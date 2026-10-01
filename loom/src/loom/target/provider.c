@@ -218,14 +218,29 @@ static iree_status_t loom_target_environment_append_low_verify_providers(
 static iree_status_t loom_target_environment_append_emitters(
     loom_target_environment_t* environment,
     const loom_target_provider_t* provider) {
+  if (provider->emitter_list.count != 0 &&
+      provider->emitter_list.values == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target emitter list has no storage");
+  }
   if (environment->emitter_count + provider->emitter_list.count >
       IREE_ARRAYSIZE(environment->emitters)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "target emitter capacity exceeded");
   }
   for (iree_host_size_t i = 0; i < provider->emitter_list.count; ++i) {
+    const loom_target_emitter_t* emitter = provider->emitter_list.values[i];
+    if (emitter == NULL || iree_string_view_is_empty(emitter->name) ||
+        iree_string_view_is_empty(emitter->public_artifact_format) ||
+        emitter->emit == NULL ||
+        loom_target_environment_lookup_emitter(
+            environment, emitter->public_artifact_format) != NULL) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "target emitter must have a name, unique format, and emit function");
+    }
     const iree_host_size_t index = environment->emitter_count++;
-    environment->emitters[index] = provider->emitter_list.values[i];
+    environment->emitters[index] = emitter;
   }
   return iree_ok_status();
 }
@@ -296,8 +311,33 @@ iree_status_t loom_target_environment_initialize(
   const loom_target_fact_type_t* canonical_kernel_fact_types
       [LOOM_TARGET_PROVIDER_CANONICAL_EMITTER_CAPACITY] = {0};
   iree_host_size_t canonical_kernel_fact_type_count = 0;
+  if (provider_set->provider_count != 0 && provider_set->providers == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "target provider set has no storage");
+  }
   for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
     const loom_target_provider_t* provider = provider_set->providers[i];
+    if (provider == NULL) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "target provider set contains a NULL provider");
+    }
+    const loom_target_fact_type_t* fact_type =
+        loom_target_provider_fact_type(provider);
+    for (iree_host_size_t j = 0; j < i; ++j) {
+      const loom_target_provider_t* previous = provider_set->providers[j];
+      const bool duplicate_profile =
+          provider->profile_type != NULL && previous->profile_type != NULL &&
+          iree_string_view_equal(provider->profile_type->name,
+                                 previous->profile_type->name);
+      const bool duplicate_facts =
+          fact_type != NULL &&
+          fact_type == loom_target_provider_fact_type(previous);
+      if (duplicate_profile || duplicate_facts) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "target profile family and fact type ownership must be unique");
+      }
+    }
     if (provider->target_fact_type != NULL && provider->profile_type != NULL &&
         provider->target_fact_type != provider->profile_type->fact_type) {
       return iree_make_status(
@@ -451,11 +491,21 @@ loom_target_environment_low_verify_provider_list(
       environment->low_verify_provider_count);
 }
 
-loom_target_emitter_list_t loom_target_environment_emitter_list(
-    const loom_target_environment_t* environment) {
+const loom_target_emitter_t* loom_target_environment_lookup_emitter(
+    const loom_target_environment_t* environment,
+    iree_string_view_t public_artifact_format) {
   IREE_ASSERT_ARGUMENT(environment);
-  return loom_target_emitter_list_make(environment->emitters,
-                                       environment->emitter_count);
+  if (iree_string_view_is_empty(public_artifact_format)) {
+    return environment->emitter_count == 1 ? environment->emitters[0] : NULL;
+  }
+  for (iree_host_size_t i = 0; i < environment->emitter_count; ++i) {
+    const loom_target_emitter_t* emitter = environment->emitters[i];
+    if (iree_string_view_equal(emitter->public_artifact_format,
+                               public_artifact_format)) {
+      return emitter;
+    }
+  }
+  return NULL;
 }
 
 const loom_pass_registry_t* loom_target_environment_pass_registry(

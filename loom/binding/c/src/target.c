@@ -138,12 +138,6 @@ loomc_status_t loomc_target_specialization_options_validate(
   return loomc_ok_status();
 }
 
-static const loom_target_provider_set_t* loomc_target_environment_provider_set(
-    const loomc_target_environment_t* target_environment) {
-  return target_environment ? target_environment->environment.provider_set
-                            : NULL;
-}
-
 static bool loomc_target_environment_is_compatible(
     const loomc_target_environment_t* target_environment,
     const loomc_target_environment_t* profile_environment) {
@@ -156,8 +150,8 @@ static bool loomc_target_environment_is_compatible(
   if (target_environment == profile_environment) {
     return true;
   }
-  return loomc_target_environment_provider_set(target_environment) ==
-         loomc_target_environment_provider_set(profile_environment);
+  return target_environment->environment.provider_set ==
+         profile_environment->environment.provider_set;
 }
 
 static loomc_status_t loomc_target_specialization_validate_profile_environment(
@@ -174,22 +168,6 @@ static loomc_status_t loomc_target_specialization_validate_profile_environment(
     return loomc_make_status(LOOMC_STATUS_INVALID_ARGUMENT, incomplete_message);
   }
   return loomc_ok_status();
-}
-
-static bool loomc_target_environment_supports_profile_type(
-    const loomc_target_environment_t* target_environment,
-    const loom_target_profile_type_t* profile_type) {
-  const loom_target_provider_set_t* provider_set =
-      loomc_target_environment_provider_set(target_environment);
-  if (provider_set == NULL || profile_type == NULL) {
-    return false;
-  }
-  for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
-    if (provider_set->providers[i]->profile_type == profile_type) {
-      return true;
-    }
-  }
-  return false;
 }
 
 static loomc_status_t loomc_target_pass_environment_initialize(
@@ -568,8 +546,10 @@ loomc_status_t loomc_target_profile_create(
         "target_profile requires a target-family profile type");
   }
   if (loomc_status_is_ok(status) &&
-      !loomc_target_environment_supports_profile_type(
-          target_environment, pending_target_profile->type)) {
+      (target_environment == NULL ||
+       loom_target_environment_lookup_profile_provider(
+           &target_environment->environment, pending_target_profile->type) ==
+           NULL)) {
     status = loomc_status_from_iree(iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "target environment does not support profile family '%.*s'",

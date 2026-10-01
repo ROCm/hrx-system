@@ -215,10 +215,10 @@ typedef iree_status_t (*loom_target_emit_fn_t)(
 
 // Target-owned emission backend linked into a binary or embedding.
 typedef struct loom_target_emitter_t {
-  // Stable emitter name used in diagnostics.
+  // Stable nonempty emitter name used in diagnostics.
   iree_string_view_t name;
 
-  // Public artifact format string returned by binding layers.
+  // Unique nonempty public artifact format returned by binding layers.
   iree_string_view_t public_artifact_format;
 
   // Default artifact identifier used when the caller leaves it empty.
@@ -230,7 +230,7 @@ typedef struct loom_target_emitter_t {
   // Options for the default compiler pipeline preparing this artifact.
   loom_target_pipeline_options_t default_pipeline_options;
 
-  // Emission callback.
+  // Non-NULL emission callback.
   loom_target_emit_fn_t emit;
 } loom_target_emitter_t;
 
@@ -486,7 +486,8 @@ iree_status_t loom_target_provider_set_storage_append_set(
     const loom_target_provider_set_t* provider_set);
 
 // Initializes |out_environment| from |provider_set|. The environment borrows
-// |provider_set| until deinitialized.
+// |provider_set| until deinitialized. Profile families, target fact types, and
+// public artifact formats must each have exactly one owning provider.
 iree_status_t loom_target_environment_initialize(
     const loom_target_provider_set_t* provider_set,
     loom_target_environment_t* out_environment);
@@ -539,9 +540,12 @@ loom_low_verify_provider_list_t
 loom_target_environment_low_verify_provider_list(
     const loom_target_environment_t* environment);
 
-// Returns target-owned emitters linked into |environment|.
-loom_target_emitter_list_t loom_target_environment_emitter_list(
-    const loom_target_environment_t* environment);
+// Returns the unique emitter for |public_artifact_format|. An empty format
+// selects the only linked emitter. Returns NULL when no unique emitter exists;
+// environment initialization rejects duplicate nonempty public formats.
+const loom_target_emitter_t* loom_target_environment_lookup_emitter(
+    const loom_target_environment_t* environment,
+    iree_string_view_t public_artifact_format);
 
 // Returns target-owned pass descriptors linked into |environment|.
 const loom_pass_registry_t* loom_target_environment_pass_registry(

@@ -55,18 +55,12 @@ iree_status_t loom_target_environment_select_profile(
   const loom_target_provider_set_t* provider_set = environment->provider_set;
   for (iree_host_size_t i = 0; i < provider_set->provider_count; ++i) {
     const loom_target_provider_t* provider = provider_set->providers[i];
-    if (provider == NULL || provider->profile_type == NULL ||
-        !iree_string_view_equal(provider->profile_type->name,
-                                specification->family)) {
-      continue;
+    if (provider->profile_type != NULL &&
+        iree_string_view_equal(provider->profile_type->name,
+                               specification->family)) {
+      selected_provider = provider;
+      break;
     }
-    if (selected_provider != NULL) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "target family '%.*s' has multiple configured providers",
-          (int)specification->family.size, specification->family.data);
-    }
-    selected_provider = provider;
   }
   if (selected_provider == NULL) {
     return iree_make_status(

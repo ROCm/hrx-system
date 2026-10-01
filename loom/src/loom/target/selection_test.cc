@@ -171,7 +171,7 @@ TEST(TargetSelectionTest, RejectsFamilyWithoutNamedProfiles) {
   loom_target_environment_deinitialize(&environment);
 }
 
-TEST(TargetSelectionTest, RejectsAmbiguousFamilyProviders) {
+TEST(TargetSelectionTest, RejectsAmbiguousFamilyProvidersAtInitialization) {
   loom_target_provider_t first_provider = {};
   first_provider.profile_type = &kTargetProfileType;
   first_provider.select_profile = SelectFakeProfile;
@@ -185,20 +185,9 @@ TEST(TargetSelectionTest, RejectsAmbiguousFamilyProviders) {
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
   loom_target_environment_t environment = {};
-  IREE_ASSERT_OK(
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
       loom_target_environment_initialize(&provider_set, &environment));
-
-  const loom_target_specification_t specification = {
-      /*.family=*/IREE_SVL("fake"),
-      /*.selector=*/IREE_SVL("target-123"),
-  };
-  const loom_target_profile_t* profile = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        loom_target_environment_select_profile(
-                            &environment, &specification, &profile));
-  EXPECT_EQ(profile, nullptr);
-
-  loom_target_environment_deinitialize(&environment);
 }
 
 TEST(TargetSelectionTest, RejectsProfileFromAnotherFamily) {

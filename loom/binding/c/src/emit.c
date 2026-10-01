@@ -470,35 +470,12 @@ static loomc_status_t loomc_emit_select_emitter(
     const loom_target_environment_t* target_environment,
     loomc_string_view_t artifact_format, loomc_result_t* result,
     loomc_allocator_t allocator, const loom_target_emitter_t** out_emitter) {
-  *out_emitter = NULL;
-  loom_target_emitter_list_t emitters =
-      loom_target_environment_emitter_list(target_environment);
-  if (loomc_string_view_is_empty(artifact_format)) {
-    if (emitters.count == 0) {
-      return loomc_emit_result_fail_cstring(
-          result, "EMIT/TARGET",
-          "target environment does not contain a linked emitter");
-    }
-    if (emitters.count > 1) {
-      return loomc_emit_result_fail_cstring(
-          result, "EMIT/TARGET",
-          "artifact_format is required when multiple emitters are linked");
-    }
-    *out_emitter = emitters.values[0];
-    return loomc_ok_status();
-  }
-
-  for (iree_host_size_t i = 0; i < emitters.count; ++i) {
-    const loom_target_emitter_t* emitter = emitters.values[i];
-    if (iree_string_view_equal(emitter->public_artifact_format,
-                               iree_string_view_from_loomc(artifact_format))) {
-      if (*out_emitter != NULL) {
-        return loomc_make_status(
-            LOOMC_STATUS_INTERNAL,
-            "target environment contains duplicate emitter artifact formats");
-      }
-      *out_emitter = emitter;
-    }
+  *out_emitter = loom_target_environment_lookup_emitter(
+      target_environment, iree_string_view_from_loomc(artifact_format));
+  if (*out_emitter == NULL && loomc_string_view_is_empty(artifact_format)) {
+    return loomc_emit_result_fail_cstring(
+        result, "EMIT/TARGET",
+        "artifact_format is required unless exactly one emitter is linked");
   }
   if (*out_emitter == NULL) {
     return loomc_emit_result_fail_format_message(
@@ -747,113 +724,107 @@ loomc_status_t loomc_emit_module(loomc_target_environment_t* target_environment,
   bool scratch_arena_initialized = false;
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&
       emitter != NULL) {
-    if (emitter->emit == NULL) {
-      status = loomc_make_status(LOOMC_STATUS_INTERNAL,
-                                 "target emitter has no emit function");
-    } else {
-      iree_arena_initialize(loomc_workspace_block_pool(workspace),
-                            &scratch_arena);
-      scratch_arena_initialized = true;
-      const loomc_target_pass_environment_t* pass_environment =
-          loomc_target_environment_pass_environment(target_environment);
-      loomc_emit_diagnostic_capture_t capture = {
-          .result = result,
-          .module = internal_module,
-      };
-      if (resolved_options.artifact_manifest_mode !=
-          LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
-        status = loomc_emit_make_manifest_identifier(
-            &resolved_options, emitter, allocator, &manifest_identifier);
-      }
-      if (loomc_status_is_ok(status) && resolved_options.compile_report_mode !=
-                                            LOOMC_COMPILE_REPORT_MODE_NONE) {
-        status = loomc_emit_make_compile_report_identifier(
-            &resolved_options, emitter, allocator, &compile_report_identifier);
-      }
-      if (loomc_status_is_ok(status) && resolved_options.compile_report_mode !=
-                                            LOOMC_COMPILE_REPORT_MODE_NONE) {
-        loom_target_compile_report_initialize(&compile_report, host_allocator);
-        compile_report_initialized = true;
-        compile_report.artifact_kind =
-            LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
-        compile_report.backend_name = emitter->name;
-        compile_report.artifact_format =
-            loom_target_artifact_format_name(emitter->target_artifact_format);
-        compile_report.requested_detail_flags =
-            loomc_emit_compile_report_requested_detail_flags(
-                resolved_options.compile_report_mode);
+    iree_arena_initialize(loomc_workspace_block_pool(workspace),
+                          &scratch_arena);
+    scratch_arena_initialized = true;
+    const loomc_target_pass_environment_t* pass_environment =
+        loomc_target_environment_pass_environment(target_environment);
+    loomc_emit_diagnostic_capture_t capture = {
+        .result = result,
+        .module = internal_module,
+    };
+    if (resolved_options.artifact_manifest_mode !=
+        LOOMC_ARTIFACT_MANIFEST_MODE_NONE) {
+      status = loomc_emit_make_manifest_identifier(
+          &resolved_options, emitter, allocator, &manifest_identifier);
+    }
+    if (loomc_status_is_ok(status) && resolved_options.compile_report_mode !=
+                                          LOOMC_COMPILE_REPORT_MODE_NONE) {
+      status = loomc_emit_make_compile_report_identifier(
+          &resolved_options, emitter, allocator, &compile_report_identifier);
+    }
+    if (loomc_status_is_ok(status) && resolved_options.compile_report_mode !=
+                                          LOOMC_COMPILE_REPORT_MODE_NONE) {
+      loom_target_compile_report_initialize(&compile_report, host_allocator);
+      compile_report_initialized = true;
+      compile_report.artifact_kind =
+          LOOM_TARGET_COMPILE_ARTIFACT_KIND_TARGET_ARTIFACT;
+      compile_report.backend_name = emitter->name;
+      compile_report.artifact_format =
+          loom_target_artifact_format_name(emitter->target_artifact_format);
+      compile_report.requested_detail_flags =
+          loomc_emit_compile_report_requested_detail_flags(
+              resolved_options.compile_report_mode);
+      status = loomc_status_from_iree(
+          loom_target_compile_report_record_loop_pipelines(
+              &compile_report, internal_module,
+              loomc_module_function_versions(module)));
+    }
+    if (compile_report_initialized) {
+      for (const loomc_config_binding_record_t* binding =
+               loomc_module_config_bindings(module)->head;
+           binding != NULL && loomc_status_is_ok(status);
+           binding = binding->next) {
+        const loom_target_compile_report_config_binding_row_t row = {
+            .key = binding->binding.key,
+            .value = binding->binding.value,
+        };
         status = loomc_status_from_iree(
-            loom_target_compile_report_record_loop_pipelines(
-                &compile_report, internal_module,
-                loomc_module_function_versions(module)));
+            loom_target_compile_report_record_config_binding_row(
+                &compile_report, &row));
       }
+    }
+    const loom_target_emit_request_t request = {
+        .target_environment = internal_target_environment,
+        .low_descriptor_registry =
+            &pass_environment->low_descriptor_registry.registry,
+        .module = internal_module,
+        .function_versions = loomc_module_function_versions(module),
+        .option_chain = resolved_options.option_chain,
+        .identifier = iree_string_view_from_loomc(
+            loomc_emit_identifier(&resolved_options, emitter)),
+        .artifact_manifest =
+            {
+                .mode = loomc_emit_target_manifest_mode(
+                    resolved_options.artifact_manifest_mode),
+                .identifier = iree_string_view_from_loomc(manifest_identifier),
+            },
+        .compile_report = compile_report_initialized ? &compile_report : NULL,
+        .diagnostic_emitter =
+            {
+                .fn = loomc_emit_capture_diagnostic,
+                .user_data = &capture,
+            },
+        .scratch_arena = &scratch_arena,
+        .allocator = host_allocator,
+    };
+    if (loomc_status_is_ok(status)) {
+      bool target_emitted = false;
+      iree_status_t emit_status =
+          emitter->emit(&request, &target_emitted, &target_artifact);
       if (compile_report_initialized) {
-        for (const loomc_config_binding_record_t* binding =
-                 loomc_module_config_bindings(module)->head;
-             binding != NULL && loomc_status_is_ok(status);
-             binding = binding->next) {
-          const loom_target_compile_report_config_binding_row_t row = {
-              .key = binding->binding.key,
-              .value = binding->binding.value,
-          };
-          status = loomc_status_from_iree(
-              loom_target_compile_report_record_config_binding_row(
-                  &compile_report, &row));
+        iree_status_code_t report_status = iree_status_code(emit_status);
+        if (report_status == IREE_STATUS_OK && !target_emitted) {
+          report_status = IREE_STATUS_FAILED_PRECONDITION;
+        }
+        loom_target_compile_report_record_status(&compile_report,
+                                                 report_status);
+        if (target_artifact.contents != NULL) {
+          loom_target_compile_report_record_artifact_size(
+              &compile_report,
+              iree_byte_sequence_length(target_artifact.contents));
         }
       }
-      const loom_target_emit_request_t request = {
-          .target_environment = internal_target_environment,
-          .low_descriptor_registry =
-              &pass_environment->low_descriptor_registry.registry,
-          .module = internal_module,
-          .function_versions = loomc_module_function_versions(module),
-          .option_chain = resolved_options.option_chain,
-          .identifier = iree_string_view_from_loomc(
-              loomc_emit_identifier(&resolved_options, emitter)),
-          .artifact_manifest =
-              {
-                  .mode = loomc_emit_target_manifest_mode(
-                      resolved_options.artifact_manifest_mode),
-                  .identifier =
-                      iree_string_view_from_loomc(manifest_identifier),
-              },
-          .compile_report = compile_report_initialized ? &compile_report : NULL,
-          .diagnostic_emitter =
-              {
-                  .fn = loomc_emit_capture_diagnostic,
-                  .user_data = &capture,
-              },
-          .scratch_arena = &scratch_arena,
-          .allocator = host_allocator,
-      };
-      if (loomc_status_is_ok(status)) {
-        bool target_emitted = false;
-        iree_status_t emit_status =
-            emitter->emit(&request, &target_emitted, &target_artifact);
-        if (compile_report_initialized) {
-          iree_status_code_t report_status = iree_status_code(emit_status);
-          if (report_status == IREE_STATUS_OK && !target_emitted) {
-            report_status = IREE_STATUS_FAILED_PRECONDITION;
-          }
-          loom_target_compile_report_record_status(&compile_report,
-                                                   report_status);
-          if (target_artifact.contents != NULL) {
-            loom_target_compile_report_record_artifact_size(
-                &compile_report,
-                iree_byte_sequence_length(target_artifact.contents));
-          }
-        }
-        status = loomc_status_from_iree(emit_status);
-        if (loomc_status_is_ok(status) && !target_emitted) {
-          status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
-        }
+      status = loomc_status_from_iree(emit_status);
+      if (loomc_status_is_ok(status) && !target_emitted) {
+        status = loomc_result_set_state(result, LOOMC_RESULT_STATE_FAILED);
       }
-      if (!loomc_status_is_ok(status) &&
-          loomc_status_is_result_diagnostic(status)) {
-        status = loomc_result_fail_status_diagnostic_consume(
-            result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
-            loomc_make_cstring_view("EMIT/TARGET"), status);
-      }
+    }
+    if (!loomc_status_is_ok(status) &&
+        loomc_status_is_result_diagnostic(status)) {
+      status = loomc_result_fail_status_diagnostic_consume(
+          result, NULL, LOOMC_DIAGNOSTIC_SEVERITY_ERROR,
+          loomc_make_cstring_view("EMIT/TARGET"), status);
     }
   }
   if (loomc_status_is_ok(status) && loomc_result_succeeded(result) &&

@@ -669,10 +669,6 @@ static iree_status_t loom_compile_emit_target(
     const loom_compile_options_t* compile_options, iree_allocator_t allocator,
     iree_string_view_t artifact_manifest_output_path, bool* out_emitted) {
   *out_emitted = false;
-  if (target_emitter == NULL || target_emitter->emit == NULL) {
-    return iree_make_status(IREE_STATUS_INTERNAL,
-                            "selected target emitter is incomplete");
-  }
   const iree_string_view_t output_path = iree_make_cstring_view(FLAG_output);
   const iree_string_view_t target_artifact_path =
       iree_make_cstring_view(FLAG_emit_target_artifact);

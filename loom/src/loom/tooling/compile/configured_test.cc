@@ -37,25 +37,21 @@ TEST(ConfiguredCompileTest, ReturnsStableCompleteEnvironment) {
   EXPECT_GT(environment->target_environment->provider_set->provider_count, 0u);
   EXPECT_NE(environment->cleanup_pattern_provider_set, nullptr);
 
-  const loom_target_emitter_list_t emitters =
-      loom_target_environment_emitter_list(environment->target_environment);
-  bool has_amdgpu_emitter = false;
-  bool has_spirv_emitter = false;
-  bool has_vm_emitter = false;
-  bool has_wasm_emitter = false;
-  bool has_xdna_emitter = false;
-  for (iree_host_size_t i = 0; i < emitters.count; ++i) {
-    has_amdgpu_emitter |=
-        iree_string_view_equal(emitters.values[i]->name, IREE_SV("amdgpu-hal"));
-    has_spirv_emitter |=
-        iree_string_view_equal(emitters.values[i]->name, IREE_SV("spirv"));
-    has_vm_emitter |=
-        iree_string_view_equal(emitters.values[i]->name, IREE_SV("vm"));
-    has_wasm_emitter |= iree_string_view_equal(emitters.values[i]->name,
-                                               IREE_SV("wasm-binary"));
-    has_xdna_emitter |=
-        iree_string_view_equal(emitters.values[i]->name, IREE_SV("xdna"));
-  }
+  const bool has_amdgpu_emitter =
+      loom_target_environment_lookup_emitter(
+          environment->target_environment, IREE_SV("amdgpu-hsaco")) != nullptr;
+  const bool has_spirv_emitter =
+      loom_target_environment_lookup_emitter(environment->target_environment,
+                                             IREE_SV("spirv")) != nullptr;
+  const bool has_vm_emitter =
+      loom_target_environment_lookup_emitter(environment->target_environment,
+                                             IREE_SV("vm")) != nullptr;
+  const bool has_wasm_emitter =
+      loom_target_environment_lookup_emitter(environment->target_environment,
+                                             IREE_SV("wasm-binary")) != nullptr;
+  const bool has_xdna_emitter =
+      loom_target_environment_lookup_emitter(environment->target_environment,
+                                             IREE_SV("xdna")) != nullptr;
   EXPECT_EQ(has_amdgpu_emitter,
             static_cast<bool>(LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS));
   EXPECT_EQ(has_spirv_emitter,

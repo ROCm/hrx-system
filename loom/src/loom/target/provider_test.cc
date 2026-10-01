@@ -43,6 +43,15 @@ iree_status_t NoopFunctionPass(loom_pass_t* pass, loom_module_t* module,
   return iree_ok_status();
 }
 
+iree_status_t EmitNothing(const loom_target_emit_request_t* request,
+                          bool* out_emitted,
+                          loom_target_emit_artifact_t* out_artifact) {
+  (void)request;
+  *out_emitted = false;
+  *out_artifact = {};
+  return iree_ok_status();
+}
+
 static loom_pass_descriptor_t MakeFunctionPassDescriptor(
     iree_string_view_t key, loom_pass_info_fn_t info) {
   loom_pass_descriptor_t descriptor = {};
@@ -156,6 +165,37 @@ TEST(TargetProviderSetStorageTest, CapacityFailureDoesNotPartiallyAppend) {
       loom_target_provider_set_storage_append(&storage, &provider));
   EXPECT_EQ(storage.provider_set.provider_count,
             LOOM_TARGET_PROVIDER_SET_STORAGE_CAPACITY);
+}
+
+TEST(TargetEnvironmentTest, RejectsMalformedProviderTables) {
+  loom_target_environment_t environment = {};
+  const loom_target_provider_set_t missing_provider_storage =
+      loom_target_provider_set_make(nullptr, 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_target_environment_initialize(
+                            &missing_provider_storage, &environment));
+
+  const loom_target_provider_t* null_providers[] = {nullptr};
+  const loom_target_provider_set_t null_provider_set =
+      loom_target_provider_set_make(null_providers, 1);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&null_provider_set, &environment));
+
+  loom_target_provider_t provider = {};
+  provider.emitter_list.count = 1;
+  const loom_target_provider_t* providers[] = {&provider};
+  const loom_target_provider_set_t missing_emitter_storage =
+      loom_target_provider_set_make(providers, 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_target_environment_initialize(
+                            &missing_emitter_storage, &environment));
+
+  const loom_target_emitter_t* null_emitters[] = {nullptr};
+  provider.emitter_list = loom_target_emitter_list_make(null_emitters, 1);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_target_environment_initialize(
+                            &missing_emitter_storage, &environment));
 }
 
 class TargetProviderTest : public ::testing::Test {
@@ -409,6 +449,11 @@ TEST_F(TargetProviderTest, ComposesCanonicalModuleEmitterByFactType) {
   static const loom_target_fact_type_t kFactType = {};
   static const loom_target_emitter_t kEmitter = {
       /*.name=*/IREE_SVL("module-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("module-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kEmitters[] = {&kEmitter};
   loom_target_provider_t target_provider = {};
@@ -434,6 +479,12 @@ TEST_F(TargetProviderTest, ComposesCanonicalModuleEmitterByFactType) {
   EXPECT_EQ(loom_target_environment_lookup_canonical_module_emitter(
                 &environment, &kFactType),
             &kEmitter);
+  EXPECT_EQ(loom_target_environment_lookup_emitter(&environment,
+                                                   IREE_SV("module-format")),
+            &kEmitter);
+  EXPECT_EQ(loom_target_environment_lookup_emitter(&environment,
+                                                   IREE_SV("missing-format")),
+            nullptr);
 
   loom_target_environment_deinitialize(&environment);
 }
@@ -442,6 +493,11 @@ TEST_F(TargetProviderTest, ComposesCanonicalKernelEmitterByFactType) {
   static const loom_target_fact_type_t kFactType = {};
   static const loom_target_emitter_t kEmitter = {
       /*.name=*/IREE_SVL("kernel-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("kernel-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kEmitters[] = {&kEmitter};
   loom_target_provider_t target_provider = {};
@@ -474,6 +530,11 @@ TEST_F(TargetProviderTest, ComposesCanonicalKernelEmitterByFactType) {
 TEST_F(TargetProviderTest, RejectsCanonicalModuleEmitterWithoutFactType) {
   static const loom_target_emitter_t kEmitter = {
       /*.name=*/IREE_SVL("module-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("module-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kEmitters[] = {&kEmitter};
   loom_target_provider_t provider = {};
@@ -508,6 +569,11 @@ TEST_F(TargetProviderTest, RejectsUncontributedCanonicalModuleEmitter) {
   static const loom_target_fact_type_t kFactType = {};
   static const loom_target_emitter_t kEmitter = {
       /*.name=*/IREE_SVL("module-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("module-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   loom_target_provider_t provider = {};
   provider.canonical_module_emitter = &kEmitter;
@@ -526,9 +592,19 @@ TEST_F(TargetProviderTest, RejectsDuplicateCanonicalModuleEmitter) {
   static const loom_target_fact_type_t kFactType = {};
   static const loom_target_emitter_t kFirstEmitter = {
       /*.name=*/IREE_SVL("first-module-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("first-module-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t kSecondEmitter = {
       /*.name=*/IREE_SVL("second-module-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("second-module-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kFirstEmitters[] = {
       &kFirstEmitter,
@@ -563,9 +639,19 @@ TEST_F(TargetProviderTest, RejectsDuplicateCanonicalKernelEmitter) {
   static const loom_target_fact_type_t kFactType = {};
   static const loom_target_emitter_t kFirstEmitter = {
       /*.name=*/IREE_SVL("first-kernel-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("first-kernel-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t kSecondEmitter = {
       /*.name=*/IREE_SVL("second-kernel-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("second-kernel-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kFirstEmitters[] = {
       &kFirstEmitter,
@@ -594,6 +680,141 @@ TEST_F(TargetProviderTest, RejectsDuplicateCanonicalKernelEmitter) {
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsDuplicateFactTypeProviders) {
+  static const loom_target_fact_type_t kFactType = {
+      /*.name=*/IREE_SVL("shared-facts"),
+  };
+  loom_target_provider_t first_provider = {};
+  first_provider.target_fact_type = &kFactType;
+  loom_target_provider_t second_provider = {};
+  second_provider.target_fact_type = &kFactType;
+  const loom_target_provider_t* providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsDuplicateProfileFamilyNames) {
+  static const loom_target_fact_type_t kFirstFactType = {};
+  static const loom_target_fact_type_t kSecondFactType = {};
+  static const loom_target_profile_type_t kFirstProfileType = {
+      /*.name=*/IREE_SVL("shared-family"),
+      /*.fact_type=*/&kFirstFactType,
+  };
+  static const loom_target_profile_type_t kSecondProfileType = {
+      /*.name=*/IREE_SVL("shared-family"),
+      /*.fact_type=*/&kSecondFactType,
+  };
+  loom_target_provider_t first_provider = {};
+  first_provider.profile_type = &kFirstProfileType;
+  loom_target_provider_t second_provider = {};
+  second_provider.profile_type = &kSecondProfileType;
+  const loom_target_provider_t* providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsDuplicateEmitterFormats) {
+  static const loom_target_emitter_t kFirstEmitter = {
+      /*.name=*/IREE_SVL("first-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("shared-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
+  };
+  static const loom_target_emitter_t kSecondEmitter = {
+      /*.name=*/IREE_SVL("second-emitter"),
+      /*.public_artifact_format=*/IREE_SVL("shared-format"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
+  };
+  static const loom_target_emitter_t* const kFirstEmitters[] = {
+      &kFirstEmitter,
+  };
+  static const loom_target_emitter_t* const kSecondEmitters[] = {
+      &kSecondEmitter,
+  };
+  loom_target_provider_t first_provider = {};
+  first_provider.emitter_list = loom_target_emitter_list_make(
+      kFirstEmitters, IREE_ARRAYSIZE(kFirstEmitters));
+  loom_target_provider_t second_provider = {};
+  second_provider.emitter_list = loom_target_emitter_list_make(
+      kSecondEmitters, IREE_ARRAYSIZE(kSecondEmitters));
+  const loom_target_provider_t* providers[] = {
+      &first_provider,
+      &second_provider,
+  };
+  const loom_target_provider_set_t provider_set =
+      loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
+  loom_target_environment_t environment = {};
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_target_environment_initialize(&provider_set, &environment));
+}
+
+TEST_F(TargetProviderTest, RejectsIncompleteEmitterDescriptors) {
+  static const loom_target_emitter_t kMissingName = {
+      /*.name=*/{},
+      /*.public_artifact_format=*/IREE_SVL("missing-name"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
+  };
+  static const loom_target_emitter_t kMissingFormat = {
+      /*.name=*/IREE_SVL("missing-format"),
+      /*.public_artifact_format=*/{},
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/EmitNothing,
+  };
+  static const loom_target_emitter_t kMissingEmit = {
+      /*.name=*/IREE_SVL("missing-emit"),
+      /*.public_artifact_format=*/IREE_SVL("missing-emit"),
+      /*.default_identifier=*/{},
+      /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+      /*.default_pipeline_options=*/{},
+      /*.emit=*/nullptr,
+  };
+  static const loom_target_emitter_t* const kInvalidEmitters[] = {
+      &kMissingName,
+      &kMissingFormat,
+      &kMissingEmit,
+  };
+  for (const loom_target_emitter_t* emitter : kInvalidEmitters) {
+    const loom_target_emitter_t* emitters[] = {emitter};
+    loom_target_provider_t provider = {};
+    provider.emitter_list = loom_target_emitter_list_make(emitters, 1);
+    const loom_target_provider_t* providers[] = {&provider};
+    const loom_target_provider_set_t provider_set =
+        loom_target_provider_set_make(providers, 1);
+    loom_target_environment_t environment = {};
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_target_environment_initialize(&provider_set, &environment));
+  }
 }
 
 TEST_F(TargetProviderTest, RejectsMismatchedProfileAndProviderFactTypes) {

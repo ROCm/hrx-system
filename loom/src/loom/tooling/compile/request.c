@@ -47,28 +47,21 @@ static iree_status_t loom_compile_request_select_named_format(
     const loom_target_environment_t* target_environment,
     loom_compile_producer_t* out_producer) {
   *out_producer = (loom_compile_producer_t){0};
-  iree_host_size_t match_count = 0;
-  if (iree_string_view_equal(format, IREE_SV("loom-command"))) {
+  const bool is_command_format =
+      iree_string_view_equal(format, IREE_SV("loom-command"));
+  const loom_target_emitter_t* target_emitter =
+      loom_target_environment_lookup_emitter(target_environment, format);
+  if (is_command_format) {
     out_producer->kind = LOOM_COMPILE_PRODUCER_COMMAND;
-    ++match_count;
-  }
-  const loom_target_emitter_list_t emitters =
-      loom_target_environment_emitter_list(target_environment);
-  for (iree_host_size_t i = 0; i < emitters.count; ++i) {
-    const loom_target_emitter_t* emitter = emitters.values[i];
-    if (emitter != NULL &&
-        iree_string_view_equal(emitter->public_artifact_format, format)) {
-      out_producer->kind = LOOM_COMPILE_PRODUCER_TARGET_EMITTER;
-      out_producer->target_emitter = emitter;
-      ++match_count;
-    }
-  }
-  if (match_count == 0) {
+  } else if (target_emitter != NULL) {
+    out_producer->kind = LOOM_COMPILE_PRODUCER_TARGET_EMITTER;
+    out_producer->target_emitter = target_emitter;
+  } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "format '%.*s' is not available in this binary",
                             (int)format.size, format.data);
   }
-  if (match_count != 1) {
+  if (is_command_format && target_emitter != NULL) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "format '%.*s' has multiple configured producers",
                             (int)format.size, format.data);
