@@ -31,6 +31,14 @@ struct GpuQueueRequirements {
       AMDF_QUEUE_PUBLICATION_MODE_USER;
 };
 
+// Queries one passive endpoint without acquiring a native device. Success
+// publishes a match result; the family output changes only on a match.
+amdf_status_t FindGpuQueueFamily(const amdf_api_t* api,
+                                 amdf_endpoint_t* endpoint,
+                                 const GpuQueueRequirements& requirements,
+                                 amdf_queue_family_info_t* out_family,
+                                 bool* out_matches);
+
 // Borrows the corpus's cached device and owns only this case's workload.
 // No helper emits cache commands or conflates ring consumption with execution.
 class GpuCommandTest : public GpuDeviceFixture {
@@ -40,12 +48,6 @@ class GpuCommandTest : public GpuDeviceFixture {
 
   amdf_status_t MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                  bool* out_matches) override;
-  // Queries before activation. Success publishes a match result; the family
-  // output changes only when a family satisfies every requirement.
-  amdf_status_t FindQueueFamily(amdf_endpoint_t* endpoint,
-                                const GpuQueueRequirements& requirements,
-                                amdf_queue_family_info_t* out_family,
-                                bool* out_matches);
   void TearDown() override;
   void CreateMemory(amdf_memory_access_t access, uint64_t byte_length,
                     GpuMemory** out_memory);

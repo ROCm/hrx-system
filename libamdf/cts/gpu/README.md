@@ -189,7 +189,7 @@ remaining field, composition and architecture boundaries within each group.
 | AQL | [aql/BUILD.bazel](aql/BUILD.bazel) | Signal reach, additional executable lifecycles, profiling, counters and metadata. |
 | Recipes | [recipes/BUILD.bazel](recipes/BUILD.bazel) | Additional backing classes, producer/consumer compositions and executable visibility. |
 | Manual lifecycle | [lifecycle/BUILD.bazel](lifecycle/BUILD.bazel) | Ordinary same-device copies are enabled; peer-device recreation remains disabled. |
-| Physical peers | [peer/BUILD.bazel](peer/BUILD.bazel) | Explicit endpoint reservation and joint memory construction; executed dataflow, synchronization and topology retain independent witnesses. |
+| Physical peers | [peer/BUILD.bazel](peer/BUILD.bazel) | Explicit endpoint reservation, joint construction and device-driven SYSTEM SDMA round trips; peer-local dataflow, atomic reach and topology remain separate witnesses. |
 | GPU/NPU recipes | [interop/gpu/xdna/recipes/BUILD.bazel](../interop/gpu/xdna/recipes/BUILD.bazel) | Finite transfer/shader chains and resident exchanges cover both initiators, credits, independent workers and startup/drain. Cross-output-channel publication, other imported backing and simultaneous independent traffic require separate witnesses. |
 
 Cases use real commands and changing exact data. They do not exhaust their

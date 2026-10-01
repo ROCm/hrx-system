@@ -166,7 +166,6 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   EXPECT_EQ(memory_info.access_count, accesses.size());
   EXPECT_EQ(memory_info.memory_class, GetParam().memory_class);
   EXPECT_EQ(memory_info.byte_length, create_info.byte_length);
-  uint64_t common_address = 0;
   for (uint32_t i = 0; i < accesses.size(); ++i) {
     amdf_memory_access_info_t access_info = {};
     access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
@@ -179,10 +178,8 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
     ASSERT_EQ(api_->memory_query_address(memory_, i, AMDF_MEMORY_ADDRESS_GPU,
                                          &address),
               AMDF_STATUS_OK);
-    if (i == 0) {
-      common_address = address;
-    }
-    EXPECT_EQ(address, common_address);
+    // Each consumer owns its address domain. Shared physical backing does
+    // not require equal numeric addresses in independent GPU address spaces.
     EXPECT_GE(address, capabilities[i].device_address.minimum_address);
     EXPECT_LE(address, capabilities[i].device_address.maximum_address);
     EXPECT_EQ(address % capabilities[i].device_address.minimum_alignment, 0u);

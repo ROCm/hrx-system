@@ -24,7 +24,10 @@ amdf_cc_library(
 
 amdf_cts_test_suite(
     name = "peer",
-    srcs = ["memory_group_test.cc"],
+    srcs = [
+        "memory_group_test.cc",
+        "sdma_system_test.cc",
+    ],
     target_compatible_with = ["@platforms//cpu:x86_64"] + select({
         "@platforms//os:linux": [],
         "@platforms//os:windows": [],
@@ -33,6 +36,9 @@ amdf_cts_test_suite(
     visibility = ["//visibility:public"],
     deps = [
         ":device_fixture",
+        "//libamdf/cts/gpu/sdma/encoding:commands",
+        "//libamdf/cts/gpu/util:command_fixture",
+        "//libamdf/cts/util:mapped_memory",
         "//third_party:google_test",
     ],
 )

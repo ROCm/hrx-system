@@ -125,8 +125,8 @@ class CopyDispatchRecipeTest : public AqlDispatchTest {
     };
     amdf_queue_family_info_t sdma_family = {};
     bool matches = false;
-    amdf_status_t status =
-        FindQueueFamily(endpoint, requirements, &sdma_family, &matches);
+    amdf_status_t status = FindGpuQueueFamily(api_, endpoint, requirements,
+                                              &sdma_family, &matches);
     if (!amdf_status_is_ok(status)) {
       return status;
     }

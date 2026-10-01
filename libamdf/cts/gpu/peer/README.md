@@ -12,6 +12,27 @@ Registered storage checks the original allocation and its guards after native
 release. A successful attachment establishes neither executed dataflow nor
 mutually atomic reach.
 
+`PeerSdmaSystemTest.DeviceDrivenRoundTrips` exchanges payload through one owned,
+coherent SYSTEM allocation. It queries every host/device and device/device
+visibility direction before creating the two SDMA queues. The case requires
+USER publication and NONE payload cache transitions; each device uses its own
+access address and packet-format features.
+
+Four prepublished round trips run without a CPU dependency or payload relay
+between stages, then the initiating roles reverse with new data. Aligned,
+single-writer DWORD fences and equality polls carry the dependencies. Those
+completion cells stay stable through all readers and rearm only after both
+streams retire; the case requires no atomic read-modify-write capability.
+The host checks every input, intermediate, output, guard and control word,
+plus both immutable command rings, before native retirement. Queue-first
+cleanup precedes backing release. This SYSTEM path does not exercise direct
+peer-local-memory transfer or choose an xGMI engine.
+
+The hardware reference separates [completion and signal lifetime](../../../../docs/reference/amd/gpu/sdma/atomics.md)
+from [payload cache visibility](../../../../docs/reference/amd/gpu/sdma/cache.md).
+The case queries the latter explicitly; the fence/poll protocol supplies the
+former.
+
 The runner provisions and exclusively reserves two physical GPUs, then passes
 their exact contemporaneous endpoint IDs:
 
@@ -21,7 +42,8 @@ build_tools/bin/iree-bazel-test --config=asan \
   //libamdf/cts/gpu/peer:peer_dynamic \
   --test_arg="--amdf_gpu_endpoint_id=${GPU_ENDPOINT_ID}" \
   --test_arg="--amdf_gpu_peer_endpoint_id=${PEER_GPU_ENDPOINT_ID}" \
-  --test_arg=--amdf_require_test=Acquisition/GpuMemoryGroupTest.OneBackingForTwoPhysicalConsumers/SystemCreate
+  --test_arg=--amdf_require_test=Acquisition/GpuMemoryGroupTest.OneBackingForTwoPhysicalConsumers/SystemCreate \
+  --test_arg=--amdf_require_test=PeerSdmaSystemTest.DeviceDrivenRoundTrips
 ```
 
 The [enumeration example](../../../examples/enumerate.c) reports the IDs and

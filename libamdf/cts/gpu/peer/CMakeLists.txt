@@ -29,10 +29,14 @@ iree_cc_library(
     peer_cases
   SRCS
     "memory_group_test.cc"
+    "sdma_system_test.cc"
   DEPS
     ::device_fixture
     amdf::headers
     iree::third_party::google_test
+    libamdf::cts::gpu::sdma::encoding::commands
+    libamdf::cts::gpu::util::command_fixture
+    libamdf::cts::util::mapped_memory
   TESTONLY
   ALWAYSLINK
   PUBLIC

@@ -43,7 +43,7 @@ amdf_status_t Pm4SdmaTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
   amdf_queue_family_info_t sdma_family = {};
   bool matches = false;
   amdf_status_t status =
-      FindQueueFamily(endpoint, requirements, &sdma_family, &matches);
+      FindGpuQueueFamily(api_, endpoint, requirements, &sdma_family, &matches);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
