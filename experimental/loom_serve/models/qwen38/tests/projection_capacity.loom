@@ -1,0 +1,63 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q6k_f16_wmma_c64t32_f32acc(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q6k_f16_wmma_c64t32_f32acc_residual(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_c128_t128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_x128_direct(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+// The same padded matrix is contracted regardless of how many logical tokens
+// later stateful kernels consume. Check all output rows, not just active ones.
+check.case public @projection_capacity {
+  %tokens = check.literal value(32) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(64) : index
+  %hidden = check.literal value(5120) : index
+  %short = check.generate.fill value(7) : tensor<1xi32>
+  %full = check.generate.fill value(32) : tensor<1xi32>
+  %input = check.generate.iota offset(-0.25) step(0.00006103515625) period(8191) : tensor<32x5120xf32>
+  %q5 = check.generate.fill value(1) : tensor<64x20x176xi8>
+  %q6 = check.generate.fill value(1) : tensor<64x20x210xi8>
+  %q6_residual = check.generate.fill value(1) : tensor<5120x20x210xi8>
+  %actual5 = check.generate.fill value(17.0) : tensor<32x64xf32>
+  %expected5 = check.generate.fill value(-17.0) : tensor<32x64xf32>
+  %actual6 = check.generate.fill value(17.0) : tensor<32x64xf32>
+  %expected6 = check.generate.fill value(-17.0) : tensor<32x64xf32>
+  %actual_residual = check.generate.iota offset(0.5) step(0.000244140625) period(8191) : tensor<32x5120xf32>
+  %expected_residual = check.generate.iota offset(0.5) step(0.000244140625) period(8191) : tensor<32x5120xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%tokens, %inputs, %outputs](%short, %inputs, %outputs, %input, %q5, %actual5) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<64x20x176xi8>, tensor<32x64xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%tokens, %inputs, %outputs](%full, %inputs, %outputs, %input, %q5, %expected5) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<64x20x176xi8>, tensor<32x64xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c64t32_f32acc[%tokens, %inputs, %outputs](%short, %inputs, %outputs, %input, %q6, %actual6) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<64x20x210xi8>, tensor<32x64xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c64t32_f32acc[%tokens, %inputs, %outputs](%full, %inputs, %outputs, %input, %q6, %expected6) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<64x20x210xi8>, tensor<32x64xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c64t32_f32acc_residual[%tokens, %inputs, %hidden](%short, %inputs, %hidden, %input, %q6_residual, %actual_residual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<5120x20x210xi8>, tensor<32x5120xf32>)
+  kernel.launch @qwen38_linear_q6k_f16_wmma_c64t32_f32acc_residual[%tokens, %inputs, %hidden](%full, %inputs, %hidden, %input, %q6_residual, %expected_residual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<5120x20x210xi8>, tensor<32x5120xf32>)
+  check.expect.equal actual(%actual5) expected(%expected5) : tensor<32x64xf32>
+  check.expect.equal actual(%actual6) expected(%expected6) : tensor<32x64xf32>
+  check.expect.equal actual(%actual_residual) expected(%expected_residual) : tensor<32x5120xf32>
+  check.return
+}
+
+check.case public @projection_capacity_wide {
+  %tokens = check.literal value(128) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %short = check.generate.fill value(7) : tensor<1xi32>
+  %full = check.generate.fill value(128) : tensor<1xi32>
+  %input = check.generate.iota offset(-0.25) step(0.00006103515625) period(8191) : tensor<128x5120xf32>
+  %weight = check.generate.fill value(1) : tensor<17408x20x176xi8>
+  %actual = check.generate.fill value(17.0) : tensor<128x17408xf32>
+  %expected = check.generate.fill value(-17.0) : tensor<128x17408xf32>
+  %actual_direct = check.generate.fill value(17.0) : tensor<128x17408xf32>
+  %expected_direct = check.generate.fill value(-17.0) : tensor<128x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c128_t128[%tokens, %inputs, %outputs](%short, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<128x5120xf32>, tensor<17408x20x176xi8>, tensor<128x17408xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c128_t128[%tokens, %inputs, %outputs](%full, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<128x5120xf32>, tensor<17408x20x176xi8>, tensor<128x17408xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_x128_direct[%tokens, %inputs, %outputs](%short, %inputs, %outputs, %input, %weight, %actual_direct) : [index, index, index](tensor<1xi32>, index, index, tensor<128x5120xf32>, tensor<17408x20x176xi8>, tensor<128x17408xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_x128_direct[%tokens, %inputs, %outputs](%full, %inputs, %outputs, %input, %weight, %expected_direct) : [index, index, index](tensor<1xi32>, index, index, tensor<128x5120xf32>, tensor<17408x20x176xi8>, tensor<128x17408xf32>)
+  check.expect.equal actual(%actual) expected(%expected) : tensor<128x17408xf32>
+  check.expect.equal actual(%actual_direct) expected(%expected_direct) : tensor<128x17408xf32>
+  check.return
+}
