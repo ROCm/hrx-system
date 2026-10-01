@@ -97,10 +97,11 @@ TEST_F(ScheduleEventFrontierTest, NewerEventsDoNotEraseOlderPendingAccesses) {
   EXPECT_EQ(
       loom_low_schedule_event_frontier_query(&frontier_, physical, early_read),
       13u);
-  // The negative fast-write/late-read separation imposes no extra issue gap.
+  // The signed bound permits native issue before the published writer without
+  // dropping the producer's timing obligation.
   EXPECT_EQ(
       loom_low_schedule_event_frontier_query(&frontier_, physical, late_read),
-      0u);
+      9u);
   IREE_ASSERT_OK(loom_low_schedule_event_frontier_commit(&frontier_, physical,
                                                          late_read, 20));
   IREE_ASSERT_OK(loom_low_schedule_event_frontier_commit(&frontier_, physical,
@@ -109,6 +110,87 @@ TEST_F(ScheduleEventFrontierTest, NewerEventsDoNotEraseOlderPendingAccesses) {
       loom_low_schedule_event_frontier_query(&frontier_, physical, fast_write),
       23u);
   EXPECT_EQ(frontier_.quiescent_cycle, 23u);
+}
+
+TEST_F(ScheduleEventFrontierTest, NonpositiveDeadlinesRetainOrderAndSaturate) {
+  const auto physical = Register("test.r0");
+  const auto fast_write = Event("test.write.fast");
+  const auto early_read = Event("test.read.early");
+  const auto late_read = Event("test.read.late");
+  IREE_ASSERT_OK(loom_low_schedule_event_frontier_commit(&frontier_, physical,
+                                                         fast_write, 1));
+  EXPECT_EQ(
+      loom_low_schedule_event_frontier_query(&frontier_, physical, early_read),
+      1u);
+  EXPECT_EQ(
+      loom_low_schedule_event_frontier_query(&frontier_, physical, late_read),
+      0u);
+  IREE_ASSERT_OK(loom_low_schedule_event_frontier_commit(&frontier_, physical,
+                                                         fast_write, 10));
+  EXPECT_EQ(
+      loom_low_schedule_event_frontier_query(&frontier_, physical, early_read),
+      10u);
+  EXPECT_EQ(
+      loom_low_schedule_event_frontier_query(&frontier_, physical, late_read),
+      8u);
+}
+
+TEST_F(ScheduleEventFrontierTest, DelayedOverwriteKeepsOldAndNewValueReads) {
+  // The storage write occurs at stage seven; reads and immediate writes occur
+  // at stage one. An old read may share the delayed replacement's write cycle,
+  // while a new-value read must occur on the following cycle.
+  constexpr uint16_t kDelayedWrite = 0;
+  constexpr uint16_t kRead = 1;
+  constexpr uint16_t kImmediateWrite = 2;
+  const loom_low_event_separation_t separations[] = {
+      {kDelayedWrite, kDelayedWrite, 1, LOOM_LOW_MODEL_QUALITY_EXACT},
+      {kDelayedWrite, kRead, 7, LOOM_LOW_MODEL_QUALITY_EXACT},
+      {kDelayedWrite, kImmediateWrite, 7, LOOM_LOW_MODEL_QUALITY_EXACT},
+      {kRead, kDelayedWrite, -6, LOOM_LOW_MODEL_QUALITY_EXACT},
+      {kRead, kImmediateWrite, 0, LOOM_LOW_MODEL_QUALITY_EXACT},
+      {kImmediateWrite, kDelayedWrite, -5, LOOM_LOW_MODEL_QUALITY_EXACT},
+      {kImmediateWrite, kRead, 1, LOOM_LOW_MODEL_QUALITY_EXACT},
+      {kImmediateWrite, kImmediateWrite, 1, LOOM_LOW_MODEL_QUALITY_EXACT},
+  };
+  loom_low_timing_event_t events[3] = {};
+  events[kDelayedWrite].separation_count = 3;
+  events[kDelayedWrite].maximum_issue_separation_cycles = 7;
+  events[kRead].separation_start = 3;
+  events[kRead].separation_count = 2;
+  events[kImmediateWrite].separation_start = 5;
+  events[kImmediateWrite].separation_count = 3;
+  events[kImmediateWrite].maximum_issue_separation_cycles = 1;
+  loom_low_descriptor_set_t descriptors = *descriptors_;
+  descriptors.timing_events = events;
+  descriptors.timing_event_count = IREE_ARRAYSIZE(events);
+  descriptors.event_separations = separations;
+  descriptors.event_separation_count = IREE_ARRAYSIZE(separations);
+  IREE_ASSERT_OK(loom_low_schedule_event_frontier_initialize(
+      &descriptors, &arena_, &frontier_));
+  const auto physical = Register("test.r0");
+  IREE_ASSERT_OK(loom_low_schedule_event_frontier_commit(&frontier_, physical,
+                                                         kDelayedWrite, 0));
+  EXPECT_EQ(loom_low_schedule_event_frontier_query(&frontier_, physical, kRead),
+            7u);
+  IREE_ASSERT_OK(
+      loom_low_schedule_event_frontier_commit(&frontier_, physical, kRead, 7));
+
+  // Semantic publication is old write, old read, new write. Only the new
+  // delayed write may issue at one; an immediate overwrite must wait to seven.
+  EXPECT_EQ(loom_low_schedule_event_frontier_query(&frontier_, physical,
+                                                   kDelayedWrite),
+            1u);
+  EXPECT_EQ(loom_low_schedule_event_frontier_query(&frontier_, physical,
+                                                   kImmediateWrite),
+            7u);
+  IREE_ASSERT_OK(loom_low_schedule_event_frontier_commit(&frontier_, physical,
+                                                         kDelayedWrite, 1));
+  EXPECT_EQ(loom_low_schedule_event_frontier_query(&frontier_, physical, kRead),
+            8u);
+  EXPECT_EQ(loom_low_schedule_event_frontier_query(&frontier_, physical,
+                                                   kImmediateWrite),
+            8u);
+  EXPECT_EQ(frontier_.quiescent_cycle, 8u);
 }
 
 TEST_F(ScheduleEventFrontierTest, FixedStorageAcrossLargeCyclesAndOverflow) {

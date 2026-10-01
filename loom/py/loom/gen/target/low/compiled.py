@@ -159,6 +159,8 @@ class CompiledDescriptorSet:
     resource_calendars: list[CompiledResourceCalendar]
     # Total occupancy slots across distinct resource calendars.
     resource_calendar_slot_count: int
+    # Earlier issue distance retained before the native issue high-water mark.
+    resource_calendar_lookback_cycles: int
     schedule_classes: list[ScheduleClass]
     timing_events: list[TimingEvent]
     event_separations: list[EventSeparation]

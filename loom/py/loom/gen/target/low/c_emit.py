@@ -720,8 +720,6 @@ def emit_source_for_views(
     )
     event_separation_ranges = {}
     for index, separation in enumerate(compiled.event_separations):
-        if separation.minimum_issue_separation_cycles <= 0:
-            continue
         start, count, maximum = event_separation_ranges.get(separation.producer_event, (index, 0, 0))
         event_separation_ranges[separation.producer_event] = (start, index - start + 1, max(maximum, separation.minimum_issue_separation_cycles))
     timing_event_rows = []
@@ -1174,6 +1172,7 @@ def emit_source_for_views(
             f"    .descriptor_views = {descriptor_view_table_symbol},",
             f"    .descriptor_count = {view.descriptor_count},",
             f"    .resource_calendar_slot_count = {compiled.resource_calendar_slot_count},",
+            f"    .resource_calendar_lookback_cycles = {compiled.resource_calendar_lookback_cycles},",
             f"    .physical_register_unit_count = {max(compiled.physical_register_atomic_units, default=-1) + 1},",
             f"    .maximum_descriptor_operand_count = {max((len(descriptor.operands) for descriptor in compiled.descriptors), default=0)},",
             f"    .descriptor_refs = {descriptor_ref_table_symbol},",

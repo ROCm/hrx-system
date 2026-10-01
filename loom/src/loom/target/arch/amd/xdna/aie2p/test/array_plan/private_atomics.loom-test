@@ -137,7 +137,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=854 resources=0 fixups=2
+resident worker=0 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=848 resources=0 fixups=2
 
 low.func.def retain target<amd.xdna.aie2p.core> @private_atomic_array$worker$0() asm {
   %4 = storage {byte_alignment = 8, byte_length = 24} : low.storage<private>

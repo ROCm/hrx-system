@@ -63,7 +63,8 @@ void loom_low_physical_issue_commit_source(loom_low_physical_issue_t* issue,
     issue->node_ready_cycles[consumer] =
         iree_max(issue->node_ready_cycles[consumer],
                  loom_low_schedule_add_signed_issue_separation(
-                     available_cycle, group->minimum_issue_separation_cycles));
+                     available_cycle,
+                     iree_max(0, group->minimum_issue_separation_cycles)));
   }
 }
 
@@ -173,10 +174,10 @@ uint32_t loom_low_physical_issue_register_ready_cycle(
   return cycle;
 }
 
-iree_status_t loom_low_physical_issue_place(
-    loom_low_physical_issue_t* issue,
+uint32_t loom_low_physical_issue_find_earliest_issue_cycle(
+    const loom_low_physical_issue_t* issue,
     const loom_low_physical_instruction_t* instructions, uint16_t count,
-    uint32_t proposed_cycle, uint32_t* out_cycle) {
+    uint32_t proposed_cycle) {
   const loom_low_descriptor_set_t* descriptor_set =
       issue->events.descriptor_set;
   const loom_low_schedule_class_t** classes =
@@ -185,14 +186,28 @@ iree_status_t loom_low_physical_issue_place(
     classes[i] =
         loom_low_physical_instruction_class(descriptor_set, &instructions[i]);
   }
-  uint32_t cycle = iree_max(
+  const uint32_t cycle = iree_max(
       proposed_cycle,
       loom_low_physical_issue_register_ready_cycle(issue, instructions, count));
   uint16_t bottleneck = LOOM_LOW_RESOURCE_NONE;
-  cycle = loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
+  return loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
       &issue->resources, classes, count, cycle, &bottleneck);
+}
+
+iree_status_t loom_low_physical_issue_commit(
+    loom_low_physical_issue_t* issue,
+    const loom_low_physical_instruction_t* instructions, uint16_t count,
+    uint32_t issue_cycle) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      issue->events.descriptor_set;
+  const loom_low_schedule_class_t** classes =
+      (const loom_low_schedule_class_t**)iree_alloca(count * sizeof(*classes));
+  for (uint16_t i = 0; i < count; ++i) {
+    classes[i] =
+        loom_low_physical_instruction_class(descriptor_set, &instructions[i]);
+  }
   IREE_RETURN_IF_ERROR(loom_low_schedule_resource_calendar_commit(
-      &issue->resources, classes, count, cycle));
+      &issue->resources, classes, count, issue_cycle));
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     const loom_low_descriptor_t* descriptor =
@@ -203,10 +218,12 @@ iree_status_t loom_low_physical_issue_place(
           &descriptor_set->operands[descriptor->operand_start + j];
       const uint16_t physical_register = instructions[i].physical_registers[j];
       status = loom_low_schedule_event_frontier_commit(
-          &issue->events, physical_register, operand->read_event_id, cycle);
+          &issue->events, physical_register, operand->read_event_id,
+          issue_cycle);
       if (iree_status_is_ok(status)) {
         status = loom_low_schedule_event_frontier_commit(
-            &issue->events, physical_register, operand->write_event_id, cycle);
+            &issue->events, physical_register, operand->write_event_id,
+            issue_cycle);
       }
     }
     for (uint16_t j = 0;
@@ -219,18 +236,15 @@ iree_status_t loom_low_physical_issue_place(
       const uint32_t separation =
           descriptor_set->timing_events[effect->producer_event_id]
               .maximum_issue_separation_cycles;
-      if (cycle > UINT32_MAX - separation) {
+      if (issue_cycle > UINT32_MAX - separation) {
         status =
             iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                              "physical effect exceeds the issue-cycle domain");
       } else {
         issue->effect_quiescent_cycle =
-            iree_max(issue->effect_quiescent_cycle, cycle + separation);
+            iree_max(issue->effect_quiescent_cycle, issue_cycle + separation);
       }
     }
-  }
-  if (iree_status_is_ok(status)) {
-    *out_cycle = cycle;
   }
   return status;
 }

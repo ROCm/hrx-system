@@ -330,7 +330,7 @@ coissued components: 70
 // A broadcast retains its table until the final use. Opening every leaf before
 // preparing the predicates exceeds vector capacity even though the selection
 // tree fits when its live branches can retire incrementally.
-// RUN: with-checks emit aie2p-leaf @selection_tree report=emission
+// RUN: emit aie2p-leaf @selection_tree report=emission
 
 low.func.def target<amd.xdna.aie2p.core> @selection_tree(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %table = vlda.512.i8x64 %input, 0
@@ -389,7 +389,10 @@ low.func.def target<amd.xdna.aie2p.core> @selection_tree(%input: reg<aie2p.ep>, 
 }
 
 // ----
-CHECK: code bytes: 224
+issue cycles: 55
+code bytes: 218
+coissued bundles: 2
+coissued components: 5
 
 // ====
 
@@ -533,7 +536,7 @@ low.func.def target<amd.xdna.aie2p.core> @noncompact_upper_half_first(%source: r
 }
 
 // ----
-issue cycles: 31
+issue cycles: 30
 code bytes: 106
 coissued bundles: 2
 coissued components: 4

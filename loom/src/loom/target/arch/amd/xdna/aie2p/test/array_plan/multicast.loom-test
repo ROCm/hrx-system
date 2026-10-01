@@ -121,8 +121,8 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=0 addend=4 alignment=4
 
 resident-program workers=2
-resident worker=0 entry=@multicast_array$worker$0 tile=(0,2) code-bytes=132 resources=0 fixups=1
-resident worker=1 entry=@multicast_array$worker$1 tile=(1,2) code-bytes=144 resources=0 fixups=1
+resident worker=0 entry=@multicast_array$worker$0 tile=(0,2) code-bytes=126 resources=0 fixups=1
+resident worker=1 entry=@multicast_array$worker$1 tile=(1,2) code-bytes=138 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @multicast_array$worker$0() asm {
   %acquire_delta = mov.short -1

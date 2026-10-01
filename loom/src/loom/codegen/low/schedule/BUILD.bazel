@@ -64,6 +64,7 @@ loom_cc_library(
     srcs = ["event_frontier.c"],
     hdrs = ["event_frontier.h"],
     deps = [
+        ":dependencies",
         "//loom/src/loom/codegen/low:descriptors",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

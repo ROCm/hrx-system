@@ -35,25 +35,24 @@ extern "C" {
 // useful work in the same block when physical timing and resources permit it.
 // Return placement considers the architectural tail window, including implicit
 // NOP gaps, and materializes only the selected return position.
-// Descriptor runs use the minimum contiguous partition of exact physical
-// bundle formats because AIE2P's format domain is not downward closed.
-// Allocation-planned structural moves split a logical schedule cycle into
-// ordered physical bundles. Shared physical issue admission forwards retained
-// source dependencies from each actual producer issue instead of shifting all
-// logical deadlines after an independent register stall. Structural storage
-// setup forwards payload availability even when it coalesces or issues early;
-// native moves retain concrete register-event admission. Native expansion can
-// cover later logical gaps. Collective bundle resource occupancy remains part
-// of physical admission. Gaps occupy code bytes without allocating per-cycle
-// bundle or slot records. The frame retains its grouped dependency index.
+// Native instructions publish their concrete accesses in accepted semantic
+// order. Shared physical admission may place an instruction earlier within
+// generated bounded resource history when signed WAR/WAW timing permits it.
+// An encoded-packet window admits only exact legal slot unions, then appends
+// closed positions to the detached plan in chronological issue order. Every
+// native expansion piece forwards its actual availability through the frame's
+// retained dependency groups; semantic consumers never precede producers.
+// Coalesced storage setup forwards incoming payload availability without an
+// unrelated native high-water floor. Source-order boundaries close the window
+// on both sides, including zero-width declarations without fake instructions.
+// Gaps occupy code bytes without allocating per-cycle bundle or slot records.
 // Every control-flow edge reaches a quiescent event/resource boundary before
 // successor entry, including fallthrough and backedges. Structural control's
 // source deadline constrains retirement; native condition and LR reads retain
 // concrete register-event issue admission. Native branch-delay cycles
 // contribute to this boundary. Prebound live-ins and resource imports anchor
-// physical assignments without occupying an instruction slot. Empty
-// non-terminator logical cycles not already covered by native expansion are
-// materialized as NOP bundles. The returned plan owns its function name,
+// physical assignments without occupying an instruction slot. The returned
+// plan owns its function name,
 // resource bindings, storage requirements, and physical tables in |arena|. It
 // contains no compiler frame or IR references.
 iree_status_t loom_aie2p_bundle_plan_build(

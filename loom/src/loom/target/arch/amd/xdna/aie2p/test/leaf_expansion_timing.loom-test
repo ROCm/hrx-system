@@ -59,10 +59,10 @@ low.func.def target<amd.xdna.aie2p.core> @padded_accumulators(%left: reg<aie2p.v
 }
 
 // ----
-issue cycles: 27
-code bytes: 84
-coissued bundles: 2
-coissued components: 4
+issue cycles: 25
+code bytes: 82
+coissued bundles: 3
+coissued components: 7
 
 // ====
 
@@ -218,3 +218,65 @@ issue cycles: 15
 code bytes: 44
 coissued bundles: 1
 coissued components: 2
+
+// ====
+
+// Four live C fragments leave one DM for both loaded A packets. Publication
+// retains the old BFP read before the new writes; native issue may put those
+// delayed writes ahead of the old read without another accumulator allocation.
+// The complete bytes bind both load pairs, both conversions and return timing.
+// RUN: emit aie2p-leaf @delayed_accumulator_reuse report=code
+
+low.func.def target<amd.xdna.aie2p.core> @delayed_accumulator_reuse(%first: reg<aie2p.ep>, %second: reg<aie2p.ep>, %c00: reg<aie2p.mbms x4>, %c01: reg<aie2p.mbms x4>, %c10: reg<aie2p.mbms x4>, %c11: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mexa>, reg<aie2p.mexa>) asm {
+  %first_lower = vlda.convert.bf16x32.to.f32x32 %first, 0
+  %first_upper = vlda.convert.bf16x32.to.f32x32 %first, 64
+  %first_float = concat(%first_lower, %first_upper) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %first_encoded = vconv.bfp16ebs8.fp32 %first_float
+  %second_lower = vlda.convert.bf16x32.to.f32x32 %second, 0
+  %second_upper = vlda.convert.bf16x32.to.f32x32 %second, 64
+  %second_float = concat(%second_lower, %second_upper) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %second_encoded = vconv.bfp16ebs8.fp32 %second_float
+  return %c00, %c01, %c10, %c11, %first_encoded, %second_encoded
+}
+
+// ----
+code: 54 31 60 7f c5 00 98 6b 16 00 98 2b 06 01 98 6b 16 01 00 00 00 00 00 00 00 00 5c 00 50 c0 46 01 00 00 18 36 8a 08 00 00 00 00 00 00
+
+// ====
+
+// Locked source order closes both sides of each data instruction. Even
+// a safe delayed-write overlap cannot move a later load across that contract.
+// RUN: emit aie2p-leaf @locked_accumulator_reuse report=code
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core> @locked_accumulator_reuse(%first: reg<aie2p.ep>, %second: reg<aie2p.ep>, %c00: reg<aie2p.mbms x4>, %c01: reg<aie2p.mbms x4>, %c10: reg<aie2p.mbms x4>, %c11: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mexa>, reg<aie2p.mexa>) asm {
+  %first_lower = vlda.convert.bf16x32.to.f32x32 %first, 0
+  %first_upper = vlda.convert.bf16x32.to.f32x32 %first, 64
+  %first_float = concat(%first_lower, %first_upper) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %first_encoded = vconv.bfp16ebs8.fp32 %first_float
+  %second_lower = vlda.convert.bf16x32.to.f32x32 %second, 0
+  %second_upper = vlda.convert.bf16x32.to.f32x32 %second, 64
+  %second_float = concat(%second_lower, %second_upper) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  %second_encoded = vconv.bfp16ebs8.fp32 %second_float
+  return %c00, %c01, %c10, %c11, %first_encoded, %second_encoded
+}
+
+// ----
+code: 98 2b 06 00 98 6b 16 00 b8 18 b0 1f 00 00 00 00 00 00 00 00 00 00 18 36 0a 08 98 2b 06 01 98 6b 16 01 00 00 00 00 00 00 00 00 18 00 28 10 00 00 18 36 8a 08 00 00 00 00 00 00
+
+// ====
+
+// The store still reads r0 at stage seven. Its following stage-one write must
+// wait six cycles: accepting signed timing never drops a positive WAR bound.
+// RUN: emit aie2p-leaf @immediate_overwrite fixed=%old:physical_register:253:1 fixed=%next:physical_register:253:1 report=code
+
+low.func.def schedule(locked) target<amd.xdna.aie2p.core> @immediate_overwrite(%old: reg<aie2p.er>, %seed: reg<aie2p.er>, %output: reg<aie2p.ep>) asm {
+  st.s8 %old, %output, 0
+  %next = add %seed, 1
+  rel %next, 0
+  return
+}
+
+// ----
+code: 18 07 04 00 00 00 00 00 00 00 00 00 00 00 18 07 40 10 00 00 18 00 28 10 00 00 18 08 00 10 00 00 00 00 00 00

@@ -21,6 +21,7 @@ from loom.gen.target.low.compiler import compile_descriptor_set
 from loom.gen.target.low.low_descriptors import generate_descriptor_set
 from loom.target.arch.amd.xdna.aie.encoding import (
     BundleFieldEncoding,
+    EncodingTable,
     InstructionEncoding,
     InstructionFieldEncoding,
     encode_witness,
@@ -108,8 +109,19 @@ def _build_name_table(names: Sequence[str], table_name: str) -> tuple[dict[str, 
     return rows, lines
 
 
+def _validate_singleton_bundle_formats(table: EncodingTable) -> None:
+    """Proves that native packet placement can issue every instruction alone."""
+    singleton_slots = {bundle_format.fields[0].slot for bundle_format in table.bundle_formats if len(bundle_format.fields) == 1}
+    # AIE2P's exact slot signatures are not downward closed. Membership in a
+    # larger format does not let an instruction start an otherwise empty packet.
+    for slot in sorted({instruction.slot for instruction in table.instructions}):
+        if slot not in singleton_slots:
+            raise ValueError(f"AIE2P instruction slot '{slot}' has no exact singleton bundle format")
+
+
 def _emit_encoding_tables() -> str:
     validate_encoding_table(CORE_ENCODING_TABLE, SLOT_BIT_COUNTS)
+    _validate_singleton_bundle_formats(CORE_ENCODING_TABLE)
     for witness in CORE_ENCODING_WITNESSES:
         actual_bytes = encode_witness(CORE_ENCODING_TABLE, witness)
         if actual_bytes != witness.expected_bytes:

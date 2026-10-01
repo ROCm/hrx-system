@@ -50,7 +50,7 @@ typedef struct loom_aie2p_planned_bundle_t {
   uint32_t issue_cycle;
   // Source-order Low block containing this bundle.
   uint32_t block_index;
-  // Logical Low schedule cycle expanded into this physical bundle.
+  // Greatest logical Low schedule cycle represented by this physical bundle.
   uint32_t logical_issue_cycle;
   // Byte offset of this bundle in the contribution code section.
   uint32_t byte_offset;

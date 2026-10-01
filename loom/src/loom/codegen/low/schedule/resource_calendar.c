@@ -30,6 +30,7 @@ iree_status_t loom_low_schedule_resource_calendar_initialize(
 void loom_low_schedule_resource_calendar_reset(
     loom_low_schedule_resource_calendar_t* calendar) {
   calendar->quiescent_cycle = 0;
+  calendar->issue_cycle_high_water = 0;
   calendar->minimum_issue_cycle = 0;
   const uint32_t slot_count =
       calendar->descriptor_set->resource_calendar_slot_count;
@@ -175,7 +176,13 @@ uint32_t loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
     uint16_t schedule_class_count, uint32_t proposed_issue_cycle,
     uint16_t* out_bottleneck_resource_id) {
   *out_bottleneck_resource_id = LOOM_LOW_RESOURCE_NONE;
-  uint32_t issue_cycle = proposed_issue_cycle;
+  const uint32_t lookback_cycles =
+      calendar->descriptor_set->resource_calendar_lookback_cycles;
+  const uint32_t retained_issue_cycle =
+      calendar->issue_cycle_high_water > lookback_cycles
+          ? calendar->issue_cycle_high_water - lookback_cycles
+          : 0;
+  uint32_t issue_cycle = iree_max(proposed_issue_cycle, retained_issue_cycle);
   while (true) {
     uint16_t conflict_resource_id = LOOM_LOW_RESOURCE_NONE;
     if (loom_low_schedule_resource_calendar_issue_fits(
@@ -246,6 +253,8 @@ iree_status_t loom_low_schedule_resource_calendar_commit(
   }
   calendar->quiescent_cycle =
       iree_max(calendar->quiescent_cycle, (uint64_t)issue_cycle + maximum_end);
+  calendar->issue_cycle_high_water =
+      iree_max(calendar->issue_cycle_high_water, issue_cycle);
   for (uint16_t class_index = 0; class_index < schedule_class_count;
        ++class_index) {
     const loom_low_schedule_class_t* schedule_class =

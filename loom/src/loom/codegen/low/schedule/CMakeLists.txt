@@ -73,6 +73,7 @@ loom_cc_library(
   SRCS
     "event_frontier.c"
   DEPS
+    ::dependencies
     iree::base
     iree::base::internal::arena
     loom::codegen::low::descriptors

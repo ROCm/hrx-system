@@ -203,7 +203,7 @@ low.func.def target<amd.xdna.aie2p.core> @pinned_encode_address_prerequisites(%s
 }
 
 // ----
-issue cycles: 31
+issue cycles: 30
 code bytes: 106
 coissued bundles: 2
 coissued components: 4
@@ -239,10 +239,10 @@ low.func.def target<amd.xdna.aie2p.core> @bfp_encode_read_ahead_four_accumulator
 }
 
 // ----
-issue cycles: 23
-code bytes: 82
+issue cycles: 22
+code bytes: 80
 coissued bundles: 3
-coissued components: 6
+coissued components: 7
 
 // ====
 
@@ -273,10 +273,10 @@ low.func.def target<amd.xdna.aie2p.core> @bfp_encode_read_ahead_three_accumulato
 }
 
 // ----
-issue cycles: 22
-code bytes: 78
+issue cycles: 21
+code bytes: 76
 coissued bundles: 3
-coissued components: 6
+coissued components: 7
 
 // ====
 
@@ -364,7 +364,7 @@ low.func.def target<amd.xdna.aie2p.core> @fused_forwarded_loop(%first_row: reg<a
 }
 
 // ----
-issue cycles: 111
-code bytes: 366
-coissued bundles: 15
-coissued components: 32
+issue cycles: 70
+code bytes: 286
+coissued bundles: 17
+coissued components: 40

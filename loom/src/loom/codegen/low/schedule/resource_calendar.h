@@ -41,15 +41,20 @@ typedef struct loom_low_schedule_resource_calendar_t {
   loom_low_schedule_resource_calendar_slot_t* slots;
   // First cycle after every committed resource stage has completed.
   uint64_t quiescent_cycle;
+  // Latest committed issue cycle. Queries retain only the target-declared
+  // lookback interval preceding this high-water mark.
+  uint32_t issue_cycle_high_water;
   // Lower bound on the next descriptor issue cycle from saturated resources
-  // required by every schedule class. Other resource demands may delay it.
+  // required by every schedule class. This shortcut applies only to forward
+  // issue; earlier retained placements use the occupancy calendar directly.
   uint64_t minimum_issue_cycle;
 } loom_low_schedule_resource_calendar_t;
 
 // Allocates the exact target-declared occupancy storage. Resources with the
 // same nonzero contention group share a ring. Rings cover each group's maximum
-// stage plus duration, so monotonically advancing issue cycles only overwrite
-// expired occupancy. No allocations occur after initialization.
+// stage plus duration and the generated issue lookback, so commits only
+// overwrite occupancy outside the retained interval. No allocations occur
+// after initialization.
 iree_status_t loom_low_schedule_resource_calendar_initialize(
     const loom_low_descriptor_set_t* descriptor_set,
     iree_arena_allocator_t* arena,
@@ -68,10 +73,10 @@ bool loom_low_schedule_resource_group_fits(
     uint16_t schedule_class_count);
 
 // Returns the earliest issue cycle at or after |proposed_issue_cycle| where
-// all uses of an intrinsically legal group fit. Proposed cycles must not
-// precede the most recently committed cycle. |out_bottleneck_resource_id|
-// identifies a resource involved in the first rejected cycle, or
-// LOOM_LOW_RESOURCE_NONE when no stall is needed.
+// all uses of an intrinsically legal group fit. The proposed cycle is floored
+// to the retained interval beginning at high-water minus target lookback,
+// saturated at zero. |out_bottleneck_resource_id| identifies a resource in the
+// first rejected cycle, or LOOM_LOW_RESOURCE_NONE when none rejects admission.
 uint32_t loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
     const loom_low_schedule_resource_calendar_t* calendar,
     const loom_low_schedule_class_t* const* schedule_classes,
@@ -79,9 +84,10 @@ uint32_t loom_low_schedule_resource_calendar_find_earliest_issue_cycle(
     uint16_t* out_bottleneck_resource_id);
 
 // Commits all uses in the group at a cycle admitted by find_earliest.
-// No intervening commit may change that admission. Commit cycles must be
-// monotonically nondecreasing between resets. Reports cycle-domain overflow;
-// resource capacity is established by admission, not checked a second time.
+// No intervening commit may change that admission. Commit cycles may precede
+// the high-water mark within the admitted retained interval. Reports
+// cycle-domain overflow; history and capacity are established by admission,
+// not checked a second time.
 iree_status_t loom_low_schedule_resource_calendar_commit(
     loom_low_schedule_resource_calendar_t* calendar,
     const loom_low_schedule_class_t* const* schedule_classes,

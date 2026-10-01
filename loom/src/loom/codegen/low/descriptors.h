@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 48u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 49u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -983,8 +983,8 @@ typedef struct loom_low_resource_t {
   // Contention group identifier for related resources.
   uint16_t contention_group_id;
   // Generated occupancy-ring layout. Resources in the same contention group
-  // share a ring; its power-of-two length covers every referenced stage plus
-  // duration. Resources without issue uses consume no calendar slots.
+  // share a ring; its power-of-two length covers retained issue history plus
+  // every referenced stage and duration. Unused resources consume no slots.
   struct {
     // First occupancy slot in the descriptor set's calendar storage.
     uint32_t slot_start;
@@ -1000,11 +1000,10 @@ typedef struct loom_low_resource_t {
 typedef struct loom_low_timing_event_t {
   // String-pool reference for the stable timing-event name.
   loom_string_ref_t name_string_ref;
-  // First positive outgoing row in the complete event-separation table, or
-  // zero when this event cannot advance the physical timing frontier.
+  // First outgoing row in the complete event-separation table, or zero when
+  // this event has no outgoing rules.
   uint32_t separation_start;
-  // Span through the last positive outgoing row. Interior rows may have
-  // nonpositive delays; dependency queries retain the complete pair table.
+  // Number of contiguous outgoing rows, including zero and negative rules.
   uint16_t separation_count;
   // Reserved; must be zero.
   uint16_t reserved;
@@ -1574,6 +1573,9 @@ typedef struct loom_low_descriptor_set_t {
   uint32_t resource_count;
   // Total occupancy slots for the generated resource calendars.
   uint32_t resource_calendar_slot_count;
+  // Maximum earlier issue distance retained by the resource calendars,
+  // derived from the largest negative event-separation magnitude.
+  uint32_t resource_calendar_lookback_cycles;
   // Dense hazard rows referenced by schedule classes.
   const loom_low_hazard_t* hazards;
   // Number of hazard rows owned by this set.

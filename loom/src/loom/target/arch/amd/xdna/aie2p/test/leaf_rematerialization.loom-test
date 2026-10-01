@@ -185,7 +185,7 @@ CHECK: code bytes: 482
 // Shared zero padding has multiple consumers on both sides of an ownership
 // move. Setup ordering must preserve that fan-out and the source-order boundary
 // while keeping the rematerialized broadcasts out of persistent vector storage.
-// RUN: with-checks emit aie2p-leaf @bounded_padding report=emission
+// RUN: emit aie2p-leaf @bounded_padding report=emission
 
 low.func.def target<amd.xdna.aie2p.core> @bounded_padding(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>) asm {
   %zeros = acc.clear.f32x64
@@ -317,8 +317,10 @@ low.func.def target<amd.xdna.aie2p.core> @bounded_padding(%input: reg<aie2p.ep>,
 }
 
 // ----
-CHECK: issue cycles: 242
-CHECK: code bytes: 846
+issue cycles: 185
+code bytes: 744
+coissued bundles: 10
+coissued components: 21
 
 // ====
 
@@ -507,8 +509,8 @@ low.func.def target<amd.xdna.aie2p.core> @payload_dependent_store_indices(%sourc
 // ----
 issue cycles: 27
 code bytes: 110
-coissued bundles: 4
-coissued components: 8
+coissued bundles: 5
+coissued components: 10
 
 // ====
 

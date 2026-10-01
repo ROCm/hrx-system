@@ -117,8 +117,8 @@ control-relocation index=1 record=2 word=1 binding=1 addend=128 alignment=4
 control-relocation index=2 record=5 word=1 binding=1 addend=140 alignment=4
 
 resident-program workers=2
-resident worker=0 entry=@broadcast_read_array$worker$0 tile=(0,2) code-bytes=134 resources=0 fixups=1
-resident worker=1 entry=@broadcast_read_array$worker$1 tile=(0,3) code-bytes=134 resources=0 fixups=1
+resident worker=0 entry=@broadcast_read_array$worker$0 tile=(0,2) code-bytes=128 resources=0 fixups=1
+resident worker=1 entry=@broadcast_read_array$worker$1 tile=(0,3) code-bytes=128 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @broadcast_read_array$worker$0() asm {
   %acquire_delta = mov.short -1
@@ -295,8 +295,8 @@ control-relocation index=2 record=4 word=1 binding=1 addend=0 alignment=4
 control-relocation index=3 record=7 word=1 binding=1 addend=12 alignment=4
 
 resident-program workers=2
-resident worker=0 entry=@partitioned_write_array$worker$0 tile=(0,2) code-bytes=134 resources=0 fixups=1
-resident worker=1 entry=@partitioned_write_array$worker$1 tile=(0,3) code-bytes=134 resources=0 fixups=1
+resident worker=0 entry=@partitioned_write_array$worker$0 tile=(0,2) code-bytes=128 resources=0 fixups=1
+resident worker=1 entry=@partitioned_write_array$worker$1 tile=(0,3) code-bytes=128 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @partitioned_write_array$worker$0() asm {
   %acquire_delta = mov.short -1

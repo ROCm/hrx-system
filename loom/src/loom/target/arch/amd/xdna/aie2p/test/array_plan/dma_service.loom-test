@@ -178,8 +178,8 @@ control-relocation index=2 record=4 word=1 binding=2 addend=0 alignment=4
 control-relocation index=3 record=6 word=1 binding=3 addend=0 alignment=4
 
 resident-program workers=2
-resident worker=0 entry=@neighbor_dma_service_array$worker$0 tile=(0,2) code-bytes=264 resources=0 fixups=1
-resident worker=1 entry=@neighbor_dma_service_array$worker$1 tile=(0,4) code-bytes=86 resources=0 fixups=1
+resident worker=0 entry=@neighbor_dma_service_array$worker$0 tile=(0,2) code-bytes=258 resources=0 fixups=1
+resident worker=1 entry=@neighbor_dma_service_array$worker$1 tile=(0,4) code-bytes=80 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @neighbor_dma_service_array$worker$0() asm {
   %acquire_delta = mov.short -1

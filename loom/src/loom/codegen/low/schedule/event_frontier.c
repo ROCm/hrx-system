@@ -8,6 +8,8 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/schedule/dependencies.h"
+
 iree_status_t loom_low_schedule_event_frontier_initialize(
     const loom_low_descriptor_set_t* descriptor_set,
     iree_arena_allocator_t* arena,
@@ -77,11 +79,8 @@ iree_status_t loom_low_schedule_event_frontier_commit(
     for (uint16_t j = 0; j < event->separation_count; ++j) {
       const loom_low_event_separation_t* separation =
           &descriptor_set->event_separations[event->separation_start + j];
-      if (separation->minimum_issue_separation_cycles <= 0) {
-        continue;
-      }
-      const uint32_t deadline =
-          issue_cycle + (uint32_t)separation->minimum_issue_separation_cycles;
+      const uint32_t deadline = loom_low_schedule_add_signed_issue_separation(
+          issue_cycle, separation->minimum_issue_separation_cycles);
       uint32_t* retained = &deadlines[separation->consumer_event_id];
       *retained = iree_max(*retained, deadline);
     }

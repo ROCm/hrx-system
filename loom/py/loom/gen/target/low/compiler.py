@@ -366,8 +366,9 @@ def derive_minimum_issue_cycles(
 def _compile_resource_calendars(
     resources: Sequence[Resource],
     schedule_classes: Sequence[ScheduleClass],
+    lookback_cycles: int,
 ) -> tuple[list[CompiledResourceCalendar], int]:
-    """Retains occupancy horizons and common instruction-issue demand."""
+    """Retains bounded issue history, forward horizons and common demand."""
 
     groups = {resource.name: resource.contention_group_id or -index - 1 for index, resource in enumerate(resources)}
     horizons: dict[int, int] = dict.fromkeys(groups.values(), 0)
@@ -384,7 +385,7 @@ def _compile_resource_calendars(
     calendars: dict[int, CompiledResourceCalendar] = {}
     slot_count = 0
     for group, horizon in horizons.items():
-        length = 1 << (horizon - 1).bit_length() if horizon else 0
+        length = 1 << (horizon + lookback_cycles - 1).bit_length() if horizon else 0
         calendars[group] = CompiledResourceCalendar(slot_start=slot_count, slot_mask=max(length - 1, 0), minimum_issue_units=minimum_issue_units.get(group, 0))
         slot_count += length
     validation.validate_u32(slot_count, "resource calendar slot count")
@@ -1782,7 +1783,8 @@ def compile_descriptor_set(
             raise ValueError(f"descriptor '{descriptor.key}' stable ID collides with '{previous_key}'")
         seen_stable_ids[stable_id] = descriptor.key
 
-    resource_calendars, resource_calendar_slot_count = _compile_resource_calendars(resources, schedule_classes)
+    resource_calendar_lookback_cycles = max((max(0, -row.minimum_issue_separation_cycles) for row in event_separations), default=0)
+    resource_calendars, resource_calendar_slot_count = _compile_resource_calendars(resources, schedule_classes, resource_calendar_lookback_cycles)
     return CompiledDescriptorSet(
         spec=spec,
         source_descriptors=source_descriptors,
@@ -1807,6 +1809,7 @@ def compile_descriptor_set(
         resources=resources,
         resource_calendars=resource_calendars,
         resource_calendar_slot_count=resource_calendar_slot_count,
+        resource_calendar_lookback_cycles=resource_calendar_lookback_cycles,
         schedule_classes=schedule_classes,
         timing_events=timing_events,
         event_separations=event_separations,

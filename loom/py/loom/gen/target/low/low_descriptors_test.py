@@ -3050,6 +3050,7 @@ def test_generator_derives_minimum_issue_cycles_from_resource_pressure() -> None
     # Calendar storage depends on the furthest stage, not throughput cycles.
     assert [(row.slot_start, row.slot_mask) for row in compiled.resource_calendars] == [(0, 7), (8, 3)]
     assert compiled.resource_calendar_slot_count == 12
+    assert compiled.resource_calendar_lookback_cycles == 0
 
 
 def test_generator_shares_resource_calendar_horizons() -> None:
@@ -3107,23 +3108,26 @@ def test_generator_emits_compact_timing_event_tables() -> None:
     assert "kTestLowCoreTimingEvents" in generated.source
     assert "kTestLowCoreEventSeparations" in generated.source
     assert ".minimum_issue_separation_cycles = -2," in generated.source
-    assert ".separation_start = 2," in generated.source
+    assert ".separation_start = 0," in generated.source
     assert ".separation_count = 0," in generated.source
     assert ".separation_count = 1," in generated.source
+    assert ".separation_count = 2," in generated.source
     assert ".maximum_issue_separation_cycles = 3," in generated.source
+    assert compiled.resource_calendar_lookback_cycles == 2
+    assert ".resource_calendar_lookback_cycles = 2," in generated.source
 
 
 @pytest.mark.parametrize(
     ("delays", "expected_span"),
     [
-        ((0, -1, 0, -2, 0, -3, 0, -4), (0, 0, 0)),
-        ((-2, 0, 3, 0, 1, -1, 0, -3), (2, 3, 3)),
-        ((2, -1, 0, 0, -2, 0, 0, -3), (0, 1, 2)),
-        ((0, 0, -1, 0, 0, -2, 0, 4), (7, 1, 4)),
+        ((0, -1, 0, -2, 0, -3, 0, -4), (0, 8, 0)),
+        ((-2, 0, 3, 0, 1, -1, 0, -3), (0, 8, 3)),
+        ((2, -1, 0, 0, -2, 0, 0, -3), (0, 8, 2)),
+        ((0, 0, -1, 0, 0, -2, 0, 4), (0, 8, 4)),
         ((1, 2, 3, 4, 5, 6, 7, 8), (0, 8, 8)),
     ],
 )
-def test_generator_bounds_frontier_spans_without_discarding_pair_facts(delays: tuple[int, ...], expected_span: tuple[int, int, int]) -> None:
+def test_generator_retains_complete_signed_frontier_spans(delays: tuple[int, ...], expected_span: tuple[int, int, int]) -> None:
     events = TEST_LOW_CORE_DESCRIPTOR_SET.timing_events
     separations = tuple(EventSeparation(events[0].name, event.name, delay, ModelQuality.EXACT) for event, delay in zip(events, delays, strict=True))
     descriptor_set = replace(TEST_LOW_CORE_DESCRIPTOR_SET, event_separations=separations)
@@ -3135,6 +3139,44 @@ def test_generator_bounds_frontier_spans_without_discarding_pair_facts(delays: t
         generated.source,
     )
     assert [tuple(map(int, span)) for span in spans] == [expected_span, *((0, 0, 0),) * (len(events) - 1)]
+
+
+def test_generator_sizes_calendar_history_from_selected_event_rules() -> None:
+    events = TEST_LOW_CORE_DESCRIPTOR_SET.timing_events
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        event_separations=(EventSeparation(events[0].name, events[3].name, -8, ModelQuality.EXACT),),
+    )
+    compiled = compiler.compile_descriptor_set(
+        descriptor_set,
+        DescriptorAllowlist(keys=("test.event.fast.i32", "test.event.consume.late.i32")),
+    )
+    assert compiled.resource_calendar_lookback_cycles == 8
+    # The common resource's two-cycle forward horizon and eight-cycle issue
+    # history occupy ten absolute cycles, rounded to sixteen ring slots.
+    shared = compiled.resource_calendars[compiled.resource_ids["test.shared_a"]]
+    assert shared.slot_mask == 15
+    assert compiled.resource_calendars[compiled.resource_ids["test.shared_b"]] == shared
+    assert compiled.resource_calendar_slot_count == 16
+
+    # A view that does not expose the late-read endpoint has no historical
+    # obligation and retains the two-slot forward-only resource calendar.
+    forward = compiler.compile_descriptor_set(descriptor_set, DescriptorAllowlist(keys=("test.event.fast.i32",)))
+    assert forward.resource_calendar_lookback_cycles == 0
+    assert forward.resource_calendar_slot_count == 2
+
+
+def test_generator_rejects_unrepresentable_history_storage() -> None:
+    events = TEST_LOW_CORE_DESCRIPTOR_SET.timing_events
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        event_separations=(EventSeparation(events[0].name, events[3].name, -(2**31), ModelQuality.EXACT),),
+    )
+    with pytest.raises(ValueError, match="resource calendar slot count"):
+        compiler.compile_descriptor_set(
+            descriptor_set,
+            DescriptorAllowlist(keys=("test.event.fast.i32", "test.event.consume.late.i32")),
+        )
 
 
 def test_generator_rejects_duplicate_schedule_resource() -> None:

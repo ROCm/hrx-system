@@ -109,6 +109,7 @@ TEST_F(ScheduleResourceCalendarTest, ResetRetainsAnEmptyCalendar) {
   EXPECT_EQ(FindEarliest(slow, 0), 0u);
   EXPECT_EQ(FindEarliest(consumer, 0), 0u);
   EXPECT_EQ(calendar_.minimum_issue_cycle, 0u);
+  EXPECT_EQ(calendar_.issue_cycle_high_water, 0u);
 }
 
 TEST_F(ScheduleResourceCalendarTest,
@@ -231,6 +232,92 @@ TEST_F(ScheduleResourceCalendarTest, OccupancyMayIncludeTheFinalCycle) {
   EXPECT_EQ(FindEarliest(required, 0), 0u);
 }
 
+TEST_F(ScheduleResourceCalendarTest, HistoryRetainsStageOccupancyAcrossWraps) {
+  loom_low_resource_t resources[2] = {};
+  for (auto& resource : resources) {
+    resource.capacity_per_cycle = 1;
+    resource.kind = LOOM_LOW_RESOURCE_KIND_PIPELINE;
+    resource.contention_group_id = 1;
+    // Five forward stage cycles plus three historical issue cycles.
+    resource.calendar.slot_mask = 7;
+  }
+  const loom_low_issue_use_t uses[] = {
+      {/*resource_id=*/0, /*cycles=*/2, /*units=*/1, /*stage=*/3,
+       /*kind=*/LOOM_LOW_ISSUE_USE_KIND_REQUIRED},
+      {/*resource_id=*/1, /*cycles=*/1, /*units=*/1, /*stage=*/0,
+       /*kind=*/LOOM_LOW_ISSUE_USE_KIND_REQUIRED},
+  };
+  loom_low_schedule_class_t classes[2] = {};
+  for (uint16_t i = 0; i < IREE_ARRAYSIZE(classes); ++i) {
+    classes[i].issue_use_start = i;
+    classes[i].issue_use_count = 1;
+    classes[i].flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES;
+  }
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.schedule_classes = classes;
+  descriptors.schedule_class_count = IREE_ARRAYSIZE(classes);
+  descriptors.issue_uses = uses;
+  descriptors.issue_use_count = IREE_ARRAYSIZE(uses);
+  descriptors.resources = resources;
+  descriptors.resource_count = IREE_ARRAYSIZE(resources);
+  descriptors.resource_calendar_slot_count = 8;
+  descriptors.resource_calendar_lookback_cycles = 3;
+  IREE_ASSERT_OK(loom_low_schedule_resource_calendar_initialize(
+      &descriptors, &arena_, &calendar_));
+  const auto* slots = calendar_.slots;
+  const auto used_bytes = arena_.used_allocation_size;
+  Commit(&classes[0], 10);  // Occupies cycles thirteen and fourteen.
+  EXPECT_EQ(FindEarliest(&classes[1], 0), 7u);
+  Commit(&classes[1], 7);
+  EXPECT_EQ(calendar_.issue_cycle_high_water, 10u);
+  EXPECT_EQ(FindEarliest(&classes[1], 0), 8u);
+  EXPECT_EQ(FindEarliest(&classes[0], 9), 12u);
+
+  Commit(&classes[0], 17);  // Occupies twenty and twenty-one after a ring wrap.
+  EXPECT_EQ(calendar_.issue_cycle_high_water, 17u);
+  // Fourteen is still retained and occupied by the first delayed instruction.
+  // Expired history is not mistaken for free occupancy at the query's zero.
+  EXPECT_EQ(FindEarliest(&classes[1], 0), 15u);
+  Commit(&classes[1], 15);
+  EXPECT_EQ(calendar_.quiescent_cycle, 22u);
+  EXPECT_EQ(calendar_.slots, slots);
+  EXPECT_EQ(arena_.used_allocation_size, used_bytes);
+  loom_low_schedule_resource_calendar_reset(&calendar_);
+  EXPECT_EQ(calendar_.issue_cycle_high_water, 0u);
+  EXPECT_EQ(FindEarliest(&classes[1], 0), 0u);
+}
+
+TEST_F(ScheduleResourceCalendarTest, ForwardIssueFloorDoesNotExcludeHistory) {
+  loom_low_resource_t resource = {};
+  resource.capacity_per_cycle = 1;
+  resource.kind = LOOM_LOW_RESOURCE_KIND_PIPELINE;
+  resource.calendar.slot_mask = 3;
+  resource.calendar.minimum_issue_units = 1;
+  const loom_low_issue_use_t use = {/*resource_id=*/0, /*cycles=*/1,
+                                    /*units=*/1, /*stage=*/0,
+                                    /*kind=*/LOOM_LOW_ISSUE_USE_KIND_REQUIRED};
+  loom_low_schedule_class_t schedule_class = {};
+  schedule_class.issue_use_count = 1;
+  schedule_class.flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES;
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.schedule_classes = &schedule_class;
+  descriptors.schedule_class_count = 1;
+  descriptors.issue_uses = &use;
+  descriptors.issue_use_count = 1;
+  descriptors.resources = &resource;
+  descriptors.resource_count = 1;
+  descriptors.resource_calendar_slot_count = 4;
+  descriptors.resource_calendar_lookback_cycles = 3;
+  IREE_ASSERT_OK(loom_low_schedule_resource_calendar_initialize(
+      &descriptors, &arena_, &calendar_));
+  Commit(&schedule_class, 10);
+  EXPECT_EQ(calendar_.minimum_issue_cycle, 11u);
+  EXPECT_EQ(FindEarliest(&schedule_class, 0), 7u);
+  Commit(&schedule_class, 7);
+  EXPECT_EQ(calendar_.minimum_issue_cycle, 11u);
+  EXPECT_EQ(FindEarliest(&schedule_class, 10), 11u);
+}
+
 TEST_F(ScheduleResourceCalendarTest, RejectsAnUnrepresentableResourceStage) {
   const auto* fast =
       ScheduleClass(TEST_LOW_CORE_DESCRIPTOR_REF_TEST_EVENT_FAST_I32);
@@ -266,7 +353,8 @@ TEST_F(ScheduleResourceCalendarTest, AdmitsCollectiveInstructionDemand) {
   EXPECT_GT(calendar_.quiescent_cycle, cycle);
 }
 
-TEST_F(ScheduleResourceCalendarTest, MatchesDenseOccupancyAcrossRingWraps) {
+TEST_F(ScheduleResourceCalendarTest,
+       MatchesDenseOccupancyAcrossHistoricalInsertionsAndRingWraps) {
   // The oracle records absolute cycles independently for every resource. It
   // derives contention from the authored group IDs, without using generated
   // ring offsets, masks, or the production occupancy queries.
@@ -289,7 +377,11 @@ TEST_F(ScheduleResourceCalendarTest, MatchesDenseOccupancyAcrossRingWraps) {
   };
   const iree_host_size_t used_bytes = arena_.used_allocation_size;
   const iree_host_size_t owned_bytes = arena_.total_allocation_size;
-  uint32_t issue_cycle = 0;
+  uint32_t issue_cycle_high_water = 0;
+  const uint32_t lookback_cycles =
+      descriptor_set_->resource_calendar_lookback_cycles;
+  ASSERT_GT(lookback_cycles, 0u);
+  uint32_t historical_commit_count = 0;
   uint32_t random = 42;
   for (uint32_t step = 0; step < 256; ++step) {
     random = random * 1664525u + 1013904223u;
@@ -322,10 +414,19 @@ TEST_F(ScheduleResourceCalendarTest, MatchesDenseOccupancyAcrossRingWraps) {
         }
       }
     }
-    // Include idle gaps, same-cycle issue, and queries which must not reserve
-    // anything until their chosen cycle is committed.
-    const uint32_t proposed = issue_cycle + ((random >> 24) % 4);
-    uint32_t expected = proposed;
+    // Include idle gaps, same-cycle issue, historical insertion and proposals
+    // older than retained history. Queries must not reserve any occupancy.
+    const uint32_t retreat = (random >> 16) % (lookback_cycles + 3);
+    const uint32_t proposed =
+        (random & 1) ? issue_cycle_high_water + ((random >> 24) % 4)
+                     : (issue_cycle_high_water > retreat
+                            ? issue_cycle_high_water - retreat
+                            : 0);
+    const uint32_t retained_cycle =
+        issue_cycle_high_water > lookback_cycles
+            ? issue_cycle_high_water - lookback_cycles
+            : 0;
+    uint32_t expected = std::max(proposed, retained_cycle);
     for (;; ++expected) {
       ASSERT_LT(expected + duration, kCycleCount);
       bool fits = true;
@@ -347,6 +448,7 @@ TEST_F(ScheduleResourceCalendarTest, MatchesDenseOccupancyAcrossRingWraps) {
     ASSERT_EQ(FindEarliest(schedule_class, proposed), expected)
         << "step " << step;
     EXPECT_EQ(FindEarliest(schedule_class, proposed), expected);
+    historical_commit_count += expected < issue_cycle_high_water;
     Commit(schedule_class, expected);
     for (uint32_t resource_id = 0; resource_id < resource_count;
          ++resource_id) {
@@ -355,8 +457,10 @@ TEST_F(ScheduleResourceCalendarTest, MatchesDenseOccupancyAcrossRingWraps) {
                    candidate[resource_id * kCycleCount + cycle]);
       }
     }
-    issue_cycle = expected;
+    issue_cycle_high_water = std::max(issue_cycle_high_water, expected);
+    EXPECT_EQ(calendar_.issue_cycle_high_water, issue_cycle_high_water);
   }
+  EXPECT_GT(historical_commit_count, 0u);
   EXPECT_EQ(arena_.used_allocation_size, used_bytes);
   EXPECT_EQ(arena_.total_allocation_size, owned_bytes);
 }

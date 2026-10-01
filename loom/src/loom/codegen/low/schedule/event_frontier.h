@@ -21,11 +21,13 @@ extern "C" {
 // by its outgoing RAW/WAR/WAW rules. In particular, a newer write never erases
 // an outstanding reader or a slower older write.
 //
-// The stream owner resolves register aliases into the descriptor set's atomic
-// units and queries every access before committing any access of one issue
-// group. Accesses within a group must independently permit coissue. Partial
-// accesses conservatively occupy their containing atomic unit; they cannot
-// kill another part's pending events. No allocation occurs after initialize.
+// The stream owner publishes accesses in accepted semantic order, preserving
+// old/new value identity even when native issue times move backward. It
+// resolves register aliases into the descriptor set's atomic units and queries
+// every access before committing any access of one issue group. Accesses within
+// a group must independently permit coissue. Partial accesses conservatively
+// occupy their containing atomic unit; they cannot kill another part's pending
+// events. No allocation occurs after initialize.
 typedef struct loom_low_schedule_event_frontier_t {
   // Descriptor set owning the event rules and physical storage geometry.
   const loom_low_descriptor_set_t* descriptor_set;
@@ -46,9 +48,10 @@ uint32_t loom_low_schedule_event_frontier_query(
     const loom_low_schedule_event_frontier_t* frontier,
     uint16_t physical_register_id, uint16_t event_id);
 
-// Commits an admitted physical access. The only possible failure is overflow
-// of the issue-cycle domain. Events with zero or negative separations impose
-// no delay on an instruction stream that preserves issue order.
+// Publishes an admitted physical access in accepted semantic order. Signed
+// separations permit an earlier issue time without dropping any previous
+// access's deadline. Negative deadlines saturate at zero. The only possible
+// failure is overflow of the issue-cycle domain.
 iree_status_t loom_low_schedule_event_frontier_commit(
     loom_low_schedule_event_frontier_t* frontier, uint16_t physical_register_id,
     uint16_t event_id, uint32_t issue_cycle);

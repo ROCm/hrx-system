@@ -190,12 +190,13 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
     }
     const loom_low_physical_instruction_t instruction = {
         packet.descriptor_ordinal, registers};
-    uint32_t cycle = 0;
     const uint32_t proposed_cycle =
         iree_max(iree_max(next_cycle, packet.node->issue_cycle),
                  loom_low_physical_issue_source_ready_cycle(&issue, i));
-    IREE_ASSERT_OK(loom_low_physical_issue_place(&issue, &instruction, 1,
-                                                 proposed_cycle, &cycle));
+    const uint32_t cycle = loom_low_physical_issue_find_earliest_issue_cycle(
+        &issue, &instruction, 1, proposed_cycle);
+    IREE_ASSERT_OK(
+        loom_low_physical_issue_commit(&issue, &instruction, 1, cycle));
     loom_low_physical_issue_commit_source(&issue, i, cycle);
     cycles[packet.node->source_ordinal] = cycle;
     next_cycle = cycle + 1;
@@ -215,6 +216,18 @@ low.func.def target<test.low.core> @physical_reuse(%seed: reg<test.phys>) -> (re
   write_registers[0] = 1;
   EXPECT_TRUE(
       loom_low_physical_issue_group_fits(frame.target.descriptor_set, pair, 2));
+
+  // A negative hardware RAW permits early native issue, but semantic source
+  // edges retain producer-before-consumer issue order in this admission model.
+  loom_low_physical_issue_t semantic_issue = {};
+  IREE_ASSERT_OK(loom_low_physical_issue_initialize(&frame.schedule, &arena_,
+                                                    &semantic_issue));
+  const auto producer_packet = loom_low_packet_at_node(&frame.schedule, 0);
+  loom_low_physical_issue_commit_source(
+      &semantic_issue, (uint32_t)producer_packet.packet_index, 10);
+  EXPECT_EQ(loom_low_physical_issue_source_ready_cycle(
+                &semantic_issue, (uint32_t)read_packet.packet_index),
+            10u);
 }
 
 TEST_F(LowEmissionFrameTest, EveryStrategyEnforcesIssueResourceCapacity) {

@@ -102,8 +102,8 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=2 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=2
-resident worker=0 entry=@discard_then_increment$worker$0 tile=(0,2) code-bytes=98 resources=0 fixups=1
-resident worker=1 entry=@discard_then_increment$worker$1 tile=(0,3) code-bytes=142 resources=0 fixups=1
+resident worker=0 entry=@discard_then_increment$worker$0 tile=(0,2) code-bytes=92 resources=0 fixups=1
+resident worker=1 entry=@discard_then_increment$worker$1 tile=(0,3) code-bytes=136 resources=0 fixups=1
 
 low.func.def retain target<amd.xdna.aie2p.core> @discard_then_increment$worker$0() asm {
   %acquire_delta = mov.short -1
