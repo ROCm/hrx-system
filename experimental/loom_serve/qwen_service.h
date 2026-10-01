@@ -43,11 +43,14 @@ typedef struct loom_serve_qwen_service_options_t {
   loom_serve_qwen_schedule_mode_t schedule_mode;
   // Whether prompt and decode inputs may share an epoch, independent of math.
   loom_serve_qwen_packing_mode_t packing_mode;
+  // Proposal depth: zero or three. Three requires packed scheduling and an MTP
+  // bundle on the borrowed model. Zero with a bundle measures warm target-only.
+  iree_host_size_t mtp_depth;
 } loom_serve_qwen_service_options_t;
 
 // Runs one application owner until transport shutdown or model failure. Model
 // and transport are borrowed. Each epoch gathers credited ready rows, executes
-// their known spans and commits outputs before reusing the shared workspace.
+// their known/verifier spans and commits outputs before reusing the workspace.
 // Heartbeats observe a copied snapshot and continue during model waits.
 // X-Loom-Session selects retained state; idle rows are an LRU prefix cache, not
 // durable sessions. Busy named sessions reject concurrent requests. Untagged

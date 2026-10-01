@@ -11,7 +11,8 @@
 namespace {
 
 TEST(QwenScheduleTest, PromptChunksFillAroundDecodeAndShortTails) {
-  const iree_host_size_t ready[] = {80, 1, 3, 1, 50, 0};
+  const loom_serve_qwen_ready_span_t ready[] = {{80, 1}, {1, 1},  {3, 1},
+                                                {1, 1},  {50, 1}, {0, 0}};
   loom_serve_qwen_scheduled_span_t spans[6];
   iree_host_size_t cursor = 0;
   ASSERT_EQ(loom_serve_qwen_schedule(6, ready, 64, 6, 32, &cursor, spans), 5);
@@ -24,7 +25,8 @@ TEST(QwenScheduleTest, PromptChunksFillAroundDecodeAndShortTails) {
 }
 
 TEST(QwenScheduleTest, CapacityPressureRotatesWithoutStarvation) {
-  const iree_host_size_t ready[] = {100, 1, 100, 1, 100, 1, 100, 1};
+  const loom_serve_qwen_ready_span_t ready[] = {
+      {100, 1}, {1, 1}, {100, 1}, {1, 1}, {100, 1}, {1, 1}, {100, 1}, {1, 1}};
   for (iree_host_size_t span_capacity : {2u, 8u}) {
     loom_serve_qwen_scheduled_span_t spans[8];
     iree_host_size_t cursor = 0;
@@ -45,7 +47,7 @@ TEST(QwenScheduleTest, CapacityPressureRotatesWithoutStarvation) {
 }
 
 TEST(QwenScheduleTest, PromptExpansionRotatesWhenAllRowsFit) {
-  const iree_host_size_t ready[] = {100, 100, 100};
+  const loom_serve_qwen_ready_span_t ready[] = {{100, 1}, {100, 1}, {100, 1}};
   loom_serve_qwen_scheduled_span_t spans[3];
   iree_host_size_t cursor = 0;
   for (iree_host_size_t epoch = 0; epoch < 3; ++epoch) {
@@ -58,7 +60,8 @@ TEST(QwenScheduleTest, PromptExpansionRotatesWhenAllRowsFit) {
 }
 
 TEST(QwenScheduleTest, PausedRowsConsumeNeitherTokensNorSpanSlots) {
-  const iree_host_size_t ready[] = {0, 1, 0, 7, 0, 2};
+  const loom_serve_qwen_ready_span_t ready[] = {{0, 0}, {1, 1}, {0, 0},
+                                                {7, 1}, {0, 0}, {2, 1}};
   loom_serve_qwen_scheduled_span_t spans[6];
   iree_host_size_t cursor = 4;
   ASSERT_EQ(loom_serve_qwen_schedule(6, ready, 16, 3, 16, &cursor, spans), 3);
@@ -71,7 +74,7 @@ TEST(QwenScheduleTest, PausedRowsConsumeNeitherTokensNorSpanSlots) {
 }
 
 TEST(QwenScheduleTest, EmptyReadinessDoesNotAdvanceCursor) {
-  const iree_host_size_t ready[] = {0, 0, 0};
+  const loom_serve_qwen_ready_span_t ready[3] = {};
   loom_serve_qwen_scheduled_span_t spans[3];
   iree_host_size_t cursor = 2;
   EXPECT_EQ(loom_serve_qwen_schedule(3, ready, 8, 3, 8, &cursor, spans), 0);
@@ -79,7 +82,8 @@ TEST(QwenScheduleTest, EmptyReadinessDoesNotAdvanceCursor) {
 }
 
 TEST(QwenScheduleTest, ExhaustsFiniteMixedWorkExactlyOnce) {
-  iree_host_size_t ready[] = {71, 1, 3, 256, 1, 23, 1, 91};
+  loom_serve_qwen_ready_span_t ready[] = {{71, 1}, {1, 1},  {3, 1}, {256, 1},
+                                          {1, 1},  {23, 1}, {1, 1}, {91, 1}};
   const iree_host_size_t expected[] = {71, 1, 3, 256, 1, 23, 1, 91};
   iree_host_size_t consumed[8] = {};
   iree_host_size_t cursor = 0;
@@ -95,9 +99,9 @@ TEST(QwenScheduleTest, ExhaustsFiniteMixedWorkExactlyOnce) {
       EXPECT_EQ(seen & (1u << span.row_index), 0);
       seen |= 1u << span.row_index;
       ASSERT_GT(span.token_count, 0);
-      ASSERT_LE(span.token_count, ready[span.row_index]);
+      ASSERT_LE(span.token_count, ready[span.row_index].token_count);
       EXPECT_LE(span.token_count, 24);
-      ready[span.row_index] -= span.token_count;
+      ready[span.row_index].token_count -= span.token_count;
       consumed[span.row_index] += span.token_count;
       total += span.token_count;
     }
@@ -110,7 +114,8 @@ TEST(QwenScheduleTest, ExhaustsFiniteMixedWorkExactlyOnce) {
 
 TEST(QwenScheduleTest, CachedShapesShrinkWithoutLosingReadyWork) {
   const loom_serve_qwen_shape_t shapes[] = {{512, 8}, {32, 8}, {128, 8}};
-  iree_host_size_t ready[] = {500, 1, 1, 1, 1, 1, 1, 1};
+  loom_serve_qwen_ready_span_t ready[] = {{500, 1}, {1, 1}, {1, 1}, {1, 1},
+                                          {1, 1},   {1, 1}, {1, 1}, {1, 1}};
   loom_serve_qwen_scheduled_span_t spans[8], scratch[8];
   iree_host_size_t cursor = 0, shape = 0;
   ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
@@ -119,13 +124,13 @@ TEST(QwenScheduleTest, CachedShapesShrinkWithoutLosingReadyWork) {
   EXPECT_EQ(shape, 0);
   EXPECT_EQ(spans[0].token_count, 500);
   EXPECT_EQ(cursor, 1);
-  ready[0] = 70;
+  ready[0].token_count = 70;
   ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
                                             spans, scratch, &shape),
             8);
   EXPECT_EQ(shape, 2);
   EXPECT_EQ(cursor, 2);
-  ready[0] = 1;
+  ready[0].token_count = 1;
   ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
                                             spans, scratch, &shape),
             8);
@@ -138,7 +143,8 @@ TEST(QwenScheduleTest, CachedShapesShrinkWithoutLosingReadyWork) {
 
 TEST(QwenScheduleTest, ShapePlanningKeepsTokenAndSpanConstraintsIndependent) {
   const loom_serve_qwen_shape_t shapes[] = {{512, 1}, {128, 8}, {128, 4}};
-  const iree_host_size_t ready[] = {1, 1, 1, 1, 0, 0, 0, 0};
+  const loom_serve_qwen_ready_span_t ready[] = {{1, 1}, {1, 1}, {1, 1}, {1, 1},
+                                                {0, 0}, {0, 0}, {0, 0}, {0, 0}};
   loom_serve_qwen_scheduled_span_t spans[8], scratch[8];
   iree_host_size_t cursor = 0, shape = 0;
   ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
@@ -146,7 +152,7 @@ TEST(QwenScheduleTest, ShapePlanningKeepsTokenAndSpanConstraintsIndependent) {
             4);
   EXPECT_EQ(shape, 2);
   EXPECT_EQ(cursor, 4);
-  const iree_host_size_t empty[8] = {};
+  const loom_serve_qwen_ready_span_t empty[8] = {};
   EXPECT_EQ(loom_serve_qwen_schedule_shapes(8, empty, 3, shapes, 512, &cursor,
                                             spans, scratch, &shape),
             0);
@@ -155,7 +161,8 @@ TEST(QwenScheduleTest, ShapePlanningKeepsTokenAndSpanConstraintsIndependent) {
 
 TEST(QwenScheduleTest, ShapePlanningHonorsChunkLimitBeforeSizing) {
   const loom_serve_qwen_shape_t shapes[] = {{512, 8}, {128, 8}, {32, 8}};
-  const iree_host_size_t ready[] = {1000, 1, 1, 1};
+  const loom_serve_qwen_ready_span_t ready[] = {
+      {1000, 1}, {1, 1}, {1, 1}, {1, 1}};
   loom_serve_qwen_scheduled_span_t spans[4], scratch[4];
   iree_host_size_t cursor = 0, shape = 0;
   EXPECT_EQ(loom_serve_qwen_schedule_shapes(4, ready, 3, shapes, 64, &cursor,
@@ -163,6 +170,53 @@ TEST(QwenScheduleTest, ShapePlanningHonorsChunkLimitBeforeSizing) {
             4);
   EXPECT_EQ(shape, 1);
   EXPECT_EQ(spans[0].token_count, 64);
+}
+
+TEST(QwenScheduleTest, ReservesWholeVerifiersBeforePromptExpansion) {
+  const loom_serve_qwen_ready_span_t ready[] = {
+      {80, 1}, {4, 4}, {3, 1}, {4, 4}, {50, 1}, {4, 4}, {1, 1}, {4, 4}};
+  const loom_serve_qwen_shape_t shapes[] = {{128, 8}, {32, 8}};
+  loom_serve_qwen_scheduled_span_t spans[8], scratch[8];
+  iree_host_size_t cursor = 0, shape = 0;
+  ASSERT_EQ(loom_serve_qwen_schedule(8, ready, 32, 8, 7, &cursor, spans), 8);
+  const iree_host_size_t expected[] = {7, 4, 3, 4, 5, 4, 1, 4};
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(spans[i].row_index, i);
+    EXPECT_EQ(spans[i].token_count, expected[i]);
+  }
+  cursor = 0;
+  ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 2, shapes, 6, &cursor,
+                                            spans, scratch, &shape),
+            8);
+  EXPECT_EQ(shape, 1);
+  EXPECT_EQ(spans[0].token_count, 6);
+  EXPECT_EQ(spans[4].token_count, 6);
+  cursor = 0;
+  ASSERT_EQ(loom_serve_qwen_schedule(8, ready, 32, 8, 1, &cursor, spans), 8);
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(spans[i].token_count, ready[i].minimum_count);
+  }
+}
+
+TEST(QwenScheduleTest, FillsGapsWithoutSplittingOrStarvingVerifiers) {
+  const loom_serve_qwen_ready_span_t ready[] = {{4, 4}, {4, 4}, {30, 1}};
+  loom_serve_qwen_scheduled_span_t spans[3];
+  iree_host_size_t cursor = 0;
+  iree_host_size_t visits[3] = {};
+  for (int epoch = 0; epoch < 3; ++epoch) {
+    ASSERT_EQ(loom_serve_qwen_schedule(3, ready, 6, 3, 6, &cursor, spans), 2);
+    iree_host_size_t tokens = 0;
+    for (iree_host_size_t i = 0; i < 2; ++i) {
+      const auto span = spans[i];
+      EXPECT_EQ(span.token_count, span.row_index == 2 ? 2 : 4);
+      tokens += span.token_count;
+      ++visits[span.row_index];
+    }
+    EXPECT_EQ(tokens, 6);
+  }
+  for (auto count : visits) {
+    EXPECT_GT(count, 0);
+  }
 }
 
 }  // namespace

@@ -181,8 +181,9 @@ not a working chat endpoint or a pi session.
 
 `qwen_server` serves the shared model through the TCP transport. The main
 application thread owns model state and packs ready prompt chunks and pending
-decode tokens into one model epoch. Every admitted row receives a token slot
-before remaining capacity is filled from prompt spans. Rotating priority bounds
+decode tokens into one model epoch. Every admitted row receives its minimum
+span before remaining capacity is filled from prompt input: one token for known
+input or four for an indivisible MTP verifier. Rotating priority bounds
 starvation when token/span capacity cannot fit every ready row and distributes
 large prompt chunks. Network progress runs independently. Each row has one
 pending copied SSE packet; exhausted carrier credit pauses that row before its
@@ -248,7 +249,27 @@ default `--packing=mixed` admits both classes together. This choice is
 independent of `--scheduler` and the per-row `--chunk_size` cap; ready and epoch
 events record it. Comparing separate against mixed with `--scheduler=packed`
 isolates cohort mixing, while packed against isolated measures shared versus
-per-row traversals. Neither comparison enables speculative decoding.
+per-row traversals. Neither option alone enables speculative decoding.
+
+`--mtp=/path/to/bundle --mtp_depth=3` enables three-token MTP proposals under
+packed scheduling. Only admitted verifier rows are drafted; known prompt chunks
+fill the remaining shape capacity. The shared target command verifies pending
+anchors and candidates, commits accepted recurrent transitions, and catches MTP
+up to the accepted target hidden state. The host streams every accepted output,
+including a rejection replacement or EOS; only the final output stays pending.
+Request output credit truncates acceptance before state publication. A row with
+one remaining output credit or fewer than four context slots uses ordinary
+decode. Cancellation is still observed at the completed-epoch boundary.
+
+Depth zero with an MTP bundle keeps its cache/carry warm without proposing;
+omitting the bundle is the target-only control. These are distinct costs.
+Epoch and heartbeat records expose proposed tokens and accepted draft inputs
+(excluding the pending anchor). `model_ms` includes drafting, verification,
+accepted-state replay and catch-up; `draft_ms` isolates completed proposals and
+`target_ms` includes the remaining target/commit/catch-up work. No extra GPU
+waits split the inner command for timing. Bundle capacities must match every
+loaded target shape. The full canonical vocabulary is used for both proposal
+and target selection; all code and weights remain shared across sessions.
 
 For a bounded real HTTP check and initial end-to-end measurement:
 
