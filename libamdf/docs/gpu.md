@@ -191,10 +191,24 @@ can enter the driver to inspect VM faults, and also observes firmware queue
 errors. It is an explicit status operation, separate from mapped publication or
 a direct signal load. A healthy sampled status is not execution completion.
 
-Normal release stops producers, observes final execution completion and ring
-consumption, releases the producer mapping, destroys the queue, and then releases
-scratch and other remaining dispatch allocations. The caller checks every
-release result. Failed native retirement follows the documented
+Closing a runtime's producers prevents new work from entering the stream. It
+does not remove the publication or execution obligations of already accepted
+work. The runtime finishes outstanding publication and continues any host
+services that work still requires, such as filling an upload source or
+acknowledging consumption of a downloaded result. Waiting for completion while
+withholding one of those dependencies can prevent the stream from draining.
+
+A runtime with reusable staging slots tracks prepared inputs separately from
+published work. Prepared data that no accepted work can consume requires no
+native completion. When the runtime uses per-slot completion values, each final
+wait refers to that slot's actual submitted generation. A partial batch can
+leave slots at different generations; a rounded-up batch count or the
+prepared-input count can include work that will never execute.
+
+Normal release closes acceptance, finishes accepted publication and execution,
+observes ring consumption, releases the producer mapping, destroys the queue,
+and then releases scratch and other remaining dispatch allocations. The caller
+checks every release result. Failed native retirement follows the documented
 [resource-release contract](memory.md#lifetime-and-failure), including
 preservation of backing that may remain reachable. Instance native-lifetime
 policy still controls which underlying KFD reclamation boundary is available;
