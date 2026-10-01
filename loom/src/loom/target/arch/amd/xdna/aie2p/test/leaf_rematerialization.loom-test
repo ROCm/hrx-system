@@ -467,10 +467,10 @@ low.func.def target<amd.xdna.aie2p.core> @effect_blocked_store_indices(%source: 
 }
 
 // ----
-issue cycles: 33
-code bytes: 122
-coissued bundles: 2
-coissued components: 4
+issue cycles: 30
+code bytes: 118
+coissued bundles: 4
+coissued components: 8
 
 // ====
 

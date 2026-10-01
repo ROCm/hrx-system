@@ -38,13 +38,13 @@ typedef enum loom_low_schedule_completion_selection_kind_e {
 } loom_low_schedule_completion_selection_kind_t;
 
 // One pinned completion per selection kind and hardware pressure domain. A
-// completion remains selected until it is scheduled. Its same-block SSA
-// ancestors are then also scheduled, so their demand bits need not be cleared
-// before selecting another completion. Each node and incoming edge is visited
-// at most once per selection kind and domain. All storage belongs to the
-// scheduling scratch arena and is fixed at creation.
+// completion remains selected until it is scheduled. Its same-block scheduling
+// prerequisites are then also scheduled, so their demand bits need not be
+// cleared before selecting another completion. Each node and incoming edge is
+// visited at most once per selection kind and domain. All storage belongs to
+// the scheduling scratch arena and is fixed at creation.
 typedef struct loom_low_schedule_completion_demand_t {
-  // Incoming same-block SSA producer ranges, with a terminal sentinel.
+  // Incoming same-block scheduling prerequisites, with a terminal sentinel.
   uint32_t* incoming_starts;
   // Producer nodes grouped by consumer in incoming_starts.
   uint32_t* producers;
@@ -81,7 +81,8 @@ typedef struct loom_low_schedule_completion_demand_t {
   } nominations;
 } loom_low_schedule_completion_demand_t;
 
-// Builds the reverse same-block SSA index and empty domain demand sets.
+// Builds the reverse same-block dependency index and empty domain demand sets.
+// Every dependency kind constrains readiness, including non-value ordering.
 iree_status_t loom_low_schedule_completion_demand_initialize(
     const loom_low_schedule_dependency_index_t* index,
     const loom_low_schedule_node_t* nodes, uint16_t domain_count,

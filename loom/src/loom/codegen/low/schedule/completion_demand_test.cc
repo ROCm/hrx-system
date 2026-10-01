@@ -97,7 +97,6 @@ class ScheduleCompletionDemandTest : public ::testing::Test {
         const auto* edge = loom_low_schedule_dependency_graph_at(&graph_, i);
         const uint32_t producer = edge->producer_node;
         if (edge->consumer_node != consumer ||
-            edge->kind != LOOM_LOW_SCHEDULE_DEPENDENCY_SSA ||
             nodes_[producer].block_index != nodes_[consumer].block_index ||
             nodes_[producer].scheduled_ordinal != LOOM_LOW_SCHEDULE_NODE_NONE ||
             ancestors[producer]) {
@@ -143,11 +142,11 @@ class ScheduleCompletionDemandTest : public ::testing::Test {
 
 TEST_F(ScheduleCompletionDemandTest, PinsCompletionUntilItsConsumerRuns) {
   SetNodes(8);
-  Append(0, 2);
+  Append(0, 2, LOOM_LOW_SCHEDULE_DEPENDENCY_STATE);
   Append(1, 2);
-  Append(2, 5);
-  Append(3, 4);
-  Append(4, 5);
+  Append(2, 5, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT);
+  Append(3, 4, LOOM_LOW_SCHEDULE_DEPENDENCY_ORDER);
+  Append(4, 5, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE);
   Append(1, 6);
   Append(6, 7);
   Initialize(2);
@@ -170,8 +169,9 @@ TEST_F(ScheduleCompletionDemandTest, PinsCompletionUntilItsConsumerRuns) {
   EXPECT_EQ(arena_.used_allocation_size, allocation_size);
 }
 
-TEST_F(ScheduleCompletionDemandTest, FiltersDependenciesAndBlockBoundaries) {
-  SetNodes(8);
+TEST_F(ScheduleCompletionDemandTest,
+       RetainsReadinessDependenciesWithinBlockBoundaries) {
+  SetNodes(10);
   nodes_[0].block_index = 1;
   Append(0, 1);
   Append(1, 5);
@@ -180,14 +180,21 @@ TEST_F(ScheduleCompletionDemandTest, FiltersDependenciesAndBlockBoundaries) {
   Append(4, 5, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT);
   Append(4, 5);
   Append(4, 5);
+  Append(7, 5, LOOM_LOW_SCHEDULE_DEPENDENCY_STATE);
+  Append(8, 7, LOOM_LOW_SCHEDULE_DEPENDENCY_ORDER);
   Append(5, 6);
   nodes_[4].scheduled_ordinal = 0;
   Initialize(1);
   Nominate(0, 6);
   EXPECT_EQ(Select(0), 6u);
   ExpectAncestors(0, 6);
+  EXPECT_FALSE(Contains(0, 0));
+  EXPECT_TRUE(Contains(0, 2));
+  EXPECT_TRUE(Contains(0, 3));
   EXPECT_FALSE(Contains(0, 4));
-  EXPECT_FALSE(Contains(0, 7));
+  EXPECT_TRUE(Contains(0, 7));
+  EXPECT_TRUE(Contains(0, 8));
+  EXPECT_FALSE(Contains(0, 9));
 }
 
 TEST_F(ScheduleCompletionDemandTest, ReusesDemandAcrossManyCompletions) {

@@ -40,8 +40,7 @@ iree_status_t loom_low_schedule_completion_demand_initialize(
       const uint32_t consumer =
           loom_low_schedule_dependency_index_group_at(index, group)
               ->consumer_node;
-      if (loom_low_schedule_dependency_index_group_has_ssa(index, group) &&
-          nodes[producer].block_index == nodes[consumer].block_index) {
+      if (nodes[producer].block_index == nodes[consumer].block_index) {
         ++starts[consumer + 1];
       }
     }
@@ -64,8 +63,7 @@ iree_status_t loom_low_schedule_completion_demand_initialize(
       const uint32_t consumer =
           loom_low_schedule_dependency_index_group_at(index, group)
               ->consumer_node;
-      if (loom_low_schedule_dependency_index_group_has_ssa(index, group) &&
-          nodes[producer].block_index == nodes[consumer].block_index) {
+      if (nodes[producer].block_index == nodes[consumer].block_index) {
         out_demand->producers[--starts[consumer + 1]] = producer;
       }
     }

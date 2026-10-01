@@ -210,6 +210,42 @@ coissued components: 4
 
 // ====
 
+// Completing the first encoding requires the prior carry-writing ADD, even
+// though its returned cursor is not an SSA input of the encoding. The four C
+// fragments leave only one DM of scratch, so the second encoding must wait.
+// RUN: emit aie2p-leaf @pinned_encode_state_prerequisite report=code
+
+low.func.def target<amd.xdna.aie2p.core> @pinned_encode_state_prerequisite(%source: reg<aie2p.ep>, %cursor_state: reg<aie2p.ep>, %row_byte_position: reg<aie2p.er>, %first_lower_bf16: reg<aie2p.vec256 x2>, %second_lower_bf16: reg<aie2p.vec256 x2>, %second_upper_bf16: reg<aie2p.vec256 x2>, %accumulator00: reg<aie2p.mbms x4>, %accumulator01: reg<aie2p.mbms x4>, %accumulator10: reg<aie2p.mbms x4>, %accumulator11: reg<aie2p.mbms x4>, %other_lhs: reg<aie2p.mexa>, %other_rhs: reg<aie2p.mexa>) -> (reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.mbms x4>, reg<aie2p.er>) asm {
+  %first_lower = vconv.fp32.bf16 %first_lower_bf16
+  %upper_half_offset = mov.static-byte-offset 1088
+  %row_stride_bytes = mov.i32 128
+  %current_byte_position = lda %cursor_state, 0
+  %next_byte_position = add.rr %current_byte_position, %row_stride_bytes
+  %upper_half_position = add.rr %row_byte_position, %upper_half_offset
+  %upper_half_address = mov.address-index %upper_half_position
+  %first_upper_bf16 = vlda.512.bf16x32.index %source, %upper_half_address
+  %first_upper = vconv.fp32.bf16 %first_upper_bf16
+  %first_float = concat(%first_lower, %first_upper) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %lhs = vconv.bfp16ebs8.fp32 %first_float
+  %second_lower = vconv.fp32.bf16 %second_lower_bf16
+  %second_upper = vconv.fp32.bf16 %second_upper_bf16
+  %second_float = concat(%second_lower, %second_upper) : (reg<aie2p.mbms x2>, reg<aie2p.mbms x2>) -> reg<aie2p.mbms x4>
+  set.rounding 12
+  %rhs = vconv.bfp16ebs8.fp32 %second_float
+  %matrix_control = mova.i32 780
+  %next00 = mma.bfp16ebs8.m8n8k8 %accumulator00, %other_lhs, %rhs, %matrix_control
+  %next01 = mma.bfp16ebs8.m8n8k8 %accumulator01, %other_lhs, %other_rhs, %matrix_control
+  %next10 = mma.bfp16ebs8.m8n8k8 %accumulator10, %lhs, %rhs, %matrix_control
+  %next11 = mma.bfp16ebs8.m8n8k8 %accumulator11, %lhs, %other_rhs, %matrix_control
+  return %next00, %next01, %next10, %next11, %next_byte_position
+}
+
+// ----
+code: d4 15 03 d8 8e 00 44 80 a8 00 00 00 44 00 21 01 00 00 00 00 00 00 00 00 00 00 98 20 c4 10 98 10 00 10 02 50 0c d8 03 60 01 04 98 1b 00 01 00 00 00 00 18 00 0c 03 00 00 00 00 00 00 f8 8a 81 1c f8 8a 03 1c 02 70 c5 42 02 c0 46 01 b8 18 b0 1f 18 36 8a 08 00 00 00 00 00 00 48 29 06 00 48 89 26 01 48 29 40 02 48 89 60 03 18 00 28 10 00 00 00 00 00 00 00 00 00 00
+
+// ====
+
 // Four loaded-C fragments leave one DM register for encoding scratch. Ready
 // BF16 inputs can encode before the shuffle-dependent inputs: unread sticky
 // conversion flags do not force their scratch exits into source order.
