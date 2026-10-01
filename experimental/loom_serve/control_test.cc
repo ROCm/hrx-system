@@ -303,7 +303,7 @@ class ControlTest
       operations[i].download.target = data[i];
       operations[i].download.length = kLengths[i];
     }
-    return loom_serve_execution_transfer(execution_, operations.size(),
+    return loom_serve_execution_feedback(execution_, operations.size(),
                                          operations.data(), out_value);
   }
 
@@ -391,7 +391,7 @@ TEST_P(ControlTest, InterleavedRowsRetainHistory) {
     // overwritten.
     IREE_ASSERT_OK(Download(0, &completion));
     IREE_ASSERT_OK(Download(1, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
+    IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
     for (size_t row = 0; row < 2; ++row) {
       EXPECT_EQ(outputs_[row].control, expected[row].control);
       EXPECT_EQ(outputs_[row].tokens, expected[row].tokens);
@@ -415,11 +415,51 @@ TEST_P(ControlTest, RejectedNativeCallLeavesTheTimelineUsable) {
   IREE_ASSERT_OK(Invoke(1, buffers_[0], &completion));
   EXPECT_EQ(completion, 2u);
   IREE_ASSERT_OK(Download(0, &completion));
-  IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   EXPECT_EQ(outputs_[0].control[0], 21);
   EXPECT_EQ(outputs_[0].control[1], 2);
   EXPECT_EQ(outputs_[0].tokens[1], 7);
   EXPECT_EQ(outputs_[0].tokens[2], 7);
+}
+
+TEST_P(ControlTest, FeedbackForkDoesNotAdvanceWork) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  inputs_[1].control = {4, 100, 31};
+  inputs_[1].tokens[0] = 11;
+  uint64_t work_completion = 0;
+  uint64_t feedback_completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &work_completion));
+  IREE_ASSERT_OK(Upload(1, 0, 3, &work_completion));
+  IREE_ASSERT_OK(Invoke(1, buffers_[0], &work_completion));
+  EXPECT_EQ(work_completion, 3u);
+  iree_hal_transfer_operation_t invalid = {};
+  invalid.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  invalid.download.source_buffer = buffers_[0][1];
+  invalid.download.source_offset = kLengths[1];
+  invalid.download.target = outputs_[0].tokens.data();
+  invalid.download.length = sizeof(int32_t);
+  feedback_completion = 777;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_serve_execution_feedback(execution_, 1, &invalid,
+                                                      &feedback_completion));
+  EXPECT_EQ(feedback_completion, 777u);
+  IREE_ASSERT_OK(Download(0, &feedback_completion));
+  EXPECT_EQ(feedback_completion, 1u);
+
+  // Later model work consumes distinct state and may proceed independently of
+  // row zero's feedback. Neither host output has been inspected or recycled.
+  IREE_ASSERT_OK(Invoke(1, buffers_[1], &work_completion));
+  EXPECT_EQ(work_completion, 4u);
+  IREE_ASSERT_OK(Download(1, &feedback_completion));
+  EXPECT_EQ(feedback_completion, 2u);
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  EXPECT_EQ(outputs_[0].control[0], 21);
+  EXPECT_EQ(outputs_[0].control[1], 2);
+  EXPECT_EQ(outputs_[0].tokens[2], 7);
+  EXPECT_EQ(outputs_[1].control[0], 105);
+  EXPECT_EQ(outputs_[1].control[1], 2);
+  EXPECT_EQ(outputs_[1].tokens[2], 11);
 }
 
 INSTANTIATE_TEST_SUITE_P(
