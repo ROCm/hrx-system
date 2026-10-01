@@ -118,7 +118,7 @@ template.def<@ggml.q6k.f16_vector4> device @ggml_q6k_f16_vector4(%weight: buffer
 // Contracts both four-value packets assigned to one lane in a Q6_K block.
 // QL, QH, and the block scale are shared by the two packed parts, and their
 // contributions are summed before entering the row-wide recurrence.
-func.def inline @ggml_q6k_q8_1_x4_block_lane(%weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %q6_block: index, %lane: index) -> (f32) {
+func.def public inline @ggml_q6k_q8_1_x4_block_lane(%weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %q6_block: index, %lane: index) -> (f32) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
