@@ -265,6 +265,18 @@ coding-agent score. Compare optimized, non-sanitized server runs under the
 benchmark lease in interleaved mode order; preserve server epochs and client
 results together. Real pi tool continuations remain the product check below.
 
+`--workload=/path/to/workload.json` replaces the counting/codeword prompts with
+a frozen text-turn corpus. The object contains a `name` and `sessions`; each
+session has a `system` string and a nonempty `turns` array of
+`{"content": "user text", "max_tokens": 192}` objects. The first `--clients`
+sessions run concurrently, each immediately issuing its next turn with its
+actual previous reply in the history. Follow-ups must hit the retained prefix.
+This supports code/file-result review workloads without an agent harness in
+the timed client. It measures a closed-loop text replay, not tool execution or
+hidden reasoning. The summary records the exact corpus SHA256, and each reply
+records the submitted history hash. Preserve full replies and usage to expose
+work differences when comparing engines or kernel math.
+
 ### Run telemetry
 
 `observe.py` launches the runner and combines its stdout/stderr with independent
