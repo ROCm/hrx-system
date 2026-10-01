@@ -17,10 +17,10 @@ kernel.decl @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %o
 
 amdgpu.target<gfx11-generic> @qwen38_dense_gfx11_wave64 {subgroup_size = 64}
 
-// Decodes four adjacent Q5_K values directly into the F16 matrix tile. The
-// packet coordinate follows logical K order even though GGUF stores the low
-// nibbles and high bits in separate physical planes.
-func.def public inline @qwen38_q5k_f16_vector4_prescaled(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %packet: index, %d_scale: f32, %dmin_scale: f32) -> (vector<4xf16>) {
+// Loads four adjacent Q5_K codes without consuming scale metadata. Keeping
+// acquisition separate allows contraction pipelines to prefetch the encoded
+// planes before consuming workgroup-local scale/minimum pairs.
+func.def public inline @qwen38_q5k_codes_f32_vector4(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %packet: index) -> (vector<4xf32>) {
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
   %c16 = index.constant 16 : index
@@ -68,6 +68,13 @@ func.def public inline @qwen38_q5k_f16_vector4_prescaled(%weight: buffer, %row_b
   %q5_word = vector.ori %low_codes, %high_codes : vector<1xi32>
   %q5_values = vector.bitcast %q5_word : vector<1xi32> to vector<4xi8>
   %q5_f32 = vector.uitofp %q5_values : vector<4xi8> to vector<4xf32>
+  func.return %q5_f32 : vector<4xf32>
+}
+
+// Decodes four adjacent values into the F16 matrix tile. The packet coordinate
+// follows logical K order across the separate low-nibble and high-bit planes.
+func.def public inline @qwen38_q5k_f16_vector4_prescaled(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %packet: index, %d_scale: f32, %dmin_scale: f32) -> (vector<4xf16>) {
+  %q5_f32 = func.call @qwen38_q5k_codes_f32_vector4(%weight, %row_byte_base, %q5_block, %q5_group, %packet) : (buffer, offset, index, index, index) -> (vector<4xf32>)
   %d_scale_vector = vector.splat %d_scale : vector<4xf32>
   %dmin_scale_vector = vector.splat %dmin_scale : vector<4xf32>
   %scaled = vector.mulf %q5_f32, %d_scale_vector : vector<4xf32>

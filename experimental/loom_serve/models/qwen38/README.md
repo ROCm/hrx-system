@@ -196,6 +196,21 @@ build_tools/bin/iree-bazel-run --config=asan \
   --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
 ```
 
+The wide Q5 projection pipelines the eight quantization groups inside each
+256-channel block. Global weight-code and activation acquisition runs one
+group ahead of LDS publication and matrix consumption. Scale/minimum metadata
+stays in the ordered consumer. Padded channels read a valid source row and use
+their zero metadata; padded activations are selected to zero after acquisition.
+This keeps load results out of guarded reconvergence before the preceding
+group's WMMA work. F32 and F16 activation storage share the same F16 operands,
+F32 accumulation order, and unchanged resident weight representation.
+
+`tests/linear_q5k_f16_wmma_wave32.loom` compares both activation storage types
+bitwise with the wave64 global-decoding schedule, including single-token,
+partial-token and partial-channel tiles, untouched output padding, and full
+5120-channel projections. The check uses the same Q5 libraries as above plus
+`kernels/qwen38/linear_q5k_f16_wmma_wave32.loom`.
+
 ### Vocabulary projection
 
 Epoch and MTP roots pass their complete padded output cohort to the shared
