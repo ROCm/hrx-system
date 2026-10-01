@@ -26,14 +26,12 @@
           "--pipeline=none",
           "--target=amd.xdna.aie2p:amd.xdna.strix_halo.17f0_11",
           "--output={tmp}/resident.xdna",
-          "--emit-target-artifact={tmp}/resident-target.xdna",
           "--compile-report=summary",
           "--compile-report-output={tmp}/resident-report.json"
         ]
       },
       "files": [
         {"path": "{tmp}/resident.xdna", "non_empty": true},
-        {"path": "{tmp}/resident-target.xdna", "non_empty": true},
         {
           "path": "{tmp}/resident-report.json",
           "contains": [

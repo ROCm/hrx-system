@@ -116,13 +116,16 @@
               "--format=amdgpu-hsaco",
               "--root=@selected_store_i32",
               "--target=amdgpu:gfx1151",
-              "--output={tmp}/specialized_report.hal",
-              "--emit-target-artifact={tmp}/specialized_report.hsaco",
+              "--output={tmp}/specialized_report.hsaco",
               "--compile-report=summary",
               "--compile-report-output={tmp}/specialized_report.json"
             ]
           },
           "files": [
+            {
+              "path": "{tmp}/specialized_report.hsaco",
+              "non_empty": true
+            },
             {
               "path": "{tmp}/specialized_report.json",
               "contains": {"unordered": [
@@ -166,8 +169,7 @@
           "--exclude-root=configured_targetless_store_i32",
           "--target=amdgpu:gfx1151",
           "--format=amdgpu-hsaco",
-          "--output={tmp}/excluded.hal",
-          "--emit-target-artifact={tmp}/excluded.hsaco",
+          "--output={tmp}/excluded.hsaco",
           "--compile-report=summary",
           "--compile-report-output={tmp}/excluded.json"
         ]
@@ -193,8 +195,7 @@
           "--root=@paired_scope",
           "--target=amdgpu:gfx1151",
           "--format=amdgpu-hsaco",
-          "--output={tmp}/scoped.hal",
-          "--emit-target-artifact={tmp}/scoped.hsaco",
+          "--output={tmp}/scoped.hsaco",
           "--compile-report=details",
           "--compile-report-output={tmp}/scoped.json"
         ]

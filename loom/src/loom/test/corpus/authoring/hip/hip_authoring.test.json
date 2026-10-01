@@ -2,15 +2,14 @@
   "version": 1,
   "cases": [
     {
-      "name": "compiles wave64 reductions to AMDGPU HAL artifact",
+      "name": "compiles wave64 reductions to AMDGPU HSACO",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/wave64_reductions.loom",
           "--format=amdgpu-hsaco",
           "--target=amdgpu:gfx1151",
-          "--output={tmp}/wave64_reductions.hal",
-          "--emit-target-artifact={tmp}/wave64_reductions.hsaco",
+          "--output={tmp}/wave64_reductions.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
         ]
@@ -32,10 +31,6 @@
       },
       "files": [
         {
-          "path": "{tmp}/wave64_reductions.hal",
-          "non_empty": true
-        },
-        {
           "path": "{tmp}/wave64_reductions.hsaco",
           "non_empty": true
         },
@@ -51,15 +46,14 @@
       ]
     },
     {
-      "name": "compiles shared memory vector tile to AMDGPU HAL artifact",
+      "name": "compiles shared memory vector tile to AMDGPU HSACO",
       "run": {
         "tool": "loom-compile",
         "args": [
           "{srcdir}/shared_memory_vector_tile.loom",
           "--format=amdgpu-hsaco",
           "--target=amdgpu:gfx11-generic",
-          "--output={tmp}/shared_memory_vector_tile.hal",
-          "--emit-target-artifact={tmp}/shared_memory_vector_tile.hsaco",
+          "--output={tmp}/shared_memory_vector_tile.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
         ]
@@ -78,10 +72,6 @@
       },
       "files": [
         {
-          "path": "{tmp}/shared_memory_vector_tile.hal",
-          "non_empty": true
-        },
-        {
           "path": "{tmp}/shared_memory_vector_tile.hsaco",
           "non_empty": true
         },
@@ -99,8 +89,7 @@
           "{srcdir}/cluster_b128_multicast.loom",
           "--format=amdgpu-hsaco",
           "--target=amdgpu:gfx1250",
-          "--output={tmp}/cluster_b128_multicast.hal",
-          "--emit-target-artifact={tmp}/cluster_b128_multicast.hsaco",
+          "--output={tmp}/cluster_b128_multicast.hsaco",
           "--artifact-manifest=summary",
           "--compile-report=summary"
         ]
@@ -119,10 +108,6 @@
         }
       },
       "files": [
-        {
-          "path": "{tmp}/cluster_b128_multicast.hal",
-          "non_empty": true
-        },
         {
           "path": "{tmp}/cluster_b128_multicast.hsaco",
           "non_empty": true

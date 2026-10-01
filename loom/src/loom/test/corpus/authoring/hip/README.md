@@ -305,8 +305,7 @@ Target compile evidence:
 loom-compile shared_memory_tile.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/shared-memory-tile.hal \
-  --emit-target-artifact=/tmp/shared-memory-tile.hsaco \
+  --output=/tmp/shared-memory-tile.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary \
   --compile-report-output=/tmp/shared-memory-tile.compile-report.json
@@ -434,8 +433,7 @@ Target compile evidence:
 loom-compile shared_memory_transpose.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/shared-memory-transpose.hal \
-  --emit-target-artifact=/tmp/shared-memory-transpose.hsaco \
+  --output=/tmp/shared-memory-transpose.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary \
   --compile-report-output=/tmp/shared-memory-transpose.compile-report.json
@@ -504,8 +502,7 @@ Target compile evidence:
 loom-compile shared_memory_vector_tile.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/shared-memory-vector-tile.hal \
-  --emit-target-artifact=/tmp/shared-memory-vector-tile.hsaco \
+  --output=/tmp/shared-memory-vector-tile.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.json
@@ -760,8 +757,7 @@ Compile the same source for generic wave32 and wave64 target profiles:
 loom-compile target_provider_selection.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/target-provider-gfx11-generic.hal \
-  --emit-target-artifact=/tmp/target-provider-gfx11-generic.hsaco \
+  --output=/tmp/target-provider-gfx11-generic.hsaco \
   --dump-ir-after=select-templates \
   --dump-ir-format=jsonl \
   --dump-ir-output=/tmp/target-provider-gfx11-generic-trace.jsonl
@@ -769,8 +765,7 @@ loom-compile target_provider_selection.loom \
 loom-compile target_provider_selection.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx9-4-generic \
-  --output=/tmp/target-provider-gfx9-4-generic.hal \
-  --emit-target-artifact=/tmp/target-provider-gfx9-4-generic.hsaco \
+  --output=/tmp/target-provider-gfx9-4-generic.hsaco \
   --dump-ir-after=select-templates \
   --dump-ir-format=jsonl \
   --dump-ir-output=/tmp/target-provider-gfx9-4-generic-trace.jsonl
@@ -848,8 +843,7 @@ Proof command:
 loom-compile cluster_b128_multicast.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx1250 \
-  --output=/tmp/cluster-b128-multicast.hal \
-  --emit-target-artifact=/tmp/cluster-b128-multicast.hsaco \
+  --output=/tmp/cluster-b128-multicast.hsaco \
   --artifact-manifest=summary \
   --emit-artifact-manifest=/tmp/cluster-b128-multicast.manifest.json \
   --compile-report=summary \

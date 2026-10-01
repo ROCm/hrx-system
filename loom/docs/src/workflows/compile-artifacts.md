@@ -211,24 +211,6 @@ that use case and its evidence boundary.
 pass list selects those passes directly. Both forms replace the default
 pipeline with the requested transformation sequence.
 
-## Emit a target-native sidecar
-
-A loadable kernel format may have both a loader-ready representation and a
-target-native artifact. Request both when an integration needs the primary
-loader product and tooling needs the native object:
-
-```shell
-loom-compile kernel.loom \
-  --format=amdgpu-hsaco \
-  --target=amdgpu:gfx11-generic \
-  --output=kernel.executable \
-  --emit-target-artifact=kernel.hsaco
-```
-
-The two byte sequences may be identical. AMDGPU currently uses HSACO for both;
-the separate output contract still matters for formats whose loader container
-and native artifact differ.
-
 ## Emit an artifact manifest
 
 An artifact manifest describes the loader product without asking a consumer to
@@ -266,10 +248,11 @@ jq '.functions[] | {name, target, workgroup_size}' kernel.manifest.json
 
 ## Keep compiler evidence separate
 
-The primary artifact is what a runtime loads. The target-native sidecar is what
-target tooling consumes. The manifest describes the emitted interface. A
-compile report records compiler and emitted-code evidence. An IR trace records
-the program at selected pipeline boundaries.
+`--output` receives the selected target encoding. Runtime loaders consume that
+byte sequence, and target tooling can inspect it directly. The manifest
+describes the emitted interface. A compile report records compiler and
+emitted-code evidence. An IR trace records the program at selected pipeline
+boundaries.
 
 Generate each product only for the consumer that needs it. Routine application
 builds can stop at the artifact; tuning runs continue with

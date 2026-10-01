@@ -144,8 +144,7 @@ class QualificationTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_native_entry_report_and_publication(self):
-        output = self.root / "module.hal"
-        native_output = self.root / "module.hsaco"
+        artifact_path = self.root / "module.hsaco"
         report_path = self.root / "report.json"
         roots = ["address_guarded_rows", "address_materialized_wide_offset"]
         result = subprocess.run(
@@ -154,8 +153,7 @@ class QualificationTest(unittest.TestCase):
                 _ARGS.realizations,
                 "--target=amdgpu:gfx942",
                 *[f"--root=@{root}" for root in roots],
-                f"--output={output}",
-                f"--emit-target-artifact={native_output}",
+                f"--output={artifact_path}",
                 "--compile-report=summary",
                 f"--compile-report-output={report_path}",
             ],
@@ -163,8 +161,7 @@ class QualificationTest(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertGreater(output.stat().st_size, 0)
-        self.assertGreater(native_output.stat().st_size, 0)
+        self.assertGreater(artifact_path.stat().st_size, 0)
         report = json.loads(report_path.read_text())
         self.assertEqual(report["target_key"], "gfx942")
         self.assertEqual(report["entries"]["count"], len(roots))
@@ -176,21 +173,18 @@ class QualificationTest(unittest.TestCase):
         )
 
     def test_rejected_compilation_does_not_publish_output(self):
-        output = self.root / "rejected.hal"
-        native_output = self.root / "rejected.hsaco"
+        artifact_path = self.root / "rejected.hsaco"
         for contents in (None, b"previous artifact"):
             with self.subTest(existing_output=contents is not None):
                 if contents is not None:
-                    output.write_bytes(contents)
-                    native_output.write_bytes(contents)
+                    artifact_path.write_bytes(contents)
                 result = subprocess.run(
                     [
                         _ARGS.compiler,
                         str(self.rejected),
                         "--target=amdgpu:gfx942",
                         "--root=@unsupported_wave_size",
-                        f"--output={output}",
-                        f"--emit-target-artifact={native_output}",
+                        f"--output={artifact_path}",
                     ],
                     capture_output=True,
                     text=True,
@@ -198,11 +192,10 @@ class QualificationTest(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("AMDGPU/026", result.stderr)
                 self.assertEqual(result.stdout, "")
-                for artifact in (output, native_output):
-                    if contents is None:
-                        self.assertFalse(artifact.exists())
-                    else:
-                        self.assertEqual(artifact.read_bytes(), contents)
+                if contents is None:
+                    self.assertFalse(artifact_path.exists())
+                else:
+                    self.assertEqual(artifact_path.read_bytes(), contents)
 
 
 if __name__ == "__main__":

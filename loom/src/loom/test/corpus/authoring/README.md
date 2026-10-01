@@ -92,16 +92,15 @@ measure timing, so it is the cheapest way to catch source and benchmark
 selection mistakes. Inspect `summary`, `work_items`, `benchmarks`, `failures`,
 and `failed_samples` in the output JSON.
 
-Compile the same authored file to an AMDGPU HAL executable plus a native HSACO
-sidecar when validating target lowering and packaging:
+Compile the same authored file to an AMDGPU HSACO when validating target
+lowering and packaging:
 
 ```bash
 loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/loom-q6q8.hal \
-  --emit-target-artifact=/tmp/loom-q6q8.hsaco \
+  --output=/tmp/loom-q6q8.hsaco \
   --artifact-manifest=summary \
   --emit-artifact-manifest=/tmp/loom-q6q8.manifest.json \
   --compile-report=summary \
@@ -211,8 +210,7 @@ loom-compile \
   loom/src/loom/test/corpus/authoring/ffn_gate_up_swiglu_q6q8.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/loom-q6q8.hal \
-  --emit-target-artifact=/tmp/loom-q6q8.hsaco \
+  --output=/tmp/loom-q6q8.hsaco \
   --dump-ir-after=select-templates \
   --dump-ir-after=inline-callables \
   --dump-ir-after=legalize-math \
@@ -482,7 +480,7 @@ padding, swizzling, vectorization, or imported kernel staging choices:
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/shared-memory-vector-tile.hal \
+  --output=/tmp/shared-memory-vector-tile.hsaco \
   --compile-report=json-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.json
 ```
@@ -522,7 +520,7 @@ greppable report is more convenient:
 loom-compile loom/src/loom/test/corpus/authoring/hip/shared_memory_vector_tile.loom \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx11-generic \
-  --output=/tmp/shared-memory-vector-tile.hal \
+  --output=/tmp/shared-memory-vector-tile.hsaco \
   --compile-report=text-details \
   --compile-report-output=/tmp/shared-memory-vector-tile.compile-report.txt
 

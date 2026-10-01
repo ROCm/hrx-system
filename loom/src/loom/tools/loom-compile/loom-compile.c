@@ -131,10 +131,6 @@ IREE_FLAG_LIST_NAMED(
 IREE_FLAG(string, output, "-",
           "Output path for the selected single-file kernel or module format.");
 IREE_FLAG_NAMED(
-    string, emit_target_artifact, "emit-target-artifact", "",
-    "Optional output path for a target-native artifact produced beside the "
-    "primary runtime artifact, such as AMDGPU HSACO.");
-IREE_FLAG_NAMED(
     string, compile_report, "compile-report", "",
     "Optional compile report output. Use 'summary'/'details' for structured "
     "JSON, 'text-summary'/'text-details' for human-readable text, or "
@@ -384,17 +380,11 @@ static iree_status_t loom_compile_artifact_manifest_options_initialize(
         "--artifact-manifest is only valid for loadable kernel formats");
   }
 
-  const iree_string_view_t target_artifact_path =
-      iree_make_cstring_view(FLAG_emit_target_artifact);
-  const iree_string_view_t primary_artifact_path =
-      iree_make_cstring_view(FLAG_output);
-  out_options->artifact_name = !iree_string_view_is_empty(target_artifact_path)
-                                   ? target_artifact_path
-                                   : primary_artifact_path;
+  const iree_string_view_t artifact_path = iree_make_cstring_view(FLAG_output);
+  out_options->artifact_name = artifact_path;
   if (iree_string_view_is_empty(explicit_output_path)) {
     IREE_RETURN_IF_ERROR(loom_compile_make_artifact_manifest_path(
-        out_options->artifact_name, allocator, out_output_path,
-        out_output_path_storage));
+        artifact_path, allocator, out_output_path, out_output_path_storage));
   } else {
     *out_output_path = explicit_output_path;
   }
@@ -451,25 +441,6 @@ static iree_status_t loom_compile_run_pass_pipeline(
                                    out_result);
 }
 
-static iree_status_t loom_compile_write_bytes(iree_string_view_t path,
-                                              iree_const_byte_span_t contents,
-                                              iree_allocator_t allocator) {
-  return loom_tooling_write_output_file(
-      path,
-      iree_make_string_view((const char*)contents.data, contents.data_length),
-      allocator);
-}
-
-static iree_status_t loom_compile_write_optional_target_artifact(
-    iree_byte_sequence_t* contents, iree_allocator_t allocator) {
-  const iree_string_view_t path =
-      iree_make_cstring_view(FLAG_emit_target_artifact);
-  if (iree_string_view_is_empty(path)) {
-    return iree_ok_status();
-  }
-  return loom_tooling_write_output_byte_sequence(path, contents, allocator);
-}
-
 static iree_status_t loom_compile_write_optional_artifact_manifest(
     const loom_target_emit_sidecar_artifact_t* sidecars,
     iree_host_size_t sidecar_count, iree_string_view_t path,
@@ -522,17 +493,13 @@ static iree_status_t loom_compile_write_report(
                                   "failed to flush compile report stderr");
   }
   if (loom_tooling_file_path_is_stdio(path)) {
-    const iree_string_view_t target_artifact_path =
-        iree_make_cstring_view(FLAG_emit_target_artifact);
     if (loom_tooling_file_path_is_stdio(iree_make_cstring_view(FLAG_output)) ||
-        (!iree_string_view_is_empty(target_artifact_path) &&
-         loom_tooling_file_path_is_stdio(target_artifact_path)) ||
         (!iree_string_view_is_empty(artifact_manifest_output_path) &&
          loom_tooling_file_path_is_stdio(artifact_manifest_output_path))) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "--compile-report-output=- cannot share stdout with --output=-, "
-          "--emit-target-artifact=-, or --emit-artifact-manifest=-");
+          "--compile-report-output=- cannot share stdout with --output=- "
+          "or --emit-artifact-manifest=-");
     }
     loom_output_stream_t stream;
     loom_output_stream_for_file(stdout, &stream);
@@ -567,30 +534,14 @@ static void loom_compile_record_terminal_report_status(
 }
 
 static iree_status_t loom_compile_validate_artifact_output_paths(
-    iree_string_view_t output_path, iree_string_view_t target_artifact_path,
+    iree_string_view_t output_path,
     iree_string_view_t artifact_manifest_output_path) {
-  if (!iree_string_view_is_empty(target_artifact_path) &&
-      loom_tooling_file_path_is_stdio(output_path) &&
-      loom_tooling_file_path_is_stdio(target_artifact_path)) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--output and --emit-target-artifact cannot both write to stdout");
-  }
   if (!iree_string_view_is_empty(artifact_manifest_output_path) &&
       loom_tooling_file_path_is_stdio(output_path) &&
       loom_tooling_file_path_is_stdio(artifact_manifest_output_path)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "--output and --emit-artifact-manifest cannot both write to stdout");
-  }
-  if (!iree_string_view_is_empty(target_artifact_path) &&
-      !iree_string_view_is_empty(artifact_manifest_output_path) &&
-      loom_tooling_file_path_is_stdio(target_artifact_path) &&
-      loom_tooling_file_path_is_stdio(artifact_manifest_output_path)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "--emit-target-artifact and "
-                            "--emit-artifact-manifest cannot both write to "
-                            "stdout");
   }
   return iree_ok_status();
 }
@@ -611,14 +562,6 @@ static iree_status_t loom_compile_emit_target(
     iree_string_view_t artifact_manifest_output_path, bool* out_emitted) {
   *out_emitted = false;
   const iree_string_view_t output_path = iree_make_cstring_view(FLAG_output);
-  const iree_string_view_t target_artifact_path =
-      iree_make_cstring_view(FLAG_emit_target_artifact);
-  if (!iree_string_view_is_empty(target_artifact_path) &&
-      compile_request->selection.kind != LOOM_COMPILE_ENTRY_KIND_KERNEL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--emit-target-artifact is only valid for loadable kernel formats");
-  }
   if (compile_options->artifact_manifest.mode !=
           LOOM_TARGET_ARTIFACT_MANIFEST_MODE_NONE &&
       compile_request->selection.kind != LOOM_COMPILE_ENTRY_KIND_KERNEL) {
@@ -627,7 +570,7 @@ static iree_status_t loom_compile_emit_target(
         "--artifact-manifest is only valid for loadable kernel formats");
   }
   IREE_RETURN_IF_ERROR(loom_compile_validate_artifact_output_paths(
-      output_path, target_artifact_path, artifact_manifest_output_path));
+      output_path, artifact_manifest_output_path));
 
   loom_target_entry_options_t target_options = {
       .function_versions = compile_options->function_versions,
@@ -688,10 +631,6 @@ static iree_status_t loom_compile_emit_target(
     IREE_ASSERT(artifact.contents != NULL);
     status = loom_tooling_write_output_byte_sequence(
         output_path, artifact.contents, allocator);
-  }
-  if (iree_status_is_ok(status) && target_emitted) {
-    status = loom_compile_write_optional_target_artifact(artifact.contents,
-                                                         allocator);
   }
   if (iree_status_is_ok(status) && target_emitted) {
     status = loom_compile_write_optional_artifact_manifest(
@@ -942,18 +881,11 @@ int main(int argc, char** argv) {
         &compile_report_capture, &compile_options);
   }
   if (iree_status_is_ok(status)) {
-    const iree_string_view_t target_artifact_path =
-        iree_make_cstring_view(FLAG_emit_target_artifact);
     const loom_tooling_pass_trace_stdout_conflict_t stdout_conflicts[] = {
         {
             .active = true,
             .flag_name = IREE_SV("--output"),
             .path = iree_make_cstring_view(FLAG_output),
-        },
-        {
-            .active = !iree_string_view_is_empty(target_artifact_path),
-            .flag_name = IREE_SV("--emit-target-artifact"),
-            .path = target_artifact_path,
         },
         {
             .active = !iree_string_view_is_empty(artifact_manifest_output_path),

@@ -149,8 +149,7 @@ Compile the linked bytecode with a function specialization target:
 loom-compile linked.loombc \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx1100 \
-  --output=scale_i32.hal \
-  --emit-target-artifact=scale_i32.hsaco \
+  --output=scale_i32.hsaco \
   --artifact-manifest=summary \
   --compile-report=summary
 ```
@@ -188,8 +187,7 @@ specialized function:
 loom-compile portable.loombc \
   --format=amdgpu-hsaco \
   --target=amdgpu:gfx1100 \
-  --output=scale_i32.hal \
-  --emit-target-artifact=scale_i32.hsaco \
+  --output=scale_i32.hsaco \
   --dump-ir-after=select-templates \
   --dump-ir-after=inline-callables \
   --dump-ir-format=jsonl \
