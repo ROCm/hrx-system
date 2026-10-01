@@ -497,16 +497,57 @@ static hipError_t iree_hip_vmm_get_device_for_properties(
 static hipError_t iree_hip_vmm_query_granularity(hrx_device_t device,
                                                  hrx_memory_type_t memory_type,
                                                  size_t* out_minimum,
-                                                 size_t* out_recommended) {
+                                                 size_t* out_recommended,
+                                                 bool* out_unsupported) {
+  if (out_unsupported) {
+    *out_unsupported = false;
+  }
   bool supported = false;
-  hipError_t result =
-      iree_hip_vmm_from_hrx_status(hrx_allocator_query_virtual_memory(
-          hrx_device_allocator(device), memory_type, &supported, out_minimum,
-          out_recommended));
+  hrx_status_t status = hrx_allocator_query_virtual_memory(
+      hrx_device_allocator(device), memory_type, &supported, out_minimum,
+      out_recommended);
+  if (!hrx_status_is_ok(status) && out_unsupported) {
+    const hrx_status_code_t code = hrx_status_code(status);
+    *out_unsupported = code == HRX_STATUS_INVALID_ARGUMENT ||
+                       code == HRX_STATUS_UNIMPLEMENTED ||
+                       code == HRX_STATUS_UNAVAILABLE;
+  }
+  hipError_t result = iree_hip_vmm_from_hrx_status(status);
   if (result != hipSuccess) {
     return result;
   }
-  return supported && *out_minimum != 0 ? hipSuccess : hipErrorNotSupported;
+  if (!supported || *out_minimum == 0) {
+    if (out_unsupported) {
+      *out_unsupported = true;
+    }
+    return hipErrorNotSupported;
+  }
+  return hipSuccess;
+}
+
+static hipError_t iree_hip_vmm_resolve_memory_type(
+    hrx_device_t device, const hipMemAllocationProp* properties,
+    hrx_memory_type_t* out_memory_type, size_t* out_minimum,
+    size_t* out_recommended) {
+  hrx_memory_type_t memory_type = iree_hip_vmm_memory_type(properties);
+  bool unsupported = false;
+  hipError_t result = iree_hip_vmm_query_granularity(
+      device, memory_type, out_minimum, out_recommended, &unsupported);
+  if (result != hipSuccess &&
+      properties->type == hipMemAllocationTypeUncached && unsupported) {
+    // HIP uses the uncached allocation type to select a dedicated physical
+    // pool when one is available and otherwise uses the location's default
+    // pool. HAL uncached memory is a strict requirement, so retry without that
+    // bit only after the allocator reports that exact placement unsupported.
+    memory_type &= ~HRX_MEMORY_TYPE_DEVICE_UNCACHED;
+    result = iree_hip_vmm_query_granularity(device, memory_type, out_minimum,
+                                            out_recommended,
+                                            /*out_unsupported=*/NULL);
+  }
+  if (result == hipSuccess && out_memory_type) {
+    *out_memory_type = memory_type;
+  }
+  return result;
 }
 
 static size_t iree_hip_vmm_mapping_lower_bound(
@@ -881,7 +922,8 @@ hipError_t iree_hip_vmm_address_reserve(void** ptr, size_t size,
   size_t granularity = 0;
   size_t recommended = 0;
   result = iree_hip_vmm_query_granularity(device, HRX_MEMORY_TYPE_DEVICE_LOCAL,
-                                          &granularity, &recommended);
+                                          &granularity, &recommended,
+                                          /*out_unsupported=*/NULL);
   if (result != hipSuccess ||
       !iree_hip_vmm_range_is_valid(size, 0, size, granularity)) {
     return result == hipSuccess ? hipErrorInvalidValue : result;
@@ -1044,11 +1086,11 @@ hipError_t iree_hip_vmm_create(hipMemGenericAllocationHandle_t* handle,
   if (result != hipSuccess) {
     return result;
   }
-  const hrx_memory_type_t memory_type = iree_hip_vmm_memory_type(properties);
+  hrx_memory_type_t memory_type = HRX_MEMORY_TYPE_NONE;
   size_t granularity = 0;
   size_t recommended = 0;
-  result = iree_hip_vmm_query_granularity(device, memory_type, &granularity,
-                                          &recommended);
+  result = iree_hip_vmm_resolve_memory_type(device, properties, &memory_type,
+                                            &granularity, &recommended);
   if (result != hipSuccess ||
       !iree_hip_vmm_range_is_valid(size, 0, size, granularity)) {
     return result == hipSuccess ? hipErrorInvalidValue : result;
@@ -1482,8 +1524,8 @@ hipError_t iree_hip_vmm_get_allocation_granularity(
   }
   size_t minimum = 0;
   size_t recommended = 0;
-  result = iree_hip_vmm_query_granularity(
-      device, iree_hip_vmm_memory_type(properties), &minimum, &recommended);
+  result = iree_hip_vmm_resolve_memory_type(
+      device, properties, /*out_memory_type=*/NULL, &minimum, &recommended);
   if (result == hipSuccess) {
     *granularity =
         option == hipMemAllocationGranularityMinimum ? minimum : recommended;

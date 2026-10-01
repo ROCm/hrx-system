@@ -766,6 +766,31 @@ hrx_cc_test(
 )
 
 hrx_cc_test(
+    name = "hip_vmm_api_test",
+    srcs = [
+        "api.h",
+        "hip_vmm_api_test.cc",
+    ],
+    data = [":amdhip64"],
+    env = {
+        "HRX_TEST_LIBAMDHIP64": "$(location :amdhip64)",
+    },
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    sanitizer_suppressions = hsa_suppressions,
+    tags = [
+        "iree-run-requirement=runtime.resource.amd_gpu",
+        "runtime-resource=amd-gpu",
+    ],
+    target_compatible_with = _HIP_GPU_COMPATIBILITY,
+    deps = [
+        ":hip_dso_test_util",
+        "//build_tools/bazel:dl",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+hrx_cc_test(
     name = "hip_memory_pool_api_test",
     srcs = ["hip_memory_pool_api_test.cc"],
     # The test loads the built runtime through its public ABI and exercises
