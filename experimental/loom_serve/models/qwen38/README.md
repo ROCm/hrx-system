@@ -121,13 +121,20 @@ The owned-output Q5 gate/up kernel views F16 activations as complete 256-channel
 blocks. Each four-element packet is wholly inside one block, so its load needs
 no K-axis mask. Active-token and output-channel tails remain masked. This view
 preserves the canonical contiguous activation layout and does not add padding
-or alter the contraction, staging barriers, or F32 SwiGLU calculation.
+or alter the contraction or F32 SwiGLU calculation.
+
+Each workgroup stages complete canonical Q5 blocks for both projections once
+per 256 input channels. Metadata and code decoding then read the local slab
+across its eight quantization groups. After the final contraction barrier
+retires all block readers, the same allocation holds the per-wave output
+transpose. The model keeps one unchanged global weight residency; encoded
+staging and publication share storage only within the workgroup.
 
 `tests/ffn_gate_up.loom` compares complete outputs with the paired-wave schedule,
-including inactive rows, partial output channels and the model's full projection
-shape. Distinct activation rows and channel-varying gate/up weights exercise
-the indexing paths. These are staging and layout differentials, not independent
-model-accuracy oracles.
+including inactive rows, partial output channels and four token tiles at the
+model's full projection shape. Distinct activation rows and channel-varying
+gate/up weights exercise the indexing paths. These are staging and layout
+differentials, not independent model-accuracy oracles.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \

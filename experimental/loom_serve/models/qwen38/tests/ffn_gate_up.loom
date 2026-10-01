@@ -30,21 +30,21 @@ check.case public @ffn_gate_up_block_tails {
 check.benchmark<@ffn_gate_up_block_tails> @ffn_gate_up_block_tails_benchmark
 
 check.case public @ffn_gate_up_full_shape {
-  %capacity = check.literal value(128) : index
+  %capacity = check.literal value(512) : index
   %hidden = check.literal value(5120) : index
   %blocks = check.literal value(20) : index
   %channels = check.literal value(17408) : index
-  %count = check.generate.fill value(127) : tensor<1xi32>
+  %count = check.generate.fill value(511) : tensor<1xi32>
   %seed = check.param.seed base(42961) count(3) name("seed") : i64
   %up_seed = check.literal value(89213) : i64
-  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<128x[%hidden]xf16>
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<512x[%hidden]xf16>
   %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x[%blocks]x176xi8>
   %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x[%blocks]x176xi8>
-  %expected = check.generate.fill value(-13.0) : tensor<128x17408xf16>
-  %actual = check.generate.fill value(-13.0) : tensor<128x17408xf16>
-  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_output_f16[%capacity, %hidden, %channels](%count, %hidden, %channels, %input, %gate, %up, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<128x[%hidden]xf16>, tensor<17408x[%blocks]x176xi8>, tensor<17408x[%blocks]x176xi8>, tensor<128x17408xf16>)
-  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_owned_output_f16[%capacity, %hidden, %channels](%count, %hidden, %channels, %input, %gate, %up, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<128x[%hidden]xf16>, tensor<17408x[%blocks]x176xi8>, tensor<17408x[%blocks]x176xi8>, tensor<128x17408xf16>)
-  check.expect.bitwise actual(%actual) expected(%expected) : tensor<128x17408xf16>
+  %expected = check.generate.fill value(-13.0) : tensor<512x17408xf16>
+  %actual = check.generate.fill value(-13.0) : tensor<512x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_output_f16[%capacity, %hidden, %channels](%count, %hidden, %channels, %input, %gate, %up, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<512x[%hidden]xf16>, tensor<17408x[%blocks]x176xi8>, tensor<17408x[%blocks]x176xi8>, tensor<512x17408xf16>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_owned_output_f16[%capacity, %hidden, %channels](%count, %hidden, %channels, %input, %gate, %up, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<512x[%hidden]xf16>, tensor<17408x[%blocks]x176xi8>, tensor<17408x[%blocks]x176xi8>, tensor<512x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<512x17408xf16>
   check.return
 }
 check.benchmark<@ffn_gate_up_full_shape> @ffn_gate_up_full_shape_benchmark
