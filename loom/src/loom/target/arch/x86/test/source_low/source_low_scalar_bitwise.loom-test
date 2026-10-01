@@ -66,7 +66,7 @@ func.def target(@target) @scalar_narrow_float_signs(%fp8_magnitude: f8E4M3, %fp8
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_narrow_float_signs(%fp8_magnitude: reg<x86.gpr32>, %fp8_sign: reg<x86.gpr32>, %f16_magnitude: reg<x86.gpr32>, %f16_sign: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (f8E4M3, f8E4M3, f16, f16) -> (f8E4M3, f8E4M3, f8E4M3, f16, f16, f16)}) @scalar_narrow_float_signs(%fp8_magnitude: reg<x86.gpr32>, %fp8_sign: reg<x86.gpr32>, %f16_magnitude: reg<x86.gpr32>, %f16_sign: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %106 = movzx.u8.gpr32 %fp8_magnitude
   %107 = copy %106 : reg<x86.gpr32> -> reg<x86.gpr32>
   %fp8_absolute = and.imm.gpr32 %107 {imm32 = 127}
