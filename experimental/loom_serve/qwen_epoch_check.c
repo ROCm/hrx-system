@@ -126,60 +126,6 @@ static iree_status_t qwen_check_epoch(loom_serve_qwen_model_t* model,
   return status;
 }
 
-static iree_status_t qwen_check_proposals(loom_serve_qwen_model_t* model,
-                                          qwen_check_row_t rows[4]) {
-  if (!FLAG_mtp[0]) {
-    return iree_ok_status();
-  }
-  iree_host_size_t indices[3][4];
-  const iree_host_size_t permutation[4] = {2, 0, 3, 1};
-  iree_host_size_t positions[8];
-  int32_t predictions[8];
-  for (iree_host_size_t i = 0; i < 8; ++i) {
-    const loom_serve_qwen_row_t* row = loom_serve_qwen_model_row(model, i);
-    positions[i] = loom_serve_qwen_row_position(row);
-    predictions[i] = loom_serve_qwen_row_token(row);
-  }
-  for (iree_host_size_t i = 0; i < 4; ++i) {
-    indices[0][i] = rows[i].packed;
-    indices[1][i] = rows[i].isolated;
-    indices[2][i] = rows[permutation[i]].packed;
-  }
-  int32_t proposals[3][4][3] = {0};
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t issue = 0; issue < 3 && iree_status_is_ok(status);
-       ++issue) {
-    status = loom_serve_qwen_model_propose(model, 4, indices[issue],
-                                           proposals[issue]);
-    for (iree_host_size_t i = 0; i < 8 && iree_status_is_ok(status); ++i) {
-      const loom_serve_qwen_row_t* row = loom_serve_qwen_model_row(model, i);
-      if (loom_serve_qwen_row_position(row) != positions[i] ||
-          loom_serve_qwen_row_token(row) != predictions[i]) {
-        status =
-            iree_make_status(IREE_STATUS_DATA_LOSS,
-                             "proposal changed committed target row %zu", i);
-      }
-    }
-  }
-  for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
-    if (memcmp(proposals[0][i], proposals[1][i], sizeof(proposals[0][i])) ||
-        memcmp(proposals[2][i], proposals[0][permutation[i]],
-               sizeof(proposals[0][i]))) {
-      status = iree_make_status(
-          IREE_STATUS_DATA_LOSS,
-          "MTP proposal depends on resident or compact row placement");
-    }
-    if (iree_status_is_ok(status)) {
-      fprintf(
-          stderr,
-          "Matched MTP row %zu: [%d,%d,%d], target position %zu unchanged.\n",
-          rows[i].packed, proposals[0][i][0], proposals[0][i][1],
-          proposals[0][i][2], positions[rows[i].packed]);
-    }
-  }
-  return status;
-}
-
 static iree_status_t qwen_check_error(iree_status_t actual,
                                       iree_status_code_t expected) {
   if (iree_status_code(actual) == expected) {
@@ -208,6 +154,8 @@ static iree_status_t qwen_check_verified_epoch(
     const loom_serve_qwen_result_t* result = &results[i];
     const bool selects =
         iree_any_bit_set(spans[i].flags, LOOM_SERVE_QWEN_SPAN_FLAG_SELECT);
+    const bool generates =
+        iree_any_bit_set(spans[i].flags, LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE);
     if ((limits[i] &&
          (!result->output_count || result->output_count > limits[i] ||
           result->consumed_count != result->output_count)) ||
@@ -236,13 +184,14 @@ static iree_status_t qwen_check_verified_epoch(
               loom_serve_qwen_row_token(reference));
         }
         if (iree_status_is_ok(status) && j + 1 < result->output_count &&
-            (result->tokens[j] != spans[i].token_ids[j + 1] ||
+            ((!generates && result->tokens[j] != spans[i].token_ids[j + 1]) ||
              loom_serve_qwen_row_is_eos(reference))) {
           status = iree_make_status(IREE_STATUS_DATA_LOSS,
                                     "verification crossed rejection or EOS");
         }
       }
-      if (iree_status_is_ok(status) && result->output_count < limits[i] &&
+      if (iree_status_is_ok(status) && !generates &&
+          result->output_count < limits[i] &&
           !loom_serve_qwen_row_is_eos(reference) &&
           result->tokens[result->output_count - 1] ==
               spans[i].token_ids[result->output_count]) {
@@ -367,27 +316,20 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
                        IREE_STATUS_INVALID_ARGUMENT));
   IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(model, 0, rows, order, spans,
                                                  limits, expected));
-  IREE_RETURN_IF_ERROR(qwen_check_proposals(model, rows));
 
   // Natural proposals share the next epoch with an intermediate prompt and a
   // known decode. Captured/replayed slots now contain holes and reordered rows.
-  iree_host_size_t proposal_rows[4];
-  int32_t proposals[4][3];
-  for (iree_host_size_t i = 0; i < 4; ++i) {
-    proposal_rows[i] = rows[i].packed;
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_serve_qwen_model_propose(model, 4, proposal_rows, proposals));
   for (iree_host_size_t i = 0; i < 4; ++i) {
     inputs[i][0] = loom_serve_qwen_row_token(
         loom_serve_qwen_model_row(model, rows[i].packed));
-    memcpy(&inputs[i][1], proposals[i], sizeof(proposals[i]));
   }
   const iree_host_size_t mixed_order[] = {3, 0, 2, 1};
   const loom_serve_qwen_span_t mixed[] = {
-      {rows[3].packed, 4, inputs[3], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
+      {rows[3].packed, 4, inputs[3],
+       LOOM_SERVE_QWEN_SPAN_FLAG_SELECT | LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE},
       {rows[0].packed, 3, rows[0].input + 4, 0},
-      {rows[2].packed, 4, inputs[2], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
+      {rows[2].packed, 4, inputs[2],
+       LOOM_SERVE_QWEN_SPAN_FLAG_SELECT | LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE},
       {rows[1].packed, 1, inputs[1], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
   };
   const uint32_t mixed_limits[] = {4, 0, 4, 0};
@@ -404,7 +346,6 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
   IREE_RETURN_IF_ERROR(
       qwen_check_prefill(model, rows[0].isolated, 1, rows[0].input + 7));
   IREE_RETURN_IF_ERROR(qwen_check_prediction(model, &rows[0]));
-  IREE_RETURN_IF_ERROR(qwen_check_proposals(model, rows));
   iree_host_size_t next_shape = 0;
   for (int step = 0; step < 3 && iree_status_is_ok(status); ++step) {
     for (iree_host_size_t i = 0; i < 4; ++i) {
@@ -488,7 +429,6 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
   }
   IREE_RETURN_IF_ERROR(status);
 
-  IREE_RETURN_IF_ERROR(qwen_check_proposals(model, rows));
   int32_t decode_tokens[4] = {0};
   for (iree_host_size_t i = 2; i < 4; ++i) {
     decode_tokens[i] = loom_serve_qwen_row_token(

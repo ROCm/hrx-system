@@ -152,7 +152,7 @@ struct loom_serve_qwen_model_t {
   // committed target residuals before the next target invocation can reuse
   // them.
   struct {
-    // First auxiliary stage: draft, begin, warm shapes, then verify shapes.
+    // First auxiliary stage: propose, warm shapes, then verify shapes.
     iree_host_size_t first_stage;
     // Normalized committed target hidden, indexed by retained row.
     iree_hal_buffer_t* carry;
@@ -162,16 +162,12 @@ struct loom_serve_qwen_model_t {
     iree_hal_buffer_t* results;
     // Stable readback backing, retained through completion or terminal drain.
     int32_t records[QWEN_ROW_CAPACITY][6];
-    // One-token proposal bindings followed by its compiler transient slab.
-    iree_hal_buffer_t* buffers[8];
+    // Private one-layer attention cache shared by proposal and catch-up.
+    iree_hal_buffer_t* cache;
+    // Immutable resident-row origins consumed by proposal and catch-up.
+    iree_hal_buffer_t* row_table;
     // Immutable row origins in the private one-layer attention cache.
     int64_t origins[QWEN_ROW_CAPACITY][2];
-    // Reusable proposal control payload, separate from immutable target work.
-    int32_t metadata[QWEN_EPOCH_WORDS];
-    // Padded proposal input IDs, retained until transfer completion.
-    int32_t tokens[QWEN_TOKEN_CAPACITY];
-    // Compact output IDs downloaded after each proposal round.
-    int32_t outputs[QWEN_ROW_CAPACITY];
   } mtp;
   // Tokenizer owning its parsed vocabulary and encoding data.
   iree_tokenizer_t* tokenizer;
@@ -930,29 +926,17 @@ static iree_status_t qwen_allocate_mtp(loom_serve_qwen_model_t* model) {
   if (!model->mtp.first_stage) {
     return iree_ok_status();
   }
-  model->mtp.buffers[0] = model->residual;
-  model->mtp.buffers[7] = model->workspace;
   IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, model->row_count * 20480,
                                             256, &model->mtp.carry));
   IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, QWEN_EPOCH_WORDS * 4, 256,
                                             &model->mtp.committed));
   IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, sizeof(model->mtp.records),
                                             256, &model->mtp.results));
-  const uint64_t lengths[8] = {
-      0,
-      sizeof(model->mtp.metadata),
-      sizeof(model->mtp.origins),
-      model->row_count * model->context_capacity * 4096ull,
-      32 * 20480,
-      sizeof(model->mtp.tokens),
-      sizeof(model->mtp.outputs),
-      0,
-  };
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 1; i < 7 && iree_status_is_ok(status); ++i) {
-    status =
-        qwen_allocate_buffer(model, lengths[i], 256, &model->mtp.buffers[i]);
-  }
+  IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, sizeof(model->mtp.origins),
+                                            256, &model->mtp.row_table));
+  iree_status_t status = qwen_allocate_buffer(
+      model, model->row_count * model->context_capacity * 4096ull, 256,
+      &model->mtp.cache);
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < model->row_count; ++i) {
       model->mtp.origins[i][1] =
@@ -965,14 +949,9 @@ static iree_status_t qwen_allocate_mtp(loom_serve_qwen_model_t* model) {
                   .length = iree_hal_buffer_byte_length(model->mtp.carry),
                   .pattern = &zero,
                   .pattern_length = sizeof(zero)}},
-        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-         .fill = {.target_buffer = model->mtp.buffers[4],
-                  .length = lengths[4],
-                  .pattern = &zero,
-                  .pattern_length = sizeof(zero)}},
         {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
          .upload = {.source = model->mtp.origins,
-                    .target_buffer = model->mtp.buffers[2],
+                    .target_buffer = model->mtp.row_table,
                     .length = sizeof(model->mtp.origins)}},
     };
     uint64_t completion = 0;
@@ -1004,7 +983,7 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
   iree_host_size_t stage_count = options->epoch_count + 2;
   if (uses_mtp) {
     model->mtp.first_stage = stage_count;
-    stage_count += 2 * options->epoch_count + 2;
+    stage_count += 2 * options->epoch_count + 1;
   }
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       model->allocator, stage_count, sizeof(*model->stages),
@@ -1063,13 +1042,12 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
        i < model->stage_count && iree_status_is_ok(status); ++i) {
     qwen_stage_t* stage = &model->stages[i];
     const iree_host_size_t ordinal = i - model->mtp.first_stage;
-    const bool verifies = ordinal >= 2 + model->shape_count;
+    const bool verifies = ordinal >= 1 + model->shape_count;
     const iree_host_size_t shape_index =
-        ordinal < 2 ? 0 : (ordinal - 2) % model->shape_count;
+        ordinal == 0 ? 0 : (ordinal - 1) % model->shape_count;
     char relative[32];
-    if (ordinal < 2) {
-      snprintf(relative, sizeof(relative), "%s",
-               ordinal == 0 ? "draft" : "begin");
+    if (ordinal == 0) {
+      snprintf(relative, sizeof(relative), "propose");
     } else {
       snprintf(relative, sizeof(relative), "%s%zu",
                verifies ? "verify" : "warm",
@@ -1084,16 +1062,9 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
                                model->allocator, stage);
     }
     if (iree_status_is_ok(status)) {
-      const uint32_t fixed_count = ordinal == 0   ? 5
-                                   : ordinal == 1 ? 0
-                                   : verifies     ? 1
-                                                  : 4;
-      const uint32_t binding_count = ordinal == 0   ? 8
-                                     : ordinal == 1 ? 3
-                                     : verifies     ? 8
-                                                    : 7;
-      const uint32_t transient_index =
-          ordinal == 1 ? UINT32_MAX : binding_count - 1;
+      const uint32_t fixed_count = ordinal == 0 ? 5 : verifies ? 1 : 4;
+      const uint32_t binding_count = ordinal == 0 ? 6 : verifies ? 8 : 7;
+      const uint32_t transient_index = binding_count - 1;
       const loom_cmd_program_requirements_t requirements =
           stage->program.requirements;
       if (requirements.fixed_buffer_count != fixed_count ||
@@ -1115,9 +1086,9 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
     if (iree_status_is_ok(status) &&
         (context != model->context_capacity ||
          tokens !=
-             (ordinal < 2 ? 32 : model->shapes[shape_index].token_capacity) ||
+             (ordinal == 0 ? 32 : model->shapes[shape_index].token_capacity) ||
          spans !=
-             (ordinal < 2 ? 8 : model->shapes[shape_index].span_capacity))) {
+             (ordinal == 0 ? 8 : model->shapes[shape_index].span_capacity))) {
       status = iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "MTP %s shape/context does not match target residency", relative);
@@ -1205,9 +1176,8 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
   iree_hal_buffer_release(model->mtp.carry);
   iree_hal_buffer_release(model->mtp.committed);
   iree_hal_buffer_release(model->mtp.results);
-  for (iree_host_size_t i = 1; i < 7; ++i) {
-    iree_hal_buffer_release(model->mtp.buffers[i]);
-  }
+  iree_hal_buffer_release(model->mtp.cache);
+  iree_hal_buffer_release(model->mtp.row_table);
   iree_hal_buffer_release(model->row_arena);
   iree_hal_buffer_release(model->residual);
   iree_hal_buffer_release(model->workspace);
@@ -1379,11 +1349,13 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
   // any work. The device consumes this one established partition invariant.
   uint32_t resident_mask = 0;
   iree_host_size_t token_count = 0;
+  bool proposes = false;
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_qwen_span_t* span = &spans[i];
     if (span->row_index >= model->row_count || !span->token_count ||
         span->token_count > shape.token_capacity - token_count ||
-        (span->flags & ~LOOM_SERVE_QWEN_SPAN_FLAG_SELECT)) {
+        (span->flags & ~(LOOM_SERVE_QWEN_SPAN_FLAG_SELECT |
+                         LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE))) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "invalid Qwen epoch span %zu", i);
     }
@@ -1398,6 +1370,12 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "epoch span %zu exceeds remaining context", i);
     }
+    const bool generates =
+        iree_any_bit_set(span->flags, LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE);
+    if (generates && (!output_limits || !output_limits[i])) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "proposal requires a speculative Qwen span");
+    }
     if (output_limits && output_limits[i]) {
       const loom_serve_qwen_row_t* row = &model->rows[span->row_index];
       if (output_limits[i] > 4 || span->token_count != 4 ||
@@ -1410,6 +1388,7 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
     }
     resident_mask |= resident_bit;
     token_count += span->token_count;
+    proposes |= generates;
   }
 
   memset(model->epoch.tokens, 0, sizeof(model->epoch.tokens));
@@ -1424,8 +1403,10 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
     descriptor[2] = (int32_t)token_begin;
     descriptor[3] = (int32_t)span->row_index;
     descriptor[4] = -1;
+    const bool generates =
+        iree_any_bit_set(span->flags, LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE);
     memcpy(model->epoch.tokens + token_begin, span->token_ids,
-           span->token_count * sizeof(int32_t));
+           (generates ? 1 : span->token_count) * sizeof(int32_t));
     token_begin += span->token_count;
     if (iree_any_bit_set(span->flags, LOOM_SERVE_QWEN_SPAN_FLAG_SELECT)) {
       descriptor[4] = (int32_t)output_count;
@@ -1438,7 +1419,7 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
     }
     if (output_limits) {
       model->epoch.metadata[QWEN_VERIFY_OPTIONS + 2 * i] =
-          output_limits[i] != 0;
+          generates ? 2 : output_limits[i] != 0;
       model->epoch.metadata[QWEN_VERIFY_OPTIONS + 2 * i + 1] =
           (int32_t)output_limits[i];
     }
@@ -1460,6 +1441,14 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
   uint64_t completion = 0;
   IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(
       model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion));
+  if (proposes) {
+    iree_hal_buffer_t* proposal_buffers[] = {
+        model->epoch.buffers[1], model->epoch.buffers[4], model->mtp.row_table,
+        model->mtp.cache,        model->mtp.carry,        model->workspace,
+    };
+    IREE_RETURN_IF_ERROR(
+        qwen_invoke_stage(model, model->mtp.first_stage, proposal_buffers));
+  }
   if (output_limits) {
     iree_hal_buffer_t* verify_buffers[] = {
         model->residual,    model->epoch.buffers[1], model->epoch.buffers[2],
@@ -1467,7 +1456,7 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
         model->mtp.results, model->workspace,
     };
     IREE_RETURN_IF_ERROR(qwen_invoke_stage(
-        model, model->mtp.first_stage + 2 + model->shape_count + shape_index,
+        model, model->mtp.first_stage + 1 + model->shape_count + shape_index,
         verify_buffers));
   } else {
     IREE_RETURN_IF_ERROR(
@@ -1477,14 +1466,14 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
     iree_hal_buffer_t* warm_buffers[] = {
         model->residual,
         output_limits ? model->mtp.committed : model->epoch.buffers[1],
-        model->mtp.buffers[2],
-        model->mtp.buffers[3],
+        model->mtp.row_table,
+        model->mtp.cache,
         model->mtp.carry,
         model->epoch.buffers[4],
         model->workspace,
     };
     IREE_RETURN_IF_ERROR(qwen_invoke_stage(
-        model, model->mtp.first_stage + 2 + shape_index, warm_buffers));
+        model, model->mtp.first_stage + 1 + shape_index, warm_buffers));
   }
   if (output_limits) {
     const iree_hal_transfer_operation_t download = {
@@ -1555,101 +1544,6 @@ iree_status_t loom_serve_qwen_model_verify(
   }
   return qwen_epoch(model, shape_index, span_count, spans, output_limits,
                     out_results);
-}
-
-iree_status_t loom_serve_qwen_model_propose(loom_serve_qwen_model_t* model,
-                                            iree_host_size_t row_count,
-                                            const iree_host_size_t* row_indices,
-                                            int32_t (*out_tokens)[3]) {
-  if (!model->mtp.first_stage) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "MTP artifacts were not loaded");
-  }
-  if (!row_count || row_count > model->row_count) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "invalid MTP proposal row count");
-  }
-  uint32_t resident_mask = 0;
-  for (iree_host_size_t i = 0; i < row_count; ++i) {
-    const iree_host_size_t index = row_indices[i];
-    if (index >= model->row_count || (resident_mask & (1u << index))) {
-      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "invalid or repeated MTP proposal row");
-    }
-    const loom_serve_qwen_row_t* row = &model->rows[index];
-    if (!row->has_prediction || row->transfer.progress[7] ||
-        model->context_capacity - row->position < 4) {
-      return iree_make_status(
-          IREE_STATUS_FAILED_PRECONDITION,
-          "MTP needs a pending non-EOS token and four context slots");
-    }
-    resident_mask |= 1u << index;
-  }
-  memset(model->mtp.tokens, 0, sizeof(model->mtp.tokens));
-  model->mtp.metadata[0] = (int32_t)row_count;
-  model->mtp.metadata[1] = (int32_t)row_count;
-  model->mtp.metadata[2] = (int32_t)row_count;
-  for (iree_host_size_t i = 0; i < row_count; ++i) {
-    const loom_serve_qwen_row_t* row = &model->rows[row_indices[i]];
-    int32_t* descriptor = &model->mtp.metadata[3 + 5 * i];
-    descriptor[0] = 1;
-    descriptor[1] = (int32_t)row->position;
-    descriptor[2] = (int32_t)i;
-    descriptor[3] = (int32_t)row_indices[i];
-    descriptor[4] = (int32_t)i;
-    model->mtp.tokens[i] = row->transfer.tokens[0];
-  }
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t round = 0; round < 3 && iree_status_is_ok(status);
-       ++round) {
-    const iree_hal_transfer_operation_t uploads[] = {
-        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-         .upload = {.source = model->mtp.metadata,
-                    .target_buffer = model->mtp.buffers[1],
-                    .length = sizeof(model->mtp.metadata)}},
-        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-         .upload = {.source = model->mtp.tokens,
-                    .target_buffer = model->mtp.buffers[5],
-                    .length = sizeof(model->mtp.tokens)}},
-    };
-    uint64_t completion = 0;
-    status = loom_serve_execution_transfer(
-        model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion);
-    if (iree_status_is_ok(status) && round == 0) {
-      iree_hal_buffer_t* begin_buffers[] = {
-          model->mtp.buffers[1],
-          model->mtp.carry,
-          model->mtp.buffers[4],
-      };
-      status =
-          qwen_invoke_stage(model, model->mtp.first_stage + 1, begin_buffers);
-    }
-    if (iree_status_is_ok(status)) {
-      status =
-          qwen_invoke_stage(model, model->mtp.first_stage, model->mtp.buffers);
-    }
-    if (iree_status_is_ok(status)) {
-      const iree_hal_transfer_operation_t download = {
-          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-          .download = {.source_buffer = model->mtp.buffers[6],
-                       .target = model->mtp.outputs,
-                       .length = row_count * sizeof(int32_t)},
-      };
-      status = loom_serve_execution_transfer(model->execution, 1, &download,
-                                             &completion);
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_execution_wait(model->execution, completion);
-    }
-    if (iree_status_is_ok(status)) {
-      for (iree_host_size_t i = 0; i < row_count; ++i) {
-        out_tokens[i][round] = model->mtp.outputs[i];
-        model->mtp.tokens[i] = model->mtp.outputs[i];
-        ++model->mtp.metadata[3 + 5 * i + 1];
-      }
-    }
-  }
-  return status;
 }
 
 iree_status_t loom_serve_qwen_row_prefill(loom_serve_qwen_row_t* row,

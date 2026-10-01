@@ -33,7 +33,7 @@ typedef struct loom_serve_qwen_options_t {
   iree_host_size_t epoch_count;
   // Borrowed directories with identical weights and retained-state placement.
   const iree_string_view_t* epoch_directories;
-  // Optional MTP bundle: draft, begin, warm<capacity>, verify<capacity>.
+  // Optional MTP bundle: propose, warm<capacity>, verify<capacity>.
   // Uses the same retained rows and canonical target embedding/output weights.
   iree_string_view_t mtp_directory;
   // Canonical UD-Q5_K_XL GGUF file loaded once during creation.
@@ -48,6 +48,10 @@ enum loom_serve_qwen_span_flag_bits_e {
   // Select the next token after consuming this span. An intermediate input
   // chunk can omit this flag; its previous prediction then becomes invalid.
   LOOM_SERVE_QWEN_SPAN_FLAG_SELECT = 1u << 0,
+  // Generate three candidates on device before verification. The span reserves
+  // four inputs but token_ids supplies only the pending anchor. Requires SELECT
+  // and a nonzero output limit in model_verify.
+  LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE = 1u << 1,
 };
 typedef uint32_t loom_serve_qwen_span_flags_t;
 
@@ -58,9 +62,10 @@ typedef struct loom_serve_qwen_span_t {
   iree_host_size_t row_index;
   // Nonempty prefix appended at the row's current consumed position.
   iree_host_size_t token_count;
-  // Borrowed tokenizer/model-produced IDs, copied before any submission.
+  // Borrowed known IDs, copied before submission. PROPOSE supplies one anchor;
+  // the other three reserved inputs are generated and consumed on device.
   const int32_t* token_ids;
-  // Output selection policy for this span.
+  // Output selection and optional device proposal generation for this span.
   loom_serve_qwen_span_flags_t flags;
 } loom_serve_qwen_span_t;
 
@@ -127,22 +132,16 @@ iree_status_t loom_serve_qwen_model_epoch(loom_serve_qwen_model_t* model,
                                           iree_host_size_t span_count,
                                           const loom_serve_qwen_span_t* spans);
 
-// Proposes three candidate successors for distinct rows with pending tokens.
-// Does not consume target inputs or change committed predictions/positions.
-// All rows must have four remaining context slots. Candidate KV/hidden state
-// is private to MTP; a following target epoch overwrites its committed prefix.
-// |out_tokens| contains three IDs per row in caller order, valid on success.
-iree_status_t loom_serve_qwen_model_propose(loom_serve_qwen_model_t* model,
-                                            iree_host_size_t row_count,
-                                            const iree_host_size_t* row_indices,
-                                            int32_t (*out_tokens)[3]);
-
 // Mixes ordinary known spans with four-input speculative spans on one cached
 // target shape. A zero output limit denotes known input. Limits 1-4 denote
-// speculative input {pending token, three proposals}, require SELECT and a
-// pending non-EOS prediction, and cap the number of new selected outputs.
+// speculative input, require SELECT and a pending non-EOS prediction, and cap
+// the number of new selected outputs. PROPOSE spans supply only the pending
+// token: three draft rounds publish directly into the verifier input buffer.
+// Other speculative spans supply {pending token, three proposals} themselves.
 // Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
 // state is published; catch-up pairs accepted inputs with target hidden state.
+// Proposal, verification, commit and catch-up have no intermediate host wait or
+// readback. Only completed output/progress records cross back to the caller.
 // Results are in caller order and valid on success. Validation and submission
 // failure have the same contracts as model_epoch; all storage is reused.
 iree_status_t loom_serve_qwen_model_verify(

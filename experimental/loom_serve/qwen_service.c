@@ -106,8 +106,6 @@ typedef struct qwen_heartbeat_snapshot_t {
     uint64_t proposed_tokens;
     // Draft inputs consumed by the target, excluding each pending anchor.
     uint64_t accepted_inputs;
-    // Host-observed completed proposal time, included in model_duration.
-    iree_duration_t draft_duration;
   } mtp;
   // Span count of the most recently issued epoch.
   iree_host_size_t epoch_spans;
@@ -197,7 +195,7 @@ static int qwen_heartbeat_main(void* argument) {
         ",\"model_ms\":%.3f,\"epoch_spans\":%zu,\"epoch_tokens\":%zu,"
         "\"mtp\":{\"proposed_tokens\":%" PRIu64
         ",\"accepted_draft_inputs\":%" PRIu64
-        ",\"draft_ms\":%.3f},"
+        "},"
         "\"interval_prefill_tokens_per_second\":%.3f,"
         "\"interval_output_tokens_per_second\":%.3f}\n",
         state.phase, (now - state.phase_start) / 1e6,
@@ -207,7 +205,6 @@ static int qwen_heartbeat_main(void* argument) {
         state.prefill_tokens, state.decode_tokens, state.output_tokens,
         state.model_duration / 1e6, state.epoch_spans, state.epoch_tokens,
         state.mtp.proposed_tokens, state.mtp.accepted_inputs,
-        state.mtp.draft_duration / 1e6,
         seconds > 0 ? (state.prefill_tokens - previous_prefill) / seconds : 0,
         seconds > 0 ? (state.output_tokens - previous_output) / seconds : 0);
     previous_time = now;
@@ -787,9 +784,8 @@ static iree_status_t qwen_execute_epoch(
     iree_host_size_t count, const loom_serve_qwen_scheduled_span_t* scheduled) {
   loom_serve_qwen_span_t spans[8];
   loom_serve_qwen_result_t results[8] = {0};
-  int32_t decode_tokens[8][4];
-  int32_t proposals[8][3];
-  iree_host_size_t proposal_rows[8], proposal_spans[8], positions[8];
+  int32_t decode_tokens[8];
+  iree_host_size_t positions[8];
   uint32_t output_limits[8] = {0};
   iree_host_size_t proposal_count = 0;
   iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
@@ -803,10 +799,9 @@ static iree_status_t qwen_execute_epoch(
                                             session->request.input_offset;
     positions[i] = loom_serve_qwen_row_position(session->row);
     if (!prefill) {
-      decode_tokens[i][0] = loom_serve_qwen_row_token(session->row);
+      decode_tokens[i] = loom_serve_qwen_row_token(session->row);
       if (scheduled[i].token_count == 4) {
-        proposal_rows[proposal_count] = row;
-        proposal_spans[proposal_count++] = i;
+        ++proposal_count;
         output_limits[i] =
             (uint32_t)iree_min(4, session->request.chat.max_tokens -
                                       session->request.output_count);
@@ -816,8 +811,9 @@ static iree_status_t qwen_execute_epoch(
         .row_index = row,
         .token_count = scheduled[i].token_count,
         .token_ids = prefill ? session->tokens + session->request.input_offset
-                             : decode_tokens[i],
-        .flags = select ? LOOM_SERVE_QWEN_SPAN_FLAG_SELECT : 0,
+                             : &decode_tokens[i],
+        .flags = (select ? LOOM_SERVE_QWEN_SPAN_FLAG_SELECT : 0) |
+                 (output_limits[i] ? LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE : 0),
     };
     prefill_count += prefill ? spans[i].token_count : 0;
     input_count += spans[i].token_count;
@@ -827,7 +823,7 @@ static iree_status_t qwen_execute_epoch(
       packed                                                       ? "packed"
       : service->schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_MATCHED ? "matched"
                                                                    : "isolated";
-  qwen_observe(service, proposal_count ? "draft" : "execute");
+  qwen_observe(service, "execute");
   const iree_time_t start = iree_time_now();
   iree_slim_mutex_lock(&service->heartbeat.mutex);
   qwen_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
@@ -837,17 +833,6 @@ static iree_status_t qwen_execute_epoch(
   state->epoch_tokens = input_count;
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
   iree_status_t status = iree_ok_status();
-  if (proposal_count) {
-    status = loom_serve_qwen_model_propose(service->model, proposal_count,
-                                           proposal_rows, proposals);
-    IREE_RETURN_IF_ERROR(status);
-    for (iree_host_size_t i = 0; i < proposal_count; ++i) {
-      memcpy(decode_tokens[proposal_spans[i]] + 1, proposals[i],
-             sizeof(proposals[i]));
-    }
-    qwen_observe(service, "execute");
-  }
-  const iree_time_t target_start = proposal_count ? iree_time_now() : start;
   if (packed) {
     status = proposal_count ? loom_serve_qwen_model_verify(
                                   service->model, shape_index, count, spans,
@@ -908,7 +893,6 @@ static iree_status_t qwen_execute_epoch(
   state->model_duration += completed - start;
   state->mtp.proposed_tokens += proposal_count * 3;
   state->mtp.accepted_inputs += accepted_drafts;
-  state->mtp.draft_duration += target_start - start;
   state->last_completion = completed;
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
   fprintf(stderr,
@@ -918,9 +902,9 @@ static iree_status_t qwen_execute_epoch(
           "\"packing\":\"%s\","
           "\"prefill_tokens\":%zu,\"decode_tokens\":%zu,"
           "\"selected_tokens_including_eos\":%zu,\"traversals\":%zu,"
-          "\"model_ms\":%.3f,\"target_ms\":%.3f,"
+          "\"model_ms\":%.3f,"
           "\"mtp\":{\"rows\":%zu,\"proposed_tokens\":%zu,"
-          "\"accepted_draft_inputs\":%zu,\"draft_ms\":%.3f},\"rows\":%.*s}\n",
+          "\"accepted_draft_inputs\":%zu},\"rows\":%.*s}\n",
           epoch, mode, count, shape_index,
           service->shapes[shape_index].token_capacity,
           service->shapes[shape_index].span_capacity,
@@ -928,8 +912,7 @@ static iree_status_t qwen_execute_epoch(
                                                                     : "mixed",
           prefill_count, decode_count, output_count,
           packed ? (iree_host_size_t)1 : count, (completed - start) / 1e6,
-          (completed - target_start) / 1e6, proposal_count, proposal_count * 3,
-          accepted_drafts, (target_start - start) / 1e6,
+          proposal_count, proposal_count * 3, accepted_drafts,
           (int)iree_string_builder_size(&service->scratch),
           iree_string_builder_buffer(&service->scratch));
   qwen_observe(service, "output");
