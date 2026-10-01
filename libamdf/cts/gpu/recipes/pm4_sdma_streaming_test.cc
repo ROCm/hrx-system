@@ -41,10 +41,23 @@ constexpr std::array<uint32_t, 5> kControlByteOffsets = {
 
 enum class AcquireMode { kFullBarrier, kOrderedData };
 
+enum class ProducerClosure { kFullStream, kPendingIngress, kUnusedInput };
+
+struct StreamCase {
+  // Number of reusable payload slots in this stream.
+  uint32_t credits;
+  // Complete three-queue graph groups accepted before closing the producer.
+  uint32_t graph_limit;
+};
+
 // Tokens are the low 32 bits of a logical generation. Reader acknowledgments
 // keep each value stable until its consumers advance, including across zero.
 uint32_t CreditToken(uint32_t initial_token, uint32_t generation) {
   return static_cast<uint32_t>(uint64_t{initial_token} + generation);
+}
+
+uint32_t SlotGeneration(uint32_t graph_count, uint32_t slot, uint32_t credits) {
+  return graph_count / credits + (slot < graph_count % credits);
 }
 
 class Pm4SdmaStreamingTest : public Pm4SdmaTest {
@@ -74,7 +87,8 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
       {"control_sdma_to_host", kControl, Site::kSdma, Site::kHost, kDownload},
   }};
 
-  void RunStreaming(AcquireMode acquire_mode, uint32_t initial_token = 0) {
+  void RunStreaming(AcquireMode acquire_mode, uint32_t initial_token = 0,
+                    ProducerClosure closure = ProducerClosure::kFullStream) {
     const bool ordered = acquire_mode == AcquireMode::kOrderedData;
     const auto* kernel_product =
         kernels::transform::kKernels.Find(gpu_endpoint_info_);
@@ -184,6 +198,21 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
     RecordProperty("stream_download_capacity_bytes",
                    std::to_string(download_capacity));
 
+    std::vector<StreamCase> stream_cases;
+    for (const uint32_t credits : kCreditCounts) {
+      if (closure == ProducerClosure::kFullStream) {
+        stream_cases.push_back({credits, graph_count});
+      } else {
+        std::array<uint32_t, 6> limits = {
+            0, 1, credits - 1, credits, credits + 1, graph_count - 1};
+        std::sort(limits.begin(), limits.end());
+        const auto end = std::unique(limits.begin(), limits.end());
+        for (auto limit = limits.begin(); limit != end; ++limit) {
+          stream_cases.push_back({credits, *limit});
+        }
+      }
+    }
+
     RecordProperty("host_staging_slots_allocated", kMaximumCredits);
     RecordProperty("host_ingress_bytes_per_graph",
                    kGridSize * sizeof(uint32_t));
@@ -208,6 +237,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
     std::array<uint32_t, kMaximumCredits * kPageWordCount> observed_control;
     std::array<uint32_t, kPageWordCount> observed_code;
     uint64_t completed_graphs = 0;
+    uint64_t prepared_inputs = 0;
     bool program_published = false;
 
     const auto check_words = [&](const char* name, const auto& actual,
@@ -220,14 +250,20 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
                       << " expected=" << *mismatch.second;
       }
     };
-    for (uint32_t stream = 0; stream < kCreditCounts.size(); ++stream) {
-      const uint32_t credits = kCreditCounts[stream];
+    for (uint32_t stream = 0; stream < stream_cases.size(); ++stream) {
+      const uint32_t credits = stream_cases[stream].credits;
+      const uint32_t graph_limit = stream_cases[stream].graph_limit;
       SCOPED_TRACE(::testing::Message()
-                   << "stream=" << stream << " credits=" << credits);
+                   << "stream=" << stream << " credits=" << credits
+                   << " accepted=" << graph_limit);
       for (size_t owner = 0; owner < expected.size(); ++owner) {
         std::fill(expected[owner].begin(), expected[owner].end(),
                   kGuards[owner] ^ (stream * 0x1020304u));
+        std::memcpy(backings[owner].memory->host.pointer,
+                    expected[owner].data(),
+                    expected[owner].size() * sizeof(uint32_t));
       }
+      std::fill(expected_records.begin(), expected_records.end(), 0x2badb007u);
       expected_control.fill(kControlGuard);
       std::fill(observed_records.begin(), observed_records.end(), 0x2badb007u);
       for (uint32_t slot = 0; slot < kMaximumCredits; ++slot) {
@@ -353,7 +389,9 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
               UINT64_C(0xfffffff0) + uint64_t{word} * 0x01030507u +
               uint64_t{tag} * 0x11111111u);
           source_records[record_word] = value;
-          expected[kSource][slot_word] = value;
+          if (graph >= graph_limit) {
+            continue;
+          }
           expected[kInput][slot_word] = value;
           if (word < kCounts[(stream + slot) % 2]) {
             expected[kOutput][slot_word] = static_cast<uint32_t>(
@@ -362,39 +400,24 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
           expected[kReadback][slot_word] = expected[kOutput][slot_word];
           expected_records[record_word] = expected[kOutput][slot_word];
         }
-        for (const uint32_t byte_offset : kControlByteOffsets) {
-          expected_control[page + byte_offset / sizeof(uint32_t)] = token;
-        }
-      }
-      for (size_t owner = 0; owner < expected.size(); ++owner) {
-        std::memcpy(backings[owner].memory->host.pointer,
-                    expected[owner].data(),
-                    expected[owner].size() * sizeof(uint32_t));
-      }
-      for (uint32_t slot = 0; slot < credits; ++slot) {
-        for (uint32_t word = 0; word < kGridSize; ++word) {
-          const size_t offset =
-              slot * kPayloadWordCount + kPayloadOffset + word;
-          static_cast<uint32_t*>(source.host.pointer)[offset] =
-              ~expected[kSource][offset];
-          static_cast<uint32_t*>(readback.host.pointer)[offset] =
-              ~expected[kReadback][offset];
-          static_cast<uint32_t*>(input.host.pointer)[offset] =
-              ~expected[kInput][offset];
-          if (word < kCounts[(stream + slot) % 2]) {
-            static_cast<uint32_t*>(output.host.pointer)[offset] =
-                ~expected[kOutput][offset];
-          }
-        }
       }
 
       uint32_t input_published = 0;
+      uint32_t accepted_graphs = 0;
+      uint32_t ingress_limit = graph_limit;
+      if (closure == ProducerClosure::kPendingIngress && graph_limit != 0) {
+        // The final accepted graph waits for input supplied after closure.
+        --ingress_limit;
+      } else if (closure == ProducerClosure::kUnusedInput) {
+        // One prepared record has no submitted native consumer.
+        ++ingress_limit;
+      }
       uint32_t output_consumed = 0;
       const uint64_t host_control =
           reinterpret_cast<uintptr_t>(control.host.pointer);
       const auto service_host = [&] {
         bool progressed = false;
-        if (output_consumed < graph_count) {
+        if (output_consumed < accepted_graphs) {
           const uint32_t slot = output_consumed % credits;
           const uint32_t generation = output_consumed / credits + 1;
           const uint32_t token = CreditToken(initial_token, generation);
@@ -414,7 +437,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
             progressed = true;
           }
         }
-        if (input_published < graph_count) {
+        if (input_published < ingress_limit) {
           const uint32_t slot = input_published % credits;
           const uint32_t generation = input_published / credits + 1;
           const uint32_t token = CreditToken(initial_token, generation);
@@ -447,7 +470,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
       };
 
       const auto submit_stream = [&] {
-        for (uint32_t graph = 0; graph < graph_count; ++graph) {
+        for (uint32_t graph = 0; graph < graph_limit; ++graph) {
           service_host();
           const uint64_t begin_graph = completed_graphs + graph;
           const uint64_t end_graph = begin_graph + 1;
@@ -488,27 +511,62 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
             const uint64_t end = end_graph * slot_units[queue];
             ASSERT_NO_FATAL_FAILURE(queues[queue]->PublishStream(end));
           }
+          accepted_graphs = graph + 1;
         }
       };
       ASSERT_NO_FATAL_FAILURE(submit_stream());
-      drain_outputs(graph_count);
-      ASSERT_EQ(input_published, graph_count);
-      ASSERT_EQ(output_consumed, graph_count);
+      if (closure == ProducerClosure::kUnusedInput) {
+        while (input_published < ingress_limit) {
+          if (!service_host()) {
+            std::this_thread::yield();
+          }
+        }
+      }
+      const uint32_t staged_at_close = input_published;
+      const uint32_t consumed_at_close = output_consumed;
+      EXPECT_EQ(accepted_graphs, graph_limit);
+      if (closure == ProducerClosure::kPendingIngress && accepted_graphs != 0) {
+        EXPECT_LT(staged_at_close, accepted_graphs);
+        EXPECT_LT(consumed_at_close, accepted_graphs);
+      } else if (closure == ProducerClosure::kUnusedInput) {
+        EXPECT_EQ(staged_at_close, accepted_graphs + 1);
+      }
+      // Closing acceptance preserves ingress and egress for accepted groups.
+      // Extra preparation has no native consumer and needs no completion.
+      ingress_limit = accepted_graphs;
+      drain_outputs(accepted_graphs);
+      EXPECT_EQ(input_published, std::max(staged_at_close, accepted_graphs));
+      EXPECT_EQ(output_consumed, accepted_graphs);
+      for (uint32_t graph = 0; graph < input_published; ++graph) {
+        const uint32_t slot = graph % credits;
+        std::copy_n(source_records.data() + size_t{graph} * kGridSize,
+                    kGridSize,
+                    expected[kSource].data() + slot * kPayloadWordCount +
+                        kPayloadOffset);
+      }
       // Each transcript copy preceded its R acknowledgement and all later
       // reuse. Compare before independent C/U joins or native retirement.
       check_words("retained_cpu_results", observed_records, expected_records);
       std::memcpy(observed[kReadback].data(), readback.host.pointer,
                   backings[kReadback].byte_length);
       for (uint32_t slot = 0; slot < credits; ++slot) {
+        const uint32_t generation =
+            SlotGeneration(accepted_graphs, slot, credits);
+        const uint32_t token = CreditToken(initial_token, generation);
         const uint64_t address =
             reinterpret_cast<uintptr_t>(control.host.pointer) +
             slot * kPageWordCount * sizeof(uint32_t);
-        GpuWaitEqual<uint32_t>(
-            address + kComputeCompleteByteOffset,
-            CreditToken(initial_token, graph_count / credits));
-        GpuWaitEqual<uint32_t>(
-            address + kUploadCompleteByteOffset,
-            CreditToken(initial_token, graph_count / credits));
+        GpuWaitEqual<uint32_t>(address + kComputeCompleteByteOffset, token);
+        GpuWaitEqual<uint32_t>(address + kUploadCompleteByteOffset, token);
+        for (const uint32_t byte_offset : kControlByteOffsets) {
+          const uint32_t control_generation =
+              byte_offset == kSourceReadyByteOffset
+                  ? SlotGeneration(input_published, slot, credits)
+                  : generation;
+          expected_control[slot * kPageWordCount +
+                           byte_offset / sizeof(uint32_t)] =
+              CreditToken(initial_token, control_generation);
+        }
       }
       for (size_t owner = kSource; owner <= kOutput; ++owner) {
         std::memcpy(observed[owner].data(),
@@ -529,25 +587,38 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
       check_words("code", observed_code, expected_code);
       for (size_t queue = 0; queue < queues.size(); ++queue) {
         EXPECT_NO_FATAL_FAILURE(queues[queue]->WaitConsumed(
-            api_, (completed_graphs + graph_count) * slot_units[queue]));
+            api_, (completed_graphs + accepted_graphs) * slot_units[queue]));
       }
       if (HasFailure()) {
         return;
       }
-      completed_graphs += graph_count;
-      program_published = true;
+      completed_graphs += accepted_graphs;
+      prepared_inputs += input_published;
+      program_published |= accepted_graphs != 0;
       const std::string prefix = "stream_" + std::to_string(stream);
       RecordProperty(prefix + "_credits", credits);
-      RecordProperty(prefix + "_completed_graphs", graph_count);
-      RecordProperty(prefix + "_slot_generation", graph_count / credits);
-      RecordProperty(
-          prefix + "_slot_token",
-          std::to_string(CreditToken(initial_token, graph_count / credits)));
+      RecordProperty(prefix + "_completed_graphs", accepted_graphs);
+      RecordProperty(prefix + "_staged_at_close", staged_at_close);
+      RecordProperty(prefix + "_consumed_at_close", consumed_at_close);
+      RecordProperty(prefix + "_prepared_inputs", input_published);
+      std::string generations;
+      std::string tokens;
+      for (uint32_t slot = 0; slot < credits; ++slot) {
+        const uint32_t generation =
+            SlotGeneration(accepted_graphs, slot, credits);
+        if (slot != 0) {
+          generations += ",";
+          tokens += ",";
+        }
+        generations += std::to_string(generation);
+        tokens += std::to_string(CreditToken(initial_token, generation));
+      }
+      RecordProperty(prefix + "_slot_generations", generations);
+      RecordProperty(prefix + "_slot_tokens", tokens);
     }
-    RecordProperty("completed_streams", kCreditCounts.size());
+    RecordProperty("completed_streams", stream_cases.size());
     RecordProperty("completed_graphs", std::to_string(completed_graphs));
-    RecordProperty("host_source_publications",
-                   std::to_string(completed_graphs));
+    RecordProperty("host_source_publications", std::to_string(prepared_inputs));
     RecordProperty("host_readback_consumptions",
                    std::to_string(completed_graphs));
     for (size_t queue = 0; queue < queues.size(); ++queue) {
@@ -592,6 +663,23 @@ TEST_F(Pm4SdmaStreamingTest, CreditTokensWrap) {
 
 TEST_F(Pm4SdmaStreamingTest, OrderedDataAcquireCreditTokensWrap) {
   RunStreaming(AcquireMode::kOrderedData, UINT32_C(0xfffffffe));
+}
+
+TEST_F(Pm4SdmaStreamingTest, ProducerClosureWithPendingIngress) {
+  RunStreaming(AcquireMode::kFullBarrier, 0, ProducerClosure::kPendingIngress);
+}
+
+TEST_F(Pm4SdmaStreamingTest,
+       OrderedDataAcquireProducerClosureWithPendingIngress) {
+  RunStreaming(AcquireMode::kOrderedData, 0, ProducerClosure::kPendingIngress);
+}
+
+TEST_F(Pm4SdmaStreamingTest, ProducerClosureWithUnusedInput) {
+  RunStreaming(AcquireMode::kFullBarrier, 0, ProducerClosure::kUnusedInput);
+}
+
+TEST_F(Pm4SdmaStreamingTest, OrderedDataAcquireProducerClosureWithUnusedInput) {
+  RunStreaming(AcquireMode::kOrderedData, 0, ProducerClosure::kUnusedInput);
 }
 
 }  // namespace

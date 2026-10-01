@@ -139,13 +139,33 @@ acquiring data or rebinding compute registers. Both layouts preserve the
 target's data-cache actions and reuse already-published immutable code; their
 full-barrier controls retain shader-idle and instruction invalidation.
 
-Every case snapshots all graph readbacks after the final download, then
+Each batch case snapshots all graph readbacks after the final download, then
 independently joins compute and upload before observing other backing. All
 queues retire before the second batch rewrites inputs. Complete payload and
 guard checks cover each graph and every allocation. These device chains qualify
 host-independent batch advancement with shared or separate transfer queues.
 Queue count alone establishes neither physical engine assignment nor overlap
 between transfer and compute.
+
+The [bounded streaming cases](recipes/pm4_sdma_streaming_test.cc) reuse
+1/2/4/8 payload slots across a longer sequence of graphs. They require mapped
+USER publication on one PM4 queue and two independent SDMA queues. The CPU
+services source refill and readback consumption while the GPU queues exchange
+their own dependencies; no host completion wait separates upload, compute and
+download. Upload completion protects source refill, shader completion protects
+input reuse, download completion protects output reuse, and CPU consumption
+protects readback reuse. Command-ring capacity and final native consumption
+remain independent of those payload acknowledgments.
+
+Named cases exercise full or ordered acquisition and 32-bit control tokens
+crossing the high bit or wrapping through zero. Producer-closure cases stop
+after complete graph groups, including zero work and partial slot windows.
+One variant leaves accepted ingress pending until closure; another prepares
+an extra input with no submitted consumer. Draining supplies all accepted
+inputs and consumes their outputs, using each slot's actual accepted generation
+without inventing native work for unused preparation. Full backing, guard and
+control checks include inactive slots and unaccepted result sentinels. Every
+stream retires all three native frontiers before its backing is reset.
 
 The lifecycle cases exercise the same resource helper as the `DISABLED_`
 peer-device recreation scenarios, without creating extra devices. Recreation requires
