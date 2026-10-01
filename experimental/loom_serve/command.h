@@ -32,10 +32,12 @@ typedef struct loom_serve_command_entry_t {
 // bytes and input arrays may be released when this returns. Rebindable slots,
 // including the transient slab, must be supplied at issue time; recording
 // allocates none of their backing storage. |out_command_buffer| is untouched on
-// failure.
+// failure. |mode| selects HAL recording policy, including retained profiling
+// metadata when a caller intends to profile these reusable commands.
 iree_status_t loom_serve_command_create(
     const iree_hal_queue_family_t* queue_family,
-    const loom_cmd_program_t* program, iree_host_size_t fixed_buffer_count,
+    iree_hal_command_buffer_mode_t mode, const loom_cmd_program_t* program,
+    iree_host_size_t fixed_buffer_count,
     iree_hal_buffer_t* const* fixed_buffers, iree_host_size_t entry_count,
     const loom_serve_command_entry_t* entries, iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer);

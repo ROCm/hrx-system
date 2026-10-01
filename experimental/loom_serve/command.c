@@ -236,7 +236,8 @@ static iree_status_t loom_serve_command_record(
 
 iree_status_t loom_serve_command_create(
     const iree_hal_queue_family_t* queue_family,
-    const loom_cmd_program_t* program, iree_host_size_t fixed_buffer_count,
+    iree_hal_command_buffer_mode_t mode, const loom_cmd_program_t* program,
+    iree_host_size_t fixed_buffer_count,
     iree_hal_buffer_t* const* fixed_buffers, iree_host_size_t entry_count,
     const loom_serve_command_entry_t* entries, iree_allocator_t host_allocator,
     iree_hal_command_buffer_t** out_command_buffer) {
@@ -283,7 +284,7 @@ iree_status_t loom_serve_command_create(
   iree_hal_command_buffer_t* command_buffer = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_create(
-        queue_family, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+        queue_family, mode,
         IREE_HAL_COMMAND_CATEGORY_DISPATCH | IREE_HAL_COMMAND_CATEGORY_TRANSFER,
         program->requirements.rebindable_binding_count, &command_buffer);
   }
