@@ -6,7 +6,9 @@
 
 #include "loom/target/emit/native/x86/check/loom_check.h"
 
+#include "iree/io/vec_stream.h"
 #include "loom/target/emit/native/x86/assembly.h"
+#include "loom/target/emit/native/x86/function.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
 
@@ -34,7 +36,8 @@ static bool loom_x86_loom_check_emit_provider_matches(
     iree_string_view_t target_name) {
   (void)provider;
   return iree_string_view_equal(target_name, IREE_SV("x86-assembly")) ||
-         iree_string_view_equal(target_name, IREE_SV("x86-asm"));
+         iree_string_view_equal(target_name, IREE_SV("x86-asm")) ||
+         iree_string_view_equal(target_name, IREE_SV("x86-bytes"));
 }
 
 static iree_status_t loom_x86_loom_check_parse_key_value_option(
@@ -121,6 +124,37 @@ static iree_status_t loom_x86_loom_check_emit_assembly(
                                          builder, arena);
 }
 
+static iree_status_t loom_x86_loom_check_emit_bytes(
+    const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
+    iree_arena_allocator_t* arena) {
+  loom_x86_function_t function;
+  IREE_RETURN_IF_ERROR(loom_x86_function_prepare(frame, arena, &function));
+  iree_io_stream_t* stream = NULL;
+  IREE_RETURN_IF_ERROR(iree_io_vec_stream_create(
+      IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_WRITABLE |
+          IREE_IO_STREAM_MODE_SEEKABLE | IREE_IO_STREAM_MODE_RESIZABLE,
+      1024, iree_allocator_system(), &stream));
+  iree_status_t status = loom_x86_function_write(&function, stream, arena);
+  const iree_io_stream_pos_t length = iree_io_stream_length(stream);
+  if (iree_status_is_ok(status)) {
+    status = iree_io_stream_seek(stream, IREE_IO_STREAM_SEEK_SET, 0);
+  }
+  for (iree_io_stream_pos_t i = 0; i < length && iree_status_is_ok(status);
+       ++i) {
+    uint8_t byte = 0;
+    status = iree_io_stream_read(stream, 1, &byte, NULL);
+    if (iree_status_is_ok(status)) {
+      status = iree_string_builder_append_format(builder, "%s%02x",
+                                                 i == 0 ? "" : " ", byte);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(builder, "\n");
+  }
+  iree_io_stream_release(stream);
+  return status;
+}
+
 static iree_status_t loom_x86_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
@@ -149,6 +183,10 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
   if (!frame_accepted) {
     return iree_ok_status();
   }
+  if (iree_string_view_equal(request->target_name, IREE_SV("x86-bytes"))) {
+    return loom_x86_loom_check_emit_bytes(
+        &frame, &request->result->actual_output, request->case_arena);
+  }
   return loom_x86_loom_check_emit_assembly(
       &frame, &request->result->actual_output, request->case_arena);
 }
@@ -157,7 +195,8 @@ static iree_status_t loom_x86_loom_check_emit_provider_append_names(
     const loom_check_emit_provider_t* provider,
     iree_string_builder_t* builder) {
   (void)provider;
-  return iree_string_builder_append_cstring(builder, "x86-assembly, x86-asm");
+  return iree_string_builder_append_cstring(builder,
+                                            "x86-assembly, x86-asm, x86-bytes");
 }
 
 const loom_check_emit_provider_t loom_x86_native_loom_check_emit_provider = {

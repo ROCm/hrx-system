@@ -9,7 +9,7 @@ func.def target(@target) @scalar_i1_constant(%value: i1) -> (i1) {
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i1_constant(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (i1) -> (i1)}) @scalar_i1_constant(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %6 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = xor.imm.gpr32 %6 {imm32 = 1}
   return %result
@@ -31,7 +31,7 @@ func.def target(@target) @scalar_i1_bitwise_control(%lhs: i1, %rhs: i1, %true_va
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i1_bitwise_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (i1, i1, i32, i32) -> (i32)}) @scalar_i1_bitwise_control(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %13 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
   %both = and.gpr32 %13, %rhs
   %15 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -55,7 +55,7 @@ func.def target(@target) @scalar_i32_select(%condition: i1, %true_value: i32, %f
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i32_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (i1, i32, i32) -> (i32)}) @scalar_i32_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.gpr32>, %false_value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %9 = copy %false_value : reg<x86.gpr32> -> reg<x86.gpr32>
   %result = select.gpr32 %condition, %true_value, %9
   return %result
@@ -80,7 +80,7 @@ func.def target(@target) @index_comparisons(%lhs: index, %rhs: index) -> (i1, i1
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @index_comparisons(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (index, index) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1)}) @index_comparisons(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %eq = cmp.eq.gpr64 %lhs, %rhs
   %ne = cmp.ne.gpr64 %lhs, %rhs
   %slt = cmp.slt.gpr64 %lhs, %rhs
@@ -113,7 +113,7 @@ func.def target(@target) @offset_comparisons(%lhs: offset, %rhs: offset) -> (i1,
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @offset_comparisons(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (offset, offset) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1)}) @offset_comparisons(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %eq = cmp.eq.gpr64 %lhs, %rhs
   %ne = cmp.ne.gpr64 %lhs, %rhs
   %slt = cmp.slt.gpr64 %lhs, %rhs

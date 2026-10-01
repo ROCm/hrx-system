@@ -40,6 +40,7 @@
 
 static const loom_target_export_plan_t kX86_64ObjectExportPlan = {
     .name = IREE_SVL("x86_64-object"),
+    .calling_convention = IREE_SVL("sysv"),
     .abi_kind = LOOM_TARGET_ABI_OBJECT_FUNCTION,
     .linkage = LOOM_TARGET_LINKAGE_DSO_LOCAL,
 };

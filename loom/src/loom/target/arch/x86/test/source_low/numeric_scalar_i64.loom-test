@@ -29,7 +29,7 @@ func.def @scalar_i64_addi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_addi_vgpr(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, vector<2xi64>) -> (i64)}) @scalar_i64_addi_vgpr(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
   %lhs = vpextrq.xmm %lhs_values, 0
   %rhs = vpextrq.xmm %rhs_values, 0
   %11 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -47,7 +47,7 @@ func.def @scalar_i64_subi_vgpr(%lhs_values: vector<2xi64>, %rhs_values: vector<2
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_subi_vgpr(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, vector<2xi64>) -> (i64)}) @scalar_i64_subi_vgpr(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
   %lhs = vpextrq.xmm %lhs_values, 0
   %rhs = vpextrq.xmm %rhs_values, 0
   %11 = copy %lhs : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -65,7 +65,7 @@ func.def @scalar_i64_shli_vgpr(%value_values: vector<2xi64>, %shift_values: vect
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_shli_vgpr(%value_values: reg<x86.xmm>, %shift_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, vector<2xi64>) -> (i64)}) @scalar_i64_shli_vgpr(%value_values: reg<x86.xmm>, %shift_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
   %value = vpextrq.xmm %value_values, 0
   %shift = vpextrq.xmm %shift_values, 0
   %11 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -86,7 +86,7 @@ func.def @scalar_i64_muli_bitwise_vgpr(%lhs_values: vector<2xi64>, %rhs_values: 
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_muli_bitwise_vgpr(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>, %mask_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, vector<2xi64>, vector<2xi64>) -> (i64)}) @scalar_i64_muli_bitwise_vgpr(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>, %mask_values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
   %lhs = vpextrq.xmm %lhs_values, 0
   %rhs = vpextrq.xmm %rhs_values, 0
   %mask = vpextrq.xmm %mask_values, 0
@@ -105,7 +105,7 @@ func.def @scalar_i64_compare_eq_scc(%lhs: i64, %rhs: i64) -> (i1) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_compare_eq_scc(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64, i64) -> (i1)}) @scalar_i64_compare_eq_scc(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %cmp = cmp.eq.gpr64 %lhs, %rhs
   return %cmp
 }
@@ -118,7 +118,7 @@ func.def @scalar_i64_compare_ne_scc(%lhs: i64, %rhs: i64) -> (i1) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_compare_ne_scc(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64, i64) -> (i1)}) @scalar_i64_compare_ne_scc(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %cmp = cmp.ne.gpr64 %lhs, %rhs
   return %cmp
 }
@@ -131,7 +131,7 @@ func.def @scalar_i64_compare_slt_return(%lhs: i64, %rhs: i64) -> (i1) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_compare_slt_return(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64, i64) -> (i1)}) @scalar_i64_compare_slt_return(%lhs: reg<x86.gpr64>, %rhs: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %cmp = cmp.slt.gpr64 %lhs, %rhs
   return %cmp
 }
@@ -166,7 +166,7 @@ func.def @scalar_i64_compare_constant_select(%lhs: i64, %true_value: f32, %false
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_compare_constant_select(%lhs: reg<x86.gpr64>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64, f32, f32) -> (f32)}) @scalar_i64_compare_constant_select(%lhs: reg<x86.gpr64>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %limit = mov.imm64 4294967296
   %cmp = cmp.ult.gpr64 %lhs, %limit
   %13 = vmovd.xmm.gpr32 %cmp
@@ -204,7 +204,7 @@ func.def @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: vector<2xi6
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, vector<2xi64>, f32, f32) -> (f32, f32, f32, f32, f32, f32, f32, f32, f32, f32)}) @scalar_i64_compare_all_predicates_vgpr_select(%lhs_values: reg<x86.xmm>, %rhs_values: reg<x86.xmm>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
   %lhs = vpextrq.xmm %lhs_values, 0
   %rhs = vpextrq.xmm %rhs_values, 0
   %eq = cmp.eq.gpr64 %lhs, %rhs
@@ -314,7 +314,7 @@ func.def @scalar_i64_lanes(%values: vector<2xi64>, %replacement: i64) -> (i64, i
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_lanes(%values: reg<x86.xmm>, %replacement: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.xmm>, reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, i64) -> (i64, i64, vector<2xi64>, vector<2xi64>)}) @scalar_i64_lanes(%values: reg<x86.xmm>, %replacement: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.xmm>, reg<x86.xmm>) asm {
   %first = vpextrq.xmm %values, 0
   %second = vpextrq.xmm %values, 1
   %replace_first = vpinsrq.xmm %values, %replacement, 0
@@ -333,7 +333,7 @@ func.def @scalar_f64_lanes(%values: vector<2xf64>, %replacement: f64) -> (f64, f
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_f64_lanes(%values: reg<x86.xmm>, %replacement: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xf64>, f64) -> (f64, f64, vector<2xf64>, vector<2xf64>)}) @scalar_f64_lanes(%values: reg<x86.xmm>, %replacement: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
   %first = vpermilpd.xmm %values, 0
   %second = vpermilpd.xmm %values, 1
   %replace_first = vshufpd.xmm %replacement, %values, 2
@@ -355,7 +355,7 @@ func.def @scalar_i64_right_shift_select(%value: i64, %condition: i1) -> (i64, i6
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_i64_right_shift_select(%value: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64, i1) -> (i64, i64, i64, i64, i64)}) @scalar_i64_right_shift_select(%value: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %21 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
   %logical_word = shr.imm.gpr64 %21 {shift = 32}
   %23 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -415,7 +415,7 @@ func.def @scalar_f32_select(%condition: i1, %true_value: f32, %false_value: f32)
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_f32_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, f32, f32) -> (f32)}) @scalar_f32_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %9 = vmovd.xmm.gpr32 %condition
   %10 = vpsllq.xmm %9, 63
   %result = vblendvpd.xmm %false_value, %true_value, %10
@@ -430,7 +430,7 @@ func.def @scalar_f64_select(%condition: i1, %true_value: f64, %false_value: f64)
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_f64_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, f64, f64) -> (f64)}) @scalar_f64_select(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %9 = vmovd.xmm.gpr32 %condition
   %10 = vpsllq.xmm %9, 63
   %result = vblendvpd.xmm %false_value, %true_value, %10
@@ -445,7 +445,7 @@ func.def @scalar_f32_select_reuse(%condition: i1, %true_value: f32, %false_value
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_f32_select_reuse(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, f32, f32) -> (f32, f32, f32, i1)}) @scalar_f32_select_reuse(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.gpr32>) asm {
   %15 = vmovd.xmm.gpr32 %condition
   %16 = vpsllq.xmm %15, 63
   %result = vblendvpd.xmm %false_value, %true_value, %16
@@ -460,7 +460,7 @@ func.def @scalar_f64_select_reuse(%condition: i1, %true_value: f64, %false_value
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_f64_select_reuse(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, f64, f64) -> (f64, f64, f64, i1)}) @scalar_f64_select_reuse(%condition: reg<x86.gpr32>, %true_value: reg<x86.xmm>, %false_value: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.gpr32>) asm {
   %15 = vmovd.xmm.gpr32 %condition
   %16 = vpsllq.xmm %15, 63
   %result = vblendvpd.xmm %false_value, %true_value, %16

@@ -160,7 +160,7 @@ func.def @exchange_narrow(%buffer: buffer, %byte_value: i8, %word_value: i16) ->
 }
 
 // ----
-low.func.def target<x86.scalar.core> abi(object_function) @exchange_narrow(%buffer: reg<x86.gpr64>, %byte_value: reg<x86.gpr32>, %word_value: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (buffer, i8, i16) -> (i32, i32)}) @exchange_narrow(%buffer: reg<x86.gpr64>, %byte_value: reg<x86.gpr32>, %word_value: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %previous_byte = movzx.load.u8.gpr32 %buffer {disp32 = 0}
   %previous_word = movzx.load.u16.gpr32 %buffer {disp32 = 1}
   mov.store.u8.gpr32 %byte_value, %buffer {disp32 = 0}

@@ -48,7 +48,7 @@ func.def @mixed_subtract(%uniform: i64, %values: vector<2xi64>) -> (i64, i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @mixed_subtract(%uniform: reg<x86.gpr64>, %values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i64, vector<2xi64>) -> (i64, i64)}) @mixed_subtract(%uniform: reg<x86.gpr64>, %values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %varying = vpextrq.xmm %values, 0
   %12 = copy %uniform : reg<x86.gpr64> -> reg<x86.gpr64>
   %uniform_left = sub.gpr64 %12, %varying

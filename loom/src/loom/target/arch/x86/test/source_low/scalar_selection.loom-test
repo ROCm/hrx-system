@@ -11,7 +11,7 @@ func.def @scalar_selection(%condition: i1, %a_i1: i1, %b_i1: i1, %a_i32: i32, %b
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @scalar_selection(%condition: reg<x86.gpr32>, %a_i1: reg<x86.gpr32>, %b_i1: reg<x86.gpr32>, %a_i32: reg<x86.gpr32>, %b_i32: reg<x86.gpr32>, %a_i64: reg<x86.gpr64>, %b_i64: reg<x86.gpr64>, %a_f32: reg<x86.xmm>, %b_f32: reg<x86.xmm>, %a_f64: reg<x86.xmm>, %b_f64: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.xmm>, reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, i1, i1, i32, i32, i64, i64, f32, f32, f64, f64) -> (i1, i32, i64, f32, f64)}) @scalar_selection(%condition: reg<x86.gpr32>, %a_i1: reg<x86.gpr32>, %b_i1: reg<x86.gpr32>, %a_i32: reg<x86.gpr32>, %b_i32: reg<x86.gpr32>, %a_i64: reg<x86.gpr64>, %b_i64: reg<x86.gpr64>, %a_f32: reg<x86.xmm>, %b_f32: reg<x86.xmm>, %a_f64: reg<x86.xmm>, %b_f64: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.xmm>, reg<x86.xmm>) asm {
   %37 = copy %b_i1 : reg<x86.gpr32> -> reg<x86.gpr32>
   %r_i1 = select.gpr32 %condition, %a_i1, %37
   %39 = copy %b_i32 : reg<x86.gpr32> -> reg<x86.gpr32>

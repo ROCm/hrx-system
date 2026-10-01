@@ -14,6 +14,12 @@ load(
 
 _CONFIGURED_COMPILE_COPTS = (
     iree_select({
+        "//loom/config/target/arch:x86": [
+            "-DLOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS=1",
+        ],
+        "//conditions:default": [],
+    }) +
+    iree_select({
         "//loom/config/target:amdgpu_artifacts": [
             "-DLOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS=1",
         ],
@@ -46,6 +52,12 @@ _CONFIGURED_COMPILE_COPTS = (
 )
 
 _CONFIGURED_COMPILE_DEPS = (
+    iree_select({
+        "//loom/config/target/arch:x86": [
+            "//loom/src/loom/target/arch/x86:compiler_provider",
+        ],
+        "//conditions:default": [],
+    }) +
     iree_select({
         "//loom/config/target:amdgpu_artifacts": [
             "//loom/src/loom/target/emit/native/amdgpu:hal_kernel_library",

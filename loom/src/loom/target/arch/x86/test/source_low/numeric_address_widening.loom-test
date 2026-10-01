@@ -66,7 +66,7 @@ func.def @widen_varying_address_payload(%values: vector<4xi32>) -> (i64, i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @widen_varying_address_payload(%values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>) -> (i64, i64)}) @widen_varying_address_payload(%values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %input = vpextrd.xmm %values, 0
   %signed = movsxd.gpr64.gpr32 %input
   %unsigned = movzx.gpr64.gpr32 %input

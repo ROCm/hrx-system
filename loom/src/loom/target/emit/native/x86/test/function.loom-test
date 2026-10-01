@@ -1,0 +1,46 @@
+// The fixed result tests frame preservation independently of allocation policy.
+// RUN: emit x86-bytes @saved fixed=%value:physical_register:3:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @saved() -> (reg<x86.gpr64>) asm {
+  %value = mov.imm64 42
+  return %value
+}
+
+// ----
+53 bb 2a 00 00 00 48 8b c3 5b c3
+
+// ====
+
+// A caller-saved destination needs no preservation envelope.
+// RUN: emit x86-bytes @unsaved fixed=%value:physical_register:0:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @unsaved() -> (reg<x86.gpr64>) asm {
+  %value = mov.imm64 42
+  return %value
+}
+
+// ----
+b8 2a 00 00 00 c3
+
+// ====
+
+// Both exits restore the same callee-saved set. Fixups target the envelope,
+// including a non-fallthrough return, rather than bypassing the pops.
+// RUN: emit x86-bytes @two_returns fixed=%condition:physical_register:0:1 fixed=%left:physical_register:3:1 fixed=%right:physical_register:12:1
+x86.target<scalar> @target
+
+low.func.def target<x86.scalar.core>(@target) @two_returns() -> (reg<x86.gpr64>) asm {
+  %condition = mov.imm32 1
+  low.cond_br %condition, ^left, ^right : reg<x86.gpr32>
+^left:
+  %left = mov.imm64 42
+  return %left
+^right:
+  %right = mov.imm64 43
+  return %right
+}
+
+// ----
+53 41 54 b8 01 00 00 00 85 c0 0f 84 0d 00 00 00 bb 2a 00 00 00 48 8b c3 e9 09 00 00 00 41 bc 2b 00 00 00 49 8b c4 41 5c 5b c3

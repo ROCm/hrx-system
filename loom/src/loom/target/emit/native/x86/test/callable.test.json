@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "ordinary functions default to the SysV contract",
+      "steps": [
+        {
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "--target=x86:scalar",
+              "--output={tmp}/default.o"
+            ],
+            "stdin": {
+              "text": "func.def public @mix(%input: i64, %delta: i64) -> (i64) {\n  %sum = scalar.addi %input, %delta : i64\n  %result = scalar.xori %sum, %input : i64\n  func.return %result : i64\n}\n"
+            }
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "--target=x86:scalar",
+              "--output={tmp}/explicit.o"
+            ],
+            "stdin": {
+              "text": "func.def public abi(object_function, {calling_convention = \"sysv\"}) @mix(%input: i64, %delta: i64) -> (i64) {\n  %sum = scalar.addi %input, %delta : i64\n  %result = scalar.xori %sum, %input : i64\n  func.return %result : i64\n}\n"
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/explicit.o",
+              "equals": "{tmp}/default.o",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "logical Boolean signature cannot masquerade as a word",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--target=x86:scalar",
+          "--output={tmp}/boolean.o"
+        ],
+        "stdin": {
+          "text": "func.def public @identity(%value: i1) -> (i1) {\n  func.return %value : i1\n}\n"
+        }
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "native x86 ABI signature requires scalar i32, i64, or pointers"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/boolean.o",
+          "exists": false
+        }
+      ]
+    },
+    {
+      "name": "unsupported platform convention fails at the native boundary",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--target=x86:scalar",
+          "--output={tmp}/other.o"
+        ],
+        "stdin": {
+          "text": "func.def public abi(object_function, {calling_convention = \"ms_x64\"}) @mix(%input: i64, %delta: i64) -> (i64) {\n  %sum = scalar.addi %input, %delta : i64\n  %result = scalar.xori %sum, %input : i64\n  func.return %result : i64\n}\n"
+        }
+      },
+      "exit": 1,
+      "stderr": {
+        "contains": [
+          "native x86 supports the sysv calling convention"
+        ]
+      },
+      "files": [
+        {
+          "path": "{tmp}/other.o",
+          "exists": false
+        }
+      ]
+    },
+    {
+      "name": "authored Low consumes the same native function contract",
+      "steps": [
+        {
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "--target=x86:scalar",
+              "--output={tmp}/high.o"
+            ],
+            "stdin": {
+              "text": "func.def public @identity(%value: i64) -> (i64) {\n  func.return %value : i64\n}\n"
+            }
+          }
+        },
+        {
+          "run": {
+            "tool": "loom-compile",
+            "args": [
+              "--target=x86:scalar",
+              "--pipeline=none",
+              "--output={tmp}/low.o"
+            ],
+            "stdin": {
+              "text": "low.func.def public target<x86.scalar.core> abi(object_function) @identity(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {\n  return %value\n}\n"
+            }
+          },
+          "files": [
+            {
+              "path": "{tmp}/low.o",
+              "equals": "{tmp}/high.o",
+              "non_empty": true
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

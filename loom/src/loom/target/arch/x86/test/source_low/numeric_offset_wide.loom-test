@@ -74,7 +74,7 @@ func.def @offset_scale_lane(%elements: vector<4xi32>, %stride: offset) -> (offse
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @offset_scale_lane(%elements: reg<x86.xmm>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, offset) -> (offset)}) @offset_scale_lane(%elements: reg<x86.xmm>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %raw = vpextrd.xmm %elements, 0
   %element = movzx.gpr64.gpr32 %raw
   %12 = copy %element : reg<x86.gpr64> -> reg<x86.gpr64>

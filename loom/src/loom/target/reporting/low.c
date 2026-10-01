@@ -211,7 +211,8 @@ static void loom_target_compile_report_record_edge_copy_moves(
     loom_target_compile_report_t* report,
     const loom_low_allocation_table_t* allocation) {
   uint64_t packet_count = 0;
-  uint64_t unit_count = 0;
+  const uint64_t unit_count =
+      allocation->move_count - allocation->packet_move_count;
   for (iree_host_size_t i = 0; i < allocation->edge_copy_group_count; ++i) {
     const loom_low_allocation_edge_copy_group_t* group =
         &allocation->edge_copy_groups[i];
@@ -219,7 +220,6 @@ static void loom_target_compile_report_record_edge_copy_moves(
       continue;
     }
     ++packet_count;
-    unit_count += group->move_group.moves.count;
   }
   loom_target_compile_report_record_move_cause_if_nonzero(
       report, LOOM_TARGET_COMPILE_REPORT_MOVE_CAUSE_BRANCH_EDGE, packet_count,

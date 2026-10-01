@@ -10,7 +10,7 @@ func.def @scalar_f32_arith(%lhs: f32, %rhs: f32, %bias: f32) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512.core> abi(object_function) @scalar_f32_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %bias: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (f32, f32, f32) -> (f32)}) @scalar_f32_arith(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %bias: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %sum = vaddss.xmm %lhs, %rhs
   %difference = vsubss.xmm %sum, %bias
   %product = vmulss.xmm %difference, %rhs

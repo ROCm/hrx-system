@@ -1,0 +1,87 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// The platform ABI comes from the compile target. No target-specific source
+// annotation, register name, or runtime calling convention is required.
+func.def public @mix(%input: i64, %delta: i64) -> (i64) {
+  %sum = scalar.addi %input, %delta : i64
+  %result = scalar.xori %sum, %input : i64
+  func.return %result : i64
+}
+
+// Both exits return through the same native preservation envelope.
+func.def public @choose_mix(%input: i64, %delta: i64, %limit: i64) -> (i64) {
+  %condition = scalar.cmpi ult, %input, %limit : i64
+  cfg.cond_br %condition, ^less, ^greater
+^less:
+  %sum = scalar.addi %input, %delta : i64
+  %result = scalar.xori %sum, %input : i64
+  func.return %result : i64
+^greater:
+  %product = scalar.muli %input, %delta : i64
+  %other = scalar.xori %product, %limit : i64
+  func.return %other : i64
+}
+
+// Live inputs cross destructive arithmetic; the shared allocator decides
+// transport and register use before native frame preservation is prepared.
+func.def public @preserve(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64) -> (i64) {
+  %x = scalar.addi %a, %b : i64
+  %y = scalar.addi %c, %d : i64
+  %z = scalar.addi %e, %f : i64
+  %v = scalar.muli %x, %y : i64
+  %w = scalar.muli %z, %a : i64
+  %k = scalar.xori %b, %c : i64
+  %sum = scalar.addi %v, %w : i64
+  %result = scalar.xori %sum, %k : i64
+  func.return %result : i64
+}
+
+// The count enters through the ordinary ABI before allocation transports it
+// to the shift instruction's fixed count register. The input remains live.
+func.def public @shift_mix(%input: i64, %count: i64) -> (i64) {
+  %mask = scalar.constant 63 : i64
+  %bounded_count = scalar.andi %count, %mask : i64
+  %shifted = scalar.shrui %input, %bounded_count : i64
+  %result = scalar.xori %shifted, %input : i64
+  func.return %result : i64
+}
+
+// An unused argument still consumes its ABI position. The next two arguments
+// are a borrowed host pointer and an element index into its six-word extent.
+// The C caller guarantees the index is in [0, 6).
+func.def public @load_word(%unused: i64, %input: buffer, %index: index) -> (i64) {
+  %base = index.constant 0 : offset
+  %bounded_index = index.assume %index [range(%index, 0, 5)] : index
+  %input_view = buffer.view %input[%base] : buffer -> view<6xi64>
+  %value = view.load %input_view[%bounded_index] : view<6xi64> -> i64
+  func.return %value : i64
+}
+
+// Widening must define the upper half of the destination register even when
+// the two physical register views share a location.
+func.def public @add_word(%word: i32, %bias: i64) -> (i64) {
+  %wide = scalar.extui %word : i32 to i64
+  %result = scalar.addi %wide, %bias : i64
+  func.return %result : i64
+}
+
+// Loop-carried values cross both the forward exit and the backward edge.
+// Their simultaneous transport belongs to the shared allocator's move plan.
+func.def public @recurrence(%first: i64, %second: i64, %iterations: i64) -> (i64) {
+  %begin = scalar.constant 0 : i64
+  %step = scalar.constant 1 : i64
+  cfg.br ^header(%first: i64, %second: i64, %begin: i64)
+^header(%a: i64, %b: i64, %position: i64):
+  %more = scalar.cmpi ult, %position, %iterations : i64
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %sum = scalar.addi %a, %b : i64
+  %next = scalar.addi %position, %step : i64
+  cfg.br ^header(%b: i64, %sum: i64, %next: i64)
+^exit:
+  func.return %a : i64
+}

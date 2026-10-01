@@ -13,7 +13,7 @@ func.def @wide_subview_selection(%input: buffer, %byte_base0: offset, %condition
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @wide_subview_selection(%aligned: reg<x86.gpr64>, %byte_base: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, offset, i1) -> (i32)}) @wide_subview_selection(%aligned: reg<x86.gpr64>, %byte_base: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %20 = lea.disp %byte_base {disp32 = 4}
   %21 = lea.disp %byte_base {disp32 = 8}
   %22 = copy %21 : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -37,7 +37,7 @@ func.def @distinct_root_selection(%first: buffer, %second: buffer, %condition: i
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @distinct_root_selection(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer, i1) -> (i32)}) @distinct_root_selection(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %first_offset = mov.imm64 4
   %second_offset = mov.imm64 8
   low.cond_br %condition, ^_bb1, ^_bb2 : reg<x86.gpr32>
@@ -220,7 +220,7 @@ func.def @correlated_cfg_rotation(%input: buffer, %select: i1, %again: i1, %left
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @correlated_cfg_rotation(%storage: reg<x86.gpr64>, %select: reg<x86.gpr32>, %again: reg<x86.gpr32>, %left_offset: reg<x86.gpr64>, %right_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, i1, offset, offset) -> (i32)}) @correlated_cfg_rotation(%storage: reg<x86.gpr64>, %select: reg<x86.gpr32>, %again: reg<x86.gpr32>, %left_offset: reg<x86.gpr64>, %right_offset: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   low.cond_br %select, ^left, ^right : reg<x86.gpr32>
 ^left:
   low.br ^loop(%left_offset: reg<x86.gpr64>)
@@ -262,7 +262,7 @@ func.def @nested_dynamic_view_refinement(%input: buffer, %extent_input: index, %
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @nested_dynamic_view_refinement(%aligned: reg<x86.gpr64>, %second_extent: reg<x86.gpr64>, %position: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, index, index, i1) -> (i32)}) @nested_dynamic_view_refinement(%aligned: reg<x86.gpr64>, %second_extent: reg<x86.gpr64>, %position: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %condition, ^_bb1, ^_bb2 : reg<x86.gpr32>
 ^_bb1:
   %value$24 = mov.load.indexed.gpr32 %aligned, %position {disp32 = 0, scale = 4}

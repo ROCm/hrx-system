@@ -254,6 +254,12 @@ typedef struct loom_target_export_plan_t {
   iree_string_view_t name;
   // Output symbol exposed by this export, or empty to preserve the source name.
   iree_string_view_t export_symbol;
+  // Platform calling convention for ordinary native functions. A target's
+  // default is inherited by its functions and may be overridden through the
+  // function ABI contract. Empty means this ABI has no platform-convention
+  // dimension; convention attributes are then rejected at the contract
+  // boundary.
+  iree_string_view_t calling_convention;
   // Callable/package ABI used for this export.
   loom_target_abi_kind_t abi_kind;
   // ABI-required linkage for exported object functions or entry points.

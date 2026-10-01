@@ -8,7 +8,7 @@ func.def @scalar_contract(%a: f32, %b: f32, %c: f32) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @scalar_contract(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32, f32) -> (f32)}) @scalar_contract(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %11 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
   %result = vfmadd231ss.xmm %11, %a, %b
   return %result
@@ -23,7 +23,7 @@ func.def @scalar_swapped(%a: f32, %b: f32, %c: f32) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @scalar_swapped(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32, f32) -> (f32)}) @scalar_swapped(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %11 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
   %result = vfmadd231ss.xmm %11, %a, %b
   return %result
@@ -39,7 +39,7 @@ func.def @scalar_nonadjacent(%a: f32, %b: f32, %c: f32) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @scalar_nonadjacent(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32, f32) -> (f32)}) @scalar_nonadjacent(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %addend = vmulss.xmm %c, %c
   %13 = copy %addend : reg<x86.xmm> -> reg<x86.xmm>
   %result = vfmadd231ss.xmm %13, %a, %b
@@ -55,7 +55,7 @@ func.def @scalar_multiuse(%a: f32, %b: f32, %c: f32) -> (f32, f32) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @scalar_multiuse(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32, f32) -> (f32, f32)}) @scalar_multiuse(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
   %product = vmulss.xmm %a, %b
   %result = vaddss.xmm %product, %c
   return %product, %result
@@ -70,7 +70,7 @@ func.def @scalar_one_flag(%a: f32, %b: f32, %c: f32) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @scalar_one_flag(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32, f32) -> (f32)}) @scalar_one_flag(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %product = vmulss.xmm %a, %b
   %result = vaddss.xmm %product, %c
   return %result
@@ -84,7 +84,7 @@ func.def @scalar_explicit(%a: f32, %b: f32, %c: f32) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @scalar_explicit(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32, f32) -> (f32)}) @scalar_explicit(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %9 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
   %result = vfmadd231ss.xmm %9, %a, %b
   return %result
@@ -99,7 +99,7 @@ func.def @vector4_contract(%a: vector<4xf32>, %b: vector<4xf32>, %c: vector<4xf3
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @vector4_contract(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (vector<4xf32>, vector<4xf32>, vector<4xf32>) -> (vector<4xf32>)}) @vector4_contract(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %product = vmulps.xmm %a, %b
   %result = vaddps.xmm %product, %c
   return %result
@@ -114,7 +114,7 @@ func.def @vector4_reduce(%a: vector<4xf32>, %b: vector<4xf32>, %c: f32) -> (f32)
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @vector4_reduce(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (vector<4xf32>, vector<4xf32>, f32) -> (f32)}) @vector4_reduce(%a: reg<x86.xmm>, %b: reg<x86.xmm>, %c: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %23 = vpermilps.xmm %a, 0
   %24 = vpermilps.xmm %b, 0
   %25 = copy %c : reg<x86.xmm> -> reg<x86.xmm>
@@ -143,7 +143,7 @@ func.def @vector16_contract(%a: vector<16xf32>, %b: vector<16xf32>, %c: vector<1
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @vector16_contract(%a: reg<x86.zmm>, %b: reg<x86.zmm>, %c: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (vector<16xf32>, vector<16xf32>, vector<16xf32>) -> (vector<16xf32>)}) @vector16_contract(%a: reg<x86.zmm>, %b: reg<x86.zmm>, %c: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
   %11 = copy %c : reg<x86.zmm> -> reg<x86.zmm>
   %result = vfmadd231ps %11, %a, %b
   return %result

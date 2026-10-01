@@ -123,7 +123,7 @@ func.def public @boolean_constants() -> (i1, i1) {
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @boolean_constants() -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = () -> (i1, i1)}) @boolean_constants() -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %false = mov.imm32 0
   %true = mov.imm32 1
   return %false, %true
@@ -139,7 +139,7 @@ func.def public @boolean_algebra(%lhs: i1, %rhs: i1) -> (i1, i1, i1) {
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @boolean_algebra(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, i1) -> (i1, i1, i1)}) @boolean_algebra(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %13 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
   %and = and.gpr32 %13, %rhs
   %15 = copy %lhs : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -158,7 +158,7 @@ func.def public @boolean_unsigned_extensions(%input: i1) -> (i32, i64) {
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @boolean_unsigned_extensions(%word: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1) -> (i32, i64)}) @boolean_unsigned_extensions(%word: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr64>) asm {
   %11 = mov.imm64 1
   %12 = mov.imm64 0
   %13 = copy %12 : reg<x86.gpr64> -> reg<x86.gpr64>

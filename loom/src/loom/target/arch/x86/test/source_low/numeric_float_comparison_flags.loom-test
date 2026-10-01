@@ -11,7 +11,7 @@ func.def @non_nan_classifications(%lhs: f32, %rhs: f32) -> (i1, i1, i1) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @non_nan_classifications(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32) -> (i1, i1, i1)}) @non_nan_classifications(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %ordered = mov.imm32 1
   %unordered = mov.imm32 0
   return %ordered, %unordered, %ordered
@@ -29,7 +29,7 @@ func.def @non_nan_integer_classifications(%lhs: f32, %rhs: f32) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core> abi(object_function) @non_nan_integer_classifications(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx512_packed_dot.core> abi(object_function) abi_layout({signature = (f32, f32) -> (i32, i32)}) @non_nan_integer_classifications(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %ordered_integer = mov.imm32 1
   %unordered_integer = mov.imm32 0
   return %ordered_integer, %unordered_integer

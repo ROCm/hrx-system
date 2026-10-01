@@ -10,7 +10,7 @@ func.def @predicate_extension_i32(%condition: i1) -> (i32, i32) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @predicate_extension_i32(%unsigned: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1) -> (i32, i32)}) @predicate_extension_i32(%unsigned: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %11 = mov.imm32 -1
   %12 = mov.imm32 0
   %13 = copy %12 : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -27,7 +27,7 @@ func.def @predicate_extension_i64(%condition: i1) -> (i64, i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @predicate_extension_i64(%condition: reg<x86.gpr32>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1) -> (i64, i64)}) @predicate_extension_i64(%condition: reg<x86.gpr32>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %14 = mov.imm64 -1
   %15 = mov.imm64 0
   %16 = copy %15 : reg<x86.gpr64> -> reg<x86.gpr64>

@@ -35,7 +35,7 @@ func.def target(@target) @fill_f32(%pattern: f32, %target: buffer, %target_offse
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @fill_f32(%pattern: reg<x86.xmm>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (f32, buffer, offset, offset) -> ()}) @fill_f32(%pattern: reg<x86.xmm>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
   %28 = vmovd.gpr32.xmm %pattern
   %29 = mov.imm64 0
   low.br ^_bb1(%29: reg<x86.gpr64>, %28: reg<x86.gpr32>)
@@ -67,7 +67,7 @@ func.def target(@target) @fill_f8(%pattern: f8E4M3, %target: buffer, %target_off
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @fill_f8(%pattern: reg<x86.gpr32>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (f8E4M3, buffer, offset, offset) -> ()}) @fill_f8(%pattern: reg<x86.gpr32>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
   %19 = movzx.u8.gpr32 %pattern
   %20 = mov.imm64 0
   low.br ^_bb1(%20: reg<x86.gpr64>)
@@ -93,7 +93,7 @@ func.def target(@target) @fill_bf16(%pattern: bf16, %target: buffer, %target_off
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @fill_bf16(%pattern: reg<x86.gpr32>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (bf16, buffer, offset, offset) -> ()}) @fill_bf16(%pattern: reg<x86.gpr32>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
   %32 = movzx.u16.gpr32 %pattern
   %33 = copy %32 : reg<x86.gpr32> -> reg<x86.gpr32>
   %34 = shl.imm.gpr32 %33 {shift = 16}
@@ -161,7 +161,7 @@ func.def target(@target) @fill_f64(%pattern: f64, %target: buffer, %target_offse
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @fill_f64(%pattern: reg<x86.xmm>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (f64, buffer, offset, offset) -> ()}) @fill_f64(%pattern: reg<x86.xmm>, %target: reg<x86.gpr64>, %target_offset: reg<x86.gpr64>, %byte_length: reg<x86.gpr64>) asm {
   %29 = vmovq.gpr64.xmm %pattern
   %30 = mov.imm64 0
   low.br ^_bb1(%30: reg<x86.gpr64>, %29: reg<x86.gpr64>)

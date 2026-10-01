@@ -80,20 +80,30 @@ static bool loom_target_function_contract_mul_u64(uint64_t lhs, uint64_t rhs,
 static iree_status_t loom_target_function_contract_apply_abi_attrs(
     const loom_module_t* module, const loom_func_symbol_facts_t* func_facts,
     iree_diagnostic_emitter_t diagnostic_emitter, loom_named_attr_slice_t attrs,
-    bool* out_valid) {
-  for (iree_host_size_t i = 0; i < attrs.count; ++i) {
+    loom_target_export_plan_t* export_plan, bool* out_valid) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < attrs.count && *out_valid && iree_status_is_ok(status); ++i) {
     const loom_named_attr_t* entry = &attrs.entries[i];
     iree_string_view_t name =
         loom_target_function_contract_string_from_id(module, entry->name_id);
-    const loom_diagnostic_param_t params[] = {
-        loom_param_string(func_facts->name),
-        loom_param_string(name),
-    };
-    return loom_target_function_contract_reject(
-        diagnostic_emitter, func_facts->func_op, LOOM_ERR_TARGET_021, params,
-        IREE_ARRAYSIZE(params), out_valid);
+    if (export_plan->abi_kind == LOOM_TARGET_ABI_OBJECT_FUNCTION &&
+        !iree_string_view_is_empty(export_plan->calling_convention) &&
+        iree_string_view_equal(name, IREE_SV("calling_convention")) &&
+        entry->value.kind == LOOM_ATTR_STRING) {
+      export_plan->calling_convention =
+          loom_string_table_get(&module->strings, entry->value.string_id);
+    } else {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(func_facts->name),
+          loom_param_string(name),
+      };
+      status = loom_target_function_contract_reject(
+          diagnostic_emitter, func_facts->func_op, LOOM_ERR_TARGET_021, params,
+          IREE_ARRAYSIZE(params), out_valid);
+    }
   }
-  return iree_ok_status();
+  return status;
 }
 
 static iree_status_t loom_target_function_contract_lookup_target(
@@ -392,7 +402,7 @@ static iree_status_t loom_target_function_contract_resolve_scoped_bundle(
   *out_valid = true;
   IREE_RETURN_IF_ERROR(loom_target_function_contract_apply_abi_attrs(
       module, func_facts, diagnostic_emitter, func_facts->abi_attrs,
-      out_valid));
+      &out_bundle_storage->export_plan, out_valid));
   if (!*out_valid) {
     return iree_ok_status();
   }

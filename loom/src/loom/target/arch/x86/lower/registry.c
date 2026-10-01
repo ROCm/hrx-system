@@ -325,11 +325,83 @@ static iree_status_t loom_x86_map_avx512_packed_dot_argument(
                                              &out_argument->abi_type);
 }
 
+static bool loom_x86_abi_type_has_default_boundary(loom_type_t type) {
+  return loom_x86_type_is_address_gpr64(type) ||
+         loom_x86_type_is_scalar_i32(type) || loom_x86_type_is_scalar_i64(type);
+}
+
+static iree_status_t loom_x86_map_native_abi_layout(
+    void* user_data, loom_low_lower_context_t* context,
+    loom_low_lower_abi_layout_kind_t layout_kind, const loom_type_t* arg_types,
+    iree_host_size_t arg_count, const loom_type_t* result_types,
+    iree_host_size_t result_count, loom_named_attr_slice_t* out_abi_layout) {
+  (void)user_data;
+  (void)layout_kind;
+  (void)arg_types;
+  (void)arg_count;
+  (void)result_types;
+  (void)result_count;
+  *out_abi_layout = loom_make_named_attr_slice(NULL, 0);
+  if (loom_low_lower_context_bundle(context)->export_plan->abi_kind !=
+      LOOM_TARGET_ABI_OBJECT_FUNCTION) {
+    return iree_ok_status();
+  }
+  loom_module_t* module = loom_low_lower_context_module(context);
+  loom_func_like_t function = loom_low_lower_context_source_function(context);
+  uint16_t argument_count = 0;
+  const loom_value_id_t* arguments =
+      loom_func_like_arg_ids(function, &argument_count);
+  const loom_value_id_t* results = loom_op_const_results(function.op);
+  const iree_host_size_t type_count =
+      (iree_host_size_t)argument_count + function.op->result_count;
+  bool needs_signature = false;
+  for (iree_host_size_t i = 0; i < type_count && !needs_signature; ++i) {
+    const loom_value_id_t value =
+        i < argument_count ? arguments[i] : results[i - argument_count];
+    needs_signature = !loom_x86_abi_type_has_default_boundary(
+        loom_module_value_type(module, value));
+  }
+  if (!needs_signature) {
+    return iree_ok_status();
+  }
+  loom_type_t* types = NULL;
+  IREE_RETURN_IF_ERROR(loom_low_lower_allocate_emission_array(
+      context, type_count, sizeof(*types), (void**)&types));
+  for (iree_host_size_t i = 0; i < type_count; ++i) {
+    const loom_value_id_t value =
+        i < argument_count ? arguments[i] : results[i - argument_count];
+    types[i] = loom_module_value_type(module, value);
+    // x86 maps each view directly to its data address. Shape dependencies are
+    // separate scalar parameters, not fields of a foreign view descriptor.
+    if (loom_type_is_view(types[i])) {
+      types[i] = loom_type_buffer();
+    }
+  }
+  loom_type_t signature;
+  IREE_RETURN_IF_ERROR(loom_module_intern_function_type(
+      module, types, argument_count, types + argument_count,
+      function.op->result_count, &signature));
+  loom_type_id_t signature_id = loom_module_lookup_type_id(module, signature);
+  loom_string_id_t signature_key;
+  IREE_RETURN_IF_ERROR(
+      loom_module_intern_string(module, IREE_SV("signature"), &signature_key));
+  const loom_named_attr_t entry = {
+      .name_id = signature_key,
+      .value = loom_attr_type(signature_id),
+  };
+  loom_attribute_t layout;
+  IREE_RETURN_IF_ERROR(loom_module_make_canonical_attr_dict(
+      module, loom_make_named_attr_slice(&entry, 1), &layout));
+  *out_abi_layout = loom_attr_as_dict(layout);
+  return iree_ok_status();
+}
+
 #include "loom/target/arch/x86/contracts/tables.inl"
 
 static const loom_low_lower_policy_t kX86Avx512LowLowerPolicy = {
     .name = IREE_SVL("x86-avx512-low-lower"),
     .error_catalog = &loom_error_catalog_core,
+    .map_abi_layout = {.fn = loom_x86_map_native_abi_layout},
     .map_type = {.fn = loom_x86_map_avx512_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_argument, .user_data = NULL},
     .source_type_supported = {.fn = loom_x86_source_type_supported,
@@ -340,6 +412,7 @@ static const loom_low_lower_policy_t kX86Avx512LowLowerPolicy = {
 static const loom_low_lower_policy_t kX86Avx2LowLowerPolicy = {
     .name = IREE_SVL("x86-avx2-low-lower"),
     .error_catalog = &loom_error_catalog_core,
+    .map_abi_layout = {.fn = loom_x86_map_native_abi_layout},
     .map_type = {.fn = loom_x86_map_avx2_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx2_argument, .user_data = NULL},
     .source_type_supported = {.fn = loom_x86_source_type_supported,
@@ -350,6 +423,7 @@ static const loom_low_lower_policy_t kX86Avx2LowLowerPolicy = {
 static const loom_low_lower_policy_t kX86ScalarLowLowerPolicy = {
     .name = IREE_SVL("x86-scalar-low-lower"),
     .error_catalog = &loom_error_catalog_core,
+    .map_abi_layout = {.fn = loom_x86_map_native_abi_layout},
     .map_type = {.fn = loom_x86_map_scalar_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_scalar_argument, .user_data = NULL},
     .source_type_supported = {.fn = loom_x86_source_type_supported,
@@ -360,6 +434,7 @@ static const loom_low_lower_policy_t kX86ScalarLowLowerPolicy = {
 static const loom_low_lower_policy_t kX86PackedDotLowLowerPolicy = {
     .name = IREE_SVL("x86-packed-dot-low-lower"),
     .error_catalog = &loom_error_catalog_core,
+    .map_abi_layout = {.fn = loom_x86_map_native_abi_layout},
     .map_type = {.fn = loom_x86_map_packed_dot_type, .user_data = NULL},
     .descriptor_matrix =
         {
@@ -372,6 +447,7 @@ static const loom_low_lower_policy_t kX86PackedDotLowLowerPolicy = {
 static const loom_low_lower_policy_t kX86Avx512PackedDotLowLowerPolicy = {
     .name = IREE_SVL("x86-avx512-packed-dot-low-lower"),
     .error_catalog = &loom_error_catalog_core,
+    .map_abi_layout = {.fn = loom_x86_map_native_abi_layout},
     .map_type = {.fn = loom_x86_map_avx512_packed_dot_type, .user_data = NULL},
     .map_argument = {.fn = loom_x86_map_avx512_packed_dot_argument,
                      .user_data = NULL},

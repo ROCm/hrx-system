@@ -12,6 +12,99 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
+    encoding
+  HDRS
+    "encoding.h"
+  SRCS
+    "encoding.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_test(
+  NAME
+    encoding_test
+  SRCS
+    "encoding_test.cc"
+  DEPS
+    ::encoding
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
+    function
+  HDRS
+    "function.h"
+  SRCS
+    "function.c"
+  DEPS
+    ::encoding
+    iree::base
+    iree::base::internal
+    iree::io::stream
+    loom::codegen::low::frame
+    loom::codegen::low::packet
+    loom::ir
+    loom::ops::low
+    loom::target::arch::x86::register_classes
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
+    abi
+  HDRS
+    "abi.h"
+  SRCS
+    "abi.c"
+  DEPS
+    iree::base
+    loom::codegen::low::allocation
+    loom::error::error_defs
+    loom::ir
+    loom::ops::low
+    loom::target::arch::x86::register_classes
+    loom::target::entry_selection
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
+    module
+  HDRS
+    "module.h"
+  SRCS
+    "module.c"
+  DEPS
+    ::abi
+    ::function
+    iree::base
+    iree::base::internal::arena
+    iree::io::stream
+    loom::codegen::low::frame
+    loom::target::emit::native::object_elf
+    loom::target::entry_selection
+    loom::target::provider
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+loom_cc_library(
+  NAME
     assembly
   HDRS
     "assembly.h"
@@ -47,7 +140,9 @@ loom_cc_library(
     "check/loom_check.c"
   DEPS
     ::assembly
+    ::function
     iree::base
+    iree::io::stream
     loom::tools::loom-check::execute
   PUBLIC
 )
@@ -61,12 +156,60 @@ loom_check_test_suite(
     "test/assembly.loom-test"
     "test/buffer_selection.loom-test"
     "test/copies.loom-test"
+    "test/function.loom-test"
     "test/high_product.loom-test"
     "test/lanes.loom-test"
     "test/memory.loom-test"
     "test/schedule_scopes.loom-test"
     "test/selects.loom-test"
     "test/shifts.loom-test"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86)
+iree_execution_test_suite(
+  NAME
+    callable_test
+  MANIFESTS
+    "test/callable.test.json"
+  TOOLS
+    "loom-compile=loom::tools::loom-compile::loom-compile"
+  LABELS
+    "hostonly"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_generated_file(
+  NAME
+    callable_object
+  GENERATOR
+    loom::tools::loom-compile::loom-compile
+  OUTPUT
+    "callable.o"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/target/emit/native/x86/test/callable.loom"
+    "--target=x86:scalar"
+  INPUTS
+    "test/callable.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_X86 AND IREE_ARCH STREQUAL "x86_64" AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    callable_link_test
+  SRCS
+    "callable.o"
+    "callable_link_test.cc"
+  DEPS
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.x86"
 )
 endif()
 

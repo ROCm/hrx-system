@@ -22,7 +22,7 @@ func.def @derived_selection(%first: buffer, %second: buffer, %third: buffer, %po
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @derived_selection(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %third_aligned: reg<x86.gpr64>, %position: reg<x86.gpr64>, %select_first: reg<x86.gpr32>, %select_pair: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer, buffer, index, i1, i1) -> (i32)}) @derived_selection(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %third_aligned: reg<x86.gpr64>, %position: reg<x86.gpr64>, %select_first: reg<x86.gpr32>, %select_pair: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %base0 = mov.imm64 4
   %base1 = mov.imm64 8
   %base2 = mov.imm64 12
@@ -73,7 +73,7 @@ func.def @selection_with_side_effects(%first: buffer, %second: buffer, %third: b
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @selection_with_side_effects(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %third_aligned: reg<x86.gpr64>, %select_first: reg<x86.gpr32>, %select_pair: reg<x86.gpr32>, %enter: reg<x86.gpr32>, %side: reg<x86.gpr32>, %initial: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer, buffer, i1, i1, i1, i1, i32) -> (i32)}) @selection_with_side_effects(%first_aligned: reg<x86.gpr64>, %second_aligned: reg<x86.gpr64>, %third_aligned: reg<x86.gpr64>, %select_first: reg<x86.gpr32>, %select_pair: reg<x86.gpr32>, %enter: reg<x86.gpr32>, %side: reg<x86.gpr32>, %initial: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %enter, ^producer, ^exit : reg<x86.gpr32>
 ^producer:
   mov.store.gpr32 %initial, %third_aligned {disp32 = 0}

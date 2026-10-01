@@ -591,6 +591,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   frame.allocation.packet_move_groups = packet_move_groups;
   frame.allocation.packet_move_group_count = IREE_ARRAYSIZE(packet_move_groups);
   frame.allocation.moves = moves;
+  frame.allocation.move_count = IREE_ARRAYSIZE(moves);
   frame.allocation.packet_move_count = 1;
   frame.allocation.spill_count = IREE_ARRAYSIZE(spill_plans);
   frame.allocation.coalesced_copy_count = 3;
