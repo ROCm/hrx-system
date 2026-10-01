@@ -11,6 +11,7 @@
 #include "iree/base/alignment.h"
 #include "iree/base/byte_sequence.h"
 #include "loom/codegen/low/allocation_json.h"
+#include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/frame.h"
 #include "loom/codegen/low/packet_json.h"
 #include "loom/codegen/low/target_binding.h"
@@ -405,6 +406,10 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
       &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
+  }
+  if (target.target_facts == NULL) {
+    return loom_low_diagnostic_emit_missing_target(request->module,
+                                                   low_function, emitter);
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
       &target, request->case_arena, out_affinities));

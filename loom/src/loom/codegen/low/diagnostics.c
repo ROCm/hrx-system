@@ -77,6 +77,21 @@ iree_string_view_t loom_low_diagnostic_function_name(
   return IREE_SV("<unnamed>");
 }
 
+iree_status_t loom_low_diagnostic_emit_missing_target(
+    const loom_module_t* module, const loom_op_t* function_op,
+    iree_diagnostic_emitter_t emitter) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_function_name(module, function_op)),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = function_op,
+      .error = LOOM_ERR_TARGET_026,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
+
 iree_status_t loom_low_diagnostic_validate_workgroup_storage_limit(
     const loom_module_t* module, const loom_op_t* function_op,
     const loom_low_resolved_target_t* target, uint64_t workgroup_storage_bytes,

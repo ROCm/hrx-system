@@ -35,10 +35,11 @@
 extern "C" {
 #endif
 
-// Computes the immutable residency view for one function snapshot. Called once
-// after target resolution and storage inventory, before scheduling. The target
-// interprets retained facts only; it does not inspect IR or retain pass state.
-// The returned model is borrowed and must outlive the frame.
+// Computes the immutable residency view for one target-bound function snapshot.
+// Called once after target resolution and storage inventory, before scheduling.
+// Frame construction rejects a targetless function before calling the query.
+// The target interprets retained facts only; it does not inspect IR or retain
+// pass state. The returned model is borrowed and must outlive the frame.
 typedef loom_target_residency_view_t (
     *loom_low_emission_frame_residency_query_fn_t)(
     const loom_low_resolved_target_t* target,
@@ -54,7 +55,8 @@ typedef struct loom_low_emission_frame_options_t {
   const loom_target_facts_t* function_target_facts;
   // Optional analysis-derived memory summaries for the scheduled low function.
   const loom_low_memory_access_map_t* memory_accesses;
-  // Optional target query for the function-local residency view.
+  // Optional target query for the function-local residency view. Its presence
+  // requires concrete target facts for the function.
   loom_low_emission_frame_residency_query_fn_t residency_query;
   // Optional target-provided descriptor pair-affinity table.
   loom_low_schedule_pair_affinity_list_t schedule_pair_affinities;

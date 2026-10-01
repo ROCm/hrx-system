@@ -1,0 +1,15 @@
+// RUN: emit amdgpu-assembly @native_missing_target
+
+// ERROR@+1: TARGET/026 {function_name="native_missing_target"}
+low.func.def public target<amdgpu.rdna4.gfx125x.core> abi(hal_kernel) @native_missing_target() asm {
+  return
+}
+
+// ====
+
+// RUN: emit amdgpu-occupancy-json @occupancy_missing_target
+
+// ERROR@+1: TARGET/026 {function_name="occupancy_missing_target"}
+low.func.def target<amdgpu.rdna4.gfx125x.core> @occupancy_missing_target(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  return %value
+}

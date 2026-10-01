@@ -199,8 +199,14 @@ static iree_status_t loom_low_emission_frame_build_impl(
       LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, &model);
   if (iree_status_is_ok(status) && model.error_count == 0 &&
       options->residency_query != NULL) {
-    out_frame->residency = options->residency_query(
-        &model.target, &model.requirements.storage_layout.space_sizes);
+    if (model.target.target_facts == NULL) {
+      status = loom_low_diagnostic_emit_missing_target(module, low_func_op,
+                                                       options->emitter);
+      ++model.error_count;
+    } else {
+      out_frame->residency = options->residency_query(
+          &model.target, &model.requirements.storage_layout.space_sizes);
+    }
   }
   loom_low_schedule_options_t schedule_options = {
       .retained_blocks = retained_blocks,

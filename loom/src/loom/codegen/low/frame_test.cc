@@ -19,8 +19,10 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
+#include "loom/target/facts_builder.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/target/test/low_registry.h"
+#include "loom/target/test/target_records.h"
 #include "loom/testing/module_ptr.h"
 
 namespace loom {
@@ -114,11 +116,17 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
 TEST_F(LowEmissionFrameTest, ResidencyQueryConsumesRetainedFunctionFacts) {
   ModulePtr module = ParseModule();
   static const loom_target_residency_model_t model = {/*.best_tier=*/4};
+  loom_target_facts_t target_facts = {};
+  loom_target_facts_builder_initialize(&loom_test_target_fact_type,
+                                       loom_test_target_bundles.values[1],
+                                       &target_facts);
   loom_low_emission_frame_options_t options = {};
   options.descriptor_registry = &registry_.registry;
+  options.function_target_facts = &target_facts;
   options.residency_query =
       [](const loom_low_resolved_target_t* target,
          const loom_low_storage_layout_space_sizes_t* storage_sizes) {
+        EXPECT_NE(target->target_facts, nullptr);
         EXPECT_EQ(target->descriptor_set, loom_test_low_core_descriptor_set());
         EXPECT_EQ(storage_sizes->workgroup_bytes, 64u);
         return loom_target_residency_view(&model, 2);

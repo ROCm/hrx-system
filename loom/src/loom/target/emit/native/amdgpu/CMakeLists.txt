@@ -101,6 +101,7 @@ loom_cc_library(
     iree::base
     iree::base::core_headers
     loom::codegen::low::allocation_json
+    loom::codegen::low::diagnostics
     loom::codegen::low::frame
     loom::codegen::low::packet_json
     loom::codegen::low::target_binding
@@ -151,6 +152,7 @@ loom_check_test_suite(
     "test/register_numbering.loom-test"
     "test/spill_lowering.loom-test"
     "test/structural_delay_alu.loom-test"
+    "test/target_requirement.loom-test"
     "test/tensor_completion.loom-test"
     "test/vopd_plan.loom-test"
     "test/wait_coalescing.loom-test"
