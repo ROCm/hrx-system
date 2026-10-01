@@ -19,7 +19,10 @@
 // immutable executable storage through checked queue-first teardown.
 class Pm4DispatchTest : public Pm4CommandTest {
  protected:
-  Pm4DispatchTest() : Pm4CommandTest(AMDF_QUEUE_ROLE_COMPUTE) {}
+  explicit Pm4DispatchTest(amdf_queue_publication_modes_t publication_modes =
+                               AMDF_QUEUE_PUBLICATION_MODE_USER |
+                               AMDF_QUEUE_PUBLICATION_MODE_KERNEL)
+      : Pm4CommandTest(AMDF_QUEUE_ROLE_COMPUTE, publication_modes) {}
 
   // Places an audited image and sets the caller's entry address. Other program
   // facts remain immutable compiler inputs and explicit launch requirements.
