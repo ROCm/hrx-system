@@ -65,7 +65,9 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   %c65 = index.constant 65 : index
   %c481 = index.constant 481 : index
   %epsilon = scalar.constant 0.000001 : f32
-  %uses_m4 = index.cmp eq, %verification_depth, %c4 : index
+  %verifying = index.cmp eq, %verification_depth, %c4 : index
+  %isolated = index.cmp eq, %span_capacity, %c0 : index
+  %uses_m4 = scalar.andi %verifying, %isolated : i1
   %uses_spans = index.cmp ne, %span_capacity, %c0 : index
 
   %uses_x64 = index.cmp ult, %schedule_token_count, %c65 : index

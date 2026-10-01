@@ -21,7 +21,7 @@ IREE_FLAG_LIST(
 IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json.");
 IREE_FLAG(string, mtp, "",
-          "Optional MTP bundle; checks private proposal isolation.");
+          "Optional MTP bundle; checks proposals and accepted continuation.");
 IREE_FLAG(string, compare, "",
           "Optional completed-work ABABA comparison: single, mixed, full or "
           "decode. Empty runs the correctness witness.");
@@ -190,6 +190,244 @@ static iree_status_t qwen_check_error(iree_status_t actual,
       iree_make_status(IREE_STATUS_DATA_LOSS, "expected rejection code %d",
                        expected),
       actual);
+}
+
+static iree_status_t qwen_check_verified_epoch(
+    loom_serve_qwen_model_t* model, iree_host_size_t shape_index,
+    qwen_check_row_t rows[4], const iree_host_size_t order[4],
+    const loom_serve_qwen_span_t spans[4], const uint32_t limits[4],
+    const iree_host_size_t* expected_counts) {
+  loom_serve_qwen_result_t results[4];
+  IREE_RETURN_IF_ERROR(loom_serve_qwen_model_verify(model, shape_index, 4,
+                                                    spans, limits, results));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
+    qwen_check_row_t* fixture = &rows[order[i]];
+    loom_serve_qwen_row_t* reference =
+        loom_serve_qwen_model_row(model, fixture->isolated);
+    const loom_serve_qwen_result_t* result = &results[i];
+    const bool selects =
+        iree_any_bit_set(spans[i].flags, LOOM_SERVE_QWEN_SPAN_FLAG_SELECT);
+    if ((limits[i] &&
+         (!result->output_count || result->output_count > limits[i] ||
+          result->consumed_count != result->output_count)) ||
+        (!limits[i] && (result->consumed_count != spans[i].token_count ||
+                        result->output_count != (selects ? 1u : 0u))) ||
+        (expected_counts && result->consumed_count != expected_counts[i])) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "verified row %zu has unexpected consumed/output counts %zu/%zu",
+          fixture->packed, result->consumed_count, result->output_count);
+      continue;
+    }
+    if (limits[i]) {
+      for (iree_host_size_t j = 0;
+           j < result->output_count && iree_status_is_ok(status); ++j) {
+        const int32_t pending = loom_serve_qwen_row_token(reference);
+        const loom_serve_qwen_span_t next = {fixture->isolated, 1, &pending,
+                                             LOOM_SERVE_QWEN_SPAN_FLAG_SELECT};
+        status = loom_serve_qwen_model_epoch(model, shape_index, 1, &next);
+        if (iree_status_is_ok(status) &&
+            result->tokens[j] != loom_serve_qwen_row_token(reference)) {
+          status = iree_make_status(
+              IREE_STATUS_DATA_LOSS,
+              "verified row %zu output %zu is %d, ordinary target selected %d",
+              fixture->packed, j, result->tokens[j],
+              loom_serve_qwen_row_token(reference));
+        }
+        if (iree_status_is_ok(status) && j + 1 < result->output_count &&
+            (result->tokens[j] != spans[i].token_ids[j + 1] ||
+             loom_serve_qwen_row_is_eos(reference))) {
+          status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                    "verification crossed rejection or EOS");
+        }
+      }
+      if (iree_status_is_ok(status) && result->output_count < limits[i] &&
+          !loom_serve_qwen_row_is_eos(reference) &&
+          result->tokens[result->output_count - 1] ==
+              spans[i].token_ids[result->output_count]) {
+        status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "verification stopped before its frontier");
+      }
+    } else {
+      loom_serve_qwen_span_t known = spans[i];
+      known.row_index = fixture->isolated;
+      status = loom_serve_qwen_model_epoch(model, shape_index, 1, &known);
+      if (iree_status_is_ok(status) && selects &&
+          result->tokens[0] != loom_serve_qwen_row_token(reference)) {
+        status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "known span changed during verification");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      const loom_serve_qwen_row_t* actual =
+          loom_serve_qwen_model_row(model, fixture->packed);
+      if (loom_serve_qwen_row_position(actual) !=
+              loom_serve_qwen_row_position(reference) ||
+          (selects && (loom_serve_qwen_row_token(actual) !=
+                           loom_serve_qwen_row_token(reference) ||
+                       loom_serve_qwen_row_is_eos(actual) !=
+                           loom_serve_qwen_row_is_eos(reference)))) {
+        status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "verified retained frontier differs");
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      memcpy(fixture->output + fixture->output_count, result->tokens,
+             result->output_count * sizeof(int32_t));
+      fixture->output_count += result->output_count;
+      fprintf(stderr,
+              "Matched verification: shape %zu, row %zu, limit %u, "
+              "consumed %zu, outputs %zu [%d,%d,%d,%d].\n",
+              shape_index, fixture->packed, limits[i], result->consumed_count,
+              result->output_count, result->tokens[0], result->tokens[1],
+              result->tokens[2], result->tokens[3]);
+    }
+  }
+  return status;
+}
+
+static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
+                                                 iree_allocator_t allocator) {
+  if (!FLAG_mtp[0]) {
+    return iree_ok_status();
+  }
+  qwen_check_row_t rows[4] = {
+      {.packed = 6, .isolated = 0},
+      {.packed = 1, .isolated = 2},
+      {.packed = 7, .isolated = 4},
+      {.packed = 3, .isolated = 5},
+  };
+  const char* phrases[] = {"amber cedar maple raven",
+                           "violet birch willow falcon",
+                           "silver pine oak robin", "golden elm ash eagle"};
+  int32_t inputs[4][4];
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
+    char prompt[512];
+    snprintf(
+        prompt, sizeof(prompt),
+        "<|im_start|>user\nReturn exactly: %s copper hazel sparrow "
+        "juniper bronze larch heron poplar crimson beech kestrel "
+        "spruce.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n",
+        phrases[i]);
+    status = iree_tokenizer_encode(
+        loom_serve_qwen_model_tokenizer(model), iree_make_cstring_view(prompt),
+        IREE_TOKENIZER_ENCODE_FLAG_NONE,
+        iree_tokenizer_make_token_output(rows[i].input, NULL, NULL, 512),
+        allocator, &rows[i].input_count);
+    const iree_host_size_t indices[] = {rows[i].packed, rows[i].isolated};
+    for (iree_host_size_t j = 0; j < 2 && iree_status_is_ok(status); ++j) {
+      status = loom_serve_qwen_row_reset(
+          loom_serve_qwen_model_row(model, indices[j]));
+      if (iree_status_is_ok(status)) {
+        status = qwen_check_prefill(model, indices[j], rows[i].input_count,
+                                    rows[i].input);
+      }
+    }
+    // Derive matching proposals from ordinary target execution, then restore
+    // the reference through its actual input history. No state copies or
+    // fabricated prediction oracle are involved.
+    loom_serve_qwen_row_t* reference =
+        loom_serve_qwen_model_row(model, rows[i].isolated);
+    for (iree_host_size_t j = 0; j < 4 && iree_status_is_ok(status); ++j) {
+      if (loom_serve_qwen_row_is_eos(reference)) {
+        status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "verification fixture ended before drafts");
+      } else {
+        inputs[i][j] = loom_serve_qwen_row_token(reference);
+        status = loom_serve_qwen_row_decode(reference);
+      }
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_qwen_row_reset(reference);
+    }
+    if (iree_status_is_ok(status)) {
+      status = qwen_check_prefill(model, rows[i].isolated, rows[i].input_count,
+                                  rows[i].input);
+    }
+  }
+  IREE_RETURN_IF_ERROR(status);
+  inputs[0][1] = inputs[0][1] == 0 ? 1 : 0;
+  inputs[1][2] = inputs[1][2] == 0 ? 1 : 0;
+  const iree_host_size_t order[] = {2, 0, 3, 1};
+  const uint32_t limits[] = {4, 4, 2, 4};
+  const iree_host_size_t expected[] = {4, 1, 2, 2};
+  loom_serve_qwen_span_t spans[4];
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    spans[i] =
+        (loom_serve_qwen_span_t){rows[order[i]].packed, 4, inputs[order[i]],
+                                 LOOM_SERVE_QWEN_SPAN_FLAG_SELECT};
+  }
+  uint32_t invalid_limits[] = {5, 4, 2, 4};
+  loom_serve_qwen_result_t rejected[4];
+  IREE_RETURN_IF_ERROR(
+      qwen_check_error(loom_serve_qwen_model_verify(model, 0, 4, spans,
+                                                    invalid_limits, rejected),
+                       IREE_STATUS_INVALID_ARGUMENT));
+  IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(model, 0, rows, order, spans,
+                                                 limits, expected));
+  IREE_RETURN_IF_ERROR(qwen_check_proposals(model, rows));
+
+  // Natural proposals share the next epoch with an intermediate prompt and a
+  // known decode. Captured/replayed slots now contain holes and reordered rows.
+  iree_host_size_t proposal_rows[4];
+  int32_t proposals[4][3];
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    proposal_rows[i] = rows[i].packed;
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_serve_qwen_model_propose(model, 4, proposal_rows, proposals));
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    inputs[i][0] = loom_serve_qwen_row_token(
+        loom_serve_qwen_model_row(model, rows[i].packed));
+    memcpy(&inputs[i][1], proposals[i], sizeof(proposals[i]));
+  }
+  const iree_host_size_t mixed_order[] = {3, 0, 2, 1};
+  const loom_serve_qwen_span_t mixed[] = {
+      {rows[3].packed, 4, inputs[3], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
+      {rows[0].packed, 3, rows[0].input + 4, 0},
+      {rows[2].packed, 4, inputs[2], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
+      {rows[1].packed, 1, inputs[1], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
+  };
+  const uint32_t mixed_limits[] = {4, 0, 4, 0};
+  const iree_host_size_t mixed_shape =
+      loom_serve_qwen_model_shape_count(model) - 1;
+  IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(
+      model, mixed_shape, rows, mixed_order, mixed, mixed_limits, NULL));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_error(loom_serve_qwen_row_decode(
+                           loom_serve_qwen_model_row(model, rows[0].packed)),
+                       IREE_STATUS_FAILED_PRECONDITION));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_prefill(model, rows[0].packed, 1, rows[0].input + 7));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_prefill(model, rows[0].isolated, 1, rows[0].input + 7));
+  IREE_RETURN_IF_ERROR(qwen_check_prediction(model, &rows[0]));
+  IREE_RETURN_IF_ERROR(qwen_check_proposals(model, rows));
+  iree_host_size_t next_shape = 0;
+  for (int step = 0; step < 3 && iree_status_is_ok(status); ++step) {
+    for (iree_host_size_t i = 0; i < 4; ++i) {
+      inputs[i][0] = loom_serve_qwen_row_token(
+          loom_serve_qwen_model_row(model, rows[order[i]].packed));
+      spans[i] = (loom_serve_qwen_span_t){rows[order[i]].packed, 1, inputs[i],
+                                          LOOM_SERVE_QWEN_SPAN_FLAG_SELECT};
+    }
+    status = qwen_check_epoch(model, &next_shape, rows, 4, order, spans);
+  }
+  for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
+    char text[1024];
+    iree_host_size_t length = 0;
+    status = iree_tokenizer_decode(
+        loom_serve_qwen_model_tokenizer(model),
+        iree_tokenizer_make_token_id_list(rows[i].output, rows[i].output_count),
+        IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
+        iree_make_mutable_string_view(text, sizeof(text)), allocator, &length);
+    if (iree_status_is_ok(status)) {
+      printf("verified row %zu: %.*s\n", rows[i].packed, (int)length, text);
+    }
+  }
+  return status;
 }
 
 static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
@@ -521,6 +759,9 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = FLAG_compare[0] ? qwen_check_compare(model, allocator)
                              : qwen_check_run(model, allocator);
+  }
+  if (iree_status_is_ok(status) && !FLAG_compare[0]) {
+    status = qwen_check_mtp_verification(model, allocator);
   }
   status = iree_status_join(status, loom_serve_qwen_model_destroy(model));
   if (!iree_status_is_ok(status)) {

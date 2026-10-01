@@ -20,6 +20,7 @@ def compile_stage(arguments, stage):
         "mtp_draft": "draft",
         "mtp_begin": "begin",
         "mtp_warm": f"warm{arguments.prefill_capacity}",
+        "mtp_verify": f"verify{arguments.prefill_capacity}",
     }.get(stage, stage)
     output = arguments.output.resolve() / stage_directory
     for directory in (
@@ -60,6 +61,7 @@ def compile_stage(arguments, stage):
         "mtp_draft": ("mtp.loom", "qwen38_mtp_draft"),
         "mtp_begin": ("mtp.loom", "qwen38_mtp_begin"),
         "mtp_warm": ("mtp.loom", "qwen38_mtp_warm"),
+        "mtp_verify": ("verify.loom", "qwen38_mtp_verify"),
     }[stage]
     primary = source / primary_name
     libraries = sorted(source.glob("kernels/**/*.loom")) + sorted(
@@ -155,7 +157,7 @@ def main():
     stages = {
         "both": ("prefill", "decode"),
         "all": ("prefill", "decode", "epoch"),
-        "mtp": ("mtp_draft", "mtp_begin", "mtp_warm"),
+        "mtp": ("mtp_draft", "mtp_begin", "mtp_warm", "mtp_verify"),
     }.get(arguments.stage, (arguments.stage,))
     for stage in stages:
         compile_stage(arguments, stage)
