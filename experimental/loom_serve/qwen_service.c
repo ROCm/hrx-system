@@ -914,7 +914,7 @@ iree_status_t loom_serve_qwen_service_run(
       .shapes = loom_serve_qwen_model_shapes(model),
       .shape_count = loom_serve_qwen_model_shape_count(model),
       .heartbeat = {.interval = options->heartbeat_interval}};
-  if (service.schedule_mode != LOOM_SERVE_QWEN_SCHEDULE_PACKED) {
+  if (!service.shape_count) {
     service.shapes = &isolated_shape;
     service.shape_count = 1;
   }
