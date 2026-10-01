@@ -15,20 +15,24 @@ the native call submits and returns without waiting. HAL captures bindings and
 retains their buffers independently of the VM invocation. One process can serve
 many rows; its preallocated native binding scratch is reused between calls.
 
-`execution.c` is the shared execution capability used by both the model and
-host I/O. Each accepted submission waits on the preceding submission and signals
-the next timeline value, including transfers across different exact queues.
-This deliberately serializes shared scratch use. The returned integer is scoped
-to that execution object, not a global completion handle. Queue rejection does
-not advance the accepted frontier. The host drains accepted work before
-recycling borrowed host payloads and observes asynchronous failures explicitly.
+`execution.c` is the shared execution capability used by the model and host
+I/O. Commands and input transfers advance one timeline that serializes shared
+scratch use across exact queues. Feedback downloads wait on their producer and
+prior feedback, then advance a separate timeline without ordering later model
+work. Their device sources remain immutable until feedback completion; host
+payloads remain borrowed through that completion. Each returned integer belongs
+to its execution object and named timeline, not a global completion namespace.
+Queue rejection advances neither frontier. Final drain joins both branches and
+propagates their failures before releasing any borrowed storage.
 
 The GPU integration test compiles Qwen generation-state kernels, command programs,
 and a VM entry from source. Two retained rows share code, commands, and one VM
 process while one row pauses and resumes. Checked outputs cover token history,
 position, padding, and EOS. A rejected native binding must leave the execution
-domain usable. This is an ownership/control witness, **not a full Qwen model
-run or a performance result**. The test artifacts currently target gfx1151.
+domain usable. Feedback forks preserve the work frontier while later VM calls
+consume independent retained state. This is an ownership/control witness,
+**not a full Qwen model run or a performance result**. The test artifacts
+currently target gfx1151.
 
 From the worktree root:
 
@@ -47,6 +51,12 @@ parameter slab, prepared prefill/decode commands, model VM process, residual
 buffer and packed workspace. One preallocated arena partitions private retained
 state among up to eight rows. Rows are data, not VM processes. A single host
 owner multiplexes their stages through the shared execution timeline.
+
+Packed target completion forks compact result downloads from cache-only MTP
+catch-up. The catch-up stage consumes committed target state, not the downloaded
+result records. The synchronous model call joins both branches before publishing
+host positions and recycling payloads; it does not yet provide autonomous
+inter-epoch device continuation.
 
 The Qwen tools use IREE's standard device profiling flags. Profiling begins
 after model loading and residency initialization; shutdown drains accepted

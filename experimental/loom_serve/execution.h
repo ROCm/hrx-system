@@ -14,12 +14,12 @@
 extern "C" {
 #endif
 
-// One ordered submission domain, shared by the model and its I/O.
-// All operations explicitly wait on the preceding accepted submission. This
-// serializes scratch reuse even across distinct transfer and dispatch queues;
-// neither queue order nor buffer aliasing establishes dependencies implicitly.
+// Ordered model work with an independent feedback branch. Commands and input
+// transfers serialize scratch reuse across the exact queues. Feedback waits
+// on its producer and previous feedback, but never orders later model work.
+// Neither queue order nor buffer aliasing establishes dependencies implicitly.
 // A submission lock protects timeline assignment and enqueue as one operation.
-// Values returned by this object are meaningful only with this same object.
+// Completion values belong to this object and the method's named timeline.
 typedef struct loom_serve_execution_t loom_serve_execution_t;
 
 // Retains the device and both exact queues. The device must belong to a live
@@ -30,8 +30,9 @@ iree_status_t loom_serve_execution_create(
 
 void loom_serve_execution_retain(loom_serve_execution_t* execution);
 
-// Releases ownership without an implicit host wait. The owner must drain and
-// observe failures before final release or recycling borrowed host I/O storage.
+// Releases ownership without an implicit host wait. The owner must drain both
+// branches and observe failures before final release or recycling borrowed
+// host I/O storage.
 void loom_serve_execution_release(loom_serve_execution_t* execution);
 
 // Enqueues reusable commands. HAL captures the binding table and retains its
@@ -48,12 +49,26 @@ iree_status_t loom_serve_execution_transfer(
     loom_serve_execution_t* execution, iree_host_size_t operation_count,
     const iree_hal_transfer_operation_t* operations, uint64_t* out_value);
 
-// Waits for a value returned by this execution domain and propagates failure.
+// Enqueues feedback downloads after all preceding accepted work and feedback.
+// Returns a feedback completion, without advancing the model work timeline.
+// Operations must be downloads; host destinations remain borrowed and device
+// sources must not be overwritten until this completion retires. Independent
+// later commands may read the same sources or consume other model state.
+iree_status_t loom_serve_execution_feedback(
+    loom_serve_execution_t* execution, iree_host_size_t operation_count,
+    const iree_hal_transfer_operation_t* operations, uint64_t* out_value);
+
+// Waits for a command/input-transfer value and propagates failure.
 iree_status_t loom_serve_execution_wait(loom_serve_execution_t* execution,
                                         uint64_t value);
 
-// Waits only for the last successfully accepted submission. A synchronous
-// rejection never advances that frontier to an unsignaled value.
+// Waits for a feedback value and propagates failure. This does not join work
+// submitted after the feedback fork.
+iree_status_t loom_serve_execution_feedback_wait(
+    loom_serve_execution_t* execution, uint64_t value);
+
+// Joins both accepted frontiers and their failures. A synchronous rejection
+// never advances either frontier to an unsignaled value.
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution);
 
 #ifdef __cplusplus

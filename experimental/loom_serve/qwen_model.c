@@ -82,7 +82,7 @@ struct loom_serve_qwen_model_t {
   iree_hal_queue_t* dispatch;
   // Borrowed exact transfer queue, retained by execution.
   iree_hal_queue_t* transfer;
-  // Ordered stage and host-I/O submission domain.
+  // Ordered stage/input submissions with independently retired feedback.
   loom_serve_execution_t* execution;
   // Optional flag-selected profiling session, ended after accepted work drains.
   iree_hal_profiling_from_flags_t* profiling;
@@ -1309,9 +1309,9 @@ static iree_status_t qwen_step(loom_serve_qwen_row_t* row, int32_t initialize) {
                     .length = sizeof(row->transfer.progress)}},
   };
   uint64_t completion = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(
+  IREE_RETURN_IF_ERROR(loom_serve_execution_feedback(
       model->execution, IREE_ARRAYSIZE(downloads), downloads, &completion));
-  return loom_serve_execution_wait(model->execution, completion);
+  return loom_serve_execution_feedback_wait(model->execution, completion);
 }
 
 static iree_status_t qwen_invoke_stage(loom_serve_qwen_model_t* model,
@@ -1462,6 +1462,27 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
     IREE_RETURN_IF_ERROR(
         qwen_invoke_stage(model, shape_index + 2, model->epoch.buffers));
   }
+  // Results are immutable until this epoch retires. Download can fork from
+  // target completion while cache-only catch-up consumes other target outputs.
+  if (output_limits) {
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download = {.source_buffer = model->mtp.results,
+                     .target = model->mtp.records,
+                     .length = span_count * sizeof(model->mtp.records[0])},
+    };
+    IREE_RETURN_IF_ERROR(loom_serve_execution_feedback(model->execution, 1,
+                                                       &download, &completion));
+  } else if (output_count) {
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download = {.source_buffer = model->epoch.buffers[5],
+                     .target = model->epoch.outputs,
+                     .length = output_count * sizeof(int32_t)},
+    };
+    IREE_RETURN_IF_ERROR(loom_serve_execution_feedback(model->execution, 1,
+                                                       &download, &completion));
+  }
   if (model->mtp.first_stage) {
     iree_hal_buffer_t* warm_buffers[] = {
         model->residual,
@@ -1475,27 +1496,8 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
     IREE_RETURN_IF_ERROR(qwen_invoke_stage(
         model, model->mtp.first_stage + 1 + shape_index, warm_buffers));
   }
-  if (output_limits) {
-    const iree_hal_transfer_operation_t download = {
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download = {.source_buffer = model->mtp.results,
-                     .target = model->mtp.records,
-                     .length = span_count * sizeof(model->mtp.records[0])},
-    };
-    IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(model->execution, 1,
-                                                       &download, &completion));
-  } else if (output_count) {
-    const iree_hal_transfer_operation_t download = {
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download = {.source_buffer = model->epoch.buffers[5],
-                     .target = model->epoch.outputs,
-                     .length = output_count * sizeof(int32_t)},
-    };
-    IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(model->execution, 1,
-                                                       &download, &completion));
-  }
-  // This synchronous owner has submitted no later work. The execution frontier
-  // is the download when outputs exist, otherwise the model invocation itself.
+  // The synchronous model boundary joins catch-up and feedback independently
+  // before publishing host positions or reusing either branch's payloads.
   IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_qwen_span_t* span = &spans[i];
