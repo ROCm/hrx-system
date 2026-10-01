@@ -52,9 +52,17 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.s_mul_i32",
     "amdgpu.s_mul_hi_u32",
     "amdgpu.s_min_i32",
+    "amdgpu.s_min_i32.rhs_inline",
+    "amdgpu.s_min_i32.lit",
     "amdgpu.s_max_i32",
+    "amdgpu.s_max_i32.rhs_inline",
+    "amdgpu.s_max_i32.lit",
     "amdgpu.s_min_u32",
+    "amdgpu.s_min_u32.rhs_inline",
+    "amdgpu.s_min_u32.lit",
     "amdgpu.s_max_u32",
+    "amdgpu.s_max_u32.rhs_inline",
+    "amdgpu.s_max_u32.lit",
     "amdgpu.s_and_b32",
     "amdgpu.s_and_b32.rhs_inline",
     "amdgpu.s_and_b32.lit",
@@ -82,9 +90,17 @@ _DESCRIPTOR_KEYS = (
     "amdgpu.v_mad_u32_u24.src1_inline",
     "amdgpu.v_lshl_add_u32.shift_imm",
     "amdgpu.v_min_i32",
+    "amdgpu.v_min_i32.src0_inline",
+    "amdgpu.v_min_i32.lit",
     "amdgpu.v_max_i32",
+    "amdgpu.v_max_i32.src0_inline",
+    "amdgpu.v_max_i32.lit",
     "amdgpu.v_min_u32",
+    "amdgpu.v_min_u32.src0_inline",
+    "amdgpu.v_min_u32.lit",
     "amdgpu.v_max_u32",
+    "amdgpu.v_max_u32.src0_inline",
+    "amdgpu.v_max_u32.lit",
     "amdgpu.v_and_b32",
     "amdgpu.v_and_b32.lit",
     "amdgpu.v_or_b32",
@@ -655,6 +671,36 @@ def _i32_literal_binary_rule(
                 immediates={"imm32": ValueProject.i32_as_u32_bits(literal_source)},
                 form=DescriptorEmitForm.OP,
             ),
+        ),
+    )
+
+
+def _i32_extrema_rules(source_op: Op, suffix: str) -> tuple[DescriptorRule, ...]:
+    immediate_rules = tuple(
+        _i32_literal_binary_rule(
+            source_op,
+            _descriptor(descriptor_key),
+            literal_source=literal_source,
+            nonliteral_source=nonliteral_source,
+            register_class=register_class,
+            literal_range=literal_range,
+        )
+        for descriptor_key, register_class, literal_range in (
+            (f"amdgpu.s_{suffix}.rhs_inline", "amdgpu.sgpr", (0, 64)),
+            (f"amdgpu.s_{suffix}.lit", "amdgpu.sgpr", None),
+            (f"amdgpu.v_{suffix}.src0_inline", "amdgpu.vgpr", (0, 64)),
+            (f"amdgpu.v_{suffix}.lit", "amdgpu.vgpr", None),
+        )
+        for literal_source, nonliteral_source in (("lhs", "rhs"), ("rhs", "lhs"))
+    )
+    return (
+        *immediate_rules,
+        _sgpr_binary_rule(source_op, _I32, _descriptor(f"amdgpu.s_{suffix}")),
+        _vgpr_binary_rule(
+            source_op,
+            _I32,
+            _descriptor(f"amdgpu.v_{suffix}"),
+            I32_VGPR_MATERIALIZER,
         ),
     )
 
@@ -1576,9 +1622,7 @@ def _rules() -> tuple[DescriptorRule, ...]:
         (scalar_arithmetic.scalar_minui, "min_u32"),
         (scalar_arithmetic.scalar_maxui, "max_u32"),
     ):
-        rules.extend(
-            _i32_sgpr_vgpr_rules(source_op, f"amdgpu.s_{suffix}", f"amdgpu.v_{suffix}")
-        )
+        rules.extend(_i32_extrema_rules(source_op, suffix))
     rules.extend(
         _i32_sgpr_vgpr_rules(
             scalar_arithmetic.scalar_addi,

@@ -204,6 +204,33 @@ def test_f32_copysign_rules_try_literal_bfi_before_register_mask() -> None:
         )
 
 
+def test_integer_extrema_rules_prefer_encoded_constants() -> None:
+    compiled = _compiled_integer_rules()
+
+    for source_op, suffix in (
+        (scalar_arithmetic.scalar_minsi, "min_i32"),
+        (scalar_arithmetic.scalar_maxsi, "max_i32"),
+        (scalar_arithmetic.scalar_minui, "min_u32"),
+        (scalar_arithmetic.scalar_maxui, "max_u32"),
+    ):
+        descriptor_sequences = tuple(
+            _rule_descriptor_keys(compiled, rule)
+            for rule in _rules_for_source_op(compiled, source_op)
+        )
+        assert descriptor_sequences == (
+            (f"amdgpu.s_{suffix}.rhs_inline",),
+            (f"amdgpu.s_{suffix}.rhs_inline",),
+            (f"amdgpu.s_{suffix}.lit",),
+            (f"amdgpu.s_{suffix}.lit",),
+            (f"amdgpu.v_{suffix}.src0_inline",),
+            (f"amdgpu.v_{suffix}.src0_inline",),
+            (f"amdgpu.v_{suffix}.lit",),
+            (f"amdgpu.v_{suffix}.lit",),
+            (f"amdgpu.s_{suffix}",),
+            (f"amdgpu.v_{suffix}",),
+        )
+
+
 def test_packed_i16_arithmetic_rules_try_native_pk_ops_before_word_ops() -> None:
     compiled = _compiled_arithmetic_rules()
 

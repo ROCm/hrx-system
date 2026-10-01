@@ -52,3 +52,61 @@ low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @mixed_integer_extrema(
   %unsigned_maximum = v_max_u32 %33, %value
   return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum
 }
+
+// ====
+
+// Inline and full literal encodings consume no temporary scalar registers.
+func.def @uniform_constant_integer_extrema(%value: i32) -> (i32, i32, i32, i32) {
+  %inline = scalar.constant 7 : i32
+  %literal = scalar.constant 305419896 : i32
+  %signed_minimum = scalar.minsi %value, %inline : i32
+  %signed_maximum = scalar.maxsi %inline, %value : i32
+  %unsigned_minimum = scalar.minui %value, %literal : i32
+  %unsigned_maximum = scalar.maxui %literal, %value : i32
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @uniform_constant_integer_extrema(%value: reg<amdgpu.sgpr>) -> (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %signed_minimum = s_min_i32_rhs_inline %value, 7
+  %signed_maximum = s_max_i32_rhs_inline %value, 7
+  %unsigned_minimum = s_min_u32_lit %value, 305419896
+  %unsigned_maximum = s_max_u32_lit %value, 305419896
+  return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum
+}
+
+// ====
+
+// Varying values use the same direct forms with no temporary vector registers.
+func.def @varying_constant_integer_extrema(%input: buffer, %position: index) -> (i32, i32, i32, i32) {
+  %base = index.constant 0 : offset
+  %bounded_position = index.assume %position [range(%position, 0, 31)] : index
+  %values = buffer.view %input[%base] : buffer -> view<32xi32>
+  %value = view.load %values[%bounded_position] : view<32xi32> -> i32
+  %inline = scalar.constant 7 : i32
+  %literal = scalar.constant 305419896 : i32
+  %signed_minimum = scalar.minsi %value, %literal : i32
+  %signed_maximum = scalar.maxsi %literal, %value : i32
+  %unsigned_minimum = scalar.minui %value, %inline : i32
+  %unsigned_maximum = scalar.maxui %inline, %value : i32
+  func.return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum : i32, i32, i32, i32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3_5.core> abi(hal_kernel) @varying_constant_integer_extrema(%bounded_position: reg<amdgpu.sgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %values = resource<hal_binding> {extent = 128, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %22 = v_mov_b32 0
+  %23 = s_lshl_b32_rhs_inline %bounded_position, 2
+  %24 = slice %values[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %25 = slice %values[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %26 = s_mov_b32 0
+  %27, %28 = s_add_co_u32 %24, %23
+  %29, %30 = s_addc_u32 %25, %26, %28
+  %31 = concat(%27, %29) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %value = global_load_b32_saddr %22, %31
+  %signed_minimum = v_min_i32_lit %value, 305419896
+  %signed_maximum = v_max_i32_lit %value, 305419896
+  %unsigned_minimum = v_min_u32_src0_inline %value, 7
+  %unsigned_maximum = v_max_u32_src0_inline %value, 7
+  return %signed_minimum, %signed_maximum, %unsigned_minimum, %unsigned_maximum
+}
