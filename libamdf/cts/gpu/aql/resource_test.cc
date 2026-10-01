@@ -215,7 +215,7 @@ TEST_F(AqlDispatchTest, SwitchesBetweenPrivateAndLdsKernels) {
         uses_private ? private_descriptor_address : lds_descriptor_address,
         arguments->device_address, completion->device_address, kScopes);
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
 
     // The complete initialized output extent, arguments and signal storage
     // are captured before diagnostics or consumption can add synchronization.

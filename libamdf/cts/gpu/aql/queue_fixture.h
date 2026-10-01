@@ -7,9 +7,7 @@
 #ifndef AMDF_CTS_GPU_AQL_QUEUE_FIXTURE_H_
 #define AMDF_CTS_GPU_AQL_QUEUE_FIXTURE_H_
 
-#include <cstring>
-
-#include "libamdf/cts/gpu/aql/encoding/packets.h"
+#include "libamdf/cts/gpu/aql/publication.h"
 #include "libamdf/cts/gpu/util/command_fixture.h"
 
 class AqlQueueTest : public GpuCommandTest {
@@ -25,23 +23,6 @@ class AqlQueueTest : public GpuCommandTest {
             .cache_transition_kinds = AMDF_CACHE_TRANSITION_KINDS_GLOBAL,
             .publication_modes = AMDF_QUEUE_PUBLICATION_MODE_USER,
         }) {}
-
-  // The caller reserves a packet index before publishing. Read-index progress
-  // permits slot reuse, not signal or workload-memory reuse.
-  static void Publish(const GpuUserQueue& queue, uint64_t index,
-                      const aql::Packet& packet) {
-    const uint64_t capacity = queue.host.ring_byte_length / sizeof(aql::Packet);
-    while (index - GpuLoadAcquire<uint64_t>(queue.host.read_index_address) >=
-           capacity) {
-      std::this_thread::yield();
-    }
-    auto* slot = reinterpret_cast<uint32_t*>(queue.host.ring_address) +
-                 (index & (capacity - 1)) * 16;
-    std::memcpy(slot + 1, packet.data() + 1,
-                sizeof(aql::Packet) - sizeof(uint32_t));
-    GpuStoreRelease(reinterpret_cast<uintptr_t>(slot), packet[0]);
-    GpuStoreRelease(queue.host.doorbell_address, index);
-  }
 
   // Joins execution completion and ring retirement. Payload visibility cases
   // acquire their signal and snapshot results before waiting for consumption.

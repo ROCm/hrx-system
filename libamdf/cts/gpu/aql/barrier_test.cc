@@ -42,15 +42,15 @@ TEST_F(AqlQueueTest, BarrierAndJoinsFiveQueueDependencies) {
     // Publish the complete consumer chain before any producer packet. The
     // dependencies, not cross-queue submission order, connect their execution.
     GpuStoreRelease(consumer->host.write_index_address, consumer_index + 2);
-    Publish(*consumer, consumer_index++, join);
-    Publish(*consumer, consumer_index++, marker);
+    aql::Publish(*consumer, consumer_index++, join);
+    aql::Publish(*consumer, consumer_index++, marker);
     for (uint32_t i = 0; i < dependencies.size(); ++i) {
       const uint32_t slot = round == 0 ? i : 4 - i;
       const auto packet =
           aql::Barrier(aql::BarrierType::kAnd, aql::HeaderBarrier::kDisabled,
                        dependencies[slot]);
       GpuStoreRelease(producer->host.write_index_address, producer_index + 1);
-      Publish(*producer, producer_index++, packet);
+      aql::Publish(*producer, producer_index++, packet);
     }
 
     // AND/OR completion blocks later launches even with the header barrier
@@ -105,8 +105,8 @@ TEST_F(AqlQueueTest, BarrierOrAcceptsEachSatisfiedSlot) {
     // Exactly one live signal is zero. Positive, negative and high-word-only
     // nonzero signals remain unchanged; they must not prevent OR completion.
     GpuStoreRelease(queue->host.write_index_address, index + 2);
-    Publish(*queue, index++, select);
-    Publish(*queue, index++, marker);
+    aql::Publish(*queue, index++, select);
+    aql::Publish(*queue, index++, marker);
     ASSERT_NO_FATAL_FAILURE(
         WaitCompletionAndConsumption(*queue, signals[6], index));
     ASSERT_EQ(
@@ -152,10 +152,10 @@ TEST_F(AqlQueueTest, BarrierOrCompletesWithPublishedDependencyAndNullSlots) {
                      dependencies[selected]);
 
     GpuStoreRelease(consumer->host.write_index_address, consumer_index + 2);
-    Publish(*consumer, consumer_index++, select);
-    Publish(*consumer, consumer_index++, marker);
+    aql::Publish(*consumer, consumer_index++, select);
+    aql::Publish(*consumer, consumer_index++, marker);
     GpuStoreRelease(producer->host.write_index_address, producer_index + 1);
-    Publish(*producer, producer_index++, produce);
+    aql::Publish(*producer, producer_index++, produce);
 
     // The following marker supplies completion for the sparse OR, whose own
     // completion handle is null. Final values qualify completion of this legal

@@ -14,11 +14,35 @@ package(
 )
 
 amdf_cc_library(
+    name = "publication",
+    testonly = True,
+    hdrs = ["publication.h"],
+    deps = [
+        "//libamdf/cts/gpu/aql/encoding:packets",
+        "//libamdf/cts/gpu/util:user_queue",
+    ],
+)
+
+amdf_cc_library(
+    name = "executable",
+    testonly = True,
+    srcs = ["executable.cc"],
+    hdrs = ["executable.h"],
+    deps = [
+        ":publication",
+        "//libamdf/cts/gpu:gpu_device_fixture",
+        "//libamdf/cts/gpu/kernels:kernel",
+        "//libamdf/cts/gpu/util:memory",
+        "//libamdf/cts/gpu/util:user_queue",
+    ],
+)
+
+amdf_cc_library(
     name = "queue_fixture",
     testonly = True,
     hdrs = ["queue_fixture.h"],
     deps = [
-        "//libamdf/cts/gpu/aql/encoding:packets",
+        ":publication",
         "//libamdf/cts/gpu/util:command_fixture",
     ],
 )
@@ -81,6 +105,7 @@ amdf_cc_library(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
+        ":executable",
         ":queue_fixture",
         "//libamdf/cts/gpu/kernels:kernel",
         "//libamdf/cts/gpu/pm4/encoding:profile",

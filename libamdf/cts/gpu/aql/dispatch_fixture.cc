@@ -6,9 +6,6 @@
 
 #include "libamdf/cts/gpu/aql/dispatch_fixture.h"
 
-#include <cstring>
-#include <string>
-
 amdf_status_t AqlDispatchTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                                 bool* out_matches) {
   amdf_gpu_endpoint_info_t info = {};
@@ -92,62 +89,22 @@ void AqlDispatchTest::CreateFixedScratchQueue(
       CreateQueue(out_queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, scratch));
 }
 
-uint64_t AqlDispatchTest::CodeByteLength(const kernels::Kernel& kernel) const {
-  const auto& image = kernel.executable;
-  const auto* profile = Pm4CommandProfile::Find(gpu_endpoint_info_);
-  return profile ? profile->CodeByteLength(image.byte_length,
-                                           kernel.entry_byte_offset,
-                                           kernel.program.resource3)
-                 : ((uint64_t{image.byte_length} + 63u) & ~UINT64_C(63)) + 192u;
-}
-
 void AqlDispatchTest::PublishKernel(GpuUserQueue& queue,
                                     const kernels::Kernel& kernel,
                                     const char* property_prefix,
                                     uint64_t* next_packet_index,
                                     uint64_t* out_descriptor_address) {
-  const auto& image = kernel.executable;
-  const uint64_t code_byte_length = CodeByteLength(kernel);
-  GpuMemory* code = nullptr;
-  GpuMemory* commands = nullptr;
-  GpuMemory* completion = nullptr;
+  auto& executable = executables_.emplace_back();
   ASSERT_NO_FATAL_FAILURE(
-      CreateMemory(AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE,
-                   (code_byte_length + 4095u) & ~UINT64_C(4095), &code));
-  ASSERT_NO_FATAL_FAILURE(CreateMemory(
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_EXECUTE, 4096, &commands));
-  ASSERT_NO_FATAL_FAILURE(CreateMemory(
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE, 4096, &completion));
-  ASSERT_EQ(code->device_address % 256, 0u);
-  ASSERT_EQ(commands->device_address % 4, 0u);
-  ASSERT_LT(commands->device_address, UINT64_C(1) << 48);
-  std::memset(code->host.pointer, 0, code->info.byte_length);
-  std::memcpy(code->host.pointer, image.words, image.byte_length);
-  const auto code_publication = aql::CodeCacheInvalidate(
-      gpu_endpoint_info_, code->device_address, image.byte_length);
-  std::memset(commands->host.pointer, 0, commands->info.byte_length);
-  std::memcpy(commands->host.pointer, code_publication.data(),
-              code_publication.size() * sizeof(uint32_t));
-  std::memset(completion->host.pointer, 0, completion->info.byte_length);
-  auto& signal = *static_cast<aql::Signal*>(completion->host.pointer);
-  signal.kind = 1;
-  signal.value = 1;
-  const std::string prefix = property_prefix;
-  RecordProperty(prefix + "_image_sha256", image.sha256);
-  RecordProperty(prefix + "_image_byte_length", image.byte_length);
-  RecordProperty(prefix + "_descriptor_byte_offset",
-                 image.descriptor_byte_offset);
+      executable.Initialize(api_, system_scope_, device_, gpu_endpoint_info_,
+                            kernel, property_prefix, queue, next_packet_index));
+  *out_descriptor_address = executable.descriptor_address();
+}
 
-  const uint64_t index = (*next_packet_index)++;
-  GpuStoreRelease(queue.host.write_index_address, *next_packet_index);
-  Publish(queue, index,
-          aql::IndirectBuffer(
-              aql::HeaderBarrier::kDisabled, commands->device_address,
-              code_publication.size(), completion->device_address,
-              {aql::FenceScope::kNone, aql::FenceScope::kNone}));
-  // Explicit instruction-cache publication has its own execution completion.
-  // The next dispatch never relies on ring consumption or FIFO completion.
-  ASSERT_NO_FATAL_FAILURE(
-      WaitCompletionAndConsumption(queue, signal, *next_packet_index));
-  *out_descriptor_address = code->device_address + image.descriptor_byte_offset;
+void AqlDispatchTest::TearDown() {
+  // A failed native queue removal leaves every executable backing retained.
+  ASSERT_NO_FATAL_FAILURE(GpuCommandTest::TearDown());
+  for (auto& executable : executables_) {
+    ASSERT_TRUE(executable.Release(api_));
+  }
 }

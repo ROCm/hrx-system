@@ -207,9 +207,9 @@ TEST_F(AqlDispatchTest, AgentScopeOrdersShaderPayloadBeforeSystemCompletion) {
     signal.value = 1;
 
     GpuStoreRelease(queue->host.write_index_address, index + kPacketsPerEpoch);
-    Publish(*queue, index++, produce);
-    Publish(*queue, index++, consume);
-    Publish(*queue, index++, complete);
+    aql::Publish(*queue, index++, produce);
+    aql::Publish(*queue, index++, consume);
+    aql::Publish(*queue, index++, complete);
 
     // The enabled terminal AND joins both dispatches independently of the
     // middle data edge. Capture D first, then all remaining workload backing

@@ -49,10 +49,12 @@ TEST_F(AqlDispatchTest, ReplacesCompletedExecutableAtSameAddress) {
                 alternate_kernel.executable.byte_length) +
        255u) &
       ~255u;
-  const uint64_t kCodeByteLength = (std::max(CodeByteLength(first_kernel),
-                                             CodeByteLength(alternate_kernel)) +
-                                    kPageByteLength - 1) &
-                                   ~(uint64_t{kPageByteLength} - 1);
+  const uint64_t kCodeByteLength =
+      (std::max(
+           aql::ExecutableByteLength(gpu_endpoint_info_, first_kernel),
+           aql::ExecutableByteLength(gpu_endpoint_info_, alternate_kernel)) +
+       kPageByteLength - 1) &
+      ~(uint64_t{kPageByteLength} - 1);
   const std::array<const kernels::Kernel*, 3> kKernels = {
       &first_kernel, &alternate_kernel, &first_kernel};
   constexpr std::array<uint32_t, 3> kMultipliers = {3, 5, 3};
@@ -205,7 +207,7 @@ TEST_F(AqlDispatchTest, ReplacesCompletedExecutableAtSameAddress) {
     signals[1].value = 1;
 
     GpuStoreRelease(queue->host.write_index_address, next_packet_index + 1);
-    Publish(*queue, next_packet_index++, cache_packet);
+    aql::Publish(*queue, next_packet_index++, cache_packet);
     // Ring consumption alone is not code publication. Complete the explicit
     // unpredicated cache command before making the dispatch reachable.
     ASSERT_NO_FATAL_FAILURE(
@@ -221,7 +223,7 @@ TEST_F(AqlDispatchTest, ReplacesCompletedExecutableAtSameAddress) {
         control->device_address + sizeof(aql::Signal),
         {aql::FenceScope::kSystem, aql::FenceScope::kSystem});
     GpuStoreRelease(queue->host.write_index_address, next_packet_index + 1);
-    Publish(*queue, next_packet_index++, dispatch_packet);
+    aql::Publish(*queue, next_packet_index++, dispatch_packet);
     GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signals[1].value), 0);
 
     // Capture every initialized extent before diagnostics or ring retirement.

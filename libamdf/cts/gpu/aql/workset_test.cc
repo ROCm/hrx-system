@@ -289,7 +289,7 @@ TEST_F(AqlDispatchTest, IndependentWorksetReusePreservesPendingConsumer) {
   GpuStoreRelease(parked.queue->host.write_index_address,
                   parked.next_packet_index + packets[2].size());
   for (const auto& packet : packets[2]) {
-    Publish(*parked.queue, parked.next_packet_index++, packet);
+    aql::Publish(*parked.queue, parked.next_packet_index++, packet);
   }
   // Join the finite producer before relying on independent queue progress.
   // G1 never passed through zero: its consumer remains pending, without any
@@ -339,7 +339,7 @@ TEST_F(AqlDispatchTest, IndependentWorksetReusePreservesPendingConsumer) {
     GpuStoreRelease(reused.queue->host.write_index_address,
                     reused.next_packet_index + packets[generation].size());
     for (const auto& packet : packets[generation]) {
-      Publish(*reused.queue, reused.next_packet_index++, packet);
+      aql::Publish(*reused.queue, reused.next_packet_index++, packet);
     }
     GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&reused_signals[1].value),
                           0);

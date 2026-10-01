@@ -684,8 +684,8 @@ void CopyDispatchRecipeTest::RunCoherentHandoff(
     // Consumer-first publication leaves every dataflow edge on the device.
     // Both rings are free from the preceding epoch before this reservation.
     GpuStoreRelease(aql_queue->host.write_index_address, aql_index + 2);
-    Publish(*aql_queue, aql_index++, dependency);
-    Publish(*aql_queue, aql_index++, dispatch);
+    aql::Publish(*aql_queue, aql_index++, dependency);
+    aql::Publish(*aql_queue, aql_index++, dispatch);
     ASSERT_NO_FATAL_FAILURE(sdma_queue->PublishStream(sdma_index));
     GpuWaitEqual<uint32_t>(reinterpret_cast<uintptr_t>(&completion.download),
                            epoch);
@@ -1123,8 +1123,8 @@ void CopyDispatchRecipeTest::RunStagedHandoff(PairQuery query_kind) {
 
     // Consumer-first publication leaves both inter-engine edges on device.
     GpuStoreRelease(aql_queue->host.write_index_address, aql_index + 2);
-    Publish(*aql_queue, aql_index++, dependency);
-    Publish(*aql_queue, aql_index++, dispatch);
+    aql::Publish(*aql_queue, aql_index++, dependency);
+    aql::Publish(*aql_queue, aql_index++, dispatch);
     ASSERT_NO_FATAL_FAILURE(sdma_queue->PublishStream(sdma_index));
     GpuWaitEqual<uint32_t>(reinterpret_cast<uintptr_t>(&completion.download),
                            epoch);

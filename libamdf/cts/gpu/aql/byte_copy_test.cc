@@ -170,7 +170,7 @@ TEST_F(AqlDispatchTest, CoherentSystemByteCopyPreservesBoundsAcrossEpochs) {
         descriptor_address, arguments->device_address,
         completion->device_address, kScopes);
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
 
     // All four pages are captured before diagnostics or ring consumption can
     // contribute a second observation boundary. Completion bounds code use.

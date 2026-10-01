@@ -236,11 +236,11 @@ TEST_F(AqlDispatchTest, BarrierAndJoinsIndependentShaderPayloads) {
     // AND blocks later launches even with its header barrier clear; the
     // consumer supplies the SYSTEM acquire after both dependencies reach zero.
     GpuStoreRelease(consumer->host.write_index_address, consumer_index + 2);
-    Publish(*consumer, consumer_index++, wait);
-    Publish(*consumer, consumer_index++, consume);
+    aql::Publish(*consumer, consumer_index++, wait);
+    aql::Publish(*consumer, consumer_index++, consume);
     GpuStoreRelease(producer->host.write_index_address, producer_index + 2);
-    Publish(*producer, producer_index++, produce[first_producer]);
-    Publish(*producer, producer_index++, produce[1 - first_producer]);
+    aql::Publish(*producer, producer_index++, produce[first_producer]);
+    aql::Publish(*producer, producer_index++, produce[1 - first_producer]);
 
     // Preserve the entire consumer result before independent producer joins
     // or consumption can add synchronization to this decisive observation.
