@@ -277,6 +277,28 @@ hidden reasoning. The summary records the exact corpus SHA256, and each reply
 records the submitted history hash. Preserve full replies and usage to expose
 work differences when comparing engines or kernel math.
 
+### Fixed-trajectory model replay
+
+`qwen_replay` isolates model/scheduler costs from generated-text divergence.
+Its JSON fixture contains `sessions`, each with a `turns` array. Each turn has
+the full HTTP `request` object, recorded `response` text, and
+`"finish_reason": "length"`. The production chat renderer validates retained
+history; the final selected token stays pending and leads the next prompt
+append. Recorded text must re-encode to the request's output count. EOS traces
+require original token IDs and are rejected by this text-only fixture loader.
+
+Repeated `--epoch` options load shared-state variants; repeated `--window`
+options list the zero-based epoch indexes available to the production planner
+in each replay. For example, with epochs 128/32/256/512, windows `0`, `0,1`,
+`0`, `0,2,3`, `0`, `0,1,2,3`, `0` isolate narrow tails and wider prompts with
+interleaved fixed controls. Every window resets rows but reuses weights, commands
+and scratch. Sessions issue their next recorded turn immediately on completion.
+Selected predictions are logged at fixed logical positions but never feed back
+into the input or terminate a trace. Differences from the first window remain
+visible. This is teacher-forced completed-work timing, not a generated-quality
+score or HTTP latency measurement. `trajectory` events preserve exact input IDs;
+`epoch` and `window` events report costs, counts and prediction differences.
+
 ### Run telemetry
 
 `observe.py` launches the runner and combines its stdout/stderr with independent
