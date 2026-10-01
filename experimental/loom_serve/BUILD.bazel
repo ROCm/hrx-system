@@ -319,27 +319,9 @@ loom_generated_file(
     target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
 )
 
-loom_generated_file(
-    name = "qwen_model_epoch_binary",
-    args = [
-        "$(location :qwen_model.loom)",
-        "--target=vm:core",
-        "--root=@step",
-        "--root=@epoch",
-    ],
-    generator = "//loom/src/loom/tools/loom-compile",
-    inputs = [":qwen_model.loom"],
-    output = "qwen_model_epoch.vm",
-    output_flag = "--output=",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
-)
-
 iree_c_embed_data(
     name = "qwen_model_data",
-    srcs = [
-        ":qwen_model_binary",
-        ":qwen_model_epoch_binary",
-    ],
+    srcs = [":qwen_model_binary"],
     c_file_output = "qwen_model_data.c",
     h_file_output = "qwen_model_data.h",
     identifier = "loom_serve_qwen_model_data",
@@ -375,6 +357,7 @@ loom_cc_library(
         ":execution",
         ":module",
         ":qwen_model_data",
+        ":qwen_schedule",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

@@ -15,7 +15,9 @@
 IREE_FLAG(string, prefill, "",
           "Isolated prefill artifacts, using the same schedule.");
 IREE_FLAG(string, decode, "", "Isolated decode artifact directory.");
-IREE_FLAG(string, epoch, "", "Packed epoch artifact directory.");
+IREE_FLAG_LIST(
+    string, epoch,
+    "Packed epoch directory; repeat to cycle through cached shapes.");
 IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json.");
 IREE_FLAG(string, compare, "",
@@ -72,11 +74,15 @@ static iree_status_t qwen_check_prediction(loom_serve_qwen_model_t* model,
 }
 
 static iree_status_t qwen_check_epoch(loom_serve_qwen_model_t* model,
+                                      iree_host_size_t* next_shape,
                                       qwen_check_row_t rows[4],
                                       iree_host_size_t count,
                                       const iree_host_size_t logical_rows[4],
                                       const loom_serve_qwen_span_t* spans) {
-  IREE_RETURN_IF_ERROR(loom_serve_qwen_model_epoch(model, count, spans));
+  const iree_host_size_t shape_index =
+      (*next_shape)++ % loom_serve_qwen_model_shape_count(model);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_qwen_model_epoch(model, shape_index, count, spans));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     qwen_check_row_t* row = &rows[logical_rows[i]];
@@ -103,8 +109,9 @@ static iree_status_t qwen_check_epoch(loom_serve_qwen_model_t* model,
   }
   if (iree_status_is_ok(status)) {
     fprintf(stderr,
-            "Matched packed epoch: %zu spans; positions [%zu,%zu,%zu,%zu].\n",
-            count,
+            "Matched packed epoch: shape %zu, %zu spans; positions "
+            "[%zu,%zu,%zu,%zu].\n",
+            shape_index, count,
             loom_serve_qwen_row_position(
                 loom_serve_qwen_model_row(model, rows[0].packed)),
             loom_serve_qwen_row_position(
@@ -131,12 +138,17 @@ static iree_status_t qwen_check_error(iree_status_t actual,
 
 static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
                                     iree_allocator_t allocator) {
-  if (loom_serve_qwen_model_epoch_capacity(model) < 10 ||
-      loom_serve_qwen_model_span_capacity(model) < 4) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "witness requires at least 10 tokens and four spans");
+  for (iree_host_size_t i = 0; i < loom_serve_qwen_model_shape_count(model);
+       ++i) {
+    const loom_serve_qwen_shape_t shape =
+        loom_serve_qwen_model_shapes(model)[i];
+    if (shape.token_capacity < 10 || shape.span_capacity < 4) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "witness requires at least 10 tokens and four spans in every shape");
+    }
   }
+  iree_host_size_t next_shape = 0;
   qwen_check_row_t rows[4] = {
       {.packed = 6, .isolated = 0},
       {.packed = 1, .isolated = 2},
@@ -197,9 +209,10 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
   };
   loom_serve_qwen_span_t repeated[] = {first[0], first[0]};
   IREE_RETURN_IF_ERROR(
-      qwen_check_error(loom_serve_qwen_model_epoch(model, 2, repeated),
+      qwen_check_error(loom_serve_qwen_model_epoch(model, 0, 2, repeated),
                        IREE_STATUS_INVALID_ARGUMENT));
-  IREE_RETURN_IF_ERROR(qwen_check_epoch(model, rows, 4, first_order, first));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_epoch(model, &next_shape, rows, 4, first_order, first));
   IREE_RETURN_IF_ERROR(
       qwen_check_error(loom_serve_qwen_row_decode(
                            loom_serve_qwen_model_row(model, rows[1].packed)),
@@ -213,7 +226,8 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
       {rows[1].packed, 1, rows[1].input + rows[1].input_count - 1,
        LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
   };
-  IREE_RETURN_IF_ERROR(qwen_check_epoch(model, rows, 2, second_order, second));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_epoch(model, &next_shape, rows, 2, second_order, second));
 
   // Rows omitted by the previous epoch rejoin in different compact slots.
   const iree_host_size_t resumed_order[] = {2, 0, 3, 1};
@@ -227,7 +241,8 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
           (loom_serve_qwen_span_t){rows[logical].packed, 1, &decode_tokens[i],
                                    LOOM_SERVE_QWEN_SPAN_FLAG_SELECT};
     }
-    status = qwen_check_epoch(model, rows, 4, resumed_order, resumed);
+    status =
+        qwen_check_epoch(model, &next_shape, rows, 4, resumed_order, resumed);
   }
   IREE_RETURN_IF_ERROR(status);
   for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
@@ -250,10 +265,12 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
       loom_serve_qwen_model_row(model, rows[0].packed));
   const iree_host_size_t final_order[] = {0};
   const loom_serve_qwen_span_t hidden = {rows[0].packed, 1, decode_tokens, 0};
-  IREE_RETURN_IF_ERROR(qwen_check_epoch(model, rows, 1, final_order, &hidden));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_epoch(model, &next_shape, rows, 1, final_order, &hidden));
   const loom_serve_qwen_span_t visible = {rows[0].packed, 1, rows[0].input + 3,
                                           LOOM_SERVE_QWEN_SPAN_FLAG_SELECT};
-  IREE_RETURN_IF_ERROR(qwen_check_epoch(model, rows, 1, final_order, &visible));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_epoch(model, &next_shape, rows, 1, final_order, &visible));
 
   // Crossing back into the isolated decode family must consume the packed
   // prediction and position, not the old device-local single-row control.
@@ -297,7 +314,7 @@ static iree_status_t qwen_check_measure(
   IREE_RETURN_IF_ERROR(status);
   const iree_time_t start = iree_time_now();
   if (packed) {
-    status = loom_serve_qwen_model_epoch(model, span_count, spans);
+    status = loom_serve_qwen_model_epoch(model, 0, span_count, spans);
   } else {
     for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
          ++i) {
@@ -345,8 +362,8 @@ static iree_status_t qwen_check_compare(loom_serve_qwen_model_t* model,
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     token_count += lengths[i];
   }
-  if (token_count > loom_serve_qwen_model_epoch_capacity(model) ||
-      span_count > loom_serve_qwen_model_span_capacity(model)) {
+  if (token_count > loom_serve_qwen_model_shapes(model)[0].token_capacity ||
+      span_count > loom_serve_qwen_model_shapes(model)[0].span_capacity) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "comparison exceeds packed stage capacities");
   }
@@ -412,10 +429,16 @@ static iree_status_t qwen_check_compare(loom_serve_qwen_model_t* model,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  if (!FLAG_prefill[0] || !FLAG_decode[0] || !FLAG_epoch[0] ||
+  const iree_flag_string_list_t epochs = FLAG_epoch_list();
+  if (!FLAG_prefill[0] || !FLAG_decode[0] || !epochs.count ||
       !FLAG_weights[0] || !FLAG_tokenizer[0]) {
     fprintf(stderr,
             "Provide prefill, decode, epoch, weights and tokenizer paths.\n");
+    return EXIT_FAILURE;
+  }
+  if (FLAG_compare[0] && epochs.count != 1) {
+    fprintf(stderr,
+            "The isolated comparison requires exactly one epoch shape.\n");
     return EXIT_FAILURE;
   }
   if (FLAG_compare[0] && strcmp(FLAG_compare, "single") != 0 &&
@@ -427,7 +450,8 @@ int main(int argc, char** argv) {
   const loom_serve_qwen_options_t options = {
       .prefill_directory = iree_make_cstring_view(FLAG_prefill),
       .decode_directory = iree_make_cstring_view(FLAG_decode),
-      .epoch_directory = iree_make_cstring_view(FLAG_epoch),
+      .epoch_count = epochs.count,
+      .epoch_directories = epochs.values,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
       .row_count = 8,

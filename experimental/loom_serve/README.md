@@ -48,6 +48,19 @@ buffer and packed workspace. One preallocated arena partitions private retained
 state among up to eight rows. Rows are data, not VM processes. A single host
 owner multiplexes their stages through the shared execution timeline.
 
+The server accepts repeated `--epoch=/path/to/shape` options. These cached
+commands share the same weights, retained rows, residual storage, maximum-sized
+workspace, and VM process. Each is a native runner export resolved once at load
+time; selecting another shape allocates no device backing and copies no retained
+state. The scheduler evaluates ready spans against each shape and chooses the
+most input tokens, breaking ties by smaller token and span capacities. This
+occupancy policy is intentionally distinct from measured cost-based selection.
+Supplying one shape gives a fixed-shape control; `--chunk_size` independently
+limits each row's prompt contribution. Epoch records report the selected shape
+index and both capacities. `qwen_epoch_check` also accepts repeated `--epoch`
+options to cycle commands while comparing retained continuations with isolated
+execution in the same residency.
+
 `qwen` is the CLI caller, not an HTTP service. It round-robins active input
 chunks and decode steps, supports retained follow-up turns, and can reset/reuse
 the same rows for repeated runs without reloading weights. This is stage-level

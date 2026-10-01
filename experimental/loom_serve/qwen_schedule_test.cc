@@ -108,4 +108,61 @@ TEST(QwenScheduleTest, ExhaustsFiniteMixedWorkExactlyOnce) {
   }
 }
 
+TEST(QwenScheduleTest, CachedShapesShrinkWithoutLosingReadyWork) {
+  const loom_serve_qwen_shape_t shapes[] = {{512, 8}, {32, 8}, {128, 8}};
+  iree_host_size_t ready[] = {500, 1, 1, 1, 1, 1, 1, 1};
+  loom_serve_qwen_scheduled_span_t spans[8], scratch[8];
+  iree_host_size_t cursor = 0, shape = 0;
+  ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
+                                            spans, scratch, &shape),
+            8);
+  EXPECT_EQ(shape, 0);
+  EXPECT_EQ(spans[0].token_count, 500);
+  EXPECT_EQ(cursor, 1);
+  ready[0] = 70;
+  ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
+                                            spans, scratch, &shape),
+            8);
+  EXPECT_EQ(shape, 2);
+  EXPECT_EQ(cursor, 2);
+  ready[0] = 1;
+  ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
+                                            spans, scratch, &shape),
+            8);
+  EXPECT_EQ(shape, 1);
+  EXPECT_EQ(cursor, 3);
+  for (const auto& span : spans) {
+    EXPECT_EQ(span.token_count, 1);
+  }
+}
+
+TEST(QwenScheduleTest, ShapePlanningKeepsTokenAndSpanConstraintsIndependent) {
+  const loom_serve_qwen_shape_t shapes[] = {{512, 1}, {128, 8}, {128, 4}};
+  const iree_host_size_t ready[] = {1, 1, 1, 1, 0, 0, 0, 0};
+  loom_serve_qwen_scheduled_span_t spans[8], scratch[8];
+  iree_host_size_t cursor = 0, shape = 0;
+  ASSERT_EQ(loom_serve_qwen_schedule_shapes(8, ready, 3, shapes, 512, &cursor,
+                                            spans, scratch, &shape),
+            4);
+  EXPECT_EQ(shape, 2);
+  EXPECT_EQ(cursor, 4);
+  const iree_host_size_t empty[8] = {};
+  EXPECT_EQ(loom_serve_qwen_schedule_shapes(8, empty, 3, shapes, 512, &cursor,
+                                            spans, scratch, &shape),
+            0);
+  EXPECT_EQ(cursor, 4);
+}
+
+TEST(QwenScheduleTest, ShapePlanningHonorsChunkLimitBeforeSizing) {
+  const loom_serve_qwen_shape_t shapes[] = {{512, 8}, {128, 8}, {32, 8}};
+  const iree_host_size_t ready[] = {1000, 1, 1, 1};
+  loom_serve_qwen_scheduled_span_t spans[4], scratch[4];
+  iree_host_size_t cursor = 0, shape = 0;
+  EXPECT_EQ(loom_serve_qwen_schedule_shapes(4, ready, 3, shapes, 64, &cursor,
+                                            spans, scratch, &shape),
+            4);
+  EXPECT_EQ(shape, 1);
+  EXPECT_EQ(spans[0].token_count, 64);
+}
+
 }  // namespace
