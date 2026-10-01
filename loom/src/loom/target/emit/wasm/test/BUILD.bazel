@@ -22,8 +22,10 @@ loom_check_test_suite(
     ],
     data = [
         "@wasi_sdk//:llvm-objdump",
+        "@wasi_sdk//:tool_runtime_files",
     ],
     env = {
         "LOOM_WASM_LLVM_OBJDUMP": "$(rootpath @wasi_sdk//:llvm-objdump)",
     },
+    visibility = ["//loom/build_tools/bazel/test:__pkg__"],
 )
