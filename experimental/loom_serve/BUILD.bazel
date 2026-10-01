@@ -31,6 +31,33 @@ py_binary(
     srcs = ["benchmark_service.py"],
 )
 
+py_library(
+    name = "system_stats",
+    srcs = ["system_stats.py"],
+)
+
+py_library(
+    name = "observe_lib",
+    srcs = ["observe.py"],
+    deps = [":system_stats"],
+)
+
+py_binary(
+    name = "observe",
+    srcs = ["observe.py"],
+    deps = [":system_stats"],
+)
+
+py_test(
+    name = "observe_test",
+    size = "small",
+    srcs = ["observe_test.py"],
+    deps = [
+        ":observe_lib",
+        ":system_stats",
+    ],
+)
+
 py_test(
     name = "agent_trace_test",
     size = "small",

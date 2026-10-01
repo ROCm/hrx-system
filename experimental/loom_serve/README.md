@@ -243,6 +243,54 @@ coding-agent score. Compare optimized, non-sanitized server runs under the
 benchmark lease in interleaved mode order; preserve server epochs and client
 results together. Real pi tool continuations remain the product check below.
 
+### Run telemetry
+
+`observe.py` launches the runner and combines its stdout/stderr with independent
+Linux system samples. It uses only the Python standard library; no sensor
+subprocesses or OS polling enter the inference process. Build the exact server
+target first, then place the observer inside the benchmark lease when measuring:
+
+```sh
+python -B -m experimental.loom_serve.observe --log=/private/runs/run.jsonl -- \
+  bazel-bin/experimental/loom_serve/qwen_server \
+  --prefill=/path/to/compiled/prefill --decode=/path/to/compiled/decode \
+  --epoch=/path/to/compiled/epoch \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json --rows=8
+```
+
+The log is created exclusively; an existing run is never overwritten. The
+default system interval is one second (`--interval`), independent of the native
+service heartbeat interval. `--quiet` suppresses console mirroring, not logging.
+SIGINT/SIGTERM reach the owned server and wait for its normal retirement. A log
+or observer failure stops the server and reports failure while continuing to
+drain its output through shutdown. There is no silent lossy queue or automatic
+log rotation. The caller owns log retention and available disk space. Logs
+contain command paths and application diagnostics and are private run data.
+
+Each line is a version-1 envelope containing `sequence`, `unix_time_ns`,
+monotonic `elapsed_ns`, `source`, and `data`. Sequence and timestamps describe
+observer receipt, not device event time or ordering between stdout and stderr.
+Native JSON events remain unchanged inside `data`; plain output becomes a
+`diagnostic` event. `run`/`process_start`/`run_end` delimit child lifetime.
+
+The `system_inventory` event gives stable channel indices, labels, source paths,
+units and runtime-power guards. Each `system` event supplies the corresponding
+`values` array, `unavailable` reasons by index, and errors for missing host
+facilities. Readings include available hwmon temperatures, fan speeds, power
+and limits; CPU governors/EPP/frequencies; platform policy; GPU occupancy,
+memory and clocks; GPU/NPU runtime power state; host and server CPU/memory;
+CPU/memory/I/O pressure; and log-filesystem free space. Unavailable readings
+are null, never zero or a previous value. CPU percentages use host-wide busy
+time for the machine and top-style 100% per busy CPU for the server. First
+samples have no CPU delta. Sensor power is device/package power, not wall power.
+
+Discovery is once per run and reflects the kernel's exported interfaces and
+current permissions. Device values are skipped when their runtime-power guard
+reports suspension or transition, avoiding deliberate wake polling; state can
+still change between the guard and attribute reads. Nothing changes power
+policy, requests privileged access, or substitutes an estimate for a sensor.
+
 ### Real pi continuation check
 
 An isolated pi custom-provider configuration uses this `models.json`:
