@@ -54,8 +54,11 @@ work before ending the session and propagates profiling failures. For aggregate
 execution statistics, add `--print_device_statistics=true`. Per-dispatch
 attribution can use `--device_profiling_mode=dispatch-events` with that flag,
 or `--device_profiling_output=/path/to/profile` instead of aggregate printing.
-Profiling retains command metadata only when requested. Instrumented device
-timings explain kernel costs; throughput comparisons run with profiling off.
+Long captures consume bounded producer event rings with
+`--device_profiling_flush_interval_ms=1000`; completing device work does not
+itself drain captured records into the sink. Profiling retains command metadata
+only when requested. Instrumented device timings explain kernel costs;
+throughput comparisons run with profiling off.
 
 The server accepts repeated `--epoch=/path/to/shape` options. These cached
 commands share the same weights, retained rows, residual storage, maximum-sized
