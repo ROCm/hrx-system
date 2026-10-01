@@ -64,7 +64,7 @@ typedef struct qwen_stage_t {
   // Reusable command retaining its executable and fixed weight resources.
   iree_hal_command_buffer_t* command;
   // Owned views of immutable parameter groups, in fixed-root order.
-  iree_hal_buffer_t* fixed_buffers[5];
+  iree_hal_buffer_t* fixed_buffers[7];
 } qwen_stage_t;
 
 struct loom_serve_qwen_model_t {
@@ -1062,7 +1062,7 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
                                model->allocator, stage);
     }
     if (iree_status_is_ok(status)) {
-      const uint32_t fixed_count = ordinal == 0 ? 5 : verifies ? 1 : 4;
+      const uint32_t fixed_count = ordinal == 0 ? 5 : verifies ? 1 : 7;
       const uint32_t binding_count = ordinal == 0 ? 6 : verifies ? 8 : 7;
       const uint32_t transient_index = binding_count - 1;
       const loom_cmd_program_requirements_t requirements =
