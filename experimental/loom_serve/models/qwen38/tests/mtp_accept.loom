@@ -1,0 +1,259 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qwen38_mtp_accept_spans() launch(%epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
+
+// Eight permuted resident rows include a three-token intermediate prompt, a
+// one-token known span, and six verifiers. Trials move mismatch/EOS positions
+// and vary output credit, including truncation before a matching proposal.
+func.def @accept_fixture(%trial_value: index, %epoch: buffer, %predictions: buffer) {
+  %trial = index.assume %trial_value [range(%trial_value, 0, 3)] : index
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %options_origin = index.constant 1548 : offset
+  %control = buffer.view %epoch[%origin] : buffer -> view<516xi32>
+  %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<64x5xi32>
+  %options = buffer.view %epoch[%options_origin] : buffer -> view<64x2xi32>
+  %selected = buffer.view %predictions[%origin] : buffer -> view<32xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %five = index.constant 5 : index
+  %six = index.constant 6 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %hundred = index.constant 100 : index
+  %thousand = index.constant 1001 : index
+  %wrong = index.constant 7777 : index
+  %eos = scalar.constant 42 : i32
+  %none = scalar.constant -1 : i32
+  %span_word = scalar.constant 8 : i32
+  view.store %span_word, %control[1] : i32, view<516xi32>
+  view.store %eos, %control[515] : i32, view<516xi32>
+  %total, %selection_count = scf.for %span = [%zero to %eight step %one](%begin = %zero : index, %selection = %zero : index) -> (index, index) {
+    %hidden = index.cmp eq, %span, %two : index
+    %known = index.cmp eq, %span, %six : index
+    %ordinary = scalar.ori %hidden, %known : i1
+    %true = scalar.constant true : i1
+    %speculative = scalar.xori %ordinary, %true : i1
+    %visible_count = scf.select %known, %one, %four : index
+    %count = scf.select %hidden, %three, %visible_count : index
+    %output_count = scf.select %hidden, %zero, %visible_count : index
+    %row = index.sub %seven, %span : index
+    %position = index.add %hundred, %span : index
+    %count_word = index.cast %count : index to i32
+    %begin_word = index.cast %begin : index to i32
+    %position_word = index.cast %position : index to i32
+    %row_word = index.cast %row : index to i32
+    %selected_word = index.cast %selection : index to i32
+    %selection_word = scf.select %hidden, %none, %selected_word : i32
+    %flag = scalar.extui %speculative : i1 to i32
+    %limited = index.cmp eq, %span, %seven : index
+    %trial_limit = index.add %trial, %one : index
+    %credit = scf.select %limited, %trial_limit, %four : index
+    %credit_word = index.cast %credit : index to i32
+    view.store %count_word, %descriptors[%span, 0] : i32, view<64x5xi32>
+    view.store %position_word, %descriptors[%span, 1] : i32, view<64x5xi32>
+    view.store %begin_word, %descriptors[%span, 2] : i32, view<64x5xi32>
+    view.store %row_word, %descriptors[%span, 3] : i32, view<64x5xi32>
+    view.store %selection_word, %descriptors[%span, 4] : i32, view<64x5xi32>
+    view.store %flag, %options[%span, 0] : i32, view<64x2xi32>
+    view.store %credit_word, %options[%span, 1] : i32, view<64x2xi32>
+    %phase = index.add %span, %trial : index
+    %mismatch = index.rem %phase, %four : index
+    %eos_span = index.cmp eq, %span, %five : index
+    scf.for %token = [%zero to %output_count step %one] {
+      %packed = index.add %begin, %token : index
+      %matching = index.add %thousand, %packed : index
+      %replacement = index.add %wrong, %token : index
+      %wrong_position = index.cmp eq, %token, %mismatch : index
+      %value = scf.select %wrong_position, %replacement, %matching : index
+      %word = index.cast %value : index to i32
+      %eos_position = index.cmp eq, %token, %trial : index
+      %stops = scalar.andi %eos_span, %eos_position : i1
+      %prediction = scf.select %stops, %eos, %word : i32
+      %slot_value = index.add %selection, %token : index
+      %slot = index.assume %slot_value [range(%slot_value, 0, 31)] : index
+      view.store %prediction, %selected[%slot] : i32, view<32xi32>
+    }
+    %next_begin = index.add %begin, %count : index
+    %next_selection = index.add %selection, %output_count : index
+    scf.yield %next_begin, %next_selection : index, index
+  }
+  %total_word = index.cast %total : index to i32
+  %selection_word = index.cast %selection_count : index to i32
+  view.store %total_word, %control[0] : i32, view<516xi32>
+  view.store %selection_word, %control[2] : i32, view<516xi32>
+  func.return
+}
+
+// Independent oracle takes the minimum frontier of all mismatches, EOS and
+// credit before copying any outputs. The kernel instead walks a live prefix.
+func.def @accept_oracle(%epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %options_origin = index.constant 1548 : offset
+  %control = buffer.view %epoch[%origin] : buffer -> view<516xi32>
+  %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<64x5xi32>
+  %options = buffer.view %epoch[%options_origin] : buffer -> view<64x2xi32>
+  %tokens = buffer.view %inputs[%origin] : buffer -> view<512xi32>
+  %selected = buffer.view %predictions[%origin] : buffer -> view<32xi32>
+  %accepted_header = buffer.view %committed[%origin] : buffer -> view<3xi32>
+  %accepted = buffer.view %committed[%descriptor_origin] : buffer -> view<64x5xi32>
+  %replay_header = buffer.view %replay[%origin] : buffer -> view<3xi32>
+  %replayed = buffer.view %replay[%descriptor_origin] : buffer -> view<64x5xi32>
+  %records = buffer.view %results[%origin] : buffer -> view<8x6xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %zero_word = scalar.constant 0 : i32
+  %one_word = scalar.constant 1 : i32
+  %none = scalar.constant -1 : i32
+  %eos = view.load %control[515] : view<516xi32> -> i32
+  %total = view.load %control[0] : view<516xi32> -> i32
+  %span_word = view.load %control[1] : view<516xi32> -> i32
+  view.store %total, %accepted_header[0] : i32, view<3xi32>
+  view.store %span_word, %accepted_header[1] : i32, view<3xi32>
+  view.store %zero_word, %accepted_header[2] : i32, view<3xi32>
+  %replay_count = scf.for %span = [%zero to %eight step %one](%replay_index = %zero : index) -> (index) {
+    %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
+    %speculative = scalar.cmpi ne, %flag, %zero_word : i32
+    %count_word = view.load %descriptors[%span, 0] : view<64x5xi32> -> i32
+    %begin_word = view.load %descriptors[%span, 2] : view<64x5xi32> -> i32
+    %selection_word = view.load %descriptors[%span, 4] : view<64x5xi32> -> i32
+    %begin = index.cast %begin_word : i32 to index
+    %selection = index.cast %selection_word : i32 to index
+    %has_output = scalar.cmpi sge, %selection_word, %zero_word : i32
+    %consumed, %emitted = scf.if %speculative -> (i32, i32) {
+      %credit_word = view.load %options[%span, 1] : view<64x2xi32> -> i32
+      %credit = index.cast %credit_word : i32 to index
+      %frontier = scf.for %token = [%zero to %four step %one](%limit = %credit : index) -> (index) {
+        %slot_value = index.add %selection, %token : index
+        %slot = index.assume %slot_value [range(%slot_value, 0, 31)] : index
+        %prediction = view.load %selected[%slot] : view<32xi32> -> i32
+        %is_eos = scalar.cmpi eq, %prediction, %eos : i32
+        %has_candidate = index.cmp ult, %token, %three : index
+        %mismatch = scf.if %has_candidate -> (i1) {
+          %relative = index.add %token, %one : index
+          %candidate_value = index.add %begin, %relative : index
+          %candidate_index = index.assume %candidate_value [range(%candidate_value, 0, 511)] : index
+          %candidate = view.load %tokens[%candidate_index] : view<512xi32> -> i32
+          %different = scalar.cmpi ne, %candidate, %prediction : i32
+          scf.yield %different : i1
+        } else {
+          %false = scalar.constant false : i1
+          scf.yield %false : i1
+        }
+        %stop = scalar.ori %is_eos, %mismatch : i1
+        %end = index.add %token, %one : index
+        %earlier = index.cmp ult, %end, %limit : index
+        %truncate = scalar.andi %stop, %earlier : i1
+        %next = scf.select %truncate, %end, %limit : index
+        scf.yield %next : index
+      }
+      %word = index.cast %frontier : index to i32
+      scf.yield %word, %word : i32, i32
+    } else {
+      %emitted = scf.select %has_output, %one_word, %zero_word : i32
+      scf.yield %count_word, %emitted : i32, i32
+    }
+    view.store %consumed, %records[%span, 0] : i32, view<8x6xi32>
+    view.store %emitted, %records[%span, 1] : i32, view<8x6xi32>
+    %output_count = index.cast %emitted : i32 to index
+    scf.for %token = [%zero to %four step %one] {
+      %valid = index.cmp ult, %token, %output_count : index
+      %value = scf.if %valid -> (i32) {
+        %slot_value = index.add %selection, %token : index
+        %slot = index.assume %slot_value [range(%slot_value, 0, 31)] : index
+        %prediction = view.load %selected[%slot] : view<32xi32> -> i32
+        scf.yield %prediction : i32
+      } else {
+        scf.yield %zero_word : i32
+      }
+      %field = index.add %token, %two : index
+      view.store %value, %records[%span, %field] : i32, view<8x6xi32>
+    }
+    scf.for %field = [%zero to %four step %one] {
+      %input_word = view.load %descriptors[%span, %field] : view<64x5xi32> -> i32
+      %is_count = index.cmp eq, %field, %zero : index
+      %word = scf.select %is_count, %consumed, %input_word : i32
+      view.store %word, %accepted[%span, %field] : i32, view<64x5xi32>
+    }
+    view.store %none, %accepted[%span, 4] : i32, view<64x5xi32>
+    %next_replay = scf.if %speculative -> (index) {
+      %capture = index.mul %span, %four : index
+      %capture_word = index.cast %capture : index to i32
+      scf.for %field = [%zero to %four step %one] {
+        %accepted_word = view.load %accepted[%span, %field] : view<64x5xi32> -> i32
+        %is_begin = index.cmp eq, %field, %two : index
+        %word = scf.select %is_begin, %capture_word, %accepted_word : i32
+        view.store %word, %replayed[%replay_index, %field] : i32, view<64x5xi32>
+      }
+      view.store %none, %replayed[%replay_index, 4] : i32, view<64x5xi32>
+      %next = index.add %replay_index, %one : index
+      scf.yield %next : index
+    } else {
+      scf.yield %replay_index : index
+    }
+    scf.yield %next_replay : index
+  }
+  %capture_word = scalar.constant 32 : i32
+  %replay_word = index.cast %replay_count : index to i32
+  view.store %capture_word, %replay_header[0] : i32, view<3xi32>
+  view.store %replay_word, %replay_header[1] : i32, view<3xi32>
+  view.store %zero_word, %replay_header[2] : i32, view<3xi32>
+  func.return
+}
+
+// The case sequences fixture construction, a production dispatch, and an
+// independent oracle. Single-thread helper dispatches carry this buffer recipe
+// across that sequence; they are not wrappers around the subject under test.
+kernel.def @accept_fixture_dispatch() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%trial: index, %epoch: buffer, %predictions: buffer) {
+  func.call @accept_fixture(%trial, %epoch, %predictions) : (index, buffer, buffer) -> ()
+  kernel.return
+}
+
+kernel.def @accept_oracle_dispatch() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer) {
+  func.call @accept_oracle(%epoch, %inputs, %predictions, %committed, %replay, %results) : (buffer, buffer, buffer, buffer, buffer, buffer) -> ()
+  kernel.return
+}
+
+check.case public @mtp_accept_frontiers {
+  %trial = check.param.range linear bounds(0 to 3) step(1) : index
+  %epoch = check.generate.fill value(-99) : tensor<516xi32>
+  %inputs = check.generate.iota offset(1000) step(1) : tensor<512xi32>
+  %predictions = check.generate.fill value(-99) : tensor<32xi32>
+  %committed = check.generate.fill value(-99) : tensor<387xi32>
+  %replay = check.generate.fill value(-99) : tensor<387xi32>
+  %results = check.generate.fill value(-99) : tensor<8x6xi32>
+  %expected_epoch = check.generate.fill value(-99) : tensor<516xi32>
+  %expected_inputs = check.generate.iota offset(1000) step(1) : tensor<512xi32>
+  %expected_predictions = check.generate.fill value(-99) : tensor<32xi32>
+  %expected_committed = check.generate.fill value(-99) : tensor<387xi32>
+  %expected_replay = check.generate.fill value(-99) : tensor<387xi32>
+  %expected_results = check.generate.fill value(-99) : tensor<8x6xi32>
+  kernel.launch @accept_fixture_dispatch(%trial, %epoch, %predictions) : (index, tensor<516xi32>, tensor<32xi32>)
+  kernel.launch @accept_fixture_dispatch(%trial, %expected_epoch, %expected_predictions) : (index, tensor<516xi32>, tensor<32xi32>)
+  kernel.launch @accept_oracle_dispatch(%expected_epoch, %expected_inputs, %expected_predictions, %expected_committed, %expected_replay, %expected_results) : (tensor<516xi32>, tensor<512xi32>, tensor<32xi32>, tensor<387xi32>, tensor<387xi32>, tensor<8x6xi32>)
+  kernel.launch @qwen38_mtp_accept_spans(%epoch, %inputs, %predictions, %committed, %replay, %results) : (tensor<516xi32>, tensor<512xi32>, tensor<32xi32>, tensor<387xi32>, tensor<387xi32>, tensor<8x6xi32>)
+  check.expect.bitwise actual(%results) expected(%expected_results) : tensor<8x6xi32>
+  check.expect.bitwise actual(%committed) expected(%expected_committed) : tensor<387xi32>
+  check.expect.bitwise actual(%replay) expected(%expected_replay) : tensor<387xi32>
+  check.expect.bitwise actual(%epoch) expected(%expected_epoch) : tensor<516xi32>
+  check.expect.bitwise actual(%inputs) expected(%expected_inputs) : tensor<512xi32>
+  check.expect.bitwise actual(%predictions) expected(%expected_predictions) : tensor<32xi32>
+  check.return
+}

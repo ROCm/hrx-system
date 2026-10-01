@@ -33,7 +33,7 @@ typedef struct loom_serve_qwen_options_t {
   iree_host_size_t epoch_count;
   // Borrowed directories with identical weights and retained-state placement.
   const iree_string_view_t* epoch_directories;
-  // Optional MTP command bundle: draft, begin, and warm<capacity> directories.
+  // Optional MTP bundle: draft, begin, warm<capacity>, verify<capacity>.
   // Uses the same retained rows and canonical target embedding/output weights.
   iree_string_view_t mtp_directory;
   // Canonical UD-Q5_K_XL GGUF file loaded once during creation.
@@ -63,6 +63,18 @@ typedef struct loom_serve_qwen_span_t {
   // Output selection policy for this span.
   loom_serve_qwen_span_flags_t flags;
 } loom_serve_qwen_span_t;
+
+// Committed progress for one known or speculative span. A speculative span
+// consumes its pending anchor plus matched drafts; its final output stays
+// pending. Consumed and output counts therefore agree for speculative spans.
+typedef struct loom_serve_qwen_result_t {
+  // Inputs consumed into retained target and MTP state.
+  iree_host_size_t consumed_count;
+  // Selected output IDs, including an EOS or the first rejected replacement.
+  iree_host_size_t output_count;
+  // Valid prefix of output_count IDs in generation order.
+  int32_t tokens[4];
+} loom_serve_qwen_result_t;
 
 typedef struct loom_serve_qwen_metrics_t {
   // Active input tokens consumed since the last reset.
@@ -124,6 +136,19 @@ iree_status_t loom_serve_qwen_model_propose(loom_serve_qwen_model_t* model,
                                             iree_host_size_t row_count,
                                             const iree_host_size_t* row_indices,
                                             int32_t (*out_tokens)[3]);
+
+// Mixes ordinary known spans with four-input speculative spans on one cached
+// target shape. A zero output limit denotes known input. Limits 1-4 denote
+// speculative input {pending token, three proposals}, require SELECT and a
+// pending non-EOS prediction, and cap the number of new selected outputs.
+// Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
+// state is published; catch-up pairs accepted inputs with target hidden state.
+// Results are in caller order and valid on success. Validation and submission
+// failure have the same contracts as model_epoch; all storage is reused.
+iree_status_t loom_serve_qwen_model_verify(
+    loom_serve_qwen_model_t* model, iree_host_size_t shape_index,
+    iree_host_size_t span_count, const loom_serve_qwen_span_t* spans,
+    const uint32_t* output_limits, loom_serve_qwen_result_t* out_results);
 
 // Clears recurrent state and position without allocating or changing ownership.
 // Attention beyond the new logical prefix is inaccessible and need not clear.

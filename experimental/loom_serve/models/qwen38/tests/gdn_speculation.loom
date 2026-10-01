@@ -1,0 +1,146 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qwen38_gdn_conv_verify_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer)
+kernel.decl @qwen38_gdn_recurrent_verify_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+kernel.decl @qwen38_gdn_capture_spans(%span_capacity: index) launch(%epoch: buffer, %qkv: buffer, %alpha: buffer, %beta: buffer, %capture: buffer, %layer_origin: offset)
+kernel.decl @qwen38_gdn_conv_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer)
+kernel.decl @qwen38_gdn_recurrent_spans(%span_capacity: index) launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
+// Original spans occupy rows 1/3/5/7 with 3/4/4/4 input tokens. Row 1 is
+// known; speculative rows accept 1/2/4 transitions. Replay descriptors omit
+// the known row and preserve holes at original_span*4 in the capture.
+kernel.def @gdn_verify_fixture() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer, %known: buffer, %accepted: buffer, %replay: buffer, %rows: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %options_origin = index.constant 1548 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %descriptors = buffer.view %epoch[%descriptor_origin] : buffer -> view<64x5xi32>
+  %options = buffer.view %epoch[%options_origin] : buffer -> view<64x2xi32>
+  %known_header = buffer.view %known[%origin] : buffer -> view<3xi32>
+  %known_span = buffer.view %known[%descriptor_origin] : buffer -> view<5xi32>
+  %accepted_header = buffer.view %accepted[%origin] : buffer -> view<3xi32>
+  %accepted_spans = buffer.view %accepted[%descriptor_origin] : buffer -> view<64x5xi32>
+  %replay_header = buffer.view %replay[%origin] : buffer -> view<3xi32>
+  %replay_spans = buffer.view %replay[%descriptor_origin] : buffer -> view<64x5xi32>
+  %origins = buffer.view %rows[%origin] : buffer -> view<8x2xi64>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %eight = index.constant 8 : index
+  %state_bytes = index.constant 3268608 : index
+  %zero_word = scalar.constant 0 : i32
+  %one_word = scalar.constant 1 : i32
+  %three_word = scalar.constant 3 : i32
+  %four_word = scalar.constant 4 : i32
+  %fifteen_word = scalar.constant 15 : i32
+  %thirtytwo_word = scalar.constant 32 : i32
+  %position = scalar.constant 100 : i32
+  %none = scalar.constant -1 : i32
+  view.store %fifteen_word, %header[0] : i32, view<3xi32>
+  view.store %four_word, %header[1] : i32, view<3xi32>
+  view.store %zero_word, %header[2] : i32, view<3xi32>
+  view.store %fifteen_word, %known_header[0] : i32, view<3xi32>
+  view.store %one_word, %known_header[1] : i32, view<3xi32>
+  view.store %zero_word, %known_header[2] : i32, view<3xi32>
+  view.store %fifteen_word, %accepted_header[0] : i32, view<3xi32>
+  view.store %three_word, %accepted_header[1] : i32, view<3xi32>
+  view.store %zero_word, %accepted_header[2] : i32, view<3xi32>
+  view.store %thirtytwo_word, %replay_header[0] : i32, view<3xi32>
+  view.store %three_word, %replay_header[1] : i32, view<3xi32>
+  view.store %zero_word, %replay_header[2] : i32, view<3xi32>
+  view.store %three_word, %known_span[0] : i32, view<5xi32>
+  view.store %position, %known_span[1] : i32, view<5xi32>
+  view.store %zero_word, %known_span[2] : i32, view<5xi32>
+  view.store %one_word, %known_span[3] : i32, view<5xi32>
+  view.store %none, %known_span[4] : i32, view<5xi32>
+  scf.for %row = [%zero to %eight step %one] {
+    %address = index.mul %row, %state_bytes : index
+    %address_word = index.cast %address : index to i64
+    view.store %address_word, %origins[%row, 0] : i64, view<8x2xi64>
+  }
+  scf.for %span = [%zero to %four step %one] {
+    %is_known = index.cmp eq, %span, %zero : index
+    %count = scf.select %is_known, %three_word, %four_word : i32
+    %flag = scf.select %is_known, %zero_word, %one_word : i32
+    %compact = index.mul %span, %four : index
+    %compact_word = index.cast %compact : index to i32
+    %shifted = scalar.subi %compact_word, %one_word : i32
+    %begin = scf.select %is_known, %zero_word, %shifted : i32
+    %even_row = index.mul %span, %two : index
+    %row = index.add %even_row, %one : index
+    %row_word = index.cast %row : index to i32
+    view.store %count, %descriptors[%span, 0] : i32, view<64x5xi32>
+    view.store %position, %descriptors[%span, 1] : i32, view<64x5xi32>
+    view.store %begin, %descriptors[%span, 2] : i32, view<64x5xi32>
+    view.store %row_word, %descriptors[%span, 3] : i32, view<64x5xi32>
+    view.store %none, %descriptors[%span, 4] : i32, view<64x5xi32>
+    view.store %flag, %options[%span, 0] : i32, view<64x2xi32>
+    view.store %four_word, %options[%span, 1] : i32, view<64x2xi32>
+    scf.if %is_known {
+    } else {
+      %slot = index.sub %span, %one : index
+      %full = index.cmp eq, %span, %three : index
+      %accepted_count = scf.select %full, %four, %span : index
+      %accepted_word = index.cast %accepted_count : index to i32
+      view.store %accepted_word, %accepted_spans[%slot, 0] : i32, view<64x5xi32>
+      view.store %position, %accepted_spans[%slot, 1] : i32, view<64x5xi32>
+      view.store %begin, %accepted_spans[%slot, 2] : i32, view<64x5xi32>
+      view.store %row_word, %accepted_spans[%slot, 3] : i32, view<64x5xi32>
+      view.store %none, %accepted_spans[%slot, 4] : i32, view<64x5xi32>
+      view.store %accepted_word, %replay_spans[%slot, 0] : i32, view<64x5xi32>
+      view.store %position, %replay_spans[%slot, 1] : i32, view<64x5xi32>
+      view.store %compact_word, %replay_spans[%slot, 2] : i32, view<64x5xi32>
+      view.store %row_word, %replay_spans[%slot, 3] : i32, view<64x5xi32>
+      view.store %none, %replay_spans[%slot, 4] : i32, view<64x5xi32>
+    }
+  }
+  kernel.return
+}
+
+check.case public @gdn_accepted_publication {
+  %spans = check.literal value(8) : index
+  %origin = check.literal value(0) : offset
+  %history = check.literal value(3145728) : offset
+  %epsilon = check.literal value(0.000001) : f32
+  %epoch = check.generate.fill value(-99) : tensor<516xi32>
+  %known = check.generate.fill value(-99) : tensor<387xi32>
+  %accepted = check.generate.fill value(-99) : tensor<387xi32>
+  %replay = check.generate.fill value(-99) : tensor<387xi32>
+  %rows = check.generate.fill value(0) : tensor<8x2xi64>
+  %qkv = check.generate.iota offset(-0.5) step(0.000003814697265625) : tensor<32x10240xf32>
+  %alpha = check.generate.iota offset(-0.1) step(0.00006103515625) : tensor<32x48xf32>
+  %beta = check.generate.iota offset(0.1) step(0.00006103515625) : tensor<32x48xf32>
+  %weight = check.generate.fill value(0.125) : tensor<40960xf32>
+  %a = check.generate.fill value(-1.0) : tensor<48xf32>
+  %bias = check.generate.fill value(0.0) : tensor<48xf32>
+  %state = check.generate.iota offset(-0.01) step(0.000000003725290298461914) : tensor<8x817152xf32>
+  %reference = check.generate.iota offset(-0.01) step(0.000000003725290298461914) : tensor<8x817152xf32>
+  %convolved = check.generate.fill value(-9.0) : tensor<32x10240xf32>
+  %norm = check.generate.fill value(-9.0) : tensor<32x32xf32>
+  %output = check.generate.fill value(-9.0) : tensor<32x6144xf32>
+  %capture = check.generate.fill value(-9.0) : tensor<330752xf32>
+  %captured_qkv = check.tensor.view %capture offset(0) : tensor<330752xf32> -> tensor<32x10240xf32>
+  %captured_alpha = check.tensor.view %capture offset(1310720) : tensor<330752xf32> -> tensor<32x48xf32>
+  %captured_beta = check.tensor.view %capture offset(1316864) : tensor<330752xf32> -> tensor<32x48xf32>
+  kernel.launch @gdn_verify_fixture(%epoch, %known, %accepted, %replay, %rows) : (tensor<516xi32>, tensor<387xi32>, tensor<387xi32>, tensor<387xi32>, tensor<8x2xi64>)
+  kernel.launch @qwen38_gdn_conv_verify_spans[%spans](%epoch, %rows, %history, %epsilon, %qkv, %weight, %state, %convolved, %norm) : [index](tensor<516xi32>, tensor<8x2xi64>, offset, f32, tensor<32x10240xf32>, tensor<40960xf32>, tensor<8x817152xf32>, tensor<32x10240xf32>, tensor<32x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_verify_spans[%spans](%epoch, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state, %output) : [index](tensor<516xi32>, tensor<8x2xi64>, offset, tensor<32x10240xf32>, tensor<32x32xf32>, tensor<32x48xf32>, tensor<32x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<8x817152xf32>, tensor<32x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_spans[%spans](%known, %rows, %history, %epsilon, %qkv, %weight, %reference, %convolved, %norm) : [index](tensor<387xi32>, tensor<8x2xi64>, offset, f32, tensor<32x10240xf32>, tensor<40960xf32>, tensor<8x817152xf32>, tensor<32x10240xf32>, tensor<32x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%known, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %reference, %output) : [index](tensor<387xi32>, tensor<8x2xi64>, offset, tensor<32x10240xf32>, tensor<32x32xf32>, tensor<32x48xf32>, tensor<32x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<8x817152xf32>, tensor<32x6144xf32>)
+  check.expect.bitwise actual(%state) expected(%reference) : tensor<8x817152xf32>
+  kernel.launch @qwen38_gdn_capture_spans[%spans](%epoch, %qkv, %alpha, %beta, %capture, %origin) : [index](tensor<516xi32>, tensor<32x10240xf32>, tensor<32x48xf32>, tensor<32x48xf32>, tensor<330752xf32>, offset)
+  kernel.launch @qwen38_gdn_conv_spans[%spans](%replay, %rows, %history, %epsilon, %captured_qkv, %weight, %state, %convolved, %norm) : [index](tensor<387xi32>, tensor<8x2xi64>, offset, f32, tensor<32x10240xf32>, tensor<40960xf32>, tensor<8x817152xf32>, tensor<32x10240xf32>, tensor<32x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%replay, %rows, %origin, %convolved, %norm, %captured_alpha, %captured_beta, %a, %bias, %state, %output) : [index](tensor<387xi32>, tensor<8x2xi64>, offset, tensor<32x10240xf32>, tensor<32x32xf32>, tensor<32x48xf32>, tensor<32x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<8x817152xf32>, tensor<32x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_spans[%spans](%accepted, %rows, %history, %epsilon, %qkv, %weight, %reference, %convolved, %norm) : [index](tensor<387xi32>, tensor<8x2xi64>, offset, f32, tensor<32x10240xf32>, tensor<40960xf32>, tensor<8x817152xf32>, tensor<32x10240xf32>, tensor<32x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%accepted, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %reference, %output) : [index](tensor<387xi32>, tensor<8x2xi64>, offset, tensor<32x10240xf32>, tensor<32x32xf32>, tensor<32x48xf32>, tensor<32x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<8x817152xf32>, tensor<32x6144xf32>)
+  check.expect.bitwise actual(%state) expected(%reference) : tensor<8x817152xf32>
+  check.return
+}

@@ -1,0 +1,140 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Greedy acceptance is the sole owner of speculative publication. A result
+// record is {consumed_inputs, output_count, token[4]}. The final selected token
+// remains pending; consuming the anchor plus matched drafts advances by exactly
+// output_count. EOS and the caller's output credit truncate the same prefix.
+// Committed control preserves original packed offsets for MTP catch-up. Replay
+// control instead indexes compact captured transitions at original_span*4 and
+// contains only speculative spans, so known spans are never committed twice.
+kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %options_origin = index.constant 1548 : offset
+  %eos_origin = index.constant 2060 : offset
+  %metadata = buffer.assume.memory_space<constant> %epoch : buffer
+  %header = buffer.view %metadata[%origin] : buffer -> view<3xi32>
+  %descriptors = buffer.view %metadata[%descriptor_origin] : buffer -> view<64x5xi32>
+  %options = buffer.view %metadata[%options_origin] : buffer -> view<64x2xi32>
+  %eos_view = buffer.view %metadata[%eos_origin] : buffer -> view<1xi32>
+  %eos = view.load %eos_view[0] : view<1xi32> -> i32
+  %tokens = buffer.view %inputs[%origin] : buffer -> view<512xi32>
+  %selected = buffer.view %predictions[%origin] : buffer -> view<32xi32>
+  %outputs = buffer.view %results[%origin] : buffer -> view<8x6xi32>
+  %accepted_header = buffer.view %committed[%origin] : buffer -> view<3xi32>
+  %accepted = buffer.view %committed[%descriptor_origin] : buffer -> view<64x5xi32>
+  %replay_header = buffer.view %replay[%origin] : buffer -> view<3xi32>
+  %replayed = buffer.view %replay[%descriptor_origin] : buffer -> view<64x5xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %zero_word = scalar.constant 0 : i32
+  %one_word = scalar.constant 1 : i32
+  %none_word = scalar.constant -1 : i32
+  %true = scalar.constant true : i1
+  %false = scalar.constant false : i1
+  %total = view.load %header[0] : view<3xi32> -> i32
+  %span_word = view.load %header[1] : view<3xi32> -> i32
+  %span_value = index.cast %span_word : i32 to index
+  %spans = index.assume %span_value [range(%span_value, 1, 8)] : index
+  view.store %total, %accepted_header[0] : i32, view<3xi32>
+  view.store %span_word, %accepted_header[1] : i32, view<3xi32>
+  view.store %zero_word, %accepted_header[2] : i32, view<3xi32>
+  %replay_count = scf.for %span = [%zero to %spans step %one](%prior_replay = %zero : index) -> (index) {
+    %count_word = view.load %descriptors[%span, 0] : view<64x5xi32> -> i32
+    %position = view.load %descriptors[%span, 1] : view<64x5xi32> -> i32
+    %begin_word = view.load %descriptors[%span, 2] : view<64x5xi32> -> i32
+    %row = view.load %descriptors[%span, 3] : view<64x5xi32> -> i32
+    %selection_word = view.load %descriptors[%span, 4] : view<64x5xi32> -> i32
+    %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
+    %speculative = scalar.cmpi ne, %flag, %zero_word : i32
+    %begin = index.cast %begin_word : i32 to index
+    %selection = index.cast %selection_word : i32 to index
+    scf.for %token = [%zero to %four step %one] {
+      %slot = index.add %token, %two : index
+      view.store %zero_word, %outputs[%span, %slot] : i32, view<8x6xi32>
+    }
+    %consumed_word, %emitted_word = scf.if %speculative -> (i32, i32) {
+      %speculative_begin = index.assume %begin [range(%begin, 0, 508)] : index
+      %speculative_selection = index.assume %selection [range(%selection, 0, 28)] : index
+      %limit_word = view.load %options[%span, 1] : view<64x2xi32> -> i32
+      %limit = index.cast %limit_word : i32 to index
+      %output_count, %continuing = scf.for %token = [%zero to %four step %one](%count = %zero : index, %live = %true : i1) -> (index, i1) {
+        %credited = index.cmp ult, %token, %limit : index
+        %emit = scalar.andi %live, %credited : i1
+        %next_count, %next_live = scf.if %emit -> (index, i1) {
+          %prediction_index = index.add %speculative_selection, %token : index
+          %prediction = view.load %selected[%prediction_index] : view<32xi32> -> i32
+          %slot = index.add %token, %two : index
+          view.store %prediction, %outputs[%span, %slot] : i32, view<8x6xi32>
+          %next_count = index.add %count, %one : index
+          %has_draft = index.cmp ult, %token, %three : index
+          %matches = scf.if %has_draft -> (i1) {
+            %relative = index.add %token, %one : index
+            %candidate_index = index.add %speculative_begin, %relative : index
+            %candidate = view.load %tokens[%candidate_index] : view<512xi32> -> i32
+            %same = scalar.cmpi eq, %prediction, %candidate : i32
+            scf.yield %same : i1
+          } else {
+            scf.yield %false : i1
+          }
+          %not_eos = scalar.cmpi ne, %prediction, %eos : i32
+          %next_live = scalar.andi %matches, %not_eos : i1
+          scf.yield %next_count, %next_live : index, i1
+        } else {
+          scf.yield %count, %false : index, i1
+        }
+        scf.yield %next_count, %next_live : index, i1
+      }
+      %word = index.cast %output_count : index to i32
+      scf.yield %word, %word : i32, i32
+    } else {
+      %has_output = scalar.cmpi sge, %selection_word, %zero_word : i32
+      %emitted = scf.if %has_output -> (i32) {
+        %known_selection = index.assume %selection [range(%selection, 0, 31)] : index
+        %prediction = view.load %selected[%known_selection] : view<32xi32> -> i32
+        view.store %prediction, %outputs[%span, 2] : i32, view<8x6xi32>
+        scf.yield %one_word : i32
+      } else {
+        scf.yield %zero_word : i32
+      }
+      scf.yield %count_word, %emitted : i32, i32
+    }
+    view.store %consumed_word, %outputs[%span, 0] : i32, view<8x6xi32>
+    view.store %emitted_word, %outputs[%span, 1] : i32, view<8x6xi32>
+    view.store %consumed_word, %accepted[%span, 0] : i32, view<64x5xi32>
+    view.store %position, %accepted[%span, 1] : i32, view<64x5xi32>
+    view.store %begin_word, %accepted[%span, 2] : i32, view<64x5xi32>
+    view.store %row, %accepted[%span, 3] : i32, view<64x5xi32>
+    view.store %none_word, %accepted[%span, 4] : i32, view<64x5xi32>
+    %next_replay = scf.if %speculative -> (index) {
+      %capture_begin = index.mul %span, %four : index
+      %capture_word = index.cast %capture_begin : index to i32
+      view.store %consumed_word, %replayed[%prior_replay, 0] : i32, view<64x5xi32>
+      view.store %position, %replayed[%prior_replay, 1] : i32, view<64x5xi32>
+      view.store %capture_word, %replayed[%prior_replay, 2] : i32, view<64x5xi32>
+      view.store %row, %replayed[%prior_replay, 3] : i32, view<64x5xi32>
+      view.store %none_word, %replayed[%prior_replay, 4] : i32, view<64x5xi32>
+      %next = index.add %prior_replay, %one : index
+      scf.yield %next : index
+    } else {
+      scf.yield %prior_replay : index
+    }
+    scf.yield %next_replay : index
+  }
+  %capture_count = scalar.constant 32 : i32
+  %replay_word = index.cast %replay_count : index to i32
+  view.store %capture_count, %replay_header[0] : i32, view<3xi32>
+  view.store %replay_word, %replay_header[1] : i32, view<3xi32>
+  view.store %zero_word, %replay_header[2] : i32, view<3xi32>
+  kernel.return
+}

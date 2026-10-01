@@ -11,24 +11,33 @@ requests into HSACO images. The generated JSON contains configuration and an
 artifact index, not executable host policy. Compilation stops on the first
 failure. An output directory is usable only after the whole command succeeds.
 
-`--stage=mtp` prepares block-64 warm/carry/proposal commands. It emits `draft`
+`--stage=mtp` prepares block-64 warm/carry/proposal and target verification
+commands. It emits `draft`
 and `begin` at the fixed 32-token/eight-span proposal shape and
-`warm<prefill-capacity>` for a matching target epoch. Each loaded target shape
-needs its warm variant. Shared embedding, target normalization and full-vocabulary
+`warm<prefill-capacity>` and `verify<prefill-capacity>` for a matching target
+epoch. Each loaded target shape needs both variants. Shared embedding, target
+normalization and full-vocabulary
 output roots resolve to existing target weight views; the extra block-64 groups
 load once. There is no command ABI or HAL extension.
 
 The model's optional MTP bundle warms its private cache after committed target
 epochs. `loom_serve_qwen_model_propose` returns three candidates without changing
 target positions or predictions. Its private hidden chain is discarded before
-the next proposal; committed target hidden supplies the starting carry. This is
-proposal execution, not accepted speculative decoding: the service does not yet
-select or publish these candidates. Target verification and accepted recurrent
-commit must own that publication boundary.
+the next proposal; committed target hidden supplies the starting carry.
+`loom_serve_qwen_model_verify` packs four-input verifiers with ordinary known
+spans. Device greedy acceptance stops at mismatch, EOS or output credit. Known
+spans publish directly; speculative GDN transitions occupy a 63,504,384-byte
+capture, and only the accepted prefixes replay into retained state. Attention
+tails beyond the accepted position stay unreachable. MTP catch-up then consumes
+accepted inputs paired with committed target hidden. All buffers and commands
+are prepared once. The HTTP scheduler does not yet select this optional path.
 
 The real-weight `qwen_epoch_check --mtp=/path/to/bundle` checks proposal isolation,
-duplicate resident histories, compact-row permutation, and subsequent retained
-target continuations. The focused carry check additionally compares exact copy
+duplicate resident histories, compact-row permutation, zero/partial/full draft
+acceptance, output-credit truncation, mixed known/speculative epochs, and
+subsequent retained target continuations. Forced proposals come from ordinary
+target execution, not baked token fixtures. Natural proposals are checked too.
+The focused carry check additionally compares exact copy
 identities and untouched rows/padding without loading model weights:
 
 ```sh
@@ -39,6 +48,15 @@ build_tools/bin/iree-bazel-run --config=asan \
   --library=experimental/loom_serve/models/qwen38/kernels/qwen38/spans.loom \
   --device=amdgpu --target=amdgpu:gfx1151 --case=@mtp_carry_spans
 ```
+
+`tests/mtp_accept.loom` compares acceptance records and both derived descriptor
+tables against an independent minimum-frontier oracle across four fixtures,
+including EOS and untouched storage. `tests/gdn_speculation.loom` compares the
+entire eight-row recurrent/history slab bitwise before and after accepted
+publication: known work commits once, speculative work remains unpublished
+until replay, and inactive rows remain unchanged. Both support device access
+sanitization. They use the corresponding kernels plus `gdn_spans.loom`,
+`gdn_prefill.loom`, `gdn_common.loom`, and `spans.loom` for the GDN check.
 
 From the repository root:
 

@@ -1,0 +1,54 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%value, 1, 512)]
+config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 8)]
+
+command.program.decl @qwen38_text_prefill_body_impl(%token_count: index, %schedule_token_count: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %control: buffer, %gdn_state: buffer, %attention_cache: buffer, %transition_capture: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%verification_depth, 0, 4), range(%span_capacity, 0, 64)]
+command.program.decl @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 4)]
+command.program.decl @qwen38_gdn_commit(%span_capacity: index) launch(%parameters: buffer, %capture: buffer, %replay: buffer, %rows: buffer, %state: buffer) where [range(%span_capacity, 1, 8)]
+kernel.decl @qwen38_token_embedding_q5k_f32_prefill(%token_count: index) launch(%token_ids: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_output_normalize_spans(%output_capacity: index) launch(%epoch: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_mtp_accept_spans() launch(%epoch: buffer, %inputs: buffer, %predictions: buffer, %committed: buffer, %replay: buffer, %results: buffer)
+
+// Mixed known and speculative spans share the ordinary target token shape.
+// GDN publishes known spans and captures speculative transitions. Attention
+// may write beyond the accepted frontier; those entries remain unreachable.
+// Device acceptance produces both the compact recurrent replay and the exact
+// committed target-hidden/token pairing consumed by the following MTP warm.
+command.program.def public @qwen38_mtp_verify() launch(%parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %state: buffer, %input_tokens: buffer, %committed: buffer, %results: buffer) {
+  %tokens = config.get @runner.qwen38.prefill_token_count : index
+  %spans = config.get @runner.qwen38.span_capacity : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %outputs = index.mul %spans, %four : index
+  %hidden_row_bytes = index.constant 20480 : offset
+  %hidden_group_bytes = index.constant 81920 : offset
+  %output_row_bytes = index.constant 4 : offset
+  %output_group_bytes = index.constant 16 : offset
+  %capture_bytes = index.constant 63504384 : offset
+  %replay_bytes = index.constant 1548 : offset
+  %hidden_bytes = index.scale %outputs, %hidden_row_bytes : index, offset -> offset
+  %output_bytes = index.scale %outputs, %output_row_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %predictions = buffer.alloca<global> align(256) %output_bytes : buffer
+  %capture = buffer.alloca<global> align(256) %capture_bytes : buffer
+  %replay = buffer.alloca<global> align(256) %replay_bytes : buffer
+  %embedding = command.parameter %parameters, "token_embd.weight" : view<874086400xi8>
+  kernel.launch @qwen38_token_embedding_q5k_f32_prefill[%tokens](%input_tokens, %embedding, %residual) : [index](buffer, view<874086400xi8>, buffer)
+  command.program.launch @qwen38_text_prefill_body_impl[%tokens, %tokens, %four, %spans](%parameters, %residual, %epoch, %state, %state, %capture, %rows) : [index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %epsilon = scalar.constant 0.000001 : f32
+  %norm_weight = command.parameter %parameters, "output_norm.weight" : view<5120xf32>
+  kernel.launch @qwen38_output_normalize_spans[%outputs](%epoch, %epsilon, %residual, %norm_weight, %normalized) : [index](buffer, f32, buffer, view<5120xf32>, buffer)
+  scf.for %group = [%zero to %spans step %one] unroll {
+    %hidden_origin = index.scale %group, %hidden_group_bytes : index, offset -> offset
+    %output_origin = index.scale %group, %output_group_bytes : index, offset -> offset
+    command.program.launch @qwen38_output_projection_greedy[%four, %hidden_origin, %output_origin](%parameters, %normalized, %predictions) : [index, offset, offset](buffer, buffer, buffer)
+  }
+  kernel.launch @qwen38_mtp_accept_spans(%epoch, %input_tokens, %predictions, %committed, %replay, %results) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @qwen38_gdn_commit[%spans](%parameters, %capture, %replay, %rows, %state) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

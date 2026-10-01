@@ -6,11 +6,14 @@
 // Model-owned packed work. The header contains three I32 words: active token
 // count, span count, and selected output count. Each following span contains
 // five I32 words: token count, absolute position, packed token begin, resident
-// row, and selected output index (-1 when no output is requested). Active spans
+// row, and selected output index (-1 when no output is requested). Input epochs
 // partition the packed token prefix and refer to distinct resident rows.
+// Accepted/replay controls retain original activation offsets with gaps; their
+// counts describe only the accepted subspans inside the header's token extent.
 // Full-model epochs reserve 64 descriptors, followed at byte 1292 by 64 I32
 // selected packed-row indices. The producer fills this direct output mapping
-// with each selected span's last token; unused entries are never consumed.
+// with selected token positions (all four for speculative spans, otherwise the
+// span's last token); unused entries are never consumed.
 // These helpers consume the caller's validated model plan, not external input.
 // Metadata is immutable for the entire queued epoch; the completion edge owns
 // permission to refill epoch storage. Resident origins remain cold data.

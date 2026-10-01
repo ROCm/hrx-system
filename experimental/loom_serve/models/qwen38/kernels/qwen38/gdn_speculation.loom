@@ -1,0 +1,140 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
+func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index)
+func.decl @qwen38_row_gdn_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
+template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish: i1, %head: index, %thread: index, %epoch: buffer, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset)
+template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish: i1, %head: index, %column: index, %lane: index, %epoch: buffer, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset)
+
+// Verification extends the immutable epoch after its 64 selected-row slots:
+// 64 pairs of {speculative, output_limit}, followed by the EOS token. Known
+// spans publish in the traversal; four-input speculative spans publish only
+// after acceptance. The ordinary five-word span and cold row layouts match.
+func.def public inline @qwen38_span_speculative(%epoch: buffer, %span: index) -> (i1) {
+  %origin = index.constant 1548 : offset
+  %zero = scalar.constant 0 : i32
+  %metadata = buffer.assume.memory_space<constant> %epoch : buffer
+  %options = buffer.view %metadata[%origin] : buffer -> view<64x2xi32>
+  %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
+  %speculative = scalar.cmpi ne, %flag, %zero : i32
+  func.return %speculative : i1
+}
+
+kernel.def export("qwen38_gdn_conv_verify_spans") @qwen38_gdn_conv_verify_spans(%span_capacity: index) {
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %heads = index.constant 16 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %spans, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer) {
+  %span = kernel.workgroup.id<y> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %head_value = kernel.workgroup.id<x> : index
+    %head = index.assume %head_value [range(%head_value, 0, 15)] : index
+    %thread_value = kernel.workitem.id<x> : index
+    %thread = index.assume %thread_value [range(%thread_value, 0, 255)] : index
+    %control, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %history = func.call @qwen38_row_gdn_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+    %speculative = func.call @qwen38_span_speculative(%epoch, %span) : (buffer, index) -> (i1)
+    %true = scalar.constant true : i1
+    %publish = scalar.xori %speculative, %true : i1
+    template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish, %head, %thread, %epoch, %epsilon, %qkv, %weight, %state, %output, %inverse_norm, %control, %begin, %history) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+  }
+  kernel.return
+}
+
+kernel.def export("qwen38_gdn_recurrent_verify_spans") @qwen38_gdn_recurrent_verify_spans(%span_capacity: index) {
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %heads = index.constant 48 : index
+  %columns = index.constant 32 : index
+  %threads = index.constant 32 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %columns, %spans) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %rows: buffer, %layer_origin: offset, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer) {
+  %span = kernel.workgroup.id<z> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %head_value = kernel.workgroup.id<x> : index
+    %head = index.assume %head_value [range(%head_value, 0, 47)] : index
+    %column_value = kernel.workgroup.id<y> : index
+    %column = index.assume %column_value [range(%column_value, 0, 31)] : index
+    %lane_value = kernel.workitem.id<x> : index
+    %lane = index.assume %lane_value [range(%lane_value, 0, 31)] : index
+    %control, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+    %origin = func.call @qwen38_row_gdn_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+    %speculative = func.call @qwen38_span_speculative(%epoch, %span) : (buffer, index) -> (i1)
+    %true = scalar.constant true : i1
+    %publish = scalar.xori %speculative, %true : i1
+    template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish, %head, %column, %lane, %epoch, %qkv, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output, %control, %begin, %origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+  }
+  kernel.return
+}
+
+// Each layer retains 32 compact transitions, independently of the target's
+// padded token capacity. Slot 4*span names that span's four input transitions.
+// Known prompt/decode spans leave their slots untouched and are never replayed.
+kernel.def export("qwen38_gdn_capture_spans") @qwen38_gdn_capture_spans(%span_capacity: index) {
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %tiles = index.constant 41 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%tiles, %spans, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%epoch: buffer, %qkv: buffer, %alpha: buffer, %beta: buffer, %capture: buffer, %layer_origin: offset) {
+  %span = kernel.workgroup.id<y> : index
+  %active = func.call @qwen38_span_active(%epoch, %span) : (buffer, index) -> (i1)
+  scf.if %active {
+    %speculative = func.call @qwen38_span_speculative(%epoch, %span) : (buffer, index) -> (i1)
+    scf.if %speculative {
+      %control, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
+      %tile = kernel.workgroup.id<x> : index
+      %thread = kernel.workitem.id<x> : index
+      %four = index.constant 4 : index
+      %forty = index.constant 40 : index
+      %threads = index.constant 256 : index
+      %qkv_row_bytes = index.constant 40960 : offset
+      %qkv_span_bytes = index.constant 163840 : offset
+      %gate_row_bytes = index.constant 192 : offset
+      %gate_span_bytes = index.constant 768 : offset
+      %is_qkv = index.cmp ult, %tile, %forty : index
+      scf.if %is_qkv {
+        %source_origin = index.scale %begin, %qkv_row_bytes : index, offset -> offset
+        %span_origin = index.scale %span, %qkv_span_bytes : index, offset -> offset
+        %target_origin = index.add %layer_origin, %span_origin : offset
+        %input = buffer.view %qkv[%source_origin] : buffer -> view<40960xf32>
+        %output = buffer.view %capture[%target_origin] : buffer -> view<40960xf32>
+        %tile_begin = index.mul %tile, %threads : index
+        %packet = index.add %tile_begin, %thread : index
+        %element = index.mul %packet, %four : index
+        %value = vector.load %input[%element] : view<40960xf32> -> vector<4xf32>
+        vector.store %value, %output[%element] : vector<4xf32>, view<40960xf32>
+      } else {
+        %packets = index.constant 48 : index
+        %active_packet = index.cmp ult, %thread, %packets : index
+        scf.if %active_packet {
+          %source_origin = index.scale %begin, %gate_row_bytes : index, offset -> offset
+          %span_origin = index.scale %span, %gate_span_bytes : index, offset -> offset
+          %target_origin = index.add %layer_origin, %span_origin : offset
+          %alpha_offset = index.constant 1310720 : offset
+          %beta_offset = index.constant 1316864 : offset
+          %alpha_origin = index.add %target_origin, %alpha_offset : offset
+          %beta_origin = index.add %target_origin, %beta_offset : offset
+          %input_a = buffer.view %alpha[%source_origin] : buffer -> view<192xf32>
+          %input_b = buffer.view %beta[%source_origin] : buffer -> view<192xf32>
+          %output_a = buffer.view %capture[%alpha_origin] : buffer -> view<192xf32>
+          %output_b = buffer.view %capture[%beta_origin] : buffer -> view<192xf32>
+          %element = index.mul %thread, %four : index
+          %a = vector.load %input_a[%element] : view<192xf32> -> vector<4xf32>
+          %b = vector.load %input_b[%element] : view<192xf32> -> vector<4xf32>
+          vector.store %a, %output_a[%element] : vector<4xf32>, view<192xf32>
+          vector.store %b, %output_b[%element] : vector<4xf32>, view<192xf32>
+        }
+      }
+    }
+  }
+  kernel.return
+}
