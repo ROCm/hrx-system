@@ -155,7 +155,8 @@ static iree_host_size_t qwen_workload_plan(
     int32_t decode_tokens[QWEN_WORKLOAD_ROWS]) {
   iree_host_size_t span_count = 0;
   iree_host_size_t prefill_count = 0;
-  iree_host_size_t remaining = loom_serve_qwen_model_epoch_capacity(model);
+  iree_host_size_t remaining =
+      loom_serve_qwen_model_shapes(model)[0].token_capacity;
   for (iree_host_size_t i = 0; i < row_count; ++i) {
     qwen_workload_row_t* row = &rows[i];
     if (row->finished) {
@@ -216,7 +217,7 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
     }
     const iree_time_t issue_start = iree_time_now();
     if (arm == 'B') {
-      status = loom_serve_qwen_model_epoch(model, span_count, spans);
+      status = loom_serve_qwen_model_epoch(model, 0, span_count, spans);
     } else {
       for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
            ++i) {
@@ -377,10 +378,12 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
+  const iree_string_view_t epoch_directory = iree_make_cstring_view(FLAG_epoch);
   const loom_serve_qwen_options_t options = {
       .prefill_directory = iree_make_cstring_view(FLAG_prefill),
       .decode_directory = iree_make_cstring_view(FLAG_decode),
-      .epoch_directory = iree_make_cstring_view(FLAG_epoch),
+      .epoch_count = 1,
+      .epoch_directories = &epoch_directory,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
       .row_count = row_count,
@@ -390,9 +393,9 @@ int main(int argc, char** argv) {
   iree_status_t status =
       loom_serve_qwen_model_create(&options, allocator, &model);
   if (iree_status_is_ok(status) &&
-      (loom_serve_qwen_model_span_capacity(model) < row_count ||
-       loom_serve_qwen_model_epoch_capacity(model) < row_count ||
-       loom_serve_qwen_model_epoch_capacity(model) !=
+      (loom_serve_qwen_model_shapes(model)[0].span_capacity < row_count ||
+       loom_serve_qwen_model_shapes(model)[0].token_capacity < row_count ||
+       loom_serve_qwen_model_shapes(model)[0].token_capacity !=
            loom_serve_qwen_model_prefill_capacity(model))) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -409,7 +412,7 @@ int main(int argc, char** argv) {
       printf("{\"event\":\"seed\",\"window\":%zu,\"completed_ns\":%" PRId64
              ",\"token_capacity\":%zu,\"rows\":[",
              window, iree_time_now() - start,
-             loom_serve_qwen_model_epoch_capacity(model));
+             loom_serve_qwen_model_shapes(model)[0].token_capacity);
       for (iree_host_size_t i = 0; i < row_count; ++i) {
         printf("%s{\"row\":%zu,\"prompt_tokens\":%zu,\"retained_tokens\":%zu}",
                i ? "," : "", i, rows[i].input_count, rows[i].prefix_count);

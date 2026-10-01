@@ -8,14 +8,6 @@ func.decl import("runner") @prefill(%residual: hal.buffer, %control: hal.buffer,
 
 func.decl import("runner") @decode(%residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64)
 
-func.decl import("runner", "epoch") @submit_epoch(%residual: hal.buffer, %metadata: hal.buffer, %rows: hal.buffer, %state: hal.buffer, %inputs: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer) -> (i64)
-
-// The packed entry is included only in configurations loading an epoch stage.
-func.def public @epoch(%residual: hal.buffer, %metadata: hal.buffer, %rows: hal.buffer, %state: hal.buffer, %inputs: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer) -> (i64) {
-  %completion = func.call @submit_epoch(%residual, %metadata, %rows, %state, %inputs, %outputs, %workspace) : (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-  func.return %completion : i64
-}
-
 // The program is shared; all request state arrives as buffer bindings.
 func.def public @step(%initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
   %zero = scalar.constant 0 : i32

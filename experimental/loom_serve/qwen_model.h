@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_QWEN_MODEL_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_QWEN_MODEL_H_
 
+#include "experimental/loom_serve/qwen_schedule.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
 
@@ -28,9 +29,10 @@ typedef struct loom_serve_qwen_options_t {
   iree_string_view_t prefill_directory;
   // Compiled decode directory with identical parameter placement and context.
   iree_string_view_t decode_directory;
-  // Optional packed-epoch stage with the same weights and context placement.
-  // Empty selects isolated-stage execution only.
-  iree_string_view_t epoch_directory;
+  // Number of cached packed-epoch stages; zero selects isolated execution.
+  iree_host_size_t epoch_count;
+  // Borrowed directories with identical weights and retained-state placement.
+  const iree_string_view_t* epoch_directories;
   // Canonical UD-Q5_K_XL GGUF file loaded once during creation.
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
@@ -92,10 +94,11 @@ iree_host_size_t loom_serve_qwen_model_context_capacity(
     const loom_serve_qwen_model_t* model);
 iree_host_size_t loom_serve_qwen_model_prefill_capacity(
     const loom_serve_qwen_model_t* model);
-// Zero capacities mean no packed-epoch stage was loaded.
-iree_host_size_t loom_serve_qwen_model_epoch_capacity(
+// Shapes are in artifact option order and borrow model-owned immutable storage.
+// Zero means no packed-epoch stages were loaded.
+iree_host_size_t loom_serve_qwen_model_shape_count(
     const loom_serve_qwen_model_t* model);
-iree_host_size_t loom_serve_qwen_model_span_capacity(
+const loom_serve_qwen_shape_t* loom_serve_qwen_model_shapes(
     const loom_serve_qwen_model_t* model);
 
 // Advances distinct resident rows in one packed model traversal. The nonempty
@@ -105,6 +108,7 @@ iree_host_size_t loom_serve_qwen_model_span_capacity(
 // execution failure ends the run and destroy drains all accepted work.
 // Model storage, weights, commands and VM state are preallocated and reused.
 iree_status_t loom_serve_qwen_model_epoch(loom_serve_qwen_model_t* model,
+                                          iree_host_size_t shape_index,
                                           iree_host_size_t span_count,
                                           const loom_serve_qwen_span_t* spans);
 

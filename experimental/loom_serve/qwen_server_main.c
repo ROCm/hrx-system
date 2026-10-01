@@ -14,7 +14,8 @@
 
 IREE_FLAG(string, prefill, "", "Compiled prefill artifact directory.");
 IREE_FLAG(string, decode, "", "Compiled decode artifact directory.");
-IREE_FLAG(string, epoch, "", "Compiled packed epoch artifact directory.");
+IREE_FLAG_LIST(string, epoch,
+               "Compiled packed epoch directory; repeat for cached shapes.");
 IREE_FLAG(string, scheduler, "packed",
           "packed, isolated, or matched (isolated with prefill decode math).");
 IREE_FLAG(string, packing, "mixed",
@@ -33,6 +34,7 @@ IREE_FLAG(int32_t, heartbeat_ms, 1000,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
+  const iree_flag_string_list_t epochs = FLAG_epoch_list();
   if (!FLAG_prefill[0] || !FLAG_decode[0] || !FLAG_weights[0] ||
       !FLAG_tokenizer[0] || FLAG_port < 0 || FLAG_port > 65535 ||
       FLAG_rows < 1 || FLAG_rows > 8 || FLAG_chunk_size < 0 ||
@@ -53,7 +55,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "scheduler must be packed, isolated, or matched.\n");
     return EXIT_FAILURE;
   }
-  if (schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED && !FLAG_epoch[0]) {
+  if (schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED && !epochs.count) {
     fprintf(stderr, "The packed scheduler requires --epoch.\n");
     return EXIT_FAILURE;
   }
@@ -71,7 +73,8 @@ int main(int argc, char** argv) {
   const loom_serve_qwen_options_t options = {
       .prefill_directory = iree_make_cstring_view(FLAG_prefill),
       .decode_directory = iree_make_cstring_view(FLAG_decode),
-      .epoch_directory = iree_make_cstring_view(FLAG_epoch),
+      .epoch_count = epochs.count,
+      .epoch_directories = epochs.values,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
       .row_count = (iree_host_size_t)FLAG_rows};
@@ -82,10 +85,15 @@ int main(int argc, char** argv) {
   }
   iree_host_size_t chunk_size = 0;
   if (iree_status_is_ok(status)) {
-    const iree_host_size_t capacity =
-        schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED
-            ? loom_serve_qwen_model_epoch_capacity(model)
-            : loom_serve_qwen_model_prefill_capacity(model);
+    iree_host_size_t capacity = loom_serve_qwen_model_prefill_capacity(model);
+    if (schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED) {
+      capacity = 0;
+      const loom_serve_qwen_shape_t* shapes =
+          loom_serve_qwen_model_shapes(model);
+      for (iree_host_size_t i = 0; i < epochs.count; ++i) {
+        capacity = iree_max(capacity, shapes[i].token_capacity);
+      }
+    }
     chunk_size = FLAG_chunk_size ? (iree_host_size_t)FLAG_chunk_size : capacity;
     if (chunk_size > capacity) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -104,11 +112,10 @@ int main(int argc, char** argv) {
     if (iree_status_is_ok(status)) {
       fprintf(stderr,
               "{\"event\":\"ready\",\"address\":\"%.*s\",\"rows\":%d,\"chunk_"
-              "size\":%zu,\"scheduler\":\"%s\",\"epoch_capacity\":%zu,"
-              "\"span_capacity\":%zu,\"packing\":\"%s\"}\n",
+              "size\":%zu,\"scheduler\":\"%s\",\"shape_count\":%zu,"
+              "\"packing\":\"%s\"}\n",
               (int)address.size, address.data, FLAG_rows, chunk_size,
-              FLAG_scheduler, loom_serve_qwen_model_epoch_capacity(model),
-              loom_serve_qwen_model_span_capacity(model), FLAG_packing);
+              FLAG_scheduler, epochs.count, FLAG_packing);
       const loom_serve_qwen_service_options_t service_options = {
           .row_count = (iree_host_size_t)FLAG_rows,
           .chunk_size = chunk_size,

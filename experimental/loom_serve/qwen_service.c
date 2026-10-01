@@ -140,10 +140,10 @@ typedef struct qwen_service_t {
   loom_serve_qwen_schedule_mode_t schedule_mode;
   // Admission ablation independent of the packed versus isolated math choice.
   loom_serve_qwen_packing_mode_t packing_mode;
-  // Prepared token shape used by the live packing policy.
-  iree_host_size_t token_capacity;
-  // Maximum distinct rows in one prepared epoch.
-  iree_host_size_t span_capacity;
+  // Borrowed model shapes, or the one isolated control shape.
+  const loom_serve_qwen_shape_t* shapes;
+  // Number of candidate shapes evaluated against each ready cohort.
+  iree_host_size_t shape_count;
   // Rotating admission priority, independent of row or request identity.
   iree_host_size_t cursor;
   // Independent periodic reporting of copied service state.
@@ -751,8 +751,8 @@ static void qwen_separate_ready(const qwen_service_t* service,
 }
 
 static iree_status_t qwen_execute_epoch(
-    qwen_service_t* service, iree_host_size_t count,
-    const loom_serve_qwen_scheduled_span_t* scheduled) {
+    qwen_service_t* service, iree_host_size_t shape_index,
+    iree_host_size_t count, const loom_serve_qwen_scheduled_span_t* scheduled) {
   loom_serve_qwen_span_t spans[8];
   int32_t decode_tokens[8];
   iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
@@ -803,7 +803,8 @@ static iree_status_t qwen_execute_epoch(
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
   iree_status_t status = iree_ok_status();
   if (packed) {
-    status = loom_serve_qwen_model_epoch(service->model, count, spans);
+    status =
+        loom_serve_qwen_model_epoch(service->model, shape_index, count, spans);
   } else {
     for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
       qwen_session_t* session = &service->sessions[spans[i].row_index];
@@ -828,12 +829,15 @@ static iree_status_t qwen_execute_epoch(
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
   fprintf(stderr,
           "{\"event\":\"epoch\",\"epoch\":%" PRIu64
-          ",\"scheduler\":\"%s\",\"spans\":%zu,\"token_capacity\":%zu,"
+          ",\"scheduler\":\"%s\",\"spans\":%zu,\"shape\":%zu,"
+          "\"token_capacity\":%zu,\"span_capacity\":%zu,"
           "\"packing\":\"%s\","
           "\"prefill_tokens\":%zu,\"decode_tokens\":%zu,"
           "\"selected_tokens_including_eos\":%zu,\"traversals\":%zu,"
           "\"model_ms\":%.3f,\"rows\":%.*s}\n",
-          epoch, mode, count, service->token_capacity,
+          epoch, mode, count, shape_index,
+          service->shapes[shape_index].token_capacity,
+          service->shapes[shape_index].span_capacity,
           service->packing_mode == LOOM_SERVE_QWEN_PACKING_SEPARATE ? "separate"
                                                                     : "mixed",
           prefill_count, decode_count, output_count,
@@ -895,6 +899,8 @@ iree_status_t loom_serve_qwen_service_run(
     loom_serve_qwen_model_t* model, loom_serve_http_server_t* server,
     const loom_serve_qwen_service_options_t* options,
     iree_allocator_t host_allocator) {
+  const loom_serve_qwen_shape_t isolated_shape = {
+      loom_serve_qwen_model_prefill_capacity(model), options->row_count};
   qwen_service_t service = {
       .allocator = host_allocator,
       .model = model,
@@ -905,12 +911,12 @@ iree_status_t loom_serve_qwen_service_run(
       .default_max_tokens = options->default_max_tokens,
       .schedule_mode = options->schedule_mode,
       .packing_mode = options->packing_mode,
-      .token_capacity = loom_serve_qwen_model_epoch_capacity(model),
-      .span_capacity = loom_serve_qwen_model_span_capacity(model),
+      .shapes = loom_serve_qwen_model_shapes(model),
+      .shape_count = loom_serve_qwen_model_shape_count(model),
       .heartbeat = {.interval = options->heartbeat_interval}};
-  if (!service.token_capacity) {
-    service.token_capacity = loom_serve_qwen_model_prefill_capacity(model);
-    service.span_capacity = service.row_count;
+  if (service.schedule_mode != LOOM_SERVE_QWEN_SCHEDULE_PACKED) {
+    service.shapes = &isolated_shape;
+    service.shape_count = 1;
   }
   iree_slim_mutex_initialize(&service.heartbeat.mutex);
   iree_notification_initialize(&service.heartbeat.notification);
@@ -969,12 +975,14 @@ iree_status_t loom_serve_qwen_service_run(
         qwen_separate_ready(&service, ready_counts);
       }
       loom_serve_qwen_scheduled_span_t spans[8];
-      const iree_host_size_t count = loom_serve_qwen_schedule(
-          service.row_count, ready_counts, service.token_capacity,
-          service.span_capacity, service.chunk_size, &service.cursor, spans);
+      loom_serve_qwen_scheduled_span_t scratch[8];
+      iree_host_size_t shape_index = 0;
+      const iree_host_size_t count = loom_serve_qwen_schedule_shapes(
+          service.row_count, ready_counts, service.shape_count, service.shapes,
+          service.chunk_size, &service.cursor, spans, scratch, &shape_index);
       if (count) {
         progress = true;
-        status = qwen_execute_epoch(&service, count, spans);
+        status = qwen_execute_epoch(&service, shape_index, count, spans);
       }
     }
     qwen_observe(&service, iree_status_is_ok(status) ? "idle" : "failed");

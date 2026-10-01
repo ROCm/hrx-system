@@ -164,7 +164,7 @@ def render(view, all_sensors=False, now_ns=None, width=None):
     ready = latest.get("ready", {})
     lines.append(
         f"Scheduler {text(ready.get('scheduler', '--'))}  rows {ready.get('rows', '--')}"
-        f"  packing {text(ready.get('packing', '--'))}  token shape {ready.get('epoch_capacity', '--')}"
+        f"  packing {text(ready.get('packing', '--'))}  cached shapes {ready.get('shape_count', '--')}"
         f"  record #{view.last['sequence']}"
     )
 
