@@ -109,6 +109,8 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
   %c2 = index.constant 2 : index
   %c4 = index.constant 4 : index
   %c8 = index.constant 8 : index
+  // A canonical Q5 block has eleven complete 16-byte packets.
+  %c11 = index.constant 11 : index
   %c16 = index.constant 16 : index
   %c32 = index.constant 32 : index
   %c40 = index.constant 40 : index
@@ -117,12 +119,14 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
   %c256 = index.constant 256 : index
   %c512 = index.constant 512 : index
   %c0_offset = index.constant 0 : offset
-  %weight_block_byte_count = index.constant 176 : index
   %weight_block_bytes = index.constant 176 : offset
   %weight_stage_bytes = index.constant 10240 : offset
   %activation_stage_bytes = index.constant 10240 : offset
   %metadata_stage_bytes = index.constant 8192 : offset
-  %result_stage_bytes = index.constant 16384 : offset
+  %raw_stage_bytes = index.constant 22528 : offset
+  // Sixty-four output channels each own eleven encoded packets.
+  %raw_load_count = index.constant 704 : index
+  %zero_raw_packet = vector.constant 0 : vector<4xi32>
   %wave_result_stage_bytes = index.constant 1024 : offset
   %c0_f32x2 = vector.constant 0.0 : vector<2xf32>
   %c0_f16x4 = vector.constant 0.0 : vector<4xf16>
@@ -146,7 +150,6 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
   %lane0 = kernel.subgroup.lane.id : index
   %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
   %quant_block_count = index.div %input_size, %c256 : index
-  %weight_row_bytes = index.mul %quant_block_count, %weight_block_byte_count : index
   %channel_tile_base = index.mul %channel_tile, %c64 : index
   %token_tile_base = index.mul %token_tile, %c128 : index
   %channel_group0 = index.rem %subgroup, %c4 : index
@@ -167,7 +170,11 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
   %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
   %activation_stage = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
   %metadata_stage = buffer.alloca<workgroup> align(16) %metadata_stage_bytes : buffer
-  %result_stage = buffer.alloca<workgroup> align(16) %result_stage_bytes : buffer
+  // The final workgroup barrier retires raw readers before result publication.
+  %raw_stage = buffer.alloca<workgroup> align(16) %raw_stage_bytes : buffer
+  %raw_stage_view = buffer.view %raw_stage[%c0_offset] : buffer -> view<128x44xi32>
+  %gate_raw_view = buffer.view %gate_weight_noalias[%c0_offset] : buffer -> view<[%output_size]x[%quant_block_count]x44xi32>
+  %up_raw_view = buffer.view %up_weight_noalias[%c0_offset] : buffer -> view<[%output_size]x[%quant_block_count]x44xi32>
   %weight_stage_view = buffer.view %weight_stage[%c0_offset] : buffer -> view<128x40xf16>
   %activation_stage_physical_view = buffer.view %activation_stage[%c0_offset] : buffer -> view<128x40xf16>
   %metadata_stage_view = buffer.view %metadata_stage[%c0_offset] : buffer -> view<128x8x2xf32>
@@ -175,11 +182,48 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
   %activation_fragment_view = buffer.view %activation_stage[%c0_offset] : buffer -> view<32x128xf16, %activation_fragment_layout>
   %wave_result_stage_offset = index.scale %subgroup, %wave_result_stage_bytes : index, offset -> offset
   %result_fragment_layout = encoding.layout.strided [1, %c16] : encoding<layout>
-  %result_fragment_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf32, %result_fragment_layout>
-  %result_physical_view = buffer.view %result_stage[%wave_result_stage_offset] : buffer -> view<16x16xf32>
+  %result_fragment_view = buffer.view %raw_stage[%wave_result_stage_offset] : buffer -> view<16x16xf32, %result_fragment_layout>
+  %result_physical_view = buffer.view %raw_stage[%wave_result_stage_offset] : buffer -> view<16x16xf32>
 
   %zero_accumulator = vector.fragment<init> %zero_values shape [%m, %n] : vector<8xf32>
   %gate_result0, %gate_result1, %up_result0, %up_result1 = scf.for %quant_block = [%c0 to %quant_block_count step %c1](%gate_block_acc0 = %zero_accumulator : vector<8xf32>, %gate_block_acc1 = %zero_accumulator : vector<8xf32>, %up_block_acc0 = %zero_accumulator : vector<8xf32>, %up_block_acc1 = %zero_accumulator : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    scf.for %raw_task = [%workitem to %raw_load_count step %c512] {
+      %raw_row0 = index.div %raw_task, %c11 : index
+      %raw_row = index.assume %raw_row0 [range(%raw_row0, 0, 63)] : index
+      %raw_packet0 = index.rem %raw_task, %c11 : index
+      %raw_packet = index.assume %raw_packet0 [range(%raw_packet0, 0, 10)] : index
+      %raw_word = index.mul %raw_packet, %c4 : index
+      %raw_channel = index.add %channel_tile_base, %raw_row : index
+      %raw_valid_channel = index.cmp ult, %raw_channel, %output_size : index
+      %raw_values = scf.if %raw_valid_channel -> (vector<4xi32>) {
+        %raw_bounded_channel = index.assume %raw_channel [lt(%raw_channel, %output_size)] : index
+        %loaded = vector.load %gate_raw_view[%raw_bounded_channel, %quant_block, %raw_word] : view<[%output_size]x[%quant_block_count]x44xi32> -> vector<4xi32>
+        scf.yield %loaded : vector<4xi32>
+      } else {
+        scf.yield %zero_raw_packet : vector<4xi32>
+      }
+      vector.store %raw_values, %raw_stage_view[%raw_row, %raw_word] : vector<4xi32>, view<128x44xi32>
+    }
+    scf.for %raw_task = [%workitem to %raw_load_count step %c512] {
+      %raw_row0 = index.div %raw_task, %c11 : index
+      %raw_row = index.assume %raw_row0 [range(%raw_row0, 0, 63)] : index
+      %raw_packet0 = index.rem %raw_task, %c11 : index
+      %raw_packet = index.assume %raw_packet0 [range(%raw_packet0, 0, 10)] : index
+      %raw_word = index.mul %raw_packet, %c4 : index
+      %raw_channel = index.add %channel_tile_base, %raw_row : index
+      %raw_valid_channel = index.cmp ult, %raw_channel, %output_size : index
+      %raw_values = scf.if %raw_valid_channel -> (vector<4xi32>) {
+        %raw_bounded_channel = index.assume %raw_channel [lt(%raw_channel, %output_size)] : index
+        %loaded = vector.load %up_raw_view[%raw_bounded_channel, %quant_block, %raw_word] : view<[%output_size]x[%quant_block_count]x44xi32> -> vector<4xi32>
+        scf.yield %loaded : vector<4xi32>
+      } else {
+        scf.yield %zero_raw_packet : vector<4xi32>
+      }
+      %raw_stage_row = index.add %raw_row, %c64 : index
+      vector.store %raw_values, %raw_stage_view[%raw_stage_row, %raw_word] : vector<4xi32>, view<128x44xi32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
     scf.for %metadata_task = [%workitem to %metadata_load_count step %c512] unroll {
       %metadata_group0 = index.rem %metadata_task, %c8 : index
       %metadata_group = index.assume %metadata_group0 [range(%metadata_group0, 0, 7)] : index
@@ -188,11 +232,8 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
       %metadata_channel = index.add %channel_tile_base, %metadata_row : index
       %valid_channel = index.cmp ult, %metadata_channel, %output_size : index
       %metadata_pair = scf.if %valid_channel -> (vector<2xf32>) {
-        %channel_byte_index = index.mul %metadata_channel, %weight_row_bytes : index
-        %row_byte_base = index.cast %channel_byte_index : index to offset
-        %block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
-        %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%gate_weight_noalias, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %block_byte_base = index.scale %metadata_row, %weight_block_bytes : index, offset -> offset
+        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
@@ -208,11 +249,9 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
       %metadata_channel = index.add %channel_tile_base, %metadata_row : index
       %valid_channel = index.cmp ult, %metadata_channel, %output_size : index
       %metadata_pair = scf.if %valid_channel -> (vector<2xf32>) {
-        %channel_byte_index = index.mul %metadata_channel, %weight_row_bytes : index
-        %row_byte_base = index.cast %channel_byte_index : index to offset
-        %block_byte_add = index.scale %quant_block, %weight_block_bytes : index, offset -> offset
-        %block_byte_base = index.add %row_byte_base, %block_byte_add : offset
-        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%up_weight_noalias, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
+        %raw_metadata_row = index.add %metadata_row, %c64 : index
+        %block_byte_base = index.scale %raw_metadata_row, %weight_block_bytes : index, offset -> offset
+        %d_scale, %dmin_scale = template.apply<@ggml.q5k.scale_min>(%raw_stage, %block_byte_base, %metadata_group) : (buffer, offset, index) -> (f32, f32)
         %decoded_pair = vector.from_elements %d_scale, %dmin_scale : vector<2xf32>
         scf.yield %decoded_pair : vector<2xf32>
       } else {
@@ -234,12 +273,11 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %channel = index.add %channel_tile_base, %load_row : index
         %valid_channel = index.cmp ult, %channel, %output_size : index
         %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
-          %channel_byte_index = index.mul %channel, %weight_row_bytes : index
-          %row_byte_base = index.cast %channel_byte_index : index to offset
+          %row_byte_base = index.scale %load_row, %weight_block_bytes : index, offset -> offset
           %metadata_pair = vector.load %metadata_stage_view[%load_row, %quant_group, %c0] : view<128x8x2xf32> -> vector<2xf32>
           %d_scale = vector.extract %metadata_pair[0] : vector<2xf32> -> f32
           %dmin_scale = vector.extract %metadata_pair[1] : vector<2xf32> -> f32
-          %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%gate_weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
+          %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%raw_stage, %row_byte_base, %c0, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
           scf.yield %decoded : vector<4xf16>
         } else {
           scf.yield %c0_f16x4 : vector<4xf16>
@@ -255,13 +293,13 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %channel = index.add %channel_tile_base, %load_row : index
         %valid_channel = index.cmp ult, %channel, %output_size : index
         %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
-          %channel_byte_index = index.mul %channel, %weight_row_bytes : index
-          %row_byte_base = index.cast %channel_byte_index : index to offset
+          %raw_load_row = index.add %load_row, %c64 : index
+          %row_byte_base = index.scale %raw_load_row, %weight_block_bytes : index, offset -> offset
           %stage_row = index.add %load_row, %c64 : index
           %metadata_pair = vector.load %metadata_stage_view[%stage_row, %quant_group, %c0] : view<128x8x2xf32> -> vector<2xf32>
           %d_scale = vector.extract %metadata_pair[0] : vector<2xf32> -> f32
           %dmin_scale = vector.extract %metadata_pair[1] : vector<2xf32> -> f32
-          %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%up_weight_noalias, %row_byte_base, %quant_block, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
+          %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%raw_stage, %row_byte_base, %c0, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
           scf.yield %decoded : vector<4xf16>
         } else {
           scf.yield %c0_f16x4 : vector<4xf16>
