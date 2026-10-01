@@ -33,6 +33,9 @@ typedef struct loom_serve_qwen_options_t {
   iree_host_size_t epoch_count;
   // Borrowed directories with identical weights and retained-state placement.
   const iree_string_view_t* epoch_directories;
+  // Optional MTP command bundle: draft, begin, and warm<capacity> directories.
+  // Uses the same retained rows and canonical target embedding/output weights.
+  iree_string_view_t mtp_directory;
   // Canonical UD-Q5_K_XL GGUF file loaded once during creation.
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
@@ -111,6 +114,16 @@ iree_status_t loom_serve_qwen_model_epoch(loom_serve_qwen_model_t* model,
                                           iree_host_size_t shape_index,
                                           iree_host_size_t span_count,
                                           const loom_serve_qwen_span_t* spans);
+
+// Proposes three candidate successors for distinct rows with pending tokens.
+// Does not consume target inputs or change committed predictions/positions.
+// All rows must have four remaining context slots. Candidate KV/hidden state
+// is private to MTP; a following target epoch overwrites its committed prefix.
+// |out_tokens| contains three IDs per row in caller order, valid on success.
+iree_status_t loom_serve_qwen_model_propose(loom_serve_qwen_model_t* model,
+                                            iree_host_size_t row_count,
+                                            const iree_host_size_t* row_indices,
+                                            int32_t (*out_tokens)[3]);
 
 // Clears recurrent state and position without allocating or changing ownership.
 // Attention beyond the new logical prefix is inaccessible and need not clear.
