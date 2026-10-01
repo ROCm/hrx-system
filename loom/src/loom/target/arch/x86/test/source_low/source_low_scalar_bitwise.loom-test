@@ -50,3 +50,46 @@ low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i32_s
   %result = shr.imm.gpr32 %14 {shift = 2}
   return %result
 }
+
+// ====
+
+x86.target<scalar> @target
+
+func.def target(@target) @scalar_narrow_float_signs(%fp8_magnitude: f8E4M3, %fp8_sign: f8E4M3, %f16_magnitude: f16, %f16_sign: f16) -> (f8E4M3, f8E4M3, f8E4M3, f16, f16, f16) {
+  %fp8_absolute = scalar.absf %fp8_magnitude : f8E4M3
+  %fp8_negated = scalar.negf %fp8_magnitude : f8E4M3
+  %fp8_copied = scalar.copysignf %fp8_magnitude, %fp8_sign : f8E4M3
+  %f16_absolute = scalar.absf %f16_magnitude : f16
+  %f16_negated = scalar.negf %f16_magnitude : f16
+  %f16_copied = scalar.copysignf %f16_magnitude, %f16_sign : f16
+  func.return %fp8_absolute, %fp8_negated, %fp8_copied, %f16_absolute, %f16_negated, %f16_copied : f8E4M3, f8E4M3, f8E4M3, f16, f16, f16
+}
+
+// ----
+low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_narrow_float_signs(%fp8_magnitude: reg<x86.gpr32>, %fp8_sign: reg<x86.gpr32>, %f16_magnitude: reg<x86.gpr32>, %f16_sign: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+  %106 = movzx.u8.gpr32 %fp8_magnitude
+  %107 = copy %106 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %fp8_absolute = and.imm.gpr32 %107 {imm32 = 127}
+  %109 = copy %106 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %fp8_negated = xor.imm.gpr32 %109 {imm32 = 128}
+  %111 = movzx.u8.gpr32 %fp8_sign
+  %112 = copy %111 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %113 = and.imm.gpr32 %112 {imm32 = 128}
+  %114 = movzx.u8.gpr32 %fp8_absolute
+  %115 = movzx.u8.gpr32 %113
+  %116 = copy %114 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %fp8_copied = or.gpr32 %116, %115
+  %118 = movzx.u16.gpr32 %f16_magnitude
+  %119 = copy %118 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %f16_absolute = and.imm.gpr32 %119 {imm32 = 32767}
+  %121 = copy %118 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %f16_negated = xor.imm.gpr32 %121 {imm32 = 32768}
+  %123 = movzx.u16.gpr32 %f16_sign
+  %124 = copy %123 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %125 = and.imm.gpr32 %124 {imm32 = 32768}
+  %126 = movzx.u16.gpr32 %f16_absolute
+  %127 = movzx.u16.gpr32 %125
+  %128 = copy %126 : reg<x86.gpr32> -> reg<x86.gpr32>
+  %f16_copied = or.gpr32 %128, %127
+  return %fp8_absolute, %fp8_negated, %fp8_copied, %f16_absolute, %f16_negated, %f16_copied
+}

@@ -38,6 +38,7 @@ loom_check_test_suite(
         "target_legalize_comparison.loom-test",
         "target_legalize_conversion.loom-test",
         "target_legalize_diagnostics.loom-test",
+        "target_legalize_float_sign.loom-test",
         "target_legalize_matrix.loom-test",
         "target_legalize_memory.loom-test",
         "target_legalize_report.loom-test",

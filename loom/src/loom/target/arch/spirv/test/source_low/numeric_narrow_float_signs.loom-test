@@ -1,0 +1,33 @@
+// RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low
+
+func.def @scalar_narrow_float_signs(%fp8_magnitude: f8E4M3, %fp8_sign: f8E4M3, %f16_magnitude: f16, %f16_sign: f16) -> (f8E4M3, f8E4M3, f8E4M3, f16, f16, f16) {
+  %fp8_absolute = scalar.absf %fp8_magnitude : f8E4M3
+  %fp8_negated = scalar.negf %fp8_magnitude : f8E4M3
+  %fp8_copied = scalar.copysignf %fp8_magnitude, %fp8_sign : f8E4M3
+  %f16_absolute = scalar.absf %f16_magnitude : f16
+  %f16_negated = scalar.negf %f16_magnitude : f16
+  %f16_copied = scalar.copysignf %f16_magnitude, %f16_sign : f16
+  func.return %fp8_absolute, %fp8_negated, %fp8_copied, %f16_absolute, %f16_negated, %f16_copied : f8E4M3, f8E4M3, f8E4M3, f16, f16, f16
+}
+
+// ----
+low.func.def target<spirv.logical.core> abi(shader_entry_point) @scalar_narrow_float_signs(%fp8_magnitude: reg<spirv.id : i8>, %fp8_sign: reg<spirv.id : i8>, %f16_magnitude: reg<spirv.id : f16>, %f16_sign: reg<spirv.id : f16>) -> (reg<spirv.id : i8>, reg<spirv.id : i8>, reg<spirv.id : i8>, reg<spirv.id : f16>, reg<spirv.id : f16>, reg<spirv.id : f16>) asm {
+  %58 = OpConstant.i8 127
+  %fp8_absolute = OpBitwiseAnd.i8 %fp8_magnitude, %58
+  %60 = OpConstant.i8 -128
+  %fp8_negated = OpBitwiseXor.i8 %fp8_magnitude, %60
+  %62 = OpBitwiseAnd.i8 %fp8_sign, %60
+  %fp8_copied = OpBitwiseOr.i8 %fp8_absolute, %62
+  %64 = OpBitcast.f16.i16 %f16_magnitude
+  %65 = OpConstant.i16 32767
+  %66 = OpBitwiseAnd.i16 %64, %65
+  %f16_absolute = OpBitcast.i16.f16 %66
+  %68 = OpConstant.i16 -32768
+  %69 = OpBitwiseXor.i16 %64, %68
+  %f16_negated = OpBitcast.i16.f16 %69
+  %71 = OpBitcast.f16.i16 %f16_sign
+  %72 = OpBitwiseAnd.i16 %71, %68
+  %73 = OpBitwiseOr.i16 %66, %72
+  %f16_copied = OpBitcast.i16.f16 %73
+  return %fp8_absolute, %fp8_negated, %fp8_copied, %f16_absolute, %f16_negated, %f16_copied
+}

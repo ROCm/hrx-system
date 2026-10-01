@@ -90,6 +90,7 @@ _KERNEL_SOURCES = [
     "numeric/float/approximate_extended.loom",
     "numeric/float/extrema.loom",
     "numeric/float/narrow_reduction.loom",
+    "numeric/float/sign_kernel.loom",
     "numeric/integer/bitwise_divisibility.loom",
     "numeric/integer/narrow_consumers.loom",
     "numeric/integer/unsigned_remainder.loom",

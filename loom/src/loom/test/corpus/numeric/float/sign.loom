@@ -1,0 +1,176 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Every encoding is loaded after compilation so target legalization cannot
+// specialize the sign operations to constants. The integer oracle is exact:
+// all non-sign fields, including every NaN payload, must remain unchanged.
+func.def @float8_sign_bits(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%base] : buffer -> view<256xi8>
+  %results = buffer.view %output[%base] : buffer -> view<8x256xi8>
+  %positive_sign_pattern = scalar.constant 0 : i8
+  %negative_sign_pattern = scalar.constant -128 : i8
+  %e4_positive_zero = scalar.bitcast %positive_sign_pattern : i8 to f8E4M3
+  %e4_negative_zero = scalar.bitcast %negative_sign_pattern : i8 to f8E4M3
+  %e5_positive_zero = scalar.bitcast %positive_sign_pattern : i8 to f8E5M2
+  %e5_negative_zero = scalar.bitcast %negative_sign_pattern : i8 to f8E5M2
+  scf.for %i = [%begin to %end step %step] {
+    %bits = view.load %inputs[%i] : view<256xi8> -> i8
+    %e4 = scalar.bitcast %bits : i8 to f8E4M3
+    %e4_absolute = scalar.absf %e4 : f8E4M3
+    %e4_negated = scalar.negf %e4 : f8E4M3
+    %e4_positive = scalar.copysignf %e4, %e4_positive_zero : f8E4M3
+    %e4_negative = scalar.copysignf %e4, %e4_negative_zero : f8E4M3
+    %e4_absolute_bits = scalar.bitcast %e4_absolute : f8E4M3 to i8
+    %e4_negated_bits = scalar.bitcast %e4_negated : f8E4M3 to i8
+    %e4_positive_bits = scalar.bitcast %e4_positive : f8E4M3 to i8
+    %e4_negative_bits = scalar.bitcast %e4_negative : f8E4M3 to i8
+    %e5 = scalar.bitcast %bits : i8 to f8E5M2
+    %e5_absolute = scalar.absf %e5 : f8E5M2
+    %e5_negated = scalar.negf %e5 : f8E5M2
+    %e5_positive = scalar.copysignf %e5, %e5_positive_zero : f8E5M2
+    %e5_negative = scalar.copysignf %e5, %e5_negative_zero : f8E5M2
+    %e5_absolute_bits = scalar.bitcast %e5_absolute : f8E5M2 to i8
+    %e5_negated_bits = scalar.bitcast %e5_negated : f8E5M2 to i8
+    %e5_positive_bits = scalar.bitcast %e5_positive : f8E5M2 to i8
+    %e5_negative_bits = scalar.bitcast %e5_negative : f8E5M2 to i8
+    view.store %e4_absolute_bits, %results[0, %i] : i8, view<8x256xi8>
+    view.store %e4_negated_bits, %results[1, %i] : i8, view<8x256xi8>
+    view.store %e4_positive_bits, %results[2, %i] : i8, view<8x256xi8>
+    view.store %e4_negative_bits, %results[3, %i] : i8, view<8x256xi8>
+    view.store %e5_absolute_bits, %results[4, %i] : i8, view<8x256xi8>
+    view.store %e5_negated_bits, %results[5, %i] : i8, view<8x256xi8>
+    view.store %e5_positive_bits, %results[6, %i] : i8, view<8x256xi8>
+    view.store %e5_negative_bits, %results[7, %i] : i8, view<8x256xi8>
+  }
+  func.return
+}
+
+func.def @float8_sign_bits_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%base] : buffer -> view<256xi8>
+  %results = buffer.view %output[%base] : buffer -> view<8x256xi8>
+  %magnitude_mask = scalar.constant 127 : i8
+  %sign_mask = scalar.constant -128 : i8
+  scf.for %i = [%begin to %end step %step] {
+    %bits = view.load %inputs[%i] : view<256xi8> -> i8
+    %absolute = scalar.andi %bits, %magnitude_mask : i8
+    %negated = scalar.xori %bits, %sign_mask : i8
+    %negative = scalar.ori %absolute, %sign_mask : i8
+    view.store %absolute, %results[0, %i] : i8, view<8x256xi8>
+    view.store %negated, %results[1, %i] : i8, view<8x256xi8>
+    view.store %absolute, %results[2, %i] : i8, view<8x256xi8>
+    view.store %negative, %results[3, %i] : i8, view<8x256xi8>
+    view.store %absolute, %results[4, %i] : i8, view<8x256xi8>
+    view.store %negated, %results[5, %i] : i8, view<8x256xi8>
+    view.store %absolute, %results[6, %i] : i8, view<8x256xi8>
+    view.store %negative, %results[7, %i] : i8, view<8x256xi8>
+  }
+  func.return
+}
+
+check.scenario @float8_sign_all_bits {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %expected_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %output = check.generate.fill value(41) : tensor<2048xi8>
+    check.compare<@float8_sign_bits, @float8_sign_bits_oracle>(%input, %output) : (tensor<256xi8>, tensor<2048xi8>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<2048xi8>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<256xi8>
+    }
+  }
+  check.return
+}
+
+func.def @float16_sign_bits(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 65536 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%base] : buffer -> view<65536xi16>
+  %results = buffer.view %output[%base] : buffer -> view<8x65536xi16>
+  %positive_sign_pattern = scalar.constant 0 : i16
+  %negative_sign_pattern = scalar.constant -32768 : i16
+  %f16_positive_zero = scalar.bitcast %positive_sign_pattern : i16 to f16
+  %f16_negative_zero = scalar.bitcast %negative_sign_pattern : i16 to f16
+  %bf16_positive_zero = scalar.bitcast %positive_sign_pattern : i16 to bf16
+  %bf16_negative_zero = scalar.bitcast %negative_sign_pattern : i16 to bf16
+  scf.for %i = [%begin to %end step %step] {
+    %bits = view.load %inputs[%i] : view<65536xi16> -> i16
+    %f16 = scalar.bitcast %bits : i16 to f16
+    %f16_absolute = scalar.absf %f16 : f16
+    %f16_negated = scalar.negf %f16 : f16
+    %f16_positive = scalar.copysignf %f16, %f16_positive_zero : f16
+    %f16_negative = scalar.copysignf %f16, %f16_negative_zero : f16
+    %f16_absolute_bits = scalar.bitcast %f16_absolute : f16 to i16
+    %f16_negated_bits = scalar.bitcast %f16_negated : f16 to i16
+    %f16_positive_bits = scalar.bitcast %f16_positive : f16 to i16
+    %f16_negative_bits = scalar.bitcast %f16_negative : f16 to i16
+    %bf16 = scalar.bitcast %bits : i16 to bf16
+    %bf16_absolute = scalar.absf %bf16 : bf16
+    %bf16_negated = scalar.negf %bf16 : bf16
+    %bf16_positive = scalar.copysignf %bf16, %bf16_positive_zero : bf16
+    %bf16_negative = scalar.copysignf %bf16, %bf16_negative_zero : bf16
+    %bf16_absolute_bits = scalar.bitcast %bf16_absolute : bf16 to i16
+    %bf16_negated_bits = scalar.bitcast %bf16_negated : bf16 to i16
+    %bf16_positive_bits = scalar.bitcast %bf16_positive : bf16 to i16
+    %bf16_negative_bits = scalar.bitcast %bf16_negative : bf16 to i16
+    view.store %f16_absolute_bits, %results[0, %i] : i16, view<8x65536xi16>
+    view.store %f16_negated_bits, %results[1, %i] : i16, view<8x65536xi16>
+    view.store %f16_positive_bits, %results[2, %i] : i16, view<8x65536xi16>
+    view.store %f16_negative_bits, %results[3, %i] : i16, view<8x65536xi16>
+    view.store %bf16_absolute_bits, %results[4, %i] : i16, view<8x65536xi16>
+    view.store %bf16_negated_bits, %results[5, %i] : i16, view<8x65536xi16>
+    view.store %bf16_positive_bits, %results[6, %i] : i16, view<8x65536xi16>
+    view.store %bf16_negative_bits, %results[7, %i] : i16, view<8x65536xi16>
+  }
+  func.return
+}
+
+func.def @float16_sign_bits_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 65536 : index
+  %step = index.constant 1 : index
+  %inputs = buffer.view %input[%base] : buffer -> view<65536xi16>
+  %results = buffer.view %output[%base] : buffer -> view<8x65536xi16>
+  %magnitude_mask = scalar.constant 32767 : i16
+  %sign_mask = scalar.constant -32768 : i16
+  scf.for %i = [%begin to %end step %step] {
+    %bits = view.load %inputs[%i] : view<65536xi16> -> i16
+    %absolute = scalar.andi %bits, %magnitude_mask : i16
+    %negated = scalar.xori %bits, %sign_mask : i16
+    %negative = scalar.ori %absolute, %sign_mask : i16
+    view.store %absolute, %results[0, %i] : i16, view<8x65536xi16>
+    view.store %negated, %results[1, %i] : i16, view<8x65536xi16>
+    view.store %absolute, %results[2, %i] : i16, view<8x65536xi16>
+    view.store %negative, %results[3, %i] : i16, view<8x65536xi16>
+    view.store %absolute, %results[4, %i] : i16, view<8x65536xi16>
+    view.store %negated, %results[5, %i] : i16, view<8x65536xi16>
+    view.store %absolute, %results[6, %i] : i16, view<8x65536xi16>
+    view.store %negative, %results[7, %i] : i16, view<8x65536xi16>
+  }
+  func.return
+}
+
+check.scenario @float16_sign_all_bits {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(1) : tensor<65536xi16>
+    %expected_input = check.generate.iota offset(-32768) step(1) : tensor<65536xi16>
+    %output = check.generate.fill value(19441) : tensor<524288xi16>
+    check.compare<@float16_sign_bits, @float16_sign_bits_oracle>(%input, %output) : (tensor<65536xi16>, tensor<524288xi16>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<524288xi16>
+      check.expect.bitwise actual(%input) expected(%expected_input) : tensor<65536xi16>
+    }
+  }
+  check.return
+}

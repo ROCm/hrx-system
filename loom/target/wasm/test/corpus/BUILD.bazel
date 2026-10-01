@@ -90,6 +90,7 @@ _KERNEL_SOURCES = [
     "numeric/float/approximate_extended.loom",
     "numeric/float/extrema.loom",
     "numeric/float/narrow_reduction.loom",
+    "numeric/float/sign_kernel.loom",
     "numeric/integer/bitwise_divisibility.loom",
     "numeric/integer/narrow_consumers.loom",
     "numeric/integer/unsigned_remainder.loom",
@@ -182,7 +183,7 @@ loom_corpus_build(
             "memory/atomic/operations.loom:@atomic_storage": "TARGET/001",
             "memory/buffer/allocation_freshness.loom:@allocation_aliases": "WASM/005",
             "memory/buffer/allocation_freshness.loom:@allocation_selection": "WASM/005",
-            "memory/buffer/boundaries.loom:@adjacent_half_snapshot": "WASM/001",
+            "memory/buffer/boundaries.loom:@adjacent_half_snapshot": "WASM/005",
             "memory/buffer/boundaries.loom:@captured_lane": "WASM/005",
             "memory/buffer/boundaries.loom:@guarded_byte_load": "TARGET/001",
             "memory/buffer/boundaries.loom:@last_byte_order": "WASM/001",
@@ -298,7 +299,6 @@ loom_corpus_build(
             "numeric/integer/arithmetic.loom:@order_and_rotate_i64": "TARGET/001",
             "numeric/integer/bitfield.loom:@bitfield_narrow": "WASM/001",
             "numeric/integer/bitfield.loom:@bitfield_predicate": "WASM/001",
-            "numeric/integer/bitfield.loom:@bitfield_widen": "WASM/001",
             "numeric/integer/boundaries.loom:@shift_boundaries_i32": "TARGET/001",
             "numeric/integer/boundaries.loom:@shift_boundaries_i64": "TARGET/001",
             "numeric/integer/constants.loom:@integer_constants_narrow": "WASM/001",
@@ -374,6 +374,12 @@ loom_test(
 loom_test(
     name = "narrow_widening_test",
     srcs = ["//loom/src/loom/test/corpus/numeric:conversion/narrow_widening.loom"],
+    execution_profiles = [WASM_HOSTED_PROFILE],
+)
+
+loom_test(
+    name = "narrow_float_sign_test",
+    srcs = ["//loom/src/loom/test/corpus/numeric:float/sign.loom"],
     execution_profiles = [WASM_HOSTED_PROFILE],
 )
 

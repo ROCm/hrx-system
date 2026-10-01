@@ -1053,9 +1053,15 @@ def _cases() -> Sequence[ContractCase]:
             for input_type in (_INDEX, _OFFSET)
         ),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E4M3, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I8, _F8E4M3),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F8E5M2, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I8, _F8E5M2),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _F16, _I16),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I16, _F16),
         _conversion_alias_rule(scalar_conversion.scalar_bitcast, _BF16, _I16),
+        _conversion_alias_rule(scalar_conversion.scalar_bitcast, _I16, _BF16),
+        _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I8),
+        _conversion_alias_rule(scalar_conversion.scalar_trunci, _I32, _I16),
         _conversion_alias_rule(scalar_conversion.scalar_extui, _I1, _I32),
         *(
             _conversion_rule(

@@ -1,0 +1,28 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+func.def @packed_narrow_float_signs(%fp8_magnitude: vector<4xf8E4M3>, %fp8_sign: vector<4xf8E4M3>, %bf16_magnitude: vector<2xbf16>, %bf16_sign: vector<2xbf16>) -> (vector<4xf8E4M3>, vector<4xf8E4M3>, vector<4xf8E4M3>, vector<2xbf16>, vector<2xbf16>, vector<2xbf16>) {
+  %fp8_absolute = vector.absf %fp8_magnitude : vector<4xf8E4M3>
+  %fp8_negated = vector.negf %fp8_magnitude : vector<4xf8E4M3>
+  %fp8_copied = vector.copysignf %fp8_magnitude, %fp8_sign : vector<4xf8E4M3>
+  %bf16_absolute = vector.absf %bf16_magnitude : vector<2xbf16>
+  %bf16_negated = vector.negf %bf16_magnitude : vector<2xbf16>
+  %bf16_copied = vector.copysignf %bf16_magnitude, %bf16_sign : vector<2xbf16>
+  func.return %fp8_absolute, %fp8_negated, %fp8_copied, %bf16_absolute, %bf16_negated, %bf16_copied : vector<4xf8E4M3>, vector<4xf8E4M3>, vector<4xf8E4M3>, vector<2xbf16>, vector<2xbf16>, vector<2xbf16>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @packed_narrow_float_signs(%fp8_magnitude: reg<amdgpu.vgpr>, %fp8_sign: reg<amdgpu.vgpr>, %bf16_magnitude: reg<amdgpu.vgpr>, %bf16_sign: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %58 = v_mov_b32 2139062143
+  %fp8_absolute = v_and_b32 %fp8_magnitude, %58
+  %60 = v_mov_b32 2155905152
+  %fp8_negated = v_xor_b32 %fp8_magnitude, %60
+  %62 = v_and_b32 %fp8_sign, %60
+  %fp8_copied = v_or_b32 %fp8_absolute, %62
+  %64 = v_mov_b32 2147450879
+  %bf16_absolute = v_and_b32 %bf16_magnitude, %64
+  %66 = v_mov_b32 2147516416
+  %bf16_negated = v_xor_b32 %bf16_magnitude, %66
+  %68 = v_and_b32 %bf16_sign, %66
+  %bf16_copied = v_or_b32 %bf16_absolute, %68
+  return %fp8_absolute, %fp8_negated, %fp8_copied, %bf16_absolute, %bf16_negated, %bf16_copied
+}

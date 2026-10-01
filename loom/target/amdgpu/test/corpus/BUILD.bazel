@@ -48,6 +48,7 @@ _NO_DEVICE_SUBJECTS = [
     "numeric/conversion/narrow_arithmetic.loom",
     "numeric/conversion/paths.loom",
     "numeric/float/arithmetic.loom",
+    "numeric/float/sign.loom",
     "numeric/float/comparison.loom",
     "numeric/float/exponential.loom",
     "numeric/float/logarithm.loom",

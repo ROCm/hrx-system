@@ -1,0 +1,135 @@
+// RUN: pass target-legalize{mode=eager,policy=reference-only},dce
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @scalar_narrow_float_signs(%fp8_magnitude: f8E5M2, %fp8_sign: f8E5M2, %f16_magnitude: f16, %f16_sign: f16) -> (f8E5M2, f8E5M2, f8E5M2, f16, f16, f16) {
+  %fp8_absolute = scalar.absf %fp8_magnitude : f8E5M2
+  %fp8_negated = scalar.negf %fp8_magnitude : f8E5M2
+  %fp8_copied = scalar.copysignf %fp8_magnitude, %fp8_sign : f8E5M2
+  %f16_absolute = scalar.absf %f16_magnitude : f16
+  %f16_negated = scalar.negf %f16_magnitude : f16
+  %f16_copied = scalar.copysignf %f16_magnitude, %f16_sign : f16
+  func.return %fp8_absolute, %fp8_negated, %fp8_copied, %f16_absolute, %f16_negated, %f16_copied : f8E5M2, f8E5M2, f8E5M2, f16, f16, f16
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @scalar_narrow_float_signs(%fp8_magnitude: f8E5M2, %fp8_sign: f8E5M2, %f16_magnitude: f16, %f16_sign: f16) -> (f8E5M2, f8E5M2, f8E5M2, f16, f16, f16) {
+  %80 = scalar.bitcast %fp8_magnitude : f8E5M2 to i8
+  %81 = scalar.constant 127 : i8
+  %84 = scalar.extui %80 : i8 to i32
+  %85 = scalar.extui %81 : i8 to i32
+  %86 = scalar.andi %84, %85 : i32
+  %87 = scalar.trunci %86 : i32 to i8
+  %fp8_absolute = scalar.bitcast %87 : i8 to f8E5M2
+  %72 = scalar.bitcast %fp8_magnitude : f8E5M2 to i8
+  %73 = scalar.constant -128 : i8
+  %76 = scalar.extui %72 : i8 to i32
+  %77 = scalar.extui %73 : i8 to i32
+  %78 = scalar.xori %76, %77 : i32
+  %79 = scalar.trunci %78 : i32 to i8
+  %fp8_negated = scalar.bitcast %79 : i8 to f8E5M2
+  %52 = scalar.bitcast %fp8_magnitude : f8E5M2 to i8
+  %53 = scalar.bitcast %fp8_sign : f8E5M2 to i8
+  %54 = scalar.constant 127 : i8
+  %68 = scalar.extui %52 : i8 to i32
+  %69 = scalar.extui %54 : i8 to i32
+  %70 = scalar.andi %68, %69 : i32
+  %71 = scalar.trunci %70 : i32 to i8
+  %56 = scalar.constant -128 : i8
+  %64 = scalar.extui %53 : i8 to i32
+  %65 = scalar.extui %56 : i8 to i32
+  %66 = scalar.andi %64, %65 : i32
+  %67 = scalar.trunci %66 : i32 to i8
+  %60 = scalar.extui %71 : i8 to i32
+  %61 = scalar.extui %67 : i8 to i32
+  %62 = scalar.ori %60, %61 : i32
+  %63 = scalar.trunci %62 : i32 to i8
+  %fp8_copied = scalar.bitcast %63 : i8 to f8E5M2
+  %44 = scalar.bitcast %f16_magnitude : f16 to i16
+  %45 = scalar.constant 32767 : i16
+  %48 = scalar.extui %44 : i16 to i32
+  %49 = scalar.extui %45 : i16 to i32
+  %50 = scalar.andi %48, %49 : i32
+  %51 = scalar.trunci %50 : i32 to i16
+  %f16_absolute = scalar.bitcast %51 : i16 to f16
+  %36 = scalar.bitcast %f16_magnitude : f16 to i16
+  %37 = scalar.constant -32768 : i16
+  %40 = scalar.extui %36 : i16 to i32
+  %41 = scalar.extui %37 : i16 to i32
+  %42 = scalar.xori %40, %41 : i32
+  %43 = scalar.trunci %42 : i32 to i16
+  %f16_negated = scalar.bitcast %43 : i16 to f16
+  %16 = scalar.bitcast %f16_magnitude : f16 to i16
+  %17 = scalar.bitcast %f16_sign : f16 to i16
+  %18 = scalar.constant 32767 : i16
+  %32 = scalar.extui %16 : i16 to i32
+  %33 = scalar.extui %18 : i16 to i32
+  %34 = scalar.andi %32, %33 : i32
+  %35 = scalar.trunci %34 : i32 to i16
+  %20 = scalar.constant -32768 : i16
+  %28 = scalar.extui %17 : i16 to i32
+  %29 = scalar.extui %20 : i16 to i32
+  %30 = scalar.andi %28, %29 : i32
+  %31 = scalar.trunci %30 : i32 to i16
+  %24 = scalar.extui %35 : i16 to i32
+  %25 = scalar.extui %31 : i16 to i32
+  %26 = scalar.ori %24, %25 : i32
+  %27 = scalar.trunci %26 : i32 to i16
+  %f16_copied = scalar.bitcast %27 : i16 to f16
+  func.return %fp8_absolute, %fp8_negated, %fp8_copied, %f16_absolute, %f16_negated, %f16_copied : f8E5M2, f8E5M2, f8E5M2, f16, f16, f16
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+func.def target(@test_target) @vector_narrow_float_signs(%fp8_magnitude: vector<4xf8E4M3>, %fp8_sign: vector<4xf8E4M3>, %bf16_magnitude: vector<3xbf16>, %bf16_sign: vector<3xbf16>) -> (vector<4xf8E4M3>, vector<4xf8E4M3>, vector<4xf8E4M3>, vector<3xbf16>, vector<3xbf16>, vector<3xbf16>) {
+  %fp8_absolute = vector.absf %fp8_magnitude : vector<4xf8E4M3>
+  %fp8_negated = vector.negf %fp8_magnitude : vector<4xf8E4M3>
+  %fp8_copied = vector.copysignf %fp8_magnitude, %fp8_sign : vector<4xf8E4M3>
+  %bf16_absolute = vector.absf %bf16_magnitude : vector<3xbf16>
+  %bf16_negated = vector.negf %bf16_magnitude : vector<3xbf16>
+  %bf16_copied = vector.copysignf %bf16_magnitude, %bf16_sign : vector<3xbf16>
+  func.return %fp8_absolute, %fp8_negated, %fp8_copied, %bf16_absolute, %bf16_negated, %bf16_copied : vector<4xf8E4M3>, vector<4xf8E4M3>, vector<4xf8E4M3>, vector<3xbf16>, vector<3xbf16>, vector<3xbf16>
+}
+
+// ----
+test.target<low_core> @test_target
+
+func.def target(@test_target) @vector_narrow_float_signs(%fp8_magnitude: vector<4xf8E4M3>, %fp8_sign: vector<4xf8E4M3>, %bf16_magnitude: vector<3xbf16>, %bf16_sign: vector<3xbf16>) -> (vector<4xf8E4M3>, vector<4xf8E4M3>, vector<4xf8E4M3>, vector<3xbf16>, vector<3xbf16>, vector<3xbf16>) {
+  %44 = vector.bitcast %fp8_magnitude : vector<4xf8E4M3> to vector<4xi8>
+  %45 = vector.constant 127 : vector<4xi8>
+  %46 = vector.andi %44, %45 : vector<4xi8>
+  %fp8_absolute = vector.bitcast %46 : vector<4xi8> to vector<4xf8E4M3>
+  %40 = vector.bitcast %fp8_magnitude : vector<4xf8E4M3> to vector<4xi8>
+  %41 = vector.constant -128 : vector<4xi8>
+  %42 = vector.xori %40, %41 : vector<4xi8>
+  %fp8_negated = vector.bitcast %42 : vector<4xi8> to vector<4xf8E4M3>
+  %32 = vector.bitcast %fp8_magnitude : vector<4xf8E4M3> to vector<4xi8>
+  %33 = vector.bitcast %fp8_sign : vector<4xf8E4M3> to vector<4xi8>
+  %34 = vector.constant 127 : vector<4xi8>
+  %35 = vector.andi %32, %34 : vector<4xi8>
+  %36 = vector.constant -128 : vector<4xi8>
+  %37 = vector.andi %33, %36 : vector<4xi8>
+  %38 = vector.ori %35, %37 : vector<4xi8>
+  %fp8_copied = vector.bitcast %38 : vector<4xi8> to vector<4xf8E4M3>
+  %28 = vector.bitcast %bf16_magnitude : vector<3xbf16> to vector<3xi16>
+  %29 = vector.constant 32767 : vector<3xi16>
+  %30 = vector.andi %28, %29 : vector<3xi16>
+  %bf16_absolute = vector.bitcast %30 : vector<3xi16> to vector<3xbf16>
+  %24 = vector.bitcast %bf16_magnitude : vector<3xbf16> to vector<3xi16>
+  %25 = vector.constant -32768 : vector<3xi16>
+  %26 = vector.xori %24, %25 : vector<3xi16>
+  %bf16_negated = vector.bitcast %26 : vector<3xi16> to vector<3xbf16>
+  %16 = vector.bitcast %bf16_magnitude : vector<3xbf16> to vector<3xi16>
+  %17 = vector.bitcast %bf16_sign : vector<3xbf16> to vector<3xi16>
+  %18 = vector.constant 32767 : vector<3xi16>
+  %19 = vector.andi %16, %18 : vector<3xi16>
+  %20 = vector.constant -32768 : vector<3xi16>
+  %21 = vector.andi %17, %20 : vector<3xi16>
+  %22 = vector.ori %19, %21 : vector<3xi16>
+  %bf16_copied = vector.bitcast %22 : vector<3xi16> to vector<3xbf16>
+  func.return %fp8_absolute, %fp8_negated, %fp8_copied, %bf16_absolute, %bf16_negated, %bf16_copied : vector<4xf8E4M3>, vector<4xf8E4M3>, vector<4xf8E4M3>, vector<3xbf16>, vector<3xbf16>, vector<3xbf16>
+}
