@@ -869,6 +869,44 @@ check.case public @qwen38_linear_q8_0_f16_wmma_x128_scalar_reference_case {
   check.return
 }
 
+// Full MTP concatenation projection, compared with independent F32 products.
+// Finite channel-varying Q8_0 blocks and distinct activation rows exercise the
+// entire 55,705,600-byte weight range. Tolerance includes F16 operand rounding.
+check.case public @qwen38_mtp_projection_8_case {
+  %tokens = check.literal value(8) : index
+  %hidden = check.literal value(10240) : index
+  %channels = check.literal value(5120) : index
+  %control = check.generate.fill value(8) : tensor<1xi32>
+  %seed = check.param.seed base(72831) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<8x10240xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<5120x320x34xi8>
+  %actual = check.generate.fill value(17.0) : tensor<8x5120xf32>
+  %expected = check.generate.fill value(-17.0) : tensor<8x5120xf32>
+  kernel.launch @qwen38_linear_q8_0_f32_reference[%tokens, %hidden, %channels](%tokens, %hidden, %channels, %input, %weight, %expected) : [index, index, index](index, index, index, tensor<8x10240xf32>, tensor<5120x320x34xi8>, tensor<8x5120xf32>)
+  kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%tokens, %hidden, %channels](%control, %hidden, %channels, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<8x10240xf32>, tensor<5120x320x34xi8>, tensor<8x5120xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.005) rtol(0.001) nan(same) : tensor<8x5120xf32>
+  check.return
+}
+
+// Full MTP concatenation projection, compared with independent F32 products.
+// Finite channel-varying Q8_0 blocks and distinct activation rows exercise the
+// entire 55,705,600-byte weight range. Tolerance includes F16 operand rounding.
+check.case public @qwen38_mtp_projection_512_case {
+  %tokens = check.literal value(512) : index
+  %hidden = check.literal value(10240) : index
+  %channels = check.literal value(5120) : index
+  %control = check.generate.fill value(512) : tensor<1xi32>
+  %seed = check.param.seed base(72831) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<512x10240xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<5120x320x34xi8>
+  %actual = check.generate.fill value(17.0) : tensor<512x5120xf32>
+  %expected = check.generate.fill value(-17.0) : tensor<512x5120xf32>
+  kernel.launch @qwen38_linear_q8_0_f32_reference[%tokens, %hidden, %channels](%tokens, %hidden, %channels, %input, %weight, %expected) : [index, index, index](index, index, index, tensor<512x10240xf32>, tensor<5120x320x34xi8>, tensor<512x5120xf32>)
+  kernel.launch @qwen38_linear_q8_0_f16_wmma_x128[%tokens, %hidden, %channels](%control, %hidden, %channels, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<512x10240xf32>, tensor<5120x320x34xi8>, tensor<512x5120xf32>)
+  check.expect.close actual(%actual) expected(%expected) atol(0.005) rtol(0.001) nan(same) : tensor<512x5120xf32>
+  check.return
+}
+
 check.case public @qwen38_linear_q8_0_f16_wmma_x128_prefill_128_case {
   %token_count = check.literal value(128) : index
   %input_size = check.literal value(5120) : index

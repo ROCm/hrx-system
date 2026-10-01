@@ -38,6 +38,20 @@ are prepared once. The HTTP scheduler selects this optional path with
 `--mtp=/path/to/bundle --mtp_depth=3`; depth zero keeps MTP warm without
 proposing. Whole verifier spans share a target epoch with known prompt input.
 
+Both MTP input projections consume the normalized embedding/hidden matrix
+directly with the token-reusing Q8_0/F16 WMMA contraction and F32 accumulation.
+Canonical Q8_0 weights stay in the shared residency. There is no intermediate
+Q8 activation pack or per-token weight traversal for the 10240-by-5120
+concatenation projection. The projection's active token bound comes from the
+device descriptor header, including compact generated cohorts.
+
+The full-sized `qwen38_mtp_projection_8_case` and
+`qwen38_mtp_projection_512_case` checks in `linear_q6k_f16_wmma.loom` compare
+against independent F32 products over channel-varying finite weights and
+distinct activation rows. Their numerical tolerance accounts for F16 operand
+rounding. Target verification, not draft arithmetic agreement, determines
+committed outputs; full-model qualification also observes draft acceptance.
+
 The real-weight `qwen_epoch_check --mtp=/path/to/bundle` compares distinct
 resident histories against ordinary target continuations: compact-row
 permutation, zero/partial/full draft
