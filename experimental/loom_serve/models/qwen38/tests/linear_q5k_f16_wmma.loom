@@ -1,0 +1,27 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @qwen38_linear_q5k_f16_wmma(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+// The generic schedule decodes directly from global weights; the narrow
+// schedule stages complete blocks. Distinct rows and channel-varying codes
+// cover all production widths plus a partial output tile. Finite block scales
+// keep this an exact memory-layout differential, not an accuracy envelope.
+check.case public @qwen38_narrow_q5_block_staging {
+  %tokens = check.literal value(32) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.param.choice values([48, 6144, 10240, 17408]) name("channels") : index
+  %control = check.generate.fill value(32) : tensor<1xi32>
+  %seed = check.param.seed base(98412) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<32x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<[%outputs]x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<32x[%outputs]xf32>
+  %actual = check.generate.fill value(17.0) : tensor<32x[%outputs]xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<[%outputs]x20x176xi8>, tensor<32x[%outputs]xf32>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<[%outputs]x20x176xi8>, tensor<32x[%outputs]xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<32x[%outputs]xf32>
+  check.return
+}
