@@ -35,6 +35,7 @@ iree_cc_library(
   SRCS
     "copy_dispatch_test.cc"
     "memory_pair_test.cc"
+    "pm4_sdma_streaming_test.cc"
     "pm4_sdma_test.cc"
   DEPS
     ::pm4_sdma_fixture
@@ -48,6 +49,7 @@ iree_cc_library(
     libamdf::cts::gpu::pm4::encoding::commands
     libamdf::cts::gpu::sdma::encoding::commands
     libamdf::cts::gpu::util::command_fixture
+    libamdf::cts::gpu::util::user_queue
   TESTONLY
   ALWAYSLINK
   PUBLIC

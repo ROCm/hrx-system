@@ -31,6 +31,7 @@ amdf_cts_test_suite(
     srcs = [
         "copy_dispatch_test.cc",
         "memory_pair_test.cc",
+        "pm4_sdma_streaming_test.cc",
         "pm4_sdma_test.cc",
     ],
     target_compatible_with = ["@platforms//cpu:x86_64"] + select({
@@ -49,6 +50,7 @@ amdf_cts_test_suite(
         "//libamdf/cts/gpu/pm4/encoding:commands",
         "//libamdf/cts/gpu/sdma/encoding:commands",
         "//libamdf/cts/gpu/util:command_fixture",
+        "//libamdf/cts/gpu/util:user_queue",
         "//third_party:google_test",
     ],
 )
