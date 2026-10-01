@@ -56,3 +56,35 @@ check.case public @repeated_consumer {
   check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
   check.return
 }
+
+// A wide reduction and a later store both observe the snapshot taken before
+// the source changes.
+kernel.def @wide_snapshot_reduction() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %sum_output: buffer, %saved_output: buffer) {
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%base] : buffer -> view<88xi32>
+  %sum_destination = buffer.view %sum_output[%base] : buffer -> view<1xi32>
+  %saved_destination = buffer.view %saved_output[%base] : buffer -> view<88xi32>
+  %captured = vector.load %source[0] : view<88xi32> -> vector<88xi32>
+  %replacement = scalar.constant 99 : i32
+  view.store %replacement, %source[0] : i32, view<88xi32>
+  %c0 = scalar.constant 0 : i32
+  %sum = vector.reduce<addi> %captured, %c0 : vector<88xi32>, i32
+  view.store %sum, %sum_destination[0] : i32, view<1xi32>
+  vector.store %captured, %saved_destination[0] : vector<88xi32>, view<88xi32>
+  kernel.return
+}
+
+check.case public @wide_reduction {
+  %input = check.generate.fill value(7) : tensor<88xi32>
+  %sum = check.generate.fill value(0) : tensor<1xi32>
+  %saved = check.generate.fill value(0) : tensor<88xi32>
+  %expected_sum = check.generate.fill value(616) : tensor<1xi32>
+  %expected_saved = check.generate.fill value(7) : tensor<88xi32>
+  kernel.launch @wide_snapshot_reduction(%input, %sum, %saved) : (tensor<88xi32>, tensor<1xi32>, tensor<88xi32>)
+  check.expect.equal actual(%sum) expected(%expected_sum) : tensor<1xi32>
+  check.expect.equal actual(%saved) expected(%expected_saved) : tensor<88xi32>
+  check.return
+}

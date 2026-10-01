@@ -15,95 +15,95 @@ func.def @preserve_large_old_source(%source: buffer, %destination: buffer, %repl
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @preserve_large_old_source(%replacement: reg<amdgpu.vgpr>) asm {
   %source_view = resource<hal_binding> {extent = 528, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
   %destination_view = resource<hal_binding> {extent = 528, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %60 = storage {byte_alignment = 16, byte_length = 528} : low.storage<private>
-  %61 = v_mov_b32 0
-  %62 = global_load_b128_saddr %61, %source_view
-  %64 = global_load_b128_saddr %61, %source_view {offset = 16}
-  %66 = global_load_b128_saddr %61, %source_view {offset = 32}
-  %68 = global_load_b128_saddr %61, %source_view {offset = 48}
-  %70 = global_load_b128_saddr %61, %source_view {offset = 64}
-  %72 = global_load_b128_saddr %61, %source_view {offset = 80}
-  %74 = global_load_b128_saddr %61, %source_view {offset = 96}
-  %76 = global_load_b128_saddr %61, %source_view {offset = 112}
-  %78 = global_load_b128_saddr %61, %source_view {offset = 128}
-  %80 = global_load_b128_saddr %61, %source_view {offset = 144}
-  %82 = global_load_b128_saddr %61, %source_view {offset = 160}
-  %84 = global_load_b128_saddr %61, %source_view {offset = 176}
-  %86 = global_load_b128_saddr %61, %source_view {offset = 192}
-  %88 = global_load_b128_saddr %61, %source_view {offset = 208}
-  %90 = global_load_b128_saddr %61, %source_view {offset = 224}
-  %92 = global_load_b128_saddr %61, %source_view {offset = 240}
-  %94 = global_load_b128_saddr %61, %source_view {offset = 256}
-  %96 = global_load_b128_saddr %61, %source_view {offset = 272}
-  %98 = global_load_b128_saddr %61, %source_view {offset = 288}
-  %100 = global_load_b128_saddr %61, %source_view {offset = 304}
-  %102 = global_load_b128_saddr %61, %source_view {offset = 320}
-  %104 = global_load_b128_saddr %61, %source_view {offset = 336}
-  %106 = global_load_b128_saddr %61, %source_view {offset = 352}
-  %108 = global_load_b128_saddr %61, %source_view {offset = 368}
-  %110 = global_load_b128_saddr %61, %source_view {offset = 384}
-  %112 = global_load_b128_saddr %61, %source_view {offset = 400}
-  %114 = global_load_b128_saddr %61, %source_view {offset = 416}
-  %116 = global_load_b128_saddr %61, %source_view {offset = 432}
-  %118 = global_load_b128_saddr %61, %source_view {offset = 448}
-  %120 = global_load_b128_saddr %61, %source_view {offset = 464}
-  %122 = global_load_b128_saddr %61, %source_view {offset = 480}
-  %124 = global_load_b128_saddr %61, %source_view {offset = 496}
-  %126 = global_load_b128_saddr %61, %source_view {offset = 512}
-  global_store_b32_saddr %61, %replacement, %source_view
-  scratch_store_b128_vaddr %61, %62
-  scratch_store_b128_vaddr %61, %64 {offset = 16}
-  scratch_store_b128_vaddr %61, %66 {offset = 32}
-  scratch_store_b128_vaddr %61, %68 {offset = 48}
-  scratch_store_b128_vaddr %61, %70 {offset = 64}
-  scratch_store_b128_vaddr %61, %72 {offset = 80}
-  scratch_store_b128_vaddr %61, %74 {offset = 96}
-  scratch_store_b128_vaddr %61, %76 {offset = 112}
-  scratch_store_b128_vaddr %61, %78 {offset = 128}
-  scratch_store_b128_vaddr %61, %80 {offset = 144}
-  scratch_store_b128_vaddr %61, %82 {offset = 160}
-  scratch_store_b128_vaddr %61, %84 {offset = 176}
-  scratch_store_b128_vaddr %61, %86 {offset = 192}
-  scratch_store_b128_vaddr %61, %88 {offset = 208}
-  scratch_store_b128_vaddr %61, %90 {offset = 224}
-  scratch_store_b128_vaddr %61, %92 {offset = 240}
-  scratch_store_b128_vaddr %61, %94 {offset = 256}
-  scratch_store_b128_vaddr %61, %96 {offset = 272}
-  scratch_store_b128_vaddr %61, %98 {offset = 288}
-  scratch_store_b128_vaddr %61, %100 {offset = 304}
-  scratch_store_b128_vaddr %61, %102 {offset = 320}
-  scratch_store_b128_vaddr %61, %104 {offset = 336}
-  scratch_store_b128_vaddr %61, %106 {offset = 352}
-  scratch_store_b128_vaddr %61, %108 {offset = 368}
-  scratch_store_b128_vaddr %61, %110 {offset = 384}
-  scratch_store_b128_vaddr %61, %112 {offset = 400}
-  scratch_store_b128_vaddr %61, %114 {offset = 416}
-  scratch_store_b128_vaddr %61, %116 {offset = 432}
-  scratch_store_b128_vaddr %61, %118 {offset = 448}
-  scratch_store_b128_vaddr %61, %120 {offset = 464}
-  scratch_store_b128_vaddr %61, %122 {offset = 480}
-  scratch_store_b128_vaddr %61, %124 {offset = 496}
-  scratch_store_b128_vaddr %61, %126 {offset = 512}
-  %162 = s_mov_b32 0
-  %163 = s_mov_b32 132
-  %164 = s_mov_b32 4
-  low.br ^_bb1(%162: reg<amdgpu.sgpr>)
-^_bb1(%57: reg<amdgpu.sgpr>):
-  %165 = s_cmp_lt_i32 %57, %163
-  low.cond_br %165, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %61 = storage {byte_alignment = 16, byte_length = 528} : low.storage<private>
+  %62 = v_mov_b32 0
+  %63 = global_load_b128_saddr %62, %source_view
+  %65 = global_load_b128_saddr %62, %source_view {offset = 16}
+  %67 = global_load_b128_saddr %62, %source_view {offset = 32}
+  %69 = global_load_b128_saddr %62, %source_view {offset = 48}
+  %71 = global_load_b128_saddr %62, %source_view {offset = 64}
+  %73 = global_load_b128_saddr %62, %source_view {offset = 80}
+  %75 = global_load_b128_saddr %62, %source_view {offset = 96}
+  %77 = global_load_b128_saddr %62, %source_view {offset = 112}
+  %79 = global_load_b128_saddr %62, %source_view {offset = 128}
+  %81 = global_load_b128_saddr %62, %source_view {offset = 144}
+  %83 = global_load_b128_saddr %62, %source_view {offset = 160}
+  %85 = global_load_b128_saddr %62, %source_view {offset = 176}
+  %87 = global_load_b128_saddr %62, %source_view {offset = 192}
+  %89 = global_load_b128_saddr %62, %source_view {offset = 208}
+  %91 = global_load_b128_saddr %62, %source_view {offset = 224}
+  %93 = global_load_b128_saddr %62, %source_view {offset = 240}
+  %95 = global_load_b128_saddr %62, %source_view {offset = 256}
+  %97 = global_load_b128_saddr %62, %source_view {offset = 272}
+  %99 = global_load_b128_saddr %62, %source_view {offset = 288}
+  %101 = global_load_b128_saddr %62, %source_view {offset = 304}
+  %103 = global_load_b128_saddr %62, %source_view {offset = 320}
+  %105 = global_load_b128_saddr %62, %source_view {offset = 336}
+  %107 = global_load_b128_saddr %62, %source_view {offset = 352}
+  %109 = global_load_b128_saddr %62, %source_view {offset = 368}
+  %111 = global_load_b128_saddr %62, %source_view {offset = 384}
+  %113 = global_load_b128_saddr %62, %source_view {offset = 400}
+  %115 = global_load_b128_saddr %62, %source_view {offset = 416}
+  %117 = global_load_b128_saddr %62, %source_view {offset = 432}
+  %119 = global_load_b128_saddr %62, %source_view {offset = 448}
+  %121 = global_load_b128_saddr %62, %source_view {offset = 464}
+  %123 = global_load_b128_saddr %62, %source_view {offset = 480}
+  %125 = global_load_b128_saddr %62, %source_view {offset = 496}
+  %127 = global_load_b128_saddr %62, %source_view {offset = 512}
+  scratch_store_b128_vaddr %62, %63
+  scratch_store_b128_vaddr %62, %65 {offset = 16}
+  scratch_store_b128_vaddr %62, %67 {offset = 32}
+  scratch_store_b128_vaddr %62, %69 {offset = 48}
+  scratch_store_b128_vaddr %62, %71 {offset = 64}
+  scratch_store_b128_vaddr %62, %73 {offset = 80}
+  scratch_store_b128_vaddr %62, %75 {offset = 96}
+  scratch_store_b128_vaddr %62, %77 {offset = 112}
+  scratch_store_b128_vaddr %62, %79 {offset = 128}
+  scratch_store_b128_vaddr %62, %81 {offset = 144}
+  scratch_store_b128_vaddr %62, %83 {offset = 160}
+  scratch_store_b128_vaddr %62, %85 {offset = 176}
+  scratch_store_b128_vaddr %62, %87 {offset = 192}
+  scratch_store_b128_vaddr %62, %89 {offset = 208}
+  scratch_store_b128_vaddr %62, %91 {offset = 224}
+  scratch_store_b128_vaddr %62, %93 {offset = 240}
+  scratch_store_b128_vaddr %62, %95 {offset = 256}
+  scratch_store_b128_vaddr %62, %97 {offset = 272}
+  scratch_store_b128_vaddr %62, %99 {offset = 288}
+  scratch_store_b128_vaddr %62, %101 {offset = 304}
+  scratch_store_b128_vaddr %62, %103 {offset = 320}
+  scratch_store_b128_vaddr %62, %105 {offset = 336}
+  scratch_store_b128_vaddr %62, %107 {offset = 352}
+  scratch_store_b128_vaddr %62, %109 {offset = 368}
+  scratch_store_b128_vaddr %62, %111 {offset = 384}
+  scratch_store_b128_vaddr %62, %113 {offset = 400}
+  scratch_store_b128_vaddr %62, %115 {offset = 416}
+  scratch_store_b128_vaddr %62, %117 {offset = 432}
+  scratch_store_b128_vaddr %62, %119 {offset = 448}
+  scratch_store_b128_vaddr %62, %121 {offset = 464}
+  scratch_store_b128_vaddr %62, %123 {offset = 480}
+  scratch_store_b128_vaddr %62, %125 {offset = 496}
+  scratch_store_b128_vaddr %62, %127 {offset = 512}
+  global_store_b32_saddr %62, %replacement, %source_view
+  %163 = s_mov_b32 0
+  %164 = s_mov_b32 132
+  %165 = s_mov_b32 4
+  low.br ^_bb1(%163: reg<amdgpu.sgpr>)
+^_bb1(%58: reg<amdgpu.sgpr>):
+  %166 = s_cmp_lt_i32 %58, %164
+  low.cond_br %166, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
-  %166 = v_mov_b32_copy %57
-  %167 = v_lshlrev_b32_src0_inline %166, 2
-  %168 = scratch_load_b128_vaddr %167
-  %170 = s_lshl_b32_rhs_inline %57, 2
-  %171 = slice %destination_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %172 = slice %destination_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %174, %175 = s_add_co_u32 %171, %170
-  %176, %177 = s_addc_u32 %172, %162, %175
-  %178 = concat(%174, %176) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
-  global_store_b128_saddr %61, %168, %178
-  %179 = s_add_u32 %57, %164
-  low.br ^_bb1(%179: reg<amdgpu.sgpr>)
+  %167 = v_mov_b32_copy %58
+  %168 = v_lshlrev_b32_src0_inline %167, 2
+  %169 = scratch_load_b128_vaddr %168
+  %171 = s_lshl_b32_rhs_inline %58, 2
+  %172 = slice %destination_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %173 = slice %destination_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %175, %176 = s_add_co_u32 %172, %171
+  %177, %178 = s_addc_u32 %173, %163, %176
+  %179 = concat(%175, %177) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  global_store_b128_saddr %62, %169, %179
+  %180 = s_add_u32 %58, %165
+  low.br ^_bb1(%180: reg<amdgpu.sgpr>)
 ^_bb3:
   return
 }

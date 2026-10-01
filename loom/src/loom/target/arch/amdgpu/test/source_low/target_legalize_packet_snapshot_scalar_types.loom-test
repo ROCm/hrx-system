@@ -1,0 +1,193 @@
+// RUN: with-checks pass target-legalize{mode=final,policy=require-native}
+
+// Every byte-addressable vector payload scalar type uses the same snapshot
+// staging representation. Predicates and address scalars have distinct target
+// carrier contracts and do not enter this storage path.
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_i8(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<512xi8>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<512xi8>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<512xi8>
+  %snapshot = vector.load %source_view[0] : view<512xi8> -> vector<512xi8>
+  vector.store %snapshot, %destination0_view[0] : vector<512xi8>, view<512xi8>
+  vector.store %snapshot, %destination1_view[0] : vector<512xi8>, view<512xi8>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<512xi8>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_i16(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<256xi16>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<256xi16>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<256xi16>
+  %snapshot = vector.load %source_view[0] : view<256xi16> -> vector<256xi16>
+  vector.store %snapshot, %destination0_view[0] : vector<256xi16>, view<256xi16>
+  vector.store %snapshot, %destination1_view[0] : vector<256xi16>, view<256xi16>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<256xi16>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_i32(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<128xi32>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<128xi32>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<128xi32>
+  %snapshot = vector.load %source_view[0] : view<128xi32> -> vector<128xi32>
+  vector.store %snapshot, %destination0_view[0] : vector<128xi32>, view<128xi32>
+  vector.store %snapshot, %destination1_view[0] : vector<128xi32>, view<128xi32>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<128xi32>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_i64(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<64xi64>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<64xi64>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<64xi64>
+  %snapshot = vector.load %source_view[0] : view<64xi64> -> vector<64xi64>
+  vector.store %snapshot, %destination0_view[0] : vector<64xi64>, view<64xi64>
+  vector.store %snapshot, %destination1_view[0] : vector<64xi64>, view<64xi64>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<64xi64>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_f8e4m3(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<512xf8E4M3>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<512xf8E4M3>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<512xf8E4M3>
+  %snapshot = vector.load %source_view[0] : view<512xf8E4M3> -> vector<512xf8E4M3>
+  vector.store %snapshot, %destination0_view[0] : vector<512xf8E4M3>, view<512xf8E4M3>
+  vector.store %snapshot, %destination1_view[0] : vector<512xf8E4M3>, view<512xf8E4M3>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<512xf8E4M3>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_f8e5m2(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<512xf8E5M2>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<512xf8E5M2>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<512xf8E5M2>
+  %snapshot = vector.load %source_view[0] : view<512xf8E5M2> -> vector<512xf8E5M2>
+  vector.store %snapshot, %destination0_view[0] : vector<512xf8E5M2>, view<512xf8E5M2>
+  vector.store %snapshot, %destination1_view[0] : vector<512xf8E5M2>, view<512xf8E5M2>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<512xf8E5M2>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_f16(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<256xf16>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<256xf16>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<256xf16>
+  %snapshot = vector.load %source_view[0] : view<256xf16> -> vector<256xf16>
+  vector.store %snapshot, %destination0_view[0] : vector<256xf16>, view<256xf16>
+  vector.store %snapshot, %destination1_view[0] : vector<256xf16>, view<256xf16>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<256xf16>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_bf16(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<256xbf16>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<256xbf16>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<256xbf16>
+  %snapshot = vector.load %source_view[0] : view<256xbf16> -> vector<256xbf16>
+  vector.store %snapshot, %destination0_view[0] : vector<256xbf16>, view<256xbf16>
+  vector.store %snapshot, %destination1_view[0] : vector<256xbf16>, view<256xbf16>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<256xbf16>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_f32(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<128xf32>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<128xf32>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<128xf32>
+  %snapshot = vector.load %source_view[0] : view<128xf32> -> vector<128xf32>
+  vector.store %snapshot, %destination0_view[0] : vector<128xf32>, view<128xf32>
+  vector.store %snapshot, %destination1_view[0] : vector<128xf32>, view<128xf32>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<128xf32>
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @snapshot_fanout_f64(%source: buffer, %destination0: buffer, %destination1: buffer) {
+  %base = index.constant 0 : offset
+  %source_view = buffer.view %source[%base] : buffer -> view<64xf64>
+  %destination0_view = buffer.view %destination0[%base] : buffer -> view<64xf64>
+  %destination1_view = buffer.view %destination1[%base] : buffer -> view<64xf64>
+  %snapshot = vector.load %source_view[0] : view<64xf64> -> vector<64xf64>
+  vector.store %snapshot, %destination0_view[0] : vector<64xf64>, view<64xf64>
+  vector.store %snapshot, %destination1_view[0] : vector<64xf64>, view<64xf64>
+  func.return
+}
+
+// ----
+CHECK: * = buffer.alloca<private> align(16) * : buffer
+CHECK-NOT: * = vector.concat * : * -> vector<64xf64>
