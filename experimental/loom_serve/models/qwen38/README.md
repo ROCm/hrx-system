@@ -115,6 +115,30 @@ generated text through the runner. Kernel differential success alone does not
 establish retained-session or end-to-end model correctness. The shared-row CLI
 and retained pi service checks are described in the parent README.
 
+### Fused feed-forward projection
+
+The owned-output Q5 gate/up kernel views F16 activations as complete 256-channel
+blocks. Each four-element packet is wholly inside one block, so its load needs
+no K-axis mask. Active-token and output-channel tails remain masked. This view
+preserves the canonical contiguous activation layout and does not add padding
+or alter the contraction, staging barriers, or F32 SwiGLU calculation.
+
+`tests/ffn_gate_up.loom` compares complete outputs with the paired-wave schedule,
+including inactive rows, partial output channels and the model's full projection
+shape. Distinct activation rows and channel-varying gate/up weights exercise
+the indexing paths. These are staging and layout differentials, not independent
+model-accuracy oracles.
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/ffn_gate_up.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q5k_f16_wmma.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
+```
+
 ### Vocabulary projection
 
 Epoch and MTP roots pass their complete padded output cohort to the shared

@@ -2,10 +2,10 @@ template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %gr
 
 // Exact Q5_K gate/up contraction with local F32 SwiGLU.
 //
-// One workgroup owns 128 tokens by 128 FFN channels. Sixteen wave32
-// subgroups contract both projections while sharing the F32 activation load
-// and its transient F16 WMMA tile. Q5_K weights remain in their canonical
-// GGUF encoding and both projections accumulate in F32. The x128 schedule
+// One workgroup owns 128 tokens by 64 channels of each projection. Sixteen
+// wave32 subgroups contract both projections while sharing F16 activation
+// tiles. Q5_K weights remain in their canonical GGUF encoding and both
+// projections accumulate in F32. The x128 schedule
 // rounds the final SwiGLU value once to the F16 operand type consumed by the
 // following Q6_K down projection instead of rerounding it in every output tile.
 
@@ -160,7 +160,9 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
   %metadata_load_count = index.constant 512 : index
 
   %input_noalias, %gate_weight_noalias, %up_weight_noalias, %output_noalias = buffer.assume.noalias %input, %gate_weight, %up_weight, %output : buffer, buffer, buffer, buffer
-  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<[%token_count]x[%input_size]xf16>
+  // The block axis preserves complete four-element activation packets. Only
+  // token and output-channel tails require masking.
+  %input_view = buffer.view %input_noalias[%c0_offset] : buffer -> view<[%token_count]x[%quant_block_count]x256xf16>
   %output_view = buffer.view %output_noalias[%c0_offset] : buffer -> view<[%token_count]x[%output_size]xf16>
   %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
   %activation_stage = buffer.alloca<workgroup> align(16) %activation_stage_bytes : buffer
@@ -222,9 +224,7 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
     %gate_block_result0, %gate_block_result1, %up_block_result0, %up_block_result1 = scf.for %quant_group = [%c0 to %c8 step %c1](%gate_acc0 = %gate_block_acc0 : vector<8xf32>, %gate_acc1 = %gate_block_acc1 : vector<8xf32>, %up_acc0 = %up_block_acc0 : vector<8xf32>, %up_acc1 = %up_block_acc1 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
-      %block_k_base = index.mul %quant_block, %c256 : index
       %group_k_add = index.mul %quant_group, %c32 : index
-      %k_origin = index.add %block_k_base, %group_k_add : index
       scf.for %weight_task = [%workitem to %weight_load_count step %c512] unroll {
         %load_packet0 = index.rem %weight_task, %c8 : index
         %load_packet = index.assume %load_packet0 [range(%load_packet0, 0, 7)] : index
@@ -279,9 +279,8 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %valid_token = index.cmp ult, %token, %token_count : index
         %activation_values = scf.if %valid_token -> (vector<4xf16>) {
           %bounded_token = index.assume %token [lt(%token, %token_count)] : index
-          %input_k = index.add %k_origin, %load_k : index
-          %input_mask = vector.mask.range [%input_k to %input_size step %c1] : index -> vector<4xi1>
-          %loaded = vector.load.mask %input_view[%bounded_token, %input_k], %input_mask, %c0_f16x4 : view<[%token_count]x[%input_size]xf16>, vector<4xi1>, vector<4xf16>
+          %input_k = index.add %group_k_add, %load_k : index
+          %loaded = vector.load %input_view[%bounded_token, %quant_block, %input_k] : view<[%token_count]x[%quant_block_count]x256xf16> -> vector<4xf16>
           scf.yield %loaded : vector<4xf16>
         } else {
           scf.yield %c0_f16x4 : vector<4xf16>
