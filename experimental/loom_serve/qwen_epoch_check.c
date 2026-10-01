@@ -20,6 +20,8 @@ IREE_FLAG_LIST(
     "Packed epoch directory; repeat to cycle through cached shapes.");
 IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json.");
+IREE_FLAG(string, mtp, "",
+          "Optional MTP bundle; checks private proposal isolation.");
 IREE_FLAG(string, compare, "",
           "Optional completed-work ABABA comparison: single, mixed, full or "
           "decode. Empty runs the correctness witness.");
@@ -124,6 +126,60 @@ static iree_status_t qwen_check_epoch(loom_serve_qwen_model_t* model,
   return status;
 }
 
+static iree_status_t qwen_check_proposals(loom_serve_qwen_model_t* model,
+                                          qwen_check_row_t rows[4]) {
+  if (!FLAG_mtp[0]) {
+    return iree_ok_status();
+  }
+  iree_host_size_t indices[3][4];
+  const iree_host_size_t permutation[4] = {2, 0, 3, 1};
+  iree_host_size_t positions[8];
+  int32_t predictions[8];
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    const loom_serve_qwen_row_t* row = loom_serve_qwen_model_row(model, i);
+    positions[i] = loom_serve_qwen_row_position(row);
+    predictions[i] = loom_serve_qwen_row_token(row);
+  }
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    indices[0][i] = rows[i].packed;
+    indices[1][i] = rows[i].isolated;
+    indices[2][i] = rows[permutation[i]].packed;
+  }
+  int32_t proposals[3][4][3] = {0};
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t issue = 0; issue < 3 && iree_status_is_ok(status);
+       ++issue) {
+    status = loom_serve_qwen_model_propose(model, 4, indices[issue],
+                                           proposals[issue]);
+    for (iree_host_size_t i = 0; i < 8 && iree_status_is_ok(status); ++i) {
+      const loom_serve_qwen_row_t* row = loom_serve_qwen_model_row(model, i);
+      if (loom_serve_qwen_row_position(row) != positions[i] ||
+          loom_serve_qwen_row_token(row) != predictions[i]) {
+        status =
+            iree_make_status(IREE_STATUS_DATA_LOSS,
+                             "proposal changed committed target row %zu", i);
+      }
+    }
+  }
+  for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
+    if (memcmp(proposals[0][i], proposals[1][i], sizeof(proposals[0][i])) ||
+        memcmp(proposals[2][i], proposals[0][permutation[i]],
+               sizeof(proposals[0][i]))) {
+      status = iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "MTP proposal depends on resident or compact row placement");
+    }
+    if (iree_status_is_ok(status)) {
+      fprintf(
+          stderr,
+          "Matched MTP row %zu: [%d,%d,%d], target position %zu unchanged.\n",
+          rows[i].packed, proposals[0][i][0], proposals[0][i][1],
+          proposals[0][i][2], positions[rows[i].packed]);
+    }
+  }
+  return status;
+}
+
 static iree_status_t qwen_check_error(iree_status_t actual,
                                       iree_status_code_t expected) {
   if (iree_status_code(actual) == expected) {
@@ -194,6 +250,7 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
   }
   IREE_RETURN_IF_ERROR(status);
 
+  IREE_RETURN_IF_ERROR(qwen_check_proposals(model, rows));
   int32_t decode_tokens[4] = {0};
   for (iree_host_size_t i = 2; i < 4; ++i) {
     decode_tokens[i] = loom_serve_qwen_row_token(
@@ -454,6 +511,7 @@ int main(int argc, char** argv) {
       .epoch_directories = epochs.values,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
+      .mtp_directory = iree_make_cstring_view(FLAG_mtp),
       .row_count = 8,
   };
   const iree_allocator_t allocator = iree_allocator_system();

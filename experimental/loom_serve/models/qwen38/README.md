@@ -11,6 +11,35 @@ requests into HSACO images. The generated JSON contains configuration and an
 artifact index, not executable host policy. Compilation stops on the first
 failure. An output directory is usable only after the whole command succeeds.
 
+`--stage=mtp` prepares block-64 warm/carry/proposal commands. It emits `draft`
+and `begin` at the fixed 32-token/eight-span proposal shape and
+`warm<prefill-capacity>` for a matching target epoch. Each loaded target shape
+needs its warm variant. Shared embedding, target normalization and full-vocabulary
+output roots resolve to existing target weight views; the extra block-64 groups
+load once. There is no command ABI or HAL extension.
+
+The model's optional MTP bundle warms its private cache after committed target
+epochs. `loom_serve_qwen_model_propose` returns three candidates without changing
+target positions or predictions. Its private hidden chain is discarded before
+the next proposal; committed target hidden supplies the starting carry. This is
+proposal execution, not accepted speculative decoding: the service does not yet
+select or publish these candidates. Target verification and accepted recurrent
+commit must own that publication boundary.
+
+The real-weight `qwen_epoch_check --mtp=/path/to/bundle` checks proposal isolation,
+duplicate resident histories, compact-row permutation, and subsequent retained
+target continuations. The focused carry check additionally compares exact copy
+identities and untouched rows/padding without loading model weights:
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/mtp_prepare.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/mtp_prepare.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/spans.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --case=@mtp_carry_spans
+```
+
 From the repository root:
 
 ```sh

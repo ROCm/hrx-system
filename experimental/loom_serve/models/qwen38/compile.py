@@ -15,7 +15,13 @@ from pathlib import Path
 
 def compile_stage(arguments, stage):
     source = Path(__file__).resolve().parent
-    output = arguments.output.resolve() / stage
+    is_mtp = stage.startswith("mtp_")
+    stage_directory = {
+        "mtp_draft": "draft",
+        "mtp_begin": "begin",
+        "mtp_warm": f"warm{arguments.prefill_capacity}",
+    }.get(stage, stage)
+    output = arguments.output.resolve() / stage_directory
     for directory in (
         output,
         output / "commands",
@@ -25,8 +31,12 @@ def compile_stage(arguments, stage):
         directory.mkdir(parents=True, exist_ok=True)
     token_capacity = 1 if stage == "decode" else 512
     config = {
-        "runner.qwen38.prefill_token_count": arguments.prefill_capacity,
-        "runner.qwen38.span_capacity": arguments.span_capacity,
+        "runner.qwen38.prefill_token_count": (
+            32 if stage in ("mtp_draft", "mtp_begin") else arguments.prefill_capacity
+        ),
+        "runner.qwen38.span_capacity": (
+            8 if stage in ("mtp_draft", "mtp_begin") else arguments.span_capacity
+        ),
         "ggml.linear_q4k_q8_1_x4.token_capacity": token_capacity,
         "ggml.linear_q4k_q8_1_x4.output_capacity": 48,
         "ggml.linear_q5k_q8_1_x4.token_capacity": token_capacity,
@@ -34,8 +44,8 @@ def compile_stage(arguments, stage):
         "ggml.linear_q6k_f32_decode.output_capacity": 5120,
         "ggml.linear_q6k_q8_1_x4.token_capacity": token_capacity,
         "ggml.linear_q6k_q8_1_x4.output_capacity": 248320,
-        "ggml.linear_q8_0_q8_1_x4.token_capacity": 1,
-        "ggml.linear_q8_0_q8_1_x4.output_capacity": 1024,
+        "ggml.linear_q8_0_q8_1_x4.token_capacity": 512 if is_mtp else 1,
+        "ggml.linear_q8_0_q8_1_x4.output_capacity": 5120 if is_mtp else 1024,
         "ggml.quantize_q8_1_x4.group_capacity": 136 * token_capacity,
         "qwen38.attention.cache_capacity": arguments.context_capacity,
         "qwen38.attention.decode_split_count": arguments.decode_splits,
@@ -47,6 +57,9 @@ def compile_stage(arguments, stage):
         "prefill": ("prefill.loom", "qwen38_prefill"),
         "decode": ("programs/qwen38/model_decode.loom", "qwen38_text_decode_greedy"),
         "epoch": ("epoch.loom", "qwen38_epoch"),
+        "mtp_draft": ("mtp.loom", "qwen38_mtp_draft"),
+        "mtp_begin": ("mtp.loom", "qwen38_mtp_begin"),
+        "mtp_warm": ("mtp.loom", "qwen38_mtp_warm"),
     }[stage]
     primary = source / primary_name
     libraries = sorted(source.glob("kernels/**/*.loom")) + sorted(
@@ -116,7 +129,9 @@ def main():
         default="default",
     )
     parser.add_argument(
-        "--stage", choices=("prefill", "decode", "epoch", "both", "all"), default="both"
+        "--stage",
+        choices=("prefill", "decode", "epoch", "mtp", "both", "all"),
+        default="both",
     )
     parser.add_argument(
         "--loom-link",
@@ -140,6 +155,7 @@ def main():
     stages = {
         "both": ("prefill", "decode"),
         "all": ("prefill", "decode", "epoch"),
+        "mtp": ("mtp_draft", "mtp_begin", "mtp_warm"),
     }.get(arguments.stage, (arguments.stage,))
     for stage in stages:
         compile_stage(arguments, stage)
