@@ -26,6 +26,7 @@ from .common import (
     _asm,
     _gpr64_resource,
 )
+from .encoding import Flag, Form
 
 
 def _load_effect(width_bits: int) -> Effect:
@@ -58,7 +59,7 @@ def memory_descriptors(
     load_schedule_class: str,
     store_schedule_class: str,
     assembly_suffix: str,
-    native_assembly_mnemonic: str | None = None,
+    encoding_ids: tuple[int, int] | None = None,
 ) -> tuple[Descriptor, ...]:
     """Declares static/indexed loads followed by static/indexed stores."""
     register_alternatives = (RegClassAlt(register_class),)
@@ -94,6 +95,17 @@ def memory_descriptors(
                 Descriptor(
                     key=f"{key_prefix}.{mnemonic}.{operation_name}.{register_suffix}",
                     mnemonic=mnemonic,
+                    encoding_format_id=(
+                        Form.LOAD if operation == "load" else Form.STORE
+                    )
+                    if encoding_ids
+                    else 0,
+                    encoding_id=(
+                        encoding_ids[0 if operation == "load" else 1]
+                        | (Flag.INDEXED if address_suffix else 0)
+                    )
+                    if encoding_ids
+                    else 0,
                     semantic_tag=f"memory.{operation_name}.{semantic_type}",
                     operands=(
                         value,
@@ -102,7 +114,6 @@ def memory_descriptors(
                     immediates=immediates,
                     asm_forms=_asm(
                         mnemonic=f"{mnemonic}.{operation_name}{assembly_suffix}",
-                        native_assembly_mnemonic=native_assembly_mnemonic,
                         results=results,
                         operands=(*value_fields, *address_fields),
                         immediates=tuple(item.field_name for item in immediates),

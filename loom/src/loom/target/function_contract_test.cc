@@ -363,6 +363,7 @@ TEST_F(TargetFunctionContractTest,
   const loom_target_export_plan_t module_export = {
       /*.name=*/IREE_SVL("spirv-shader-entry-point"),
       /*.export_symbol=*/{},
+      /*.calling_convention=*/{},
       /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
   };
   const loom_target_config_t module_config = {
@@ -410,6 +411,7 @@ TEST_F(TargetFunctionContractTest, BundleCompatibilityRejectsContractShape) {
   loom_target_export_plan_t module_export = {
       /*.name=*/IREE_SVL("spirv-shader-entry-point"),
       /*.export_symbol=*/{},
+      /*.calling_convention=*/{},
       /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
   };
   loom_target_config_t module_config = {

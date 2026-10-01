@@ -382,6 +382,7 @@ TEST_F(HalInvocationTest,
   static const loom_target_export_plan_t export_plan = {
       /*.name=*/IREE_SVL("test-export"),
       /*.export_symbol=*/{},
+      /*.calling_convention=*/{},
       /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
       /*.linkage=*/{},
       /*.hal_kernel=*/

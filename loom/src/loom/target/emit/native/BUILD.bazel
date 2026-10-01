@@ -61,9 +61,20 @@ loom_cc_library(
     hdrs = ["contribution.h"],
     visibility = _NATIVE_AIE2P_VISIBILITY,
     deps = [
-        ":elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "elf_sections",
+    srcs = ["elf_sections.c"],
+    hdrs = ["elf_sections.h"],
+    visibility = _NATIVE_AIE2P_VISIBILITY,
+    deps = [
+        ":contribution",
+        ":elf",
+        "//runtime/src/iree/base",
     ],
 )
 
@@ -75,6 +86,22 @@ loom_cc_library(
     deps = [
         ":contribution",
         "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "object_elf",
+    srcs = ["object_elf.c"],
+    hdrs = ["object_elf.h"],
+    visibility = _NATIVE_X86_VISIBILITY,
+    deps = [
+        ":contribution",
+        ":elf",
+        ":elf_sections",
+        ":object",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
     ],
 )
 
@@ -109,7 +136,29 @@ loom_cc_test(
     srcs = ["contribution_test.cc"],
     deps = [
         ":contribution",
-        ":elf",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "elf_sections_test",
+    srcs = ["elf_sections_test.cc"],
+    deps = [
+        ":elf_sections",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "object_elf_test",
+    srcs = ["object_elf_test.cc"],
+    deps = [
+        ":object_elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

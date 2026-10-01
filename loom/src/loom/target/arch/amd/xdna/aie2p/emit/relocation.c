@@ -112,7 +112,7 @@ static bool loom_aie2p_native_relocation_is_core_branch(
 
 static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
     uint64_t target_address, uint64_t fixup_offset,
-    loom_native_elf_section_t* section) {
+    loom_native_section_t* section) {
   const loom_aie2p_slot_t branch_slot = LOOM_AIE2P_SLOT_LNG;
   const loom_aie2p_bundle_format_id_t branch_format =
       loom_aie2p_encoding_find_bundle_format_for_slots(&branch_slot, 1);
@@ -216,7 +216,7 @@ static iree_status_t loom_aie2p_native_relocation_patch_core_branch(
 
 static iree_status_t loom_aie2p_native_relocation_patch_local_address(
     uint64_t target_address, uint64_t fixup_offset,
-    loom_native_elf_section_t* section) {
+    loom_native_section_t* section) {
   if (fixup_offset > IREE_HOST_SIZE_MAX ||
       (iree_host_size_t)fixup_offset >= section->contents.data_length) {
     return iree_make_status(
@@ -348,9 +348,9 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "AIE2P fixup section layout is invalid");
     }
-    loom_native_elf_section_t* source_section =
+    loom_native_section_t* source_section =
         &assembly->sections[fixup_layout->section_index];
-    loom_native_elf_section_t* target_section =
+    loom_native_section_t* target_section =
         &assembly->sections[target_layout->section_index];
     uint64_t target_offset = 0;
     IREE_RETURN_IF_ERROR(loom_aie2p_native_relocation_add_signed(
@@ -368,15 +368,14 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
               IREE_STATUS_FAILED_PRECONDITION,
               "AIE2P core branch target must share its executable section");
         }
-        if (source_section->type != LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS ||
-            (source_section->flags &
-             (LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR)) !=
-                (LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                 LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR)) {
+        if (source_section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS ||
+            (source_section->access & (LOOM_NATIVE_SECTION_ACCESS_READ |
+                                       LOOM_NATIVE_SECTION_ACCESS_EXECUTE)) !=
+                (LOOM_NATIVE_SECTION_ACCESS_READ |
+                 LOOM_NATIVE_SECTION_ACCESS_EXECUTE)) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
-              "AIE2P core branch fixup requires executable PROGBITS");
+              "AIE2P core branch fixup requires executable contents");
         }
         if (target_offset >= target_section->contents.data_length) {
           return iree_make_status(
@@ -388,28 +387,28 @@ iree_status_t loom_aie2p_native_object_apply_fixups(
         break;
       }
       case LOOM_AIE2P_NATIVE_RELOCATION_KIND_LOCAL_ADDRESS_ABSOLUTE:
-        if (source_section->type != LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS ||
-            (source_section->flags &
-             (LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR)) !=
-                (LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                 LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR)) {
+        if (source_section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS ||
+            (source_section->access & (LOOM_NATIVE_SECTION_ACCESS_READ |
+                                       LOOM_NATIVE_SECTION_ACCESS_EXECUTE)) !=
+                (LOOM_NATIVE_SECTION_ACCESS_READ |
+                 LOOM_NATIVE_SECTION_ACCESS_EXECUTE)) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
-              "AIE2P local-address fixup requires executable PROGBITS");
+              "AIE2P local-address fixup requires executable contents");
         }
-        if ((target_section->type != LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS &&
-             target_section->type != LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS) ||
-            !iree_any_bit_set(target_section->flags,
-                              LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) ||
-            iree_any_bit_set(target_section->flags,
-                             LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR)) {
+        if ((target_section->storage !=
+                 LOOM_NATIVE_SECTION_STORAGE_RESERVATION &&
+             target_section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS) ||
+            !iree_any_bit_set(target_section->access,
+                              LOOM_NATIVE_SECTION_ACCESS_READ) ||
+            iree_any_bit_set(target_section->access,
+                             LOOM_NATIVE_SECTION_ACCESS_EXECUTE)) {
           return iree_make_status(
               IREE_STATUS_FAILED_PRECONDITION,
               "AIE2P local address must target allocated data");
         }
         const uint64_t target_length =
-            loom_native_elf_section_byte_length(target_section);
+            loom_native_section_byte_length(target_section);
         if ((target_length == 0 && target_offset != 0) ||
             (target_length != 0 && target_offset >= target_length)) {
           return iree_make_status(

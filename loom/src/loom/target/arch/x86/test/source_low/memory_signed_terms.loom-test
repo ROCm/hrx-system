@@ -87,7 +87,7 @@ func.def @signed_varying_byte(%input: buffer, %table: buffer) -> (i8) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @signed_varying_byte(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer) -> (i8)}) @signed_varying_byte(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %signed = mov.load.gpr32 %input {disp32 = 0}
   %17 = movsxd.gpr64.gpr32 %signed
   %value = movzx.load.indexed.u8.gpr32 %table, %17 {disp32 = 256, scale = 1}
@@ -140,7 +140,7 @@ func.def @signed_high_bit_stride(%input: buffer, %table: buffer) -> (i8) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @signed_high_bit_stride(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer) -> (i8)}) @signed_high_bit_stride(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %signed = mov.load.gpr32 %input {disp32 = 0}
   %18 = mov.imm64 2147483649
   %19 = movsxd.gpr64.gpr32 %signed
@@ -232,7 +232,7 @@ func.def @dynamic_stride_static_bias(%table: buffer, %position0: index, %stride0
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @dynamic_stride_static_bias(%table: reg<x86.gpr64>, %position: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, index, index) -> (i8)}) @dynamic_stride_static_bias(%table: reg<x86.gpr64>, %position: reg<x86.gpr64>, %stride: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %14 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
   %15 = imul.gpr64 %14, %stride
   %value = movzx.load.indexed.u8.gpr32 %table, %15 {disp32 = 128, scale = 1}
@@ -252,7 +252,7 @@ func.def @unsigned_high_bit_offset(%input: buffer, %table: buffer) -> (i8) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @unsigned_high_bit_offset(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer) -> (i8)}) @unsigned_high_bit_offset(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %raw = mov.load.gpr32 %input {disp32 = 0}
   %origin = movzx.gpr64.gpr32 %raw
   %value = movzx.load.indexed.u8.gpr32 %table, %origin {disp32 = 0, scale = 1}
@@ -386,7 +386,7 @@ func.def @negative_wide_coefficient(%input: buffer, %table: buffer) -> (i8) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @negative_wide_coefficient(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer) -> (i8)}) @negative_wide_coefficient(%input: reg<x86.gpr64>, %table: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %selector = mov.load.gpr32 %input {disp32 = 0}
   %18 = mov.imm64 4294967297
   %19 = movsxd.gpr64.gpr32 %selector

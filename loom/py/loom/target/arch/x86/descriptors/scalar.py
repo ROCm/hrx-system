@@ -69,6 +69,7 @@ from .common import (
     _gpr64_operand,
     _gpr64_result,
 )
+from .encoding import Flag, Form, encoding
 from .memory import memory_descriptors
 
 # Physical IDs follow the native GPR encoding order, including width aliases.
@@ -101,9 +102,13 @@ def _gpr32_destructive_binary_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    opcode: int,
+    form: Form = Form.BINARY_RM_R,
 ) -> Descriptor:
     return _gpr_destructive_binary_descriptor(
         key=key,
+        encoding_form=form,
+        encoding_id=encoding(opcode),
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         result=_gpr32_result(),
@@ -118,9 +123,13 @@ def _gpr64_destructive_binary_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    opcode: int,
+    form: Form = Form.BINARY_RM_R,
 ) -> Descriptor:
     return _gpr_destructive_binary_descriptor(
         key=key,
+        encoding_form=form,
+        encoding_id=encoding(opcode, flags=Flag.REX_W),
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         result=_gpr64_result(),
@@ -133,6 +142,8 @@ def _gpr64_destructive_binary_descriptor(
 def _gpr_destructive_binary_descriptor(
     *,
     key: str,
+    encoding_form: Form,
+    encoding_id: int,
     mnemonic: str,
     semantic_tag: str,
     result: Operand,
@@ -142,6 +153,8 @@ def _gpr_destructive_binary_descriptor(
 ) -> Descriptor:
     return Descriptor(
         key=key,
+        encoding_format_id=encoding_form,
+        encoding_id=encoding_id,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         operands=(result, lhs, rhs),
@@ -161,9 +174,12 @@ def _gpr32_destructive_shift_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    extension: int,
 ) -> Descriptor:
     return _gpr_destructive_immediate_descriptor(
         key=key,
+        encoding_form=Form.SHIFT_IMMEDIATE,
+        encoding_id=encoding(0xC1, extension=extension),
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         result=_gpr32_result(),
@@ -178,9 +194,12 @@ def _gpr64_destructive_shift_descriptor(
     key: str,
     mnemonic: str,
     semantic_tag: str,
+    extension: int,
 ) -> Descriptor:
     return _gpr_destructive_immediate_descriptor(
         key=key,
+        encoding_form=Form.SHIFT_IMMEDIATE,
+        encoding_id=encoding(0xC1, extension=extension, flags=Flag.REX_W),
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         result=_gpr64_result(),
@@ -195,10 +214,15 @@ def _gpr_count_shift_descriptor(
     mnemonic: str,
     semantic: str,
     bit_count: int,
+    extension: int,
 ) -> Descriptor:
     result = _gpr32_result() if bit_count == 32 else _gpr64_result()
     lhs = _gpr32_operand("lhs") if bit_count == 32 else _gpr64_operand("lhs")
     return Descriptor(
+        encoding_format_id=Form.SHIFT_COUNT,
+        encoding_id=encoding(
+            0xD3, extension=extension, flags=Flag.REX_W if bit_count == 64 else 0
+        ),
         key=f"x86.scalar.{mnemonic}.cl.gpr{bit_count}",
         mnemonic=mnemonic,
         semantic_tag=f"integer.{semantic}.i{bit_count}",
@@ -225,6 +249,8 @@ def _gpr_count_shift_descriptor(
 def _gpr_destructive_immediate_descriptor(
     *,
     key: str,
+    encoding_form: Form,
+    encoding_id: int,
     mnemonic: str,
     semantic_tag: str,
     result: Operand,
@@ -234,6 +260,8 @@ def _gpr_destructive_immediate_descriptor(
 ) -> Descriptor:
     return Descriptor(
         key=key,
+        encoding_format_id=encoding_form,
+        encoding_id=encoding_id,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         operands=(result, source),
@@ -254,12 +282,15 @@ def _gpr_destructive_immediate_descriptor(
 def _gpr32_to_gpr64_extend_descriptor(
     *,
     key: str,
+    encoding_id: int,
     mnemonic: str,
     semantic_tag: str,
     asm_mnemonic: str,
 ) -> Descriptor:
     return Descriptor(
         key=key,
+        encoding_format_id=Form.MOVE,
+        encoding_id=encoding_id,
         mnemonic=mnemonic,
         semantic_tag=semantic_tag,
         operands=(_gpr64_result(), _gpr32_operand("src")),
@@ -276,6 +307,8 @@ def _gpr32_to_gpr64_extend_descriptor(
 def _gpr64_to_gpr32_truncate_descriptor() -> Descriptor:
     return Descriptor(
         key="x86.scalar.mov.trunc.gpr32.gpr64",
+        encoding_format_id=Form.MOVE,
+        encoding_id=encoding(0x8B),
         mnemonic="mov.trunc",
         semantic_tag="integer.trunc.i64.i32",
         operands=(_gpr32_result(), _gpr64_operand("src")),
@@ -294,6 +327,11 @@ def _gpr_narrow_zero_extend_descriptor(bit_count: int) -> Descriptor:
     # low byte or word. Independent operands permit distinct payload types.
     return Descriptor(
         key=f"x86.scalar.movzx.u{bit_count}.gpr32",
+        encoding_format_id=Form.MOVE,
+        encoding_id=encoding(
+            0x0FB6 if bit_count == 8 else 0x0FB7,
+            flags=Flag.BYTE if bit_count == 8 else 0,
+        ),
         mnemonic="movzx",
         semantic_tag=f"integer.extui.i{bit_count}.i32",
         operands=(_gpr32_result(), _gpr32_operand("src")),
@@ -312,6 +350,8 @@ def _gpr_select_descriptor(bit_count: int) -> Descriptor:
     operand = _gpr64_operand if bit_count == 64 else _gpr32_operand
     return Descriptor(
         key=f"x86.scalar.select.gpr{bit_count}",
+        encoding_format_id=Form.SELECT,
+        encoding_id=encoding(0x0F45, flags=Flag.REX_W if bit_count == 64 else 0),
         mnemonic="select.cmovne",
         semantic_tag=f"integer.select.i{bit_count}",
         operands=(
@@ -338,11 +378,13 @@ def _gpr32_compare_descriptor(
     *,
     predicate: str,
     setcc: str,
+    opcode: int,
     semantic_tag: str,
 ) -> Descriptor:
     return _gpr_compare_descriptor(
         predicate=predicate,
         setcc=setcc,
+        encoding_id=encoding(opcode),
         semantic_tag=semantic_tag,
         lhs=_gpr32_operand("lhs"),
         rhs=_gpr32_operand("rhs"),
@@ -354,11 +396,13 @@ def _gpr64_compare_descriptor(
     *,
     predicate: str,
     setcc: str,
+    opcode: int,
     semantic_tag: str,
 ) -> Descriptor:
     return _gpr_compare_descriptor(
         predicate=predicate,
         setcc=setcc,
+        encoding_id=encoding(opcode, flags=Flag.REX_W),
         semantic_tag=semantic_tag,
         lhs=_gpr64_operand("lhs"),
         rhs=_gpr64_operand("rhs"),
@@ -370,6 +414,7 @@ def _gpr_compare_descriptor(
     *,
     predicate: str,
     setcc: str,
+    encoding_id: int,
     semantic_tag: str,
     lhs: Operand,
     rhs: Operand | Immediate,
@@ -377,6 +422,8 @@ def _gpr_compare_descriptor(
 ) -> Descriptor:
     immediate = isinstance(rhs, Immediate)
     return Descriptor(
+        encoding_format_id=Form.COMPARE_IMMEDIATE if immediate else Form.COMPARE,
+        encoding_id=encoding_id,
         key=f"x86.scalar.cmp.{predicate}.{asm_suffix}",
         mnemonic=f"cmp.{setcc}",
         semantic_tag=semantic_tag,
@@ -398,27 +445,29 @@ def _gpr_compare_descriptor(
 
 
 _CMP_PREDICATE_SETCC = (
-    ("eq", "sete"),
-    ("ne", "setne"),
-    ("slt", "setl"),
-    ("sle", "setle"),
-    ("sgt", "setg"),
-    ("sge", "setge"),
-    ("ult", "setb"),
-    ("ule", "setbe"),
-    ("ugt", "seta"),
-    ("uge", "setae"),
+    ("eq", "sete", 0x94),
+    ("ne", "setne", 0x95),
+    ("slt", "setl", 0x9C),
+    ("sle", "setle", 0x9E),
+    ("sgt", "setg", 0x9F),
+    ("sge", "setge", 0x9D),
+    ("ult", "setb", 0x92),
+    ("ule", "setbe", 0x96),
+    ("ugt", "seta", 0x97),
+    ("uge", "setae", 0x93),
 )
 
 
 X86_SCALAR_PREFIX_DESCRIPTORS = (
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.add.gpr32",
+        opcode=0x01,
         mnemonic="add",
         semantic_tag="integer.add.i32",
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.add.gpr64",
+        opcode=0x01,
         mnemonic="add",
         semantic_tag="integer.add.i64",
     ),
@@ -427,26 +476,34 @@ X86_SCALAR_PREFIX_DESCRIPTORS = (
 X86_SCALAR_SUFFIX_DESCRIPTORS = (
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.sub.gpr32",
+        opcode=0x29,
         mnemonic="sub",
         semantic_tag="integer.sub.i32",
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.imul.gpr32",
+        opcode=0x0FAF,
+        form=Form.BINARY_R_RM,
         mnemonic="imul",
         semantic_tag="integer.mul.i32",
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.sub.gpr64",
+        opcode=0x29,
         mnemonic="sub",
         semantic_tag="integer.sub.i64",
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.imul.gpr64",
+        opcode=0x0FAF,
+        form=Form.BINARY_R_RM,
         mnemonic="imul",
         semantic_tag="integer.mul.i64",
     ),
     Descriptor(
         key="x86.scalar.mul.high.gpr64",
+        encoding_format_id=Form.MULTIPLY_HIGH,
+        encoding_id=encoding(0xF7, extension=4, flags=Flag.REX_W),
         mnemonic="mul",
         semantic_tag="integer.mul.high.u64",
         operands=(
@@ -480,6 +537,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     Descriptor(
         key="x86.scalar.imul.imm.gpr64",
+        encoding_format_id=Form.MULTIPLY_IMMEDIATE,
+        encoding_id=encoding(0x69, flags=Flag.REX_W),
         mnemonic="imul",
         semantic_tag="integer.mul.signed_imm32.i64",
         operands=(_gpr64_result(), _gpr64_operand("lhs")),
@@ -496,37 +555,47 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.and.gpr32",
+        opcode=0x21,
         mnemonic="and",
         semantic_tag="integer.and.i32",
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.or.gpr32",
+        opcode=0x09,
         mnemonic="or",
         semantic_tag="integer.or.i32",
     ),
     _gpr32_destructive_binary_descriptor(
         key="x86.scalar.xor.gpr32",
+        opcode=0x31,
         mnemonic="xor",
         semantic_tag="integer.xor.i32",
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.and.gpr64",
+        opcode=0x21,
         mnemonic="and",
         semantic_tag="integer.and.i64",
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.or.gpr64",
+        opcode=0x09,
         mnemonic="or",
         semantic_tag="integer.or.i64",
     ),
     _gpr64_destructive_binary_descriptor(
         key="x86.scalar.xor.gpr64",
+        opcode=0x31,
         mnemonic="xor",
         semantic_tag="integer.xor.i64",
     ),
     *(
         _gpr_destructive_immediate_descriptor(
             key=f"x86.scalar.{operation}.imm.gpr{width}",
+            encoding_form=Form.BINARY_IMMEDIATE,
+            encoding_id=encoding(
+                0x81, extension=extension, flags=Flag.REX_W if width == 64 else 0
+            ),
             mnemonic=operation,
             semantic_tag=f"integer.{operation}.signed_imm32.i{width}",
             result=result(),
@@ -538,44 +607,57 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             (32, _gpr32_result, _gpr32_operand),
             (64, _gpr64_result, _gpr64_operand),
         )
-        for operation in ("and", "or", "xor")
+        for operation, extension in (("and", 4), ("or", 1), ("xor", 6))
     ),
     _gpr32_destructive_shift_descriptor(
         key="x86.scalar.shl.imm.gpr32",
+        extension=4,
         mnemonic="shl",
         semantic_tag="integer.shl.i32",
     ),
     _gpr32_destructive_shift_descriptor(
         key="x86.scalar.sar.imm.gpr32",
+        extension=7,
         mnemonic="sar",
         semantic_tag="integer.shrs.i32",
     ),
     _gpr32_destructive_shift_descriptor(
         key="x86.scalar.shr.imm.gpr32",
+        extension=5,
         mnemonic="shr",
         semantic_tag="integer.shru.i32",
     ),
     _gpr64_destructive_shift_descriptor(
         key="x86.scalar.shl.imm.gpr64",
+        extension=4,
         mnemonic="shl",
         semantic_tag="integer.shl.i64",
     ),
     _gpr64_destructive_shift_descriptor(
         key="x86.scalar.sar.imm.gpr64",
+        extension=7,
         mnemonic="sar",
         semantic_tag="integer.shrs.i64",
     ),
     _gpr64_destructive_shift_descriptor(
         key="x86.scalar.shr.imm.gpr64",
+        extension=5,
         mnemonic="shr",
         semantic_tag="integer.shru.i64",
     ),
     *(
         _gpr_count_shift_descriptor(
-            mnemonic=mnemonic, semantic=semantic, bit_count=bit_count
+            mnemonic=mnemonic,
+            semantic=semantic,
+            bit_count=bit_count,
+            extension=extension,
         )
         for bit_count in (32, 64)
-        for mnemonic, semantic in (("shl", "shl"), ("sar", "shrs"), ("shr", "shru"))
+        for mnemonic, semantic, extension in (
+            ("shl", "shl", 4),
+            ("sar", "shrs", 7),
+            ("shr", "shru", 5),
+        )
     ),
     _gpr64_to_gpr32_truncate_descriptor(),
     _gpr_select_descriptor(32),
@@ -584,6 +666,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     # still read after dst is written, so allocation keeps the two disjoint.
     Descriptor(
         key="x86.scalar.sub.if_uge.imm.gpr32",
+        encoding_format_id=Form.SUBTRACT_IF_UGE,
+        encoding_id=encoding(0x0F42),
         mnemonic="sub.cmovb",
         semantic_tag="integer.subtract_if_unsigned_ge.i32",
         operands=(_gpr32_result(), _gpr32_operand("lhs")),
@@ -602,31 +686,36 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         _gpr_compare_descriptor(
             predicate=predicate,
             setcc=setcc,
+            encoding_id=encoding(opcode),
             semantic_tag=f"integer.cmp.{predicate}.i32",
             lhs=_gpr32_operand("lhs"),
             rhs=_IMM32_IMMEDIATE,
             asm_suffix="imm.gpr32",
         )
-        for predicate, setcc in _CMP_PREDICATE_SETCC
+        for predicate, setcc, opcode in _CMP_PREDICATE_SETCC
     ),
     *(
         _gpr32_compare_descriptor(
             predicate=predicate,
             setcc=setcc,
+            opcode=opcode,
             semantic_tag=f"integer.cmp.{predicate}.i32",
         )
-        for predicate, setcc in _CMP_PREDICATE_SETCC
+        for predicate, setcc, opcode in _CMP_PREDICATE_SETCC
     ),
     *(
         _gpr64_compare_descriptor(
             predicate=predicate,
             setcc=setcc,
+            opcode=opcode,
             semantic_tag=f"integer.cmp.{predicate}.i64",
         )
-        for predicate, setcc in _CMP_PREDICATE_SETCC
+        for predicate, setcc, opcode in _CMP_PREDICATE_SETCC
     ),
     Descriptor(
         key="x86.scalar.movimm.gpr32",
+        encoding_format_id=Form.CONSTANT,
+        encoding_id=encoding(0xB8),
         mnemonic="mov",
         semantic_tag="integer.const.i32",
         operands=(_gpr32_result(),),
@@ -655,6 +744,12 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
             load_schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
             store_schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
             assembly_suffix=f".u{width_bits}.gpr32",
+            encoding_ids=(
+                encoding(0x0FB6 if width_bits == 8 else 0x0FB7),
+                encoding(0x88, flags=Flag.BYTE)
+                if width_bits == 8
+                else encoding(0x89, flags=Flag.OPERAND_16),
+            ),
         )
     ),
     *memory_descriptors(
@@ -668,6 +763,7 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         load_schedule_class=_SCHEDULE_MEMORY_LOAD_GPR32,
         store_schedule_class=_SCHEDULE_MEMORY_STORE_GPR32,
         assembly_suffix=".gpr32",
+        encoding_ids=(encoding(0x8B), encoding(0x89)),
     ),
     *memory_descriptors(
         key_prefix="x86.scalar",
@@ -680,9 +776,15 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
         load_schedule_class=_SCHEDULE_MEMORY_LOAD_GPR64,
         store_schedule_class=_SCHEDULE_MEMORY_STORE_GPR64,
         assembly_suffix=".gpr64",
+        encoding_ids=(
+            encoding(0x8B, flags=Flag.REX_W),
+            encoding(0x89, flags=Flag.REX_W),
+        ),
     ),
     Descriptor(
         key="x86.scalar.mov.gpr64",
+        encoding_format_id=Form.MOVE,
+        encoding_id=encoding(0x8B, flags=Flag.REX_W),
         mnemonic="mov",
         semantic_tag="integer.move.i64",
         operands=(_gpr64_result(), _gpr64_operand("src")),
@@ -692,12 +794,14 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     _gpr32_to_gpr64_extend_descriptor(
         key="x86.scalar.movsxd.gpr64.gpr32",
+        encoding_id=encoding(0x63, flags=Flag.REX_W),
         mnemonic="movsxd",
         semantic_tag="integer.extsi.i32.i64",
         asm_mnemonic="movsxd.gpr64.gpr32",
     ),
     _gpr32_to_gpr64_extend_descriptor(
         key="x86.scalar.movzx.gpr64.gpr32",
+        encoding_id=encoding(0x8B),
         mnemonic="movzx",
         semantic_tag="integer.extui.i32.i64",
         asm_mnemonic="movzx.gpr64.gpr32",
@@ -705,6 +809,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     *(_gpr_narrow_zero_extend_descriptor(width) for width in (8, 16)),
     Descriptor(
         key="x86.scalar.movimm.gpr64",
+        encoding_format_id=Form.CONSTANT,
+        encoding_id=encoding(0xB8, flags=Flag.REX_W),
         mnemonic="mov",
         semantic_tag="integer.const.i64",
         operands=(_gpr64_result(),),
@@ -721,6 +827,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     Descriptor(
         key="x86.scalar.lea.add.gpr64",
+        encoding_format_id=Form.ADDRESS_ADD,
+        encoding_id=encoding(0x8D, flags=Flag.REX_W),
         mnemonic="lea",
         semantic_tag="integer.add.i64",
         operands=(
@@ -734,6 +842,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     Descriptor(
         key="x86.scalar.lea.disp.gpr64",
+        encoding_format_id=Form.ADDRESS_DISPLACEMENT,
+        encoding_id=encoding(0x8D, flags=Flag.REX_W),
         mnemonic="lea",
         semantic_tag="integer.add.disp.i64",
         operands=(
@@ -753,6 +863,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     Descriptor(
         key="x86.scalar.lea.scale.gpr64",
+        encoding_format_id=Form.ADDRESS_SCALE,
+        encoding_id=encoding(0x8D, flags=Flag.REX_W),
         mnemonic="lea",
         semantic_tag="integer.scale.disp.i64",
         operands=(
@@ -772,6 +884,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     Descriptor(
         key="x86.scalar.lea.add_scale.gpr64",
+        encoding_format_id=Form.ADDRESS_ADD_SCALE,
+        encoding_id=encoding(0x8D, flags=Flag.REX_W),
         mnemonic="lea",
         semantic_tag="integer.add.scale.disp.i64",
         operands=(
@@ -792,6 +906,8 @@ X86_SCALAR_SUFFIX_DESCRIPTORS = (
     ),
     Descriptor(
         key="x86.scalar.lea.add_scale.gpr32",
+        encoding_format_id=Form.ADDRESS_ADD_SCALE,
+        encoding_id=encoding(0x8D),
         mnemonic="lea",
         semantic_tag="integer.add.scale.disp.i64.trunc.i32",
         operands=(

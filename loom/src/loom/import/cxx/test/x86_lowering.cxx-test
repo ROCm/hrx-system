@@ -5,7 +5,7 @@ bool select_predicate(bool condition, bool left, bool right) {
 }
 
 // ----
-low.func.def public target<x86.scalar.core> abi(object_function) @select_predicate(%condition: reg<x86.gpr32>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.scalar.core> abi(object_function) abi_layout({signature = (i1, i1, i1) -> (i1)}) @select_predicate(%condition: reg<x86.gpr32>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %10 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
   %11 = select.gpr32 %condition, %left, %10
   return %11
@@ -21,7 +21,7 @@ unsigned select_bits(bool condition, bool left, bool right) {
 }
 
 // ----
-low.func.def public target<x86.scalar.core> abi(object_function) @select_bits(%condition: reg<x86.gpr32>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.scalar.core> abi(object_function) abi_layout({signature = (i1, i1, i1) -> (i32)}) @select_bits(%condition: reg<x86.gpr32>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %23 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
   %selected = select.gpr32 %condition, %left, %23
   %25 = copy %selected : reg<x86.gpr32> -> reg<x86.gpr32>

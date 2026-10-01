@@ -145,12 +145,11 @@ TEST(Aie2pLeafObjectTest, EmitsPreparedProgramRepeatedlyWithoutMutation) {
   EXPECT_NE(first.object.sections[1].contents.data, table_contents);
   EXPECT_EQ(0, std::memcmp(first.object.sections[1].contents.data,
                            table_contents, sizeof(table_contents)));
-  EXPECT_EQ(first.object.sections[1].section_type,
-            LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS);
-  EXPECT_EQ(first.object.sections[1].section_flags,
-            LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC);
+  EXPECT_EQ(first.object.sections[1].storage,
+            LOOM_NATIVE_SECTION_STORAGE_CONTENTS);
+  EXPECT_EQ(first.object.sections[1].access, LOOM_NATIVE_SECTION_ACCESS_READ);
   EXPECT_EQ(first.object.sections[1].contribution_alignment, 32u);
-  EXPECT_EQ(first.object.sections[2].zero_fill_length, 64u);
+  EXPECT_EQ(first.object.sections[2].reservation_length, 64u);
   EXPECT_EQ(first.object.sections[2].contribution_alignment, 16u);
   EXPECT_EQ(first.object.fixups[0].section_contribution_index, 0u);
   EXPECT_EQ(first.object.fixups[0].section_offset, 0u);

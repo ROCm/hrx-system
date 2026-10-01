@@ -109,9 +109,22 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "compiler_provider",
+    srcs = ["compiler_provider.c"],
+    hdrs = ["compiler_provider.h"],
+    visibility = ["//loom/src/loom/tooling/compile:__pkg__"],
+    deps = [
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/arch/x86/ops",
+        "//loom/src/loom/target/emit/native/x86:module",
+    ],
+)
+
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
+        "test/instruction_immediates.loom-test",
         "test/register_classes.loom-test",
         "test/source_low/allocation.loom-test",
         "test/source_low/buffer_bulk.loom-test",
@@ -120,6 +133,7 @@ loom_check_test_suite(
         "test/source_low/callable_returns.loom-test",
         "test/source_low/callable_values.loom-test",
         "test/source_low/carried_counter_store.loom-test",
+        "test/source_low/function_boundary.loom-test",
         "test/source_low/loop_counter_offset.loom-test",
         "test/source_low/math_contraction.loom-test",
         "test/source_low/memory_access_flags.loom-test",

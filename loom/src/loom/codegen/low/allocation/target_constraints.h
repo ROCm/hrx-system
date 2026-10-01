@@ -60,7 +60,8 @@ typedef struct loom_low_allocation_fixed_value_t {
 // Reserved ranges model architectural state that is never allocatable for
 // ordinary values in the current low function, such as special registers or
 // permanently reserved target IDs. Use fixed values instead for ABI live-ins
-// whose registers can be reused after their last use.
+// whose registers can be reused after their last use. Reservations obey target
+// location limits independently of the budget for ordinary allocations.
 typedef struct loom_low_allocation_reserved_range_t {
   // Stable register-class name.
   iree_string_view_t register_class;

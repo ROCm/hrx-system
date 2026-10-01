@@ -492,7 +492,7 @@ loom_low_allocation_target_constraints_validate_register_location_capacity(
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_target_constraints_emit_capacity_failure(
               constraints, diagnostic_op, reg_class_id, subject, location_base,
-              location_count, location_end, reg_class->allocatable_count));
+              location_count, location_end, capacity.max_units));
       return iree_ok_status();
     }
     *out_valid = true;
@@ -721,10 +721,13 @@ iree_status_t loom_low_allocation_target_constraints_initialize(
     out_constraints->max_constrained_location_end_by_reg_class =
         location_ends + reg_class_count;
   }
-  IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_resolve_budgets(
-      out_constraints, budgets, budget_count, arena));
-  return loom_low_allocation_target_constraints_resolve_reserved_ranges(
-      out_constraints, reserved_ranges, reserved_range_count, arena);
+  // Architectural reservations must be valid target locations, even when a
+  // tuning budget excludes them from the ordinary allocation candidates.
+  IREE_RETURN_IF_ERROR(
+      loom_low_allocation_target_constraints_resolve_reserved_ranges(
+          out_constraints, reserved_ranges, reserved_range_count, arena));
+  return loom_low_allocation_target_constraints_resolve_budgets(
+      out_constraints, budgets, budget_count, arena);
 }
 
 static iree_status_t

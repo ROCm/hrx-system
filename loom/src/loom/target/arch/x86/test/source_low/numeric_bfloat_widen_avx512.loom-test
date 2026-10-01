@@ -7,7 +7,7 @@ func.def @widen_bfloat(%input: bf16) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512.core> abi(object_function) @widen_bfloat(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (bf16) -> (f32)}) @widen_bfloat(%input: reg<x86.gpr32>) -> (reg<x86.xmm>) asm {
   %5 = copy %input : reg<x86.gpr32> -> reg<x86.gpr32>
   %6 = shl.imm.gpr32 %5 {shift = 16}
   %wide = vmovd.xmm.gpr32 %6
@@ -25,7 +25,7 @@ func.def @load_bfloat(%input: buffer) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512.core> abi(object_function) @load_bfloat(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer) -> (f32)}) @load_bfloat(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
   %value = movzx.load.u16.gpr32 %input {disp32 = 0}
   %9 = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
   %10 = shl.imm.gpr32 %9 {shift = 16}
@@ -45,7 +45,7 @@ func.def @load_bfloat_at(%input: buffer, %origin: offset, %element: index) -> (f
 }
 
 // ----
-low.func.def target<x86.avx512.core> abi(object_function) @load_bfloat_at(%input: reg<x86.gpr64>, %base: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer, offset, index) -> (f32)}) @load_bfloat_at(%input: reg<x86.gpr64>, %base: reg<x86.gpr64>, %position: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
   %13 = mov.imm64 2
   %14 = copy %position : reg<x86.gpr64> -> reg<x86.gpr64>
   %15 = imul.gpr64 %14, %13
@@ -72,7 +72,7 @@ func.def @bfloat_pair_sum(%input: buffer) -> (f32) {
 }
 
 // ----
-low.func.def target<x86.avx512.core> abi(object_function) @bfloat_pair_sum(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer) -> (f32)}) @bfloat_pair_sum(%input: reg<x86.gpr64>) -> (reg<x86.xmm>) asm {
   %19 = movzx.load.u16.gpr32 %input {disp32 = 0}
   %second = movzx.load.u16.gpr32 %input {disp32 = 2}
   %21 = copy %19 : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -100,7 +100,7 @@ func.def @replace_bfloat(%input: buffer, %replacement: bf16) -> (f32, f32) {
 }
 
 // ----
-low.func.def target<x86.avx512.core> abi(object_function) @replace_bfloat(%input: reg<x86.gpr64>, %replacement: reg<x86.gpr32>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core> abi(object_function) abi_layout({signature = (buffer, bf16) -> (f32, f32)}) @replace_bfloat(%input: reg<x86.gpr64>, %replacement: reg<x86.gpr32>) -> (reg<x86.xmm>, reg<x86.xmm>) asm {
   %before = movzx.load.u16.gpr32 %input {disp32 = 0}
   mov.store.u16.gpr32 %replacement, %input {disp32 = 0}
   %after = movzx.load.u16.gpr32<volatile> %input {disp32 = 0}

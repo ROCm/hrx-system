@@ -11,7 +11,6 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "iree/schemas/xdna_executable.h"
 #include "loom/target/arch/amd/xdna/aie2p/emit/leaf_program.h"
 #include "loom/target/emit/native/object.h"
 
@@ -70,12 +69,6 @@ typedef struct loom_aie2p_leaf_realization_t {
   iree_string_view_t abi_identity;
   // Index of the entry definition in object.symbols.
   uint32_t entry_symbol_index;
-  // ELF machine identity required by the contribution.
-  uint16_t elf_machine;
-  // XDNA target generation required by the contribution.
-  iree_xdna_target_generation_t target_generation;
-  // Processor-specific ELF flags required by the contribution.
-  uint32_t elf_flags;
   // Physical features the array linker must realize.
   loom_aie2p_leaf_capability_flags_t capability_flags;
   // Core program-memory footprint.

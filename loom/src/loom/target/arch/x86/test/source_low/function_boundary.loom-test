@@ -1,0 +1,36 @@
+// A physical GPR32 cannot distinguish a Boolean foreign signature from i32.
+// RUN: emit source-low target=x86:scalar output=low
+func.def public @identity(%value: i1) -> (i1) {
+  func.return %value : i1
+}
+
+// ----
+low.func.def public target<x86.scalar.core> abi(object_function) abi_layout({signature = (i1) -> (i1)}) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  return %value
+}
+
+// ====
+
+// The word-sized default needs neither an annotation nor a redundant signature.
+// RUN: emit source-low target=x86:scalar output=low
+func.def public @identity(%value: i32) -> (i32) {
+  func.return %value : i32
+}
+
+// ----
+low.func.def public target<x86.scalar.core> abi(object_function) @identity(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  return %value
+}
+
+// ====
+
+// Calling convention is part of the function contract and survives lowering.
+// RUN: emit source-low target=x86:scalar output=low
+func.def public abi(object_function, {calling_convention = "sysv"}) @identity(%value: i64) -> (i64) {
+  func.return %value : i64
+}
+
+// ----
+low.func.def public target<x86.scalar.core> abi(object_function, {calling_convention = "sysv"}) @identity(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  return %value
+}

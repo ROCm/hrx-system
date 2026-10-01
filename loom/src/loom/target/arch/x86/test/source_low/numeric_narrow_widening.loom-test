@@ -7,7 +7,7 @@ func.def @widen_unsigned_byte(%value: i8) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.scalar.core> abi(object_function) @widen_unsigned_byte(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (i8) -> (i32)}) @widen_unsigned_byte(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %result = movzx.u8.gpr32 %value
   return %result
 }
@@ -20,7 +20,7 @@ func.def @widen_unsigned_halfword(%value: i16) -> (i32) {
 }
 
 // ----
-low.func.def target<x86.scalar.core> abi(object_function) @widen_unsigned_halfword(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (i16) -> (i32)}) @widen_unsigned_halfword(%value: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %result = movzx.u16.gpr32 %value
   return %result
 }

@@ -16,7 +16,7 @@ func.def target(@target) @distinct_root_cfg(%first: buffer, %second: buffer, %fi
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @distinct_root_cfg(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, offset, offset, i1) -> (i32)}) @distinct_root_cfg(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %condition, ^left, ^right : reg<x86.gpr32>
 ^left:
   %first_view = lea.add_scale %first, %first_offset {disp32 = 0, scale = 1}
@@ -91,7 +91,7 @@ func.def target(@target) @dynamic_layout_subview_cfg(%first: buffer, %second: bu
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @dynamic_layout_subview_cfg(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_base: reg<x86.gpr64>, %second_base: reg<x86.gpr64>, %column_count: reg<x86.gpr64>, %row_stride: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, offset, offset, index, index, i1) -> (i32)}) @dynamic_layout_subview_cfg(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_base: reg<x86.gpr64>, %second_base: reg<x86.gpr64>, %column_count: reg<x86.gpr64>, %row_stride: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %condition, ^left, ^right : reg<x86.gpr32>
 ^left:
   %27 = mov.imm64 4
@@ -147,7 +147,7 @@ func.def target(@target) @return_distinct_root_view(%first: buffer, %second: buf
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @return_distinct_root_view(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, offset, offset, i1) -> (buffer)}) @return_distinct_root_view(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_offset: reg<x86.gpr64>, %second_offset: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   low.cond_br %condition, ^left, ^right : reg<x86.gpr32>
 ^left:
   %first_view = lea.add_scale %first, %first_offset {disp32 = 0, scale = 1}
@@ -179,7 +179,7 @@ func.def target(@target) @wide_static_carrier(%first: buffer, %second: buffer, %
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @wide_static_carrier(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, i1) -> (i32)}) @wide_static_carrier(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %15 = mov.imm64 1099511627776
   %first_view = lea %first, %15
   %17 = mov.imm64 1099511627780
@@ -227,7 +227,7 @@ func.def target(@target) @exchange_selected_view(%first: buffer, %second: buffer
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @exchange_selected_view(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_origin: reg<x86.gpr64>, %second_origin: reg<x86.gpr64>, %condition: reg<x86.gpr32>, %replacement: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, offset, offset, i1, i32) -> (i32)}) @exchange_selected_view(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_origin: reg<x86.gpr64>, %second_origin: reg<x86.gpr64>, %condition: reg<x86.gpr32>, %replacement: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %20 = copy %second : reg<x86.gpr64> -> reg<x86.gpr64>
   %selected = select.gpr64 %condition, %first, %20
   %22 = copy %second_origin : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -250,7 +250,7 @@ func.def target(@target) @return_selected_buffer_view(%first: buffer, %second: b
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @return_selected_buffer_view(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %origin: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, offset, i1) -> (buffer)}) @return_selected_buffer_view(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %origin: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %13 = copy %second : reg<x86.gpr64> -> reg<x86.gpr64>
   %selected = select.gpr64 %condition, %first, %13
   %word = lea.add_scale %selected, %origin {disp32 = 4, scale = 1}
@@ -271,7 +271,7 @@ func.def target(@target) @load_selected_buffer_wide_offset(%first: buffer, %seco
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @load_selected_buffer_wide_offset(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, i1) -> (i32)}) @load_selected_buffer_wide_offset(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %condition: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %12 = copy %second : reg<x86.gpr64> -> reg<x86.gpr64>
   %selected = select.gpr64 %condition, %first, %12
   %14 = mov.imm64 1099511627776

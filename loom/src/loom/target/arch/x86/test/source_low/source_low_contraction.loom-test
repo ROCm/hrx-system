@@ -15,7 +15,7 @@ func.def target(@target) @bf16_blocked_mma_xmm(%lhs_data: vector<8xbf16>, %rhs_d
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_blocked_mma_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<8xbf16>, vector<8xbf16>, vector<4xf32>) -> (vector<4xf32>)}) @bf16_blocked_mma_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>, %init: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %16 = copy %init : reg<x86.xmm> -> reg<x86.xmm>
   %result = avx512_bf16.vdpbf16ps.xmm %16, %lhs, %rhs
   return %result
@@ -38,7 +38,7 @@ func.def target(@target) @bf16_blocked_mma(%lhs_data: vector<16xbf16>, %rhs_data
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<16xbf16>, vector<16xbf16>, vector<8xf32>) -> (vector<8xf32>)}) @bf16_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %16 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
   %result = avx512_bf16.vdpbf16ps.ymm %16, %lhs, %rhs
   return %result
@@ -61,7 +61,7 @@ func.def target(@target) @bf16_blocked_mma_zmm(%lhs_data: vector<32xbf16>, %rhs_
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_blocked_mma_zmm(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %init: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<32xbf16>, vector<32xbf16>, vector<16xf32>) -> (vector<16xf32>)}) @bf16_blocked_mma_zmm(%lhs: reg<x86.zmm>, %rhs: reg<x86.zmm>, %init: reg<x86.zmm>) -> (reg<x86.zmm>) asm {
   %16 = copy %init : reg<x86.zmm> -> reg<x86.zmm>
   %result = avx512_bf16.vdpbf16ps %16, %lhs, %rhs
   return %result
@@ -84,7 +84,7 @@ func.def target(@target) @i8_blocked_mma(%lhs_data: vector<32xi8>, %rhs_data: ve
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @i8_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<32xi8>, vector<32xi8>, vector<8xi32>) -> (vector<8xi32>)}) @i8_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %16 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
   %result = avx_vnni_int8.vpdpbssd.ymm %16, %lhs, %rhs
   return %result
@@ -109,7 +109,7 @@ func.def target(@target) @encoded_u8s8_blocked_mma(%lhs_data: vector<8xi32>, %rh
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @encoded_u8s8_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<8xi32>, vector<8xi32>, vector<8xi32>) -> (vector<8xi32>)}) @encoded_u8s8_blocked_mma(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %init: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   %18 = copy %init : reg<x86.ymm> -> reg<x86.ymm>
   %result = avx512_vnni.vpdpbusd.ymm %18, %lhs, %rhs
   return %result
@@ -166,7 +166,7 @@ func.def target(@target) @packed_byte_bitcast_roundtrip(%bytes: vector<32xi8>) -
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @packed_byte_bitcast_roundtrip(%result: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<32xi8>) -> (vector<32xi8>)}) @packed_byte_bitcast_roundtrip(%result: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
   return %result
 }
 

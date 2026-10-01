@@ -8,7 +8,7 @@ func.def target(@target) @f32x4_ordered_reduce(%values: vector<4xf32>, %initial:
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_ordered_reduce(%values: reg<x86.xmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<4xf32>, f32) -> (f32)}) @f32x4_ordered_reduce(%values: reg<x86.xmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %7 = vaddss.xmm %initial, %values
   %8 = vpermilps.xmm %values, 1
   %9 = vaddss.xmm %7, %8
@@ -29,7 +29,7 @@ func.def target(@target) @f32x4_reassociated_reduce(%values: vector<4xf32>, %ini
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x4_reassociated_reduce(%values: reg<x86.xmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<4xf32>, f32) -> (f32)}) @f32x4_reassociated_reduce(%values: reg<x86.xmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %7 = vpermilps.xmm %values, 78
   %8 = vaddps.xmm %values, %7
   %9 = vpermilps.xmm %8, 177
@@ -48,7 +48,7 @@ func.def target(@target) @f32x8_ordered_reduce(%values: vector<8xf32>, %initial:
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x8_ordered_reduce(%values: reg<x86.ymm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xf32>, f32) -> (f32)}) @f32x8_ordered_reduce(%values: reg<x86.ymm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %7 = vextractf128.xmm %values, 0
   %8 = vextractf128.xmm %values, 1
   %9 = vaddss.xmm %initial, %7
@@ -78,7 +78,7 @@ func.def target(@target) @f32x8_reassociated_reduce(%values: vector<8xf32>, %ini
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @f32x8_reassociated_reduce(%values: reg<x86.ymm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (vector<8xf32>, f32) -> (f32)}) @f32x8_reassociated_reduce(%values: reg<x86.ymm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %7 = vextractf128.xmm %values, 0
   %8 = vextractf128.xmm %values, 1
   %9 = vaddps.xmm %7, %8
@@ -100,7 +100,7 @@ func.def target(@target) @f32x16_ordered_reduce(%values: vector<16xf32>, %initia
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_ordered_reduce(%values: reg<x86.zmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<16xf32>, f32) -> (f32)}) @f32x16_ordered_reduce(%values: reg<x86.zmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %7 = vextractf32x4.xmm %values, 0
   %8 = vextractf32x4.xmm %values, 1
   %9 = vextractf32x4.xmm %values, 2
@@ -146,7 +146,7 @@ func.def target(@target) @f32x16_reassociated_reduce(%values: vector<16xf32>, %i
 }
 
 // ----
-low.func.def target<x86.avx512.core>(@target) abi(object_function) @f32x16_reassociated_reduce(%values: reg<x86.zmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512.core>(@target) abi(object_function) abi_layout({signature = (vector<16xf32>, f32) -> (f32)}) @f32x16_reassociated_reduce(%values: reg<x86.zmm>, %initial: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %7 = vextractf32x4.xmm %values, 0
   %8 = vextractf32x4.xmm %values, 1
   %9 = vextractf32x4.xmm %values, 2
@@ -173,7 +173,7 @@ func.def target(@target) @bf16_dot2_ordered_reduce(%lhs: vector<16xbf16>, %rhs: 
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_dot2_ordered_reduce(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %initial: reg<x86.ymm>, %seed: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<16xbf16>, vector<16xbf16>, vector<8xf32>, f32) -> (f32)}) @bf16_dot2_ordered_reduce(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %initial: reg<x86.ymm>, %seed: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %12 = copy %initial : reg<x86.ymm> -> reg<x86.ymm>
   %dot = avx512_bf16.vdpbf16ps.ymm %12, %lhs, %rhs
   %14 = vextractf128.xmm %dot, 0
@@ -206,7 +206,7 @@ func.def target(@target) @bf16_dot2_reassociated_reduce(%lhs: vector<16xbf16>, %
 }
 
 // ----
-low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) @bf16_dot2_reassociated_reduce(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %initial: reg<x86.ymm>, %seed: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+low.func.def target<x86.avx512_packed_dot.core>(@target) abi(object_function) abi_layout({signature = (vector<16xbf16>, vector<16xbf16>, vector<8xf32>, f32) -> (f32)}) @bf16_dot2_reassociated_reduce(%lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>, %initial: reg<x86.ymm>, %seed: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
   %12 = copy %initial : reg<x86.ymm> -> reg<x86.ymm>
   %dot = avx512_bf16.vdpbf16ps.ymm %12, %lhs, %rhs
   %14 = vextractf128.xmm %dot, 0

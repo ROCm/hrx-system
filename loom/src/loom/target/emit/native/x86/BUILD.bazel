@@ -4,9 +4,13 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//build_tools/testing:build_defs.bzl", "iree_execution_test_suite")
 load(
     "//loom/build_tools/bazel:build_defs.bzl",
     "loom_cc_library",
+    "loom_cc_test",
+    "loom_config_compatible_with",
+    "loom_generated_file",
 )
 load(
     "//loom/build_tools/bazel:loom_check.bzl",
@@ -22,29 +26,86 @@ package(
 _X86_CHECK_VISIBILITY = ["//loom/src/loom/target/arch/x86/check:__pkg__"]
 
 #===------------------------------------------------------------------------===#
-# x86 native assembly fragments
+# x86 native functions
 #===------------------------------------------------------------------------===#
 
 loom_cc_library(
-    name = "assembly",
-    srcs = ["assembly.c"],
-    hdrs = ["assembly.h"],
+    name = "encoding",
+    srcs = ["encoding.c"],
+    hdrs = ["encoding.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "encoding_test",
+    srcs = ["encoding_test.cc"],
     deps = [
-        "//loom/src/loom/codegen/low:allocation",
+        ":encoding",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "function",
+    srcs = ["function.c"],
+    hdrs = ["function.h"],
+    deps = [
+        ":encoding",
+        "//loom/src/loom/codegen/low:frame",
         "//loom/src/loom/codegen/low:packet",
-        "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/x86:register_classes",
-        "//loom/src/loom/target/arch/x86/descriptors:avx2_descriptors_ids",
-        "//loom/src/loom/target/arch/x86/descriptors:avx512_descriptors_ids",
-        "//loom/src/loom/target/arch/x86/descriptors:avx512_packed_dot_descriptors_ids",
-        "//loom/src/loom/target/arch/x86/descriptors:packed_dot_descriptors_ids",
-        "//loom/src/loom/target/arch/x86/descriptors:scalar_descriptors_ids",
-        "//loom/src/loom/target/arch/x86/descriptors:simd128_descriptors_ids",
-        "//loom/src/loom/target/emit/native:assembly",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/io:stream",
+    ],
+)
+
+loom_cc_test(
+    name = "function_test",
+    srcs = ["function_test.cc"],
+    deps = [
+        ":encoding",
+        ":function",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "abi",
+    srcs = ["abi.c"],
+    hdrs = ["abi.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:allocation",
+        "//loom/src/loom/error:error_defs",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops/low",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target/arch/x86:register_classes",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
+    name = "module",
+    srcs = ["module.c"],
+    hdrs = ["module.h"],
+    visibility = ["//loom/src/loom/target/arch/x86:__pkg__"],
+    deps = [
+        ":abi",
+        ":function",
+        "//loom/src/loom/codegen/low:frame",
+        "//loom/src/loom/target:entry_selection",
+        "//loom/src/loom/target:provider",
+        "//loom/src/loom/target/emit/native:object_elf",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/io:stream",
     ],
 )
 
@@ -54,7 +115,7 @@ loom_cc_library(
     hdrs = ["check/loom_check.h"],
     visibility = _X86_CHECK_VISIBILITY,
     deps = [
-        ":assembly",
+        ":function",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
     ],
@@ -63,14 +124,55 @@ loom_cc_library(
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
-        "test/assembly.loom-test",
-        "test/buffer_selection.loom-test",
-        "test/copies.loom-test",
-        "test/high_product.loom-test",
-        "test/lanes.loom-test",
-        "test/memory.loom-test",
-        "test/schedule_scopes.loom-test",
-        "test/selects.loom-test",
-        "test/shifts.loom-test",
+        "test/function.loom-test",
+    ],
+)
+
+iree_execution_test_suite(
+    name = "callable_test",
+    manifests = ["test/callable.test.json"],
+    tags = ["hostonly"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+    ]),
+    tools = {"loom-compile": "//loom/src/loom/tools/loom-compile:loom-compile"},
+)
+
+# The native object is a normal linker input. The caller contains no compiler
+# library, loader, runtime trampoline, or generated-code inspection machinery.
+loom_generated_file(
+    name = "callable_object",
+    testonly = True,
+    args = [
+        "$(location test/callable.loom)",
+        "--target=x86:scalar",
+    ],
+    generator = "//loom/src/loom/tools/loom-compile:loom-compile",
+    inputs = ["test/callable.loom"],
+    output = "callable.o",
+    output_flag = "--output=",
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+    ]) + [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+)
+
+loom_cc_test(
+    name = "callable_link_test",
+    srcs = [
+        "callable.o",
+        "callable_link_test.cc",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:x86",
+    ]) + [
+        "@platforms//cpu:x86_64",
+        "@platforms//os:linux",
+    ],
+    deps = [
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )

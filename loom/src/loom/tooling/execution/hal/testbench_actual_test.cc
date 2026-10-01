@@ -160,6 +160,7 @@ static const loom_target_snapshot_t kIndex64Offset32TargetSnapshot =
 static const loom_target_export_plan_t kFakeTargetExportPlan = {
     /*.name=*/IREE_SVL("fake-export"),
     /*.export_symbol=*/{},
+    /*.calling_convention=*/{},
     /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
 };
 static const loom_target_config_t kFakeTargetConfig = {

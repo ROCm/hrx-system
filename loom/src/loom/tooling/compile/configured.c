@@ -10,6 +10,14 @@
 #include "loom/target/configured/provider_set.h"
 #include "loom/transforms/cleanup/configured.h"
 
+#ifndef LOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS
+#define LOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS 0
+#endif  // LOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS
+
+#if LOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS
+#include "loom/target/arch/x86/compiler_provider.h"
+#endif  // LOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS
+
 #ifndef LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
 #define LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS 0
 #endif  // LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
@@ -60,6 +68,11 @@ static iree_status_t loom_tooling_configured_compile_initialize_storage(void) {
   IREE_RETURN_IF_ERROR(loom_target_provider_set_storage_append_set(
       &configured_compile_storage.target_provider_storage,
       loom_configured_target_provider_set()));
+#if LOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS
+  IREE_RETURN_IF_ERROR(loom_target_provider_set_storage_append(
+      &configured_compile_storage.target_provider_storage,
+      &loom_x86_compiler_provider));
+#endif  // LOOM_CONFIG_COMPILE_HAVE_X86_ARTIFACTS
 #if LOOM_CONFIG_COMPILE_HAVE_AMDGPU_ARTIFACTS
   IREE_RETURN_IF_ERROR(loom_target_provider_set_storage_append(
       &configured_compile_storage.target_provider_storage,

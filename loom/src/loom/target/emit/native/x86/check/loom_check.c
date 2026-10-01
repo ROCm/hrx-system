@@ -6,7 +6,7 @@
 
 #include "loom/target/emit/native/x86/check/loom_check.h"
 
-#include "loom/target/emit/native/x86/assembly.h"
+#include "loom/target/emit/native/x86/function.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
 
@@ -33,8 +33,7 @@ static bool loom_x86_loom_check_emit_provider_matches(
     const loom_check_emit_provider_t* provider,
     iree_string_view_t target_name) {
   (void)provider;
-  return iree_string_view_equal(target_name, IREE_SV("x86-assembly")) ||
-         iree_string_view_equal(target_name, IREE_SV("x86-asm"));
+  return iree_string_view_equal(target_name, IREE_SV("x86-frame"));
 }
 
 static iree_status_t loom_x86_loom_check_parse_key_value_option(
@@ -49,10 +48,10 @@ static iree_status_t loom_x86_loom_check_parse_key_value_option(
   if (iree_string_view_equal(name, IREE_SV("strategy"))) {
     if (options->has_schedule_strategy_option) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "duplicate x86 assembly option 'strategy'");
+                              "duplicate x86 frame option 'strategy'");
     }
     IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_schedule_strategy(
-        value, IREE_SV("x86 assembly"), &options->schedule_strategy));
+        value, IREE_SV("x86 frame"), &options->schedule_strategy));
     options->has_schedule_strategy_option = true;
     *out_matched = true;
   }
@@ -68,7 +67,7 @@ static iree_status_t loom_x86_loom_check_parse_option(
     return iree_ok_status();
   }
   return loom_check_low_emit_parse_allocation_option(
-      token, IREE_SV("x86 assembly"), options->allocation_budgets,
+      token, IREE_SV("x86 frame"), options->allocation_budgets,
       IREE_ARRAYSIZE(options->allocation_budgets),
       &options->allocation_budget_count, options->allocation_fixed_value_specs,
       IREE_ARRAYSIZE(options->allocation_fixed_value_specs),
@@ -90,13 +89,13 @@ static iree_status_t loom_x86_loom_check_parse_emit_options(
   option_text = iree_string_view_trim(option_text);
   if (!iree_string_view_starts_with(symbol_name, IREE_SV("@"))) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "x86 assembly requires a low function symbol name");
+                            "x86 frame requires a low function symbol name");
   }
   out_options->function_symbol_name =
       iree_string_view_substr(symbol_name, 1, IREE_HOST_SIZE_MAX);
   if (iree_string_view_is_empty(out_options->function_symbol_name)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "x86 assembly low function symbol name is "
+                            "x86 frame low function symbol name is "
                             "required");
   }
 
@@ -114,11 +113,29 @@ static iree_status_t loom_x86_loom_check_parse_emit_options(
   return iree_ok_status();
 }
 
-static iree_status_t loom_x86_loom_check_emit_assembly(
+static iree_status_t loom_x86_loom_check_emit_frame(
     const loom_low_emission_frame_t* frame, iree_string_builder_t* builder,
     iree_arena_allocator_t* arena) {
-  return loom_x86_emit_assembly_fragment(&frame->schedule, &frame->allocation,
-                                         builder, arena);
+  loom_x86_function_t function;
+  IREE_RETURN_IF_ERROR(loom_x86_function_prepare(frame, arena, &function));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(builder, "callee-preserved:"));
+  if (!function.saved_registers) {
+    return iree_string_builder_append_cstring(builder, " none\n");
+  }
+  static const char* const register_names[] = {
+      "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
+      "r8",  "r9",  "r10", "r11", "r12", "r13", "r14", "r15",
+  };
+  const char* separator = " ";
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(register_names); ++i) {
+    if (function.saved_registers & (1u << i)) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "%s%s", separator, register_names[i]));
+      separator = ", ";
+    }
+  }
+  return iree_string_builder_append_cstring(builder, "\n");
 }
 
 static iree_status_t loom_x86_loom_check_emit_provider_execute(
@@ -132,15 +149,25 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
   loom_low_emission_frame_t frame = {0};
   bool frame_accepted = false;
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {0};
+  // The fixture supplies incoming value locations. Reserve RSP just as the
+  // object provider does before allocation; the native envelope uses it.
+  const loom_low_allocation_reserved_range_t stack_pointer = {
+      .register_class = IREE_SV("x86.gpr64"),
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 4,
+      .location_count = 1,
+  };
+  const loom_low_emission_frame_options_t frame_options = {
+      .schedule_strategy = options.schedule_strategy,
+      .allocation_budgets = options.allocation_budgets,
+      .allocation_budget_count = options.allocation_budget_count,
+      .allocation_reserved_ranges = &stack_pointer,
+      .allocation_reserved_range_count = 1,
+  };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, options.schedule_strategy,
-      /*schedule_diagnostic_flags=*/0,
-      /*allocation_diagnostic_flags=*/0, options.allocation_budgets,
-      options.allocation_budget_count, options.allocation_fixed_value_specs,
-      options.allocation_fixed_value_spec_count,
-      /*residency_query=*/NULL, loom_low_schedule_pair_affinity_list_empty(),
-      loom_low_schedule_structural_state_read_list_empty(),
-      /*storage_lease_provider=*/NULL, &spill_free_options, &frame,
+      request, options.function_symbol_name, &frame_options,
+      options.allocation_fixed_value_specs,
+      options.allocation_fixed_value_spec_count, &spill_free_options, &frame,
       &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       request->diagnostic_collector->count != 0) {
@@ -149,15 +176,15 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
   if (!frame_accepted) {
     return iree_ok_status();
   }
-  return loom_x86_loom_check_emit_assembly(
-      &frame, &request->result->actual_output, request->case_arena);
+  return loom_x86_loom_check_emit_frame(&frame, &request->result->actual_output,
+                                        request->case_arena);
 }
 
 static iree_status_t loom_x86_loom_check_emit_provider_append_names(
     const loom_check_emit_provider_t* provider,
     iree_string_builder_t* builder) {
   (void)provider;
-  return iree_string_builder_append_cstring(builder, "x86-assembly, x86-asm");
+  return iree_string_builder_append_cstring(builder, "x86-frame");
 }
 
 const loom_check_emit_provider_t loom_x86_native_loom_check_emit_provider = {

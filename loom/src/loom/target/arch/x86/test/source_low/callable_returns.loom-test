@@ -15,7 +15,7 @@ func.def @return_loaded_or_argument(%input: buffer, %load: i1, %fallback: i32) -
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_loaded_or_argument(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, i32) -> (i32)}) @return_loaded_or_argument(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
 ^loaded:
   %value = mov.load.gpr32 %input {disp32 = 0}
@@ -38,7 +38,7 @@ func.def @return_argument_or_loaded(%input: buffer, %load: i1, %fallback: i32) -
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_argument_or_loaded(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, i32) -> (i32)}) @return_argument_or_loaded(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
 ^argument:
   return %fallback
@@ -61,7 +61,7 @@ func.def @return_wide_loaded_or_argument(%input: buffer, %load: i1, %fallback: i
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_wide_loaded_or_argument(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, i64) -> (i64)}) @return_wide_loaded_or_argument(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
 ^loaded:
   %value = mov.load.gpr64 %input {disp32 = 0}
@@ -84,7 +84,7 @@ func.def @return_wide_argument_or_loaded(%input: buffer, %load: i1, %fallback: i
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_wide_argument_or_loaded(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, i64) -> (i64)}) @return_wide_argument_or_loaded(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
 ^argument:
   return %fallback
@@ -104,7 +104,7 @@ func.def @return_uniform_values(%choose: i1, %first: i32, %second: i32) -> (i32,
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_uniform_values(%choose: reg<x86.gpr32>, %first: reg<x86.gpr32>, %second: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, i32, i32) -> (i32, i32)}) @return_uniform_values(%choose: reg<x86.gpr32>, %first: reg<x86.gpr32>, %second: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>) asm {
   low.cond_br %choose, ^original, ^swapped : reg<x86.gpr32>
 ^original:
   return %first, %second
@@ -129,7 +129,7 @@ func.def @return_offset(%input: buffer, %load: i1, %fallback: offset) -> (offset
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_offset(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, offset) -> (offset)}) @return_offset(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
 ^argument:
   return %fallback
@@ -155,7 +155,7 @@ func.def @return_predicate(%input: buffer, %load: i1, %fallback: i1) -> (i1) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_predicate(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, i1) -> (i1)}) @return_predicate(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %load, ^loaded, ^argument : reg<x86.gpr32>
 ^argument:
   return %fallback
@@ -182,7 +182,7 @@ func.def @return_selected_buffer(%input: buffer, %fallback: buffer, %select: i1)
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_selected_buffer(%input: reg<x86.gpr64>, %fallback: reg<x86.gpr64>, %select: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, buffer, i1) -> (buffer)}) @return_selected_buffer(%input: reg<x86.gpr64>, %fallback: reg<x86.gpr64>, %select: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   low.cond_br %select, ^selected, ^argument : reg<x86.gpr32>
 ^argument:
   return %fallback
@@ -217,7 +217,7 @@ func.def @load_or_fallback(%input: buffer, %load: i1, %fallback: i32) -> (i32) {
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @call_returned_value(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, i1, i32) -> (i32)}) @call_returned_value(%input: reg<x86.gpr64>, %load: reg<x86.gpr32>, %fallback: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %load, ^_bb2, ^_bb1 : reg<x86.gpr32>
 ^_bb1:
   low.br ^_bb3(%fallback: reg<x86.gpr32>)
@@ -244,7 +244,7 @@ func.def @return_uniform_predicate(%choose: i1, %fallback: i1, %input: i32) -> (
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @return_uniform_predicate(%choose: reg<x86.gpr32>, %fallback: reg<x86.gpr32>, %input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, i1, i32) -> (i1)}) @return_uniform_predicate(%choose: reg<x86.gpr32>, %fallback: reg<x86.gpr32>, %input: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.cond_br %choose, ^compare, ^argument : reg<x86.gpr32>
 ^argument:
   return %fallback

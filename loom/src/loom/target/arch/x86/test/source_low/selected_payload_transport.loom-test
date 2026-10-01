@@ -13,7 +13,7 @@ func.def public @selected_truncated(%input: vector<4xi32>, %left: i64, %right: i
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @selected_truncated(%input: reg<x86.xmm>, %left: reg<x86.gpr64>, %right: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i64, i64) -> (i32)}) @selected_truncated(%input: reg<x86.xmm>, %left: reg<x86.gpr64>, %right: reg<x86.gpr64>) -> (reg<x86.gpr32>) asm {
   %value = vpextrd.xmm %input, 0
   %condition = cmp.sgt.imm.gpr32 %value, 0
   %17 = copy %right : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -38,7 +38,7 @@ func.def public @selected_coordinate(%input: vector<4xi32>, %left: i32, %right: 
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @selected_coordinate(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i32, i32) -> (index)}) @selected_coordinate(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %value = vpextrd.xmm %input, 0
   %condition = cmp.sgt.imm.gpr32 %value, 0
   %17 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -63,7 +63,7 @@ func.def public @selected_offset(%input: vector<4xi32>, %left: i32, %right: i32)
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @selected_offset(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i32, i32) -> (offset)}) @selected_offset(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %value = vpextrd.xmm %input, 0
   %condition = cmp.sgt.imm.gpr32 %value, 0
   %17 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -112,7 +112,7 @@ func.def public @selected_extended_truncation(%input: vector<4xi32>, %left: i64,
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @selected_extended_truncation(%input: reg<x86.xmm>, %left: reg<x86.gpr64>, %right: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i64, i64) -> (i64)}) @selected_extended_truncation(%input: reg<x86.xmm>, %left: reg<x86.gpr64>, %right: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %value = vpextrd.xmm %input, 0
   %condition = cmp.sgt.imm.gpr32 %value, 0
   %18 = copy %right : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -161,7 +161,7 @@ func.def public @independent_assumption_payload(%input: vector<4xi32>, %left: i3
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @independent_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i32, i32, i32) -> (i32)}) @independent_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.br ^forward(%payload: reg<x86.gpr32>)
 ^forward(%carried: reg<x86.gpr32>):
   return %carried
@@ -181,7 +181,7 @@ func.def public @selected_assumption_payload(%input: vector<4xi32>, %left: i32, 
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @selected_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i32, i32, i32) -> (i32)}) @selected_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %value = vpextrd.xmm %input, 0
   %condition = cmp.sgt.imm.gpr32 %value, 0
   %20 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -207,7 +207,7 @@ func.def public @independent_transformed_assumption_payload(%input: vector<4xi32
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @independent_transformed_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i32, i32, i32) -> (i32)}) @independent_transformed_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %increment = mov.imm32 3
   %21 = copy %payload : reg<x86.gpr32> -> reg<x86.gpr32>
   %transformed = add.gpr32 %21, %increment
@@ -232,7 +232,7 @@ func.def public @selected_transformed_assumption_payload(%input: vector<4xi32>, 
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @selected_transformed_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i32, i32, i32) -> (i32)}) @selected_transformed_assumption_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %value = vpextrd.xmm %input, 0
   %condition = cmp.sgt.imm.gpr32 %value, 0
   %22 = copy %right : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -259,7 +259,7 @@ func.def public @independent_predicate_payload(%input: vector<4xi32>, %left: i32
 }
 
 // ----
-low.func.def public target<x86.avx2.core> abi(object_function) @independent_predicate_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def public target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<4xi32>, i32, i32, i32) -> (i32)}) @independent_predicate_payload(%input: reg<x86.xmm>, %left: reg<x86.gpr32>, %right: reg<x86.gpr32>, %payload: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   low.br ^forward(%payload: reg<x86.gpr32>)
 ^forward(%carried: reg<x86.gpr32>):
   return %carried

@@ -56,14 +56,12 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "AIE2P tile code section is invalid");
   }
-  loom_native_elf_section_t* code_section =
-      &assembly->sections[code_section_index];
-  const uint64_t code_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR;
-  const uint64_t code_length =
-      loom_native_elf_section_byte_length(code_section);
-  if (code_section->type != LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS ||
-      code_section->flags != code_flags ||
+  loom_native_section_t* code_section = &assembly->sections[code_section_index];
+  const loom_native_section_access_t code_access =
+      LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_EXECUTE;
+  const uint64_t code_length = loom_native_section_byte_length(code_section);
+  if (code_section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS ||
+      code_section->access != code_access ||
       code_length != realization->code.byte_length) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
@@ -117,13 +115,12 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "AIE2P leaf read-only data symbol is invalid");
     }
-    loom_native_elf_section_t* section = &assembly->sections[section_index];
-    const uint64_t section_length =
-        loom_native_elf_section_byte_length(section);
+    loom_native_section_t* section = &assembly->sections[section_index];
+    const uint64_t section_length = loom_native_section_byte_length(section);
     const uint64_t section_end =
         (uint64_t)placement->load_address + section_length;
-    if (section->type != LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS ||
-        section->flags != LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC ||
+    if (section->storage != LOOM_NATIVE_SECTION_STORAGE_CONTENTS ||
+        section->access != LOOM_NATIVE_SECTION_ACCESS_READ ||
         section_length != placement->byte_length || section->alignment == 0) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
@@ -132,7 +129,7 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
     if (section_end > (uint64_t)UINT32_MAX + 1u) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "AIE2P tile read-only data exceeds ELF32 address space");
+          "AIE2P tile read-only data exceeds the 32-bit tile address space");
     }
     if (placement->load_address % section->alignment != 0) {
       return iree_make_status(
@@ -152,12 +149,12 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
             IREE_STATUS_FAILED_PRECONDITION,
             "AIE2P read-only data domains must use distinct sections");
       }
-      const loom_native_elf_section_t* previous_section =
+      const loom_native_section_t* previous_section =
           &assembly->sections[previous_section_index];
       if (loom_aie2p_tile_link_ranges_overlap(
               placement->load_address, section_length,
               previous_section->address,
-              loom_native_elf_section_byte_length(previous_section))) {
+              loom_native_section_byte_length(previous_section))) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "AIE2P tile read-only data placements overlap");
       }
@@ -226,17 +223,16 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
                               "AIE2P leaf storage symbol is invalid");
     }
 
-    loom_native_elf_section_t* section = &assembly->sections[section_index];
+    loom_native_section_t* section = &assembly->sections[section_index];
     const loom_aie2p_leaf_storage_requirement_t* requirement =
         loom_aie2p_leaf_storage_requirement(realization, domain->storage_space);
-    const uint64_t storage_flags =
-        LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC | LOOM_NATIVE_ELF_SECTION_FLAG_WRITE;
-    const uint64_t section_length =
-        loom_native_elf_section_byte_length(section);
+    const loom_native_section_access_t storage_access =
+        LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_WRITE;
+    const uint64_t section_length = loom_native_section_byte_length(section);
     const uint64_t section_end =
         (uint64_t)placement->load_address + section_length;
-    if (section->type != LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS ||
-        section->flags != storage_flags ||
+    if (section->storage != LOOM_NATIVE_SECTION_STORAGE_RESERVATION ||
+        section->access != storage_access ||
         section_length != requirement->byte_length ||
         section->alignment < requirement->minimum_alignment) {
       return iree_make_status(
@@ -244,8 +240,9 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
           "AIE2P tile storage section does not match its realization");
     }
     if (section_end > (uint64_t)UINT32_MAX + 1u) {
-      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "AIE2P tile storage exceeds ELF32 address space");
+      return iree_make_status(
+          IREE_STATUS_OUT_OF_RANGE,
+          "AIE2P tile storage exceeds the 32-bit tile address space");
     }
     if (section->alignment != 0 &&
         placement->load_address % section->alignment != 0) {
@@ -265,11 +262,11 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
             IREE_STATUS_FAILED_PRECONDITION,
             "AIE2P leaf storage domains must use distinct sections");
       }
-      const loom_native_elf_section_t* previous_section =
+      const loom_native_section_t* previous_section =
           &assembly->sections[previous_section_index];
       const uint64_t previous_end =
           previous_section->address +
-          loom_native_elf_section_byte_length(previous_section);
+          loom_native_section_byte_length(previous_section);
       if ((uint64_t)placement->load_address < previous_end &&
           previous_section->address < section_end) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -283,11 +280,11 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
           assembly
               ->contribution_layouts[data_domain->section_contribution_index]
               .section_index;
-      const loom_native_elf_section_t* data_section =
+      const loom_native_section_t* data_section =
           &assembly->sections[data_section_index];
       if (loom_aie2p_tile_link_ranges_overlap(
               placement->load_address, section_length, data_section->address,
-              loom_native_elf_section_byte_length(data_section))) {
+              loom_native_section_byte_length(data_section))) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "AIE2P tile local data placements overlap");
       }
@@ -300,8 +297,8 @@ static iree_status_t loom_aie2p_tile_link_assign_addresses(
   }
 
   for (iree_host_size_t i = 0; i < assembly->section_count; ++i) {
-    if (!iree_any_bit_set(assembly->sections[i].flags,
-                          LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) ||
+    if (!iree_any_bit_set(assembly->sections[i].access,
+                          LOOM_NATIVE_SECTION_ACCESS_READ) ||
         (section_placements[i].memory_space != LOOM_XDNA_MEMORY_SPACE_PROGRAM &&
          section_placements[i].memory_space != LOOM_XDNA_MEMORY_SPACE_DATA)) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
@@ -367,8 +364,9 @@ iree_status_t loom_aie2p_tile_link(
           assembly.sections[entry_layout->section_index].address,
           entry_layout->section_offset, &entry_address) ||
       entry_address > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "AIE2P tile entry address exceeds ELF32");
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "AIE2P tile entry address exceeds the 32-bit tile address space");
   }
 
   *out_tile = (loom_aie2p_linked_tile_t){

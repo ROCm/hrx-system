@@ -17,7 +17,7 @@ func.def target(@target) @scalar_i32_compare_predicates(%lhs: i32, %rhs: i32) ->
 }
 
 // ----
-low.func.def target<x86.scalar.core>(@target) abi(object_function) @scalar_i32_compare_predicates(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core>(@target) abi(object_function) abi_layout({signature = (i32, i32) -> (i1, i1, i1, i1, i1, i1, i1, i1, i1, i1)}) @scalar_i32_compare_predicates(%lhs: reg<x86.gpr32>, %rhs: reg<x86.gpr32>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) asm {
   %eq = cmp.eq.gpr32 %lhs, %rhs
   %ne = cmp.ne.gpr32 %lhs, %rhs
   %slt = cmp.slt.gpr32 %lhs, %rhs

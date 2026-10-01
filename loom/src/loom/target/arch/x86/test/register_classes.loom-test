@@ -64,3 +64,27 @@ low.func.decl target<x86.avx2.core> @avx2_absent_zmm(%input: reg<x86.zmm>)
 // RUN: verify
 // ERROR@+1: PARSE/003 {actual_token="x86.zmm", expected="register class defined by the selected descriptor set"}
 low.func.decl target<x86.avx_vnni.core> @avx_vnni_absent_zmm(%input: reg<x86.zmm>)
+
+// ====
+
+// RUN: emit low-allocation-json @x86_avx2_low_subset_rejects_high_xmm output=none fixed=%sum:physical_register:16:1
+x86.target<avx512> @x86_target
+
+low.func.def target<x86.avx512.core>(@x86_target) @x86_avx2_low_subset_rejects_high_xmm(%lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  // ERROR@+1: BACKEND/022 {function_name="x86_avx2_low_subset_rejects_high_xmm", request_kind="fixed_value", register_class="x86.xmm", location_base="16", allocation_capacity="16"}
+  %sum = vpaddd.xmm %lhs, %rhs
+  return %sum
+}
+
+// ====
+
+// RUN: emit low-allocation-json @x86_avx_vnni_low_subset_rejects_high_ymm output=none fixed=%acc_copy:physical_register:16:1 fixed=%dot:physical_register:16:1
+x86.target<avx512_packed_dot> @x86_target
+
+low.func.def target<x86.avx512_packed_dot.core>(@x86_target) @x86_avx_vnni_low_subset_rejects_high_ymm(%acc: reg<x86.ymm>, %lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  // ERROR@+1: BACKEND/022 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", request_kind="fixed_value", register_class="x86.ymm", location_base="16", allocation_capacity="16"}
+  %acc_copy = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+  // ERROR@+1: BACKEND/022 {function_name="x86_avx_vnni_low_subset_rejects_high_ymm", request_kind="fixed_value", register_class="x86.ymm", location_base="16", allocation_capacity="16"}
+  %dot = avx_vnni.vpdpbusd.ymm %acc_copy, %lhs, %rhs
+  return %dot
+}

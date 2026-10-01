@@ -43,42 +43,33 @@ TEST(Aie2pXdnaProductTest, LoadsInitializedTileSectionsBeforeActivation) {
   const std::array<uint8_t, 5> table = {
       0x11, 0x22, 0x33, 0x44, 0x55,
   };
-  loom_native_elf_section_t linked_sections[] = {
+  loom_native_section_t linked_sections[] = {
       {
           /*.name=*/IREE_SV(".text.kernel"),
-          /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
+              LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
           /*.address=*/0,
           /*.alignment=*/16,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/iree_make_const_byte_span(code.data(), code.size()),
       },
       {
           /*.name=*/IREE_SV(".rodata.table"),
-          /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-          /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ,
           /*.address=*/0x74020,
           /*.alignment=*/32,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/iree_make_const_byte_span(table.data(), table.size()),
       },
       {
           /*.name=*/IREE_SV(".storage.kernel.scratch"),
-          /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
-          /*.flags=*/LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-              LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
+              LOOM_NATIVE_SECTION_ACCESS_WRITE,
           /*.address=*/0x70000,
           /*.alignment=*/64,
-          /*.entry_size=*/0,
-          /*.link=*/0,
-          /*.info=*/0,
           /*.contents=*/iree_const_byte_span_empty(),
-          /*.zero_fill_length=*/64,
+          /*.reservation_length=*/64,
       },
   };
   const loom_aie2p_linked_section_placement_t linked_placements[] = {

@@ -8,7 +8,7 @@ func.def @choose_buffer(%first: buffer, %second: buffer, %choose_first: i1) -> (
 }
 
 // ----
-low.func.def target<x86.scalar.core> abi(object_function) @choose_buffer(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %choose_first: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (buffer, buffer, i1) -> (buffer)}) @choose_buffer(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %choose_first: reg<x86.gpr32>) -> (reg<x86.gpr64>) asm {
   %9 = copy %second : reg<x86.gpr64> -> reg<x86.gpr64>
   %selected = select.gpr64 %choose_first, %first, %9
   return %selected
@@ -26,7 +26,7 @@ func.def @exchange_selected_byte(%first: buffer, %second: buffer, %choose_first:
 }
 
 // ----
-low.func.def target<x86.scalar.core> abi(object_function) @exchange_selected_byte(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %choose_first: reg<x86.gpr32>, %position: reg<x86.gpr64>, %replacement: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (buffer, buffer, i1, offset, i32) -> (i32)}) @exchange_selected_byte(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %choose_first: reg<x86.gpr32>, %position: reg<x86.gpr64>, %replacement: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %15 = copy %second : reg<x86.gpr64> -> reg<x86.gpr64>
   %selected = select.gpr64 %choose_first, %first, %15
   %previous = movzx.load.indexed.u8.gpr32 %selected, %position {disp32 = 0, scale = 1}
@@ -51,7 +51,7 @@ func.def @selected_buffer_coordinate(%first: buffer, %second: buffer, %first_ori
 }
 
 // ----
-low.func.def target<x86.scalar.core> abi(object_function) @selected_buffer_coordinate(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_origin: reg<x86.gpr64>, %second_origin: reg<x86.gpr64>, %choose_first: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+low.func.def target<x86.scalar.core> abi(object_function) abi_layout({signature = (buffer, buffer, offset, offset, i1) -> (i32)}) @selected_buffer_coordinate(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>, %first_origin: reg<x86.gpr64>, %second_origin: reg<x86.gpr64>, %choose_first: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %19 = copy %second : reg<x86.gpr64> -> reg<x86.gpr64>
   %selected = select.gpr64 %choose_first, %first, %19
   %21 = copy %second_origin : reg<x86.gpr64> -> reg<x86.gpr64>

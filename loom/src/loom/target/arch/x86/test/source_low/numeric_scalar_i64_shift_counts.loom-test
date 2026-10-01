@@ -9,7 +9,7 @@ func.def @wide_shift_constant(%values: vector<2xi64>) -> (i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @wide_shift_constant(%values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>) -> (i64)}) @wide_shift_constant(%values: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
   %value = vpextrq.xmm %values, 0
   %8 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
   %shifted = shl.imm.gpr64 %8 {shift = 31}
@@ -25,7 +25,7 @@ func.def @wide_shift_uniform(%values: vector<2xi64>, %count: i64) -> (i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @wide_shift_uniform(%values: reg<x86.xmm>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, i64) -> (i64)}) @wide_shift_uniform(%values: reg<x86.xmm>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %value = vpextrq.xmm %values, 0
   %9 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
   %10 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
@@ -43,7 +43,7 @@ func.def @wide_shift_varying(%values: vector<2xi64>, %counts: vector<2xi64>) -> 
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @wide_shift_varying(%values: reg<x86.xmm>, %counts: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, vector<2xi64>) -> (i64)}) @wide_shift_varying(%values: reg<x86.xmm>, %counts: reg<x86.xmm>) -> (reg<x86.gpr64>) asm {
   %value = vpextrq.xmm %values, 0
   %count = vpextrq.xmm %counts, 0
   %11 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -81,7 +81,7 @@ func.def @wide_right_shift_uniform_count(%values: vector<2xi64>, %count: i64) ->
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @wide_right_shift_uniform_count(%values: reg<x86.xmm>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, i64) -> (i64, i64)}) @wide_right_shift_uniform_count(%values: reg<x86.xmm>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %value = vpextrq.xmm %values, 1
   %12 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
   %13 = copy %count : reg<x86.gpr64> -> reg<x86.rcx>
@@ -103,7 +103,7 @@ func.def @wide_right_shift_varying_count(%values: vector<2xi64>, %counts: vector
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @wide_right_shift_varying_count(%values: reg<x86.xmm>, %counts: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>, vector<2xi64>) -> (i64, i64)}) @wide_right_shift_varying_count(%values: reg<x86.xmm>, %counts: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %value = vpextrq.xmm %values, 1
   %count = vpextrq.xmm %counts, 1
   %14 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -126,7 +126,7 @@ func.def @wide_right_shift_constant(%values: vector<2xi64>) -> (i64, i64) {
 }
 
 // ----
-low.func.def target<x86.avx2.core> abi(object_function) @wide_right_shift_constant(%values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (vector<2xi64>) -> (i64, i64)}) @wide_right_shift_constant(%values: reg<x86.xmm>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
   %value = vpextrq.xmm %values, 1
   %11 = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
   %logical = shr.imm.gpr64 %11 {shift = 31}

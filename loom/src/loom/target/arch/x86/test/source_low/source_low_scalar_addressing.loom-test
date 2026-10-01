@@ -525,7 +525,7 @@ func.def target(@target) @cfg_rotating_f32x4_memory(%input: buffer, %output: buf
 }
 
 // ----
-low.func.def target<x86.avx2.core>(@target) abi(object_function) @cfg_rotating_f32x4_memory(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %origin: reg<x86.gpr64>, %bound: reg<x86.gpr64>, %choice: reg<x86.gpr32>) asm {
+low.func.def target<x86.avx2.core>(@target) abi(object_function) abi_layout({signature = (buffer, buffer, index, index, i1) -> ()}) @cfg_rotating_f32x4_memory(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %origin: reg<x86.gpr64>, %bound: reg<x86.gpr64>, %choice: reg<x86.gpr32>) asm {
   %start = mov.imm64 0
   %limit = mov.imm64 2
   low.cond_br %choice, ^left, ^right : reg<x86.gpr32>

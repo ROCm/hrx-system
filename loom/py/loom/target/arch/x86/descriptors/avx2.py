@@ -440,7 +440,6 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         load_schedule_class=_SCHEDULE_MEMORY_LOAD_XMM,
         store_schedule_class=_SCHEDULE_MEMORY_STORE_XMM,
         assembly_suffix=".xmm",
-        native_assembly_mnemonic="vmovdqu",
     ),
     *memory_descriptors(
         key_prefix="x86.avx2",
@@ -453,7 +452,6 @@ _X86_AVX2_VECTOR_DESCRIPTORS = (
         load_schedule_class=_SCHEDULE_MEMORY_LOAD_YMM,
         store_schedule_class=_SCHEDULE_MEMORY_STORE_YMM,
         assembly_suffix=".ymm",
-        native_assembly_mnemonic="vmovdqu",
     ),
 )
 

@@ -1,0 +1,35 @@
+// Immediate-form limits are verified on the instruction that owns them.
+// RUN: verify
+
+low.func.def target<x86.scalar.core> @immediate_count_too_wide(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  // ERROR@+1: STRUCTURE/014
+  %result = shr.imm.gpr64 %value {shift = 64}
+  return %result
+}
+
+// ====
+
+// Packed shifts accept an imm8; counts of at least 64 clear both qwords.
+// RUN: roundtrip
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @shift_bounds(%input: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
+  %unchanged = vpsllq.xmm %input, 0
+  %sign = vpsllq.xmm %input, 63
+  %width = vpsllq.xmm %input, 64
+  %maximum = vpsllq.xmm %input, 255
+  return %unchanged, %sign, %width, %maximum
+}
+
+// ====
+
+// RUN: verify
+
+x86.target<avx2> @target
+
+low.func.def target<x86.avx2.core>(@target) @shift_invalid(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  // ERROR@+1: STRUCTURE/014
+  %result = vpsllq.xmm %input, 256
+  return %result
+}
