@@ -45,6 +45,13 @@ Q8 activation pack or per-token weight traversal for the 10240-by-5120
 concatenation projection. The projection's active token bound comes from the
 device descriptor header, including compact generated cohorts.
 
+Catch-up stops after normalization, K/V projection and cache publication. It
+does not compute a query, read attention, project an attention output or run
+the feed-forward block. Carry still records the committed target endpoint.
+The K/V kernels and shape-dependent contraction choices are shared with
+proposal execution. Four immutable parameter roots bind views of that same
+proposal block's normalization and projection weights, without a second copy.
+
 The full-sized `qwen38_mtp_projection_8_case` and
 `qwen38_mtp_projection_512_case` checks in `linear_q6k_f16_wmma.loom` compare
 against independent F32 products over channel-varying finite weights and
