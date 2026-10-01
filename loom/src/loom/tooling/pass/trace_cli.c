@@ -88,19 +88,19 @@ static iree_flag_string_list_t loom_tooling_pass_trace_dump_ir_after_list(
 }
 #endif  // IREE_FLAGS_ENABLE_CLI == 1
 
-bool loom_tooling_pass_trace_flags_requested(void) {
-  return FLAG_dump_ir_before_all || FLAG_dump_ir_after_all ||
-         loom_tooling_pass_trace_dump_ir_before_list().count > 0 ||
-         loom_tooling_pass_trace_dump_ir_after_list().count > 0;
-}
-
-static bool loom_tooling_pass_trace_path_is_stdout(iree_string_view_t path) {
-  return loom_tooling_file_path_is_stdio(path) ||
-         iree_string_view_equal(path, IREE_SV("stdout"));
+loom_tooling_output_path_t loom_tooling_pass_trace_output_path_from_flags(
+    void) {
+  return (loom_tooling_output_path_t){
+      .active = FLAG_dump_ir_before_all || FLAG_dump_ir_after_all ||
+                loom_tooling_pass_trace_dump_ir_before_list().count > 0 ||
+                loom_tooling_pass_trace_dump_ir_after_list().count > 0,
+      .flag_name = IREE_SV("--dump-ir-output"),
+      .path = iree_make_cstring_view(FLAG_dump_ir_output),
+  };
 }
 
 static bool loom_tooling_pass_trace_path_is_stream(iree_string_view_t path) {
-  return loom_tooling_pass_trace_path_is_stdout(path) ||
+  return loom_tooling_output_path_is_stdout(path) ||
          iree_string_view_equal(path, IREE_SV("stderr"));
 }
 
@@ -282,37 +282,13 @@ static iree_status_t loom_tooling_pass_trace_open_bundle(
   return status;
 }
 
-static iree_status_t loom_tooling_pass_trace_check_stdout_conflicts(
-    const loom_tooling_pass_trace_open_options_t* options,
-    iree_string_view_t dump_output_path) {
-  if (!loom_tooling_pass_trace_path_is_stdout(dump_output_path)) {
-    return iree_ok_status();
-  }
-  for (iree_host_size_t i = 0; i < options->stdout_conflict_count; ++i) {
-    const loom_tooling_pass_trace_stdout_conflict_t* conflict =
-        &options->stdout_conflicts[i];
-    if (!conflict->active ||
-        !loom_tooling_pass_trace_path_is_stdout(conflict->path)) {
-      continue;
-    }
-    iree_string_view_t path = conflict->path;
-    if (iree_string_view_is_empty(path)) {
-      path = IREE_SV("-");
-    }
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "--dump-ir-output=stdout cannot share stdout with %.*s=%.*s",
-        (int)conflict->flag_name.size, conflict->flag_name.data, (int)path.size,
-        path.data);
-  }
-  return iree_ok_status();
-}
-
 iree_status_t loom_tooling_pass_trace_open_from_flags(
     const loom_tooling_pass_trace_open_options_t* options,
     iree_allocator_t allocator, loom_tooling_pass_trace_t* out_trace) {
   *out_trace = (loom_tooling_pass_trace_t){0};
-  if (!loom_tooling_pass_trace_flags_requested()) {
+  const loom_tooling_output_path_t output_path =
+      loom_tooling_pass_trace_output_path_from_flags();
+  if (!output_path.active) {
     return iree_ok_status();
   }
 
@@ -328,21 +304,17 @@ iree_status_t loom_tooling_pass_trace_open_from_flags(
   IREE_RETURN_IF_ERROR(
       loom_pass_trace_parse_format(iree_make_cstring_view(FLAG_dump_ir_format),
                                    &out_trace->pass_options.format));
-  const iree_string_view_t output_path =
-      iree_make_cstring_view(FLAG_dump_ir_output);
-  IREE_RETURN_IF_ERROR(
-      loom_tooling_pass_trace_check_stdout_conflicts(options, output_path));
   bool output_is_directory = false;
   IREE_RETURN_IF_ERROR(loom_tooling_file_path_is_directory(
-      output_path, allocator, &output_is_directory));
-  if (!loom_tooling_pass_trace_path_is_stream(output_path) &&
+      output_path.path, allocator, &output_is_directory));
+  if (!loom_tooling_pass_trace_path_is_stream(output_path.path) &&
       (output_is_directory ||
-       loom_tooling_file_path_has_trailing_separator(output_path))) {
-    IREE_RETURN_IF_ERROR(
-        loom_tooling_pass_trace_open_bundle(out_trace, output_path, allocator));
+       loom_tooling_file_path_has_trailing_separator(output_path.path))) {
+    IREE_RETURN_IF_ERROR(loom_tooling_pass_trace_open_bundle(
+        out_trace, output_path.path, allocator));
   } else {
-    IREE_RETURN_IF_ERROR(loom_tooling_output_stream_open(output_path, allocator,
-                                                         &out_trace->output));
+    IREE_RETURN_IF_ERROR(loom_tooling_output_stream_open(
+        output_path.path, allocator, &out_trace->output));
   }
   out_trace->pass_options.stream = &out_trace->output.stream;
   out_trace->enabled = true;

@@ -116,6 +116,24 @@
       ]
     },
     {
+      "name": "rejects result and pass trace output sharing stdout",
+      "run": {
+        "tool": "loom-opt",
+        "args": [
+          "--output=stdout",
+          "--dump-ir-after-all",
+          "--dump-ir-output=-"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "--output and --dump-ir-output cannot both write to stdout"
+        ]
+      }
+    },
+    {
       "name": "dumps function pass IR as whole-module JSONL",
       "run": {
         "tool": "loom-opt",

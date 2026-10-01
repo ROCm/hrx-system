@@ -24,24 +24,11 @@ extern "C" {
   "--dump-ir-format=jsonl for one event per line; "                        \
   "--dump-ir-output=dir/ writes trace.jsonl plus ir/*.loom.\n"
 
-typedef struct loom_tooling_pass_trace_stdout_conflict_t {
-  // True when this output path is used by the active tool invocation.
-  bool active;
-  // User-visible flag name that owns the potentially stdout-backed path.
-  iree_string_view_t flag_name;
-  // Output path selected for |flag_name|.
-  iree_string_view_t path;
-} loom_tooling_pass_trace_stdout_conflict_t;
-
 typedef struct loom_tooling_pass_trace_open_options_t {
   // Tool name included in trace metadata.
   iree_string_view_t tool_name;
   // Input identity included in trace metadata.
   iree_string_view_t input_path;
-  // Active outputs that cannot share stdout with dump output.
-  const loom_tooling_pass_trace_stdout_conflict_t* stdout_conflicts;
-  // Number of entries in stdout_conflicts.
-  iree_host_size_t stdout_conflict_count;
 } loom_tooling_pass_trace_open_options_t;
 
 typedef struct loom_tooling_pass_trace_t {
@@ -67,11 +54,13 @@ typedef struct loom_tooling_pass_trace_t {
   bool enabled;
 } loom_tooling_pass_trace_t;
 
-// Returns true when any shared dump flag requests IR tracing.
-bool loom_tooling_pass_trace_flags_requested(void);
+// Returns the output path selected by the shared pass-trace flags. The path is
+// active only when at least one dump flag requests IR tracing.
+loom_tooling_output_path_t loom_tooling_pass_trace_output_path_from_flags(void);
 
-// Opens pass tracing from the shared dump flags. No output is opened when no
-// dump flag is requested.
+// Opens pass tracing from the shared dump flags. The selected trace output must
+// already have participated in the tool's output routing validation. No output
+// is opened when no dump flag is requested.
 iree_status_t loom_tooling_pass_trace_open_from_flags(
     const loom_tooling_pass_trace_open_options_t* options,
     iree_allocator_t allocator, loom_tooling_pass_trace_t* out_trace);

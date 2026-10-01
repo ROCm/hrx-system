@@ -30,6 +30,41 @@ static iree_status_t CountSegment(void* user_data,
   return iree_ok_status();
 }
 
+TEST(FileTest, ClassifiesOutputStreamAliases) {
+  EXPECT_TRUE(loom_tooling_output_path_is_stdout(iree_string_view_empty()));
+  EXPECT_TRUE(loom_tooling_output_path_is_stdout(IREE_SV("-")));
+  EXPECT_TRUE(loom_tooling_output_path_is_stdout(IREE_SV("stdout")));
+  EXPECT_FALSE(loom_tooling_output_path_is_stdout(IREE_SV("stderr")));
+  EXPECT_FALSE(loom_tooling_output_path_is_stdout(IREE_SV("output.bin")));
+}
+
+TEST(FileTest, ValidatesExclusiveStdoutOutput) {
+  loom_tooling_output_path_t output_paths[] = {
+      {
+          /*.active=*/true,
+          /*.flag_name=*/IREE_SV("--first"),
+          /*.path=*/IREE_SV("stdout"),
+      },
+      {
+          /*.active=*/true,
+          /*.flag_name=*/IREE_SV("--second"),
+          /*.path=*/IREE_SV("-"),
+      },
+      {
+          /*.active=*/true,
+          /*.flag_name=*/IREE_SV("--file"),
+          /*.path=*/IREE_SV("output.bin"),
+      },
+  };
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_tooling_output_paths_validate_exclusive_stdout(
+                            output_paths, IREE_ARRAYSIZE(output_paths)));
+
+  output_paths[1].active = false;
+  IREE_EXPECT_OK(loom_tooling_output_paths_validate_exclusive_stdout(
+      output_paths, IREE_ARRAYSIZE(output_paths)));
+}
+
 TEST(FileTest, WritesSegmentedByteSequenceInLogicalOrder) {
   iree_io_stream_t* stream = nullptr;
   IREE_ASSERT_OK(iree_io_vec_stream_create(IREE_IO_STREAM_MODE_WRITABLE, 64,

@@ -226,6 +226,83 @@
       }
     },
     {
+      "name": "rejects artifact and report output sharing stdout",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--output=stdout",
+          "--compile-report=summary",
+          "--compile-report-output=-"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "--output and --compile-report-output cannot both write to stdout"
+        ]
+      }
+    },
+    {
+      "name": "rejects artifact and pass trace output sharing stdout",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--output=stdout",
+          "--dump-ir-after-all",
+          "--dump-ir-output=-"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "--output and --dump-ir-output cannot both write to stdout"
+        ]
+      }
+    },
+    {
+      "name": "rejects artifact and manifest output sharing stdout",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--output=-",
+          "--artifact-manifest=summary",
+          "--emit-artifact-manifest=stdout"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "--output and --emit-artifact-manifest cannot both write to stdout"
+        ]
+      }
+    },
+    {
+      "name": "rejects manifest and report output sharing stdout",
+      "run": {
+        "tool": "loom-compile",
+        "args": [
+          "--output={tmp}/artifact.bin",
+          "--artifact-manifest=summary",
+          "--emit-artifact-manifest=-",
+          "--compile-report=summary",
+          "--compile-report-output=stdout"
+        ]
+      },
+      "exit": 1,
+      "stdout": {"empty": true},
+      "stderr": {
+        "contains": [
+          "--emit-artifact-manifest and --compile-report-output cannot both write to stdout"
+        ]
+      },
+      "files": [
+        {"path": "{tmp}/artifact.bin", "exists": false}
+      ]
+    },
+    {
       "name": "rejects command-program roots",
       "run": {
         "tool": "loom-compile",

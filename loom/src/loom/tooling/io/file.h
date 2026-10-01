@@ -23,6 +23,24 @@ extern "C" {
 // Returns true when |path| denotes stdin or stdout for command-line tools.
 bool loom_tooling_file_path_is_stdio(iree_string_view_t path);
 
+// Returns true when |path| selects stdout for a tool output.
+bool loom_tooling_output_path_is_stdout(iree_string_view_t path);
+
+// Describes a named CLI output that may be conditionally active.
+typedef struct loom_tooling_output_path_t {
+  // True when this output path is used by the active tool invocation.
+  bool active;
+  // User-visible flag name that owns the output path.
+  iree_string_view_t flag_name;
+  // Output path selected for |flag_name|.
+  iree_string_view_t path;
+} loom_tooling_output_path_t;
+
+// Fails when more than one active output path selects stdout.
+iree_status_t loom_tooling_output_paths_validate_exclusive_stdout(
+    const loom_tooling_output_path_t* output_paths,
+    iree_host_size_t output_path_count);
+
 // Returns true when |path| ends in a platform path separator.
 bool loom_tooling_file_path_has_trailing_separator(iree_string_view_t path);
 
@@ -76,7 +94,7 @@ typedef struct loom_tooling_output_stream_t {
   iree_string_view_t path;
 } loom_tooling_output_stream_t;
 
-// Opens an output stream to stderr, stdout/"-", or a file path.
+// Opens an output stream to stderr, stdout/"-"/empty, or a file path.
 iree_status_t loom_tooling_output_stream_open(
     iree_string_view_t path, iree_allocator_t allocator,
     loom_tooling_output_stream_t* out_output);

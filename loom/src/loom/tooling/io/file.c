@@ -36,6 +36,33 @@ bool loom_tooling_file_path_is_stdio(iree_string_view_t path) {
          iree_string_view_equal(path, IREE_SV("-"));
 }
 
+bool loom_tooling_output_path_is_stdout(iree_string_view_t path) {
+  return loom_tooling_file_path_is_stdio(path) ||
+         iree_string_view_equal(path, IREE_SV("stdout"));
+}
+
+iree_status_t loom_tooling_output_paths_validate_exclusive_stdout(
+    const loom_tooling_output_path_t* output_paths,
+    iree_host_size_t output_path_count) {
+  for (iree_host_size_t i = 0; i < output_path_count; ++i) {
+    const loom_tooling_output_path_t* lhs = &output_paths[i];
+    if (!lhs->active || !loom_tooling_output_path_is_stdout(lhs->path)) {
+      continue;
+    }
+    for (iree_host_size_t j = i + 1; j < output_path_count; ++j) {
+      const loom_tooling_output_path_t* rhs = &output_paths[j];
+      if (!rhs->active || !loom_tooling_output_path_is_stdout(rhs->path)) {
+        continue;
+      }
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "%.*s and %.*s cannot both write to stdout",
+                              (int)lhs->flag_name.size, lhs->flag_name.data,
+                              (int)rhs->flag_name.size, rhs->flag_name.data);
+    }
+  }
+  return iree_ok_status();
+}
+
 bool loom_tooling_file_path_has_trailing_separator(iree_string_view_t path) {
   path = iree_string_view_trim(path);
   if (iree_string_view_is_empty(path)) {
@@ -219,8 +246,7 @@ iree_status_t loom_tooling_output_stream_open(
     loom_output_stream_for_file(stderr, &out_output->stream);
     return iree_ok_status();
   }
-  if (loom_tooling_file_path_is_stdio(path) ||
-      iree_string_view_equal(path, IREE_SV("stdout"))) {
+  if (loom_tooling_output_path_is_stdout(path)) {
     out_output->file = stdout;
     loom_output_stream_for_file(stdout, &out_output->stream);
     return iree_ok_status();

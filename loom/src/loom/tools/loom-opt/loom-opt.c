@@ -1372,6 +1372,19 @@ int main(int argc, char** argv) {
   }
 
   if (iree_status_is_ok(status) && !metadata_only) {
+    const loom_tooling_output_path_t output_paths[] = {
+        {
+            .active = true,
+            .flag_name = IREE_SV("--output"),
+            .path = iree_make_cstring_view(FLAG_output),
+        },
+        loom_tooling_pass_trace_output_path_from_flags(),
+    };
+    status = loom_tooling_output_paths_validate_exclusive_stdout(
+        output_paths, IREE_ARRAYSIZE(output_paths));
+  }
+
+  if (iree_status_is_ok(status) && !metadata_only) {
     status = loom_opt_append_config_files(&config_set, allocator);
   }
   if (iree_status_is_ok(status) && !metadata_only) {
@@ -1444,19 +1457,10 @@ int main(int argc, char** argv) {
         diagnostic_sink);
   }
   if (iree_status_is_ok(status) && !metadata_only) {
-    const loom_tooling_pass_trace_stdout_conflict_t stdout_conflicts[] = {
-        {
-            .active = true,
-            .flag_name = IREE_SV("--output"),
-            .path = iree_make_cstring_view(FLAG_output),
-        },
-    };
     status = loom_tooling_pass_trace_open_from_flags(
         &(loom_tooling_pass_trace_open_options_t){
             .tool_name = IREE_SV("loom-opt"),
             .input_path = filename,
-            .stdout_conflicts = stdout_conflicts,
-            .stdout_conflict_count = IREE_ARRAYSIZE(stdout_conflicts),
         },
         allocator, &pass_trace);
     if (iree_status_is_ok(status) && pass_trace.enabled) {
