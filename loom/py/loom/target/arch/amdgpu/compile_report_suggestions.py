@@ -376,7 +376,7 @@ def _wait_descriptor_evidence(
         _report_object(actions_value, "wait_action_rows"), "wait_action_rows"
     )
     evidence = []
-    seen_pairs: set[tuple[str, str]] = set()
+    seen_pairs: set[tuple[str | None, str | None]] = set()
     for position, row in enumerate(rows):
         if (
             row.get("function") != function_name
@@ -385,11 +385,11 @@ def _wait_descriptor_evidence(
         ):
             continue
         row_path = f"wait_action_rows.rows[{position}]"
-        producer = _report_string(
+        producer = _optional_report_string(
             row.get("producer_descriptor_key"),
             f"{row_path}.producer_descriptor_key",
         )
-        consumer = _report_string(
+        consumer = _optional_report_string(
             row.get("consumer_descriptor_key"),
             f"{row_path}.consumer_descriptor_key",
         )

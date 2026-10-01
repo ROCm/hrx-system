@@ -761,7 +761,12 @@ def test_ignores_sparse_vmem_source_reuse_serialization(
     }
 
 
-def test_suggests_dominant_lds_ssa_use_serialization() -> None:
+@pytest.mark.parametrize("producer_descriptor_key", ["amdgpu.ds_bpermute_b32", None])
+@pytest.mark.parametrize("consumer_descriptor_key", ["amdgpu.v_add_f32", None])
+def test_suggests_dominant_lds_ssa_use_serialization(
+    producer_descriptor_key: str | None,
+    consumer_descriptor_key: str | None,
+) -> None:
     report = _compile_report()
     _add_lds_ssa_use_evidence(
         report,
@@ -771,6 +776,9 @@ def test_suggests_dominant_lds_ssa_use_serialization() -> None:
         total_full_drain_count=125,
         max_outstanding_before=1,
     )
+    action = report["wait_action_rows"]["rows"][0]
+    action["producer_descriptor_key"] = producer_descriptor_key
+    action["consumer_descriptor_key"] = consumer_descriptor_key
     document = parse_compile_report(report)
 
     result = AMDGPU_COMPILE_REPORT_SUGGESTION_PROVIDER.suggest(document)
@@ -786,11 +794,11 @@ def test_suggests_dominant_lds_ssa_use_serialization() -> None:
     assert evidence["wait_reason_summary_rows.rows[0].summary.partial_wait_count"] == 0
     assert (
         evidence["wait_action_rows.rows[0].producer_descriptor_key"]
-        == "amdgpu.ds_bpermute_b32"
+        == producer_descriptor_key
     )
     assert (
         evidence["wait_action_rows.rows[0].consumer_descriptor_key"]
-        == "amdgpu.v_add_f32"
+        == consumer_descriptor_key
     )
     assert evidence["entries.rows[0].wait_plan.full_drain_count"] == 125
 
