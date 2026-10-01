@@ -9563,7 +9563,7 @@ static hipError_t iree_hip_array_create(hipArray_t* array,
                                                 &slice_pitch) ||
                     !iree_host_size_checked_mul(slice_pitch, extent.depth,
                                                 &allocation_size))) {
-    return hipErrorInvalidValue;
+    return hipErrorOutOfMemory;
   }
 
   iree_hal_streaming_context_t* context = NULL;
