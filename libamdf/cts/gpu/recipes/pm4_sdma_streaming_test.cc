@@ -41,6 +41,12 @@ constexpr std::array<uint32_t, 5> kControlByteOffsets = {
 
 enum class AcquireMode { kFullBarrier, kOrderedData };
 
+// Tokens are the low 32 bits of a logical generation. Reader acknowledgments
+// keep each value stable until its consumers advance, including across zero.
+uint32_t CreditToken(uint32_t initial_token, uint32_t generation) {
+  return static_cast<uint32_t>(uint64_t{initial_token} + generation);
+}
+
 class Pm4SdmaStreamingTest : public Pm4SdmaTest {
  protected:
   Pm4SdmaStreamingTest() : Pm4SdmaTest(AMDF_QUEUE_PUBLICATION_MODE_USER) {}
@@ -68,7 +74,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
       {"control_sdma_to_host", kControl, Site::kSdma, Site::kHost, kDownload},
   }};
 
-  void RunStreaming(AcquireMode acquire_mode) {
+  void RunStreaming(AcquireMode acquire_mode, uint32_t initial_token = 0) {
     const bool ordered = acquire_mode == AcquireMode::kOrderedData;
     const auto* kernel_product =
         kernels::transform::kKernels.Find(gpu_endpoint_info_);
@@ -167,6 +173,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
         ~(kMaximumCredits - 1);
     RecordProperty("stream_graphs", graph_count);
     RecordProperty("stream_credit_counts", "1,2,4,8");
+    RecordProperty("stream_initial_token", std::to_string(initial_token));
     RecordProperty("stream_queue_count", 3);
     RecordProperty("stream_publication_order", "pm4,download,upload");
     RecordProperty("stream_pm4_slot_dwords", kPm4SlotWords);
@@ -226,7 +233,8 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
       for (uint32_t slot = 0; slot < kMaximumCredits; ++slot) {
         const size_t page = slot * kPageWordCount;
         for (const uint32_t byte_offset : kControlByteOffsets) {
-          expected_control[page + byte_offset / sizeof(uint32_t)] = 0;
+          expected_control[page + byte_offset / sizeof(uint32_t)] =
+              initial_token;
         }
         std::fill_n(expected_arguments.data() + page, kPageWordCount,
                     UINT32_C(0x713ace09) ^ (stream * kMaximumCredits + slot));
@@ -258,6 +266,9 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
       for (uint32_t graph = 0; graph < graph_count; ++graph) {
         const uint32_t slot = graph % credits;
         const uint32_t generation = graph / credits + 1;
+        const uint32_t token = CreditToken(initial_token, generation);
+        const uint32_t previous_token =
+            CreditToken(initial_token, generation - 1);
         const uint64_t tag = uint64_t{stream} * graph_count + graph + 1;
         const size_t record_base = size_t{graph} * kGridSize;
         const size_t slot_base = slot * kPayloadWordCount;
@@ -271,9 +282,9 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
         SdmaCommandWriter download(download_streams[graph].data(),
                                    sdma_family_.format_features);
 
-        upload.WaitMemory32(progress + kSourceReadyByteOffset, generation);
+        upload.WaitMemory32(progress + kSourceReadyByteOffset, token);
         upload.WaitMemory32(progress + kComputeCompleteByteOffset,
-                            generation - 1);
+                            previous_token);
         if (sdma_operations[kUpload] &
             AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) {
           upload.AcquireFromSystem();
@@ -285,11 +296,11 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
             AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) {
           upload.ReleaseToSystem();
         }
-        upload.Fence32(progress + kUploadCompleteByteOffset, generation);
+        upload.Fence32(progress + kUploadCompleteByteOffset, token);
 
-        pm4.WaitMemory32(progress + kUploadCompleteByteOffset, generation);
+        pm4.WaitMemory32(progress + kUploadCompleteByteOffset, token);
         pm4.WaitMemory32(progress + kDownloadCompleteByteOffset,
-                         generation - 1);
+                         previous_token);
         if (!ordered || (!program_published && graph == 0)) {
           pm4.SystemBarrier();
         } else {
@@ -299,7 +310,9 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
                 control.device_address +
                 (previous % credits) * kPageWordCount * sizeof(uint32_t) +
                 kComputeCompleteByteOffset;
-            pm4.WaitMemory32(previous_address, previous / credits + 1);
+            pm4.WaitMemory32(
+                previous_address,
+                CreditToken(initial_token, previous / credits + 1));
           }
           // A prior stream is fully drained by the host. Within this stream,
           // the explicit previous-C wait joins shader users before rebinding.
@@ -308,17 +321,16 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
         pm4.BindCompute(program,
                         arguments.device_address + page * sizeof(uint32_t));
         pm4.DispatchWave32(kGridSize, 1, 1);
-        pm4.ReleaseSystem32(progress + kComputeCompleteByteOffset, generation);
+        pm4.ReleaseSystem32(progress + kComputeCompleteByteOffset, token);
         ASSERT_LE(pm4.word_count(), kPm4SlotWords);
         while (pm4.word_count() < kPm4SlotWords) {
           pm4.PadToEightWords();
         }
         ASSERT_EQ(pm4.word_count(), kPm4SlotWords);
 
-        download.WaitMemory32(progress + kComputeCompleteByteOffset,
-                              generation);
+        download.WaitMemory32(progress + kComputeCompleteByteOffset, token);
         download.WaitMemory32(progress + kReadbackConsumedByteOffset,
-                              generation - 1);
+                              previous_token);
         if (sdma_operations[kDownload] &
             AMDF_CACHE_OPERATIONS_ACQUIRE_FROM_SYSTEM) {
           download.AcquireFromSystem();
@@ -330,7 +342,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
             AMDF_CACHE_OPERATIONS_RELEASE_TO_SYSTEM) {
           download.ReleaseToSystem();
         }
-        download.Fence32(progress + kDownloadCompleteByteOffset, generation);
+        download.Fence32(progress + kDownloadCompleteByteOffset, token);
         ASSERT_LE(upload.word_count(), kSdmaSlotWords);
         ASSERT_LE(download.word_count(), kSdmaSlotWords);
 
@@ -351,7 +363,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
           expected_records[record_word] = expected[kOutput][slot_word];
         }
         for (const uint32_t byte_offset : kControlByteOffsets) {
-          expected_control[page + byte_offset / sizeof(uint32_t)] = generation;
+          expected_control[page + byte_offset / sizeof(uint32_t)] = token;
         }
       }
       for (size_t owner = 0; owner < expected.size(); ++owner) {
@@ -385,10 +397,11 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
         if (output_consumed < graph_count) {
           const uint32_t slot = output_consumed % credits;
           const uint32_t generation = output_consumed / credits + 1;
+          const uint32_t token = CreditToken(initial_token, generation);
           const uint64_t address =
               host_control + slot * kPageWordCount * sizeof(uint32_t);
           if (GpuLoadAcquire<uint32_t>(address + kDownloadCompleteByteOffset) ==
-              generation) {
+              token) {
             // The next download cannot overwrite this slot before R. Snapshot
             // the entire payload, including the shader's untouched tail.
             std::memcpy(
@@ -396,7 +409,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
                 static_cast<uint32_t*>(readback.host.pointer) +
                     slot * kPayloadWordCount + kPayloadOffset,
                 kGridSize * sizeof(uint32_t));
-            GpuStoreRelease(address + kReadbackConsumedByteOffset, generation);
+            GpuStoreRelease(address + kReadbackConsumedByteOffset, token);
             ++output_consumed;
             progressed = true;
           }
@@ -404,10 +417,13 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
         if (input_published < graph_count) {
           const uint32_t slot = input_published % credits;
           const uint32_t generation = input_published / credits + 1;
+          const uint32_t token = CreditToken(initial_token, generation);
+          const uint32_t previous_token =
+              CreditToken(initial_token, generation - 1);
           const uint64_t address =
               host_control + slot * kPageWordCount * sizeof(uint32_t);
           if (GpuLoadAcquire<uint32_t>(address + kUploadCompleteByteOffset) ==
-              generation - 1) {
+              previous_token) {
             // U retires the previous SDMA source read. The next source read
             // waits on H, independently of the shader/input and output owners.
             std::memcpy(
@@ -415,7 +431,7 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
                     slot * kPayloadWordCount + kPayloadOffset,
                 source_records.data() + size_t{input_published} * kGridSize,
                 kGridSize * sizeof(uint32_t));
-            GpuStoreRelease(address + kSourceReadyByteOffset, generation);
+            GpuStoreRelease(address + kSourceReadyByteOffset, token);
             ++input_published;
             progressed = true;
           }
@@ -487,10 +503,12 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
         const uint64_t address =
             reinterpret_cast<uintptr_t>(control.host.pointer) +
             slot * kPageWordCount * sizeof(uint32_t);
-        GpuWaitEqual<uint32_t>(address + kComputeCompleteByteOffset,
-                               graph_count / credits);
-        GpuWaitEqual<uint32_t>(address + kUploadCompleteByteOffset,
-                               graph_count / credits);
+        GpuWaitEqual<uint32_t>(
+            address + kComputeCompleteByteOffset,
+            CreditToken(initial_token, graph_count / credits));
+        GpuWaitEqual<uint32_t>(
+            address + kUploadCompleteByteOffset,
+            CreditToken(initial_token, graph_count / credits));
       }
       for (size_t owner = kSource; owner <= kOutput; ++owner) {
         std::memcpy(observed[owner].data(),
@@ -522,6 +540,9 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
       RecordProperty(prefix + "_credits", credits);
       RecordProperty(prefix + "_completed_graphs", graph_count);
       RecordProperty(prefix + "_slot_generation", graph_count / credits);
+      RecordProperty(
+          prefix + "_slot_token",
+          std::to_string(CreditToken(initial_token, graph_count / credits)));
     }
     RecordProperty("completed_streams", kCreditCounts.size());
     RecordProperty("completed_graphs", std::to_string(completed_graphs));
@@ -555,6 +576,22 @@ TEST_F(Pm4SdmaStreamingTest, CoherentHostStreaming) {
 
 TEST_F(Pm4SdmaStreamingTest, OrderedDataAcquireHostStreaming) {
   RunStreaming(AcquireMode::kOrderedData);
+}
+
+TEST_F(Pm4SdmaStreamingTest, CreditTokensCrossHighBit) {
+  RunStreaming(AcquireMode::kFullBarrier, UINT32_C(0x7ffffffe));
+}
+
+TEST_F(Pm4SdmaStreamingTest, OrderedDataAcquireCreditTokensCrossHighBit) {
+  RunStreaming(AcquireMode::kOrderedData, UINT32_C(0x7ffffffe));
+}
+
+TEST_F(Pm4SdmaStreamingTest, CreditTokensWrap) {
+  RunStreaming(AcquireMode::kFullBarrier, UINT32_C(0xfffffffe));
+}
+
+TEST_F(Pm4SdmaStreamingTest, OrderedDataAcquireCreditTokensWrap) {
+  RunStreaming(AcquireMode::kOrderedData, UINT32_C(0xfffffffe));
 }
 
 }  // namespace
