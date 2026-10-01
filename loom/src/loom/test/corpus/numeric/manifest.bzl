@@ -38,7 +38,6 @@ NUMERIC_CORPUS = loom_corpus_manifest(
         "float/selection.loom",
         "float/selectors.loom",
         "float/sign.loom",
-        "float/sign_kernel.loom",
         "float/turns.loom",
         "integer/arithmetic.loom",
         "integer/bitfield.loom",
