@@ -115,6 +115,42 @@ generated text through the runner. Kernel differential success alone does not
 establish retained-session or end-to-end model correctness. The shared-row CLI
 and retained pi service checks are described in the parent README.
 
+### Vocabulary projection
+
+Epoch and MTP roots pass their complete padded output cohort to the shared
+greedy head. Packing and argmax cover that cohort once. The contraction uses
+32-row groups, then 8-row groups, then four-row or single-row tails. The
+model-private 8/32-row kernels specialize the canonical 5120-channel Q6_K
+layout; a wave reuses decoded weights across independent activation rows.
+This changes neither vocabulary coverage nor output ordering. No additional
+retained state or resident weight copy is required.
+
+`tests/output_projection.loom` checks every vocabulary output against independent
+wave64 row contractions using three seeds, distinct activation rows and
+channel-varying finite packed weights. This qualifies grouping and addressing
+against the established math, not independent model accuracy. The MTP model
+witness above also covers accepted-state continuation through the new head.
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/output_projection.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/output_projection.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q6k_q8_1_x4.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/quantize_q8_1_x4.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_qk_common.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 \
+  --config=ggml.linear_q6k_q8_1_x4.token_capacity=512 \
+  --config=ggml.linear_q6k_q8_1_x4.output_capacity=248320 \
+  --config=ggml.quantize_q8_1_x4.group_capacity=69632 \
+  --sanitizer=access --sanitizer-reporting=trap
+```
+
+Trap reporting checks accesses and terminates on a violation without the
+additional structured-reporting register footprint. These full-vocabulary
+checks need roughly a GiB for each live weight fixture, independently of model
+weights; they belong in a bounded GPU run, not a concurrent small-test sweep.
+
 ### Device sanitizer diagnostics
 
 Host `--config=asan` does not instrument GPU kernels. `compile.py` forwards
@@ -210,9 +246,9 @@ entry; isolated and matched-math controls use the same ready-span partition.
 `epoch.loom` advances a flat token matrix through the same dense layer programs
 as prefill. Only stateful GDN/attention dispatches select resident rows. An
 epoch's output-to-packed-row map gathers requested final span rows into the
-vocabulary head, which shares Q6 weights across groups of four predictions.
+vocabulary head, which shares Q6 weights across grouped predictions.
 The map is produced with the spans, not recovered by a device-side search.
-Padded output rows are zeroed; the fixed head still computes padded groups,
+Padded output rows are zeroed; the fixed head still computes padded rows,
 including when no prediction is requested. Stateless dense work also covers
 the selected token capacity. These are explicit schedule costs to measure.
 

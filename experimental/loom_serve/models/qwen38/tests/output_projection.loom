@@ -1,0 +1,50 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
+kernel.decl @ggml_linear_q6k_q8_1_x4_wave64_block4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_output_projection_q6k_m8() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_output_projection_q6k_m32() launch(%input: buffer, %weight: buffer, %output: buffer)
+
+// Independent activation rows and channel-varying packed weights exercise all
+// row/channel offsets. Restricting each weight byte to [0, 63] keeps the Q6_K
+// half-precision superblock scales finite. The reference uses independent
+// one-row contractions; the candidate retains weights across activation rows.
+check.case public @output_projection_m8_case {
+  %rows = check.literal value(8) : index
+  %hidden = check.literal value(5120) : index
+  %vocabulary = check.literal value(248320) : index
+  %seed = check.param.seed base(90210) count(3) name("seed") : i64
+  %activations = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<[%rows]x5120xf32>
+  %input = check.generate.fill value(0) : tensor<[%rows]x5760xi8>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 63) : tensor<248320x20x210xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%rows]x248320xf32>
+  %reference = check.generate.fill value(-1.0) : tensor<[%rows]x248320xf32>
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%rows, %hidden](%rows, %hidden, %activations, %input) : [index, index](index, index, tensor<[%rows]x5120xf32>, tensor<[%rows]x5760xi8>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4_wave64_block4[%rows, %hidden, %vocabulary](%rows, %hidden, %vocabulary, %input, %weight, %reference) : [index, index, index](index, index, index, tensor<[%rows]x5760xi8>, tensor<248320x20x210xi8>, tensor<[%rows]x248320xf32>)
+  kernel.launch @qwen38_output_projection_q6k_m8(%input, %weight, %output) : (tensor<[%rows]x5760xi8>, tensor<248320x20x210xi8>, tensor<[%rows]x248320xf32>)
+  check.expect.bitwise actual(%output) expected(%reference) : tensor<[%rows]x248320xf32>
+  check.return
+}
+
+check.case public @output_projection_m32_case {
+  %rows = check.literal value(32) : index
+  %hidden = check.literal value(5120) : index
+  %vocabulary = check.literal value(248320) : index
+  %seed = check.param.seed base(90210) count(3) name("seed") : i64
+  %activations = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<[%rows]x5120xf32>
+  %input = check.generate.fill value(0) : tensor<[%rows]x5760xi8>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 63) : tensor<248320x20x210xi8>
+  %output = check.generate.fill value(1.0) : tensor<[%rows]x248320xf32>
+  %reference = check.generate.fill value(-1.0) : tensor<[%rows]x248320xf32>
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%rows, %hidden](%rows, %hidden, %activations, %input) : [index, index](index, index, tensor<[%rows]x5120xf32>, tensor<[%rows]x5760xi8>)
+  kernel.launch @ggml_linear_q6k_q8_1_x4_wave64_block4[%rows, %hidden, %vocabulary](%rows, %hidden, %vocabulary, %input, %weight, %reference) : [index, index, index](index, index, index, tensor<[%rows]x5760xi8>, tensor<248320x20x210xi8>, tensor<[%rows]x248320xf32>)
+  kernel.launch @qwen38_output_projection_q6k_m32(%input, %weight, %output) : (tensor<[%rows]x5760xi8>, tensor<248320x20x210xi8>, tensor<[%rows]x248320xf32>)
+  check.expect.bitwise actual(%output) expected(%reference) : tensor<[%rows]x248320xf32>
+  check.return
+}
+
+check.benchmark<@output_projection_m8_case> @output_projection_m8
+check.benchmark<@output_projection_m32_case> @output_projection_m32

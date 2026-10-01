@@ -2,11 +2,13 @@
 //
 // The final RMSNorm and native Q6_K vocabulary projection stay inside the
 // command program. Greedy selection consumes device-local logits and exposes
-// only one token ID at the issue boundary.
+// only selected token IDs at the issue boundary.
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 kernel.decl @ggml_linear_q6k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @ggml_linear_q6k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count: index, %input_size: index, %output_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_output_projection_q6k_m8() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_output_projection_q6k_m32() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_decode() launch(%epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count: index) launch(%token_count: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_rmsnorm_f32_prefill_last() launch(%control: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
@@ -14,8 +16,9 @@ kernel.decl @qwen38_greedy_argmax_partial_rows_f32(%token_count: index, %output_
 kernel.decl @qwen38_greedy_argmax_reduce_rows_f32(%token_count: index, %output_size: index) launch(%token_count: index, %output_size: index, %partial_logits: buffer, %partial_token_ids: buffer, %token_ids: buffer)
 
 // Projects normalized hidden rows and publishes their deterministic greedy
-// tokens. Four-row groups decode each immutable vocabulary weight once.
-command.program.def public @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 4)] {
+// tokens. Complete cohorts share packing and argmax, while each contraction
+// retains vocabulary weights across a measured group of activation rows.
+command.program.def public @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 64)] {
   %hidden_size = index.constant 5120 : index
   %vocabulary_size = index.constant 248320 : index
   %output_weight = command.parameter %parameters, "output.weight" : view<1042944000xi8>
@@ -33,12 +36,47 @@ command.program.def public @qwen38_output_projection_greedy(%token_count: index,
   %output_rows = buffer.view %token_id[%output_origin] : buffer -> view<[%token_count]xi32>
 
   kernel.launch @ggml_quantize_q8_1_x4_f32[%token_count, %hidden_size](%token_count, %hidden_size, %normalized_rows, %normalized_q8) : [index, index](index, index, view<[%token_count]x5120xf32>, buffer)
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
   %four = index.constant 4 : index
-  %uses_m4 = index.cmp eq, %token_count, %four : index
-  scf.if %uses_m4 {
-    kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
-  } else {
-    kernel.launch @ggml_linear_q6k_q8_1_x4[%token_count, %hidden_size, %vocabulary_size](%token_count, %hidden_size, %vocabulary_size, %normalized_q8, %output_weight, %logits) : [index, index, index](index, index, index, buffer, view<1042944000xi8>, buffer)
+  %eight = index.constant 8 : index
+  %thirty_two = index.constant 32 : index
+  %wide_groups = index.div %token_count, %thirty_two : index
+  %wide_rows = index.mul %wide_groups, %thirty_two : index
+  scf.for %group = [%zero to %wide_groups step %one] unroll {
+    %row = index.mul %group, %thirty_two : index
+    %input_origin = index.scale %row, %hidden_q8_row_bytes : index, offset -> offset
+    %logits_origin = index.scale %row, %logits_row_bytes : index, offset -> offset
+    %input_group = buffer.view %normalized_q8[%input_origin] : buffer -> view<32x5760xi8>
+    %logits_group = buffer.view %logits[%logits_origin] : buffer -> view<32x248320xf32>
+    kernel.launch @qwen38_output_projection_q6k_m32(%input_group, %output_weight, %logits_group) : (view<32x5760xi8>, view<1042944000xi8>, view<32x248320xf32>)
+  }
+  %remaining_rows = index.sub %token_count, %wide_rows : index
+  %groups = index.div %remaining_rows, %eight : index
+  scf.for %group = [%zero to %groups step %one] unroll {
+    %relative_row = index.mul %group, %eight : index
+    %row = index.add %wide_rows, %relative_row : index
+    %input_origin = index.scale %row, %hidden_q8_row_bytes : index, offset -> offset
+    %logits_origin = index.scale %row, %logits_row_bytes : index, offset -> offset
+    %input_group = buffer.view %normalized_q8[%input_origin] : buffer -> view<8x5760xi8>
+    %logits_group = buffer.view %logits[%logits_origin] : buffer -> view<8x248320xf32>
+    kernel.launch @qwen38_output_projection_q6k_m8(%input_group, %output_weight, %logits_group) : (view<8x5760xi8>, view<1042944000xi8>, view<8x248320xf32>)
+  }
+  %grouped_rows = index.mul %groups, %eight : index
+  %tail_begin = index.add %wide_rows, %grouped_rows : index
+  scf.for %row = [%tail_begin to %token_count step %four] unroll {
+    %remaining = index.sub %token_count, %row : index
+    %count = index.min %remaining, %four : index
+    %input_origin = index.scale %row, %hidden_q8_row_bytes : index, offset -> offset
+    %logits_origin = index.scale %row, %logits_row_bytes : index, offset -> offset
+    %input_group = buffer.view %normalized_q8[%input_origin] : buffer -> view<[%count]x5760xi8>
+    %logits_group = buffer.view %logits[%logits_origin] : buffer -> view<[%count]x248320xf32>
+    %uses_m4 = index.cmp eq, %count, %four : index
+    scf.if %uses_m4 {
+      kernel.launch @ggml_linear_q6k_q8_1_x4_m4[%count, %hidden_size, %vocabulary_size](%count, %hidden_size, %vocabulary_size, %input_group, %output_weight, %logits_group) : [index, index, index](index, index, index, view<[%count]x5760xi8>, view<1042944000xi8>, view<[%count]x248320xf32>)
+    } else {
+      kernel.launch @ggml_linear_q6k_q8_1_x4[%count, %hidden_size, %vocabulary_size](%count, %hidden_size, %vocabulary_size, %input_group, %output_weight, %logits_group) : [index, index, index](index, index, index, view<[%count]x5760xi8>, view<1042944000xi8>, view<[%count]x248320xf32>)
+    }
   }
   kernel.launch @qwen38_greedy_argmax_partial_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %logits, %partial_logits, %partial_token_ids) : [index, index](index, index, buffer, buffer, buffer)
   kernel.launch @qwen38_greedy_argmax_reduce_rows_f32[%token_count, %vocabulary_size](%token_count, %vocabulary_size, %partial_logits, %partial_token_ids, %output_rows) : [index, index](index, index, buffer, buffer, view<[%token_count]xi32>)

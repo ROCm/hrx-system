@@ -1,0 +1,80 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Canonical 5120-channel, 248320-token Q6_K vocabulary projection. One wave
+// owns a vocabulary row and retains its decoded weight packets across all
+// activation rows. Four sixteen-lane partitions consume four blocks per
+// iteration. The fixed strides describe the model layout, not active sessions.
+func.decl @ggml_q6k_q8_1_x4_block_lane(%weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %q6_block: index, %lane: index) -> (f32)
+amdgpu.target<gfx1151> @qwen38_output_projection_wave64 {subgroup_size = 64}
+
+func.def inline @qwen38_output_projection_q6k_rows(%rows: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
+  %channel0 = kernel.workgroup.id<x> : index
+  %channel = index.assume %channel0 [range(%channel0, 0, 248319)] : index
+  %lane0 = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %five = index.constant 5 : index
+  %sixteen = index.constant 16 : index
+  %zeroes = vector.constant 0.0 : vector<32xf32>
+  %weight_stride = index.constant 4200 : offset
+  %input_stride = index.constant 5760 : offset
+  %output_stride = index.constant 993280 : offset
+  %weight_origin = index.scale %channel, %weight_stride : index, offset -> offset
+  %block_in_iteration = index.div %lane, %sixteen : index
+  %virtual0 = index.rem %lane, %sixteen : index
+  %virtual1 = index.add %virtual0, %sixteen : index
+  %partials = scf.for %iteration = [%zero to %five step %one](%accumulators = %zeroes : vector<32xf32>) -> (vector<32xf32>) {
+    %block_base = index.mul %iteration, %four : index
+    %block = index.add %block_base, %block_in_iteration : index
+    %next = scf.for %row = [%zero to %rows step %one](%bank = %accumulators : vector<32xf32>) -> (vector<32xf32>) unroll {
+      %input_origin = index.scale %row, %input_stride : index, offset -> offset
+      %low = func.call @ggml_q6k_q8_1_x4_block_lane(%weight_noalias, %weight_origin, %input_noalias, %input_origin, %block, %virtual0) : (buffer, offset, buffer, offset, index, index) -> (f32)
+      %high = func.call @ggml_q6k_q8_1_x4_block_lane(%weight_noalias, %weight_origin, %input_noalias, %input_origin, %block, %virtual1) : (buffer, offset, buffer, offset, index, index) -> (f32)
+      %sum = scalar.addf<reassoc|nnan|ninf|nsz> %low, %high : f32
+      %prior = vector.extract %bank[%row] : vector<32xf32> -> f32
+      %value = scalar.addf<reassoc|nnan|ninf|nsz> %prior, %sum : f32
+      %updated = vector.insert %value into %bank[%row] : f32, vector<32xf32>
+      scf.yield %updated : vector<32xf32>
+    }
+    scf.yield %next : vector<32xf32>
+  }
+  %leader = index.cmp eq, %lane, %zero : index
+  scf.for %row = [%zero to %rows step %one] unroll {
+    %partial = vector.extract %partials[%row] : vector<32xf32> -> f32
+    %dot = kernel.subgroup.reduce<addf> %partial : f32
+    scf.if %leader {
+      %output_origin = index.scale %row, %output_stride : index, offset -> offset
+      %view = buffer.view %output_noalias[%output_origin] : buffer -> view<248320xf32>
+      view.store %dot, %view[%channel] : f32, view<248320xf32>
+    }
+  }
+  func.return
+}
+
+kernel.def target(@qwen38_output_projection_wave64) @qwen38_output_projection_q6k_m8() {
+  %groups = index.constant 248320 : index
+  %threads = index.constant 64 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.constant 8 : index
+  func.call @qwen38_output_projection_q6k_rows(%rows, %input, %weight, %output) : (index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@qwen38_output_projection_wave64) @qwen38_output_projection_q6k_m32() {
+  %groups = index.constant 248320 : index
+  %threads = index.constant 64 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.constant 32 : index
+  func.call @qwen38_output_projection_q6k_rows(%rows, %input, %weight, %output) : (index, buffer, buffer, buffer)
+  kernel.return
+}

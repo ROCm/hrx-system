@@ -10,7 +10,7 @@ config.decl @runner.qwen38.prefill_token_count : %value: index where [range(%val
 config.decl @runner.qwen38.span_capacity : %value: index where [range(%value, 1, 64)]
 
 command.program.decl @qwen38_attention_layer_prefill(%token_count: index, %schedule_token_count: index, %layer: index, %attention_ordinal: index, %verification_depth: index, %span_capacity: index) launch(%parameters: buffer, %residual: buffer, %attention_cache: buffer, %control: buffer, %attention_output: buffer, %rows: buffer) where [range(%token_count, 1, 512), range(%schedule_token_count, 1, 512), range(%layer, 0, 64), range(%attention_ordinal, 0, 15), range(%verification_depth, 0, 4), range(%span_capacity, 0, 64)]
-command.program.decl @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 4)]
+command.program.decl @qwen38_output_projection_greedy(%token_count: index, %normalized_origin: offset, %output_origin: offset) launch(%parameters: buffer, %normalized: buffer, %token_id: buffer) where [range(%token_count, 1, 64)]
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_capacity: index, %input_size_data: index, %input: buffer, %output: buffer)
 kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_capacity: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_mtp_rmsnorm_concat_embedding_f32_prefill(%token_count: index) launch(%token_capacity: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
@@ -80,11 +80,11 @@ command.program.def public @qwen38_mtp_draft() launch(%embedding_parameters: buf
   %concat_size = index.constant 10240 : index
   %layer = index.constant 64 : index
   %zero = index.constant 0 : index
-  %one = index.constant 1 : index
   %three = index.constant 3 : index
   %four = index.constant 4 : index
   %padded_spans = index.add %spans, %three : index
   %groups = index.div %padded_spans, %four : index
+  %outputs = index.mul %groups, %four : index
   %epsilon = scalar.constant 0.000001 : f32
   %embedding_weight = command.parameter %embedding_parameters, "token_embd.weight" : view<874086400xi8>
   %embedding_norm = command.parameter %input_parameters, "blk.64.nextn.enorm.weight" : view<5120xf32>
@@ -96,8 +96,6 @@ command.program.def public @qwen38_mtp_draft() launch(%embedding_parameters: buf
   %concat_bytes = index.constant 20971520 : offset
   %concat_q8_bytes = index.constant 5898240 : offset
   %attention_bytes = index.constant 12582912 : offset
-  %hidden_group_bytes = index.constant 81920 : offset
-  %output_group_bytes = index.constant 16 : offset
   %embedding = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %concat = buffer.alloca<global> align(256) %concat_bytes : buffer
   %concat_q8 = buffer.alloca<global> align(256) %concat_q8_bytes : buffer
@@ -111,10 +109,7 @@ command.program.def public @qwen38_mtp_draft() launch(%embedding_parameters: buf
   kernel.launch @ggml_linear_q8_0_q8_1_x4[%tokens, %concat_size, %hidden_size](%capacity, %concat_size, %hidden_size, %concat_q8, %embedding_hidden_weight, %residual) : [index, index, index](index, index, index, buffer, view<55705600xi8>, buffer)
   command.program.launch @qwen38_attention_layer_prefill[%tokens, %tokens, %layer, %zero, %zero, %spans](%layer_parameters, %residual, %cache, %epoch, %attention, %rows) : [index, index, index, index, index, index](buffer, buffer, buffer, buffer, buffer, buffer)
   kernel.launch @qwen38_rmsnorm_f32_prefill[%tokens](%capacity, %epsilon, %residual, %head_norm, %hidden) : [index](index, f32, buffer, view<5120xf32>, buffer)
-  scf.for %group = [%zero to %groups step %one] unroll {
-    %hidden_origin = index.scale %group, %hidden_group_bytes : index, offset -> offset
-    %output_origin = index.scale %group, %output_group_bytes : index, offset -> offset
-    command.program.launch @qwen38_output_projection_greedy[%four, %hidden_origin, %output_origin](%output_parameters, %hidden, %output_tokens) : [index, offset, offset](buffer, buffer, buffer)
-  }
+  %origin = index.constant 0 : offset
+  command.program.launch @qwen38_output_projection_greedy[%outputs, %origin, %origin](%output_parameters, %hidden, %output_tokens) : [index, offset, offset](buffer, buffer, buffer)
   command.return
 }
