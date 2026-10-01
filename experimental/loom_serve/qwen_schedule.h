@@ -13,6 +13,16 @@
 extern "C" {
 #endif
 
+// Trusted readiness from the model owner after request and output-credit
+// checks.
+typedef struct loom_serve_qwen_ready_span_t {
+  // Available input tokens; zero means this row is not eligible.
+  iree_host_size_t token_count;
+  // Smallest legal admission: one for known input, the full verifier otherwise.
+  // For eligible rows this is positive and no larger than token_count.
+  iree_host_size_t minimum_count;
+} loom_serve_qwen_ready_span_t;
+
 typedef struct loom_serve_qwen_scheduled_span_t {
   // Resident row, independent of its position in the packed activation matrix.
   iree_host_size_t row_index;
@@ -29,11 +39,12 @@ typedef struct loom_serve_qwen_shape_t {
   iree_host_size_t span_capacity;
 } loom_serve_qwen_shape_t;
 
-// Packs trusted ready counts without allocating or modifying row state. Zero
-// means unavailable, one includes ordinary decode, and longer spans are known
-// prompt input. Every admitted row gets one token before remaining capacity is
-// filled from prompt spans, up to chunk_size per row. This preserves decode
-// progress while allowing short prompt tails to share the same traversal.
+// Packs trusted ready spans without allocating or modifying row state. Every
+// admitted row gets its minimum_count before remaining capacity is filled from
+// longer known spans. chunk_size limits expansion, never an indivisible
+// minimum. Rows whose minimum does not fit are skipped; smaller spans can fill
+// the gap. This preserves complete verifiers while allowing prompt tails to
+// share work.
 //
 // row_count, token_capacity, span_capacity and chunk_size are positive. cursor
 // is below row_count. spans has room for min(row_count, span_capacity) entries.
@@ -41,7 +52,7 @@ typedef struct loom_serve_qwen_shape_t {
 // distributes large prompt chunks when it can. Only the caller commits model
 // progress, after execution succeeds; output credit determines readiness.
 iree_host_size_t loom_serve_qwen_schedule(
-    iree_host_size_t row_count, const iree_host_size_t* ready_counts,
+    iree_host_size_t row_count, const loom_serve_qwen_ready_span_t* ready,
     iree_host_size_t token_capacity, iree_host_size_t span_capacity,
     iree_host_size_t chunk_size, iree_host_size_t* cursor,
     loom_serve_qwen_scheduled_span_t* spans);
@@ -54,7 +65,7 @@ iree_host_size_t loom_serve_qwen_schedule(
 // cursor. Returns its span count and writes its index, including for empty
 // work.
 iree_host_size_t loom_serve_qwen_schedule_shapes(
-    iree_host_size_t row_count, const iree_host_size_t* ready_counts,
+    iree_host_size_t row_count, const loom_serve_qwen_ready_span_t* ready,
     iree_host_size_t shape_count, const loom_serve_qwen_shape_t* shapes,
     iree_host_size_t chunk_size, iree_host_size_t* cursor,
     loom_serve_qwen_scheduled_span_t* spans,

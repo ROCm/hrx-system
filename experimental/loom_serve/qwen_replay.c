@@ -306,14 +306,15 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
   iree_duration_t model_duration = 0;
   const iree_time_t start = iree_time_now();
   while (iree_status_is_ok(status) && !qwen_replay_interrupted) {
-    iree_host_size_t ready[QWEN_REPLAY_ROWS] = {0};
+    loom_serve_qwen_ready_span_t ready[QWEN_REPLAY_ROWS] = {0};
     for (iree_host_size_t i = 0; i < row_count; ++i) {
       const qwen_replay_row_t* row = &rows[i];
       if (row->turn < row->turn_count) {
         const qwen_replay_turn_t* turn = &row->turns[row->turn];
-        ready[i] = row->position < turn->prompt_end
-                       ? turn->prompt_end - row->position
-                       : 1;
+        ready[i].token_count = row->position < turn->prompt_end
+                                   ? turn->prompt_end - row->position
+                                   : 1;
+        ready[i].minimum_count = 1;
       }
     }
     loom_serve_qwen_scheduled_span_t scheduled[QWEN_REPLAY_ROWS];

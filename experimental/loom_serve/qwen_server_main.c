@@ -16,6 +16,10 @@ IREE_FLAG(string, prefill, "", "Compiled prefill artifact directory.");
 IREE_FLAG(string, decode, "", "Compiled decode artifact directory.");
 IREE_FLAG_LIST(string, epoch,
                "Compiled packed epoch directory; repeat for cached shapes.");
+IREE_FLAG(string, mtp, "", "Optional compiled MTP bundle directory.");
+IREE_FLAG(
+    int32_t, mtp_depth, 0,
+    "Proposal depth: 0 or 3. Depth 0 with --mtp measures warm target-only.");
 IREE_FLAG(string, scheduler, "packed",
           "packed, isolated, or matched (isolated with prefill decode math).");
 IREE_FLAG(string, packing, "mixed",
@@ -59,6 +63,14 @@ int main(int argc, char** argv) {
     fprintf(stderr, "The packed scheduler requires --epoch.\n");
     return EXIT_FAILURE;
   }
+  if ((FLAG_mtp_depth != 0 && FLAG_mtp_depth != 3) ||
+      (FLAG_mtp_depth && !FLAG_mtp[0]) ||
+      (FLAG_mtp[0] && schedule_mode != LOOM_SERVE_QWEN_SCHEDULE_PACKED)) {
+    fprintf(stderr,
+            "mtp_depth must be 0 or 3; MTP requires --mtp and packed "
+            "scheduling.\n");
+    return EXIT_FAILURE;
+  }
   loom_serve_qwen_packing_mode_t packing_mode;
   if (!strcmp(FLAG_packing, "mixed")) {
     packing_mode = LOOM_SERVE_QWEN_PACKING_MIXED;
@@ -75,6 +87,7 @@ int main(int argc, char** argv) {
       .decode_directory = iree_make_cstring_view(FLAG_decode),
       .epoch_count = epochs.count,
       .epoch_directories = epochs.values,
+      .mtp_directory = iree_make_cstring_view(FLAG_mtp),
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
       .row_count = (iree_host_size_t)FLAG_rows};
@@ -113,9 +126,10 @@ int main(int argc, char** argv) {
       fprintf(stderr,
               "{\"event\":\"ready\",\"address\":\"%.*s\",\"rows\":%d,\"chunk_"
               "size\":%zu,\"scheduler\":\"%s\",\"shape_count\":%zu,"
-              "\"packing\":\"%s\"}\n",
+              "\"packing\":\"%s\",\"mtp_warm\":%s,\"mtp_depth\":%d}\n",
               (int)address.size, address.data, FLAG_rows, chunk_size,
-              FLAG_scheduler, epochs.count, FLAG_packing);
+              FLAG_scheduler, epochs.count, FLAG_packing,
+              FLAG_mtp[0] ? "true" : "false", FLAG_mtp_depth);
       const loom_serve_qwen_service_options_t service_options = {
           .row_count = (iree_host_size_t)FLAG_rows,
           .chunk_size = chunk_size,
@@ -123,6 +137,7 @@ int main(int argc, char** argv) {
           .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
           .schedule_mode = schedule_mode,
           .packing_mode = packing_mode,
+          .mtp_depth = (iree_host_size_t)FLAG_mtp_depth,
       };
       status = loom_serve_qwen_service_run(model, server, &service_options,
                                            allocator);

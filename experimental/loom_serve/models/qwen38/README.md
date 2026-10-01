@@ -30,7 +30,9 @@ spans publish directly; speculative GDN transitions occupy a 63,504,384-byte
 capture, and only the accepted prefixes replay into retained state. Attention
 tails beyond the accepted position stay unreachable. MTP catch-up then consumes
 accepted inputs paired with committed target hidden. All buffers and commands
-are prepared once. The HTTP scheduler does not yet select this optional path.
+are prepared once. The HTTP scheduler selects this optional path with
+`--mtp=/path/to/bundle --mtp_depth=3`; depth zero keeps MTP warm without
+proposing. Whole verifier spans share a target epoch with known prompt input.
 
 The real-weight `qwen_epoch_check --mtp=/path/to/bundle` checks proposal isolation,
 duplicate resident histories, compact-row permutation, zero/partial/full draft

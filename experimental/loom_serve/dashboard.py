@@ -202,7 +202,7 @@ def render(view, all_sensors=False, now_ns=None, width=None):
         )
     lines.extend(
         [
-            "Planned fill  |"
+            "Committed fill |"
             + history(view.fill_history, 1)
             + "|  0..100% (not GPU utilization)",
             "Output rate   |"

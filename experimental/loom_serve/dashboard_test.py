@@ -106,6 +106,29 @@ class DashboardTest(unittest.TestCase):
                 self.assertIn("run_end", view.latest)
                 self.assertEqual(reader.poll(view), 0)
 
+    def test_speculative_fill_counts_only_committed_progress(self):
+        view = dashboard.RunView()
+        record = json.loads(self.records().splitlines()[3])
+        record["data"].update(
+            token_capacity=32,
+            spans=2,
+            prefill_tokens=16,
+            decode_tokens=2,
+            selected_tokens_including_eos=2,
+            rows=[
+                {"kind": "prefill", "tokens": 16, "consumed_tokens": 16},
+                {"kind": "verify", "tokens": 4, "consumed_tokens": 2},
+            ],
+            mtp={"rows": 1, "proposed_tokens": 3, "accepted_draft_inputs": 1},
+        )
+        view.apply(record)
+        self.assertEqual(view.fill_history[0], 18 / 32)
+        result = "\n".join(dashboard.render(view))
+        self.assertIn("Committed fill", result)
+        self.assertIn(
+            "16 prompt inputs + 2 decode inputs -> 2 selected outputs", result
+        )
+
     def test_corrupt_or_missing_record_fails_at_the_log_boundary(self):
         for payload in (b"not json\n", self.records().split(b"\n", 1)[1]):
             with (
