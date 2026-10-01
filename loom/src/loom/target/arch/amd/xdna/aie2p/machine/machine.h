@@ -15,8 +15,9 @@
 extern "C" {
 #endif
 
-// Dense build-local physical-register identifier aligned with Low descriptor
-// physical-register row ordinals.
+// Dense build-local physical-register identifier. Machine register IDs form
+// the stable prefix of the Low descriptor physical-register rows; Low may
+// append allocation-only aggregate rows that have no native encoding.
 typedef uint16_t loom_aie2p_physical_register_id_t;
 #define LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID \
   ((loom_aie2p_physical_register_id_t)0xFFFFu)

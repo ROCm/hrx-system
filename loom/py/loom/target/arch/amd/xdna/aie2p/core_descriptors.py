@@ -94,6 +94,20 @@ _MACHINE_IMMEDIATES = {
     immediate.name: immediate for immediate in CORE_MACHINE_TABLE.immediates
 }
 
+# Wide predicate vectors use ordered pairs of eL registers between structural
+# concat and slice operations. No native instruction encodes such a pair, so
+# the imported machine table has no aggregate register names for this storage.
+# These allocation-only aggregates give Low the physical tuple topology while
+# native instruction operands continue to consume the individual eL units.
+_PREDICATE_PAIR_VIEWS = tuple(
+    PhysicalRegisterView(
+        physical_register=f"predicate_pair{pair_index}",
+        reg_class="aie2p.elpredicate",
+        units=(f"l{register_index}", f"l{register_index + 1}"),
+    )
+    for pair_index, register_index in enumerate(range(8, 16, 2))
+)
+
 # Reserved sticky status registers from AIE2PRegisterInfo::isReservedStickyReg.
 # Native implicit definitions accumulate status; explicit definitions replace
 # it and must not acquire the commutative-update contract.
@@ -636,14 +650,30 @@ def _reg_classes() -> tuple[RegClass, ...]:
 
 
 def _physical_registers() -> tuple[PhysicalRegister, ...]:
-    return tuple(
+    machine_registers = tuple(
         PhysicalRegister(register.name, register.atomic_units)
         for register in CORE_MACHINE_TABLE.physical_registers
     )
+    predicate_pairs = tuple(
+        PhysicalRegister(
+            view.physical_register,
+            tuple(
+                sorted(
+                    atomic_unit
+                    for unit in view.units
+                    for atomic_unit in _MACHINE_REGISTERS[unit].atomic_units
+                )
+            ),
+        )
+        for view in _PREDICATE_PAIR_VIEWS
+    )
+    return (*machine_registers, *predicate_pairs)
 
 
 def _physical_register_views() -> tuple[PhysicalRegisterView, ...]:
-    views: dict[tuple[str, str], PhysicalRegisterView] = {}
+    views = {
+        (view.physical_register, view.reg_class): view for view in _PREDICATE_PAIR_VIEWS
+    }
     for spec in descriptor_specs._DESCRIPTOR_SPECS:
         form = descriptor_specs._MACHINE_FORMS[spec.form_name]
         for operand in (*form.outputs, *form.inputs):

@@ -41,6 +41,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.reduction import (
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _ACCUMULATOR_BITCAST_TYPE_GROUPS,
     _I8_DEINTERLEAVE_CONTROLS,
+    _PREDICATE_VECTOR,
     _WIDE_VECTOR_BITCAST_TYPES,
     AIE2P_STRUCTURAL_RULES,
 )
@@ -1409,7 +1410,7 @@ def test_core_contract_closes_scalar_and_vector_families() -> None:
         (source_type, result_type)
         for source_type in _WIDE_VECTOR_BITCAST_TYPES
         for result_type in _WIDE_VECTOR_BITCAST_TYPES
-    ] + [
+    ] + [(_PREDICATE_VECTOR, _PREDICATE_VECTOR)] + [
         (source_type, result_type)
         for source_type in bitcast_types
         for result_type in bitcast_types

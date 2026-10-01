@@ -66,3 +66,37 @@ check.case @whole_vector_if_false {
   check.expect.equal actual(%second) expected(%a) : i64
   check.return
 }
+
+// Bits 0 and 8 select the first lane of each 8-lane i64 packet. Bits 7 and 15
+// remain clear, exercising both select arms in each packet.
+func.def public @lane_select_i64x16(%condition_word: i32, %true_value: i64, %false_value: i64) -> (i64, i64, i64, i64) {
+  %start = scalar.constant 0 : i32
+  %step = scalar.constant 1 : i32
+  %c1 = vector.constant 1 : vector<16xi32>
+  %c0 = vector.constant 0 : vector<16xi32>
+  %condition_words = vector.splat %condition_word : vector<16xi32>
+  %positions = vector.iota %start step %step : vector<16xi32>
+  %shifted = vector.shrui %condition_words, %positions : vector<16xi32>
+  %bits = vector.andi %shifted, %c1 : vector<16xi32>
+  %condition = vector.cmpi ne, %bits, %c0 : vector<16xi32> -> vector<16xi1>
+  %true_values = vector.splat %true_value : vector<16xi64>
+  %false_values = vector.splat %false_value : vector<16xi64>
+  %selected = vector.select %condition, %true_values, %false_values : vector<16xi64>
+  %lane0 = vector.extract %selected[0] : vector<16xi64> -> i64
+  %lane7 = vector.extract %selected[7] : vector<16xi64> -> i64
+  %lane8 = vector.extract %selected[8] : vector<16xi64> -> i64
+  %lane15 = vector.extract %selected[15] : vector<16xi64> -> i64
+  func.return %lane0, %lane7, %lane8, %lane15 : i64, i64, i64, i64
+}
+
+check.case @lane_select_i64x16_packet_boundaries {
+  %condition_word = check.literal value(257) : i32
+  %true_value = check.literal value(-9223372036854775808) : i64
+  %false_value = check.literal value(9223372036854775807) : i64
+  %lane0, %lane7, %lane8, %lane15 = func.call @lane_select_i64x16(%condition_word, %true_value, %false_value) : (i32, i64, i64) -> (i64, i64, i64, i64)
+  check.expect.equal actual(%lane0) expected(%true_value) : i64
+  check.expect.equal actual(%lane7) expected(%false_value) : i64
+  check.expect.equal actual(%lane8) expected(%true_value) : i64
+  check.expect.equal actual(%lane15) expected(%false_value) : i64
+  check.return
+}

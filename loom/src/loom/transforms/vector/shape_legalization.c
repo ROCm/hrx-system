@@ -306,6 +306,49 @@ static iree_status_t loom_vector_static_shape_table_lookup_rewrite(
   return iree_ok_status();
 }
 
+static iree_status_t loom_vector_static_shape_select_rewrite(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    bool* out_rewritten) {
+  const loom_type_t result_type =
+      loom_module_value_type(context->module, loom_vector_select_result(op));
+  uint64_t element_count = 0;
+  if (loom_type_rank(result_type) <= 1 ||
+      !loom_type_static_element_count(result_type, &element_count) ||
+      element_count == 0 || element_count > INT64_MAX) {
+    return iree_ok_status();
+  }
+
+  loom_rewriter_t* rewriter = context->rewriter;
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+  const loom_value_id_t source_values[] = {
+      loom_vector_select_condition(op),
+      loom_vector_select_true_value(op),
+      loom_vector_select_false_value(op),
+  };
+  loom_value_id_t flat_values[IREE_ARRAYSIZE(source_values)] = {0};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(source_values); ++i) {
+    const loom_type_t source_type =
+        loom_module_value_type(context->module, source_values[i]);
+    IREE_RETURN_IF_ERROR(loom_vector_static_shape_flatten_value(
+        &rewriter->builder, source_values[i], source_type, element_count,
+        op->location, &flat_values[i]));
+  }
+
+  const loom_type_t flat_result_type =
+      loom_vector_static_shape_flat_type(result_type, element_count);
+  loom_op_t* flat_select_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_select_build(
+      &rewriter->builder, flat_values[0], flat_values[1], flat_values[2],
+      flat_result_type, op->location, &flat_select_op));
+  IREE_RETURN_IF_ERROR(loom_vector_static_shape_restore_result(
+      context, op, loom_vector_select_result(flat_select_op), flat_result_type,
+      result_type, value_checkpoint));
+  *out_rewritten = true;
+  return iree_ok_status();
+}
+
 iree_status_t loom_vector_static_shape_rewrite_op(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten) {
@@ -320,6 +363,9 @@ iree_status_t loom_vector_static_shape_rewrite_op(
     case LOOM_OP_VECTOR_TABLE_LOOKUP:
       return loom_vector_static_shape_table_lookup_rewrite(context, op,
                                                            out_rewritten);
+    case LOOM_OP_VECTOR_SELECT:
+      return loom_vector_static_shape_select_rewrite(context, op,
+                                                     out_rewritten);
     default:
       return iree_ok_status();
   }

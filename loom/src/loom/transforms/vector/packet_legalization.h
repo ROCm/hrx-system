@@ -37,6 +37,16 @@ typedef enum loom_vector_packet_reduce_result_e {
   LOOM_VECTOR_PACKET_REDUCE_RESULT_CAPTURE_INPUT = 2,
 } loom_vector_packet_reduce_result_t;
 
+// Packetizes a static rank-one shape-preserving elementwise operation into
+// target-native packets and concatenates its packet results. Each operand
+// retains its authored SSA snapshot and supplies static packet slices. Returns
+// false through |out_rewritten| when the operation already fits one packet,
+// lacks the decomposable elementwise contract, or exceeds the static expansion
+// bound.
+iree_status_t loom_vector_packet_legalize_elementwise(
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    const loom_vector_packet_policy_t* policy, bool* out_rewritten);
+
 // Packetizes a static vector splat into target-native rank-one packets,
 // concatenates them into a flat carrier, and restores the logical result
 // shape. Returns false through |out_rewritten| when the result already fits

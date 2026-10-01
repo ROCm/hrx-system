@@ -54,6 +54,34 @@ PREDICATE_DESCRIPTOR_SPECS = (
             ("high32", _EL_HIGH32_PART),
         )
     ),
+    # Scalar LSHL projects either predicate word into the low half of a fresh
+    # predicate carrier. Negative counts perform the packet-aligned right
+    # shifts used by structural vector slices.
+    *(
+        _DescriptorSpec(
+            "LSHL",
+            f"{_TARGET_KEY}.predicate.shift.{word}",
+            "integer.lshl.i32",
+            "II_LSHL",
+            storage_overrides=(
+                ("d0", "eLPredicate"),
+                ("s0", "eLPredicate"),
+            ),
+            asm_mnemonic=f"predicate.shift.{word}",
+            operand_register_parts=(
+                ("d0", _EL_LOW32_PART),
+                ("s0", register_part),
+            ),
+            encoding_adapter_overrides=(
+                ("d0", "LOOM_eL_low32"),
+                ("s0", f"LOOM_eL_{word}"),
+            ),
+        )
+        for word, register_part in (
+            ("low32", _EL_LOW32_PART),
+            ("high32", _EL_HIGH32_PART),
+        )
+    ),
     _DescriptorSpec(
         "VEQZ_8",
         f"{_TARGET_KEY}.cmp.eqz.i8x64",

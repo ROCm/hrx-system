@@ -145,7 +145,9 @@ def _physical_register_packing_order(reg_class: RegClass, views: Sequence[Physic
     Larger views group the bank first, then smaller views group their pieces.
     For nested register views this visits siblings before opening another
     aggregate. Overlapping non-nested views use the first containing group at
-    each width as a deterministic preference, not a legality restriction.
+    each width as a deterministic preference, not a legality restriction. A
+    group stays at its earliest semantic ordinal so a partial view does not
+    outrank unrelated candidates that precede it.
     """
 
     ordinals = {name: index for index, name in enumerate(reg_class.physical_registers)}
@@ -156,14 +158,15 @@ def _physical_register_packing_order(reg_class: RegClass, views: Sequence[Physic
     group_keys: list[dict[int, int]] = []
     for width in sorted(groups_by_width, reverse=True):
         keys: dict[int, int] = {}
-        for group_index, group in enumerate(sorted(set(groups_by_width[width]))):
+        for group in sorted(set(groups_by_width[width])):
+            group_anchor = min(group)
             for ordinal in group:
-                keys.setdefault(ordinal, group_index)
+                keys.setdefault(ordinal, group_anchor)
         group_keys.append(keys)
     return sorted(
         range(len(ordinals)),
         key=lambda ordinal: (
-            *(keys.get(ordinal, len(ordinals) + ordinal) for keys in group_keys),
+            *(keys.get(ordinal, ordinal) for keys in group_keys),
             ordinal,
         ),
     )

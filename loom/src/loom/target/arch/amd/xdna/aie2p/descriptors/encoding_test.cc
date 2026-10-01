@@ -790,13 +790,21 @@ TEST(DescriptorEncodingTest, ScalarPairMovesPreserveBothWords) {
   }
 }
 
-TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {
+TEST(DescriptorEncodingTest, MachinePhysicalRegisterRowsRemainStablePrefix) {
   const loom_low_descriptor_set_t* descriptor_set =
       loom_aie2p_core_descriptor_set();
+  const uint32_t machine_register_count =
+      loom_aie2p_machine_physical_register_count();
+  const std::array<std::string_view, 4> allocation_only_registers = {
+      "predicate_pair0",
+      "predicate_pair1",
+      "predicate_pair2",
+      "predicate_pair3",
+  };
   ASSERT_EQ(descriptor_set->physical_register_count,
-            loom_aie2p_machine_physical_register_count());
-  for (uint32_t register_id = 0;
-       register_id < descriptor_set->physical_register_count; ++register_id) {
+            machine_register_count + allocation_only_registers.size());
+  for (uint32_t register_id = 0; register_id < machine_register_count;
+       ++register_id) {
     const loom_low_physical_register_t* descriptor_register =
         loom_low_descriptor_set_physical_register_at(descriptor_set,
                                                      register_id);
@@ -818,6 +826,17 @@ TEST(DescriptorEncodingTest, PhysicalRegisterRowsAlignWithMachineTable) {
                 loom_aie2p_machine_physical_register_atomic_unit(
                     (loom_aie2p_physical_register_id_t)register_id, i));
     }
+  }
+  for (iree_host_size_t i = 0; i < allocation_only_registers.size(); ++i) {
+    const loom_low_physical_register_t* descriptor_register =
+        loom_low_descriptor_set_physical_register_at(
+            descriptor_set, machine_register_count + i);
+    const iree_string_view_t name = loom_low_descriptor_set_string(
+        descriptor_set, descriptor_register->name_string_ref);
+    EXPECT_EQ(std::string_view(name.data, name.size),
+              allocation_only_registers[i]);
+    EXPECT_EQ(loom_aie2p_machine_find_physical_register(name),
+              LOOM_AIE2P_PHYSICAL_REGISTER_ID_INVALID);
   }
 }
 

@@ -26,6 +26,7 @@ from loom.target.low_descriptors import (
     OperandForm,
     OperandFormMatch,
     OperandFormMatchKind,
+    PhysicalRegisterView,
     RegClassAlt,
     RegClassAltFlag,
     Resource,
@@ -222,6 +223,26 @@ def test_physical_packing_order_preserves_pairs_and_semantic_ordinals(candidate_
             continue
         units = compiled.physical_register_view_unit_candidate_ordinals[view.unit_candidate_ordinal_start : view.unit_candidate_ordinal_start + view.unit_count]
         assert view.packing_rank == min(ranks[ordinal] for ordinal in units)
+
+
+@pytest.mark.parametrize(
+    ("view_units", "expected_order"),
+    [
+        (("test.r2", "test.r3"), [0, 1, 2, 3]),
+        (("test.r1", "test.r3"), [0, 1, 3, 2]),
+    ],
+)
+def test_physical_packing_order_groups_partial_views_in_place(view_units, expected_order) -> None:
+    reg_class = next(row for row in TEST_LOW_CORE_DESCRIPTOR_SET.reg_classes if row.name == "test.explicit32")
+    views = (
+        PhysicalRegisterView(
+            physical_register="test.partial",
+            reg_class=reg_class.name,
+            units=view_units,
+        ),
+    )
+
+    assert compiler._physical_register_packing_order(reg_class, views) == expected_order
 
 
 def test_physical_packing_order_is_independent_of_view_declaration_order() -> None:

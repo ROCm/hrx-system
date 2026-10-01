@@ -93,9 +93,12 @@ static iree_status_t loom_aie2p_map_type(void* user_data,
       return loom_low_lower_make_register_type(
           context, AIE2P_CORE_REG_CLASS_ID_AIE2P_MBMS, 4, out_low_type);
     }
-    if (element_count <= 64 && element_type == LOOM_SCALAR_TYPE_I1) {
+    if (element_count <= 128 && element_type == LOOM_SCALAR_TYPE_I1) {
+      const uint32_t predicate_register_count =
+          (uint32_t)((element_count + 63u) / 64u);
       return loom_low_lower_make_register_type(
-          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ELPREDICATE, 1, out_low_type);
+          context, AIE2P_CORE_REG_CLASS_ID_AIE2P_ELPREDICATE,
+          predicate_register_count, out_low_type);
     }
     if (element_bits > 0 && element_count > 512 / (uint32_t)element_bits &&
         element_count <= 1024 / (uint32_t)element_bits) {

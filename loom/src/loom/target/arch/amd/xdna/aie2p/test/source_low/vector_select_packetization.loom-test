@@ -1,0 +1,206 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @i8x65_direct_select(%condition: vector<65xi1>, %true_value: vector<65xi8>, %false_value: vector<65xi8>) -> (vector<65xi8>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<65xi8>
+  func.return %selected : vector<65xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x65_direct_select(%condition: reg<aie2p.elpredicate x2>, %true_value: reg<aie2p.vec256 x4>, %false_value: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %18 = slice %condition[0] : reg<aie2p.elpredicate x2> -> reg<aie2p.elpredicate>
+  %19 = slice %true_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %20 = slice %false_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %21 = vsel.8 %20, %19, %18
+  %22 = slice %condition[1] : reg<aie2p.elpredicate x2> -> reg<aie2p.elpredicate>
+  %23 = slice %true_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %24 = slice %false_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %25 = vsel.8 %24, %23, %22
+  %selected = concat(%21, %25) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %selected
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @i8x128_compare_select(%lhs: vector<128xi8>, %rhs: vector<128xi8>, %true_value: vector<128xi8>, %false_value: vector<128xi8>) -> (vector<128xi8>) {
+  %condition = vector.cmpi slt, %lhs, %rhs : vector<128xi8> -> vector<128xi1>
+  %selected = vector.select %condition, %true_value, %false_value : vector<128xi8>
+  func.return %selected : vector<128xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x128_compare_select(%lhs: reg<aie2p.vec256 x4>, %rhs: reg<aie2p.vec256 x4>, %true_value: reg<aie2p.vec256 x4>, %false_value: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %28 = slice %lhs[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %29 = slice %rhs[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %30 = vlt.s8x64 %28, %29
+  %31 = slice %lhs[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %32 = slice %rhs[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %33 = vlt.s8x64 %31, %32
+  %36 = slice %true_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %37 = slice %false_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %38 = vsel.8 %37, %36, %30
+  %40 = slice %true_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %41 = slice %false_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %42 = vsel.8 %41, %40, %33
+  %selected = concat(%38, %42) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %selected
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @i16x64_vector_select(%condition: vector<64xi1>, %true_value: vector<64xi16>, %false_value: vector<64xi16>) -> (vector<64xi16>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<64xi16>
+  func.return %selected : vector<64xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i16x64_vector_select(%condition: reg<aie2p.elpredicate>, %true_value: reg<aie2p.vec256 x4>, %false_value: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %18 = slice %true_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %19 = slice %false_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %20 = vsel.16.mask64 %19, %18, %condition
+  %21 = mov.short 0
+  %22 = predicate.shift.high32 %condition, %21
+  %23 = predicate.complete.zero.high32 %22, 0
+  %24 = slice %true_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %25 = slice %false_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %26 = vsel.16.mask64 %25, %24, %23
+  %selected = concat(%20, %26) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %selected
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+func.def @i32x64_vector_select(%condition: vector<64xi1>, %true_value: vector<64xi32>, %false_value: vector<64xi32>) -> (vector<64xi32>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<64xi32>
+  func.return %selected : vector<64xi32>
+}
+
+// ----
+func.def @i32x64_vector_select(%condition: vector<64xi1>, %true_value: vector<64xi32>, %false_value: vector<64xi32>) -> (vector<64xi32>) {
+  %5 = vector.slice %condition[0] : vector<64xi1> -> vector<16xi1>
+  %6 = vector.slice %true_value[0] : vector<64xi32> -> vector<16xi32>
+  %7 = vector.slice %false_value[0] : vector<64xi32> -> vector<16xi32>
+  %8 = vector.select %5, %6, %7 : vector<16xi32>
+  %9 = vector.slice %condition[16] : vector<64xi1> -> vector<16xi1>
+  %10 = vector.slice %true_value[16] : vector<64xi32> -> vector<16xi32>
+  %11 = vector.slice %false_value[16] : vector<64xi32> -> vector<16xi32>
+  %12 = vector.select %9, %10, %11 : vector<16xi32>
+  %13 = vector.slice %condition[32] : vector<64xi1> -> vector<16xi1>
+  %14 = vector.slice %true_value[32] : vector<64xi32> -> vector<16xi32>
+  %15 = vector.slice %false_value[32] : vector<64xi32> -> vector<16xi32>
+  %16 = vector.select %13, %14, %15 : vector<16xi32>
+  %17 = vector.slice %condition[48] : vector<64xi1> -> vector<16xi1>
+  %18 = vector.slice %true_value[48] : vector<64xi32> -> vector<16xi32>
+  %19 = vector.slice %false_value[48] : vector<64xi32> -> vector<16xi32>
+  %20 = vector.select %17, %18, %19 : vector<16xi32>
+  %22 = vector.concat<0> %8, %12 : vector<16xi32>, vector<16xi32> -> vector<32xi32>
+  %23 = vector.concat<0> %16, %20 : vector<16xi32>, vector<16xi32> -> vector<32xi32>
+  %selected = vector.concat<0> %22, %23 : vector<32xi32>, vector<32xi32> -> vector<64xi32>
+  func.return %selected : vector<64xi32>
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+func.def @i64x32_vector_select(%condition: vector<32xi1>, %true_value: vector<32xi64>, %false_value: vector<32xi64>) -> (vector<32xi64>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<32xi64>
+  func.return %selected : vector<32xi64>
+}
+
+// ----
+func.def @i64x32_vector_select(%condition: vector<32xi1>, %true_value: vector<32xi64>, %false_value: vector<32xi64>) -> (vector<32xi64>) {
+  %5 = vector.slice %condition[0] : vector<32xi1> -> vector<8xi1>
+  %6 = vector.slice %true_value[0] : vector<32xi64> -> vector<8xi64>
+  %7 = vector.slice %false_value[0] : vector<32xi64> -> vector<8xi64>
+  %8 = vector.select %5, %6, %7 : vector<8xi64>
+  %9 = vector.slice %condition[8] : vector<32xi1> -> vector<8xi1>
+  %10 = vector.slice %true_value[8] : vector<32xi64> -> vector<8xi64>
+  %11 = vector.slice %false_value[8] : vector<32xi64> -> vector<8xi64>
+  %12 = vector.select %9, %10, %11 : vector<8xi64>
+  %13 = vector.slice %condition[16] : vector<32xi1> -> vector<8xi1>
+  %14 = vector.slice %true_value[16] : vector<32xi64> -> vector<8xi64>
+  %15 = vector.slice %false_value[16] : vector<32xi64> -> vector<8xi64>
+  %16 = vector.select %13, %14, %15 : vector<8xi64>
+  %17 = vector.slice %condition[24] : vector<32xi1> -> vector<8xi1>
+  %18 = vector.slice %true_value[24] : vector<32xi64> -> vector<8xi64>
+  %19 = vector.slice %false_value[24] : vector<32xi64> -> vector<8xi64>
+  %20 = vector.select %17, %18, %19 : vector<8xi64>
+  %22 = vector.concat<0> %8, %12 : vector<8xi64>, vector<8xi64> -> vector<16xi64>
+  %23 = vector.concat<0> %16, %20 : vector<8xi64>, vector<8xi64> -> vector<16xi64>
+  %selected = vector.concat<0> %22, %23 : vector<16xi64>, vector<16xi64> -> vector<32xi64>
+  func.return %selected : vector<32xi64>
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @f64x3x3_vector_select(%condition: vector<3x3xi1>, %true_value: vector<3x3xf64>, %false_value: vector<3x3xf64>) -> (vector<3x3xf64>) {
+  %selected = vector.select %condition, %true_value, %false_value : vector<3x3xf64>
+  func.return %selected : vector<3x3xf64>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f64x3x3_vector_select(%condition: reg<aie2p.elpredicate>, %true_value: reg<aie2p.vec256 x4>, %false_value: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %23 = slice %true_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %24 = slice %false_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %25 = mov.short 255
+  %26 = predicate.mask.low32 %condition, %25
+  %27 = mov.short 4
+  %28 = lshl %26, %27
+  %29 = or %26, %28
+  %30 = mov.i32 3855
+  %31 = and %29, %30
+  %32 = mov.short 2
+  %33 = lshl %31, %32
+  %34 = or %31, %33
+  %35 = mov.i32 13107
+  %36 = and %34, %35
+  %37 = mov.short 1
+  %38 = lshl %36, %37
+  %39 = or %36, %38
+  %40 = mov.i32 21845
+  %41 = and %39, %40
+  %42 = lshl %41, %37
+  %43 = or %41, %42
+  %44 = copy %43 : reg<aie2p.er> -> reg<aie2p.ers16>
+  %45 = vsel.32 %24, %23, %44
+  %46 = mov.short -8
+  %47 = predicate.shift.low32 %condition, %46
+  %48 = predicate.complete.zero.high32 %47, 0
+  %49 = slice %true_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %50 = slice %false_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %52 = predicate.mask.low32 %48, %37
+  %53 = lshl %52, %37
+  %54 = or %52, %53
+  %55 = copy %54 : reg<aie2p.er> -> reg<aie2p.ers16>
+  %56 = vsel.32 %50, %49, %55
+  %selected = concat(%45, %56) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %selected
+}
+
+// ====
+
+// RUN: emit aie2p-leaf @i8x65_direct_select report=code
+
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i8x65_direct_select(%condition: reg<aie2p.elpredicate x2>, %true_value: reg<aie2p.vec256 x4>, %false_value: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %condition_low = slice %condition[0] : reg<aie2p.elpredicate x2> -> reg<aie2p.elpredicate>
+  %true_low = slice %true_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %false_low = slice %false_value[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %selected_low = vsel.8 %false_low, %true_low, %condition_low
+  %condition_high = slice %condition[1] : reg<aie2p.elpredicate x2> -> reg<aie2p.elpredicate>
+  %true_high = slice %true_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %false_high = slice %false_value[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %selected_high = vsel.8 %false_high, %true_high, %condition_high
+  %selected = concat(%selected_low, %selected_high) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %selected
+}
+
+// ----
+code: 64 88 20 00 00 05 38 cc 98 18 00 00 00 00 00 00 00 00

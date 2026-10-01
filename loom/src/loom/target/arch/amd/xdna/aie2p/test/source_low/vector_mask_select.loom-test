@@ -247,7 +247,7 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_cmpi_select_n
 
 // ====
 
-// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 func.def @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xi64>, %false_value: vector<2xi64>) -> (vector<2xi64>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xi64>
@@ -255,18 +255,26 @@ func.def @i64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true
 }
 
 // ----
-CHECK: %mask = predicate.complete.zero.high32 *
-CHECK: * = predicate.mask.low32 %mask, *
-CHECK: * = and *
-CHECK: * = copy * : reg<aie2p.er> -> reg<aie2p.ers16>
-CHECK: %selected = vsel.32 %false_value, %true_value, *
-CHECK-NOT: * = vextract.*
-CHECK-NOT: * = vinsert.*
-CHECK-NOT: * = sel.nez *
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64_vector_mask_select(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %12 = vlt.s32x16.el.low32 %lhs, %rhs
+  %mask = predicate.complete.zero.high32 %12, 0
+  %14 = mov.short 3
+  %15 = predicate.mask.low32 %mask, %14
+  %16 = mov.short 1
+  %17 = lshl %15, %16
+  %18 = or %15, %17
+  %19 = mov.short 5
+  %20 = and %18, %19
+  %21 = lshl %20, %16
+  %22 = or %20, %21
+  %23 = copy %22 : reg<aie2p.er> -> reg<aie2p.ers16>
+  %selected = vsel.32 %false_value, %true_value, %23
+  return %selected
+}
 
 // ====
 
-// RUN: with-checks emit source-low target=amd.xdna.aie2p:core output=low
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 func.def @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true_value: vector<2xf64>, %false_value: vector<2xf64>) -> (vector<2xf64>) {
   %mask = vector.cmpi slt, %lhs, %rhs : vector<2xi32> -> vector<2xi1>
   %selected = vector.select %mask, %true_value, %false_value : vector<2xf64>
@@ -274,11 +282,22 @@ func.def @f64_vector_mask_select(%lhs: vector<2xi32>, %rhs: vector<2xi32>, %true
 }
 
 // ----
-CHECK: * = predicate.mask.low32 %mask, *
-CHECK: %selected = vsel.32 %false_value, %true_value, *
-CHECK-NOT: * = vextract.*
-CHECK-NOT: * = vinsert.*
-CHECK-NOT: * = sel.nez *
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f64_vector_mask_select(%lhs: reg<aie2p.vec256 x2>, %rhs: reg<aie2p.vec256 x2>, %true_value: reg<aie2p.vec256 x2>, %false_value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %12 = vlt.s32x16.el.low32 %lhs, %rhs
+  %mask = predicate.complete.zero.high32 %12, 0
+  %14 = mov.short 3
+  %15 = predicate.mask.low32 %mask, %14
+  %16 = mov.short 1
+  %17 = lshl %15, %16
+  %18 = or %15, %17
+  %19 = mov.short 5
+  %20 = and %18, %19
+  %21 = lshl %20, %16
+  %22 = or %20, %21
+  %23 = copy %22 : reg<aie2p.er> -> reg<aie2p.ers16>
+  %selected = vsel.32 %false_value, %true_value, %23
+  return %selected
+}
 
 // ====
 

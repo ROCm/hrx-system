@@ -14,6 +14,7 @@ from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _ACCUMULATOR_BITCAST_TYPE_GROUPS,
     _ACCUMULATOR_VECTOR_SHAPES,
     _F32X32_ACCUMULATOR,
+    _I1_VECTOR,
     _I16_F16_BF16_8X8_VECTOR,
     _I16_INTERLEAVE_CONTROL,
     _I16_TRANSPOSE_8X8_CONTROLS,
@@ -21,7 +22,9 @@ from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _I32_F32_TRANSPOSE_4X4_CONTROL,
     _ORDINARY_1024_BITCAST_TYPES,
     _PACKED_VECTOR_ELEMENT_TYPES,
+    _PREDICATE_VECTOR,
     _VECTOR_CARRIER_SPECS,
+    _WIDE_PREDICATE_VECTOR,
     _WIDE_VECTOR_BITCAST_TYPES,
     _WIDE_VECTOR_CONCAT_SPECS,
     _WIDE_VECTOR_EXTRACT_SPECS,
@@ -242,6 +245,59 @@ def test_static_slices_project_logical_lanes_into_physical_carriers() -> None:
                 bytes_per_lane=element_byte_count,
             )
         }
+
+
+def test_predicate_packet_slices_project_aligned_words() -> None:
+    low = _slice_rule(_I1_VECTOR, _I1_VECTOR, 0, 0)
+    assert isinstance(low, ValueAliasRule)
+
+    for offset, maximum_result_lanes, word, shift_count in (
+        (8, 8, "low32", -8),
+        (16, 16, "low32", -16),
+        (24, 8, "low32", -24),
+        (32, 32, "high32", 0),
+        (48, 16, "high32", -16),
+    ):
+        result_type = Vector("i1", minimum_lanes=1, maximum_lanes=maximum_result_lanes)
+        rule = _slice_rule(_I1_VECTOR, result_type, offset, offset)
+        assert isinstance(rule, DescriptorRule)
+        assert [emit.descriptor.key for emit in rule.emit] == [
+            "amd.xdna.aie2p.constant.i32.short",
+            f"amd.xdna.aie2p.predicate.shift.{word}",
+            "amd.xdna.aie2p.predicate.complete.zero.high32",
+        ]
+        assert rule.emit[0].immediates == {"i": shift_count}
+
+
+def test_wide_predicate_packet_slices_project_el_carriers() -> None:
+    for offset, unit_offset in ((0, 0), (64, 1)):
+        rule = _slice_rule(
+            _WIDE_PREDICATE_VECTOR,
+            _I1_VECTOR,
+            offset,
+            offset,
+        )
+        assert isinstance(rule, DescriptorRule)
+        assert rule.emit == (
+            EmitRegisterSlice(
+                source=ValueRef.operand("source"),
+                result=ValueRef.result("result"),
+                unit_offset=unit_offset,
+            ),
+        )
+
+
+def test_wide_predicate_concat_preserves_ordered_el_carriers() -> None:
+    rule = _concat_rule(Vector("i1", lanes=64), _WIDE_PREDICATE_VECTOR)
+    assert rule.emit == (
+        EmitRegisterConcat(
+            sources=(
+                ValueRef.operand("inputs", element=0),
+                ValueRef.operand("inputs", element=1),
+            ),
+            result=ValueRef.result("result"),
+        ),
+    )
 
 
 def test_accumulator_packet_slices_move_each_mbms_unit_to_x() -> None:
@@ -565,6 +621,25 @@ def test_wide_bitcast_aliases_preserve_ordinary_y_carriers() -> None:
     ]
     assert all(rule.source.field == "input" for rule in rules)
     assert all(rule.result.field == "result" for rule in rules)
+
+
+def test_predicate_shape_bitcast_aliases_preserve_el_carriers() -> None:
+    rule = next(
+        rule
+        for rule in AIE2P_STRUCTURAL_RULES
+        if isinstance(rule, ValueAliasRule)
+        and rule.source_op is vector.vector_bitcast
+        and Guard.value_type("input", _PREDICATE_VECTOR) in rule.guards
+    )
+    assert rule.guards == (
+        Guard.value_type("input", _PREDICATE_VECTOR),
+        Guard.value_type("result", _PREDICATE_VECTOR),
+        Guard.low_value_register_class("input", "aie2p.elpredicate"),
+        Guard.low_value_register_class("result", "aie2p.elpredicate"),
+        Guard.low_value_register_unit_count_eq("input", "result"),
+    )
+    assert rule.source == ValueRef.operand("input")
+    assert rule.result == ValueRef.result("result")
 
 
 def test_accumulator_bitcast_aliases_preserve_mbms_units() -> None:

@@ -117,12 +117,23 @@ def test_control_window_covers_its_outgoing_register_events() -> None:
 
 def test_core_descriptor_closure_is_complete() -> None:
     descriptor_set = AIE2P_CORE_DESCRIPTOR_SET
-    assert tuple(row.name for row in descriptor_set.physical_registers) == tuple(
-        row.name for row in CORE_MACHINE_TABLE.physical_registers
-    )
+    machine_register_count = len(CORE_MACHINE_TABLE.physical_registers)
     assert tuple(
-        row.atomic_units for row in descriptor_set.physical_registers
+        row.name for row in descriptor_set.physical_registers[:machine_register_count]
+    ) == tuple(row.name for row in CORE_MACHINE_TABLE.physical_registers)
+    assert tuple(
+        row.atomic_units
+        for row in descriptor_set.physical_registers[:machine_register_count]
     ) == tuple(row.atomic_units for row in CORE_MACHINE_TABLE.physical_registers)
+    assert {
+        row.name: row.atomic_units
+        for row in descriptor_set.physical_registers[machine_register_count:]
+    } == {
+        "predicate_pair0": (128, 129, 130, 131),
+        "predicate_pair1": (133, 134, 135, 136),
+        "predicate_pair2": (137, 138, 139, 140),
+        "predicate_pair3": (141, 142, 144, 145),
+    }
     assert {
         (view.physical_register, view.reg_class): view.units
         for view in descriptor_set.physical_register_views
@@ -176,6 +187,13 @@ def test_core_descriptor_closure_is_complete() -> None:
                 f"wh{index * 2 + 1}",
             )
             for index in range(6)
+        },
+        **{
+            (f"predicate_pair{pair_index}", "aie2p.elpredicate"): (
+                f"l{register_index}",
+                f"l{register_index + 1}",
+            )
+            for pair_index, register_index in enumerate(range(8, 16, 2))
         },
     }
 
@@ -1405,6 +1423,25 @@ def test_vector_predicates_use_one_partially_addressable_el_value() -> None:
         assert high.constraints[0].lhs_operand_index == 0
         assert high.constraints[0].rhs_operand_index == 3
         assert high.asm_forms[0].operands == ("s0", "s1", "storage")
+
+    for word, source_part in (
+        ("low32", "aie2p.elpredicate.low32"),
+        ("high32", "aie2p.elpredicate.high32"),
+    ):
+        shift = descriptors[f"amd.xdna.aie2p.predicate.shift.{word}"]
+        assert [operand.field_name for operand in shift.operands] == [
+            "d0",
+            "s0",
+            "s1",
+        ]
+        assert shift.operands[0].reg_alts[0].reg_class == "aie2p.elpredicate"
+        assert shift.operands[0].register_part == "aie2p.elpredicate.low32"
+        assert shift.operands[0].encoding_adapter_id != 0
+        assert shift.operands[1].reg_alts[0].reg_class == "aie2p.elpredicate"
+        assert shift.operands[1].register_part == source_part
+        assert shift.operands[1].encoding_adapter_id != 0
+        assert shift.operands[2].reg_alts[0].reg_class == "aie2p.er"
+        assert shift.asm_forms[0].mnemonic == f"predicate.shift.{word}"
 
     complete = descriptors["amd.xdna.aie2p.predicate.complete.zero.high32"]
     assert complete.operands[0].register_part == "aie2p.elpredicate.high32"
