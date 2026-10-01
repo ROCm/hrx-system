@@ -1,6 +1,6 @@
 // Per-use count copies share RCX with both general register widths.
 // Live inputs and multiple counts exercise interference and scheduling.
-// RUN: emit x86-asm @word_shifts_reuse_input strategy=source fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @word_shifts_reuse_input strategy=source fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @word_shifts_reuse_input(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %left_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -24,24 +24,11 @@ low.func.def target<x86.scalar.core> @word_shifts_reuse_input(%value: reg<x86.gp
 }
 
 // ----
-  mov eax, edi
-  mov ecx, esi
-  shl eax, cl
-  mov edx, edi
-  mov ecx, esi
-  shr edx, cl
-  mov ebx, edi
-  mov ecx, esi
-  sar ebx, cl
-  xor eax, edx
-  xor eax, ebx
-  add eax, esi
-  xor eax, edi
-  ret
+53 8b c7 8b ce d3 e0 8b d7 8b ce d3 ea 8b df 8b ce d3 fb 31 d0 31 d8 01 f0 31 f8 5b c3
 
 // ====
 
-// RUN: emit x86-asm @word_shifts_reuse_input strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @word_shifts_reuse_input strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @word_shifts_reuse_input(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %left_input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -65,24 +52,11 @@ low.func.def target<x86.scalar.core> @word_shifts_reuse_input(%value: reg<x86.gp
 }
 
 // ----
-  mov eax, edi
-  mov ecx, esi
-  shl eax, cl
-  mov edx, edi
-  mov ecx, esi
-  shr edx, cl
-  mov ebx, edi
-  mov ecx, esi
-  sar ebx, cl
-  xor eax, edx
-  xor eax, ebx
-  add eax, esi
-  xor eax, edi
-  ret
+53 8b c7 8b ce d3 e0 8b d7 8b ce d3 ea 8b df 8b ce d3 fb 31 d0 31 d8 01 f0 31 f8 5b c3
 
 // ====
 
-// RUN: emit x86-asm @wide_shifts_reuse_counts strategy=source fixed=%value:physical_register:7:1 fixed=%left_count:physical_register:6:1 fixed=%right_count:physical_register:2:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @wide_shifts_reuse_counts strategy=source fixed=%value:physical_register:7:1 fixed=%left_count:physical_register:6:1 fixed=%right_count:physical_register:2:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @wide_shifts_reuse_counts(%value: reg<x86.gpr64>, %left_count: reg<x86.gpr64>, %right_count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %left_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -106,24 +80,11 @@ low.func.def target<x86.scalar.core> @wide_shifts_reuse_counts(%value: reg<x86.g
 }
 
 // ----
-  mov rax, rdi
-  mov rcx, rsi
-  shl rax, cl
-  mov rbx, rdi
-  mov rcx, rdx
-  shr rbx, cl
-  mov rcx, rsi
-  sar rax, cl
-  xor rbx, rax
-  add rbx, rsi
-  add rbx, rdx
-  mov rax, rbx
-  xor rax, rdi
-  ret
+53 48 8b c7 48 8b ce 48 d3 e0 48 8b df 48 8b ca 48 d3 eb 48 8b ce 48 d3 f8 48 31 c3 48 01 f3 48 01 d3 48 8b c3 48 31 f8 5b c3
 
 // ====
 
-// RUN: emit x86-asm @wide_shifts_reuse_counts strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%left_count:physical_register:6:1 fixed=%right_count:physical_register:2:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @wide_shifts_reuse_counts strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%left_count:physical_register:6:1 fixed=%right_count:physical_register:2:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @wide_shifts_reuse_counts(%value: reg<x86.gpr64>, %left_count: reg<x86.gpr64>, %right_count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %left_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -147,24 +108,11 @@ low.func.def target<x86.scalar.core> @wide_shifts_reuse_counts(%value: reg<x86.g
 }
 
 // ----
-  mov rax, rdi
-  mov rcx, rsi
-  shl rax, cl
-  mov rbx, rdi
-  mov rcx, rdx
-  shr rbx, cl
-  mov rcx, rsi
-  sar rax, cl
-  xor rbx, rax
-  add rbx, rsi
-  add rbx, rdx
-  mov rax, rbx
-  xor rax, rdi
-  ret
+53 48 8b c7 48 8b ce 48 d3 e0 48 8b df 48 8b ca 48 d3 eb 48 8b ce 48 d3 f8 48 31 c3 48 01 f3 48 01 d3 48 8b c3 48 31 f8 5b c3
 
 // ====
 
-// RUN: emit x86-asm @wide_shift_value_is_count strategy=source fixed=%input:physical_register:7:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @wide_shift_value_is_count strategy=source fixed=%input:physical_register:7:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @wide_shift_value_is_count(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %masked_input = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -176,15 +124,11 @@ low.func.def target<x86.scalar.core> @wide_shift_value_is_count(%input: reg<x86.
 }
 
 // ----
-  mov rcx, rdi
-  and rcx, 63
-  mov rax, rcx
-  shl rax, cl
-  ret
+48 8b cf 48 81 e1 3f 00 00 00 48 8b c1 48 d3 e0 c3
 
 // ====
 
-// RUN: emit x86-asm @wide_shift_value_is_count strategy=latency-hiding fixed=%input:physical_register:7:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @wide_shift_value_is_count strategy=latency-hiding fixed=%input:physical_register:7:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @wide_shift_value_is_count(%input: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %masked_input = copy %input : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -196,15 +140,11 @@ low.func.def target<x86.scalar.core> @wide_shift_value_is_count(%input: reg<x86.
 }
 
 // ----
-  mov rcx, rdi
-  and rcx, 63
-  mov rax, rcx
-  shl rax, cl
-  ret
+48 8b cf 48 81 e1 3f 00 00 00 48 8b c1 48 d3 e0 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shl_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shl_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shl_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -214,14 +154,11 @@ low.func.def target<x86.scalar.core> @shift_shl_32(%value: reg<x86.gpr32>, %coun
 }
 
 // ----
-  mov eax, ecx
-  mov ecx, esi
-  shl eax, cl
-  ret
+8b c1 8b ce d3 e0 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shl_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shl_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shl_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -231,13 +168,11 @@ low.func.def target<x86.scalar.core> @shift_shl_32(%value: reg<x86.gpr32>, %coun
 }
 
 // ----
-  mov eax, edi
-  shl eax, cl
-  ret
+8b c7 d3 e0 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shr_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shr_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shr_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -247,14 +182,11 @@ low.func.def target<x86.scalar.core> @shift_shr_32(%value: reg<x86.gpr32>, %coun
 }
 
 // ----
-  mov eax, ecx
-  mov ecx, esi
-  shr eax, cl
-  ret
+8b c1 8b ce d3 e8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shr_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shr_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shr_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -264,13 +196,11 @@ low.func.def target<x86.scalar.core> @shift_shr_32(%value: reg<x86.gpr32>, %coun
 }
 
 // ----
-  mov eax, edi
-  shr eax, cl
-  ret
+8b c7 d3 e8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_sar_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_sar_32 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_sar_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -280,14 +210,11 @@ low.func.def target<x86.scalar.core> @shift_sar_32(%value: reg<x86.gpr32>, %coun
 }
 
 // ----
-  mov eax, ecx
-  mov ecx, esi
-  sar eax, cl
-  ret
+8b c1 8b ce d3 f8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_sar_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_sar_32 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_sar_32(%value: reg<x86.gpr32>, %count: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
   %input = copy %value : reg<x86.gpr32> -> reg<x86.gpr32>
@@ -297,13 +224,11 @@ low.func.def target<x86.scalar.core> @shift_sar_32(%value: reg<x86.gpr32>, %coun
 }
 
 // ----
-  mov eax, edi
-  sar eax, cl
-  ret
+8b c7 d3 f8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shl_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shl_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shl_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -313,14 +238,11 @@ low.func.def target<x86.scalar.core> @shift_shl_64(%value: reg<x86.gpr64>, %coun
 }
 
 // ----
-  mov rax, rcx
-  mov rcx, rsi
-  shl rax, cl
-  ret
+48 8b c1 48 8b ce 48 d3 e0 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shl_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shl_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shl_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -330,13 +252,11 @@ low.func.def target<x86.scalar.core> @shift_shl_64(%value: reg<x86.gpr64>, %coun
 }
 
 // ----
-  mov rax, rdi
-  shl rax, cl
-  ret
+48 8b c7 48 d3 e0 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shr_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shr_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shr_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -346,14 +266,11 @@ low.func.def target<x86.scalar.core> @shift_shr_64(%value: reg<x86.gpr64>, %coun
 }
 
 // ----
-  mov rax, rcx
-  mov rcx, rsi
-  shr rax, cl
-  ret
+48 8b c1 48 8b ce 48 d3 e8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_shr_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_shr_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_shr_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -363,13 +280,11 @@ low.func.def target<x86.scalar.core> @shift_shr_64(%value: reg<x86.gpr64>, %coun
 }
 
 // ----
-  mov rax, rdi
-  shr rax, cl
-  ret
+48 8b c7 48 d3 e8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_sar_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_sar_64 fixed=%value:physical_register:1:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_sar_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -379,14 +294,11 @@ low.func.def target<x86.scalar.core> @shift_sar_64(%value: reg<x86.gpr64>, %coun
 }
 
 // ----
-  mov rax, rcx
-  mov rcx, rsi
-  sar rax, cl
-  ret
+48 8b c1 48 8b ce 48 d3 f8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_sar_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_sar_64 fixed=%value:physical_register:7:1 fixed=%count:physical_register:1:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_sar_64(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -396,14 +308,12 @@ low.func.def target<x86.scalar.core> @shift_sar_64(%value: reg<x86.gpr64>, %coun
 }
 
 // ----
-  mov rax, rdi
-  sar rax, cl
-  ret
+48 8b c7 48 d3 f8 c3
 
 // ====
 
 // The original value and count remain live after the arithmetic shift.
-// RUN: emit x86-asm @index_shift_arithmetic_reuse strategy=source fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @index_shift_arithmetic_reuse strategy=source fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @index_shift_arithmetic_reuse(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %shift_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -416,16 +326,11 @@ low.func.def target<x86.scalar.core> @index_shift_arithmetic_reuse(%value: reg<x
 }
 
 // ----
-  mov rax, rdi
-  mov rcx, rsi
-  sar rax, cl
-  lea rax, [rax + rsi]
-  xor rax, rdi
-  ret
+48 8b c7 48 8b ce 48 d3 f8 48 8d 04 30 48 31 f8 c3
 
 // ====
 
-// RUN: emit x86-asm @index_shift_arithmetic_reuse strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @index_shift_arithmetic_reuse strategy=latency-hiding fixed=%value:physical_register:7:1 fixed=%count:physical_register:6:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @index_shift_arithmetic_reuse(%value: reg<x86.gpr64>, %count: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %shift_input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -438,16 +343,11 @@ low.func.def target<x86.scalar.core> @index_shift_arithmetic_reuse(%value: reg<x
 }
 
 // ----
-  mov rax, rdi
-  mov rcx, rsi
-  sar rax, cl
-  lea rax, [rax + rsi]
-  xor rax, rdi
-  ret
+48 8b c7 48 8b ce 48 d3 f8 48 8d 04 30 48 31 f8 c3
 
 // ====
 
-// RUN: emit x86-asm @shift_sar_64_immediate fixed=%value:physical_register:7:1 fixed=%result:physical_register:0:1
+// RUN: emit x86-bytes @shift_sar_64_immediate fixed=%value:physical_register:7:1 fixed=%result:physical_register:0:1
 
 low.func.def target<x86.scalar.core> @shift_sar_64_immediate(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
   %input = copy %value : reg<x86.gpr64> -> reg<x86.gpr64>
@@ -456,51 +356,4 @@ low.func.def target<x86.scalar.core> @shift_sar_64_immediate(%value: reg<x86.gpr
 }
 
 // ----
-  mov rax, rdi
-  sar rax, 63
-  ret
-
-// ====
-
-// Immediate-form limits are verified on the instruction that owns them.
-// RUN: verify
-
-low.func.def target<x86.scalar.core> @immediate_count_too_wide(%value: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
-  // ERROR@+1: STRUCTURE/014
-  %result = shr.imm.gpr64 %value {shift = 64}
-  return %result
-}
-
-// ====
-
-// Packed shifts accept an imm8; counts of at least 64 clear both qwords.
-// RUN: emit x86-asm @shift_bounds
-
-x86.target<avx2> @target
-
-low.func.def target<x86.avx2.core>(@target) @shift_bounds(%input: reg<x86.xmm>) -> (reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>, reg<x86.xmm>) asm {
-  %unchanged = vpsllq.xmm %input, 0
-  %sign = vpsllq.xmm %input, 63
-  %width = vpsllq.xmm %input, 64
-  %maximum = vpsllq.xmm %input, 255
-  return %unchanged, %sign, %width, %maximum
-}
-
-// ----
-  vpsllq xmm1, xmm0, 0
-  vpsllq xmm2, xmm0, 63
-  vpsllq xmm3, xmm0, 64
-  vpsllq xmm0, xmm0, 255
-  ret
-
-// ====
-
-// RUN: verify
-
-x86.target<avx2> @target
-
-low.func.def target<x86.avx2.core>(@target) @shift_invalid(%input: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
-  // ERROR@+1: STRUCTURE/014
-  %result = vpsllq.xmm %input, 256
-  return %result
-}
+48 8b c7 48 c1 f8 3f c3

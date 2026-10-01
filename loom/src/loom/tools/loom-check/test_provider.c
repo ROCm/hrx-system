@@ -288,16 +288,16 @@ static iree_status_t loom_check_test_synthetic_hazard_execute(
 
   loom_low_emission_frame_t frame = {0};
   bool frame_accepted = false;
+  const loom_low_emission_frame_options_t frame_options = {
+      .schedule_strategy = options.schedule_strategy,
+      .allocation_budgets = options.allocation_budgets,
+      .allocation_budget_count = options.allocation_budget_count,
+  };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, options.schedule_strategy,
-      /*schedule_diagnostic_flags=*/0,
-      /*allocation_diagnostic_flags=*/0, options.allocation_budgets,
-      options.allocation_budget_count, options.allocation_fixed_value_specs,
+      request, options.function_symbol_name, &frame_options,
+      options.allocation_fixed_value_specs,
       options.allocation_fixed_value_spec_count,
-      /*residency_query=*/NULL, loom_low_schedule_pair_affinity_list_empty(),
-      loom_low_schedule_structural_state_read_list_empty(),
-      /*storage_lease_provider=*/NULL, /*spill_free_options=*/NULL, &frame,
-      &frame_accepted));
+      /*spill_free_options=*/NULL, &frame, &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       request->diagnostic_collector->count != 0) {
     return iree_ok_status();

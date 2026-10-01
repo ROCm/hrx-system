@@ -1,4 +1,4 @@
-// RUN: emit x86-asm @narrow_static fixed=%input:physical_register:7:1 fixed=%output:physical_register:6:1 fixed=%byte:physical_register:8:1 fixed=%word:physical_register:15:1
+// RUN: emit x86-bytes @narrow_static fixed=%input:physical_register:7:1 fixed=%output:physical_register:6:1 fixed=%byte:physical_register:8:1 fixed=%word:physical_register:15:1
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @narrow_static(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>) asm {
@@ -10,15 +10,11 @@ low.func.def target<x86.scalar.core>(@target) @narrow_static(%input: reg<x86.gpr
 }
 
 // ----
-  movzx r8d, byte ptr [rdi + 3]
-  movzx r15d, word ptr [rdi + 5]
-  mov byte ptr [rsi + 3], r8b
-  mov word ptr [rsi + 5], r15w
-  ret
+41 57 44 0f b6 47 03 44 0f b7 7f 05 44 88 46 03 66 44 89 7e 05 41 5f c3
 
 // ====
 
-// RUN: emit x86-asm @narrow_indexed fixed=%input:physical_register:12:1 fixed=%output:physical_register:13:1 fixed=%index:physical_register:14:1 fixed=%byte:physical_register:6:1 fixed=%word:physical_register:7:1
+// RUN: emit x86-bytes @narrow_indexed fixed=%input:physical_register:12:1 fixed=%output:physical_register:13:1 fixed=%index:physical_register:14:1 fixed=%byte:physical_register:6:1 fixed=%word:physical_register:7:1
 x86.target<scalar> @target
 
 low.func.def target<x86.scalar.core>(@target) @narrow_indexed(%input: reg<x86.gpr64>, %output: reg<x86.gpr64>, %index: reg<x86.gpr64>) asm {
@@ -30,8 +26,4 @@ low.func.def target<x86.scalar.core>(@target) @narrow_indexed(%input: reg<x86.gp
 }
 
 // ----
-  movzx esi, byte ptr [r12 + r14 - 1]
-  movzx edi, word ptr [r12 + r14 * 2 + 3]
-  mov byte ptr [r13 + r14 - 1], sil
-  mov word ptr [r13 + r14 * 2 + 3], di
-  ret
+43 0f b6 74 34 ff 43 0f b7 7c 74 03 43 88 74 35 ff 66 43 89 7c 75 03 c3

@@ -515,15 +515,22 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
       request->diagnostic_collector->count != 0) {
     return iree_ok_status();
   }
+  const loom_low_emission_frame_options_t frame_options = {
+      .schedule_strategy = options.schedule_strategy,
+      .schedule_diagnostic_flags = options.schedule_diagnostic_flags,
+      .allocation_diagnostic_flags = options.allocation_diagnostic_flags,
+      .allocation_budgets = options.allocation_budgets,
+      .allocation_budget_count = options.allocation_budget_count,
+      .residency_query = loom_amdgpu_occupancy_residency_view,
+      .schedule_pair_affinities = schedule_pair_affinities,
+      .schedule_structural_state_reads = schedule_state_reads,
+      .storage_lease_provider = selected_storage_lease_provider,
+  };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, options.schedule_strategy,
-      options.schedule_diagnostic_flags, options.allocation_diagnostic_flags,
-      options.allocation_budgets, options.allocation_budget_count,
+      request, options.function_symbol_name, &frame_options,
       options.allocation_fixed_value_specs,
-      options.allocation_fixed_value_spec_count,
-      loom_amdgpu_occupancy_residency_view, schedule_pair_affinities,
-      schedule_state_reads, selected_storage_lease_provider,
-      &spill_free_options, &frame, &frame_accepted));
+      options.allocation_fixed_value_spec_count, &spill_free_options, &frame,
+      &frame_accepted));
   if (request->diagnostic_collector != NULL &&
       request->diagnostic_collector->count != 0) {
     return iree_ok_status();

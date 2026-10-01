@@ -488,18 +488,9 @@ iree_status_t loom_check_low_emit_resolve_fixed_value_specs(
 iree_status_t loom_check_low_emit_packetize_function(
     const loom_check_emit_provider_request_t* request,
     iree_string_view_t function_symbol_name,
-    loom_low_schedule_strategy_t schedule_strategy,
-    loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags,
-    loom_low_allocation_diagnostic_flags_t allocation_diagnostic_flags,
-    const loom_low_allocation_budget_t* allocation_budgets,
-    iree_host_size_t allocation_budget_count,
+    const loom_low_emission_frame_options_t* options,
     const loom_check_low_emit_fixed_value_spec_t* allocation_fixed_specs,
     iree_host_size_t allocation_fixed_spec_count,
-    loom_low_emission_frame_residency_query_fn_t residency_query,
-    loom_low_schedule_pair_affinity_list_t schedule_pair_affinities,
-    loom_low_schedule_structural_state_read_list_t
-        schedule_structural_state_reads,
-    const loom_low_storage_lease_provider_t* storage_lease_provider,
     const loom_low_emission_frame_spill_free_options_t* spill_free_options,
     loom_low_emission_frame_t* out_frame, bool* out_accepted) {
   *out_accepted = false;
@@ -535,20 +526,10 @@ iree_status_t loom_check_low_emit_packetize_function(
     return iree_ok_status();
   }
 
-  loom_low_emission_frame_options_t frame_options = {
-      .descriptor_registry = &request->low_registry->registry,
-      .schedule_strategy = schedule_strategy,
-      .schedule_diagnostic_flags = schedule_diagnostic_flags,
-      .allocation_diagnostic_flags = allocation_diagnostic_flags,
-      .residency_query = residency_query,
-      .schedule_pair_affinities = schedule_pair_affinities,
-      .schedule_structural_state_reads = schedule_structural_state_reads,
-      .allocation_budgets = allocation_budgets,
-      .allocation_budget_count = allocation_budget_count,
-      .allocation_fixed_values = fixed_values,
-      .allocation_fixed_value_count = fixed_value_count,
-      .storage_lease_provider = storage_lease_provider,
-  };
+  loom_low_emission_frame_options_t frame_options = *options;
+  frame_options.descriptor_registry = &request->low_registry->registry;
+  frame_options.allocation_fixed_values = fixed_values;
+  frame_options.allocation_fixed_value_count = fixed_value_count;
   frame_options.emitter = emitter;
   *out_frame = (loom_low_emission_frame_t){0};
   if (spill_free_options != NULL) {

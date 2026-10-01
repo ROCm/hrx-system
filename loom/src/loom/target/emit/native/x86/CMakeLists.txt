@@ -105,41 +105,12 @@ endif()
 if(LOOM_TARGET_ARCH_X86)
 loom_cc_library(
   NAME
-    assembly
-  HDRS
-    "assembly.h"
-  SRCS
-    "assembly.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    loom::codegen::low::allocation
-    loom::codegen::low::packet
-    loom::codegen::low::schedule
-    loom::ir
-    loom::ops::low
-    loom::target::arch::x86::descriptors::avx2_descriptors_ids
-    loom::target::arch::x86::descriptors::avx512_descriptors_ids
-    loom::target::arch::x86::descriptors::avx512_packed_dot_descriptors_ids
-    loom::target::arch::x86::descriptors::packed_dot_descriptors_ids
-    loom::target::arch::x86::descriptors::scalar_descriptors_ids
-    loom::target::arch::x86::descriptors::simd128_descriptors_ids
-    loom::target::arch::x86::register_classes
-    loom::target::emit::native::assembly
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_X86)
-loom_cc_library(
-  NAME
     loom_check
   HDRS
     "check/loom_check.h"
   SRCS
     "check/loom_check.c"
   DEPS
-    ::assembly
     ::function
     iree::base
     iree::io::stream
@@ -153,15 +124,12 @@ loom_check_test_suite(
   NAME
     loom_check_file_test
   SRCS
-    "test/assembly.loom-test"
     "test/buffer_selection.loom-test"
     "test/copies.loom-test"
     "test/function.loom-test"
     "test/high_product.loom-test"
-    "test/lanes.loom-test"
     "test/memory.loom-test"
-    "test/schedule_scopes.loom-test"
-    "test/selects.loom-test"
+    "test/scalar.loom-test"
     "test/shifts.loom-test"
 )
 endif()

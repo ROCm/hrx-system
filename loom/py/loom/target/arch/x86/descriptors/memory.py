@@ -59,7 +59,6 @@ def memory_descriptors(
     load_schedule_class: str,
     store_schedule_class: str,
     assembly_suffix: str,
-    native_assembly_mnemonic: str | None = None,
     encoding_ids: tuple[int, int] | None = None,
 ) -> tuple[Descriptor, ...]:
     """Declares static/indexed loads followed by static/indexed stores."""
@@ -115,7 +114,6 @@ def memory_descriptors(
                     immediates=immediates,
                     asm_forms=_asm(
                         mnemonic=f"{mnemonic}.{operation_name}{assembly_suffix}",
-                        native_assembly_mnemonic=native_assembly_mnemonic,
                         results=results,
                         operands=(*value_fields, *address_fields),
                         immediates=tuple(item.field_name for item in immediates),

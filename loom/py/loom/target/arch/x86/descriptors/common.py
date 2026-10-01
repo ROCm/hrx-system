@@ -168,7 +168,6 @@ def _vector_compare_schedule_class(vector_bit_width: int) -> str:
 def _asm(
     *,
     mnemonic: str | None = None,
-    native_assembly_mnemonic: str | None = None,
     results: tuple[str, ...] = (),
     operands: tuple[str, ...] = (),
     immediates: tuple[str, ...] = (),
@@ -177,7 +176,6 @@ def _asm(
     return (
         AsmForm(
             mnemonic=mnemonic,
-            native_assembly_mnemonic=native_assembly_mnemonic,
             results=results,
             operands=operands,
             immediates=tuple(
@@ -414,13 +412,10 @@ def _packed_dot_asm_form(
     qualify_family: bool,
 ) -> tuple[AsmForm, ...]:
     mnemonic = _vector_asm_mnemonic(descriptor.mnemonic, descriptor.vector_bit_width)
-    native_assembly_mnemonic: str | None = None
     if qualify_family:
-        native_assembly_mnemonic = mnemonic
         mnemonic = f"{_packed_dot_asm_family_prefix(descriptor.key)}.{mnemonic}"
     return _asm(
         mnemonic=mnemonic,
-        native_assembly_mnemonic=native_assembly_mnemonic,
         results=("dst",),
         operands=("acc", "lhs", "rhs"),
     )
@@ -449,9 +444,6 @@ def _qualify_packed_dot_descriptor_asm_forms(descriptor: Descriptor) -> Descript
             replace(
                 asm_form,
                 mnemonic=f"{family_prefix}.{mnemonic}",
-                native_assembly_mnemonic=(
-                    asm_form.native_assembly_mnemonic or mnemonic
-                ),
             )
         )
     return replace(descriptor, asm_forms=tuple(qualified_forms))
