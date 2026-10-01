@@ -1,0 +1,107 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Proposal control belongs to the device. Option value two requests generated
+// inputs; value one already supplies candidates and zero supplies known input.
+// Compaction preserves target-span order and records the target token origin
+// separately from the ordinary draft descriptors. No target frontier changes.
+kernel.def export("qwen38_mtp_proposal_prepare") @qwen38_mtp_proposal_prepare() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %options_origin = index.constant 1548 : offset
+  %input = buffer.assume.memory_space<constant> %epoch : buffer
+  %header = buffer.view %input[%origin] : buffer -> view<3xi32>
+  %spans = buffer.view %input[%descriptor_origin] : buffer -> view<64x5xi32>
+  %options = buffer.view %input[%options_origin] : buffer -> view<64x2xi32>
+  %tokens = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
+  %draft_header = buffer.view %draft[%origin] : buffer -> view<3xi32>
+  %draft_spans = buffer.view %draft[%descriptor_origin] : buffer -> view<64x5xi32>
+  %mapping = buffer.view %origins[%origin] : buffer -> view<8xi32>
+  %inputs = buffer.view %draft_tokens[%origin] : buffer -> view<512xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %capacity = index.constant 512 : index
+  %one_word = scalar.constant 1 : i32
+  %generated_word = scalar.constant 2 : i32
+  %zeros = vector.constant 0 : vector<4xi32>
+  scf.for %token = [%zero to %capacity step %four] {
+    vector.store %zeros, %inputs[%token] : vector<4xi32>, view<512xi32>
+  }
+  %span_word = view.load %header[1] : view<3xi32> -> i32
+  %span_value = index.cast %span_word : i32 to index
+  %span_count = index.assume %span_value [range(%span_value, 1, 8)] : index
+  %count = scf.for %span = [%zero to %span_count step %one](%count = %zero : index) -> (index) {
+    %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
+    %generated = scalar.cmpi eq, %flag, %generated_word : i32
+    %next = scf.if %generated -> (index) {
+      %slot = index.assume %count [range(%count, 0, 7)] : index
+      %position = view.load %spans[%span, 1] : view<64x5xi32> -> i32
+      %begin_word = view.load %spans[%span, 2] : view<64x5xi32> -> i32
+      %row = view.load %spans[%span, 3] : view<64x5xi32> -> i32
+      %begin_value = index.cast %begin_word : i32 to index
+      %begin = index.assume %begin_value [range(%begin_value, 0, 508)] : index
+      %anchor = view.load %tokens[%begin] : view<512xi32> -> i32
+      %slot_word = index.cast %slot : index to i32
+      view.store %one_word, %draft_spans[%slot, 0] : i32, view<64x5xi32>
+      view.store %position, %draft_spans[%slot, 1] : i32, view<64x5xi32>
+      view.store %slot_word, %draft_spans[%slot, 2] : i32, view<64x5xi32>
+      view.store %row, %draft_spans[%slot, 3] : i32, view<64x5xi32>
+      view.store %slot_word, %draft_spans[%slot, 4] : i32, view<64x5xi32>
+      view.store %begin_word, %mapping[%slot] : i32, view<8xi32>
+      view.store %anchor, %inputs[%slot] : i32, view<512xi32>
+      %incremented = index.add %count, %one : index
+      scf.yield %incremented : index
+    } else {
+      scf.yield %count : index
+    }
+    scf.yield %next : index
+  }
+  %count_word = index.cast %count : index to i32
+  view.store %count_word, %draft_header[0] : i32, view<3xi32>
+  view.store %count_word, %draft_header[1] : i32, view<3xi32>
+  view.store %count_word, %draft_header[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// Publish a sampled proposal both to the next draft input and to its reserved
+// target-verifier slot. The following command consumes these writes directly.
+kernel.def export("qwen38_mtp_proposal_advance") @qwen38_mtp_proposal_advance(%round: index) {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%round_value: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer) {
+  %round = index.assume %round_value [range(%round_value, 0, 2)] : index
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %header = buffer.view %draft[%origin] : buffer -> view<3xi32>
+  %spans = buffer.view %draft[%descriptor_origin] : buffer -> view<64x5xi32>
+  %mapping = buffer.view %origins[%origin] : buffer -> view<8xi32>
+  %outputs = buffer.view %predictions[%origin] : buffer -> view<8xi32>
+  %inputs = buffer.view %draft_tokens[%origin] : buffer -> view<512xi32>
+  %target = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %one_word = scalar.constant 1 : i32
+  %relative = index.add %round, %one : index
+  %count_word = view.load %header[1] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 1, 8)] : index
+  scf.for %slot = [%zero to %count step %one] {
+    %prediction = view.load %outputs[%slot] : view<8xi32> -> i32
+    %begin_word = view.load %mapping[%slot] : view<8xi32> -> i32
+    %begin_value = index.cast %begin_word : i32 to index
+    %begin = index.assume %begin_value [range(%begin_value, 0, 508)] : index
+    %destination = index.add %begin, %relative : index
+    view.store %prediction, %target[%destination] : i32, view<512xi32>
+    view.store %prediction, %inputs[%slot] : i32, view<512xi32>
+    %position = view.load %spans[%slot, 1] : view<64x5xi32> -> i32
+    %next_position = scalar.addi %position, %one_word : i32
+    view.store %next_position, %spans[%slot, 1] : i32, view<64x5xi32>
+  }
+  kernel.return
+}

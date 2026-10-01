@@ -12,8 +12,7 @@ artifact index, not executable host policy. Compilation stops on the first
 failure. An output directory is usable only after the whole command succeeds.
 
 `--stage=mtp` prepares block-64 warm/carry/proposal and target verification
-commands. It emits `draft`
-and `begin` at the fixed 32-token/eight-span proposal shape and
+commands. It emits `propose` at the fixed 32-token/eight-span proposal shape and
 `warm<prefill-capacity>` and `verify<prefill-capacity>` for a matching target
 epoch. Each loaded target shape needs both variants. Shared embedding, target
 normalization and full-vocabulary
@@ -21,11 +20,16 @@ output roots resolve to existing target weight views; the extra block-64 groups
 load once. There is no command ABI or HAL extension.
 
 The model's optional MTP bundle warms its private cache after committed target
-epochs. `loom_serve_qwen_model_propose` returns three candidates without changing
-target positions or predictions. Its private hidden chain is discarded before
-the next proposal; committed target hidden supplies the starting carry.
-`loom_serve_qwen_model_verify` packs four-input verifiers with ordinary known
-spans. Device greedy acceptance stops at mismatch, EOS or output credit. Known
+epochs. `loom_serve_qwen_model_verify` packs four-input verifiers with ordinary
+known spans. A `PROPOSE` span supplies just its pending anchor. One cached
+command compacts the proposal rows, gathers committed carry, and runs three
+draft rounds whose sampled tokens feed both the next round and their reserved
+verifier slots on device. Target verification and catch-up follow on the same
+execution timeline without any intermediate host readback or wait. The private
+hidden chain lives in the shared command workspace; only committed target
+carry persists between epochs. Supplied candidates can use the same verifier
+without requesting proposal generation. Device greedy acceptance stops at
+mismatch, EOS or output credit. Known
 spans publish directly; speculative GDN transitions occupy a 63,504,384-byte
 capture, and only the accepted prefixes replay into retained state. Attention
 tails beyond the accepted position stay unreachable. MTP catch-up then consumes
@@ -34,11 +38,16 @@ are prepared once. The HTTP scheduler selects this optional path with
 `--mtp=/path/to/bundle --mtp_depth=3`; depth zero keeps MTP warm without
 proposing. Whole verifier spans share a target epoch with known prompt input.
 
-The real-weight `qwen_epoch_check --mtp=/path/to/bundle` checks proposal isolation,
-duplicate resident histories, compact-row permutation, zero/partial/full draft
+The real-weight `qwen_epoch_check --mtp=/path/to/bundle` compares distinct
+resident histories against ordinary target continuations: compact-row
+permutation, zero/partial/full draft
 acceptance, output-credit truncation, mixed known/speculative epochs, and
 subsequent retained target continuations. Forced proposals come from ordinary
-target execution, not baked token fixtures. Natural proposals are checked too.
+target execution, not baked token fixtures. Natural device-generated proposals
+are checked through their accepted outputs and subsequent retained continuation.
+`tests/mtp_proposal.loom` additionally checks compacted anchors, all three
+publication positions, reversed resident rows, one/eight generated spans,
+interleaved supplied candidates and known input, and untouched token storage.
 The focused carry check additionally compares exact copy
 identities and untouched rows/padding without loading model weights:
 

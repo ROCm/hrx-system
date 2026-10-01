@@ -20,6 +20,8 @@ kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count: index) launch(%token_capac
 kernel.decl @qwen38_mtp_shift_spans(%span_capacity: index) launch(%epoch: buffer, %normalized: buffer, %carry: buffer, %shifted: buffer)
 kernel.decl @qwen38_mtp_save_carry(%span_capacity: index) launch(%epoch: buffer, %normalized: buffer, %carry: buffer)
 kernel.decl @qwen38_mtp_gather_carry(%span_capacity: index) launch(%epoch: buffer, %carry: buffer, %hidden: buffer)
+kernel.decl @qwen38_mtp_proposal_prepare() launch(%epoch: buffer, %target_tokens: buffer, %draft: buffer, %origins: buffer, %draft_tokens: buffer)
+kernel.decl @qwen38_mtp_proposal_advance(%round: index) launch(%round_value: index, %draft: buffer, %origins: buffer, %predictions: buffer, %draft_tokens: buffer, %target_tokens: buffer)
 
 // Materializes the pairing token[P], target_hidden[P-1] and rewrites private
 // MTP KV from committed inputs. The full block shares its qualified math with
@@ -66,13 +68,7 @@ command.program.def public @qwen38_mtp_warm() launch(%embedding_parameters: buff
   command.return
 }
 
-command.program.def public @qwen38_mtp_begin() launch(%epoch: buffer, %carry: buffer, %hidden: buffer) {
-  %spans = config.get @runner.qwen38.span_capacity : index
-  kernel.launch @qwen38_mtp_gather_carry[%spans](%epoch, %carry, %hidden) : [index](buffer, buffer, buffer)
-  command.return
-}
-
-command.program.def public @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer, %hidden: buffer, %input_tokens: buffer, %output_tokens: buffer) {
+command.program.def @qwen38_mtp_draft() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %residual: buffer, %epoch: buffer, %rows: buffer, %cache: buffer, %hidden: buffer, %input_tokens: buffer, %output_tokens: buffer) {
   %tokens = config.get @runner.qwen38.prefill_token_count : index
   %spans = config.get @runner.qwen38.span_capacity : index
   %capacity = index.constant 512 : index
@@ -111,5 +107,33 @@ command.program.def public @qwen38_mtp_draft() launch(%embedding_parameters: buf
   kernel.launch @qwen38_rmsnorm_f32_prefill[%tokens](%capacity, %epsilon, %residual, %head_norm, %hidden) : [index](index, f32, buffer, view<5120xf32>, buffer)
   %origin = index.constant 0 : offset
   command.program.launch @qwen38_output_projection_greedy[%outputs, %origin, %origin](%output_parameters, %hidden, %output_tokens) : [index, offset, offset](buffer, buffer, buffer)
+  command.return
+}
+
+// Three autoregressive proposals remain in device storage from committed
+// carry through target verification. The transient allocator shares the same
+// residency workspace as the target; no per-round queue transfer or host wait
+// is needed. Only spans requesting generated candidates enter the draft batch.
+command.program.def public @qwen38_mtp_propose() launch(%embedding_parameters: buffer, %input_parameters: buffer, %layer_parameters: buffer, %head_parameters: buffer, %output_parameters: buffer, %epoch: buffer, %target_tokens: buffer, %rows: buffer, %cache: buffer, %carry: buffer) {
+  %spans = config.get @runner.qwen38.span_capacity : index
+  %control_bytes = index.constant 1548 : offset
+  %token_bytes = index.constant 2048 : offset
+  %output_bytes = index.constant 32 : offset
+  %hidden_bytes = index.constant 10485760 : offset
+  %draft = buffer.alloca<global> align(256) %control_bytes : buffer
+  %origins = buffer.alloca<global> align(256) %output_bytes : buffer
+  %input_tokens = buffer.alloca<global> align(256) %token_bytes : buffer
+  %output_tokens = buffer.alloca<global> align(256) %output_bytes : buffer
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  kernel.launch @qwen38_mtp_proposal_prepare(%epoch, %target_tokens, %draft, %origins, %input_tokens) : (buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @qwen38_mtp_gather_carry[%spans](%draft, %carry, %hidden) : [index](buffer, buffer, buffer)
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  scf.for %round = [%zero to %three step %one] unroll {
+    command.program.launch @qwen38_mtp_draft[](%embedding_parameters, %input_parameters, %layer_parameters, %head_parameters, %output_parameters, %residual, %draft, %rows, %cache, %hidden, %input_tokens, %output_tokens) : [](buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    kernel.launch @qwen38_mtp_proposal_advance[%round](%round, %draft, %origins, %output_tokens, %input_tokens, %target_tokens) : [index](index, buffer, buffer, buffer, buffer, buffer)
+  }
   command.return
 }

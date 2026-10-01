@@ -277,9 +277,10 @@ Depth zero with an MTP bundle keeps its cache/carry warm without proposing;
 omitting the bundle is the target-only control. These are distinct costs.
 Epoch and heartbeat records expose proposed tokens and accepted draft inputs
 (excluding the pending anchor). `model_ms` includes drafting, verification,
-accepted-state replay and catch-up; `draft_ms` isolates completed proposals and
-`target_ms` includes the remaining target/commit/catch-up work. No extra GPU
-waits split the inner command for timing. Bundle capacities must match every
+accepted-state replay and catch-up. Proposals feed each other and the verifier
+on device; only the final output/progress records are downloaded. Device
+dispatch profiling attributes inner work without inserting host waits for
+per-stage wall timers. Bundle capacities must match every
 loaded target shape. The full canonical vocabulary is used for both proposal
 and target selection; all code and weights remain shared across sessions.
 

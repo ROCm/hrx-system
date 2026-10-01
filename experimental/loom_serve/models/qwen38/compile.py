@@ -17,8 +17,7 @@ def compile_stage(arguments, stage):
     source = Path(__file__).resolve().parent
     is_mtp = stage.startswith("mtp_")
     stage_directory = {
-        "mtp_draft": "draft",
-        "mtp_begin": "begin",
+        "mtp_propose": "propose",
         "mtp_warm": f"warm{arguments.prefill_capacity}",
         "mtp_verify": f"verify{arguments.prefill_capacity}",
     }.get(stage, stage)
@@ -33,10 +32,10 @@ def compile_stage(arguments, stage):
     token_capacity = 1 if stage == "decode" else 512
     config = {
         "runner.qwen38.prefill_token_count": (
-            32 if stage in ("mtp_draft", "mtp_begin") else arguments.prefill_capacity
+            32 if stage == "mtp_propose" else arguments.prefill_capacity
         ),
         "runner.qwen38.span_capacity": (
-            8 if stage in ("mtp_draft", "mtp_begin") else arguments.span_capacity
+            8 if stage == "mtp_propose" else arguments.span_capacity
         ),
         "ggml.linear_q4k_q8_1_x4.token_capacity": token_capacity,
         "ggml.linear_q4k_q8_1_x4.output_capacity": 48,
@@ -58,8 +57,7 @@ def compile_stage(arguments, stage):
         "prefill": ("prefill.loom", "qwen38_prefill"),
         "decode": ("programs/qwen38/model_decode.loom", "qwen38_text_decode_greedy"),
         "epoch": ("epoch.loom", "qwen38_epoch"),
-        "mtp_draft": ("mtp.loom", "qwen38_mtp_draft"),
-        "mtp_begin": ("mtp.loom", "qwen38_mtp_begin"),
+        "mtp_propose": ("mtp.loom", "qwen38_mtp_propose"),
         "mtp_warm": ("mtp.loom", "qwen38_mtp_warm"),
         "mtp_verify": ("verify.loom", "qwen38_mtp_verify"),
     }[stage]
@@ -157,7 +155,7 @@ def main():
     stages = {
         "both": ("prefill", "decode"),
         "all": ("prefill", "decode", "epoch"),
-        "mtp": ("mtp_draft", "mtp_begin", "mtp_warm", "mtp_verify"),
+        "mtp": ("mtp_propose", "mtp_warm", "mtp_verify"),
     }.get(arguments.stage, (arguments.stage,))
     for stage in stages:
         compile_stage(arguments, stage)
