@@ -36,6 +36,13 @@ AMDGPU_RESOURCE = run_requirement(
     skip_contract = "Tests skip when no qualified native AMD GPU endpoint is available.",
 )
 
+AMDGPU_PEERS_RESOURCE = run_requirement(
+    id = "libamdf.resource.amd_gpu_peers",
+    label = Label("//libamdf/requirements:amd_gpu_peers"),
+    cmake_label = "runtime-resource=amd-gpu-peers",
+    skip_contract = "Tests require two explicitly selected endpoints reserved on distinct physical GPUs; absent selection or unavailable native services skip.",
+)
+
 XDNA_RESOURCE = run_requirement(
     id = "libamdf.resource.xdna",
     label = Label("//libamdf/requirements:xdna_device"),
@@ -48,5 +55,6 @@ REQUIREMENTS = [
     LIBAMDF_GPU,
     LIBAMDF_XDNA,
     AMDGPU_RESOURCE,
+    AMDGPU_PEERS_RESOURCE,
     XDNA_RESOURCE,
 ]

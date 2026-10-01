@@ -63,8 +63,9 @@ Query-driven recipes emit the backing's returned NONE or GLOBAL transitions;
 neither HOST_COHERENT nor a compiler target name substitutes for those answers.
 
 Windows compilation does not establish a USER queue service or native execution
-result. Physical peer-GPU execution has
-[no compiled cases](peer/README.md).
+result. [Physical peer-GPU construction](peer/README.md) has a separate corpus
+with explicit primary/peer selection and a two-GPU run requirement. Joint
+allocation and address queries do not establish executed peer dataflow.
 
 Per-dispatch LDS capacity changes, additional packet fields, rectangular SDMA
 transfers, SDMA atomics, general poll/cache controls, command-buffer variants,

@@ -9,6 +9,7 @@
 
 #include <cinttypes>
 #include <cstdio>
+#include <string>
 #include <vector>
 
 #include "amdf/amdf.h"
@@ -16,6 +17,48 @@
 #include "gtest/gtest.h"
 #include "util/device_cache.h"
 #include "util/provider.h"
+
+// Records the exact endpoint and its contemporaneous native correlation key.
+// Physical topology and exclusive assignment remain runner-owned facts.
+inline void RecordGpuEndpointProperties(
+    const char* prefix, const amdf_endpoint_info_t& endpoint_info,
+    const amdf_gpu_endpoint_info_t& gpu_info) {
+  const std::string property_prefix(prefix);
+  char identity[64];
+  std::snprintf(identity, sizeof(identity), "%016" PRIx64 ":%016" PRIx64,
+                endpoint_info.id.words[0], endpoint_info.id.words[1]);
+  ::testing::Test::RecordProperty(property_prefix + "_endpoint_id", identity);
+  const auto& native_identity = endpoint_info.native_identity;
+  switch (native_identity.type) {
+    case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_NONE:
+      std::snprintf(identity, sizeof(identity), "none");
+      break;
+    case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE:
+      std::snprintf(identity, sizeof(identity), "linux_device:%u:%u",
+                    native_identity.value.linux_device.major,
+                    native_identity.value.linux_device.minor);
+      break;
+    case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER:
+      std::snprintf(
+          identity, sizeof(identity), "windows_adapter:%016" PRIx64 ":%u",
+          native_identity.value.windows_adapter.luid,
+          native_identity.value.windows_adapter.physical_adapter_index);
+      break;
+    default:
+      FAIL() << "unknown native endpoint identity type "
+             << native_identity.type;
+  }
+  ::testing::Test::RecordProperty(property_prefix + "_native_identity",
+                                  identity);
+  char target[32];
+  std::snprintf(target, sizeof(target), "gfx%u%x%x", gpu_info.gfx_ip.major,
+                gpu_info.gfx_ip.minor, gpu_info.gfx_ip.stepping);
+  ::testing::Test::RecordProperty(property_prefix + "_target", target);
+  ::testing::Test::RecordProperty(property_prefix + "_asic_revision",
+                                  gpu_info.asic_revision);
+  ::testing::Test::RecordProperty(property_prefix + "_xcc_count",
+                                  gpu_info.topology.xcc_count);
+}
 
 // Finds a backing profile qualified for the requested live device access.
 inline uint32_t FindGpuMemoryProfileOrdinal(
@@ -159,34 +202,8 @@ class GpuDeviceFixture : public ::testing::Test {
         endpoint_info.structure_size = sizeof(endpoint_info);
         ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint_info),
                   AMDF_STATUS_OK);
-        char identity[64];
-        std::snprintf(identity, sizeof(identity), "%016" PRIx64 ":%016" PRIx64,
-                      endpoint_info.id.words[0], endpoint_info.id.words[1]);
-        RecordProperty("amdf_gpu_endpoint_id", identity);
-        const auto& native_identity = endpoint_info.native_identity;
-        switch (native_identity.type) {
-          case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_NONE:
-            std::snprintf(identity, sizeof(identity), "none");
-            break;
-          case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_LINUX_DEVICE:
-            std::snprintf(identity, sizeof(identity), "linux_device:%u:%u",
-                          native_identity.value.linux_device.major,
-                          native_identity.value.linux_device.minor);
-            break;
-          case AMDF_ENDPOINT_NATIVE_IDENTITY_TYPE_WINDOWS_ADAPTER:
-            std::snprintf(
-                identity, sizeof(identity), "windows_adapter:%016" PRIx64 ":%u",
-                native_identity.value.windows_adapter.luid,
-                native_identity.value.windows_adapter.physical_adapter_index);
-            break;
-          default:
-            FAIL() << "unknown native endpoint identity type "
-                   << native_identity.type;
-        }
-        RecordProperty("amdf_gpu_native_identity", identity);
-        RecordProperty("amdf_gpu_target", target);
-        RecordProperty("amdf_gpu_asic_revision", gpu_info.asic_revision);
-        RecordProperty("amdf_gpu_xcc_count", gpu_info.topology.xcc_count);
+        ASSERT_NO_FATAL_FAILURE(
+            RecordGpuEndpointProperties("amdf_gpu", endpoint_info, gpu_info));
         break;
       }
       endpoint_ = nullptr;

@@ -56,6 +56,11 @@ selection; host-only runs exclude their requirements. GPU/XDNA interoperability
 requires both families and resources. Native and interop cases share the AMD
 hardware resource group.
 
+[Physical peer-GPU cases](gpu/peer/README.md) also declare
+`libamdf.resource.amd_gpu_peers` and require both exact endpoint selectors.
+Their runner reserves two distinct physical GPUs; a single-GPU CI profile
+does not admit that resource. Missing peer selection skips before activation.
+
 A host-only invocation without the ROCr-backed AMDGPU HAL is:
 
 ```sh

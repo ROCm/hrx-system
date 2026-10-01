@@ -26,7 +26,7 @@ gpu/
     encoding/
   recipes/                   # One single-GPU composition corpus; N queues.
   kernels/                   # Compiler fixture/provenance boundary.
-  peer/                      # Physical multi-GPU deployment boundary.
+  peer/                      # One explicitly reserved physical multi-GPU corpus.
   lifecycle/                 # Completed resources and opt-in device recreation.
 ```
 
@@ -36,8 +36,8 @@ Resident programs own intermediate payload and credit handoffs; the host owns
 startup and terminal joins. Platform memory, kernel-queue and external-API suites
 retain their separate dependencies. The `kernels` package owns authored Loom GPU
 fixtures and their generated products; `xdna/programs` owns the finite and
-resident array fixtures. The `peer` package exports its design/readme without
-placeholder tests or executables.
+resident array fixtures. The [peer corpus](peer/README.md) requires explicit
+primary and peer endpoint selection under a two-physical-GPU reservation.
 
 `CtsDeviceCache` creates one instance and one device per endpoint and engine
 kind for an executable, caching activation failures as well. GPU queue families
@@ -69,15 +69,16 @@ replaces the case's earlier payload observation.
 
 ## Build and execution
 
-`//libamdf/cts/gpu/{pm4,sdma,aql,recipes}` each uses `amdf_cts_test_suite` with
+`//libamdf/cts/gpu/{pm4,sdma,aql,recipes,peer}` each uses `amdf_cts_test_suite` with
 the default dynamic provider. Process/instance native lifetimes are two test
 invocations of the same binary. Only `//libamdf/cts/core:query` explicitly
 retains the three binding modes.
 
 Native corpora require x86-64 and Linux or Windows at compile time, inherit
 the `libamdf.resource.amd_gpu` execution requirement and share the AMD GPU
-resource group. Encoder target predicates and family capabilities select the
-actual native queue service:
+resource group. Physical peer cases additionally declare
+`libamdf.resource.amd_gpu_peers`; single-GPU jobs cannot admit them. Encoder
+target predicates and family capabilities select the actual native queue service:
 
 | Platform | PM4 | AQL | SDMA |
 | --- | --- | --- | --- |
@@ -188,7 +189,7 @@ remaining field, composition and architecture boundaries within each group.
 | AQL | [aql/BUILD.bazel](aql/BUILD.bazel) | Signal reach, additional executable lifecycles, profiling, counters and metadata. |
 | Recipes | [recipes/BUILD.bazel](recipes/BUILD.bazel) | Additional backing classes, producer/consumer compositions and executable visibility. |
 | Manual lifecycle | [lifecycle/BUILD.bazel](lifecycle/BUILD.bazel) | Ordinary same-device copies are enabled; peer-device recreation remains disabled. |
-| Physical peers | No compiled cases | Multi-device admission, address reach, synchronization and runner requirements. |
+| Physical peers | [peer/BUILD.bazel](peer/BUILD.bazel) | Explicit endpoint reservation and joint memory construction; executed dataflow, synchronization and topology retain independent witnesses. |
 | GPU/NPU recipes | [interop/gpu/xdna/recipes/BUILD.bazel](../interop/gpu/xdna/recipes/BUILD.bazel) | Finite transfer/shader chains and resident exchanges cover both initiators, credits, independent workers and startup/drain. Cross-output-channel publication, other imported backing and simultaneous independent traffic require separate witnesses. |
 
 Cases use real commands and changing exact data. They do not exhaust their
