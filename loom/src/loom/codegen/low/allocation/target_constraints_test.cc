@@ -226,6 +226,49 @@ TEST_F(LowAllocationTargetConstraintsTest,
 }
 
 TEST_F(LowAllocationTargetConstraintsTest,
+       ArchitecturalReservationSurvivesNarrowerAllocationBudget) {
+  // Linear and explicit physical classes both reserve architectural state
+  // outside the candidate window available to ordinary values.
+  const iree_string_view_t class_names[] = {IREE_SV("test.phys"),
+                                            IREE_SV("test.explicit32")};
+  for (iree_string_view_t class_name : class_names) {
+    const uint16_t class_id = RegisterClassId(class_name);
+    const auto* descriptor_set = target_.descriptor_set;
+    const auto* reg_class = &descriptor_set->reg_classes[class_id];
+    const uint32_t reserved_location =
+        loom_low_reg_class_uses_explicit_physical_registers(reg_class)
+            ? loom_low_descriptor_set_physical_register_candidate(
+                  descriptor_set, class_id, /*ordinal=*/2)
+            : 6;
+    const loom_low_allocation_budget_t budget = {class_name, 2};
+    const loom_low_allocation_reserved_range_t reservation = {
+        class_name, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+        reserved_location, 1};
+    DiagnosticCapture capture = {};
+    const iree_diagnostic_emitter_t emitter = {CaptureDiagnostic, &capture};
+    loom_low_allocation_target_constraints_t constraints = {};
+    IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
+        &module_, &function_op_, &target_, &budget, /*budget_count=*/1,
+        &reservation, /*reserved_range_count=*/1, emitter, &arena_,
+        &constraints));
+    EXPECT_EQ(capture.count, 0u);
+    ASSERT_EQ(constraints.error_count, 0u);
+    ASSERT_EQ(constraints.reserved_range_count, 1u);
+    EXPECT_EQ(constraints.reserved_ranges[0].location_base, reserved_location);
+
+    loom_low_allocation_class_capacity_t capacity = {};
+    IREE_ASSERT_OK(loom_low_allocation_target_constraints_reg_class_capacity(
+        &constraints, class_id, &capacity));
+    EXPECT_EQ(capacity.max_units, 2u);
+    EXPECT_FALSE(
+        loom_low_allocation_target_constraints_location_range_fits_capacity(
+            descriptor_set, &capacity,
+            LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, reserved_location,
+            /*location_count=*/1));
+  }
+}
+
+TEST_F(LowAllocationTargetConstraintsTest,
        ReportsOverlappingReservedRangesAsDiagnostic) {
   loom_low_allocation_reserved_range_t reserved_ranges[2] = {};
   reserved_ranges[0].register_class = IREE_SV("test.phys");
