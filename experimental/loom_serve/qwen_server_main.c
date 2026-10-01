@@ -17,6 +17,8 @@ IREE_FLAG(string, decode, "", "Compiled decode artifact directory.");
 IREE_FLAG(string, epoch, "", "Compiled packed epoch artifact directory.");
 IREE_FLAG(string, scheduler, "packed",
           "packed, isolated, or matched (isolated with prefill decode math).");
+IREE_FLAG(string, packing, "mixed",
+          "mixed or separate prompt/decode cohorts, with the same kernels.");
 IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF path.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
 IREE_FLAG(int32_t, port, 8080,
@@ -53,6 +55,15 @@ int main(int argc, char** argv) {
   }
   if (schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED && !FLAG_epoch[0]) {
     fprintf(stderr, "The packed scheduler requires --epoch.\n");
+    return EXIT_FAILURE;
+  }
+  loom_serve_qwen_packing_mode_t packing_mode;
+  if (!strcmp(FLAG_packing, "mixed")) {
+    packing_mode = LOOM_SERVE_QWEN_PACKING_MIXED;
+  } else if (!strcmp(FLAG_packing, "separate")) {
+    packing_mode = LOOM_SERVE_QWEN_PACKING_SEPARATE;
+  } else {
+    fprintf(stderr, "packing must be mixed or separate.\n");
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
@@ -94,16 +105,17 @@ int main(int argc, char** argv) {
       fprintf(stderr,
               "{\"event\":\"ready\",\"address\":\"%.*s\",\"rows\":%d,\"chunk_"
               "size\":%zu,\"scheduler\":\"%s\",\"epoch_capacity\":%zu,"
-              "\"span_capacity\":%zu}\n",
+              "\"span_capacity\":%zu,\"packing\":\"%s\"}\n",
               (int)address.size, address.data, FLAG_rows, chunk_size,
               FLAG_scheduler, loom_serve_qwen_model_epoch_capacity(model),
-              loom_serve_qwen_model_span_capacity(model));
+              loom_serve_qwen_model_span_capacity(model), FLAG_packing);
       const loom_serve_qwen_service_options_t service_options = {
           .row_count = (iree_host_size_t)FLAG_rows,
           .chunk_size = chunk_size,
           .default_max_tokens = (iree_host_size_t)FLAG_max_tokens,
           .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
           .schedule_mode = schedule_mode,
+          .packing_mode = packing_mode,
       };
       status = loom_serve_qwen_service_run(model, server, &service_options,
                                            allocator);

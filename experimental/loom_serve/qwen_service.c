@@ -138,6 +138,8 @@ typedef struct qwen_service_t {
   iree_host_size_t default_max_tokens;
   // Same ready partition can execute packed or through isolated controls.
   loom_serve_qwen_schedule_mode_t schedule_mode;
+  // Admission ablation independent of the packed versus isolated math choice.
+  loom_serve_qwen_packing_mode_t packing_mode;
   // Prepared token shape used by the live packing policy.
   iree_host_size_t token_capacity;
   // Maximum distinct rows in one prepared epoch.
@@ -727,6 +729,27 @@ static void qwen_prepare_ready(qwen_session_t* session, bool* out_progress,
           : 1;
 }
 
+// The rotating first ready row chooses the phase; other rows of that phase
+// can still batch together. Explicit request phase matters: a one-token prompt
+// tail is not a decode. Credit and cancellation were settled before this
+// filter.
+static void qwen_separate_ready(const qwen_service_t* service,
+                                iree_host_size_t* ready_counts) {
+  for (iree_host_size_t i = 0; i < service->row_count; ++i) {
+    const iree_host_size_t first = (service->cursor + i) % service->row_count;
+    if (!ready_counts[first]) {
+      continue;
+    }
+    const qwen_request_phase_t phase = service->sessions[first].request.phase;
+    for (iree_host_size_t row = 0; row < service->row_count; ++row) {
+      if (service->sessions[row].request.phase != phase) {
+        ready_counts[row] = 0;
+      }
+    }
+    return;
+  }
+}
+
 static iree_status_t qwen_execute_epoch(
     qwen_service_t* service, iree_host_size_t count,
     const loom_serve_qwen_scheduled_span_t* scheduled) {
@@ -806,12 +829,15 @@ static iree_status_t qwen_execute_epoch(
   fprintf(stderr,
           "{\"event\":\"epoch\",\"epoch\":%" PRIu64
           ",\"scheduler\":\"%s\",\"spans\":%zu,\"token_capacity\":%zu,"
+          "\"packing\":\"%s\","
           "\"prefill_tokens\":%zu,\"decode_tokens\":%zu,"
           "\"selected_tokens_including_eos\":%zu,\"traversals\":%zu,"
           "\"model_ms\":%.3f,\"rows\":%.*s}\n",
-          epoch, mode, count, service->token_capacity, prefill_count,
-          decode_count, output_count, packed ? (iree_host_size_t)1 : count,
-          (completed - start) / 1e6,
+          epoch, mode, count, service->token_capacity,
+          service->packing_mode == LOOM_SERVE_QWEN_PACKING_SEPARATE ? "separate"
+                                                                    : "mixed",
+          prefill_count, decode_count, output_count,
+          packed ? (iree_host_size_t)1 : count, (completed - start) / 1e6,
           (int)iree_string_builder_size(&service->scratch),
           iree_string_builder_buffer(&service->scratch));
   qwen_observe(service, "output");
@@ -878,6 +904,7 @@ iree_status_t loom_serve_qwen_service_run(
       .context_capacity = loom_serve_qwen_model_context_capacity(model),
       .default_max_tokens = options->default_max_tokens,
       .schedule_mode = options->schedule_mode,
+      .packing_mode = options->packing_mode,
       .token_capacity = loom_serve_qwen_model_epoch_capacity(model),
       .span_capacity = loom_serve_qwen_model_span_capacity(model),
       .heartbeat = {.interval = options->heartbeat_interval}};
@@ -938,6 +965,9 @@ iree_status_t loom_serve_qwen_service_run(
     }
     if (iree_status_is_ok(status) &&
         !loom_serve_http_server_is_stopping(server)) {
+      if (service.packing_mode == LOOM_SERVE_QWEN_PACKING_SEPARATE) {
+        qwen_separate_ready(&service, ready_counts);
+      }
       loom_serve_qwen_scheduled_span_t spans[8];
       const iree_host_size_t count = loom_serve_qwen_schedule(
           service.row_count, ready_counts, service.token_capacity,

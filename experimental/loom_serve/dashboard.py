@@ -164,7 +164,8 @@ def render(view, all_sensors=False, now_ns=None, width=None):
     ready = latest.get("ready", {})
     lines.append(
         f"Scheduler {text(ready.get('scheduler', '--'))}  rows {ready.get('rows', '--')}"
-        f"  token shape {ready.get('epoch_capacity', '--')}  record #{view.last['sequence']}"
+        f"  packing {text(ready.get('packing', '--'))}  token shape {ready.get('epoch_capacity', '--')}"
+        f"  record #{view.last['sequence']}"
     )
 
     def age(event):

@@ -228,6 +228,15 @@ fixed. `--chunk_size` caps each row's contribution, not the whole epoch. The
 fixed prepared shape still computes padding; the epoch log exposes useful work
 separately from its capacity.
 
+`--packing=separate` is a same-kernel scheduling ablation: each epoch batches
+only prompts or only decode inputs, selected by the first ready row in the
+rotating priority order. A one-token prompt tail remains prompt work. The
+default `--packing=mixed` admits both classes together. This choice is
+independent of `--scheduler` and the per-row `--chunk_size` cap; ready and epoch
+events record it. Comparing separate against mixed with `--scheduler=packed`
+isolates cohort mixing, while packed against isolated measures shared versus
+per-row traversals. Neither comparison enables speculative decoding.
+
 For a bounded real HTTP check and initial end-to-end measurement:
 
 ```sh

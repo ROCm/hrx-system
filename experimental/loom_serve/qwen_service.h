@@ -23,6 +23,13 @@ typedef enum loom_serve_qwen_schedule_mode_e {
   LOOM_SERVE_QWEN_SCHEDULE_MATCHED,
 } loom_serve_qwen_schedule_mode_t;
 
+typedef enum loom_serve_qwen_packing_mode_e {
+  // Fill one epoch with all ready prompt and decode spans.
+  LOOM_SERVE_QWEN_PACKING_MIXED = 0,
+  // Pack only the first ready row's phase, using the same rotating priority.
+  LOOM_SERVE_QWEN_PACKING_SEPARATE,
+} loom_serve_qwen_packing_mode_t;
+
 typedef struct loom_serve_qwen_service_options_t {
   // Number of retained rows, matching the model residency.
   iree_host_size_t row_count;
@@ -34,6 +41,8 @@ typedef struct loom_serve_qwen_service_options_t {
   iree_duration_t heartbeat_interval;
   // Execution choice; the planner and HTTP lifecycle are shared by all modes.
   loom_serve_qwen_schedule_mode_t schedule_mode;
+  // Whether prompt and decode inputs may share an epoch, independent of math.
+  loom_serve_qwen_packing_mode_t packing_mode;
 } loom_serve_qwen_service_options_t;
 
 // Runs one application owner until transport shutdown or model failure. Model
