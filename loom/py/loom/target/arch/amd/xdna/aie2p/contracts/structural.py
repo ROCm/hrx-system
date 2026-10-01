@@ -10,7 +10,7 @@ from loom.dialect.vector import defs as vector
 from loom.target.arch.amd.xdna.aie2p.contracts.accumulator_structural import (
     _ACCUMULATOR_BITCAST_TYPE_GROUPS,
     _ACCUMULATOR_CONCAT_RULES,
-    _ACCUMULATOR_VECTOR_SHAPES,
+    _ACCUMULATOR_VECTOR_SLICE_RULES,
     _F32X32_ACCUMULATOR,
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
@@ -928,42 +928,6 @@ def _vector_slice_carrier_rule(
     )
 
 
-def _accumulator_vector_slice_rules(
-    source_type: TypePattern,
-    result_type: TypePattern,
-    packet_lane_count: int,
-    unit_count: int,
-) -> tuple[DescriptorRule, ...]:
-    move = _descriptor("amd.xdna.aie2p.move.accumulator512.to.vector512")
-    return tuple(
-        DescriptorRule(
-            source_op=vector.vector_slice,
-            descriptor=move,
-            guards=_vector_slice_guards(
-                source_type,
-                result_type,
-                unit_index * packet_lane_count,
-                unit_index * packet_lane_count,
-            ),
-            emit=(
-                EmitRegisterSlice(
-                    source=ValueRef.operand("source"),
-                    result=ValueRef.temporary("accumulator_unit"),
-                    unit_offset=unit_index,
-                    unit_count=1,
-                ),
-                EmitDescriptorOp(
-                    descriptor=move,
-                    operands={"src": ValueRef.temporary("accumulator_unit")},
-                    results={"dst": ValueRef.result("result")},
-                    form=DescriptorEmitForm.OP,
-                ),
-            ),
-        )
-        for unit_index in range(unit_count)
-    )
-
-
 def _vector_slice_wide_shift_rule(
     source_type: TypePattern,
     result_type: TypePattern,
@@ -1541,16 +1505,7 @@ AIE2P_STRUCTURAL_RULES = (
             ),
         )
     ),
-    *(
-        rule
-        for shape in _ACCUMULATOR_VECTOR_SHAPES
-        for rule in _accumulator_vector_slice_rules(
-            shape.source_type,
-            shape.packet_type,
-            shape.packet_lane_count,
-            shape.logical_packet_count,
-        )
-    ),
+    *_ACCUMULATOR_VECTOR_SLICE_RULES,
     *(
         rule
         for element_types, element_byte_count, wide_lane_maximum in (

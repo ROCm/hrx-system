@@ -12,7 +12,6 @@ from loom.target.arch.amd.xdna.aie2p.contracts.data_path import (
 )
 from loom.target.arch.amd.xdna.aie2p.contracts.structural import (
     _ACCUMULATOR_BITCAST_TYPE_GROUPS,
-    _ACCUMULATOR_VECTOR_SHAPES,
     _F32X32_ACCUMULATOR,
     _I1_VECTOR,
     _I16_F16_BF16_8X8_VECTOR,
@@ -298,34 +297,6 @@ def test_wide_predicate_concat_preserves_ordered_el_carriers() -> None:
             result=ValueRef.result("result"),
         ),
     )
-
-
-def test_accumulator_packet_slices_move_each_mbms_unit_to_x() -> None:
-    for shape in _ACCUMULATOR_VECTOR_SHAPES:
-        rules = tuple(
-            _slice_rule(
-                shape.source_type,
-                shape.packet_type,
-                unit_index * shape.packet_lane_count,
-                unit_index * shape.packet_lane_count,
-            )
-            for unit_index in range(shape.logical_packet_count)
-        )
-        assert all(
-            rule.descriptor.key == "amd.xdna.aie2p.move.accumulator512.to.vector512"
-            for rule in rules
-        )
-        for unit_index, rule in enumerate(rules):
-            assert [type(emit) for emit in rule.emit] == [
-                EmitRegisterSlice,
-                EmitDescriptorOp,
-            ]
-            assert (rule.emit[0].unit_offset, rule.emit[0].unit_count) == (
-                unit_index,
-                1,
-            )
-            assert rule.emit[1].operands["src"] == rule.emit[0].result
-            assert rule.emit[1].results["dst"] == ValueRef.result("result")
 
 
 def _concat_rule(

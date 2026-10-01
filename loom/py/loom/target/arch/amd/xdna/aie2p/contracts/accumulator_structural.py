@@ -13,6 +13,7 @@ from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
 )
 from loom.target.contracts import (
+    AttrProject,
     ContractEmit,
     DescriptorEmitForm,
     DescriptorResultType,
@@ -22,6 +23,7 @@ from loom.target.contracts import (
     EmitRegisterSlice,
     Guard,
     TypePattern,
+    ValueAliasRule,
     ValueRef,
     ValueTypeProject,
     Vector,
@@ -82,16 +84,6 @@ class _AccumulatorVectorShape:
             self.maximum_lane_count,
         )
 
-    @property
-    def packet_type(self) -> TypePattern:
-        """One possibly partial logical packet moved through an X register."""
-
-        return Vector(
-            self.element_type,
-            minimum_lanes=1,
-            maximum_lanes=self.packet_lane_count,
-        )
-
 
 # AIE2P exposes allocatable two-unit and four-unit accumulator views. There is
 # no three-unit physical view, so a three-packet logical value retains a padded
@@ -105,6 +97,427 @@ _ACCUMULATOR_VECTOR_SHAPES = (
     _AccumulatorVectorShape("i64", 17, 24, 8, 3, 4),
     _AccumulatorVectorShape("i64", 25, 32, 8, 4, 4),
 )
+
+
+@dataclass(frozen=True, slots=True)
+class _AccumulatorSliceResultShape:
+    """Logical result interval sharing one carrier and packet count."""
+
+    # Result vector element type.
+    element_type: str
+    # First logical lane count carried by the shape.
+    minimum_lane_count: int
+    # Last logical lane count carried by the shape.
+    maximum_lane_count: int
+    # Logical lanes carried by one 512-bit packet.
+    packet_lane_count: int
+    # Number of packets that can contain logical lanes.
+    logical_packet_count: int
+    # Number of units in the allocatable physical carrier.
+    register_unit_count: int
+    # Low register class carrying the result packets.
+    register_class: str
+
+    @property
+    def result_type(self) -> TypePattern:
+        """Source-visible vector interval using this carrier."""
+
+        return _vector_lane_interval(
+            self.element_type,
+            self.minimum_lane_count,
+            self.maximum_lane_count,
+        )
+
+    @property
+    def is_accumulator(self) -> bool:
+        """Whether the result packets stay in the accumulator register file."""
+
+        return self.register_class == "aie2p.mbms"
+
+
+def _accumulator_slice_result_shapes() -> tuple[_AccumulatorSliceResultShape, ...]:
+    """Returns every result carrier reachable from an accumulator source."""
+
+    ordinary_lane_maximums = {
+        "f32": 31,
+        "i32": 32,
+        "i64": 16,
+    }
+    result_shapes: list[_AccumulatorSliceResultShape] = []
+    for element_type, packet_lane_count in (("f32", 16), ("i32", 16), ("i64", 8)):
+        ordinary_lane_maximum = ordinary_lane_maximums[element_type]
+        result_shapes.append(
+            _AccumulatorSliceResultShape(
+                element_type,
+                1,
+                packet_lane_count,
+                packet_lane_count,
+                1,
+                2,
+                "aie2p.vec256",
+            )
+        )
+        if ordinary_lane_maximum > packet_lane_count:
+            result_shapes.append(
+                _AccumulatorSliceResultShape(
+                    element_type,
+                    packet_lane_count + 1,
+                    ordinary_lane_maximum,
+                    packet_lane_count,
+                    2,
+                    4,
+                    "aie2p.vec256",
+                )
+            )
+        result_shapes.extend(
+            _AccumulatorSliceResultShape(
+                shape.element_type,
+                shape.minimum_lane_count,
+                shape.maximum_lane_count,
+                shape.packet_lane_count,
+                shape.logical_packet_count,
+                shape.register_unit_count,
+                "aie2p.mbms",
+            )
+            for shape in _ACCUMULATOR_VECTOR_SHAPES
+            if shape.element_type == element_type
+        )
+    return tuple(result_shapes)
+
+
+_ACCUMULATOR_SLICE_RESULT_SHAPES = _accumulator_slice_result_shapes()
+
+
+def _accumulator_slice_guards(
+    source_type: TypePattern,
+    result_type: TypePattern,
+    offset_minimum: int,
+    offset_maximum: int,
+) -> tuple[Guard, ...]:
+    """Selects one static rank-one interval from an accumulator source."""
+
+    return (
+        Guard.value_type("source", source_type),
+        Guard.value_type("result", result_type),
+        Guard.operand_segment_count("offsets", 0),
+        Guard.i64_array_count("static_offsets", 1),
+        Guard.i64_array_element_range(
+            "static_offsets",
+            element=0,
+            minimum=offset_minimum,
+            maximum=offset_maximum,
+        ),
+    )
+
+
+def _accumulator_slice_unit(
+    source: ValueRef,
+    unit_index: int,
+    name: str,
+    emits: list[ContractEmit],
+) -> ValueRef:
+    """Projects one MBMS unit from an accumulator carrier."""
+
+    unit = ValueRef.temporary(name)
+    emits.append(
+        EmitRegisterSlice(
+            source=source,
+            result=unit,
+            unit_offset=unit_index,
+            unit_count=1,
+        )
+    )
+    return unit
+
+
+def _accumulator_slice_x_packet(
+    source: ValueRef,
+    unit_index: int,
+    name: str,
+    emits: list[ContractEmit],
+    *,
+    result: ValueRef | None = None,
+) -> ValueRef:
+    """Moves one selected MBMS unit into a 512-bit X carrier."""
+
+    accumulator_unit = _accumulator_slice_unit(
+        source,
+        unit_index,
+        f"{name}_accumulator",
+        emits,
+    )
+    vector_packet = result or ValueRef.temporary(f"{name}_vector")
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.move.accumulator512.to.vector512"),
+            operands={"src": accumulator_unit},
+            results={"dst": vector_packet},
+            result_types=(
+                None if result is not None else {"dst": DescriptorResultType()}
+            ),
+            form=DescriptorEmitForm.OP,
+        )
+    )
+    return vector_packet
+
+
+def _accumulator_slice_aligned_rule(
+    source_shape: _AccumulatorVectorShape,
+    result_shape: _AccumulatorSliceResultShape,
+    source_packet_index: int,
+) -> ValueAliasRule | DescriptorRule:
+    """Retains aligned MBMS packets or moves them into X carriers."""
+
+    offset = source_packet_index * source_shape.packet_lane_count
+    guards = _accumulator_slice_guards(
+        source_shape.source_type,
+        result_shape.result_type,
+        offset,
+        offset,
+    )
+    source = ValueRef.operand("source")
+    result = ValueRef.result("result")
+    if (
+        result_shape.is_accumulator
+        and source_packet_index == 0
+        and source_shape.register_unit_count == result_shape.register_unit_count
+    ):
+        return ValueAliasRule(
+            source_op=vector.vector_slice,
+            source=source,
+            result=result,
+            guards=guards,
+        )
+
+    if (
+        result_shape.is_accumulator
+        and result_shape.logical_packet_count == result_shape.register_unit_count
+    ):
+        return DescriptorRule(
+            source_op=vector.vector_slice,
+            guards=guards,
+            emit=(
+                EmitRegisterSlice(
+                    source=source,
+                    result=result,
+                    unit_offset=source_packet_index,
+                ),
+            ),
+        )
+
+    emits: list[ContractEmit] = []
+    packets: list[ValueRef] = []
+    if result_shape.is_accumulator:
+        packets.extend(
+            _accumulator_slice_unit(
+                source,
+                source_packet_index + packet_index,
+                f"result_accumulator_{packet_index}",
+                emits,
+            )
+            for packet_index in range(result_shape.logical_packet_count)
+        )
+        packets.extend(
+            (packets[-1],) * (result_shape.register_unit_count - len(packets))
+        )
+        emits.append(EmitRegisterConcat(sources=packets, result=result))
+        return DescriptorRule(
+            source_op=vector.vector_slice,
+            guards=guards,
+            emit=tuple(emits),
+        )
+
+    packets.extend(
+        (
+            _accumulator_slice_x_packet(
+                source,
+                source_packet_index + packet_index,
+                f"result_packet_{packet_index}",
+                emits,
+                result=(result if result_shape.logical_packet_count == 1 else None),
+            )
+        )
+        for packet_index in range(result_shape.logical_packet_count)
+    )
+    if len(packets) > 1:
+        emits.append(EmitRegisterConcat(sources=packets, result=result))
+    return DescriptorRule(
+        source_op=vector.vector_slice,
+        descriptor=_descriptor("amd.xdna.aie2p.move.accumulator512.to.vector512"),
+        guards=guards,
+        emit=tuple(emits),
+    )
+
+
+def _accumulator_slice_shifted_rule(
+    source_shape: _AccumulatorVectorShape,
+    result_shape: _AccumulatorSliceResultShape,
+    source_packet_index: int,
+    offset_minimum: int,
+    offset_maximum: int,
+    *,
+    include_adjacent_packet: bool,
+) -> DescriptorRule:
+    """Shifts selected MBMS packets through X and materializes the result."""
+
+    source = ValueRef.operand("source")
+    result = ValueRef.result("result")
+    source_packet_count = result_shape.logical_packet_count + int(
+        include_adjacent_packet
+    )
+    emits: list[ContractEmit] = []
+    source_packets = tuple(
+        _accumulator_slice_x_packet(
+            source,
+            source_packet_index + packet_index,
+            f"source_packet_{packet_index}",
+            emits,
+        )
+        for packet_index in range(source_packet_count)
+    )
+    byte_offset = ValueRef.temporary("byte_offset")
+    emits.append(
+        EmitDescriptorOp(
+            descriptor=_descriptor("amd.xdna.aie2p.constant.i32.mova"),
+            results={"dst": byte_offset},
+            result_types={"dst": DescriptorResultType()},
+            immediates={
+                "i": AttrProject.i64_array_lane_byte_offset(
+                    "static_offsets",
+                    element=0,
+                    bytes_per_lane=64 // source_shape.packet_lane_count,
+                    base_byte_offset=-64 * source_packet_index,
+                )
+            },
+            form=DescriptorEmitForm.CONST,
+        )
+    )
+
+    shift = _descriptor("amd.xdna.aie2p.shift.bytes.x.configured")
+    shifted_packets: list[ValueRef] = []
+    for packet_index in range(result_shape.logical_packet_count):
+        is_direct_result = (
+            not result_shape.is_accumulator and result_shape.logical_packet_count == 1
+        )
+        shifted_packet = (
+            result
+            if is_direct_result
+            else ValueRef.temporary(f"shifted_packet_{packet_index}")
+        )
+        high_packet_index = min(packet_index + 1, len(source_packets) - 1)
+        emits.append(
+            EmitDescriptorOp(
+                descriptor=shift,
+                operands={
+                    "s1": source_packets[packet_index],
+                    "s2": source_packets[high_packet_index],
+                    "shift": byte_offset,
+                },
+                results={"d": shifted_packet},
+                result_types=(
+                    None if is_direct_result else {"d": DescriptorResultType()}
+                ),
+                form=DescriptorEmitForm.OP,
+            )
+        )
+        shifted_packets.append(shifted_packet)
+
+    if result_shape.is_accumulator:
+        accumulator_packets: list[ValueRef] = []
+        move = _descriptor("amd.xdna.aie2p.move.vector512.to.accumulator512")
+        for packet_index, shifted_packet in enumerate(shifted_packets):
+            accumulator_packet = ValueRef.temporary(
+                f"result_accumulator_{packet_index}"
+            )
+            emits.append(
+                EmitDescriptorOp(
+                    descriptor=move,
+                    operands={"src": shifted_packet},
+                    results={"dst": accumulator_packet},
+                    result_types={"dst": DescriptorResultType()},
+                    form=DescriptorEmitForm.OP,
+                )
+            )
+            accumulator_packets.append(accumulator_packet)
+        accumulator_packets.extend(
+            (accumulator_packets[-1],)
+            * (result_shape.register_unit_count - len(accumulator_packets))
+        )
+        emits.append(
+            EmitRegisterConcat(
+                sources=accumulator_packets,
+                result=result,
+            )
+        )
+    elif result_shape.logical_packet_count > 1:
+        emits.append(EmitRegisterConcat(sources=shifted_packets, result=result))
+
+    return DescriptorRule(
+        source_op=vector.vector_slice,
+        descriptor=shift,
+        guards=_accumulator_slice_guards(
+            source_shape.source_type,
+            result_shape.result_type,
+            offset_minimum,
+            offset_maximum,
+        ),
+        emit=tuple(emits),
+    )
+
+
+def _accumulator_vector_slice_rules() -> tuple[ValueAliasRule | DescriptorRule, ...]:
+    """Builds complete static slice rules for every accumulator carrier."""
+
+    rules: list[ValueAliasRule | DescriptorRule] = []
+    for source_shape in _ACCUMULATOR_VECTOR_SHAPES:
+        result_shapes = tuple(
+            shape
+            for shape in _ACCUMULATOR_SLICE_RESULT_SHAPES
+            if shape.element_type == source_shape.element_type
+        )
+        for result_shape in result_shapes:
+            maximum_start_packet = (
+                source_shape.logical_packet_count - result_shape.logical_packet_count
+            )
+            if maximum_start_packet < 0:
+                continue
+            for source_packet_index in range(maximum_start_packet + 1):
+                rules.append(
+                    _accumulator_slice_aligned_rule(
+                        source_shape,
+                        result_shape,
+                        source_packet_index,
+                    )
+                )
+                packet_offset = source_packet_index * source_shape.packet_lane_count
+                shifted_offset_minimum = packet_offset + 1
+                shifted_offset_maximum = min(
+                    packet_offset + source_shape.packet_lane_count - 1,
+                    source_shape.maximum_lane_count - result_shape.minimum_lane_count,
+                )
+                if shifted_offset_minimum > shifted_offset_maximum:
+                    continue
+                # One carrier interval can contain both slices that stay within
+                # its logical packets and slices that cross into the next one.
+                # Materializing that adjacent packet shares one rule across the
+                # interval while bounding the extra work to one register move.
+                rules.append(
+                    _accumulator_slice_shifted_rule(
+                        source_shape,
+                        result_shape,
+                        source_packet_index,
+                        shifted_offset_minimum,
+                        shifted_offset_maximum,
+                        include_adjacent_packet=(
+                            source_packet_index + result_shape.logical_packet_count
+                            < source_shape.logical_packet_count
+                        ),
+                    )
+                )
+    return tuple(rules)
+
+
+_ACCUMULATOR_VECTOR_SLICE_RULES = _accumulator_vector_slice_rules()
 
 
 @dataclass(frozen=True, slots=True)

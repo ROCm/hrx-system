@@ -1,0 +1,113 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @f32x64_slice_low_half(%value: vector<64xf32>) -> (vector<32xf32>) {
+  %result = vector.slice %value[0] : vector<64xf32> -> vector<32xf32>
+  func.return %result : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x64_slice_low_half(%value: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x2>) asm {
+  %result = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  return %result
+}
+
+// ====
+
+func.def @f32x64_slice_high_half(%value: vector<64xf32>) -> (vector<32xf32>) {
+  %result = vector.slice %value[32] : vector<64xf32> -> vector<32xf32>
+  func.return %result : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x64_slice_high_half(%value: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x2>) asm {
+  %result = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms x2>
+  return %result
+}
+
+// ====
+
+func.def @f32x64_slice_prefix_alias(%value: vector<64xf32>) -> (vector<48xf32>) {
+  %result = vector.slice %value[0] : vector<64xf32> -> vector<48xf32>
+  func.return %result : vector<48xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x64_slice_prefix_alias(%result: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x4>) asm {
+  return %result
+}
+
+// ====
+
+func.def @i32x64_slice_high_half(%value: vector<64xi32>) -> (vector<32xi32>) {
+  %result = vector.slice %value[32] : vector<64xi32> -> vector<32xi32>
+  func.return %result : vector<32xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x64_slice_high_half(%value: reg<aie2p.mbms x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %5 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %result = concat(%6, %8) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %result
+}
+
+// ====
+
+func.def @i64x32_slice_high_half(%value: vector<32xi64>) -> (vector<16xi64>) {
+  %result = vector.slice %value[16] : vector<32xi64> -> vector<16xi64>
+  func.return %result : vector<16xi64>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i64x32_slice_high_half(%value: reg<aie2p.mbms x4>) -> (reg<aie2p.vec256 x4>) asm {
+  %5 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %value[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %result = concat(%6, %8) : (reg<aie2p.vec256 x2>, reg<aie2p.vec256 x2>) -> reg<aie2p.vec256 x4>
+  return %result
+}
+
+// ====
+
+func.def @f32x32_slice_shifted_subpacket(%value: vector<32xf32>) -> (vector<8xf32>) {
+  %result = vector.slice %value[4] : vector<32xf32> -> vector<8xf32>
+  func.return %result : vector<8xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x32_slice_shifted_subpacket(%value: reg<aie2p.mbms x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = slice %value[0] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %value[1] : reg<aie2p.mbms x2> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %9 = mova.i32 16
+  %result = vshift %6, %8, %9
+  return %result
+}
+
+// ====
+
+func.def @f32x64_slice_shifted_accumulator(%value: vector<64xf32>) -> (vector<32xf32>) {
+  %result = vector.slice %value[4] : vector<64xf32> -> vector<32xf32>
+  func.return %result : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x64_slice_shifted_accumulator(%value: reg<aie2p.mbms x4>) -> (reg<aie2p.mbms x2>) asm {
+  %5 = slice %value[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %6 = vmov.accumulator512.to.vector512 %5
+  %7 = slice %value[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %8 = vmov.accumulator512.to.vector512 %7
+  %9 = slice %value[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %10 = vmov.accumulator512.to.vector512 %9
+  %11 = mova.i32 16
+  %12 = vshift %6, %8, %11
+  %13 = vshift %8, %10, %11
+  %14 = vmov.vector512.to.accumulator512 %12
+  %15 = vmov.vector512.to.accumulator512 %13
+  %result = concat(%14, %15) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
+  return %result
+}
