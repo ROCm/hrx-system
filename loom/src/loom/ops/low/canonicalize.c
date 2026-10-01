@@ -36,6 +36,8 @@ static loom_value_slice_t loom_low_slice_concat_sources(
 
   uint32_t source_offset = 0;
   loom_value_slice_t selected = {0};
+  loom_op_t* common_slice_op = NULL;
+  bool constant_sources = false;
   loom_value_slice_t sources = loom_low_concat_sources(concat_op);
   for (uint16_t i = 0; i < sources.count; ++i) {
     if (source_offset == slice_offset) {
@@ -43,7 +45,9 @@ static loom_value_slice_t loom_low_slice_concat_sources(
     }
     const loom_value_t* source =
         loom_module_value(rewriter->module, sources.values[i]);
-    source_offset += loom_low_register_type_unit_count(source->type);
+    const uint32_t source_units =
+        loom_low_register_type_unit_count(source->type);
+    source_offset += source_units;
     if (!selected.values) {
       if (source_offset > slice_offset) {
         return (loom_value_slice_t){0};
@@ -73,7 +77,47 @@ static loom_value_slice_t loom_low_slice_concat_sources(
     if (source_offset > slice_end || !loom_value_has_single_use(source)) {
       return (loom_value_slice_t){0};
     }
+    if (selected.count == 1) {
+      common_slice_op = loom_low_defining_op(rewriter, sources.values[i]);
+      constant_sources = loom_low_const_isa(common_slice_op);
+      if (!loom_low_slice_isa(common_slice_op)) {
+        common_slice_op = NULL;
+      }
+    } else if (common_slice_op) {
+      loom_op_t* source_op = loom_low_defining_op(rewriter, sources.values[i]);
+      if (!loom_low_slice_isa(source_op) ||
+          loom_low_slice_source(source_op) !=
+              loom_low_slice_source(common_slice_op) ||
+          loom_low_slice_offset(source_op) !=
+              loom_low_slice_offset(common_slice_op) + source_offset -
+                  source_units - slice_offset) {
+        common_slice_op = NULL;
+      }
+    } else if (constant_sources) {
+      constant_sources =
+          loom_low_const_isa(loom_low_defining_op(rewriter, sources.values[i]));
+    }
     if (source_offset == slice_end) {
+      // Contiguous views of one source already share its register range.
+      // Reuse that source when the selection covers it entirely. Partial
+      // selections retain their existing identity instead of allocating a
+      // new sub-concat that can force copies away from the native producer.
+      if (common_slice_op) {
+        const loom_type_t common_type = loom_module_value_type(
+            rewriter->module, loom_low_slice_source(common_slice_op));
+        if (loom_low_slice_offset(common_slice_op) == 0 &&
+            loom_type_equal(slice_type, common_type)) {
+          return (loom_value_slice_t){
+              .values = loom_op_operands(common_slice_op), .count = 1};
+        }
+        return (loom_value_slice_t){0};
+      }
+      // Separate constant materializations can merge during Low CSE. Keep
+      // their existing storage so that shared projections can merge as well,
+      // instead of forcing duplicate constant packs into fresh identities.
+      if (constant_sources) {
+        return (loom_value_slice_t){0};
+      }
       return selected;
     }
   }

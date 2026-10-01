@@ -233,3 +233,138 @@ low.func.def target<test.low.core>(@test_target) @projection_into_value_transfor
   %result = test.assume %first [] : reg<test.i32 x2>
   return %result
 }
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @partial_common_source(%source: reg<test.i32 x4>) -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  %a = slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  %b = slice %source[1] : reg<test.i32 x4> -> reg<test.i32>
+  %c = slice %source[2] : reg<test.i32 x4> -> reg<test.i32>
+  %d = slice %source[3] : reg<test.i32 x4> -> reg<test.i32>
+  %whole = concat(%a, %b, %c, %d) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %first = slice %whole[0] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %second = slice %whole[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %first, %second
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @whole_common_source(%prefix: reg<test.i32>, %source: reg<test.i32 x2>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %a = slice %source[0] : reg<test.i32 x2> -> reg<test.i32>
+  %b = slice %source[1] : reg<test.i32 x2> -> reg<test.i32>
+  %whole = concat(%prefix, %a, %b, %suffix) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %middle = slice %whole[1] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %middle
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @whole_common_source(%prefix: reg<test.i32>, %source: reg<test.i32 x2>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  return %source
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @gapped_common_source(%source: reg<test.i32 x4>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %a = slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  %b = slice %source[2] : reg<test.i32 x4> -> reg<test.i32>
+  %whole = concat(%a, %b, %suffix) : (reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x3>
+  %first = slice %whole[0] : reg<test.i32 x3> -> reg<test.i32 x2>
+  return %first
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @gapped_common_source(%source: reg<test.i32 x4>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %a = slice %source[0] : reg<test.i32 x4> -> reg<test.i32>
+  %b = slice %source[2] : reg<test.i32 x4> -> reg<test.i32>
+  %first = concat(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %first
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @reordered_common_source(%source: reg<test.i32 x2>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %a = slice %source[1] : reg<test.i32 x2> -> reg<test.i32>
+  %b = slice %source[0] : reg<test.i32 x2> -> reg<test.i32>
+  %whole = concat(%a, %b, %suffix) : (reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x3>
+  %first = slice %whole[0] : reg<test.i32 x3> -> reg<test.i32 x2>
+  return %first
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @reordered_common_source(%source: reg<test.i32 x2>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %a = slice %source[1] : reg<test.i32 x2> -> reg<test.i32>
+  %b = slice %source[0] : reg<test.i32 x2> -> reg<test.i32>
+  %first = concat(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %first
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @different_slice_sources(%left: reg<test.i32 x2>, %right: reg<test.i32 x2>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %a = slice %left[0] : reg<test.i32 x2> -> reg<test.i32>
+  %b = slice %right[1] : reg<test.i32 x2> -> reg<test.i32>
+  %whole = concat(%a, %b, %suffix) : (reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x3>
+  %first = slice %whole[0] : reg<test.i32 x3> -> reg<test.i32 x2>
+  return %first
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @different_slice_sources(%left: reg<test.i32 x2>, %right: reg<test.i32 x2>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %a = slice %left[0] : reg<test.i32 x2> -> reg<test.i32>
+  %b = slice %right[1] : reg<test.i32 x2> -> reg<test.i32>
+  %first = concat(%a, %b) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %first
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @constant_projections() -> (reg<test.i32 x2>, reg<test.i32 x2>) asm {
+  %a = test.const.i32 1
+  %b = test.const.i32 0
+  %c = test.const.i32 1
+  %d = test.const.i32 0
+  %whole = concat(%a, %b, %c, %d) : (reg<test.i32>, reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x4>
+  %first = slice %whole[0] : reg<test.i32 x4> -> reg<test.i32 x2>
+  %second = slice %whole[2] : reg<test.i32 x4> -> reg<test.i32 x2>
+  return %first, %second
+}
+
+// ====
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @mixed_constant_projection(%source: reg<test.i32>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %constant = test.const.i32 1
+  %whole = concat(%constant, %source, %suffix) : (reg<test.i32>, reg<test.i32>, reg<test.i32>) -> reg<test.i32 x3>
+  %first = slice %whole[0] : reg<test.i32 x3> -> reg<test.i32 x2>
+  return %first
+}
+
+// ----
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @mixed_constant_projection(%source: reg<test.i32>, %suffix: reg<test.i32>) -> (reg<test.i32 x2>) asm {
+  %constant = test.const.i32 1
+  %first = concat(%constant, %source) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  return %first
+}

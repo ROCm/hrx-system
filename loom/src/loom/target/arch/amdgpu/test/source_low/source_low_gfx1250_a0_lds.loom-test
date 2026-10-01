@@ -67,10 +67,8 @@ low.kernel.def target<amdgpu.rdna4.gfx1250_a0.core>(@target) workgroup_size(32, 
   %66 = ds_read_b32 %29 {offset = 1024}
   ds_write_b32 %29, %64
   ds_write_b32 %29, %66 {offset = 1024}
-  %88 = concat(%25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  ds_write_b64 %29, %88
-  %87 = concat(%25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  ds_write_b64 %29, %87 {offset = 2048}
+  ds_write_b64 %29, %46
+  ds_write_b64 %29, %48 {offset = 2048}
   %77 = ds_read_b64 %29
   %79 = ds_read_b64 %29 {offset = 2048}
   ds_write_b64 %29, %77
@@ -149,9 +147,7 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) workgroup_size(32, 1, 
   %55 = slice %loaded_stride64_b32[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %56 = slice %loaded_stride64_b32[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   ds_write2st64_b32 %29, %55, %56 {offset1 = 4}
-  %71 = concat(%25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  %70 = concat(%25, %29) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  ds_write2st64_b64 %29, %71, %70 {offset1 = 4}
+  ds_write2st64_b64 %29, %42, %43 {offset1 = 4}
   %loaded_stride64_b64 = ds_read2st64_b64 %29 {offset1 = 4}
   %63 = slice %loaded_stride64_b64[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
   %64 = slice %loaded_stride64_b64[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr x2>
