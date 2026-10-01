@@ -120,8 +120,8 @@ typedef struct loom_native_elf_section_t {
   uint32_t info;
   // Section bytes written into the file.
   iree_const_byte_span_t contents;
-  // Logical zero-filled byte length for SHT_NOBITS sections. This must be
-  // zero for every content-backed section.
+  // Address-space extent for SHT_NOBITS sections; zero for content-backed
+  // sections. The target's loading contract determines initialization.
   uint64_t zero_fill_length;
 } loom_native_elf_section_t;
 

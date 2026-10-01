@@ -239,9 +239,6 @@ iree_status_t loom_aie2p_leaf_object_emit(
       .target_identity = LOOM_AIE2P_LEAF_TARGET_IDENTITY,
       .abi_identity = LOOM_AIE2P_LEAF_ABI_IDENTITY,
       .entry_symbol_index = 0,
-      .elf_machine = IREE_XDNA_ELF_MACHINE_AIE,
-      .target_generation = IREE_XDNA_TARGET_GENERATION_AIE2P,
-      .elf_flags = IREE_XDNA_ELF_AIE2P_FLAGS,
       .code =
           {
               .byte_length = plan->encoded_byte_length,
@@ -289,9 +286,9 @@ iree_status_t loom_aie2p_leaf_object_emit(
       function_name, arena, &code_section_name, &entry_symbol_name));
   sections[0] = (loom_native_section_contribution_t){
       .section_name = code_section_name,
-      .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-      .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                       LOOM_NATIVE_ELF_SECTION_FLAG_EXECINSTR,
+      .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+      .access =
+          LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
       .contribution_alignment = realization->code.minimum_alignment,
       .contents = iree_make_const_byte_span(code, plan->encoded_byte_length),
   };
@@ -320,8 +317,8 @@ iree_status_t loom_aie2p_leaf_object_emit(
     }
     sections[section_index] = (loom_native_section_contribution_t){
         .section_name = section_name,
-        .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-        .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC,
+        .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+        .access = LOOM_NATIVE_SECTION_ACCESS_READ,
         .contribution_alignment = data->minimum_alignment,
         .contents =
             iree_make_const_byte_span(contents, data->contents.data_length),
@@ -364,15 +361,15 @@ iree_status_t loom_aie2p_leaf_object_emit(
     IREE_RETURN_IF_ERROR(loom_aie2p_leaf_object_copy_storage_name(
         function_name, storage_space, arena, &storage_section_name,
         &storage_symbol_name));
-    // NOBITS keeps uninitialized function storage compact. The retained
-    // FUNCTION_STORAGE capability distinguishes it from semantic zero-fill.
+    // Reserve local storage without payload or initialization. The final
+    // product loads only the contents-backed code and read-only data.
     sections[section_index] = (loom_native_section_contribution_t){
         .section_name = storage_section_name,
-        .section_type = LOOM_NATIVE_ELF_SECTION_TYPE_NOBITS,
-        .section_flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC |
-                         LOOM_NATIVE_ELF_SECTION_FLAG_WRITE,
+        .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+        .access =
+            LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_WRITE,
         .contribution_alignment = requirement->minimum_alignment,
-        .zero_fill_length = requirement->byte_length,
+        .reservation_length = requirement->byte_length,
     };
     symbols[section_index] = (loom_native_object_symbol_t){
         .name = storage_symbol_name,

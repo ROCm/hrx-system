@@ -18,34 +18,73 @@
 
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
-#include "loom/target/emit/native/elf.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// One worker-produced byte contribution to a named native section.
+// Storage carried by a native section. A reservation occupies address space
+// without contributing artifact bytes. The target's loading contract determines
+// initialization, such as zero-filled process data or uninitialized tile-local
+// function storage.
+typedef enum loom_native_section_storage_e {
+  LOOM_NATIVE_SECTION_STORAGE_CONTENTS = 0,
+  LOOM_NATIVE_SECTION_STORAGE_RESERVATION = 1,
+} loom_native_section_storage_t;
+
+// Runtime access required by a section. NONE denotes nonresident information.
+typedef enum loom_native_section_access_bits_e {
+  LOOM_NATIVE_SECTION_ACCESS_NONE = 0,
+  LOOM_NATIVE_SECTION_ACCESS_READ = 1u << 0,
+  LOOM_NATIVE_SECTION_ACCESS_WRITE = 1u << 1,
+  LOOM_NATIVE_SECTION_ACCESS_EXECUTE = 1u << 2,
+} loom_native_section_access_bits_t;
+typedef uint32_t loom_native_section_access_t;
+
+// Assembled native storage, independent of its object-file representation.
+// Product builders translate these records into format-specific section tables.
+typedef struct loom_native_section_t {
+  // Name shared by contributions to this section.
+  iree_string_view_t name;
+  // Whether the section carries bytes or reserves address space.
+  loom_native_section_storage_t storage;
+  // Runtime access required by the section.
+  loom_native_section_access_t access;
+  // Runtime address assigned by placement; zero before placement or in objects.
+  uint64_t address;
+  // Required power-of-two alignment in bytes.
+  uint64_t alignment;
+  // Arena-owned bytes for CONTENTS storage; empty for RESERVATION storage.
+  iree_const_byte_span_t contents;
+  // Address-space extent for RESERVATION storage; zero for CONTENTS storage.
+  uint64_t reservation_length;
+} loom_native_section_t;
+
+// Returns the address-space extent of a native section.
+static inline uint64_t loom_native_section_byte_length(
+    const loom_native_section_t* section) {
+  return section->storage == LOOM_NATIVE_SECTION_STORAGE_RESERVATION
+             ? section->reservation_length
+             : (uint64_t)section->contents.data_length;
+}
+
+// One worker-produced contribution to a named native section. These records
+// are compiler-owned: producers establish valid names, alignment, contents,
+// and matching storage/access for contributions sharing a name.
 typedef struct loom_native_section_contribution_t {
-  // Section-table name such as `.text`, `.rodata`, or `.note`.
+  // Section name such as `.text` or `.rodata`.
   iree_string_view_t section_name;
-  // ELF SHT_* section type.
-  uint32_t section_type;
-  // ELF SHF_* section flags.
-  uint64_t section_flags;
-  // Alignment required before this contribution within the joined section.
+  // Whether this contribution carries bytes or reserves address space.
+  loom_native_section_storage_t storage;
+  // Runtime access required by the section.
+  loom_native_section_access_t access;
+  // Power-of-two alignment within the joined section. Zero means one byte.
   uint64_t contribution_alignment;
-  // Fixed record size for table sections, or zero when not applicable.
-  uint64_t entry_size;
-  // ELF sh_link field interpreted by the section type.
-  uint32_t link;
-  // ELF sh_info field interpreted by the section type.
-  uint32_t info;
   // Contribution bytes. The referenced storage must stay live for the duration
   // of assembly; the assembled output copies bytes into the caller's arena.
   iree_const_byte_span_t contents;
-  // Logical zero-filled byte length for SHT_NOBITS contributions. This must be
-  // zero for every content-backed contribution.
-  uint64_t zero_fill_length;
+  // Address-space extent for RESERVATION storage; zero for CONTENTS storage.
+  uint64_t reservation_length;
 } loom_native_section_contribution_t;
 
 // Resolved position of one input contribution inside the assembled sections.
@@ -56,10 +95,10 @@ typedef struct loom_native_section_contribution_layout_t {
   uint64_t section_offset;
 } loom_native_section_contribution_layout_t;
 
-// Output of assembling section contributions into ELF section payloads.
+// Output of assembling native section contributions.
 typedef struct loom_native_section_contribution_assembly_t {
-  // Arena-backed class-neutral ELF section descriptors.
-  loom_native_elf_section_t* sections;
+  // Arena-backed native sections, with runtime addresses initially zero.
+  loom_native_section_t* sections;
   // Number of entries in |sections|.
   iree_host_size_t section_count;
   // Arena-backed per-input contribution placement rows.
@@ -72,10 +111,9 @@ typedef struct loom_native_section_contribution_assembly_t {
 //
 // Contributions with the same section name are concatenated in input order,
 // honoring each contribution's alignment and zero-filling padding. Matching
-// section names must have matching type, flags, entry size, link, and info
-// fields. SHT_NOBITS contributions advance logical section size without
-// allocating or copying payload bytes. The resulting section alignment is the
-// maximum contribution alignment observed for that section.
+// section names have matching storage and access. Reservations advance size
+// without allocating or copying payload bytes. The resulting section alignment
+// is the maximum contribution alignment observed for that section.
 //
 // All returned arrays, section names, and section payloads are allocated from
 // |arena| and remain valid until the arena is reset or deinitialized. On

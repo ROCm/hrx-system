@@ -772,7 +772,6 @@ loom_cc_library(
         "//loom/src/loom/target/emit/native:object",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
-        "//runtime/src/iree/schemas:xdna_executable",
     ],
 )
 
@@ -820,6 +819,7 @@ loom_cc_library(
         ":tile_link",
         "//loom/src/loom/target/arch/amd/xdna:device_profile",
         "//loom/src/loom/target/emit/native:elf",
+        "//loom/src/loom/target/emit/native:elf_sections",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/io:stream",

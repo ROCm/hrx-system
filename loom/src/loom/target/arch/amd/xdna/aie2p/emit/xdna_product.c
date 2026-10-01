@@ -9,7 +9,7 @@
 #include <string.h>
 
 #include "iree/schemas/xdna_executable.h"
-#include "loom/target/emit/native/elf.h"
+#include "loom/target/emit/native/elf_sections.h"
 
 enum {
   LOOM_AIE2P_XDNA_ELF32_SYMBOL_SIZE = 16,
@@ -29,16 +29,13 @@ static void loom_aie2p_xdna_store_u32(uint8_t* target, uint32_t value) {
 // Section names are diagnostic labels and do not participate. Every load-time
 // property and byte must match exactly.
 static bool loom_aie2p_xdna_sections_identical(
-    const loom_native_elf_section_t* lhs,
-    const loom_native_elf_section_t* rhs) {
-  if (!iree_all_bits_set(lhs->flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) ||
-      !iree_all_bits_set(rhs->flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) ||
-      lhs->type != rhs->type || lhs->flags != rhs->flags ||
+    const loom_native_section_t* lhs, const loom_native_section_t* rhs) {
+  if (lhs->access == LOOM_NATIVE_SECTION_ACCESS_NONE ||
+      rhs->access == LOOM_NATIVE_SECTION_ACCESS_NONE ||
+      lhs->storage != rhs->storage || lhs->access != rhs->access ||
       lhs->address != rhs->address || lhs->alignment != rhs->alignment ||
-      lhs->entry_size != rhs->entry_size || lhs->link != rhs->link ||
-      lhs->info != rhs->info ||
       lhs->contents.data_length != rhs->contents.data_length ||
-      lhs->zero_fill_length != rhs->zero_fill_length) {
+      lhs->reservation_length != rhs->reservation_length) {
     return false;
   }
   return lhs->contents.data_length == 0 ||
@@ -47,8 +44,8 @@ static bool loom_aie2p_xdna_sections_identical(
 }
 
 static iree_host_size_t loom_aie2p_xdna_intern_linked_section(
-    const loom_native_elf_section_t* section,
-    const loom_native_elf_section_t** unique_sections,
+    const loom_native_section_t* section,
+    const loom_native_section_t** unique_sections,
     iree_host_size_t* unique_section_count) {
   for (iree_host_size_t i = 0; i < *unique_section_count; ++i) {
     if (loom_aie2p_xdna_sections_identical(section, unique_sections[i])) {
@@ -61,9 +58,9 @@ static iree_host_size_t loom_aie2p_xdna_intern_linked_section(
 }
 
 static bool loom_aie2p_xdna_section_requires_load(
-    const loom_native_elf_section_t* section) {
-  return section->type == LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS &&
-         iree_any_bit_set(section->flags, LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC) &&
+    const loom_native_section_t* section) {
+  return section->storage == LOOM_NATIVE_SECTION_STORAGE_CONTENTS &&
+         section->access != LOOM_NATIVE_SECTION_ACCESS_NONE &&
          section->contents.data_length != 0;
 }
 
@@ -372,7 +369,7 @@ static iree_status_t loom_aie2p_xdna_measure_entry(
               .linked_tile;
       for (iree_host_size_t section_index = 0;
            section_index < tile->assembly.section_count; ++section_index) {
-        const loom_native_elf_section_t* section =
+        const loom_native_section_t* section =
             &tile->assembly.sections[section_index];
         if (!loom_aie2p_xdna_section_requires_load(section)) {
           continue;
@@ -476,7 +473,7 @@ static void loom_aie2p_xdna_emit_entry(
           loom_xdna_array_tile_facts(family, tile->coordinate);
       for (iree_host_size_t section_index = 0;
            section_index < linked->assembly.section_count; ++section_index) {
-        const loom_native_elf_section_t* section =
+        const loom_native_section_t* section =
             &linked->assembly.sections[section_index];
         if (!loom_aie2p_xdna_section_requires_load(section)) {
           continue;
@@ -649,7 +646,7 @@ iree_status_t loom_aie2p_xdna_product_write(
       profile, profile->physical_column_origin, columns));
 
   const loom_aie2p_xdna_tile_t** tiles = NULL;
-  const loom_native_elf_section_t** unique_sections = NULL;
+  const loom_native_section_t** unique_sections = NULL;
   iree_host_size_t* code_sections = NULL;
   loom_aie2p_xdna_tile_sections_t* linked_sections_by_tile = NULL;
   iree_host_size_t* linked_section_indices = NULL;
@@ -767,7 +764,8 @@ iree_status_t loom_aie2p_xdna_product_write(
                                   (uint32_t)metadata.data_length, sections,
                                   &section_count);
   for (iree_host_size_t i = 0; i < unique_section_count; ++i) {
-    sections[section_count++] = *unique_sections[i];
+    sections[section_count++] =
+        loom_native_elf_section_from_native(unique_sections[i]);
   }
   uint32_t segment_count = 1;
   segments[0] = (loom_native_elf_segment_t){
