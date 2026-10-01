@@ -94,7 +94,7 @@ TEST_F(AqlDispatchTest, CoherentSystemPayloadChangesAcrossEpochs) {
                       kernel.group_segment_byte_length, descriptor_address,
                       arguments->device_address, completion->device_address);
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
     // Snapshot completion-visible data before diagnostics or ring retirement.
     GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0);
     std::memcpy(download.data(), output->host.pointer, sizeof(download));
@@ -261,9 +261,9 @@ TEST_F(AqlDispatchTest,
     // Reserve only after constructing every packet. The consumer's header
     // joins producer completion; null dispatch completions keep their fences.
     GpuStoreRelease(queue->host.write_index_address, index + kPacketsPerEpoch);
-    Publish(*queue, index++, produce);
-    Publish(*queue, index++, consume);
-    Publish(*queue, index++, complete);
+    aql::Publish(*queue, index++, produce);
+    aql::Publish(*queue, index++, consume);
+    aql::Publish(*queue, index++, complete);
 
     // The terminal header independently joins both dispatches, even if the
     // middle edge produced wrong data. Snapshot before any diagnostic or

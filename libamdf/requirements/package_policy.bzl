@@ -21,6 +21,7 @@ load(
 )
 load(
     "//libamdf/requirements:defs.bzl",
+    "AMDGPU_PEERS_RESOURCE",
     "AMDGPU_RESOURCE",
     "LIBAMDF",
     "LIBAMDF_GPU",
@@ -69,6 +70,7 @@ PACKAGE_POLICIES = [
         packages = [
             "libamdf/cts/gpu/aql",
             "libamdf/cts/gpu/kernels",
+            "libamdf/cts/gpu/peer/aql",
             "libamdf/cts/gpu/pm4",
             "libamdf/cts/gpu/recipes",
             "libamdf/cts/interop/gpu/xdna/recipes",
@@ -88,6 +90,10 @@ PACKAGE_POLICIES = [
         ],
         run_requirements = [AMDGPU_RESOURCE],
         resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    ),
+    package_policy(
+        packages = ["libamdf/cts/gpu/peer/..."],
+        run_requirements = [AMDGPU_PEERS_RESOURCE],
     ),
     package_policy(
         packages = [

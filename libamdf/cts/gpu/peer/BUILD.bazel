@@ -4,9 +4,41 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
+load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
+
 package(
     default_visibility = ["//libamdf/cts:__subpackages__"],
+    features = ["layering_check"],
     licenses = ["notice"],
 )
 
 exports_files(["README.md"])
+
+amdf_cc_library(
+    name = "device_fixture",
+    testonly = True,
+    hdrs = ["device_fixture.h"],
+    deps = ["//libamdf/cts/gpu:gpu_device_fixture"],
+)
+
+amdf_cts_test_suite(
+    name = "peer",
+    srcs = [
+        "memory_group_test.cc",
+        "sdma_system_test.cc",
+    ],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        ":device_fixture",
+        "//libamdf/cts/gpu/sdma/encoding:commands",
+        "//libamdf/cts/gpu/util:command_fixture",
+        "//libamdf/cts/util:mapped_memory",
+        "//third_party:google_test",
+    ],
+)

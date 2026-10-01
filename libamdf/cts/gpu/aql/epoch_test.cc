@@ -172,10 +172,10 @@ TEST_F(AqlEpochTest, BarrierValueOrdersEpochPayloadAcrossQueues) {
     // before decrementing the epoch; the waiting consumer acquires it only
     // after its preceding BARRIER_VALUE packet completes.
     GpuStoreRelease(consumer->host.write_index_address, consumer_index + 2);
-    Publish(*consumer, consumer_index++, wait);
-    Publish(*consumer, consumer_index++, consume);
+    aql::Publish(*consumer, consumer_index++, wait);
+    aql::Publish(*consumer, consumer_index++, consume);
     GpuStoreRelease(producer->host.write_index_address, producer_index + 1);
-    Publish(*producer, producer_index++, produce);
+    aql::Publish(*producer, producer_index++, produce);
 
     // Observe only the completed consumer's result before any producer wait
     // or ring-consumption wait can add synchronization to this observation.

@@ -119,7 +119,7 @@ TEST_F(AqlLdsTest, StaticStorageExchangesBetweenWaves) {
                       arguments->device_address, completion->device_address,
                       {aql::FenceScope::kSystem, aql::FenceScope::kSystem});
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
     // Snapshot completion-visible data before diagnostics or ring retirement.
     GpuWaitEqual<int64_t>(reinterpret_cast<uintptr_t>(&signal.value), 0);
     std::memcpy(observed.data(), output->host.pointer, sizeof(observed));

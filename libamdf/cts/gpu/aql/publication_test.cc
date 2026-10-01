@@ -28,7 +28,7 @@ TEST_F(AqlQueueTest, CompletesBarriersAndReusesRetiredSlots) {
                      {storage->device_address + sizeof(aql::Signal)});
     for (uint64_t i = 0; i < packet_count; ++i) {
       GpuStoreRelease(queue->host.write_index_address, index + 1);
-      Publish(*queue, index++, packet);
+      aql::Publish(*queue, index++, packet);
     }
     ASSERT_NO_FATAL_FAILURE(
         WaitCompletionAndConsumption(*queue, signals[0], index));
@@ -59,7 +59,7 @@ TEST_F(AqlQueueTest, MultipleProducersReserveAndPublishIndependently) {
     for (uint32_t i = 0; i < 32; ++i) {
       const uint64_t index = std::atomic_ref<uint64_t>(write_index)
                                  .fetch_add(1, std::memory_order_relaxed);
-      Publish(*queue, index, packet);
+      aql::Publish(*queue, index, packet);
     }
   };
   std::thread first(publish);
@@ -96,8 +96,8 @@ TEST_F(AqlQueueTest, PublishesReservedPacketsOutOfOrder) {
 
   // MULTI doorbells may arrive out of order. The earlier INVALID packet holds
   // the launch frontier until its body and valid header have been published.
-  Publish(*queue, index + 1, second);
-  Publish(*queue, index, first);
+  aql::Publish(*queue, index + 1, second);
+  aql::Publish(*queue, index, first);
   ASSERT_NO_FATAL_FAILURE(
       WaitCompletionAndConsumption(*queue, signals[1], index + 2));
   EXPECT_EQ(

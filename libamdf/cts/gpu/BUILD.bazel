@@ -46,7 +46,6 @@ amdf_cc_library(
 ) for name in [
     "gpu_extension",
     "kernel_queue",
-    "memory_group",
     "memory_interop",
 ]]
 
@@ -55,11 +54,12 @@ test_suite(
     tests = [
         ":gpu_extension",
         ":kernel_queue",
-        ":memory_group",
         ":memory_interop",
         "//libamdf/cts/gpu/aql",
         "//libamdf/cts/gpu/aql/encoding:packets_test",
         "//libamdf/cts/gpu/linux:memory",
+        "//libamdf/cts/gpu/peer",
+        "//libamdf/cts/gpu/peer/aql",
         "//libamdf/cts/gpu/pm4",
         "//libamdf/cts/gpu/pm4/encoding:commands_test",
         "//libamdf/cts/gpu/recipes",

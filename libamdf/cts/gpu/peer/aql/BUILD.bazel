@@ -4,7 +4,6 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 
 package(
@@ -13,27 +12,9 @@ package(
     licenses = ["notice"],
 )
 
-amdf_cc_library(
-    name = "pm4_sdma_fixture",
-    testonly = True,
-    srcs = ["pm4_sdma_fixture.cc"],
-    hdrs = ["pm4_sdma_fixture.h"],
-    deps = [
-        "//libamdf/cts/gpu/kernels:kernel",
-        "//libamdf/cts/gpu/pm4:dispatch_fixture",
-        "//libamdf/cts/gpu/util:command_fixture",
-        "//third_party:google_test",
-    ],
-)
-
 amdf_cts_test_suite(
-    name = "recipes",
-    srcs = [
-        "copy_dispatch_test.cc",
-        "memory_pair_test.cc",
-        "pm4_sdma_streaming_test.cc",
-        "pm4_sdma_test.cc",
-    ],
+    name = "aql",
+    srcs = ["local_memory_test.cc"],
     target_compatible_with = ["@platforms//cpu:x86_64"] + select({
         "@platforms//os:linux": [],
         "@platforms//os:windows": [],
@@ -41,16 +22,12 @@ amdf_cts_test_suite(
     }),
     visibility = ["//visibility:public"],
     deps = [
-        ":pm4_sdma_fixture",
-        "//libamdf/cts/gpu/aql:dispatch_fixture",
+        "//libamdf/cts/gpu/aql:executable",
+        "//libamdf/cts/gpu/aql:publication",
         "//libamdf/cts/gpu/kernels:transform",
         "//libamdf/cts/gpu/kernels:transform_kernels",
-        "//libamdf/cts/gpu/pm4:command_fixture",
-        "//libamdf/cts/gpu/pm4:dispatch_fixture",
-        "//libamdf/cts/gpu/pm4/encoding:commands",
-        "//libamdf/cts/gpu/sdma/encoding:commands",
+        "//libamdf/cts/gpu/peer:device_fixture",
         "//libamdf/cts/gpu/util:command_fixture",
-        "//libamdf/cts/gpu/util:user_queue",
         "//third_party:google_test",
     ],
 )

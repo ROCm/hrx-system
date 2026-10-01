@@ -8,9 +8,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <utility>
-#include <vector>
 
-#include "gpu_device_fixture.h"
+#include "libamdf/cts/gpu/peer/device_fixture.h"
 
 namespace {
 
@@ -22,7 +21,7 @@ struct GroupAcquisition {
 };
 
 class GpuMemoryGroupTest
-    : public GpuDeviceFixture,
+    : public GpuPeerDeviceFixture,
       public ::testing::WithParamInterface<GroupAcquisition> {
  protected:
   void TearDown() override {
@@ -38,7 +37,7 @@ class GpuMemoryGroupTest
       std::free(caller_storage_);
     }
     caller_storage_ = nullptr;
-    GpuDeviceFixture::TearDown();
+    GpuPeerDeviceFixture::TearDown();
   }
 
   // Original caller allocation, freed only after successful native teardown.
@@ -56,7 +55,15 @@ INSTANTIATE_TEST_SUITE_P(
                       GroupAcquisition{AMDF_MEMORY_CLASS_SYSTEM,
                                        AMDF_MEMORY_PROFILE_ROLE_REGISTER},
                       GroupAcquisition{AMDF_MEMORY_CLASS_LOCAL,
-                                       AMDF_MEMORY_PROFILE_ROLE_CREATE}));
+                                       AMDF_MEMORY_PROFILE_ROLE_CREATE}),
+    [](const ::testing::TestParamInfo<GroupAcquisition>& info) {
+      if (info.param.memory_class == AMDF_MEMORY_CLASS_LOCAL) {
+        return "LocalCreate";
+      }
+      return info.param.role == AMDF_MEMORY_PROFILE_ROLE_REGISTER
+                 ? "SystemRegister"
+                 : "SystemCreate";
+    });
 
 TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   const amdf_memory_profile_roles_t role = GetParam().role;
@@ -66,45 +73,13 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
     GTEST_SKIP() << "no local backing scope";
   }
   const bool registered = role == AMDF_MEMORY_PROFILE_ROLE_REGISTER;
-  uint32_t endpoint_count = 0;
-  ASSERT_EQ(api_->endpoint_enumerate(instance_, 0, nullptr, &endpoint_count),
-            AMDF_STATUS_OK);
-  std::vector<amdf_endpoint_summary_t> summaries(endpoint_count);
-  ASSERT_EQ(api_->endpoint_enumerate(instance_, endpoint_count,
-                                     summaries.data(), &endpoint_count),
-            AMDF_STATUS_OK);
-  amdf_endpoint_t* peer_endpoint = nullptr;
-  for (const auto& summary : summaries) {
-    if (summary.engine_kind != AMDF_ENGINE_KIND_GPU) {
-      continue;
-    }
-    amdf_endpoint_t* candidate = nullptr;
-    ASSERT_EQ(GetCtsDeviceCache().OpenEndpoint(summary.id, &candidate),
-              AMDF_STATUS_OK);
-    if (candidate == endpoint_) {
-      continue;
-    }
-    peer_endpoint = candidate;
-    break;
-  }
-  if (peer_endpoint == nullptr) {
-    GTEST_SKIP() << "requires two physical GPUs";
-  }
-
   const amdf_memory_access_requirements_t requirements = {
       .access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
       .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
       .address_kinds = UINT64_C(1) << AMDF_MEMORY_ADDRESS_GPU,
   };
-  amdf_device_t* peer_device = nullptr;
-  const amdf_status_t activation =
-      GetCtsDeviceCache().GetGpuDevice(peer_endpoint, &peer_device);
-  if (activation == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
-    GTEST_SKIP() << "peer activation is unavailable for this native lifetime";
-  }
-  ASSERT_EQ(activation, AMDF_STATUS_OK);
   const std::array<amdf_memory_device_access_t, 2> accesses = {
-      {{peer_device, requirements}, {device_, requirements}}};
+      {{peer_device_, requirements}, {device_, requirements}}};
   amdf_memory_scope_info_t scope_info = {};
   scope_info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
   scope_info.structure_size = sizeof(scope_info);
@@ -191,7 +166,6 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   EXPECT_EQ(memory_info.access_count, accesses.size());
   EXPECT_EQ(memory_info.memory_class, GetParam().memory_class);
   EXPECT_EQ(memory_info.byte_length, create_info.byte_length);
-  uint64_t common_address = 0;
   for (uint32_t i = 0; i < accesses.size(); ++i) {
     amdf_memory_access_info_t access_info = {};
     access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
@@ -204,10 +178,8 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
     ASSERT_EQ(api_->memory_query_address(memory_, i, AMDF_MEMORY_ADDRESS_GPU,
                                          &address),
               AMDF_STATUS_OK);
-    if (i == 0) {
-      common_address = address;
-    }
-    EXPECT_EQ(address, common_address);
+    // Each consumer owns its address domain. Shared physical backing does
+    // not require equal numeric addresses in independent GPU address spaces.
     EXPECT_GE(address, capabilities[i].device_address.minimum_address);
     EXPECT_LE(address, capabilities[i].device_address.maximum_address);
     EXPECT_EQ(address % capabilities[i].device_address.minimum_alignment, 0u);

@@ -6,18 +6,15 @@
 
 #include "libamdf/cts/gpu/util/command_fixture.h"
 
-amdf_status_t GpuCommandTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
-                                               bool* out_matches) {
-  return FindQueueFamily(endpoint, requirements_, &family_, out_matches);
-}
-
-amdf_status_t GpuCommandTest::FindQueueFamily(
-    amdf_endpoint_t* endpoint, const GpuQueueRequirements& requirements,
-    amdf_queue_family_info_t* out_family, bool* out_matches) {
+amdf_status_t FindGpuQueueFamily(const amdf_api_t* api,
+                                 amdf_endpoint_t* endpoint,
+                                 const GpuQueueRequirements& requirements,
+                                 amdf_queue_family_info_t* out_family,
+                                 bool* out_matches) {
   amdf_endpoint_info_t endpoint_info = {};
   endpoint_info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
   endpoint_info.structure_size = sizeof(endpoint_info);
-  amdf_status_t status = api_->endpoint_query_info(endpoint, &endpoint_info);
+  amdf_status_t status = api->endpoint_query_info(endpoint, &endpoint_info);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
@@ -27,7 +24,7 @@ amdf_status_t GpuCommandTest::FindQueueFamily(
     amdf_queue_family_info_t family = {};
     family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
     family.structure_size = sizeof(family);
-    status = api_->endpoint_query_queue_family_info(endpoint, ordinal, &family);
+    status = api->endpoint_query_queue_family_info(endpoint, ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -48,6 +45,12 @@ amdf_status_t GpuCommandTest::FindQueueFamily(
   }
   *out_matches = matches;
   return AMDF_STATUS_OK;
+}
+
+amdf_status_t GpuCommandTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
+                                               bool* out_matches) {
+  return FindGpuQueueFamily(api_, endpoint, requirements_, &family_,
+                            out_matches);
 }
 
 void GpuCommandTest::CreateMemory(amdf_memory_access_t access,

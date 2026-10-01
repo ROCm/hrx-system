@@ -26,7 +26,8 @@ gpu/
     encoding/
   recipes/                   # One single-GPU composition corpus; N queues.
   kernels/                   # Compiler fixture/provenance boundary.
-  peer/                      # Physical multi-GPU deployment boundary.
+  peer/                      # Physical multi-GPU construction and SDMA corpus.
+    aql/                     # Separate shader-bearing peer-local memory corpus.
   lifecycle/                 # Completed resources and opt-in device recreation.
 ```
 
@@ -36,8 +37,8 @@ Resident programs own intermediate payload and credit handoffs; the host owns
 startup and terminal joins. Platform memory, kernel-queue and external-API suites
 retain their separate dependencies. The `kernels` package owns authored Loom GPU
 fixtures and their generated products; `xdna/programs` owns the finite and
-resident array fixtures. The `peer` package exports its design/readme without
-placeholder tests or executables.
+resident array fixtures. The [peer corpus](peer/README.md) requires explicit
+primary and peer endpoint selection under a two-physical-GPU reservation.
 
 `CtsDeviceCache` creates one instance and one device per endpoint and engine
 kind for an executable, caching activation failures as well. GPU queue families
@@ -69,15 +70,16 @@ replaces the case's earlier payload observation.
 
 ## Build and execution
 
-`//libamdf/cts/gpu/{pm4,sdma,aql,recipes}` each uses `amdf_cts_test_suite` with
-the default dynamic provider. Process/instance native lifetimes are two test
-invocations of the same binary. Only `//libamdf/cts/core:query` explicitly
-retains the three binding modes.
+`//libamdf/cts/gpu/{pm4,sdma,aql,recipes,peer,peer/aql}` each uses
+`amdf_cts_test_suite` with the default dynamic provider. Process/instance native
+lifetimes are two test invocations of the same binary. Only
+`//libamdf/cts/core:query` explicitly retains the three binding modes.
 
 Native corpora require x86-64 and Linux or Windows at compile time, inherit
 the `libamdf.resource.amd_gpu` execution requirement and share the AMD GPU
-resource group. Encoder target predicates and family capabilities select the
-actual native queue service:
+resource group. Physical peer cases additionally declare
+`libamdf.resource.amd_gpu_peers`; single-GPU jobs cannot admit them. Encoder
+target predicates and family capabilities select the actual native queue service:
 
 | Platform | PM4 | AQL | SDMA |
 | --- | --- | --- | --- |
@@ -107,8 +109,8 @@ Each `encoding/` package has one plain host-test binary. Package policy removes
 the GPU execution requirement for these exact packages, so byte-layout checks
 run without a GPU and do not reserve a GPU slot. GPU-family build enablement
 still applies. Shader-bearing corpora build their Loom fixtures by default;
-SDMA and host encoding targets have no shader compiler dependency. Native
-command corpora acquire no Vulkan/D3D12 dependencies.
+SDMA, peer construction/SDMA and host encoding targets have no shader compiler
+dependency. Native command corpora acquire no Vulkan/D3D12 dependencies.
 
 Bazel declarations are authoritative; generated CMake targets preserve the
 same corpus, dynamic loading, requirements and resource group. For example,
@@ -127,6 +129,45 @@ cases keep cache commands outside the dependent-copy sequence so they cannot
 replace the ordering operation under test. Query-driven compute compositions
 place required SDMA cache operations at each upload/download boundary; explicit
 GCR variants also exercise that stream when the backing permits a no-op.
+
+PM4/SDMA batches publish four prepared upload/compute/download graphs with one
+publication per queue. Each graph has separate payload, arguments and progress
+records. With a shared transfer queue, SDMA observes one graph's shader
+completion before uploading the next; the next PM4 upload wait therefore also
+joins the preceding shader. Independent upload and download queues allow
+uploads to advance without waiting for downloads. In that layout, the ordered
+data-acquire case explicitly waits for the preceding shader's completion before
+acquiring data or rebinding compute registers. Both layouts preserve the
+target's data-cache actions and reuse already-published immutable code; their
+full-barrier controls retain shader-idle and instruction invalidation.
+
+Each batch case snapshots all graph readbacks after the final download, then
+independently joins compute and upload before observing other backing. All
+queues retire before the second batch rewrites inputs. Complete payload and
+guard checks cover each graph and every allocation. These device chains qualify
+host-independent batch advancement with shared or separate transfer queues.
+Queue count alone establishes neither physical engine assignment nor overlap
+between transfer and compute.
+
+The [bounded streaming cases](recipes/pm4_sdma_streaming_test.cc) reuse
+1/2/4/8 payload slots across a longer sequence of graphs. They require mapped
+USER publication on one PM4 queue and two independent SDMA queues. The CPU
+services source refill and readback consumption while the GPU queues exchange
+their own dependencies; no host completion wait separates upload, compute and
+download. Upload completion protects source refill, shader completion protects
+input reuse, download completion protects output reuse, and CPU consumption
+protects readback reuse. Command-ring capacity and final native consumption
+remain independent of those payload acknowledgments.
+
+Named cases exercise full or ordered acquisition and 32-bit control tokens
+crossing the high bit or wrapping through zero. Producer-closure cases stop
+after complete graph groups, including zero work and partial slot windows.
+One variant leaves accepted ingress pending until closure; another prepares
+an extra input with no submitted consumer. Draining supplies all accepted
+inputs and consumes their outputs, using each slot's actual accepted generation
+without inventing native work for unused preparation. Full backing, guard and
+control checks include inactive slots and unaccepted result sentinels. Every
+stream retires all three native frontiers before its backing is reset.
 
 The lifecycle cases exercise the same resource helper as the `DISABLED_`
 peer-device recreation scenarios, without creating extra devices. Recreation requires
@@ -149,7 +190,8 @@ remaining field, composition and architecture boundaries within each group.
 | AQL | [aql/BUILD.bazel](aql/BUILD.bazel) | Signal reach, additional executable lifecycles, profiling, counters and metadata. |
 | Recipes | [recipes/BUILD.bazel](recipes/BUILD.bazel) | Additional backing classes, producer/consumer compositions and executable visibility. |
 | Manual lifecycle | [lifecycle/BUILD.bazel](lifecycle/BUILD.bazel) | Ordinary same-device copies are enabled; peer-device recreation remains disabled. |
-| Physical peers | No compiled cases | Multi-device admission, address reach, synchronization and runner requirements. |
+| Physical peers | [peer/BUILD.bazel](peer/BUILD.bazel) | Explicit endpoint reservation, joint construction and device-driven SYSTEM SDMA round trips. |
+| Peer AQL | [peer/aql/BUILD.bazel](peer/aql/BUILD.bazel) | Native signal reach and device-driven peer-local dataflow with both placements and producer directions; generic atomic reach, additional queue routes and physical topology remain separate witnesses. |
 | GPU/NPU recipes | [interop/gpu/xdna/recipes/BUILD.bazel](../interop/gpu/xdna/recipes/BUILD.bazel) | Finite transfer/shader chains and resident exchanges cover both initiators, credits, independent workers and startup/drain. Cross-output-channel publication, other imported backing and simultaneous independent traffic require separate witnesses. |
 
 Cases use real commands and changing exact data. They do not exhaust their

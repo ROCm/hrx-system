@@ -193,7 +193,7 @@ TEST_P(AqlTimestampTest, ConfirmedClockSamplesAreVisibleBeforeReuse) {
     std::memcpy(completion_guard_address, initial_completion_guards.data(),
                 sizeof(initial_completion_guards));
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
 
     // Capture every byte before diagnostics or consumption can contribute
     // another observation boundary. Clock samples do not complete shader work.

@@ -94,22 +94,27 @@ void Pm4CommandWriter::CallIndirectBuffer(uint64_t buffer_address,
   words_[word_count_++] = word_count | (1u << 23);
 }
 
-void Pm4CommandWriter::SystemBarrier() {
-  enum : uint32_t {
-    kEventWriteOpcode = 0x46,
-    kAcquireMemoryOpcode = 0x58,
-    kComputeShaderPartialFlush = 7 | (4 << 8),
-  };
-  words_[word_count_++] = MakeHeader(kEventWriteOpcode, 2);
-  words_[word_count_++] = kComputeShaderPartialFlush;
-  words_[word_count_++] = MakeHeader(kAcquireMemoryOpcode, 8);
+void Pm4CommandWriter::AcquireMemory(uint32_t gcr) {
+  words_[word_count_++] = MakeHeader(0x58, 8);
   words_[word_count_++] = 0;
   words_[word_count_++] = UINT32_MAX;
   words_[word_count_++] = 0xff;
   words_[word_count_++] = 0;
   words_[word_count_++] = 0;
   words_[word_count_++] = 0x0a;
-  words_[word_count_++] = profile_.system_acquire_gcr;
+  words_[word_count_++] = gcr;
+}
+
+void Pm4CommandWriter::SystemBarrier() {
+  words_[word_count_++] = MakeHeader(0x46, 2);
+  words_[word_count_++] = 7 | (4 << 8);  // CS_PARTIAL_FLUSH.
+  AcquireMemory(profile_.system_acquire_gcr);
+}
+
+void Pm4CommandWriter::AcquireFromSystem() {
+  // GLI_INV occupies bits 1:0 in every admitted profile. Preserve all data
+  // cache operations, writebacks, scope and sequencing selected for the target.
+  AcquireMemory(profile_.system_acquire_gcr & ~UINT32_C(3));
 }
 
 void Pm4CommandWriter::ReleaseSystem32(uint64_t target_address,
@@ -167,14 +172,7 @@ void Pm4CommandWriter::WaitEndOfPipeAndWriteback(uint64_t fence_address,
   // ACE ACQUIRE does immediate cache work, not shader-idle waiting. Whole-cache
   // GL2_WB is bit 15; the selected profile also supplies its scope. The high
   // size preserves only defined MEC bits rather than the wider ME layout.
-  words_[word_count_++] = MakeHeader(0x58, 8);
-  words_[word_count_++] = 0;
-  words_[word_count_++] = UINT32_MAX;
-  words_[word_count_++] = 0xff;
-  words_[word_count_++] = 0;
-  words_[word_count_++] = 0;
-  words_[word_count_++] = 0x0a;
-  words_[word_count_++] = profile_.gl2_writeback_gcr;
+  AcquireMemory(profile_.gl2_writeback_gcr);
 }
 
 void Pm4CommandWriter::CopyData32(uint64_t source_address,

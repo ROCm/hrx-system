@@ -166,7 +166,7 @@ TEST_F(AqlDispatchTest, CoherentSystemPatternFillPreservesSubspanAcrossEpochs) {
         descriptor_address, arguments->device_address,
         completion->device_address, kScopes);
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
 
     // Snapshot every workload page at direct completion, before diagnostics
     // or ring consumption can contribute another observation boundary.

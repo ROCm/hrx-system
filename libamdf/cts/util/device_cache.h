@@ -36,6 +36,14 @@ class CtsDeviceCache {
     return gpu_endpoint_id_;
   }
 
+  // Explicit second endpoint reserved by the runner for peer GPU corpora.
+  void SetGpuPeerEndpointId(amdf_endpoint_id_t id) {
+    gpu_peer_endpoint_id_ = id;
+  }
+  const std::optional<amdf_endpoint_id_t>& gpu_peer_endpoint_id() const {
+    return gpu_peer_endpoint_id_;
+  }
+
   amdf_status_t GetInstance(amdf_instance_t** out_instance);
   amdf_status_t OpenEndpoint(const amdf_endpoint_id_t& id,
                              amdf_endpoint_t** out_endpoint);
@@ -81,6 +89,8 @@ class CtsDeviceCache {
   std::string gpu_target_;
   // Exact enumerated identity of the primary GPU, absent for normal discovery.
   std::optional<amdf_endpoint_id_t> gpu_endpoint_id_;
+  // Exact reserved peer identity; absence never authorizes peer discovery.
+  std::optional<amdf_endpoint_id_t> gpu_peer_endpoint_id_;
   // Native lifetime selected once by the test executable's arguments.
   amdf_native_lifetime_t native_lifetime_ = AMDF_NATIVE_LIFETIME_PROCESS;
   // Shared instance owned until all cached descendants have been released.

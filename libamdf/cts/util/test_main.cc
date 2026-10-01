@@ -68,6 +68,7 @@ int main(int argument_count, char** argument_values) {
   const char required_prefix[] = "--amdf_require_test=";
   const char gpu_target_prefix[] = "--amdf_gpu_target=";
   const char gpu_endpoint_prefix[] = "--amdf_gpu_endpoint_id=";
+  const char gpu_peer_endpoint_prefix[] = "--amdf_gpu_peer_endpoint_id=";
   std::vector<std::string> required_tests;
   for (int i = 1; i < argument_count; ++i) {
     if (std::strncmp(argument_values[i], prefix, sizeof(prefix) - 1) == 0) {
@@ -103,6 +104,23 @@ int main(int argument_count, char** argument_values) {
         return EXIT_FAILURE;
       }
       GetCtsDeviceCache().SetGpuEndpointId(id);
+    } else if (std::strncmp(argument_values[i], gpu_peer_endpoint_prefix,
+                            sizeof(gpu_peer_endpoint_prefix) - 1) == 0) {
+      const char* value =
+          argument_values[i] + sizeof(gpu_peer_endpoint_prefix) - 1;
+      amdf_endpoint_id_t id = {};
+      if (!ParseEndpointId(value, &id)) {
+        std::fprintf(stderr,
+                     "--amdf_gpu_peer_endpoint_id needs two 16-digit "
+                     "hexadecimal words separated by ':'\n");
+        return EXIT_FAILURE;
+      }
+      if (GetCtsDeviceCache().gpu_peer_endpoint_id().has_value()) {
+        std::fprintf(stderr,
+                     "--amdf_gpu_peer_endpoint_id was specified twice\n");
+        return EXIT_FAILURE;
+      }
+      GetCtsDeviceCache().SetGpuPeerEndpointId(id);
     } else if (std::strncmp(argument_values[i], gpu_target_prefix,
                             sizeof(gpu_target_prefix) - 1) == 0) {
       const char* target = argument_values[i] + sizeof(gpu_target_prefix) - 1;
@@ -120,6 +138,18 @@ int main(int argument_count, char** argument_values) {
     }
     argument_values[--argument_count] = nullptr;
     --i;
+  }
+  const auto& primary = GetCtsDeviceCache().gpu_endpoint_id();
+  const auto& peer = GetCtsDeviceCache().gpu_peer_endpoint_id();
+  if (peer.has_value() && !primary.has_value()) {
+    std::fprintf(
+        stderr,
+        "--amdf_gpu_peer_endpoint_id requires --amdf_gpu_endpoint_id\n");
+    return EXIT_FAILURE;
+  }
+  if (peer.has_value() && amdf_endpoint_id_is_equal(&*primary, &*peer)) {
+    std::fprintf(stderr, "primary and peer GPU endpoint IDs must differ\n");
+    return EXIT_FAILURE;
   }
   if (!amdf_cts_provider_initialize(&argument_count, &argument_values)) {
     return EXIT_FAILURE;

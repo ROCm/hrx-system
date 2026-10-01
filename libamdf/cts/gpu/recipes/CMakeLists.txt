@@ -9,6 +9,25 @@
 
 iree_add_all_subdirs()
 
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+iree_cc_library(
+  NAME
+    pm4_sdma_fixture
+  HDRS
+    "pm4_sdma_fixture.h"
+  SRCS
+    "pm4_sdma_fixture.cc"
+  DEPS
+    amdf::headers
+    iree::third_party::google_test
+    libamdf::cts::gpu::kernels::kernel
+    libamdf::cts::gpu::pm4::dispatch_fixture
+    libamdf::cts::gpu::util::command_fixture
+  TESTONLY
+  PUBLIC
+)
+endif()
+
 if(IREE_ARCH STREQUAL "x86_64" AND AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_cc_library(
   NAME
@@ -16,8 +35,10 @@ iree_cc_library(
   SRCS
     "copy_dispatch_test.cc"
     "memory_pair_test.cc"
+    "pm4_sdma_streaming_test.cc"
     "pm4_sdma_test.cc"
   DEPS
+    ::pm4_sdma_fixture
     amdf::headers
     iree::third_party::google_test
     libamdf::cts::gpu::aql::dispatch_fixture
@@ -28,6 +49,7 @@ iree_cc_library(
     libamdf::cts::gpu::pm4::encoding::commands
     libamdf::cts::gpu::sdma::encoding::commands
     libamdf::cts::gpu::util::command_fixture
+    libamdf::cts::gpu::util::user_queue
   TESTONLY
   ALWAYSLINK
   PUBLIC

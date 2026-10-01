@@ -443,7 +443,9 @@ need flushing before XDNA reads them. An explicit cache-control request performs
 the advertised operation even when one device is host-coherent. A CPU view has
 no device reset epoch; reset validity belongs to each device's access.
 
-`memory_query_pair_info` describes the required transitions between two sites.
+`memory_query_pair_info` describes the visibility transitions from one site's
+writes to another site's reads. The producer must permit writes and the
+consumer must permit reads; incompatible permissions return `UNSUPPORTED`.
 A DEVICE site selects `{memory, access_ordinal, queue_family_ordinal}`; a HOST
 site selects an `amdf_host_mapping_t`. That mapping supplies its own backing,
 range and cache behavior, without another memory argument or a synthetic CPU
@@ -491,6 +493,17 @@ dependency through its synchronization and scheduling mechanisms. Libamdf
 exposes native mechanisms and requirements without inferring dependencies from
 pointers or generating a scheduling policy. The HAL constructs engine commands;
 the library does not need a packet builder to describe a cache requirement.
+
+Storage reuse also requires completion of every earlier reader. For a coherent
+CPU upload ring, completed DMA reads release a source slot for CPU refill; the
+next CPU write follows the same CPU-to-DMA visibility recipe. For a readback
+ring, download completion allows the CPU to consume the result, but reuse must
+wait until that CPU consumption finishes. The caller's acknowledgment then
+releases the destination slot for another download. These reader-to-next-writer
+dependencies establish completed use, rather than publishing writes from the
+previous reader. Reversing a visibility pair query does not establish them,
+even when both sites permit reads and writes. Native access-ownership protocols
+remain separate requirements of the selected memory transport.
 
 ## Atomic operations and participant reach
 

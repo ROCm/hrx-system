@@ -329,7 +329,7 @@ TEST_P(AqlTransferTest, ConfirmedWriteFeedsCopyAcrossEpochs) {
                 sizeof(target_words));
     signal.value = 1;
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packets[epoch]);
+    aql::Publish(*queue, index++, packets[epoch]);
 
     WaitForCompletionAndCheckPages(pages, expected_source, expected_target,
                                    expected_commands);
@@ -437,7 +437,7 @@ TEST_P(AqlTransferTest, CpuPublishedSourceFeedsCopyAcrossEpochs) {
                 sizeof(target_words));
     signal.value = 1;
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
 
     WaitForCompletionAndCheckPages(pages, expected_source, expected_target,
                                    expected_commands);
@@ -564,7 +564,7 @@ TEST_P(AqlTransferTest, CompletedCarrierAllowsCopyAddressRebinding) {
                 sizeof(expected_commands[epoch]));
     signal.value = 1;
     GpuStoreRelease(queue->host.write_index_address, index + 1);
-    Publish(*queue, index++, packet);
+    aql::Publish(*queue, index++, packet);
 
     WaitForCompletionAndCheckPages(pages, expected_source, expected_target,
                                    expected_commands[epoch]);

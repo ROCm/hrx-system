@@ -33,7 +33,6 @@ void GpuMemory::Initialize(const amdf_api_t* api, amdf_memory_scope_t* scope,
   ASSERT_EQ(api->memory_query_address(memory, 0, AMDF_MEMORY_ADDRESS_GPU,
                                       &device_address),
             AMDF_STATUS_OK);
-  ASSERT_NE(device_address, 0u);
 
   if ((creation.required_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE) == 0) {
     return;

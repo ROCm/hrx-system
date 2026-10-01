@@ -50,7 +50,12 @@ class Pm4CommandWriter {
   Pm4CommandWriter(uint32_t* words, const Pm4CommandProfile& profile)
       : words_(words), profile_(profile) {}
 
+  // Joins preceding compute waves and acquires code and data from SYSTEM.
   void SystemBarrier();
+  // Acquires SYSTEM data while retaining instruction-cache contents. The
+  // caller has already published immutable code and joined preceding waves
+  // through an independent completion dependency. This emits no shader wait.
+  void AcquireFromSystem();
   // Releases preceding ordinary compute-buffer stores to coherent SYSTEM
   // backing and writes a known 32-bit value at bottom-of-pipe. The confirmed
   // TC/L2 write has no interrupt, scalar-store or CP-DMA completion request.
@@ -122,6 +127,8 @@ class Pm4CommandWriter {
   size_t word_count() const { return word_count_; }
 
  private:
+  // Emits whole-cache acquisition with the selected native GCR fields.
+  void AcquireMemory(uint32_t gcr);
   // Writes a known ordinary compute register interval relative to SH space.
   void SetComputeRegisters(uint32_t first_register, const uint32_t* values,
                            size_t value_count);

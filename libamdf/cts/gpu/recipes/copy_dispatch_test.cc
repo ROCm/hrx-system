@@ -125,8 +125,8 @@ class CopyDispatchRecipeTest : public AqlDispatchTest {
     };
     amdf_queue_family_info_t sdma_family = {};
     bool matches = false;
-    amdf_status_t status =
-        FindQueueFamily(endpoint, requirements, &sdma_family, &matches);
+    amdf_status_t status = FindGpuQueueFamily(api_, endpoint, requirements,
+                                              &sdma_family, &matches);
     if (!amdf_status_is_ok(status)) {
       return status;
     }
@@ -684,8 +684,8 @@ void CopyDispatchRecipeTest::RunCoherentHandoff(
     // Consumer-first publication leaves every dataflow edge on the device.
     // Both rings are free from the preceding epoch before this reservation.
     GpuStoreRelease(aql_queue->host.write_index_address, aql_index + 2);
-    Publish(*aql_queue, aql_index++, dependency);
-    Publish(*aql_queue, aql_index++, dispatch);
+    aql::Publish(*aql_queue, aql_index++, dependency);
+    aql::Publish(*aql_queue, aql_index++, dispatch);
     ASSERT_NO_FATAL_FAILURE(sdma_queue->PublishStream(sdma_index));
     GpuWaitEqual<uint32_t>(reinterpret_cast<uintptr_t>(&completion.download),
                            epoch);
@@ -1123,8 +1123,8 @@ void CopyDispatchRecipeTest::RunStagedHandoff(PairQuery query_kind) {
 
     // Consumer-first publication leaves both inter-engine edges on device.
     GpuStoreRelease(aql_queue->host.write_index_address, aql_index + 2);
-    Publish(*aql_queue, aql_index++, dependency);
-    Publish(*aql_queue, aql_index++, dispatch);
+    aql::Publish(*aql_queue, aql_index++, dependency);
+    aql::Publish(*aql_queue, aql_index++, dispatch);
     ASSERT_NO_FATAL_FAILURE(sdma_queue->PublishStream(sdma_index));
     GpuWaitEqual<uint32_t>(reinterpret_cast<uintptr_t>(&completion.download),
                            epoch);
