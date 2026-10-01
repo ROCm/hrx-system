@@ -26,6 +26,7 @@
 #include "iree/io/parameter_index_provider.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/vocab/vocab.h"
+#include "iree/tooling/device_util.h"
 #include "iree/tooling/parameter_util.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
@@ -83,6 +84,10 @@ struct loom_serve_qwen_model_t {
   iree_hal_queue_t* transfer;
   // Ordered stage and host-I/O submission domain.
   loom_serve_execution_t* execution;
+  // Optional flag-selected profiling session, ended after accepted work drains.
+  iree_hal_profiling_from_flags_t* profiling;
+  // Cold recording policy for every reusable stage in this residency.
+  iree_hal_command_buffer_mode_t command_mode;
   // Prefill, decode, then packed-epoch artifacts, owned in option order.
   qwen_stage_t* stages;
   // Number of allocated stages, including partially initialized cold entries.
@@ -368,9 +373,10 @@ static iree_status_t qwen_stage_prepare(loom_serve_qwen_model_t* runner,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_command_create(
-        iree_hal_queue_family(runner->dispatch), &stage->program,
-        stage->program.requirements.fixed_buffer_count, stage->fixed_buffers,
-        count, entries, runner->allocator, &stage->command);
+        iree_hal_queue_family(runner->dispatch), runner->command_mode,
+        &stage->program, stage->program.requirements.fixed_buffer_count,
+        stage->fixed_buffers, count, entries, runner->allocator,
+        &stage->command);
   }
   for (iree_host_size_t i = 0; i < count; ++i) {
     iree_hal_executable_release(entries[i].executable);
@@ -981,6 +987,14 @@ static iree_status_t qwen_allocate_mtp(loom_serve_qwen_model_t* model) {
 
 static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
                                      const loom_serve_qwen_options_t* options) {
+  bool retain_profile_metadata = false;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
+          &retain_profile_metadata));
+  model->command_mode =
+      retain_profile_metadata
+          ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
+          : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
   model->shape_count = options->epoch_count;
   const bool uses_mtp = !iree_string_view_is_empty(options->mtp_directory);
   if (uses_mtp && !model->shape_count) {
@@ -1131,7 +1145,9 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(qwen_create_program(model));
   IREE_RETURN_IF_ERROR(qwen_allocate_rows(model));
-  return qwen_allocate_mtp(model);
+  IREE_RETURN_IF_ERROR(qwen_allocate_mtp(model));
+  return iree_hal_begin_device_group_profiling_from_flags(
+      model->group, model->allocator, &model->profiling);
 }
 
 iree_status_t loom_serve_qwen_model_create(
@@ -1163,6 +1179,8 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
   iree_status_t status = model->execution
                              ? loom_serve_execution_drain(model->execution)
                              : iree_ok_status();
+  status = iree_status_join(
+      status, iree_hal_end_profiling_from_flags(model->profiling));
   iree_vm_process_release(model->process);
   if (model->invocation) {
     iree_vm_invocation_deinitialize(model->invocation);

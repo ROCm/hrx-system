@@ -48,6 +48,15 @@ buffer and packed workspace. One preallocated arena partitions private retained
 state among up to eight rows. Rows are data, not VM processes. A single host
 owner multiplexes their stages through the shared execution timeline.
 
+The Qwen tools use IREE's standard device profiling flags. Profiling begins
+after model loading and residency initialization; shutdown drains accepted
+work before ending the session and propagates profiling failures. For aggregate
+execution statistics, add `--print_device_statistics=true`. Per-dispatch
+attribution can use `--device_profiling_mode=dispatch-events` with that flag,
+or `--device_profiling_output=/path/to/profile` instead of aggregate printing.
+Profiling retains command metadata only when requested. Instrumented device
+timings explain kernel costs; throughput comparisons run with profiling off.
+
 The server accepts repeated `--epoch=/path/to/shape` options. These cached
 commands share the same weights, retained rows, residual storage, maximum-sized
 workspace, and VM process. Each is a native runner export resolved once at load

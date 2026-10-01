@@ -64,7 +64,8 @@ struct State {
   std::array<int32_t, 8> progress = {};
 };
 
-class ControlTest : public ::testing::Test {
+class ControlTest
+    : public ::testing::TestWithParam<iree_hal_command_buffer_mode_t> {
  protected:
   void SetUp() override {
     IREE_ASSERT_OK(CreateDevice());
@@ -202,8 +203,9 @@ class ControlTest : public ::testing::Test {
     loom_cmd_program_t parsed;
     IREE_RETURN_IF_ERROR(loom_cmd_program_parse(
         iree_make_const_byte_span(bytes.data(), bytes.size()), &parsed));
-    return loom_serve_command_create(family, &parsed, 0, nullptr, entry_count,
-                                     entries, allocator_, out_command);
+    return loom_serve_command_create(family, GetParam(), &parsed, 0, nullptr,
+                                     entry_count, entries, allocator_,
+                                     out_command);
   }
 
   iree_status_t CreateModel() {
@@ -349,7 +351,7 @@ class ControlTest : public ::testing::Test {
   iree_vm_function_t step_ = iree_vm_function_null();
 };
 
-TEST_F(ControlTest, InterleavedRowsRetainHistory) {
+TEST_P(ControlTest, InterleavedRowsRetainHistory) {
   inputs_[0].control = {3, 17, 99};
   inputs_[1].control = {4, 100, 31};
   for (auto& input : inputs_) {
@@ -398,7 +400,7 @@ TEST_F(ControlTest, InterleavedRowsRetainHistory) {
   }
 }
 
-TEST_F(ControlTest, RejectedNativeCallLeavesTheTimelineUsable) {
+TEST_P(ControlTest, RejectedNativeCallLeavesTheTimelineUsable) {
   uint64_t completion = 777;
   auto invalid = buffers_[0];
   invalid[1] = nullptr;
@@ -419,5 +421,10 @@ TEST_F(ControlTest, RejectedNativeCallLeavesTheTimelineUsable) {
   EXPECT_EQ(outputs_[0].tokens[1], 7);
   EXPECT_EQ(outputs_[0].tokens[2], 7);
 }
+
+INSTANTIATE_TEST_SUITE_P(
+    RecordingPolicy, ControlTest,
+    ::testing::Values(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
+                      IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA));
 
 }  // namespace
