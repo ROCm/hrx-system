@@ -981,12 +981,10 @@ static void loom_low_schedule_score_candidate_register_packing_resources(
                 current_live_units,
                 pressure_state
                     ->candidate_delta_units_by_reg_class[reg_class_id]);
-        const uint64_t early_live_units = iree_max(
-            projected_live_units,
-            iree_math_saturating_add_u64(
-                current_live_units,
-                pressure_state
-                    ->candidate_early_added_units_by_reg_class[reg_class_id]));
+        const uint64_t early_live_units = iree_math_saturating_add_u64(
+            current_live_units,
+            pressure_state
+                ->candidate_early_added_units_by_reg_class[reg_class_id]);
         persistent_contribution =
             loom_low_schedule_register_packing_contribution(
                 projected_live_units, member);
@@ -1006,6 +1004,8 @@ static void loom_low_schedule_score_candidate_register_packing_resources(
             ->candidate_register_packing_activation_units[resource_id];
     const uint64_t activated_units =
         iree_math_saturating_add_u64(persistent_units, activation_units);
+    // Compare complete phases: summing per-member peaks would count killed
+    // inputs together with ordinary results that can reuse their storage.
     const uint64_t required_units =
         iree_max(early_required_units, activated_units);
     const bool has_aggregate_member =

@@ -1413,6 +1413,17 @@ TEST_LOW_PACKING_EXPAND_DESCRIPTOR = Descriptor(
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
 )
 
+TEST_LOW_PACKING_EARLY_EXPAND_DESCRIPTOR = Descriptor(
+    key="test.packing.early.expand",
+    mnemonic="test.packing.early.expand",
+    semantic_tag="test.register.packing.early_expand",
+    operands=(_packed_wide_result(), _packed_narrow_operand("src")),
+    constraints=(Constraint(ConstraintKind.EARLY_CLOBBER, 0),),
+    asm_forms=_asm(results=("dst",), operands=("src",)),
+    schedule_class=_SCHEDULE_VECTOR_ALU,
+    flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
 TEST_LOW_PACKING_CONFIGURED_EXPAND_DESCRIPTOR = Descriptor(
     key="test.packing.configured.expand",
     mnemonic="test.packing.configured.expand",
@@ -2564,6 +2575,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_SCHEDULE_ALTERNATIVE_A_I32_DESCRIPTOR,
         TEST_LOW_SCHEDULE_ALTERNATIVE_B_I32_DESCRIPTOR,
         TEST_LOW_CONST_ISSUED_I32_DESCRIPTOR,
+        TEST_LOW_PACKING_EARLY_EXPAND_DESCRIPTOR,
     ),
 )
 
