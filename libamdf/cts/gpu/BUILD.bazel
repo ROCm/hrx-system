@@ -59,6 +59,7 @@ test_suite(
         "//libamdf/cts/gpu/aql/encoding:packets_test",
         "//libamdf/cts/gpu/linux:memory",
         "//libamdf/cts/gpu/peer",
+        "//libamdf/cts/gpu/peer/aql",
         "//libamdf/cts/gpu/pm4",
         "//libamdf/cts/gpu/pm4/encoding:commands_test",
         "//libamdf/cts/gpu/recipes",

@@ -1,0 +1,33 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
+
+package(
+    default_visibility = ["//libamdf/cts:__subpackages__"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+amdf_cts_test_suite(
+    name = "aql",
+    srcs = ["local_memory_test.cc"],
+    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
+        "@platforms//os:linux": [],
+        "@platforms//os:windows": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    visibility = ["//visibility:public"],
+    deps = [
+        "//libamdf/cts/gpu/aql:executable",
+        "//libamdf/cts/gpu/aql:publication",
+        "//libamdf/cts/gpu/kernels:transform",
+        "//libamdf/cts/gpu/kernels:transform_kernels",
+        "//libamdf/cts/gpu/peer:device_fixture",
+        "//libamdf/cts/gpu/util:command_fixture",
+        "//third_party:google_test",
+    ],
+)

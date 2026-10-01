@@ -22,6 +22,8 @@ identity, independent observation and checked retirement.
 | AQL transfer and reuse | [carriers](aql/transfer_test.cc), [byte copy](aql/byte_copy_test.cc), [pattern fill](aql/pattern_fill_test.cc), [executable reuse](aql/executable_test.cc), [worksets](aql/workset_test.cc) | PM4-carried copies, shader subspan operations, completed-use code replacement and independent final-use obligations. |
 | CPU/GPU and cross-engine memory edges | [memory pairs](recipes/memory_pair_test.cc), [SDMA/AQL](recipes/copy_dispatch_test.cc), [PM4/SDMA](recipes/pm4_sdma_test.cc) | Queried concrete/profile policies, coherent SYSTEM and staged LOCAL payloads, upload/compute/download and final consumer output. PM4/SDMA also covers device-driven batches with shared or independent upload/download queues, full barriers or ordered data acquisition, and immutable code reuse. |
 | Bounded CPU/GPU streaming and closure | [PM4/SDMA host streams](recipes/pm4_sdma_streaming_test.cc) | Reusable payload and command storage, source/readback acknowledgments, retained outputs, 32-bit control-token boundaries, and exact per-slot/native retirement. Closure preserves pending accepted ingress and distinguishes unused preparation from submitted work. |
+| Physical peer construction and SDMA | [joint memory](peer/memory_group_test.cc), [SYSTEM round trips](peer/sdma_system_test.cc) | Explicit endpoint selection, joint attachment, changing bidirectional device-driven payloads and complete backing/command checks before retirement. |
+| Physical peer AQL | [native signals and peer-local memory](peer/aql/local_memory_test.cc) | Both signal directions, both LOCAL memory owners and producers, queried SYSTEM scopes, consumer-first dependency, changing transforms and complete output before independent joins. |
 | CPU/NPU execution | [CPU/XDNA recipes](../xdna/recipes/README.md) | Allocated/registered backing, queried host publication/acquisition, changed arithmetic outputs, full guards and native retirement. |
 | Finite GPU/NPU execution | [GPU/XDNA recipes](../interop/gpu/xdna/recipes/README.md#finite-recipes) | GPU transfers or shaders produce NPU inputs and consume its output; native phases are joined on the host without intermediate CPU payload access. |
 | Resident GPU/NPU execution | [resident recipes](../interop/gpu/xdna/recipes/README.md#resident-exchange) | Both dataflow initiators, one/two credits, independently progressing workers, complete per-generation transcripts, backing/payload layouts, startup abort and final drain. The host does not relay intermediate work. |
@@ -63,17 +65,20 @@ Query-driven recipes emit the backing's returned NONE or GLOBAL transitions;
 neither HOST_COHERENT nor a compiler target name substitutes for those answers.
 
 Windows compilation does not establish a USER queue service or native execution
-result. [Physical peer-GPU conformance](peer/README.md) has a separate corpus
+result. [Physical peer-GPU conformance](peer/README.md) has separate corpora
 with explicit primary/peer selection and a two-GPU run requirement. Its SYSTEM
 SDMA round trips use changing data, stable one-writer completion cells and full
-backing/command checks before retirement. Joint allocation and address queries
-remain distinct from that executed dataflow; peer-local memory and atomic RMW
-reach require their own cases.
+backing/command checks before retirement. The shader-bearing AQL corpus covers
+device-only peer-local memory with both placements and producer directions,
+native signal dependencies and independently selected images and addresses. Joint
+allocation and address queries remain distinct from those executed dataflows;
+generic atomic RMW reach and SDMA access to another GPU's LOCAL memory require
+their own cases.
 
 Per-dispatch LDS capacity changes, additional packet fields, rectangular SDMA
 transfers, SDMA atomics, general poll/cache controls, command-buffer variants,
-physical peers and hardware-counter collection need their own native witnesses.
-The corresponding
+additional physical-peer routes and hardware-counter collection need their own
+native witnesses. The corresponding
 [hardware reference](../../../docs/reference/amd/gpu/README.md) has a broader
 semantic scope than the implemented CTS. A new HAL recipe is qualified by its
 complete producer/dependency/consumer/reuse behavior, not by finding its opcode
@@ -90,6 +95,8 @@ Ordinary GPU corpora have the following process-lifetime test targets. Appending
 | SDMA | `//libamdf/cts/gpu/sdma:sdma_dynamic` |
 | AQL | `//libamdf/cts/gpu/aql:aql_dynamic` |
 | Single-GPU recipes | `//libamdf/cts/gpu/recipes:recipes_dynamic` |
+| Peer construction and SDMA | `//libamdf/cts/gpu/peer:peer_dynamic` |
+| Peer AQL | `//libamdf/cts/gpu/peer/aql:aql_dynamic` |
 | CPU/NPU recipes | `//libamdf/cts/xdna/recipes:execution_dynamic` |
 | GPU/NPU recipes | `//libamdf/cts/interop/gpu/xdna/recipes:execution_dynamic` |
 

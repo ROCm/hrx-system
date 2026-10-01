@@ -26,7 +26,8 @@ gpu/
     encoding/
   recipes/                   # One single-GPU composition corpus; N queues.
   kernels/                   # Compiler fixture/provenance boundary.
-  peer/                      # One explicitly reserved physical multi-GPU corpus.
+  peer/                      # Physical multi-GPU construction and SDMA corpus.
+    aql/                     # Separate shader-bearing peer-local memory corpus.
   lifecycle/                 # Completed resources and opt-in device recreation.
 ```
 
@@ -69,10 +70,10 @@ replaces the case's earlier payload observation.
 
 ## Build and execution
 
-`//libamdf/cts/gpu/{pm4,sdma,aql,recipes,peer}` each uses `amdf_cts_test_suite` with
-the default dynamic provider. Process/instance native lifetimes are two test
-invocations of the same binary. Only `//libamdf/cts/core:query` explicitly
-retains the three binding modes.
+`//libamdf/cts/gpu/{pm4,sdma,aql,recipes,peer,peer/aql}` each uses
+`amdf_cts_test_suite` with the default dynamic provider. Process/instance native
+lifetimes are two test invocations of the same binary. Only
+`//libamdf/cts/core:query` explicitly retains the three binding modes.
 
 Native corpora require x86-64 and Linux or Windows at compile time, inherit
 the `libamdf.resource.amd_gpu` execution requirement and share the AMD GPU
@@ -108,8 +109,8 @@ Each `encoding/` package has one plain host-test binary. Package policy removes
 the GPU execution requirement for these exact packages, so byte-layout checks
 run without a GPU and do not reserve a GPU slot. GPU-family build enablement
 still applies. Shader-bearing corpora build their Loom fixtures by default;
-SDMA and host encoding targets have no shader compiler dependency. Native
-command corpora acquire no Vulkan/D3D12 dependencies.
+SDMA, peer construction/SDMA and host encoding targets have no shader compiler
+dependency. Native command corpora acquire no Vulkan/D3D12 dependencies.
 
 Bazel declarations are authoritative; generated CMake targets preserve the
 same corpus, dynamic loading, requirements and resource group. For example,
@@ -189,7 +190,8 @@ remaining field, composition and architecture boundaries within each group.
 | AQL | [aql/BUILD.bazel](aql/BUILD.bazel) | Signal reach, additional executable lifecycles, profiling, counters and metadata. |
 | Recipes | [recipes/BUILD.bazel](recipes/BUILD.bazel) | Additional backing classes, producer/consumer compositions and executable visibility. |
 | Manual lifecycle | [lifecycle/BUILD.bazel](lifecycle/BUILD.bazel) | Ordinary same-device copies are enabled; peer-device recreation remains disabled. |
-| Physical peers | [peer/BUILD.bazel](peer/BUILD.bazel) | Explicit endpoint reservation, joint construction and device-driven SYSTEM SDMA round trips; peer-local dataflow, atomic reach and topology remain separate witnesses. |
+| Physical peers | [peer/BUILD.bazel](peer/BUILD.bazel) | Explicit endpoint reservation, joint construction and device-driven SYSTEM SDMA round trips. |
+| Peer AQL | [peer/aql/BUILD.bazel](peer/aql/BUILD.bazel) | Native signal reach and device-driven peer-local dataflow with both placements and producer directions; generic atomic reach, additional queue routes and physical topology remain separate witnesses. |
 | GPU/NPU recipes | [interop/gpu/xdna/recipes/BUILD.bazel](../interop/gpu/xdna/recipes/BUILD.bazel) | Finite transfer/shader chains and resident exchanges cover both initiators, credits, independent workers and startup/drain. Cross-output-channel publication, other imported backing and simultaneous independent traffic require separate witnesses. |
 
 Cases use real commands and changing exact data. They do not exhaust their
