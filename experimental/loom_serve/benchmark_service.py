@@ -12,11 +12,13 @@ Server epoch events provide the actual prompt/decode mix and traversal costs.
 """
 
 import argparse
+import hashlib
 import http.client
 import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from urllib.parse import urlsplit
 
 WORDS = ("MAPLE", "COBALT", "CEDAR", "QUARTZ", "AMBER", "CORAL", "JADE", "ONYX")
@@ -128,6 +130,62 @@ def client(arguments, address, index, barrier):
     return {"session": session, "verified_codeword": word, "turns": [first, second]}
 
 
+def load_workload(path):
+    """Loads frozen text turns; responses become retained history at run time."""
+    payload = path.read_bytes()
+    workload = json.loads(payload)
+    if not isinstance(workload, dict) or not isinstance(workload.get("name"), str):
+        raise ValueError("workload needs a name and sessions")
+    sessions = workload.get("sessions")
+    if not isinstance(sessions, list) or not sessions:
+        raise ValueError("workload sessions must be a nonempty list")
+    for index, session in enumerate(sessions):
+        if not isinstance(session, dict) or not isinstance(session.get("system"), str):
+            raise ValueError(f"session {index} needs a system string")
+        turns = session.get("turns")
+        if not isinstance(turns, list) or not turns:
+            raise ValueError(f"session {index} needs nonempty turns")
+        for turn in turns:
+            if (
+                not isinstance(turn, dict)
+                or not isinstance(turn.get("content"), str)
+                or not turn["content"]
+                or type(turn.get("max_tokens")) is not int
+                or not 1 <= turn["max_tokens"] <= 16384
+            ):
+                raise ValueError(
+                    f"session {index}: each turn needs content and max_tokens in [1, 16384]"
+                )
+    return workload, hashlib.sha256(payload).hexdigest()
+
+
+def workload_client(arguments, address, index, barrier, workload):
+    fixture = workload["sessions"][index]
+    messages = [{"role": "system", "content": fixture["system"]}]
+    session = f"{arguments.session_prefix}-{index}"
+    results = []
+    barrier.wait()
+    for turn in fixture["turns"]:
+        messages.append({"role": "user", "content": turn["content"]})
+        input_digest = hashlib.sha256(
+            json.dumps(messages, ensure_ascii=False, sort_keys=True).encode()
+        ).hexdigest()
+        result = request(address, session, messages, turn["max_tokens"])
+        if not result["text"].strip():
+            raise RuntimeError(f"{session}: empty response")
+        if results and not result["usage"]["prompt_tokens_details"]["cached_tokens"]:
+            raise RuntimeError(f"{session}: continuation did not reuse retained state")
+        results.append(
+            {
+                **result,
+                "input_sha256": input_digest,
+                "max_tokens": turn["max_tokens"],
+            }
+        )
+        messages.append({"role": "assistant", "content": result["text"]})
+    return {"session": session, "session_index": index, "turns": results}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8080")
@@ -135,6 +193,11 @@ def main():
     parser.add_argument("--long-lines", type=int, default=128)
     parser.add_argument("--max-tokens", type=int, default=64)
     parser.add_argument("--session-prefix", default="service-benchmark")
+    parser.add_argument(
+        "--workload",
+        type=Path,
+        help="Frozen JSON text-turn corpus; replaces the codeword workload.",
+    )
     arguments = parser.parse_args()
     address = urlsplit(arguments.url)
     if (
@@ -147,10 +210,18 @@ def main():
         parser.error("clients must be in [1, 8]")
     if arguments.long_lines < 0 or arguments.max_tokens < 1:
         parser.error("long-lines must be nonnegative and max-tokens positive")
+    workload = None
+    workload_digest = None
+    if arguments.workload:
+        workload, workload_digest = load_workload(arguments.workload)
+        if arguments.clients > len(workload["sessions"]):
+            parser.error("workload contains fewer sessions than --clients")
     barrier = threading.Barrier(arguments.clients + 1)
     with ThreadPoolExecutor(max_workers=arguments.clients) as pool:
         futures = [
-            pool.submit(client, arguments, address, index, barrier)
+            pool.submit(workload_client, arguments, address, index, barrier, workload)
+            if workload
+            else pool.submit(client, arguments, address, index, barrier)
             for index in range(arguments.clients)
         ]
         start = time.monotonic_ns()
@@ -172,6 +243,8 @@ def main():
         json.dumps(
             {
                 "event": "summary",
+                "workload": workload["name"] if workload else "codeword",
+                "workload_sha256": workload_digest,
                 "clients": arguments.clients,
                 "requests": len(turns),
                 "elapsed_seconds": seconds,
