@@ -33,6 +33,20 @@ func.def @i32_to_u8x4_bitunpack_i8_result(%packed: vector<1xi32>) -> (vector<4xi
 
 // ====
 
+func.def @i8_to_u4x2_bitunpack_i8_result(%packed: vector<1xi8>) -> (vector<2xi8>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<1xi8> -> vector<2xi8>
+  func.return %unpacked : vector<2xi8>
+}
+
+// ====
+
+func.def @i8x4_to_u4x8_bitunpack_i8_result(%packed: vector<4xi8>) -> (vector<8xi8>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<4xi8> -> vector<8xi8>
+  func.return %unpacked : vector<8xi8>
+}
+
+// ====
+
 func.def @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
   %unpacked = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
   func.return %unpacked : vector<4xi8>

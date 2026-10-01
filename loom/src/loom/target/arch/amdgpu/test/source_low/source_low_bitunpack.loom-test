@@ -96,6 +96,39 @@ low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i32_to_u8x4_bitu
 
 // ====
 
+func.def @i8_to_u4x2_bitunpack_i8_result(%packed: vector<1xi8>) -> (vector<2xi8>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<1xi8> -> vector<2xi8>
+  func.return %unpacked : vector<2xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8_to_u4x2_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = v_and_b32_src0_inline %packed, 15
+  %6 = v_bfe_u32_offset_width_inline %packed {offset = 4, width = 4}
+  %unpacked = v_lshl_add_u32_shift_imm %6, %5, 8
+  return %unpacked
+}
+
+// ====
+
+func.def @i8x4_to_u4x8_bitunpack_i8_result(%packed: vector<4xi8>) -> (vector<8xi8>) {
+  %unpacked = vector.bitunpacku<4> %packed : vector<4xi8> -> vector<8xi8>
+  func.return %unpacked : vector<8xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x4_to_u4x8_bitunpack_i8_result(%packed: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = v_and_b32_lit %packed, 252645135
+  %6 = v_lshrrev_b32_src0_inline %packed, 4
+  %7 = v_and_b32_lit %6, 252645135
+  %8 = v_perm_b32_src2_lit %7, %5, 83952640
+  %9 = v_perm_b32_src2_lit %7, %5, 117638658
+  %unpacked = concat(%8, %9) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %unpacked
+}
+
+// ====
+
 func.def @i8x2_to_u4x4_bitunpack_i8_result(%packed: vector<2xi8>) -> (vector<4xi8>) {
   %unpacked = vector.bitunpacku<4> %packed : vector<2xi8> -> vector<4xi8>
   func.return %unpacked : vector<4xi8>
@@ -146,126 +179,54 @@ func.def @i8x32_to_u4x64_bitunpack_i8_result(%packed: vector<32xi8>) -> (vector<
 // ----
 low.func.def target<amdgpu.gfx11.generic.core> abi(hal_kernel) @i8x32_to_u4x64_bitunpack_i8_result(%packed: reg<amdgpu.vgpr x8>) -> (reg<amdgpu.vgpr x16>) asm {
   %5 = slice %packed[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %6 = v_and_b32_src0_inline %5, 15
-  %8 = v_bfe_u32_offset_width_inline %5 {offset = 4, width = 4}
-  %9 = v_lshl_add_u32_shift_imm %8, %6, 8
-  %11 = v_bfe_u32_offset_width_inline %5 {offset = 8, width = 4}
-  %12 = v_lshl_add_u32_shift_imm %11, %9, 16
-  %14 = v_bfe_u32_offset_width_inline %5 {offset = 12, width = 4}
-  %15 = v_lshl_add_u32_shift_imm %14, %12, 24
-  %17 = v_bfe_u32_offset_width_inline %5 {offset = 16, width = 4}
-  %19 = v_bfe_u32_offset_width_inline %5 {offset = 20, width = 4}
-  %20 = v_lshl_add_u32_shift_imm %19, %17, 8
-  %22 = v_bfe_u32_offset_width_inline %5 {offset = 24, width = 4}
-  %23 = v_lshl_add_u32_shift_imm %22, %20, 16
-  %25 = v_bfe_u32_offset_width_inline %5 {offset = 28, width = 4}
-  %26 = v_lshl_add_u32_shift_imm %25, %23, 24
-  %27 = slice %packed[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %28 = v_and_b32_src0_inline %27, 15
-  %30 = v_bfe_u32_offset_width_inline %27 {offset = 4, width = 4}
-  %31 = v_lshl_add_u32_shift_imm %30, %28, 8
-  %33 = v_bfe_u32_offset_width_inline %27 {offset = 8, width = 4}
-  %34 = v_lshl_add_u32_shift_imm %33, %31, 16
-  %36 = v_bfe_u32_offset_width_inline %27 {offset = 12, width = 4}
-  %37 = v_lshl_add_u32_shift_imm %36, %34, 24
-  %39 = v_bfe_u32_offset_width_inline %27 {offset = 16, width = 4}
-  %41 = v_bfe_u32_offset_width_inline %27 {offset = 20, width = 4}
-  %42 = v_lshl_add_u32_shift_imm %41, %39, 8
-  %44 = v_bfe_u32_offset_width_inline %27 {offset = 24, width = 4}
-  %45 = v_lshl_add_u32_shift_imm %44, %42, 16
-  %47 = v_bfe_u32_offset_width_inline %27 {offset = 28, width = 4}
-  %48 = v_lshl_add_u32_shift_imm %47, %45, 24
-  %49 = slice %packed[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %50 = v_and_b32_src0_inline %49, 15
-  %52 = v_bfe_u32_offset_width_inline %49 {offset = 4, width = 4}
-  %53 = v_lshl_add_u32_shift_imm %52, %50, 8
-  %55 = v_bfe_u32_offset_width_inline %49 {offset = 8, width = 4}
-  %56 = v_lshl_add_u32_shift_imm %55, %53, 16
-  %58 = v_bfe_u32_offset_width_inline %49 {offset = 12, width = 4}
-  %59 = v_lshl_add_u32_shift_imm %58, %56, 24
-  %61 = v_bfe_u32_offset_width_inline %49 {offset = 16, width = 4}
-  %63 = v_bfe_u32_offset_width_inline %49 {offset = 20, width = 4}
-  %64 = v_lshl_add_u32_shift_imm %63, %61, 8
-  %66 = v_bfe_u32_offset_width_inline %49 {offset = 24, width = 4}
-  %67 = v_lshl_add_u32_shift_imm %66, %64, 16
-  %69 = v_bfe_u32_offset_width_inline %49 {offset = 28, width = 4}
-  %70 = v_lshl_add_u32_shift_imm %69, %67, 24
-  %71 = slice %packed[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %72 = v_and_b32_src0_inline %71, 15
-  %74 = v_bfe_u32_offset_width_inline %71 {offset = 4, width = 4}
-  %75 = v_lshl_add_u32_shift_imm %74, %72, 8
-  %77 = v_bfe_u32_offset_width_inline %71 {offset = 8, width = 4}
-  %78 = v_lshl_add_u32_shift_imm %77, %75, 16
-  %80 = v_bfe_u32_offset_width_inline %71 {offset = 12, width = 4}
-  %81 = v_lshl_add_u32_shift_imm %80, %78, 24
-  %83 = v_bfe_u32_offset_width_inline %71 {offset = 16, width = 4}
-  %85 = v_bfe_u32_offset_width_inline %71 {offset = 20, width = 4}
-  %86 = v_lshl_add_u32_shift_imm %85, %83, 8
-  %88 = v_bfe_u32_offset_width_inline %71 {offset = 24, width = 4}
-  %89 = v_lshl_add_u32_shift_imm %88, %86, 16
-  %91 = v_bfe_u32_offset_width_inline %71 {offset = 28, width = 4}
-  %92 = v_lshl_add_u32_shift_imm %91, %89, 24
-  %93 = slice %packed[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %94 = v_and_b32_src0_inline %93, 15
-  %96 = v_bfe_u32_offset_width_inline %93 {offset = 4, width = 4}
-  %97 = v_lshl_add_u32_shift_imm %96, %94, 8
-  %99 = v_bfe_u32_offset_width_inline %93 {offset = 8, width = 4}
-  %100 = v_lshl_add_u32_shift_imm %99, %97, 16
-  %102 = v_bfe_u32_offset_width_inline %93 {offset = 12, width = 4}
-  %103 = v_lshl_add_u32_shift_imm %102, %100, 24
-  %105 = v_bfe_u32_offset_width_inline %93 {offset = 16, width = 4}
-  %107 = v_bfe_u32_offset_width_inline %93 {offset = 20, width = 4}
-  %108 = v_lshl_add_u32_shift_imm %107, %105, 8
-  %110 = v_bfe_u32_offset_width_inline %93 {offset = 24, width = 4}
-  %111 = v_lshl_add_u32_shift_imm %110, %108, 16
-  %113 = v_bfe_u32_offset_width_inline %93 {offset = 28, width = 4}
-  %114 = v_lshl_add_u32_shift_imm %113, %111, 24
-  %115 = slice %packed[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %116 = v_and_b32_src0_inline %115, 15
-  %118 = v_bfe_u32_offset_width_inline %115 {offset = 4, width = 4}
-  %119 = v_lshl_add_u32_shift_imm %118, %116, 8
-  %121 = v_bfe_u32_offset_width_inline %115 {offset = 8, width = 4}
-  %122 = v_lshl_add_u32_shift_imm %121, %119, 16
-  %124 = v_bfe_u32_offset_width_inline %115 {offset = 12, width = 4}
-  %125 = v_lshl_add_u32_shift_imm %124, %122, 24
-  %127 = v_bfe_u32_offset_width_inline %115 {offset = 16, width = 4}
-  %129 = v_bfe_u32_offset_width_inline %115 {offset = 20, width = 4}
-  %130 = v_lshl_add_u32_shift_imm %129, %127, 8
-  %132 = v_bfe_u32_offset_width_inline %115 {offset = 24, width = 4}
-  %133 = v_lshl_add_u32_shift_imm %132, %130, 16
-  %135 = v_bfe_u32_offset_width_inline %115 {offset = 28, width = 4}
-  %136 = v_lshl_add_u32_shift_imm %135, %133, 24
-  %137 = slice %packed[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %138 = v_and_b32_src0_inline %137, 15
-  %140 = v_bfe_u32_offset_width_inline %137 {offset = 4, width = 4}
-  %141 = v_lshl_add_u32_shift_imm %140, %138, 8
-  %143 = v_bfe_u32_offset_width_inline %137 {offset = 8, width = 4}
-  %144 = v_lshl_add_u32_shift_imm %143, %141, 16
-  %146 = v_bfe_u32_offset_width_inline %137 {offset = 12, width = 4}
-  %147 = v_lshl_add_u32_shift_imm %146, %144, 24
-  %149 = v_bfe_u32_offset_width_inline %137 {offset = 16, width = 4}
-  %151 = v_bfe_u32_offset_width_inline %137 {offset = 20, width = 4}
-  %152 = v_lshl_add_u32_shift_imm %151, %149, 8
-  %154 = v_bfe_u32_offset_width_inline %137 {offset = 24, width = 4}
-  %155 = v_lshl_add_u32_shift_imm %154, %152, 16
-  %157 = v_bfe_u32_offset_width_inline %137 {offset = 28, width = 4}
-  %158 = v_lshl_add_u32_shift_imm %157, %155, 24
-  %159 = slice %packed[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
-  %160 = v_and_b32_src0_inline %159, 15
-  %162 = v_bfe_u32_offset_width_inline %159 {offset = 4, width = 4}
-  %163 = v_lshl_add_u32_shift_imm %162, %160, 8
-  %165 = v_bfe_u32_offset_width_inline %159 {offset = 8, width = 4}
-  %166 = v_lshl_add_u32_shift_imm %165, %163, 16
-  %168 = v_bfe_u32_offset_width_inline %159 {offset = 12, width = 4}
-  %169 = v_lshl_add_u32_shift_imm %168, %166, 24
-  %171 = v_bfe_u32_offset_width_inline %159 {offset = 16, width = 4}
-  %173 = v_bfe_u32_offset_width_inline %159 {offset = 20, width = 4}
-  %174 = v_lshl_add_u32_shift_imm %173, %171, 8
-  %176 = v_bfe_u32_offset_width_inline %159 {offset = 24, width = 4}
-  %177 = v_lshl_add_u32_shift_imm %176, %174, 16
-  %179 = v_bfe_u32_offset_width_inline %159 {offset = 28, width = 4}
-  %180 = v_lshl_add_u32_shift_imm %179, %177, 24
-  %unpacked = concat(%15, %26, %37, %48, %59, %70, %81, %92, %103, %114, %125, %136, %147, %158, %169, %180) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
+  %6 = v_and_b32_lit %5, 252645135
+  %7 = v_lshrrev_b32_src0_inline %5, 4
+  %8 = v_and_b32_lit %7, 252645135
+  %9 = v_perm_b32_src2_lit %8, %6, 83952640
+  %10 = v_perm_b32_src2_lit %8, %6, 117638658
+  %11 = slice %packed[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %12 = v_and_b32_lit %11, 252645135
+  %13 = v_lshrrev_b32_src0_inline %11, 4
+  %14 = v_and_b32_lit %13, 252645135
+  %15 = v_perm_b32_src2_lit %14, %12, 83952640
+  %16 = v_perm_b32_src2_lit %14, %12, 117638658
+  %17 = slice %packed[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %18 = v_and_b32_lit %17, 252645135
+  %19 = v_lshrrev_b32_src0_inline %17, 4
+  %20 = v_and_b32_lit %19, 252645135
+  %21 = v_perm_b32_src2_lit %20, %18, 83952640
+  %22 = v_perm_b32_src2_lit %20, %18, 117638658
+  %23 = slice %packed[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %24 = v_and_b32_lit %23, 252645135
+  %25 = v_lshrrev_b32_src0_inline %23, 4
+  %26 = v_and_b32_lit %25, 252645135
+  %27 = v_perm_b32_src2_lit %26, %24, 83952640
+  %28 = v_perm_b32_src2_lit %26, %24, 117638658
+  %29 = slice %packed[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %30 = v_and_b32_lit %29, 252645135
+  %31 = v_lshrrev_b32_src0_inline %29, 4
+  %32 = v_and_b32_lit %31, 252645135
+  %33 = v_perm_b32_src2_lit %32, %30, 83952640
+  %34 = v_perm_b32_src2_lit %32, %30, 117638658
+  %35 = slice %packed[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %36 = v_and_b32_lit %35, 252645135
+  %37 = v_lshrrev_b32_src0_inline %35, 4
+  %38 = v_and_b32_lit %37, 252645135
+  %39 = v_perm_b32_src2_lit %38, %36, 83952640
+  %40 = v_perm_b32_src2_lit %38, %36, 117638658
+  %41 = slice %packed[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %42 = v_and_b32_lit %41, 252645135
+  %43 = v_lshrrev_b32_src0_inline %41, 4
+  %44 = v_and_b32_lit %43, 252645135
+  %45 = v_perm_b32_src2_lit %44, %42, 83952640
+  %46 = v_perm_b32_src2_lit %44, %42, 117638658
+  %47 = slice %packed[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %48 = v_and_b32_lit %47, 252645135
+  %49 = v_lshrrev_b32_src0_inline %47, 4
+  %50 = v_and_b32_lit %49, 252645135
+  %51 = v_perm_b32_src2_lit %50, %48, 83952640
+  %52 = v_perm_b32_src2_lit %50, %48, 117638658
+  %unpacked = concat(%9, %10, %15, %16, %21, %22, %27, %28, %33, %34, %39, %40, %45, %46, %51, %52) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x16>
   return %unpacked
 }
 
