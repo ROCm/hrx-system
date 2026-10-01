@@ -73,6 +73,7 @@ loom_corpus_sources(
     "vector/indexing.loom"
     "vector/integer_bitwise.loom"
     "vector/integer_widening.loom"
+    "vector/packed_arithmetic.loom"
     "vector/packed_selection.loom"
     "vector/reductions.loom"
     "vector/selection.loom"

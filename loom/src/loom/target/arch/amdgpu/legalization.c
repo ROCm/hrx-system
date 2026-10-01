@@ -25,6 +25,7 @@
 #include "loom/target/arch/amdgpu/lower/encoding/vector_conversion.h"
 #include "loom/target/arch/amdgpu/lower/kinds.h"
 #include "loom/target/arch/amdgpu/lower/memory.h"
+#include "loom/target/arch/amdgpu/lower/structural.h"
 #include "loom/target/arch/amdgpu/lower/table.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/target/arch/amdgpu/lower/value/vector_transform.h"
@@ -245,6 +246,34 @@ static iree_status_t loom_amdgpu_legalize_static_vector_shape(
   bool rewritten = false;
   IREE_RETURN_IF_ERROR(
       loom_vector_static_shape_rewrite_op(context, op, &rewritten));
+  if (rewritten) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_amdgpu_legalize_vector_shuffle(
+    const loom_target_legalizer_entry_t* entry,
+    loom_target_legalization_context_t* context, loom_op_t* op,
+    loom_target_legalizer_result_t* out_result) {
+  (void)entry;
+  *out_result = (loom_target_legalizer_result_t){
+      .action = LOOM_TARGET_LEGALIZER_ACTION_NO_COMMENT,
+  };
+  if (!loom_amdgpu_legalizer_descriptor_set_is_amdgpu(
+          context->descriptor_set)) {
+    return iree_ok_status();
+  }
+  if (context->mode != LOOM_TARGET_LEGALIZATION_MODE_FINAL ||
+      loom_amdgpu_vector_shuffle_can_lower(context->module,
+                                           context->descriptor_set, op)) {
+    out_result->action = LOOM_TARGET_LEGALIZER_ACTION_DEFER;
+    return iree_ok_status();
+  }
+
+  bool rewritten = false;
+  IREE_RETURN_IF_ERROR(loom_vector_descriptor_to_scalar_rewrite_op(
+      context->pass, context->rewriter, op, &rewritten));
   if (rewritten) {
     out_result->action = LOOM_TARGET_LEGALIZER_ACTION_REWRITTEN;
   }
@@ -787,6 +816,10 @@ static const loom_target_legalizer_rule_t kAmdgpuLegalizerRules[] = {
     {
         .root_kind = LOOM_OP_VECTOR_INSERT,
         .legalize = loom_amdgpu_legalize_static_vector_shape,
+    },
+    {
+        .root_kind = LOOM_OP_VECTOR_SHUFFLE,
+        .legalize = loom_amdgpu_legalize_vector_shuffle,
     },
     // Retain native packed pairs. Other shapes and profiles use the shared
     // per-element reference, with policy enforced by that provider.

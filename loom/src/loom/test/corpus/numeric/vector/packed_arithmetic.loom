@@ -1,0 +1,97 @@
+// Reverses the byte lanes of each packed word, adds a distinct bias to every
+// lane with byte-width wrapping, and repacks the result. This composes the
+// shape-changing bitcasts with a lane permutation and narrow arithmetic.
+func.def @packed_byte_reverse_bias(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 4} : buffer
+  %source, %destination = buffer.assume.noalias %aligned_input, %aligned_output : buffer, buffer
+  %input_words = buffer.view %source[%base] : buffer -> view<256xi32>
+  %output_words = buffer.view %destination[%base] : buffer -> view<256xi32>
+  %c1 = scalar.constant 1 : i8
+  %c2 = scalar.constant 2 : i8
+  %c3 = scalar.constant 3 : i8
+  %c4 = scalar.constant 4 : i8
+  %bias = vector.from_elements %c1, %c2, %c3, %c4 : vector<4xi8>
+  scf.for %i = [%begin to %end step %step] {
+    %packed = vector.load %input_words[%i] : view<256xi32> -> vector<1xi32>
+    %bytes = vector.bitcast %packed : vector<1xi32> to vector<4xi8>
+    %reversed = vector.shuffle<[3, 2, 1, 0]> %bytes : vector<4xi8>
+    %biased = vector.addi %reversed, %bias : vector<4xi8>
+    %result = vector.bitcast %biased : vector<4xi8> to vector<1xi32>
+    vector.store %result, %output_words[%i] : vector<1xi32>, view<256xi32>
+  }
+  func.return
+}
+
+// Uses scalar extraction and assembly so the expected result does not share
+// the vector bitcast, shuffle, or arithmetic path under test.
+func.def @packed_byte_reverse_bias_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %input_words = buffer.view %input[%base] : buffer -> view<256xi32>
+  %output_words = buffer.view %output[%base] : buffer -> view<256xi32>
+  %c1_i8 = scalar.constant 1 : i8
+  %c2_i8 = scalar.constant 2 : i8
+  %c3_i8 = scalar.constant 3 : i8
+  %c4_i8 = scalar.constant 4 : i8
+  %c8 = scalar.constant 8 : i32
+  %c16 = scalar.constant 16 : i32
+  %c24 = scalar.constant 24 : i32
+  scf.for %i = [%begin to %end step %step] {
+    %word = view.load %input_words[%i] : view<256xi32> -> i32
+    %shifted1 = scalar.shrui %word, %c8 : i32
+    %shifted2 = scalar.shrui %word, %c16 : i32
+    %shifted3 = scalar.shrui %word, %c24 : i32
+    %byte0 = scalar.trunci %word : i32 to i8
+    %byte1 = scalar.trunci %shifted1 : i32 to i8
+    %byte2 = scalar.trunci %shifted2 : i32 to i8
+    %byte3 = scalar.trunci %shifted3 : i32 to i8
+    %result0 = scalar.addi %byte3, %c1_i8 : i8
+    %result1 = scalar.addi %byte2, %c2_i8 : i8
+    %result2 = scalar.addi %byte1, %c3_i8 : i8
+    %result3 = scalar.addi %byte0, %c4_i8 : i8
+    %wide0 = scalar.extui %result0 : i8 to i32
+    %wide1 = scalar.extui %result1 : i8 to i32
+    %wide2 = scalar.extui %result2 : i8 to i32
+    %wide3 = scalar.extui %result3 : i8 to i32
+    %positioned1 = scalar.shli %wide1, %c8 : i32
+    %positioned2 = scalar.shli %wide2, %c16 : i32
+    %positioned3 = scalar.shli %wide3, %c24 : i32
+    %low = scalar.ori %wide0, %positioned1 : i32
+    %high = scalar.ori %positioned2, %positioned3 : i32
+    %result = scalar.ori %low, %high : i32
+    view.store %result, %output_words[%i] : i32, view<256xi32>
+  }
+  func.return
+}
+
+check.scenario @packed_byte_reverse_bias_values {
+  // Consecutive bytes cover all 256 payloads, including every wrapping edge.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) period(256) : tensor<1024xi8>
+    %output_storage = check.generate.fill value(-559038737) : tensor<264xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<264xi32> -> tensor<256xi32>
+    check.compare<@packed_byte_reverse_bias, @packed_byte_reverse_bias_oracle>(%input, %output) : (tensor<1024xi8>, tensor<256xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<1024xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<264xi32>
+    }
+  }
+  // Independent words vary every byte position beyond the ordered payloads.
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<256xi32>
+    %output_storage = check.generate.fill value(-559038737) : tensor<264xi32>
+    %output = check.tensor.view %output_storage offset(16) : tensor<264xi32> -> tensor<256xi32>
+    check.compare<@packed_byte_reverse_bias, @packed_byte_reverse_bias_oracle>(%input, %output) : (tensor<256xi32>, tensor<256xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<256xi32>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<264xi32>
+    }
+  }
+  check.return
+}

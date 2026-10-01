@@ -224,6 +224,152 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i32x4_s
 
 amdgpu.target<gfx11-generic> @target
 
+func.def target(@target) @i8x4_shuffle_reverse(%values: vector<4xi8>) -> (vector<4xi8>) {
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %values : vector<4xi8>
+  func.return %shuffled : vector<4xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x4_shuffle_reverse(%values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %shuffled = v_perm_b32_src2_lit %values, %values, 67438087
+  return %shuffled
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i8x8_shuffle_cross_words(%values: vector<8xi8>) -> (vector<8xi8>) {
+  %shuffled = vector.shuffle<[0, 4, 1, 5, 2, 6, 3, 7]> %values : vector<8xi8>
+  func.return %shuffled : vector<8xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x8_shuffle_cross_words(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %7 = v_perm_b32_src2_lit %5, %6, 17104900
+  %8 = v_perm_b32_src2_lit %5, %6, 50790918
+  %shuffled = concat(%7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %shuffled
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i8x8_shuffle_register_swap(%values: vector<8xi8>) -> (vector<8xi8>) {
+  %shuffled = vector.shuffle<[4, 5, 6, 7, 0, 1, 2, 3]> %values : vector<8xi8>
+  func.return %shuffled : vector<8xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x8_shuffle_register_swap(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %shuffled = concat(%5, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %shuffled
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i8x5_shuffle_tail(%values: vector<5xi8>) -> (vector<5xi8>) {
+  %shuffled = vector.shuffle<[4, 3, 2, 1, 0]> %values : vector<5xi8>
+  func.return %shuffled : vector<5xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x5_shuffle_tail(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
+  %5 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %7 = v_perm_b32_src2_lit %6, %5, 16909060
+  %8 = v_perm_b32_src2_lit %5, %5, 67372036
+  %shuffled = concat(%7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  return %shuffled
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i8x12_shuffle_three_source_group(%values: vector<12xi8>) -> (vector<12xi8>) {
+  %shuffled = vector.shuffle<[0, 4, 8, 1, 2, 3, 5, 6, 7, 9, 10, 11]> %values : vector<12xi8>
+  func.return %shuffled : vector<12xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x12_shuffle_three_source_group(%values: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x3>) asm {
+  %18 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %19 = v_bfe_i32_offset_width_inline %18 {offset = 0, width = 8}
+  %20 = slice %values[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %21 = v_bfe_i32_offset_width_inline %20 {offset = 0, width = 8}
+  %22 = slice %values[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %23 = v_bfe_i32_offset_width_inline %22 {offset = 0, width = 8}
+  %25 = v_bfe_i32_offset_width_inline %18 {offset = 8, width = 8}
+  %27 = v_bfe_i32_offset_width_inline %18 {offset = 16, width = 8}
+  %29 = v_ashrrev_i32_src0_inline %18, 24
+  %31 = v_bfe_i32_offset_width_inline %20 {offset = 8, width = 8}
+  %33 = v_bfe_i32_offset_width_inline %20 {offset = 16, width = 8}
+  %35 = v_ashrrev_i32_src0_inline %20, 24
+  %37 = v_bfe_i32_offset_width_inline %22 {offset = 8, width = 8}
+  %39 = v_bfe_i32_offset_width_inline %22 {offset = 16, width = 8}
+  %41 = v_ashrrev_i32_src0_inline %22, 24
+  %42 = v_and_b32_lit %19, 255
+  %43 = v_and_b32_lit %21, 255
+  %44 = v_lshlrev_b32_src0_inline %43, 8
+  %45 = v_or_b32 %42, %44
+  %46 = v_and_b32_lit %23, 255
+  %47 = v_lshlrev_b32_src0_inline %46, 16
+  %48 = v_or_b32 %45, %47
+  %49 = v_and_b32_lit %25, 255
+  %50 = v_lshlrev_b32_src0_inline %49, 24
+  %51 = v_or_b32 %48, %50
+  %52 = v_and_b32_lit %27, 255
+  %53 = v_and_b32_lit %29, 255
+  %54 = v_lshlrev_b32_src0_inline %53, 8
+  %55 = v_or_b32 %52, %54
+  %56 = v_and_b32_lit %31, 255
+  %57 = v_lshlrev_b32_src0_inline %56, 16
+  %58 = v_or_b32 %55, %57
+  %59 = v_and_b32_lit %33, 255
+  %60 = v_lshlrev_b32_src0_inline %59, 24
+  %61 = v_or_b32 %58, %60
+  %62 = v_and_b32_lit %35, 255
+  %63 = v_and_b32_lit %37, 255
+  %64 = v_lshlrev_b32_src0_inline %63, 8
+  %65 = v_or_b32 %62, %64
+  %66 = v_and_b32_lit %39, 255
+  %67 = v_lshlrev_b32_src0_inline %66, 16
+  %68 = v_or_b32 %65, %67
+  %69 = v_and_b32_lit %41, 255
+  %70 = v_lshlrev_b32_src0_inline %69, 24
+  %71 = v_or_b32 %68, %70
+  %shuffled = concat(%51, %61, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  return %shuffled
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @i8x4_shuffle_reverse_gfx942(%values: vector<4xi8>) -> (vector<4xi8>) {
+  %shuffled = vector.shuffle<[3, 2, 1, 0]> %values : vector<4xi8>
+  func.return %shuffled : vector<4xi8>
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @i8x4_shuffle_reverse_gfx942(%values: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %5 = s_mov_b32 67438087
+  %shuffled = v_perm_b32 %values, %values, %5
+  return %shuffled
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
 func.def target(@target) @f32x2x4_transpose(%values: vector<2x4xf32>) -> (vector<4x2xf32>) {
   %transposed = vector.transpose<[1, 0]> %values : vector<2x4xf32> -> vector<4x2xf32>
   func.return %transposed : vector<4x2xf32>
