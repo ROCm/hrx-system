@@ -1,0 +1,151 @@
+# Author a model as a program
+
+Loom model code describes math, storage, specialization, and launch structure.
+The embedding supplies a live device, model configuration, parameter storage,
+and mutable state. This runner uses text sources directly; source changes are
+picked up by the next process without rebuilding its executable.
+
+## Start from a concrete numerical and storage contract
+
+For a new model, the input evidence is its pinned configuration, checkpoint,
+tokenizer/chat template, and reference implementation. The contract includes
+layer order, projection orientation, normalization epsilon, positional encoding,
+attention masking, tied weights, special-token IDs, and every persistent state
+update. A plausible sentence is weaker evidence than correct intermediate
+values and a matching retained continuation.
+
+The checked-in Qwen example has 64 target layers in sixteen groups: three Gated
+DeltaNet layers then one full-attention layer. That structure is explicit in
+[`model_prefill.loom`](../models/qwen38/programs/qwen38/model_prefill.loom),
+not inferred by the runtime. Its quantized tensor layouts and fixed dimensions
+are model-specific. Reusing a contraction motif does not imply reusing its
+Qwen parameter offsets or attention convention.
+
+The first useful port milestone is one real-weight block through the actual
+JIT/command/runtime path, compared against an independent reference, followed
+by an end-to-end model continuation. This crosses weight interpretation,
+specialization, device execution, and ownership before HTTP or scheduling work
+expands around the new model.
+
+## Four source layers
+
+| Layer | Meaning | Existing example |
+| --- | --- | --- |
+| Ordinary functions and templates | Reusable arithmetic, layouts, target-selected implementation motifs | [Authoring corpus](../../../loom/src/loom/test/corpus/authoring/README.md) |
+| Kernels | Workload-to-launch mapping and one device invocation | [Token embedding](../models/qwen38/kernels/qwen38/token_embedding.loom) |
+| Command programs | Parameter roots, transient lifetimes, layer composition, dispatch dependencies | [Packed epoch](../models/qwen38/epoch.loom) |
+| VM control | Coarse model orchestration through typed runner imports | [Qwen control](../models/qwen38/control.loom) |
+
+A kernel's workload arguments establish launch geometry and specialization;
+its launch arguments supply the values and buffers consumed by that invocation.
+Command specialization arguments fix one composition, while command bindings
+identify persistent and transient storage at execution. The canonical guides
+cover [kernels](../../../loom/docs/src/guide/kernels-and-launch.md),
+[command programs](../../../loom/docs/src/guide/command-programs.md), and
+[storage views](../../../loom/docs/src/guide/buffers-views-memory.md).
+
+`command.parameter` names a tensor and its required view. The compiler lays out
+parameter roots and publishes their offsets, sizes, and alignment. Semantic
+`buffer.alloca<global>` inside a command program becomes planned transient
+storage; the runner allocates its backing during setup. It is not a per-token
+HAL queue allocation. Workgroup allocations inside kernels have a different
+lifetime and represent local shared storage.
+
+## Configuration and live target facts
+
+[`qwen_compile_stage`](../qwen_model.c) supplies a `loomc_config_options_t`
+containing model dimensions and shape capacities. The same configuration is
+applied while materializing the command and its native source requests. The
+compiler retains the relationship between a kernel's launch math and body.
+
+Values fixed for a specialization belong in `config.decl`/`config.get` or
+specialization arguments. Current active lengths, token IDs, row origins, and
+positions belong in workload arguments or device descriptors. Capacity and
+active count are different facts: padding can exist without advancing the
+persistent state of inactive rows. The [facts guide](../../../loom/docs/src/guide/facts-and-specialization.md)
+explains both domains and path-dependent refinement.
+
+An authored target contract fixes algorithmic requirements such as subgroup
+width. `loomc_target_profile_create_amdgpu_iree_hal` supplies the actual device
+facts for native specialization. The Q4/Q5/Q8 wave32 entries explicitly name
+that width because it also changes their command launch counts. Replacing those
+queries with guessed host constants would split one contract into two.
+
+For large slabs, logical dimensions can remain bounded indices while byte
+origins use `offset`. A row starting beyond 4 GiB must retain that full origin
+through all subviews and address arithmetic. The packed attention sources show
+that distinction; changing an index width is a measured compiler/kernel
+experiment, not a blanket optimization rule.
+
+## Source catalog to executable commands
+
+[`sources.txt`](../models/qwen38/sources.txt) contains relative source paths,
+one per line. The runner indexes providers once and requests a named command
+root. The minimal corresponding catalog and programs are in
+[`testdata/jit`](../testdata/jit/sources.txt).
+
+The real embedding sequence in [`jit.c`](../jit.c) is:
+
+1. Create the target environment, context, workspace, prepared compiler and
+   pipeline; obtain the live HAL profile and freeze the source index.
+2. Call `loomc_cmd_program_product_build` with the root and configuration. Its
+   request sink takes ownership of reachable native source requests.
+3. Use the requests' binding/root ordinals and product requirements to build
+   native specialization records. Deserialization, compilation, and emission
+   use the same module, preserving prepared compiler facts.
+4. Load the emitted executable through the selected queue family, resolve its
+   named entries, and retain them in command-local requirement order.
+5. Allocate/load fixed parameter roots. `loom_serve_jit_stage_record` creates
+   reusable commands retaining those buffers and executables.
+6. JIT the VM source, transfer its image to the trusted in-process VM loader,
+   and link its imports against the runner's prepared stages.
+
+This is cold-path setup. Already recorded commands do not depend on the source
+index or compiler workspace remaining alive. A compile failure returns source
+diagnostics and releases partial state; it never substitutes a stale artifact.
+
+The Qwen adapter validates shared parameter placement across its independently
+compiled roots before assigning one weight slab. Auxiliary MTP roots either
+view existing tensors or own additional tensors. IREE's parameter index/provider
+loads bytes into those destinations. Another checkpoint format can reuse the
+IO machinery, but its model adapter must establish names, encoding, orientation,
+and size rather than treating a matching byte count as numerical equivalence.
+
+## Correctness that survives optimization
+
+[`gdn_convolution.loom`](../models/qwen38/tests/gdn_convolution.loom) is a small
+`check.scenario`/`check.trial` example: an ordinary function runs on the GPU and
+an independent serial function runs through the VM oracle. No test kernel
+wrapper is needed. It checks the activation with an explicit numerical
+tolerance and input/history preservation bitwise. Kernel-level checks can name
+an explicit oracle function with the intended serial semantics. The
+[checks guide](../../../loom/docs/src/guide/checks-and-benchmarks.md) owns the
+syntax and observation contract.
+
+Useful cases exercise boundaries that realistic batching creates: one active
+token, full tiles, odd tails, inactive rows, distinct resident origins, repeated
+continuation, and reset/reuse. Shared-state comparisons cover untouched regions
+as well as the active outputs. A scratch staging optimization can be numerically
+correct in isolation yet corrupt another session or a later turn.
+
+Kernel differentials establish an implementation relationship, not necessarily
+model accuracy. Independent reference outputs establish checkpoint/math
+interpretation. [`qwen_epoch_check.c`](../qwen_epoch_check.c) then checks full
+model retained histories, isolated versus packed execution, shape transitions,
+and MTP publication. The HTTP witness adds canonical-history reuse and visible
+multi-turn responses. These checks protect different boundaries.
+
+## Shape and layout evolution
+
+JIT makes specialization cheap to request; it does not remove authored storage
+bounds. The current adapter prepares its shape table at startup, shares a
+maximum workspace, and resolves immutable native exports once. Expanding its
+512-token/eight-row envelope requires updating the host arrays, source/view
+bounds, descriptor producers, workspace sizing, and numerical tail coverage
+together. Adding runtime variants additionally requires publishing new callable
+stages without invalidating in-flight command or VM references.
+
+The next model does not need a general serving framework first. A small
+model-specific adapter with explicit storage contracts can reuse `jit`,
+`command`, `execution`, and the native module. Once two real adapters share a
+semantic boundary, that evidence can justify extracting a common model API.
