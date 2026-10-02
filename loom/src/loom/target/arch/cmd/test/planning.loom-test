@@ -730,3 +730,85 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   cmd.dispatch.indirect.static<%3, %4>[%8]()
   return
 }
+
+// ====
+
+// Configured calls consume the entry ABI from the same source definition
+// without evaluating its workload configuration.
+// RUN: emit command-program @configured_source
+
+func.def pure @configuration_only(%count: index) -> (index) {
+  func.return %count : index
+}
+
+kernel.def @source_entry(%workload: index) {
+  %count = func.call pure @configuration_only(%workload) : (index) -> (index)
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%count, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%count: index, %data: view<[%count]xi32>) {
+  kernel.return
+}
+
+command.program.def public @configured_source() launch(%storage: buffer, %count_storage: buffer) {
+  %c0 = index.constant 0 : offset
+  %c4 = index.constant 4 : index
+  %c1 = index.constant 1 : index
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  %data = buffer.view %storage[%c0] : buffer -> view<[%c4]xi32>
+  kernel.dispatch @source_entry[%c1](%c4, %data) : [index](index, view<[%c4]xi32>)
+  kernel.dispatch @source_entry[%counts](%c4, %data) : [view<3xi32>](index, view<[%c4]xi32>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 2}) @configured_source() asm {
+  %9 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %10 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %11 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %12 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %13 = cmd.constant.u64 0
+  %14 = cmd.constant.u64 -1
+  %15 = cmd.constant.u64 12
+  %16 = cmd.constant.u64 16
+  %17 = cmd.constant.u32 1
+  %18 = cmd.constant.index 4
+  cmd.dispatch.direct<%11, %12>[%17, %17, %17](%18, %9, %13, %16)
+  %19 = cmd.buffer.ref.binding %10, %13, %15
+  cmd.dispatch.indirect.static.barrier<%11, %12>[%19](%18, %9, %13, %16)
+  return
+}
+
+// ====
+
+// Logical and already-configured calls retain one executable entry identity.
+// RUN: emit command-program @mixed_source
+
+kernel.def @shared_entry(%workload: index) {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%workload, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%data: buffer) {
+  kernel.return
+}
+
+command.program.def public @mixed_source() launch(%storage: buffer) {
+  %c2 = index.constant 2 : index
+  %c3 = index.constant 3 : index
+  kernel.dispatch @shared_entry[%c2](%storage) : [index](buffer)
+  kernel.launch @shared_entry[%c3](%storage) : [index](buffer)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 0, rebindable_binding_count = 1}) @mixed_source() asm {
+  %14 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %15 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %16 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %17 = cmd.constant.u64 0
+  %18 = cmd.constant.u64 -1
+  %19 = cmd.constant.u32 2
+  %20 = cmd.constant.u32 1
+  cmd.dispatch.direct<%15, %16>[%19, %20, %20](%14, %17, %18)
+  %21 = cmd.constant.u32 3
+  cmd.dispatch.direct.barrier<%15, %16>[%21, %20, %20](%14, %17, %18)
+  return
+}

@@ -17,6 +17,18 @@
 extern "C" {
 #endif
 
+// IR reconstruction selected from the authoritative semantic facet set.
+typedef enum loom_link_plan_symbol_projection_e {
+  // The selected source symbol can be materialized without reconstruction.
+  LOOM_LINK_PLAN_SYMBOL_PROJECTION_COMPLETE = 0,
+  // Only the executable entry's device ABI is required.
+  LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_ENTRY = 1,
+  // The logical kernel contract and its pure configuration helper are required.
+  LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION = 2,
+  // The requested partial facet set has no IR reconstruction implementation.
+  LOOM_LINK_PLAN_SYMBOL_PROJECTION_UNSUPPORTED = 3,
+} loom_link_plan_symbol_projection_t;
+
 // One selected symbol projected into its source module's ordinal domain.
 typedef struct loom_link_plan_module_symbol_t {
   // Authoritative live-symbol selection in the source plan.
@@ -27,6 +39,8 @@ typedef struct loom_link_plan_module_symbol_t {
   // Already-materialized complete modules retain sparse source ordinals;
   // compact bytecode and facet-projected modules use dense projected ordinals.
   uint32_t materialized_symbol_ordinal;
+  // Reconstruction kind computed once from the selected semantic facets.
+  loom_link_plan_symbol_projection_t projection;
 } loom_link_plan_module_symbol_t;
 
 // Exact selected-symbol slice owned by one source module.
@@ -42,8 +56,8 @@ typedef struct loom_link_plan_module_selection_t {
   } symbols;
   // Dense symbol count produced when at least one selected source symbol must
   // be reconstructed from a strict subset of its semantic facets. Includes one
-  // helper for every partial source symbol; zero selects ordinary
-  // materialization.
+  // helper for every selected kernel configuration; entry-only projections
+  // need no helper. Zero selects ordinary materialization.
   iree_host_size_t projected_symbol_count;
 } loom_link_plan_module_selection_t;
 

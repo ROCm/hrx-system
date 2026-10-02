@@ -470,8 +470,7 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   loom_cmd_program_plan_deinitialize(&plan);
 }
 
-TEST_F(CmdProgramPlanTest,
-       BodyBlindPreparationDoesNotReadKernelImplementationBytes) {
+TEST_F(CmdProgramPlanTest, PreparationDoesNotReadUnselectedKernelRegions) {
   ModulePtr source_module = ParseAndVerify(R"(
 kernel.def @child() {
   %unit = index.constant 1 : index
@@ -482,6 +481,12 @@ kernel.def @child() {
 
 command.program.def public @root() launch() {
   kernel.launch @child() : ()
+  command.return
+}
+
+command.program.def public @configured_root() launch() {
+  %unit = index.constant 1 : index
+  kernel.dispatch @child[%unit]() : [index]()
   command.return
 }
 )");
@@ -497,11 +502,8 @@ command.program.def public @root() launch() {
       index, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
       IREE_SV("provider.loombc"), &index_options, /*options=*/nullptr,
       /*out_provider_ordinal=*/nullptr));
-  const loom_link_module_index_symbol_t* root =
-      loom_link_module_index_lookup_name(index, IREE_SV("root"));
   const loom_link_module_index_symbol_t* child =
       loom_link_module_index_lookup_name(index, IREE_SV("child"));
-  ASSERT_NE(root, nullptr);
   ASSERT_NE(child, nullptr);
 
   const loom_link_module_index_provider_t* provider =
@@ -524,6 +526,11 @@ command.program.def public @root() launch() {
   ASSERT_GT(body_payload->length, 0u);
   std::fill_n(bytecode.data() + body_payload->absolute_offset,
               body_payload->length, UINT8_C(0xFF));
+  const loom_bytecode_region_payload_metadata_t* config_payload =
+      &metadata->region_payloads
+           [symbol->first_region_payload_index +
+            symbol->kernel_workload_region_payload_ordinal_plus_one - 1];
+  ASSERT_GT(config_payload->length, 0u);
 
   const loom_link_plan_materialization_environment_t environment = {
       /*.context=*/&context_,
@@ -534,46 +541,56 @@ command.program.def public @root() launch() {
       /*.user_data=*/nullptr,
       /*.allocator=*/iree_allocator_system(),
   };
-  iree_arena_allocator_t body_blind_arena;
-  iree_arena_initialize(&block_pool_, &body_blind_arena);
-  loom_cmd_program_plan_t body_blind_plan = {};
-  bool body_blind_valid = false;
-  IREE_ASSERT_OK(loom_cmd_program_plan_build_from_index(
-      index, &root->ordinal, /*program_count=*/1, /*options=*/nullptr,
-      loom_pass_builtin_registry(),
-      loom_cleanup_configured_pattern_provider_set(),
-      /*diagnostic_emitter=*/{}, &environment, &body_blind_arena,
-      &body_blind_valid, &body_blind_plan));
-  ASSERT_TRUE(body_blind_valid);
-  ASSERT_EQ(body_blind_plan.root_count, 1u);
-  ASSERT_EQ(body_blind_plan.entry_requirement_count, 1u);
-  loom_cmd_program_plan_deinitialize(&body_blind_plan);
-  iree_arena_deinitialize(&body_blind_arena);
+  for (iree_string_view_t root_name :
+       {IREE_SV("root"), IREE_SV("configured_root")}) {
+    const loom_link_module_index_symbol_t* root =
+        loom_link_module_index_lookup_name(index, root_name);
+    ASSERT_NE(root, nullptr);
+    if (iree_string_view_equal(root_name, IREE_SV("configured_root"))) {
+      std::fill_n(bytecode.data() + config_payload->absolute_offset,
+                  config_payload->length, UINT8_C(0xFF));
+    }
+    iree_arena_allocator_t body_blind_arena;
+    iree_arena_initialize(&block_pool_, &body_blind_arena);
+    loom_cmd_program_plan_t body_blind_plan = {};
+    bool body_blind_valid = false;
+    IREE_ASSERT_OK(loom_cmd_program_plan_build_from_index(
+        index, &root->ordinal, /*program_count=*/1, /*options=*/nullptr,
+        loom_pass_builtin_registry(),
+        loom_cleanup_configured_pattern_provider_set(),
+        /*diagnostic_emitter=*/{}, &environment, &body_blind_arena,
+        &body_blind_valid, &body_blind_plan));
+    ASSERT_TRUE(body_blind_valid);
+    ASSERT_EQ(body_blind_plan.root_count, 1u);
+    ASSERT_EQ(body_blind_plan.entry_requirement_count, 1u);
+    loom_cmd_program_plan_deinitialize(&body_blind_plan);
+    iree_arena_deinitialize(&body_blind_arena);
 
-  KernelRequestCapture request_capture = {
-      /*.block_pool=*/&block_pool_,
-  };
-  loom_cmd_program_plan_index_options_t request_options;
-  loom_cmd_program_plan_index_options_initialize(&request_options);
-  request_options.kernel_request_sink = {
-      /*.publish=*/CaptureKernelRequest,
-      /*.user_data=*/&request_capture,
-  };
-  iree_arena_allocator_t request_arena;
-  iree_arena_initialize(&block_pool_, &request_arena);
-  loom_cmd_program_plan_t request_plan = {};
-  bool request_valid = false;
-  IREE_EXPECT_NOT_OK(loom_cmd_program_plan_build_from_index(
-      index, &root->ordinal, /*program_count=*/1, &request_options,
-      loom_pass_builtin_registry(),
-      loom_cleanup_configured_pattern_provider_set(),
-      /*diagnostic_emitter=*/{}, &environment, &request_arena, &request_valid,
-      &request_plan));
-  EXPECT_FALSE(request_valid);
-  EXPECT_EQ(request_plan.root_module, nullptr);
-  EXPECT_TRUE(request_capture.requests.empty());
-  loom_cmd_program_plan_deinitialize(&request_plan);
-  iree_arena_deinitialize(&request_arena);
+    KernelRequestCapture request_capture = {
+        /*.block_pool=*/&block_pool_,
+    };
+    loom_cmd_program_plan_index_options_t request_options;
+    loom_cmd_program_plan_index_options_initialize(&request_options);
+    request_options.kernel_request_sink = {
+        /*.publish=*/CaptureKernelRequest,
+        /*.user_data=*/&request_capture,
+    };
+    iree_arena_allocator_t request_arena;
+    iree_arena_initialize(&block_pool_, &request_arena);
+    loom_cmd_program_plan_t request_plan = {};
+    bool request_valid = false;
+    IREE_EXPECT_NOT_OK(loom_cmd_program_plan_build_from_index(
+        index, &root->ordinal, /*program_count=*/1, &request_options,
+        loom_pass_builtin_registry(),
+        loom_cleanup_configured_pattern_provider_set(),
+        /*diagnostic_emitter=*/{}, &environment, &request_arena, &request_valid,
+        &request_plan));
+    EXPECT_FALSE(request_valid);
+    EXPECT_EQ(request_plan.root_module, nullptr);
+    EXPECT_TRUE(request_capture.requests.empty());
+    loom_cmd_program_plan_deinitialize(&request_plan);
+    iree_arena_deinitialize(&request_arena);
+  }
   loom_link_module_index_free(index);
 }
 
