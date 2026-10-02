@@ -4,6 +4,9 @@ This branch-local runner JIT-compiles portable model source into VM control,
 command programs, and GPU executables using the public Loom C API. Its private interfaces are intended to change with real models.
 It is not a general HAL VM module or a serving framework.
 
+The [model-authoring packet](docs/README.md) walks through reproduction,
+compiler/runtime ownership, a second-model port, and performance experiments.
+
 `command.c` combines a parsed portable command program with loaded executable
 reflection. Recording retains fixed buffers and code. Rebindable slots include
 model state and explicit scratch; the materializer allocates no device backing.
