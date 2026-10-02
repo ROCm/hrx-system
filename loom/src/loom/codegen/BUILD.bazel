@@ -21,6 +21,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/testing:__pkg__",
         "//loom/src/loom/codegen/low/transforms/pipeline:__pkg__",
         "//loom/src/loom/target/arch/amdgpu:__pkg__",
+        "//loom/src/loom/target/arch/cmd/lower:__pkg__",
         "//loom/src/loom/tooling/compile:__pkg__",
         "//loom/src/loom/tools/loom-check:__pkg__",
         "//loom/src/loom/tools/loom-opt:__pkg__",

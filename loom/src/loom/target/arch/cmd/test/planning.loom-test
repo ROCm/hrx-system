@@ -1,3 +1,49 @@
+// Target-dependent configuration is folded in each kernel's target context,
+// before the helpers are inlined into the target-neutral command root.
+// RUN: emit command-program @target_counts
+
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+
+amdgpu.target<gfx11-generic> @wave64 {subgroup_size = 64}
+
+kernel.def target(@wave32) @narrow() {
+  %width = target.subgroup.size : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%width, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+kernel.def target(@wave64) @wide() {
+  %width = target.subgroup.size : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%width, %c1, %c1) workgroup_size(%width, %c1, %c1) : index
+} launch() {
+  kernel.return
+}
+
+command.program.def public @target_counts() launch() {
+  kernel.launch @narrow() : ()
+  kernel.launch @wide() : ()
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 2, executable_count = 2, fixed_buffer_count = 0, rebindable_binding_count = 0}) @target_counts() asm {
+  %16 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %17 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %18 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %19 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %20 = cmd.constant.u32 32
+  %21 = cmd.constant.u32 1
+  cmd.dispatch.direct<%16, %18>[%20, %21, %21]()
+  %22 = cmd.constant.u32 64
+  cmd.dispatch.direct.barrier<%17, %19>[%22, %21, %21]()
+  return
+}
+
+// ====
+
 // RUN: emit command-program @waves
 
 kernel.def @copy() {

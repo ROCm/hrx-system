@@ -145,6 +145,7 @@ loom_cc_library(
         ":schedule",
         ":transients",
         "//loom/src/loom/analysis:symbol_references",
+        "//loom/src/loom/codegen:pass_environment",
         "//loom/src/loom/error:emitter",
         "//loom/src/loom/error:error_defs",
         "//loom/src/loom/ir",
