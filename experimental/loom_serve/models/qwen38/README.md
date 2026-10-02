@@ -211,6 +211,34 @@ partial-token and partial-channel tiles, untouched output padding, and full
 5120-channel projections. The check uses the same Q5 libraries as above plus
 `kernels/qwen38/linear_q5k_f16_wmma_wave32.loom`.
 
+### Q6 metadata contractions
+
+The C64/C128 metadata-staged Q6 contractions acquire codes and activations one
+K32 group ahead of matrix consumption. Metadata scaling stays in the ordered
+consumer; shared storage is not double-buffered. Padded channels and tokens
+read valid source rows and are selected to positive zero after acquisition.
+The six projection/residual and F32/F16-input entries preserve their F16
+operands, F32 accumulation order, canonical weights, dispatch mapping and
+output layout.
+
+`tests/linear_q6k_f16_wmma_metadata.loom` compares all six entries bitwise with
+the independent global-decoding schedule and separate residual addition.
+Seeded channel-varying weights, single/partial/full token tiles, zero grids,
+channel tails and untouched output padding exercise the shared contract.
+On a qualified GPU test runner:
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/linear_q6k_f16_wmma_metadata.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q6k_f16_wmma_metadata.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q6k_f16_wmma.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/layer_prefill.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q6k_q8_1_x4.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_qk_common.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
+```
+
 ### Vocabulary projection
 
 Epoch and MTP roots pass their complete padded output cohort to the shared
