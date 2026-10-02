@@ -160,11 +160,20 @@ retires all block readers, the same allocation holds the per-wave output
 transpose. The model keeps one unchanged global weight residency; encoded
 staging and publication share storage only within the workgroup.
 
+The eight quantization groups pipeline activation acquisition one group ahead
+of matrix consumption. Local weight and metadata rows are initialized even for
+padded channels, so decoding can remain converged and select positive zero at
+the consumer. Padded activation lanes load bounded row zero and then select
+positive zero. The workgroup barriers retain ownership of the single LDS stage;
+read-ahead adds neither a second stage nor another global weight residency.
+
 `tests/ffn_gate_up.loom` compares complete outputs with the paired-wave schedule,
 including inactive rows, partial output channels and four token tiles at the
-model's full projection shape. Distinct activation rows and channel-varying
-gate/up weights exercise the indexing paths. These are staging and layout
-differentials, not independent model-accuracy oracles.
+model's full projection shape. Single active rows, one and odd block counts,
+and zero grids exercise pipeline fill, drain and padded acquisition. Distinct
+activation rows and channel-varying gate/up weights exercise the indexing paths.
+These are staging and layout differentials, not independent model-accuracy
+oracles.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \

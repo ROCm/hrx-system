@@ -262,7 +262,9 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
-    %gate_block_result0, %gate_block_result1, %up_block_result0, %up_block_result1 = scf.for %quant_group = [%c0 to %c8 step %c1](%gate_acc0 = %gate_block_acc0 : vector<8xf32>, %gate_acc1 = %gate_block_acc1 : vector<8xf32>, %up_acc0 = %up_block_acc0 : vector<8xf32>, %up_acc1 = %up_block_acc1 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    // Acquire the next group's activations while consuming this group's LDS.
+    // Both local weight slabs include initialized rows for channel padding.
+    %gate_block_result0, %gate_block_result1, %up_block_result0, %up_block_result1 = scf.for %quant_group = [%c0 to %c8 step %c1](%gate_acc0 = %gate_block_acc0 : vector<8xf32>, %gate_acc1 = %gate_block_acc1 : vector<8xf32>, %up_acc0 = %up_block_acc0 : vector<8xf32>, %up_acc1 = %up_block_acc1 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) pipeline(%c2) {
       %group_k_add = index.mul %quant_group, %c32 : index
       scf.for %weight_task = [%workitem to %weight_load_count step %c512] unroll {
         %load_packet0 = index.rem %weight_task, %c8 : index
@@ -272,16 +274,13 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %load_row = index.assume %load_row0 [range(%load_row0, 0, 63)] : index
         %channel = index.add %channel_tile_base, %load_row : index
         %valid_channel = index.cmp ult, %channel, %output_size : index
-        %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
-          %row_byte_base = index.scale %load_row, %weight_block_bytes : index, offset -> offset
-          %metadata_pair = vector.load %metadata_stage_view[%load_row, %quant_group, %c0] : view<128x8x2xf32> -> vector<2xf32>
-          %d_scale = vector.extract %metadata_pair[0] : vector<2xf32> -> f32
-          %dmin_scale = vector.extract %metadata_pair[1] : vector<2xf32> -> f32
-          %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%raw_stage, %row_byte_base, %c0, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
-          scf.yield %decoded : vector<4xf16>
-        } else {
-          scf.yield %c0_f16x4 : vector<4xf16>
-        }
+        %row_byte_base = index.scale %load_row, %weight_block_bytes : index, offset -> offset
+        %metadata_pair = vector.load %metadata_stage_view[%load_row, %quant_group, %c0] : view<128x8x2xf32> -> vector<2xf32>
+        %d_scale = vector.extract %metadata_pair[0] : vector<2xf32> -> f32
+        %dmin_scale = vector.extract %metadata_pair[1] : vector<2xf32> -> f32
+        %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%raw_stage, %row_byte_base, %c0, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
+        %valid_weight = vector.splat %valid_channel : vector<4xi1>
+        %weight_values = vector.select %valid_weight, %decoded, %c0_f16x4 : vector<4xf16>
         vector.store %weight_values, %weight_stage_view[%load_row, %load_k] : vector<4xf16>, view<128x40xf16>
       }
       scf.for %weight_task = [%workitem to %weight_load_count step %c512] unroll {
@@ -292,19 +291,15 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %load_row = index.assume %load_row0 [range(%load_row0, 0, 63)] : index
         %channel = index.add %channel_tile_base, %load_row : index
         %valid_channel = index.cmp ult, %channel, %output_size : index
-        %weight_values = scf.if %valid_channel -> (vector<4xf16>) {
-          %raw_load_row = index.add %load_row, %c64 : index
-          %row_byte_base = index.scale %raw_load_row, %weight_block_bytes : index, offset -> offset
-          %stage_row = index.add %load_row, %c64 : index
-          %metadata_pair = vector.load %metadata_stage_view[%stage_row, %quant_group, %c0] : view<128x8x2xf32> -> vector<2xf32>
-          %d_scale = vector.extract %metadata_pair[0] : vector<2xf32> -> f32
-          %dmin_scale = vector.extract %metadata_pair[1] : vector<2xf32> -> f32
-          %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%raw_stage, %row_byte_base, %c0, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
-          scf.yield %decoded : vector<4xf16>
-        } else {
-          scf.yield %c0_f16x4 : vector<4xf16>
-        }
+        %raw_load_row = index.add %load_row, %c64 : index
+        %row_byte_base = index.scale %raw_load_row, %weight_block_bytes : index, offset -> offset
         %stage_row = index.add %load_row, %c64 : index
+        %metadata_pair = vector.load %metadata_stage_view[%stage_row, %quant_group, %c0] : view<128x8x2xf32> -> vector<2xf32>
+        %d_scale = vector.extract %metadata_pair[0] : vector<2xf32> -> f32
+        %dmin_scale = vector.extract %metadata_pair[1] : vector<2xf32> -> f32
+        %decoded = func.call @qwen38_q5k_f16_vector4_prescaled(%raw_stage, %row_byte_base, %c0, %quant_group, %load_packet, %d_scale, %dmin_scale) : (buffer, offset, index, index, index, f32, f32) -> (vector<4xf16>)
+        %valid_weight = vector.splat %valid_channel : vector<4xi1>
+        %weight_values = vector.select %valid_weight, %decoded, %c0_f16x4 : vector<4xf16>
         vector.store %weight_values, %weight_stage_view[%stage_row, %load_k] : vector<4xf16>, view<128x40xf16>
       }
       scf.for %activation_task = [%workitem to %activation_load_count step %c512] unroll {
@@ -315,14 +310,14 @@ kernel.def target(@qwen38_ffn_gate_up_q5k_f16_gfx11_wave32) export("qwen38_ffn_g
         %activation_row = index.assume %activation_row0 [range(%activation_row0, 0, 127)] : index
         %token = index.add %token_tile_base, %activation_row : index
         %valid_token = index.cmp ult, %token, %token_count : index
-        %activation_values = scf.if %valid_token -> (vector<4xf16>) {
-          %bounded_token = index.assume %token [lt(%token, %token_count)] : index
-          %input_k = index.add %group_k_add, %load_k : index
-          %loaded = vector.load %input_view[%bounded_token, %quant_block, %input_k] : view<[%token_count]x[%quant_block_count]x256xf16> -> vector<4xf16>
-          scf.yield %loaded : vector<4xf16>
-        } else {
-          scf.yield %c0_f16x4 : vector<4xf16>
-        }
+        // Keep acquisition independent of the consumer's padded-lane selection.
+        // Every executing workgroup has at least one valid activation row.
+        %safe_token = scf.select %valid_token, %token, %c0 : index
+        %bounded_token = index.assume %safe_token [ge(%safe_token, 0), lt(%safe_token, %token_count)] : index
+        %input_k = index.add %group_k_add, %load_k : index
+        %loaded = vector.load %input_view[%bounded_token, %quant_block, %input_k] : view<[%token_count]x[%quant_block_count]x256xf16> -> vector<4xf16>
+        %valid_activation = vector.splat %valid_token : vector<4xi1>
+        %activation_values = vector.select %valid_activation, %loaded, %c0_f16x4 : vector<4xf16>
         vector.store %activation_values, %activation_stage_physical_view[%activation_row, %load_k] : vector<4xf16>, view<128x40xf16>
       }
       kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
