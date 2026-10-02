@@ -420,6 +420,8 @@ class IntegerPackInstruction:
             raise ValueError("integer pack result does not fill whole storage lanes")
         if self.memory_width_bits not in (256, 512):
             raise ValueError("integer pack must produce one native W or X carrier")
+        if self.pack_size not in (0, 1):
+            raise ValueError("integer pack size must fit the one-bit crPackSize field")
 
     @property
     def source_op(self) -> Op:
@@ -566,6 +568,120 @@ class IntegerPackRuleShape:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class IntegerTruncationInstruction:
+    """One integer lane-width relation implemented by native VSHUFFLEs."""
+
+    # Source vector element type.
+    input_element: str
+    # Result vector element type.
+    result_element: str
+
+    def __post_init__(self) -> None:
+        input_bits = int(self.input_element[1:])
+        result_bits = int(self.result_element[1:])
+        if (
+            input_bits not in (32, 64)
+            or result_bits not in (8, 16, 32)
+            or input_bits <= result_bits
+        ):
+            raise ValueError(
+                "shuffle truncation requires a supported narrowing width relation"
+            )
+
+    @property
+    def shuffle_controls(self) -> tuple[int, ...]:
+        """Even-sublane filters applied from widest to narrowest."""
+
+        result_bits = int(self.result_element[1:])
+        sublane_bits = int(self.input_element[1:]) // 2
+        controls: list[int] = []
+        while sublane_bits >= result_bits:
+            controls.append({8: 0, 16: 2, 32: 4}[sublane_bits])
+            sublane_bits //= 2
+        return tuple(controls)
+
+    @property
+    def native_lane_count(self) -> int:
+        """Number of source lanes carried by one native X register."""
+
+        return 512 // int(self.input_element[1:])
+
+
+@dataclass(frozen=True, slots=True)
+class IntegerTruncationRuleShape:
+    """Logical lane interval realized by one VSHUFFLE truncation program."""
+
+    # Lane-width relation and shuffle sequence used by the conversion.
+    instruction: IntegerTruncationInstruction
+    # First logical lane count realized by this rule.
+    minimum_lane_count: int
+    # Last logical lane count realized by this rule.
+    maximum_lane_count: int
+
+    def __post_init__(self) -> None:
+        native_lane_count = self.instruction.native_lane_count
+        if not (
+            1
+            <= self.minimum_lane_count
+            <= self.maximum_lane_count
+            <= native_lane_count * 2
+        ):
+            raise ValueError("integer truncation logical lane interval is invalid")
+        if self.minimum_lane_count <= native_lane_count < self.maximum_lane_count:
+            raise ValueError("integer truncation interval crosses a carrier boundary")
+
+    @staticmethod
+    def _vector_type(element: str, minimum_lanes: int, maximum_lanes: int) -> Vector:
+        if minimum_lanes == maximum_lanes:
+            return Vector(element, lanes=minimum_lanes)
+        return Vector(
+            element,
+            minimum_lanes=minimum_lanes,
+            maximum_lanes=maximum_lanes,
+        )
+
+    @property
+    def input_type(self) -> Vector:
+        """Source-visible input type interval."""
+
+        return self._vector_type(
+            self.instruction.input_element,
+            self.minimum_lane_count,
+            self.maximum_lane_count,
+        )
+
+    @property
+    def result_type(self) -> Vector:
+        """Source-visible result type interval."""
+
+        return self._vector_type(
+            self.instruction.result_element,
+            self.minimum_lane_count,
+            self.maximum_lane_count,
+        )
+
+    @property
+    def source_carrier_count(self) -> int:
+        """Number of source X registers consumed by the first shuffle."""
+
+        return int(self.maximum_lane_count > self.instruction.native_lane_count) + 1
+
+    @property
+    def report_key(self) -> str:
+        """Stable compile-report key for this logical interval."""
+
+        lane_range = (
+            str(self.minimum_lane_count)
+            if self.minimum_lane_count == self.maximum_lane_count
+            else f"{self.minimum_lane_count}-{self.maximum_lane_count}"
+        )
+        return (
+            f"native_trunc_{self.instruction.input_element}x{lane_range}_to_"
+            f"{self.instruction.result_element}x{lane_range}"
+        )
+
+
 _I16_TO_I32_W = IntegerWidenInstruction("i16", "i32", 16)
 _I32_TO_I64_W = IntegerWidenInstruction("i32", "i64", 8)
 _I8_TO_I32_W = IntegerWidenInstruction("i8", "i32", 32)
@@ -679,8 +795,6 @@ _MXFP8_E4M3FN_E8M0_RULE_SHAPES = (
     (32, MXFP8_E4M3FN_E8M0_X32_SCHEMA),
 )
 
-_I32_TO_I16_W_PACK = IntegerPackInstruction("i32", 16, "i16", None)
-_I32_TO_I16_X_PACK = IntegerPackInstruction("i32", 32, "i16", None)
 _I16_TO_I8_W_PACK = IntegerPackInstruction("i16", 32, "i8", None)
 _I16_TO_I8_X_PACK = IntegerPackInstruction("i16", 64, "i8", None)
 _I8_TO_I4_W_PACK = IntegerPackInstruction("i8", 64, "i8", 4)
@@ -689,8 +803,6 @@ _I8_TO_I4_X_PACK = IntegerPackInstruction("i8", 128, "i8", 4)
 # Exact physical shapes also own fused memory rules, whose access width cannot
 # exceed the source value's logical footprint.
 INTEGER_PACK_INSTRUCTIONS = (
-    _I32_TO_I16_W_PACK,
-    _I32_TO_I16_X_PACK,
     _I16_TO_I8_W_PACK,
     _I16_TO_I8_X_PACK,
     _I8_TO_I4_W_PACK,
@@ -710,10 +822,40 @@ INTEGER_PACK_RULE_SHAPES = (
         )
         for instruction in INTEGER_PACK_INSTRUCTIONS
     ),
-    IntegerPackRuleShape(_I32_TO_I16_W_PACK, 1, 15),
-    IntegerPackRuleShape(_I32_TO_I16_X_PACK, 17, 31),
     IntegerPackRuleShape(_I16_TO_I8_W_PACK, 1, 31),
     IntegerPackRuleShape(_I16_TO_I8_X_PACK, 33, 63),
+)
+
+# VPACK only has a one-bit pack-size control and therefore cannot express
+# integer truncation above i16->i8. Wider lanes are reinterpreted as their
+# result-width sublanes and each shuffle selects the even (low) half. Repeating
+# that primitive covers every integer width relation admitted by the shared
+# AMDGPU vector conversion contract.
+INTEGER_TRUNCATION_INSTRUCTIONS = (
+    IntegerTruncationInstruction("i32", "i16"),
+    IntegerTruncationInstruction("i32", "i8"),
+    IntegerTruncationInstruction("i64", "i32"),
+    IntegerTruncationInstruction("i64", "i16"),
+    IntegerTruncationInstruction("i64", "i8"),
+)
+
+
+def _integer_truncation_rule_shapes(
+    instruction: IntegerTruncationInstruction,
+) -> tuple[IntegerTruncationRuleShape, ...]:
+    native_lane_count = instruction.native_lane_count
+    return (
+        IntegerTruncationRuleShape(instruction, 1, native_lane_count),
+        IntegerTruncationRuleShape(
+            instruction, native_lane_count + 1, native_lane_count * 2
+        ),
+    )
+
+
+INTEGER_TRUNCATION_RULE_SHAPES = tuple(
+    rule_shape
+    for instruction in INTEGER_TRUNCATION_INSTRUCTIONS
+    for rule_shape in _integer_truncation_rule_shapes(instruction)
 )
 
 # Uniform i32 shifts widen through one physical sixteen-lane accumulator
@@ -2518,6 +2660,82 @@ def _float_to_fp8_vector_rule(
     )
 
 
+def _integer_truncation_rule(
+    rule_shape: IntegerTruncationRuleShape,
+) -> DescriptorRule:
+    constant = _descriptor("amd.xdna.aie2p.constant.i32.mova")
+    shuffle = _descriptor("amd.xdna.aie2p.shuffle.x.configured")
+    source = ValueRef.operand("input")
+    emits: list[ContractEmit] = []
+    if rule_shape.source_carrier_count == 2:
+        low_source = ValueRef.temporary("source_low")
+        high_source = ValueRef.temporary("source_high")
+        emits.extend(
+            (
+                EmitRegisterSlice(
+                    source=source,
+                    result=low_source,
+                    unit_count=2,
+                ),
+                EmitRegisterSlice(
+                    source=source,
+                    result=high_source,
+                    unit_offset=2,
+                    unit_count=2,
+                ),
+            )
+        )
+    else:
+        low_source = source
+        high_source = source
+
+    current = source
+    for index, control_value in enumerate(rule_shape.instruction.shuffle_controls):
+        control = ValueRef.temporary(f"shuffle_control_{index}")
+        is_final = index + 1 == len(rule_shape.instruction.shuffle_controls)
+        result = (
+            ValueRef.result("result")
+            if is_final
+            else ValueRef.temporary(f"truncated_{index}")
+        )
+        emits.extend(
+            (
+                EmitDescriptorOp(
+                    descriptor=constant,
+                    results={"dst": control},
+                    result_types={"dst": DescriptorResultType()},
+                    immediates={"i": control_value},
+                    form=DescriptorEmitForm.CONST,
+                ),
+                EmitDescriptorOp(
+                    descriptor=shuffle,
+                    operands={
+                        "s1": low_source if index == 0 else current,
+                        "s2": high_source if index == 0 else current,
+                        "mod": control,
+                    },
+                    results={"dst": result},
+                    result_types=(
+                        None if is_final else {"dst": DescriptorResultType()}
+                    ),
+                    form=DescriptorEmitForm.OP,
+                ),
+            )
+        )
+        current = result
+
+    return DescriptorRule(
+        source_op=vector.vector_trunci,
+        descriptor=shuffle,
+        guards=(
+            Guard.value_type("input", rule_shape.input_type),
+            Guard.value_type("result", rule_shape.result_type),
+        ),
+        emit=tuple(emits),
+        report_key=rule_shape.report_key,
+    )
+
+
 def _integer_pack_emits(
     pack_instruction: IntegerPackInstruction,
     pack: Descriptor,
@@ -2693,6 +2911,10 @@ AIE2P_PACKET_CONVERSION_RULES = (
             (vector.vector_extsi, "signed"),
         )
         for rule_shape in INTEGER_WIDEN_RULE_SHAPES
+    ),
+    *(
+        _integer_truncation_rule(rule_shape)
+        for rule_shape in INTEGER_TRUNCATION_RULE_SHAPES
     ),
     *(_integer_pack_rule(rule_shape) for rule_shape in INTEGER_PACK_RULE_SHAPES),
     *(
