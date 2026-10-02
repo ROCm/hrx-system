@@ -607,10 +607,9 @@ static iree_status_t loom_cmd_lower_build_indirect_dispatch(
                     : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_STATIC;
   } else {
     IREE_ASSERT_EQ(kind, LOOM_CMD_LOWER_INDIRECT_DISPATCH_KIND_DYNAMIC);
-    IREE_ASSERT(has_barrier,
-                "command-produced indirect counts cross an execution wave");
     descriptor_ordinal =
-        CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC_BARRIER;
+        has_barrier ? CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC_BARRIER
+                    : CMD_CORE_DESCRIPTOR_REF_DISPATCH_INDIRECT_DYNAMIC;
   }
   return loom_cmd_lower_build_descriptor_op(
       state, descriptor_ordinal, operands, operand_count,

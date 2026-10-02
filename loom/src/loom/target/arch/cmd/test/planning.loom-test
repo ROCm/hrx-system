@@ -812,3 +812,54 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   cmd.dispatch.direct.barrier<%15, %16>[%21, %20, %20](%14, %17, %18)
   return
 }
+
+// ====
+
+// The wave's leading direct dispatch owns the barrier for every indirect
+// consumer in the concurrent group.
+// RUN: emit command-program @concurrent_dynamic_counts
+
+kernel.entry.decl @produce(%counts: view<3xi32>)
+
+kernel.entry.decl @heartbeat()
+
+kernel.entry.decl @consume(%output: buffer)
+
+command.program.def public @concurrent_dynamic_counts() launch(%first: buffer, %second: buffer) {
+  %c0 = index.constant 0 : offset
+  %c1 = index.constant 1 : index
+  %count_bytes = index.constant 12 : offset
+  %count_storage = buffer.alloca<global> align(4) %count_bytes : buffer
+  %counts = buffer.view %count_storage[%c0] : buffer -> view<3xi32>
+  kernel.dispatch @produce[%c1](%counts) : [index](view<3xi32>)
+  command.concurrent {
+    kernel.dispatch @heartbeat[%c1]() : [index]()
+    kernel.dispatch @consume[%counts](%first) : [view<3xi32>](buffer)
+    kernel.dispatch @consume[%counts](%second) : [view<3xi32>](buffer)
+  }
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 3, executable_count = 3, fixed_buffer_count = 0, rebindable_binding_count = 3}) @concurrent_dynamic_counts() asm {
+  %9 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %10 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.binding>
+  %11 = resource<command_input> {index = 2, source_type = buffer} : reg<cmd.binding>
+  %12 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %13 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %14 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %15 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %16 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %17 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %18 = cmd.constant.u64 0
+  %19 = cmd.constant.u64 -1
+  %20 = cmd.constant.u64 12
+  %21 = cmd.constant.u32 1
+  cmd.dispatch.direct<%12, %15>[%21, %21, %21](%11, %18, %20)
+  cmd.dispatch.direct.barrier<%13, %16>[%21, %21, %21]()
+  %22 = cmd.buffer.ref.binding %11, %18, %20
+  cmd.dispatch.indirect.dynamic<%14, %17>[%22](%9, %18, %19)
+  %23 = cmd.buffer.ref.binding %11, %18, %20
+  cmd.dispatch.indirect.dynamic<%14, %17>[%23](%10, %18, %19)
+  return
+}
