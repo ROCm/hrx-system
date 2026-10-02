@@ -79,6 +79,17 @@ _CDNA4_COMPATIBLE_WITH = loom_config_compatible_with([
 ])
 
 loom_test(
+    name = "divergent_loop_preservation_test",
+    srcs = ["divergent_loop_preservation.loom"],
+    compile_targets = [
+        "//loom/target/amdgpu:gfx942",
+        "//loom/target/amdgpu:gfx950",
+    ],
+    execution_profiles = [AMDGPU_HARDWARE_PROFILE],
+)
+
+
+loom_test(
     name = "buffer_selection_test",
     srcs = ["//loom/src/loom/test/corpus/source_low:buffer_selection.loom"],
     compile_targets = [

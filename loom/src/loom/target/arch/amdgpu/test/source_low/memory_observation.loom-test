@@ -70,7 +70,8 @@ kernel.def @poll_result_controls_next_loop() {
 CHECK: ^*(%startup: reg<amdgpu.vgpr>):
 CHECK: %waiting = v_cmp_eq_i32*
 CHECK: %value = global_load_b32_saddr<volatile> * {glc = 1}
-CHECK: low.br ^*(%value: reg<amdgpu.vgpr>)
+CHECK: * = v_cndmask_b32 %startup, %value, *
+CHECK: low.br ^*(*: reg<amdgpu.vgpr>)
 CHECK: low.br ^*(%startup: reg<amdgpu.vgpr>)
 CHECK: ^*(%mode: reg<amdgpu.vgpr>):
 CHECK: %running = v_cmp_eq_i32*

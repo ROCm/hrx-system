@@ -333,28 +333,32 @@ low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0,
   %left_edge_tap_begin = s_mov_b32 1
   %is_left_edge = v_cmp_eq_i32_src1_inline %lane {rhs = 0}
   %begin = v_cndmask_b32_src0_lit_src1_inline %is_left_edge {imm32 = 0, true_value = 1}
-  %42 = v_mov_b32 1023
-  %is_right_edge = v_cmp_eq_i32 %lane, %42
+  %43 = v_mov_b32 1023
+  %is_right_edge = v_cmp_eq_i32 %lane, %43
   %end = v_cndmask_b32_src0_lit_src1_inline %is_right_edge {imm32 = 3, true_value = 2}
-  %46 = s_mov_b64_exec_read
+  %47 = s_mov_b64_exec_read
   low.br ^_bb1(%begin: reg<amdgpu.vgpr>)
 ^_bb1(%tap: reg<amdgpu.vgpr>):
-  %45 = v_cmp_lt_i32 %tap, %end
-  %47, %48 = s_and_saveexec_b64 %45
-  low.cond_br %48, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+  %46 = v_cmp_lt_i32 %tap, %end
+  %50, %51 = s_and_saveexec_b64 %46
+  low.cond_br %51, ^_bb2, ^_bb3 : reg<amdgpu.scc>
 ^_bb2:
   %shifted = v_add_u32 %lane, %tap
-  %50 = v_mov_b32 1
-  %source_lane = v_sub_nc_u32 %shifted, %50
+  %53 = v_mov_b32 1
+  %source_lane = v_sub_nc_u32 %shifted, %53
   %input_lane = v_lshrrev_b32_src0_inline %source_lane, 1
-  %53 = v_lshlrev_b32_src0_inline %input_lane, 2
-  %loaded = global_load_b32_saddr %53, %input_view
-  %55 = v_lshlrev_b32_src0_inline %lane, 2
-  global_store_b32_saddr %55, %loaded, %output_view
-  %56 = v_add_u32 %left_edge_tap_begin, %tap
-  low.br ^_bb1(%56: reg<amdgpu.vgpr>)
+  %56 = v_lshlrev_b32_src0_inline %input_lane, 2
+  %loaded = global_load_b32_saddr %56, %input_view
+  %58 = v_lshlrev_b32_src0_inline %lane, 2
+  global_store_b32_saddr %58, %loaded, %output_view
+  %59 = v_add_u32 %left_edge_tap_begin, %tap
+  %48 = s_mov_b64_exec_read
+  s_mov_b64_exec %47
+  %49 = v_cndmask_b32 %tap, %59, %48
+  s_mov_b64_exec %48
+  low.br ^_bb1(%49: reg<amdgpu.vgpr>)
 ^_bb3:
-  s_mov_b64_exec %46
+  s_mov_b64_exec %47
   return
 }
 

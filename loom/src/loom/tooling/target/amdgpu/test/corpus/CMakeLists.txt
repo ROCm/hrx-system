@@ -12,6 +12,51 @@ iree_add_all_subdirs()
 if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 loom_test_module(
   NAME
+    divergent_loop_preservation_test_module
+  SRCS
+    "divergent_loop_preservation.loom"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    divergent_loop_preservation_test_execute_amdgpu_hardware_test
+  MODULE
+    "::divergent_loop_preservation_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_check_compile_tests(
+  NAME
+    "divergent_loop_preservation_test"
+  SRC
+    "::divergent_loop_preservation_test_module"
+  TARGETS
+    loom::target::amdgpu::gfx942
+    loom::target::amdgpu::gfx950
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+loom_test_module(
+  NAME
     buffer_selection_test_module
   SRCS
     "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/buffer_selection.loom"

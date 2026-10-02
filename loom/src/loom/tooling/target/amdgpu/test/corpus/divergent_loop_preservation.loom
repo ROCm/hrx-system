@@ -1,0 +1,61 @@
+// Zero-trip and early-retiring lanes preserve wide values and predicate bits.
+// The loop's parent mask excludes the upper half of the wave.
+kernel.def @preserve_retired_values() {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%bounds: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %bv = buffer.view %bounds[%origin] : buffer -> view<64xi32>
+  %ov = buffer.view %output[%origin] : buffer -> view<64xi64>
+  %bound = view.load %bv[%lane] : view<64xi32> -> i32
+  %half = index.constant 32 : index
+  %participates = index.cmp ult, %lane, %half : index
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %initial = scalar.constant 4294967297 : i64
+  %zero_wide = scalar.constant 0 : i64
+  scf.if %participates {
+    %initial_flag = scalar.cmpi sge, %bound, %zero : i32
+    %last_i, %last_value, %last_flag = scf.while(%i = %zero : i32, %value = %initial : i64, %flag = %initial_flag : i1) -> (i32, i64, i1) {
+      %more = scalar.cmpi slt, %i, %bound : i32
+      scf.condition %more, %i, %value, %flag : i1, i32, i64, i1
+    } do(%i: i32, %value: i64, %flag: i1) {
+      %next_i = scalar.addi %i, %one : i32
+      %next_value = scalar.addi %value, %value : i64
+      %next_flag = scalar.cmpi eq, %i, %zero : i32
+      scf.yield %next_i, %next_value, %next_flag : i32, i64, i1
+    }
+    %is_one = scalar.cmpi eq, %bound, %one : i32
+    %is_two = scalar.cmpi eq, %bound, %two : i32
+    %is_three = scalar.cmpi eq, %bound, %three : i32
+    %twice_initial = scalar.constant 8589934594 : i64
+    %four_times_initial = scalar.constant 17179869188 : i64
+    %eight_times_initial = scalar.constant 34359738376 : i64
+    %expected1 = scf.select %is_one, %twice_initial, %initial : i64
+    %expected2 = scf.select %is_two, %four_times_initial, %expected1 : i64
+    %expected = scf.select %is_three, %eight_times_initial, %expected2 : i64
+    %expected_flag = scalar.cmpi slt, %bound, %two : i32
+    %flag_value = scf.select %last_flag, %initial, %zero_wide : i64
+    %expected_flag_value = scf.select %expected_flag, %initial, %zero_wide : i64
+    %flag_error = scalar.subi %flag_value, %expected_flag_value : i64
+    %value_error = scalar.subi %last_value, %expected : i64
+    %error = scalar.ori %flag_error, %value_error : i64
+    view.store %error, %ov[%lane] : i64, view<64xi64>
+  } else {
+    view.store %zero_wide, %ov[%lane] : i64, view<64xi64>
+  }
+  kernel.return
+}
+
+check.case public @masked_parent {
+  %bounds = check.generate.iota offset(0) step(1) period(4) : tensor<64xi32>
+  %output = check.generate.fill value(-999) : tensor<64xi64>
+  %expected = check.generate.fill value(0) : tensor<64xi64>
+  kernel.launch @preserve_retired_values(%bounds, %output) : (tensor<64xi32>, tensor<64xi64>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<64xi64>
+  check.return
+}

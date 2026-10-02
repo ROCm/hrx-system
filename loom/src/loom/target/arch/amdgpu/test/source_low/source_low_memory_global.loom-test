@@ -2794,37 +2794,42 @@ kernel.def @grid_stride_store_offset() {
 low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 3, direct_arg_count = 2, direct_arg_names = {arg0 = "byte_length", arg1 = "pattern"}, direct_arg_offsets = [8, 16], direct_arg_parameter_indices = [1, 2], direct_arg_sizes = [8, 4], parameter_count = 3, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(64, 1, 1) workgroup_count(1, 1, 1) @grid_stride_store_offset(%byte_length: reg<amdgpu.sgpr x2>, %pattern: reg<amdgpu.sgpr>) asm {
   %lane_index = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
   %target_view = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
-  %23 = v_mov_b32 0
+  %24 = v_mov_b32 0
   %step = s_mov_b32 64
   %value = v_mov_b32_copy %pattern
-  %38 = s_mov_b64_exec_read
-  low.br ^loop(%lane_index: reg<amdgpu.vgpr>, %23: reg<amdgpu.vgpr>)
-^loop(%63: reg<amdgpu.vgpr>, %64: reg<amdgpu.vgpr>):
-  %29 = slice %byte_length[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %30 = v_mov_b32_copy %29
-  %31 = slice %byte_length[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %32 = v_mov_b32_copy %31
-  %33 = v_cmp_lt_u32 %64, %32
-  %34 = v_cmp_lt_u32 %63, %30
-  %35 = v_cmp_eq_i32 %64, %32
-  %36 = s_and_b64 %35, %34
-  %inside = s_or_b64 %33, %36
-  %39, %40 = s_and_saveexec_b64 %inside
-  low.cond_br %40, ^body, ^_bb3 : reg<amdgpu.scc>
+  %39 = s_mov_b64_exec_read
+  low.br ^loop(%lane_index: reg<amdgpu.vgpr>, %24: reg<amdgpu.vgpr>)
+^loop(%72: reg<amdgpu.vgpr>, %73: reg<amdgpu.vgpr>):
+  %30 = slice %byte_length[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %31 = v_mov_b32_copy %30
+  %32 = slice %byte_length[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %33 = v_mov_b32_copy %32
+  %34 = v_cmp_lt_u32 %73, %33
+  %35 = v_cmp_lt_u32 %72, %31
+  %36 = v_cmp_eq_i32 %73, %33
+  %37 = s_and_b64 %36, %35
+  %inside = s_or_b64 %34, %37
+  %48, %49 = s_and_saveexec_b64 %inside
+  low.cond_br %49, ^body, ^_bb3 : reg<amdgpu.scc>
 ^body:
-  %43 = slice %target_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %44 = slice %target_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
-  %45, %46 = v_add_co_u32 %43, %63
-  %47 = v_mov_b32_copy %44
-  %48, %49 = v_add_co_ci_u32 %47, %64, %46
-  %50 = concat(%45, %48) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
-  global_store_b32_vaddr %50, %value
-  %51 = v_mov_b32_copy %step
-  %52 = v_mov_b32 0
-  %58, %59 = v_add_co_u32 %63, %51
-  %60, %61 = v_add_co_ci_u32 %64, %52, %59
-  low.br ^loop(%58: reg<amdgpu.vgpr>, %60: reg<amdgpu.vgpr>)
+  %52 = slice %target_view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %53 = slice %target_view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %54, %55 = v_add_co_u32 %52, %72
+  %56 = v_mov_b32_copy %53
+  %57, %58 = v_add_co_ci_u32 %56, %73, %55
+  %59 = concat(%54, %57) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  global_store_b32_vaddr %59, %value
+  %60 = v_mov_b32_copy %step
+  %61 = v_mov_b32 0
+  %67, %68 = v_add_co_u32 %72, %60
+  %69, %70 = v_add_co_ci_u32 %73, %61, %68
+  %40 = s_mov_b64_exec_read
+  s_mov_b64_exec %39
+  %43 = v_cndmask_b32 %72, %67, %40
+  %46 = v_cndmask_b32 %73, %69, %40
+  s_mov_b64_exec %40
+  low.br ^loop(%43: reg<amdgpu.vgpr>, %46: reg<amdgpu.vgpr>)
 ^_bb3:
-  s_mov_b64_exec %38
+  s_mov_b64_exec %39
   return
 }

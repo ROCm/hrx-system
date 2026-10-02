@@ -18,6 +18,8 @@ extern "C" {
 // Plans divergent branch expansion before the source body is emitted. Source
 // distribution facts distinguish divergent predicates from uniform predicates
 // whose other uses require native mask storage.
+// Divergent loop backedges explicitly merge old and updated lane state under
+// parent EXEC so allocation and whole-value spills retain retired components.
 iree_status_t loom_amdgpu_prepare_branch(
     void* user_data, loom_low_lower_context_t* context,
     const loom_op_t* source_terminator, iree_arena_allocator_t* analysis_arena);
