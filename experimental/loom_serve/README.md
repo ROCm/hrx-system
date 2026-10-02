@@ -8,6 +8,10 @@ It is not a general HAL VM module or a serving framework.
 reflection. Recording retains fixed buffers and code. Rebindable slots include
 model state and explicit scratch; the materializer allocates no device backing.
 There is no semantic-resource extension to the command artifact format.
+Barrier recording accounts for all commands in each concurrent wave. Indirect
+count consumers require command-processing visibility, and later producers
+wait for those reads before reusing count storage. Direct-only waves retain
+dispatch/transfer scopes; replay adds no host planning or allocation.
 
 `module.c` publishes prepared stages as ordinary fixed-signature VM imports:
 `(hal.buffer, ... slots ...) -> i64`. Model code selects the stage and buffers;
@@ -33,6 +37,13 @@ domain usable. Feedback forks preserve the work frontier while later VM calls
 consume independent retained state. This is an ownership/control witness,
 **not a full Qwen model run or a performance result**. The test artifacts
 currently target gfx1151.
+
+A source-authored continuation command reuses one transient count tuple across
+eight producer/consumer steps. A direct heartbeat and an indirect state update
+share each consumer wave. Sixteen queued replays run without intermediate host
+waits: zero X/Y/Z/all-axis grids suppress exactly half of the state updates,
+while all producer and heartbeat steps complete. Both ordinary and retained
+profile recording use the same emitted command artifact.
 
 From the worktree root:
 

@@ -119,6 +119,7 @@ loom_generated_file_family(
     "--product=command"
     "--root=@prefill_to_decode"
     "--root=@decode_transition"
+    "--root=@device_continuation"
   INPUTS
     "control_kernels.loom"
   TESTONLY
@@ -127,16 +128,56 @@ loom_generated_file_family(
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_generated_file(
   NAME
-    prefill_finish_control_binary
+    continuation_consume_binary
   GENERATOR
     loom::tools::loom-compile
   OUTPUT
-    "prefill_finish_control.hsaco"
+    "continuation_consume.hsaco"
   OUTPUT_FLAG
     "--output="
   ARGS
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
-    "--root=@qwen38_prefill_finish_control"
+    "--root=@continuation_consume"
+    "--target=amdgpu:gfx1151"
+  INPUTS
+    "control_kernels.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_file(
+  NAME
+    continuation_counts_binary
+  GENERATOR
+    loom::tools::loom-compile
+  OUTPUT
+    "continuation_counts.hsaco"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
+    "--root=@continuation_counts"
+    "--target=amdgpu:gfx1151"
+  INPUTS
+    "control_kernels.loom"
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_file(
+  NAME
+    continuation_heartbeat_binary
+  GENERATOR
+    loom::tools::loom-compile
+  OUTPUT
+    "continuation_heartbeat.hsaco"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
+    "--root=@continuation_heartbeat"
     "--target=amdgpu:gfx1151"
   INPUTS
     "control_kernels.loom"
@@ -164,11 +205,34 @@ loom_generated_file(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_generated_file(
+  NAME
+    prefill_finish_control_binary
+  GENERATOR
+    loom::tools::loom-compile
+  OUTPUT
+    "prefill_finish_control.hsaco"
+  OUTPUT_FLAG
+    "--output="
+  ARGS
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
+    "--root=@qwen38_prefill_finish_control"
+    "--target=amdgpu:gfx1151"
+  INPUTS
+    "control_kernels.loom"
+  TESTONLY
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU)
 iree_c_embed_data(
   NAME
     control_data
   SRCS
+    "${CMAKE_CURRENT_BINARY_DIR}/continuation_consume.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/continuation_counts.hsaco"
+    "${CMAKE_CURRENT_BINARY_DIR}/continuation_heartbeat.hsaco"
     "${CMAKE_CURRENT_BINARY_DIR}/control_model.vm"
     "${CMAKE_CURRENT_BINARY_DIR}/decode_commit_token.hsaco"
     "${CMAKE_CURRENT_BINARY_DIR}/prefill_finish_control.hsaco"
