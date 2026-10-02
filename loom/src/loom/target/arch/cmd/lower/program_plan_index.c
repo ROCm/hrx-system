@@ -11,18 +11,19 @@
 #include "loom/link/planner.h"
 
 static bool loom_cmd_program_plan_has_source_kernels(
+    const loom_link_module_index_t* index,
     const loom_link_plan_materialization_t* materialization) {
-  if (materialization->target_kernel_configurations.count == 0) {
-    return false;
-  }
-  IREE_ASSERT_EQ(materialization->target_kernel_configurations.count,
-                 materialization->target_source_definitions.count);
   for (iree_host_size_t i = 0;
-       i < materialization->target_kernel_configurations.count; ++i) {
-    if (loom_symbol_ref_is_valid(
-            materialization->target_kernel_configurations.values[i]) &&
-        materialization->target_source_definitions.values[i] !=
-            LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+       i < materialization->target_source_definitions.count; ++i) {
+    const iree_host_size_t source_ordinal =
+        materialization->target_source_definitions.values[i];
+    if (source_ordinal == LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL) {
+      continue;
+    }
+    const loom_link_module_index_symbol_t* source =
+        loom_link_module_index_symbol_at(index, source_ordinal);
+    if (iree_any_bit_set(source->facets.schema.interfaces,
+                         LOOM_SYMBOL_INTERFACE_KERNEL)) {
       return true;
     }
   }
@@ -110,7 +111,8 @@ iree_status_t loom_cmd_program_plan_build_from_index(
   loom_cmd_program_kernel_source_t kernel_source = {0};
   if (iree_status_is_ok(status) && options != NULL &&
       options->kernel_request_sink.publish != NULL &&
-      loom_cmd_program_plan_has_source_kernels(&materialization.product)) {
+      loom_cmd_program_plan_has_source_kernels(index,
+                                               &materialization.product)) {
     status = loom_kernel_request_producer_allocate(
         index, materialization_environment, &kernel_request_producer);
     if (iree_status_is_ok(status)) {

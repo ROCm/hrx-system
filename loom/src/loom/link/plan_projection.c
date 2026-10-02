@@ -33,12 +33,24 @@ static int loom_link_plan_projection_compare_symbols(const void* lhs_ptr,
   return 0;
 }
 
-static bool loom_link_plan_projection_symbol_is_partial(
-    const loom_link_plan_module_symbol_t* symbol) {
-  IREE_ASSERT_LE(symbol->plan_symbol->selected_facet_count,
-                 symbol->source_symbol->facets.schema.facet_count);
-  return symbol->plan_symbol->selected_facet_count !=
-         symbol->source_symbol->facets.schema.facet_count;
+static loom_link_plan_symbol_projection_t
+loom_link_plan_projection_classify_symbol(
+    const loom_link_plan_t* plan, const loom_link_plan_symbol_t* selection,
+    const loom_link_module_index_symbol_t* source) {
+  if (selection->selected_facet_count == source->facets.schema.facet_count) {
+    return LOOM_LINK_PLAN_SYMBOL_PROJECTION_COMPLETE;
+  }
+  if (!iree_any_bit_set(source->facets.schema.interfaces,
+                        LOOM_SYMBOL_INTERFACE_KERNEL) ||
+      loom_link_plan_contains_facet(
+          plan, source->ordinal,
+          LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION)) {
+    return LOOM_LINK_PLAN_SYMBOL_PROJECTION_UNSUPPORTED;
+  }
+  return loom_link_plan_contains_facet(
+             plan, source->ordinal, LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION)
+             ? LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION
+             : LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_ENTRY;
 }
 
 static void loom_link_plan_projection_assign_complete_symbol_ordinals(
@@ -71,15 +83,19 @@ static void loom_link_plan_projection_assign_materialized_symbol_ordinals(
   }
 
   iree_host_size_t complete_symbol_count = 0;
+  iree_host_size_t helper_symbol_count = 0;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
-    complete_symbol_count += !loom_link_plan_projection_symbol_is_partial(
-        &module->symbols.values[i]);
+    complete_symbol_count += module->symbols.values[i].projection ==
+                             LOOM_LINK_PLAN_SYMBOL_PROJECTION_COMPLETE;
+    helper_symbol_count +=
+        module->symbols.values[i].projection ==
+        LOOM_LINK_PLAN_SYMBOL_PROJECTION_KERNEL_CONFIGURATION;
   }
   const iree_host_size_t partial_symbol_count =
       module->symbols.count - complete_symbol_count;
   module->projected_symbol_count =
       partial_symbol_count == 0 ? 0
-                                : module->symbols.count + partial_symbol_count;
+                                : module->symbols.count + helper_symbol_count;
 
   if (!loom_link_plan_module_requires_symbol_projection(module)) {
     loom_link_plan_projection_assign_complete_symbol_ordinals(module);
@@ -90,7 +106,7 @@ static void loom_link_plan_projection_assign_materialized_symbol_ordinals(
   uint32_t partial_ordinal = (uint32_t)complete_symbol_count;
   for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
     loom_link_plan_module_symbol_t* symbol = &module->symbols.values[i];
-    if (loom_link_plan_projection_symbol_is_partial(symbol)) {
+    if (symbol->projection != LOOM_LINK_PLAN_SYMBOL_PROJECTION_COMPLETE) {
       symbol->materialized_symbol_ordinal = partial_ordinal++;
     } else {
       symbol->materialized_symbol_ordinal = complete_ordinal++;
@@ -120,6 +136,8 @@ iree_status_t loom_link_plan_project_modules(
     symbols[i] = (loom_link_plan_module_symbol_t){
         .plan_symbol = planned_symbol,
         .source_symbol = source_symbol,
+        .projection = loom_link_plan_projection_classify_symbol(
+            plan, planned_symbol, source_symbol),
     };
   }
   if (symbol_count > 1) {

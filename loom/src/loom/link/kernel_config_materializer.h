@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Body-blind kernel launch-configuration facet projection.
+// Body-blind kernel contract and launch-configuration facet projection.
 
 #ifndef LOOM_LINK_KERNEL_CONFIG_MATERIALIZER_H_
 #define LOOM_LINK_KERNEL_CONFIG_MATERIALIZER_H_
@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 // Compact ordinary IR reconstructed for one source module containing partial
-// kernel-configuration selections.
+// kernel entry or configuration selections.
 typedef struct loom_link_kernel_config_module_projection_t {
   // Standalone compact module owned by the caller.
   loom_module_t* module;
@@ -25,8 +25,9 @@ typedef struct loom_link_kernel_config_module_projection_t {
   // Bytecode-only inputs have no external source snapshots and leave this NULL.
   const loom_source_id_t* target_sources;
   // Configuration functions aligned with |selection.symbols|. Complete source
-  // symbols contain null refs; partial kernel selections name their private
-  // pure workload-to-count function. Storage belongs to the caller's arena.
+  // symbols and entry-only projections contain null refs; selected kernel
+  // configurations name their private pure workload-to-count function.
+  // Storage belongs to the caller's arena.
   struct {
     // Arena-owned compact-module symbol refs.
     loom_symbol_ref_t* values;
@@ -35,11 +36,12 @@ typedef struct loom_link_kernel_config_module_projection_t {
   } configuration_functions;
 } loom_link_kernel_config_module_projection_t;
 
-// Projects every partial kernel configuration selected from one source module.
+// Projects every partial kernel contract selected from one source module.
 //
 // Complete dependency symbols are materialized once in canonical source order.
-// Each partial kernel contributes an ordinary private kernel.decl and pure
-// inline func.def while its implementation facet remains unopened. Source
+// A configuration selection contributes an ordinary private kernel.decl and
+// pure inline func.def. An entry-only selection contributes kernel.entry.decl
+// without opening its configuration or implementation regions. Source
 // symbols use the exact compact ordinals assigned by |selection|, allowing the
 // generic plan materializer to pass this module directly to the incremental
 // linker without name lookup or a second reachability pass.
