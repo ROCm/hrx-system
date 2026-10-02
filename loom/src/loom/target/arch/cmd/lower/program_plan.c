@@ -9,6 +9,7 @@
 #include <string.h>
 
 #include "loom/analysis/symbol_references.h"
+#include "loom/codegen/pass_environment.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
@@ -189,16 +190,18 @@ static iree_status_t loom_cmd_program_plan_normalize_roots(
         cleanup_pattern_provider_set, iree_arena_allocator(&registry_arena),
         &cleanup_pattern_registry_storage);
   }
-  const loom_cleanup_pass_capability_t cleanup_capability =
-      loom_cleanup_pass_capability_make(
-          loom_cleanup_pattern_registry_storage_registry(
-              &cleanup_pattern_registry_storage),
-          (loom_cleanup_canonicalizer_context_resolver_t){0});
-  const loom_pass_environment_capability_t* capabilities[] = {
-      &cleanup_capability.base,
-  };
+  // Configuration helpers retain their kernel's target contract. Resolve its
+  // facts before inlining into target-neutral command roots so launch counts
+  // use the same subgroup and resource facts as native kernel compilation.
+  loom_codegen_pass_environment_storage_t pass_environment_storage;
   const loom_pass_environment_t pass_environment =
-      loom_pass_environment_make(capabilities, IREE_ARRAYSIZE(capabilities));
+      loom_codegen_pass_environment_storage_initialize(
+          &(loom_codegen_pass_environment_options_t){
+              .cleanup_pattern_registry =
+                  loom_cleanup_pattern_registry_storage_registry(
+                      &cleanup_pattern_registry_storage),
+          },
+          NULL, &pass_environment_storage);
 
   const loom_pass_program_compile_options_t compile_options = {
       .registry = pass_registry,
