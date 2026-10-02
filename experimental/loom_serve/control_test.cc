@@ -82,10 +82,17 @@ class ControlTest
                              "qwen38_prefill_finish_control", &entries_[0]));
     IREE_ASSERT_OK(LoadEntry(family, "decode_commit_token.hsaco",
                              "qwen38_decode_commit_token", &entries_[1]));
+    IREE_ASSERT_OK(LoadEntry(family, "continuation_counts.hsaco",
+                             "continuation_counts", &entries_[2]));
+    IREE_ASSERT_OK(LoadEntry(family, "continuation_heartbeat.hsaco",
+                             "continuation_heartbeat", &entries_[3]));
+    IREE_ASSERT_OK(LoadEntry(family, "continuation_consume.hsaco",
+                             "continuation_consume", &entries_[4]));
     // Program-local projections are emitted by this source's command product:
     // prefill references finish/commit, while decode references commit alone.
     IREE_ASSERT_OK(Prepare(family, 0, 2, entries_.data(), &commands_[0]));
     IREE_ASSERT_OK(Prepare(family, 1, 1, &entries_[1], &commands_[1]));
+    IREE_ASSERT_OK(Prepare(family, 2, 3, &entries_[2], &commands_[2]));
     for (auto& row : buffers_) {
       for (size_t i = 0; i < row.size(); ++i) {
         iree_hal_buffer_params_t params = {};
@@ -95,6 +102,18 @@ class ControlTest
         IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
             iree_hal_device_allocator(device_), params, kLengths[i], &row[i]));
       }
+    }
+    for (size_t i = 0; i < continuation_.buffers.size(); ++i) {
+      iree_hal_buffer_params_t params = {};
+      params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+      params.usage =
+          IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+      if (i == 2) {
+        params.usage |= IREE_HAL_BUFFER_USAGE_DISPATCH_INDIRECT_PARAMETERS;
+      }
+      IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+          iree_hal_device_allocator(device_), params, kContinuationLengths[i],
+          &continuation_.buffers[i]));
     }
     IREE_ASSERT_OK(CreateModel());
   }
@@ -117,6 +136,9 @@ class ControlTest
       for (auto* buffer : row) {
         iree_hal_buffer_release(buffer);
       }
+    }
+    for (auto* buffer : continuation_.buffers) {
+      iree_hal_buffer_release(buffer);
     }
     for (auto* command : commands_) {
       iree_hal_command_buffer_release(command);
@@ -309,6 +331,8 @@ class ControlTest
 
   // Exact byte extents of the three generation-state buffers.
   static constexpr std::array<size_t, 3> kLengths = {12, 516, 32};
+  // Schedule, counters/canary, and the command product's transient count slab.
+  static constexpr std::array<size_t, 3> kContinuationLengths = {96, 16, 16};
   // Host allocation policy used for all runtime objects.
   iree_allocator_t allocator_ = iree_allocator_system();
   // Async services outliving the device and device group.
@@ -321,16 +345,28 @@ class ControlTest
   iree_hal_device_group_t* group_ = nullptr;
   // Shared ordered execution capability.
   loom_serve_execution_t* execution_ = nullptr;
-  // One loaded implementation of each generation-state kernel.
-  std::array<loom_serve_command_entry_t, 2> entries_ = {};
-  // One cached command buffer per stage, shared across both rows.
-  std::array<iree_hal_command_buffer_t*, 2> commands_ = {};
+  // One loaded implementation of each state-transition and continuation kernel.
+  std::array<loom_serve_command_entry_t, 5> entries_ = {};
+  // Cached stage commands and the device-owned continuation loop.
+  std::array<iree_hal_command_buffer_t*, 3> commands_ = {};
   // Two independently retained session states.
   std::array<std::array<iree_hal_buffer_t*, 3>, 2> buffers_ = {};
   // Persistent host upload storage, never recycled ahead of completion.
   std::array<State, 2> inputs_;
   // Persistent host readback storage, inspected only after completion.
   std::array<State, 2> outputs_;
+  // Device-produced grids and all host payloads retained until the final drain.
+  struct {
+    // Schedule, state, and reusable transient storage in command binding order.
+    std::array<iree_hal_buffer_t*, 3> buffers = {};
+    // Disabled X/Y/Z/all-axis grids, each followed by one live grid.
+    std::array<int32_t, 24> schedule = {0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1,
+                                        1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1};
+    // Initial producer, consumer and heartbeat counters, followed by a canary.
+    std::array<int32_t, 4> input = {0, 0, 0, -12345};
+    // Final counters/canary, inspected only after feedback completion.
+    std::array<int32_t, 4> output = {};
+  } continuation_;
   // Environment owning the type-registration namespace.
   iree_vm_environment_t* environment_ = nullptr;
   // Canonical HAL type handles.
@@ -460,6 +496,42 @@ TEST_P(ControlTest, FeedbackForkDoesNotAdvanceWork) {
   EXPECT_EQ(outputs_[1].control[0], 105);
   EXPECT_EQ(outputs_[1].control[1], 2);
   EXPECT_EQ(outputs_[1].tokens[2], 11);
+}
+
+TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {
+  std::array<iree_hal_transfer_operation_t, 2> uploads = {};
+  const void* sources[] = {continuation_.schedule.data(),
+                           continuation_.input.data()};
+  for (size_t i = 0; i < uploads.size(); ++i) {
+    uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+    uploads[i].upload.source = sources[i];
+    uploads[i].upload.target_buffer = continuation_.buffers[i];
+    uploads[i].upload.length = kContinuationLengths[i];
+  }
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(loom_serve_execution_transfer(execution_, uploads.size(),
+                                               uploads.data(), &completion));
+  std::array<iree_hal_buffer_binding_t, 3> bindings = {};
+  for (size_t i = 0; i < bindings.size(); ++i) {
+    bindings[i] = {continuation_.buffers[i], 0, kContinuationLengths[i]};
+  }
+  // Every replay contains eight producer/consumer epochs sharing one count
+  // tuple. Submission dependencies order replays; no host result gates them.
+  for (int i = 0; i < 16; ++i) {
+    IREE_ASSERT_OK(loom_serve_execution_execute(
+        execution_, commands_[2], {bindings.size(), bindings.data()},
+        &completion));
+  }
+  iree_hal_transfer_operation_t download = {};
+  download.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  download.download.source_buffer = continuation_.buffers[1];
+  download.download.target = continuation_.output.data();
+  download.download.length = kContinuationLengths[1];
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  const std::array<int32_t, 4> expected = {128, 64, 128, -12345};
+  EXPECT_EQ(continuation_.output, expected);
 }
 
 INSTANTIATE_TEST_SUITE_P(

@@ -206,6 +206,7 @@ loom_generated_file_family(
         "--product=command",
         "--root=@prefill_to_decode",
         "--root=@decode_transition",
+        "--root=@device_continuation",
     ],
     generator = "//loom/src/loom/tools/loom-compile",
     inputs = [":control_kernels.loom"],
@@ -226,7 +227,7 @@ loom_generated_file_family(
         testonly = True,
         args = [
             "$(location :control_kernels.loom)",
-            "--root=@qwen38_" + stage,
+            "--root=@" + symbol,
             "--target=amdgpu:gfx1151",
         ],
         generator = "//loom/src/loom/tools/loom-compile",
@@ -235,16 +236,22 @@ loom_generated_file_family(
         output_flag = "--output=",
         target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:amdgpu"]),
     )
-    for stage in [
-        "prefill_finish_control",
-        "decode_commit_token",
-    ]
+    for stage, symbol in {
+        "continuation_consume": "continuation_consume",
+        "continuation_counts": "continuation_counts",
+        "continuation_heartbeat": "continuation_heartbeat",
+        "decode_commit_token": "qwen38_decode_commit_token",
+        "prefill_finish_control": "qwen38_prefill_finish_control",
+    }.items()
 ]
 
 iree_c_embed_data(
     name = "control_data",
     testonly = True,
     srcs = [
+        ":continuation_consume_binary",
+        ":continuation_counts_binary",
+        ":continuation_heartbeat_binary",
         ":control_model_binary",
         ":decode_commit_token_binary",
         ":prefill_finish_control_binary",

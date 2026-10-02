@@ -165,35 +165,34 @@ static iree_status_t loom_serve_command_record_dispatch(
   return status;
 }
 
-static iree_status_t loom_serve_command_record(
-    const loom_cmd_program_t* program, iree_hal_buffer_t* const* fixed_buffers,
+static iree_hal_execution_stage_t loom_serve_command_wave_stages(
+    const loom_cmd_program_t* program, loom_cmd_program_command_range_t range) {
+  const iree_hal_execution_stage_t stages =
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER;
+  // A leading direct command may share its wave with indirect consumers.
+  for (uint32_t i = 0; i < range.command_count; ++i) {
+    const loom_cmd_program_command_kind_t kind =
+        loom_cmd_program_command_kind_base(
+            loom_cmd_program_command_at(program, range.first_command + i).kind);
+    if (kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_STATIC ||
+        kind == LOOM_CMD_PROGRAM_COMMAND_KIND_DISPATCH_INDIRECT_DYNAMIC) {
+      return stages | IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS;
+    }
+  }
+  return stages;
+}
+
+static iree_status_t loom_serve_command_record_wave(
+    const loom_cmd_program_t* program, loom_cmd_program_command_range_t range,
+    iree_hal_buffer_t* const* fixed_buffers,
     const loom_serve_command_entry_t* entries,
     loom_serve_command_layout_t* layouts,
     iree_hal_command_buffer_t* command_buffer) {
-  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
   iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < program->commands.count && iree_status_is_ok(status);
+  for (uint32_t i = 0; i < range.command_count && iree_status_is_ok(status);
        ++i) {
     const loom_cmd_program_command_t command =
-        loom_cmd_program_command_at(program, i);
-    if (loom_cmd_program_command_kind_begins_barrier_wave(command.kind)) {
-      const iree_hal_memory_barrier_t barrier = {
-          .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-          .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
-                          IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
-                          IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
-                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
-      };
-      const iree_hal_execution_stage_t stages =
-          IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER;
-      status = iree_hal_command_buffer_execution_barrier(
-          command_buffer, stages, stages, IREE_HAL_EXECUTION_BARRIER_FLAG_NONE,
-          1, &barrier, 0, NULL);
-    }
-    if (!iree_status_is_ok(status)) {
-      break;
-    }
+        loom_cmd_program_command_at(program, range.first_command + i);
     switch (loom_cmd_program_command_kind_base(command.kind)) {
       case LOOM_CMD_PROGRAM_COMMAND_KIND_BARRIER_EXECUTION:
         break;
@@ -227,6 +226,51 @@ static iree_status_t loom_serve_command_record(
             program, &command, fixed_buffers, entries, layouts, command_buffer);
         break;
     }
+  }
+  return status;
+}
+
+static iree_status_t loom_serve_command_record(
+    const loom_cmd_program_t* program, iree_hal_buffer_t* const* fixed_buffers,
+    const loom_serve_command_entry_t* entries,
+    loom_serve_command_layout_t* layouts,
+    iree_hal_command_buffer_t* command_buffer) {
+  IREE_RETURN_IF_ERROR(iree_hal_command_buffer_begin(command_buffer));
+  loom_cmd_program_barrier_wave_iterator_t iterator;
+  loom_cmd_program_barrier_wave_iterator_initialize(program, &iterator);
+  loom_cmd_program_barrier_wave_t wave;
+  iree_hal_execution_stage_t source_stages =
+      IREE_HAL_EXECUTION_STAGE_DISPATCH | IREE_HAL_EXECUTION_STAGE_TRANSFER;
+  iree_status_t status = iree_ok_status();
+  while (iree_status_is_ok(status) &&
+         loom_cmd_program_barrier_wave_iterator_next(&iterator, &wave)) {
+    const iree_hal_execution_stage_t target_stages =
+        loom_serve_command_wave_stages(program, wave.commands);
+    if (wave.ordinal != 0) {
+      iree_hal_memory_barrier_t barrier = {
+          .source_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+          .target_scope = IREE_HAL_ACCESS_SCOPE_DISPATCH_READ |
+                          IREE_HAL_ACCESS_SCOPE_DISPATCH_WRITE |
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_READ |
+                          IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+      };
+      if (iree_any_bit_set(target_stages,
+                           IREE_HAL_EXECUTION_STAGE_COMMAND_PROCESS)) {
+        barrier.target_scope |= IREE_HAL_ACCESS_SCOPE_INDIRECT_COMMAND_READ;
+      }
+      // Count publication targets command processing, not shader reads. The
+      // predecessor stage also orders indirect reads before count reuse.
+      status = iree_hal_command_buffer_execution_barrier(
+          command_buffer, source_stages, target_stages,
+          IREE_HAL_EXECUTION_BARRIER_FLAG_NONE, 1, &barrier, 0, NULL);
+    }
+    if (iree_status_is_ok(status)) {
+      status =
+          loom_serve_command_record_wave(program, wave.commands, fixed_buffers,
+                                         entries, layouts, command_buffer);
+    }
+    source_stages = target_stages;
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_command_buffer_end(command_buffer);
