@@ -14,6 +14,8 @@ config.decl @ggml.linear_q8_0_q8_1_x4.token_capacity : %value: index where [rang
 
 config.decl @ggml.linear_q8_0_q8_1_x4.output_capacity : %value: index where [range(%value, 1, 262144)]
 
+amdgpu.target<gfx11-generic> @ggml_q8_gfx11_wave32 {subgroup_size = 32}
+
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 // Computes one lane's partial for a complete Q8_0 row. The active subgroup
@@ -70,7 +72,7 @@ func.def inline @ggml_q8_0_q8_1_x4_row_lane(%input_size: index, %weight: buffer,
   func.return %result : f32
 }
 
-kernel.def export("ggml_linear_q8_0_q8_1_x4") @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def target(@ggml_q8_gfx11_wave32) export("ggml_linear_q8_0_q8_1_x4") @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %c1 = index.constant 1 : index

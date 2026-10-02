@@ -6,8 +6,7 @@
 
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
-load("//build_tools/embed_data:build_defs.bzl", "iree_c_embed_data")
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with", "loom_generated_file", "loom_generated_file_family")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -184,108 +183,26 @@ loom_cc_library(
     ],
 )
 
-loom_generated_file(
-    name = "control_model_binary",
-    testonly = True,
-    args = [
-        "$(location :control_model.loom)",
-        "--target=vm:core",
-    ],
-    generator = "//loom/src/loom/tools/loom-compile",
-    inputs = [":control_model.loom"],
-    output = "control_model.vm",
-    output_flag = "--output=",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
-)
-
-loom_generated_file_family(
-    name = "control_commands",
-    testonly = True,
-    args = [
-        "$(location :control_kernels.loom)",
-        "--product=command",
-        "--root=@prefill_to_decode",
-        "--root=@decode_transition",
-        "--root=@device_continuation",
-    ],
-    generator = "//loom/src/loom/tools/loom-compile",
-    inputs = [":control_kernels.loom"],
-    output_directories = ["control_commands"],
-    output_flags = [
-        "--output=",
-        "--emit-command-artifacts=",
-    ],
-    outputs = [
-        "control_manifest.json",
-        "control_commands",
-    ],
-)
-
-[
-    loom_generated_file(
-        name = stage + "_binary",
-        testonly = True,
-        args = [
-            "$(location :control_kernels.loom)",
-            "--root=@" + symbol,
-            "--target=amdgpu:gfx1151",
-        ],
-        generator = "//loom/src/loom/tools/loom-compile",
-        inputs = [":control_kernels.loom"],
-        output = stage + ".hsaco",
-        output_flag = "--output=",
-        target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:amdgpu"]),
-    )
-    for stage, symbol in {
-        "continuation_consume": "continuation_consume",
-        "continuation_counts": "continuation_counts",
-        "continuation_heartbeat": "continuation_heartbeat",
-        "decode_commit_token": "qwen38_decode_commit_token",
-        "prefill_finish_control": "qwen38_prefill_finish_control",
-    }.items()
-]
-
-iree_c_embed_data(
-    name = "control_data",
-    testonly = True,
-    srcs = [
-        ":continuation_consume_binary",
-        ":continuation_counts_binary",
-        ":continuation_heartbeat_binary",
-        ":control_model_binary",
-        ":decode_commit_token_binary",
-        ":prefill_finish_control_binary",
-    ],
-    c_file_output = "control_data.c",
-    h_file_output = "control_data.h",
-    identifier = "loom_serve_control_data",
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target/arch:vm",
-        "//loom/config/target/arch:amdgpu",
-    ]),
-)
-
 loom_cc_test(
     name = "control_test",
     srcs = ["control_test.cc"],
-    args = ["--control_manifest=$(rootpath :control_manifest.json)"],
+    args = ["--control_sources=$(rootpath :testdata/control/sources.txt)"],
     data = [
-        ":control_commands",
-        ":control_manifest.json",
+        "testdata/control/control.loom",
+        "testdata/control/kernels.loom",
+        "testdata/control/sources.txt",
     ],
     resource_group = GPU_DEVICE_RESOURCE_GROUP,
     tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
-        "//loom/config/target/arch:amdgpu",
-        "//runtime/config/hal:driver_amdgpu",
+        "//loom/config/execute:amdgpu_hal",
     ]),
     deps = [
-        ":command",
-        ":control_data",
         ":execution",
+        ":jit",
         ":module",
-        "//loom/src/loom/target/arch/cmd:program",
+        "//loom/binding/c:loomc",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
@@ -325,27 +242,71 @@ loom_cc_library(
     ],
 )
 
-loom_generated_file(
-    name = "qwen_model_binary",
-    args = [
-        "$(location :qwen_model.loom)",
-        "--target=vm:core",
-        "--root=@step",
+loom_cc_library(
+    name = "jit",
+    srcs = ["jit.c"],
+    hdrs = ["jit.h"],
+    deps = [
+        ":command",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/amdgpu",
+        "//loom/binding/c/target/amdgpu:iree_hal",
+        "//loom/binding/c/target/cmd",
+        "//loom/binding/c/target/vm",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
     ],
-    generator = "//loom/src/loom/tools/loom-compile",
-    inputs = [":qwen_model.loom"],
-    output = "qwen_model.vm",
-    output_flag = "--output=",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
 )
 
-iree_c_embed_data(
-    name = "qwen_model_data",
-    srcs = [":qwen_model_binary"],
-    c_file_output = "qwen_model_data.c",
-    h_file_output = "qwen_model_data.h",
-    identifier = "loom_serve_qwen_model_data",
-    target_compatible_with = loom_config_compatible_with(["//loom/config/target/arch:vm"]),
+loom_cc_library(
+    name = "qwen_flags",
+    srcs = ["qwen_flags.c"],
+    hdrs = ["qwen_flags.h"],
+    deps = [
+        ":qwen_model",
+        ":qwen_schedule",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+    ],
+)
+
+loom_cc_test(
+    name = "jit_test",
+    srcs = ["jit_test.cc"],
+    args = ["--jit_sources=$(rootpath :testdata/jit/sources.txt)"],
+    data = [
+        "testdata/jit/control.loom",
+        "testdata/jit/sources.txt",
+        "testdata/jit/stage.loom",
+    ],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//loom/config/execute:amdgpu_hal",
+    ]),
+    deps = [
+        ":execution",
+        ":jit",
+        ":module",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm/bytecode:module",
+    ],
 )
 
 loom_cc_binary(
@@ -356,6 +317,7 @@ loom_cc_binary(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":qwen_flags",
         ":qwen_model",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
@@ -375,14 +337,14 @@ loom_cc_library(
     deps = [
         ":command",
         ":execution",
+        ":jit",
         ":module",
-        ":qwen_model_data",
         ":qwen_schedule",
+        "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
@@ -411,6 +373,7 @@ loom_cc_binary(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":qwen_flags",
         ":qwen_model",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
@@ -427,6 +390,7 @@ loom_cc_binary(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":qwen_flags",
         ":qwen_model",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
@@ -445,6 +409,7 @@ loom_cc_binary(
     ]),
     deps = [
         ":qwen_chat",
+        ":qwen_flags",
         ":qwen_model",
         ":qwen_schedule",
         "//runtime/src/iree/base",
@@ -528,6 +493,7 @@ loom_cc_binary(
     ]),
     deps = [
         ":http_server",
+        ":qwen_flags",
         ":qwen_model",
         ":qwen_service",
         "//runtime/src/iree/async",

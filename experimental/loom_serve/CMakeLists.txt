@@ -84,182 +84,19 @@ loom_cc_library(
   PUBLIC
 )
 
-if(LOOM_TARGET_ARCH_VM)
-loom_generated_file(
-  NAME
-    control_model_binary
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUT
-    "control_model.vm"
-  OUTPUT_FLAG
-    "--output="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_model.loom"
-    "--target=vm:core"
-  INPUTS
-    "control_model.loom"
-  TESTONLY
-)
-endif()
-
-loom_generated_file_family(
-  NAME
-    control_commands
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUTS
-    "control_manifest.json"
-    "control_commands"
-  OUTPUT_FLAGS
-    "--output="
-    "--emit-command-artifacts="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
-    "--product=command"
-    "--root=@prefill_to_decode"
-    "--root=@decode_transition"
-    "--root=@device_continuation"
-  INPUTS
-    "control_kernels.loom"
-  TESTONLY
-)
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file(
-  NAME
-    continuation_consume_binary
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUT
-    "continuation_consume.hsaco"
-  OUTPUT_FLAG
-    "--output="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
-    "--root=@continuation_consume"
-    "--target=amdgpu:gfx1151"
-  INPUTS
-    "control_kernels.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file(
-  NAME
-    continuation_counts_binary
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUT
-    "continuation_counts.hsaco"
-  OUTPUT_FLAG
-    "--output="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
-    "--root=@continuation_counts"
-    "--target=amdgpu:gfx1151"
-  INPUTS
-    "control_kernels.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file(
-  NAME
-    continuation_heartbeat_binary
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUT
-    "continuation_heartbeat.hsaco"
-  OUTPUT_FLAG
-    "--output="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
-    "--root=@continuation_heartbeat"
-    "--target=amdgpu:gfx1151"
-  INPUTS
-    "control_kernels.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file(
-  NAME
-    decode_commit_token_binary
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUT
-    "decode_commit_token.hsaco"
-  OUTPUT_FLAG
-    "--output="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
-    "--root=@qwen38_decode_commit_token"
-    "--target=amdgpu:gfx1151"
-  INPUTS
-    "control_kernels.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_TARGET_ARCH_AMDGPU)
-loom_generated_file(
-  NAME
-    prefill_finish_control_binary
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUT
-    "prefill_finish_control.hsaco"
-  OUTPUT_FLAG
-    "--output="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/control_kernels.loom"
-    "--root=@qwen38_prefill_finish_control"
-    "--target=amdgpu:gfx1151"
-  INPUTS
-    "control_kernels.loom"
-  TESTONLY
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU)
-iree_c_embed_data(
-  NAME
-    control_data
-  SRCS
-    "${CMAKE_CURRENT_BINARY_DIR}/continuation_consume.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/continuation_counts.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/continuation_heartbeat.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/control_model.vm"
-    "${CMAKE_CURRENT_BINARY_DIR}/decode_commit_token.hsaco"
-    "${CMAKE_CURRENT_BINARY_DIR}/prefill_finish_control.hsaco"
-  C_FILE_OUTPUT
-    "control_data.c"
-  H_FILE_OUTPUT
-    "control_data.h"
-  IDENTIFIER
-    "loom_serve_control_data"
-  TESTONLY
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND IREE_HAL_DRIVER_AMDGPU)
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
     control_test
   SRCS
     "control_test.cc"
   DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/control_commands"
-    "${CMAKE_CURRENT_BINARY_DIR}/control_manifest.json"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/control/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/control/kernels.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/control/sources.txt"
   DEPS
-    ::command
-    ::control_data
     ::execution
+    ::jit
     ::module
     iree::async
     iree::async::util::proactor_pool
@@ -273,9 +110,9 @@ loom_cc_test(
     iree::testing::gtest_main
     iree::vm
     iree::vm::bytecode::module
-    loom::target::arch::cmd::program
+    loom::binding::c::loomc
   ARGS
-    "--control_manifest={{${CMAKE_CURRENT_BINARY_DIR}/control_manifest.json}}"
+    "--control_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/control/sources.txt}}"
   LABELS
     "iree-run-requirement=runtime.resource.amd_gpu"
   RESOURCE_GROUP
@@ -313,38 +150,77 @@ loom_cc_library(
   PUBLIC
 )
 
-if(LOOM_TARGET_ARCH_VM)
-loom_generated_file(
+loom_cc_library(
   NAME
-    qwen_model_binary
-  GENERATOR
-    loom::tools::loom-compile
-  OUTPUT
-    "qwen_model.vm"
-  OUTPUT_FLAG
-    "--output="
-  ARGS
-    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/qwen_model.loom"
-    "--target=vm:core"
-    "--root=@step"
-  INPUTS
-    "qwen_model.loom"
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM)
-iree_c_embed_data(
-  NAME
-    qwen_model_data
+    jit
+  HDRS
+    "jit.h"
   SRCS
-    "${CMAKE_CURRENT_BINARY_DIR}/qwen_model.vm"
-  C_FILE_OUTPUT
-    "qwen_model_data.c"
-  H_FILE_OUTPUT
-    "qwen_model_data.h"
-  IDENTIFIER
-    "loom_serve_qwen_model_data"
+    "jit.c"
+  DEPS
+    ::command
+    iree::base
+    iree::base::internal::path
+    iree::hal
+    iree::io::file_handle
+    loom::binding::c::loomc
+    loom::binding::c::target::amdgpu
+    loom::binding::c::target::amdgpu::iree_hal
+    loom::binding::c::target::cmd
+    loom::binding::c::target::vm
+    loom::target::arch::cmd::program
   PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    qwen_flags
+  HDRS
+    "qwen_flags.h"
+  SRCS
+    "qwen_flags.c"
+  DEPS
+    ::qwen_model
+    ::qwen_schedule
+    iree::base
+    iree::base::tooling::flags
+    loom::binding::c::loomc
+  PUBLIC
+)
+
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    jit_test
+  SRCS
+    "jit_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/sources.txt"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/stage.loom"
+  DEPS
+    ::execution
+    ::jit
+    ::module
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::hal
+    iree::hal::drivers
+    iree::module::hal::types
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::bytecode::module
+    loom::binding::c::loomc
+  ARGS
+    "--jit_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/sources.txt}}"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
 )
 endif()
 
@@ -355,6 +231,7 @@ loom_cc_binary(
   SRCS
     "qwen_main.c"
   DEPS
+    ::qwen_flags
     ::qwen_model
     iree::base
     iree::base::tooling::flags
@@ -374,13 +251,12 @@ loom_cc_library(
   DEPS
     ::command
     ::execution
+    ::jit
     ::module
-    ::qwen_model_data
     ::qwen_schedule
     iree::async
     iree::async::util::proactor_pool
     iree::base
-    iree::base::internal::json
     iree::base::internal::path
     iree::base::threading
     iree::hal
@@ -397,6 +273,7 @@ loom_cc_library(
     iree::tooling::parameter_util
     iree::vm
     iree::vm::bytecode::module
+    loom::binding::c::loomc
     loom::target::arch::cmd::program
   PUBLIC
 )
@@ -409,6 +286,7 @@ loom_cc_binary(
   SRCS
     "qwen_epoch_check.c"
   DEPS
+    ::qwen_flags
     ::qwen_model
     iree::base
     iree::base::tooling::flags
@@ -424,6 +302,7 @@ loom_cc_binary(
   SRCS
     "qwen_workload.c"
   DEPS
+    ::qwen_flags
     ::qwen_model
     iree::base
     iree::base::tooling::flags
@@ -441,6 +320,7 @@ loom_cc_binary(
     "qwen_replay.c"
   DEPS
     ::qwen_chat
+    ::qwen_flags
     ::qwen_model
     ::qwen_schedule
     iree::base
@@ -535,6 +415,7 @@ loom_cc_binary(
     "qwen_server_main.c"
   DEPS
     ::http_server
+    ::qwen_flags
     ::qwen_model
     ::qwen_service
     iree::async

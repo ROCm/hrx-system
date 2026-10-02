@@ -5,15 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 #include <array>
-#include <cstring>
 #include <filesystem>
-#include <fstream>
-#include <iterator>
-#include <vector>
 
-#include "experimental/loom_serve/command.h"
-#include "experimental/loom_serve/control_data.h"
 #include "experimental/loom_serve/execution.h"
+#include "experimental/loom_serve/jit.h"
 #include "experimental/loom_serve/module.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
@@ -25,8 +20,7 @@
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
 
-IREE_FLAG(string, control_manifest, "",
-          "Generated artifact-set path used to locate sibling command files.");
+IREE_FLAG(string, control_sources, "", "Portable control source catalog.");
 
 namespace {
 
@@ -42,17 +36,6 @@ iree_hal_queue_t* SelectQueue(iree_hal_device_t* device,
     }
   }
   return nullptr;
-}
-
-iree_const_byte_span_t Image(const char* name) {
-  const auto* files = loom_serve_control_data_create();
-  for (size_t i = 0; i < loom_serve_control_data_size(); ++i) {
-    if (std::filesystem::path(files[i].name).filename() == name) {
-      return iree_make_const_byte_span(files[i].data, files[i].size);
-    }
-  }
-  ADD_FAILURE() << "missing embedded artifact " << name;
-  return iree_const_byte_span_empty();
 }
 
 struct State {
@@ -78,21 +61,14 @@ class ControlTest
     IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, allocator_,
                                                &execution_));
     const auto* family = iree_hal_queue_family(dispatch);
-    IREE_ASSERT_OK(LoadEntry(family, "prefill_finish_control.hsaco",
-                             "qwen38_prefill_finish_control", &entries_[0]));
-    IREE_ASSERT_OK(LoadEntry(family, "decode_commit_token.hsaco",
-                             "qwen38_decode_commit_token", &entries_[1]));
-    IREE_ASSERT_OK(LoadEntry(family, "continuation_counts.hsaco",
-                             "continuation_counts", &entries_[2]));
-    IREE_ASSERT_OK(LoadEntry(family, "continuation_heartbeat.hsaco",
-                             "continuation_heartbeat", &entries_[3]));
-    IREE_ASSERT_OK(LoadEntry(family, "continuation_consume.hsaco",
-                             "continuation_consume", &entries_[4]));
-    // Program-local projections are emitted by this source's command product:
-    // prefill references finish/commit, while decode references commit alone.
-    IREE_ASSERT_OK(Prepare(family, 0, 2, entries_.data(), &commands_[0]));
-    IREE_ASSERT_OK(Prepare(family, 1, 1, &entries_[1], &commands_[1]));
-    IREE_ASSERT_OK(Prepare(family, 2, 3, &entries_[2], &commands_[2]));
+    directory_ =
+        std::filesystem::path(FLAG_control_sources).parent_path().string();
+    IREE_ASSERT_OK(loom_serve_jit_create(
+        device_, dispatch, iree_make_cstring_view(directory_.c_str()), nullptr,
+        allocator_, &jit_));
+    IREE_ASSERT_OK(Prepare(family, "prefill_to_decode", &commands_[0]));
+    IREE_ASSERT_OK(Prepare(family, "decode_transition", &commands_[1]));
+    IREE_ASSERT_OK(Prepare(family, "device_continuation", &commands_[2]));
     for (auto& row : buffers_) {
       for (size_t i = 0; i < row.size(); ++i) {
         iree_hal_buffer_params_t params = {};
@@ -143,9 +119,7 @@ class ControlTest
     for (auto* command : commands_) {
       iree_hal_command_buffer_release(command);
     }
-    for (auto entry : entries_) {
-      iree_hal_executable_release(entry.executable);
-    }
+    loom_serve_jit_destroy(jit_);
     loom_serve_execution_release(execution_);
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
@@ -183,51 +157,18 @@ class ControlTest
     return status;
   }
 
-  iree_status_t LoadEntry(const iree_hal_queue_family_t* family,
-                          const char* image, const char* symbol,
-                          loom_serve_command_entry_t* entry) {
-    iree_hal_executable_target_selection_t selection = {};
-    selection.family = IREE_SV("amdgpu");
-    selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT;
-    selection.physical_device_affinity =
-        iree_hal_queue_family_spec(family)->physical_device_affinity;
-    const auto target = iree_hal_device_spec_select_executable_target(
-        iree_hal_device_spec(device_), &selection);
-    if (target.outcome !=
-        IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
-      return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                              "no unambiguous AMDGPU executable target");
-    }
-    iree_hal_executable_load_params_t params;
-    iree_hal_executable_load_params_initialize(&params);
-    params.executable_data = Image(image);
-    IREE_RETURN_IF_ERROR(iree_hal_executable_load(family, target.target,
-                                                  &params, &entry->executable));
-    return iree_hal_executable_lookup_function_by_name(
-        entry->executable, iree_make_cstring_view(symbol), &entry->function);
-  }
-
-  iree_status_t Prepare(const iree_hal_queue_family_t* family, int index,
-                        size_t entry_count,
-                        const loom_serve_command_entry_t* entries,
+  iree_status_t Prepare(const iree_hal_queue_family_t* family, const char* root,
                         iree_hal_command_buffer_t** out_command) {
-    const auto path =
-        std::filesystem::path(FLAG_control_manifest).parent_path() /
-        "control_commands" / ("program-" + std::to_string(index) + ".loomcmd");
-    std::ifstream input(path, std::ios::binary);
-    if (!input) {
-      return iree_make_status(IREE_STATUS_NOT_FOUND, "%s", path.c_str());
+    const loomc_config_options_t config = {};
+    loom_serve_jit_stage_t* stage = nullptr;
+    auto status = loom_serve_jit_compile(jit_, iree_make_cstring_view(root),
+                                         &config, &stage);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_jit_stage_record(stage, family, GetParam(), nullptr,
+                                           out_command);
     }
-    std::vector<uint8_t> bytes(std::istreambuf_iterator<char>(input), {});
-    if (input.bad()) {
-      return iree_make_status(IREE_STATUS_DATA_LOSS, "%s", path.c_str());
-    }
-    loom_cmd_program_t parsed;
-    IREE_RETURN_IF_ERROR(loom_cmd_program_parse(
-        iree_make_const_byte_span(bytes.data(), bytes.size()), &parsed));
-    return loom_serve_command_create(family, GetParam(), &parsed, 0, nullptr,
-                                     entry_count, entries, allocator_,
-                                     out_command);
+    loom_serve_jit_stage_destroy(stage);
+    return status;
   }
 
   iree_status_t CreateModel() {
@@ -243,17 +184,16 @@ class ControlTest
     IREE_RETURN_IF_ERROR(
         loom_serve_module_create(&types_, execution_, IREE_ARRAYSIZE(stages),
                                  stages, allocator_, &native_module_));
-    const auto source = Image("control_model.vm");
-    uint8_t* image = nullptr;
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-        allocator_, source.data_length, reinterpret_cast<void**>(&image)));
-    std::memcpy(image, source.data, source.data_length);
-    iree_status_t status = iree_vm_bytecode_module_create(
-        environment_, IREE_SV("model"),
-        {iree_make_const_byte_span(image, source.data_length), allocator_},
-        allocator_, &bytecode_module_);
+    const std::string path = directory_ + "/control.loom";
+    iree_const_byte_span_t image;
+    IREE_RETURN_IF_ERROR(
+        loom_serve_jit_compile_vm(iree_make_cstring_view(path.c_str()),
+                                  IREE_SV("step"), allocator_, &image));
+    iree_status_t status = iree_vm_bytecode_module_create_trusted(
+        environment_, IREE_SV("model"), {image, allocator_}, allocator_,
+        &bytecode_module_);
     if (!iree_status_is_ok(status)) {
-      iree_allocator_free(allocator_, image);
+      iree_allocator_free(allocator_, (void*)image.data);
       return status;
     }
     iree_vm_module_t* libraries[] = {native_module_};
@@ -345,8 +285,10 @@ class ControlTest
   iree_hal_device_group_t* group_ = nullptr;
   // Shared ordered execution capability.
   loom_serve_execution_t* execution_ = nullptr;
-  // One loaded implementation of each state-transition and continuation kernel.
-  std::array<loom_serve_command_entry_t, 5> entries_ = {};
+  // Source directory shared by the catalog and VM program.
+  std::string directory_;
+  // One source index and compiler for all prepared control stages.
+  loom_serve_jit_t* jit_ = nullptr;
   // Cached stage commands and the device-owned continuation loop.
   std::array<iree_hal_command_buffer_t*, 3> commands_ = {};
   // Two independently retained session states.

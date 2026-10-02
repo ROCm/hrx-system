@@ -14,11 +14,10 @@
 
 #include "experimental/loom_serve/command.h"
 #include "experimental/loom_serve/execution.h"
+#include "experimental/loom_serve/jit.h"
 #include "experimental/loom_serve/module.h"
-#include "experimental/loom_serve/qwen_model_data.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/base/internal/json.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/init.h"
@@ -53,13 +52,9 @@ enum {
 typedef struct qwen_stage_t {
   // Unique native export name, established during cold loading.
   char name[32];
-  // Owned auxiliary artifact path; null for directories borrowed at creation.
-  char* directory;
-  // Owned immutable artifact manifest bytes.
-  iree_io_file_contents_t* manifest;
-  // Owned portable command bytes backing program.
-  iree_io_file_contents_t* contents;
-  // Parsed view borrowing contents.
+  // Owned JIT command image and loaded executable entries.
+  loom_serve_jit_stage_t* compiled;
+  // Parsed view borrowing compiled.
   loom_cmd_program_t program;
   // Reusable command retaining its executable and fixed weight resources.
   iree_hal_command_buffer_t* command;
@@ -88,7 +83,9 @@ struct loom_serve_qwen_model_t {
   iree_hal_profiling_from_flags_t* profiling;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
-  // Prefill, decode, then packed-epoch artifacts, owned in option order.
+  // Shared source index and compiler for this model residency.
+  loom_serve_jit_t* jit;
+  // Prefill, decode, then packed-epoch programs, owned in option order.
   qwen_stage_t* stages;
   // Number of allocated stages, including partially initialized cold entries.
   iree_host_size_t stage_count;
@@ -100,9 +97,9 @@ struct loom_serve_qwen_model_t {
   iree_vm_function_t* functions;
   // Target parameter slab; auxiliary stages retain views of shared tensors.
   iree_hal_buffer_t* weights;
-  // Compile-time capacity checked against every loaded stage configuration.
+  // Context specialization shared by every compiled stage.
   iree_host_size_t context_capacity;
-  // Maximum active input count accepted by the prepared prefill stage.
+  // Maximum active input chunk accepted by the selected row-prefill path.
   iree_host_size_t prefill_capacity;
   // Number of preallocated rows.
   iree_host_size_t row_count;
@@ -200,185 +197,6 @@ struct loom_serve_qwen_row_t {
 static iree_string_view_t qwen_file_text(iree_io_file_contents_t* contents) {
   return iree_make_string_view((const char*)contents->const_buffer.data,
                                contents->const_buffer.data_length);
-}
-
-// Reads the fixed artifact-directory layout; metadata contains names, not code.
-static iree_status_t qwen_read_artifact(
-    iree_string_view_t directory, iree_string_view_t relative_path,
-    iree_allocator_t allocator, iree_io_file_contents_t** out_contents) {
-  char* path = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_file_path_join(directory, relative_path, allocator, &path));
-  iree_status_t status = iree_io_file_contents_read(
-      iree_make_cstring_view(path), allocator, out_contents);
-  iree_allocator_free(allocator, path);
-  return status;
-}
-
-// Manifest names are bounded compiler-generated filenames/symbols. JSON
-// unescaping remains at this external artifact boundary.
-static iree_status_t qwen_json_name(iree_string_view_t object,
-                                    iree_string_view_t key, char storage[1024],
-                                    iree_string_view_t* out_name) {
-  iree_host_size_t length = 0;
-  IREE_RETURN_IF_ERROR(iree_json_lookup_string(
-      object, key, iree_make_mutable_string_view(storage, 1024), &length));
-  *out_name = iree_make_string_view(storage, length);
-  return iree_ok_status();
-}
-
-static iree_status_t qwen_stage_manifest_program(
-    const qwen_stage_t* stage, iree_string_view_t* out_program) {
-  iree_string_view_t programs = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
-      qwen_file_text(stage->manifest), IREE_SV("programs"), &programs));
-  iree_host_size_t count = 0;
-  IREE_RETURN_IF_ERROR(iree_json_array_length(programs, &count));
-  if (count != 1) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "each stage must contain exactly one program");
-  }
-  return iree_json_array_get(programs, 0, out_program);
-}
-
-static iree_status_t qwen_stage_read(iree_string_view_t directory,
-                                     iree_allocator_t allocator,
-                                     qwen_stage_t* stage) {
-  IREE_RETURN_IF_ERROR(qwen_read_artifact(directory, IREE_SV("manifest.json"),
-                                          allocator, &stage->manifest));
-  iree_string_view_t manifest = qwen_file_text(stage->manifest);
-  iree_string_view_t version = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
-      manifest, IREE_SV("schema_version"), &version));
-  uint64_t schema_version = 0;
-  IREE_RETURN_IF_ERROR(iree_json_parse_uint64(version, &schema_version));
-  char name_storage[1024];
-  iree_string_view_t name = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      qwen_json_name(manifest, IREE_SV("format"), name_storage, &name));
-  if (schema_version != 2 ||
-      !iree_string_view_equal(name, IREE_SV("loom-command-set"))) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected a version 2 loom-command-set manifest");
-  }
-  iree_string_view_t program = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(qwen_stage_manifest_program(stage, &program));
-  IREE_RETURN_IF_ERROR(
-      qwen_json_name(program, IREE_SV("artifact"), name_storage, &name));
-  char* commands_directory = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(directory, IREE_SV("commands"),
-                                           allocator, &commands_directory));
-  iree_status_t status =
-      qwen_read_artifact(iree_make_cstring_view(commands_directory), name,
-                         allocator, &stage->contents);
-  iree_allocator_free(allocator, commands_directory);
-  if (iree_status_is_ok(status)) {
-    status =
-        loom_cmd_program_parse(stage->contents->const_buffer, &stage->program);
-  }
-  return status;
-}
-
-static iree_status_t qwen_stage_load_entry(
-    loom_serve_qwen_model_t* runner, iree_string_view_t directory,
-    iree_string_view_t entry, const iree_hal_executable_target_t* target,
-    loom_serve_command_entry_t* out_entry) {
-  char name_storage[1024];
-  iree_string_view_t request = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(
-      qwen_json_name(entry, IREE_SV("source_request"), name_storage, &request));
-  iree_string_builder_t path;
-  iree_string_builder_initialize(runner->allocator, &path);
-  const iree_string_view_t stem = iree_file_path_stem(request);
-  iree_status_t status = iree_string_builder_append_format(
-      &path, "kernels/%.*s.hsaco", (int)stem.size, stem.data);
-  iree_io_file_contents_t* image = NULL;
-  if (iree_status_is_ok(status)) {
-    status = qwen_read_artifact(directory, iree_string_builder_view(&path),
-                                runner->allocator, &image);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_hal_executable_load_params_t params;
-    iree_hal_executable_load_params_initialize(&params);
-    params.executable_data = image->const_buffer;
-    status = iree_hal_executable_load(iree_hal_queue_family(runner->dispatch),
-                                      target, &params, &out_entry->executable);
-  }
-  iree_io_file_contents_free(image);
-  iree_string_builder_deinitialize(&path);
-  if (iree_status_is_ok(status)) {
-    iree_string_view_t symbol = iree_string_view_empty();
-    status = qwen_json_name(entry, IREE_SV("symbol"), name_storage, &symbol);
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_executable_lookup_function_by_name(
-          out_entry->executable, symbol, &out_entry->function);
-    }
-  }
-  return status;
-}
-
-static iree_status_t qwen_stage_prepare(loom_serve_qwen_model_t* runner,
-                                        iree_string_view_t directory,
-                                        qwen_stage_t* stage) {
-  iree_string_view_t program = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(qwen_stage_manifest_program(stage, &program));
-  iree_string_view_t requirements = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
-      program, IREE_SV("entry_requirements"), &requirements));
-  iree_host_size_t count = 0;
-  IREE_RETURN_IF_ERROR(iree_json_array_length(requirements, &count));
-  if (count != stage->program.requirements.entry_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "manifest and command entry counts differ");
-  }
-  iree_string_view_t manifest_entries = iree_string_view_empty();
-  IREE_RETURN_IF_ERROR(iree_json_lookup_object_value(
-      qwen_file_text(stage->manifest), IREE_SV("entries"), &manifest_entries));
-  iree_hal_executable_target_selection_t selection = {0};
-  selection.family = IREE_SV("amdgpu");
-  selection.kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT;
-  selection.physical_device_affinity =
-      iree_hal_queue_family_spec(iree_hal_queue_family(runner->dispatch))
-          ->physical_device_affinity;
-  const iree_hal_executable_target_selection_result_t target =
-      iree_hal_device_spec_select_executable_target(
-          iree_hal_device_spec(runner->device), &selection);
-  if (target.outcome != IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "no unambiguous AMDGPU executable target");
-  }
-  loom_serve_command_entry_t* entries = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      runner->allocator, count, sizeof(*entries), (void**)&entries));
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-    iree_string_view_t ordinal_text = iree_string_view_empty();
-    uint64_t ordinal = 0;
-    status = iree_json_array_get(requirements, i, &ordinal_text);
-    if (iree_status_is_ok(status)) {
-      status = iree_json_parse_uint64(ordinal_text, &ordinal);
-    }
-    iree_string_view_t entry = iree_string_view_empty();
-    if (iree_status_is_ok(status)) {
-      status = iree_json_array_get(manifest_entries, ordinal, &entry);
-    }
-    if (iree_status_is_ok(status)) {
-      status = qwen_stage_load_entry(runner, directory, entry, target.target,
-                                     &entries[i]);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_command_create(
-        iree_hal_queue_family(runner->dispatch), runner->command_mode,
-        &stage->program, stage->program.requirements.fixed_buffer_count,
-        stage->fixed_buffers, count, entries, runner->allocator,
-        &stage->command);
-  }
-  for (iree_host_size_t i = 0; i < count; ++i) {
-    iree_hal_executable_release(entries[i].executable);
-  }
-  iree_allocator_free(runner->allocator, entries);
-  return status;
 }
 
 static iree_hal_queue_t* qwen_select_queue(
@@ -690,7 +508,8 @@ static iree_status_t qwen_load_weights(loom_serve_qwen_model_t* runner,
   return status;
 }
 
-static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner) {
+static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner,
+                                         iree_string_view_t source_directory) {
   IREE_RETURN_IF_ERROR(
       iree_vm_environment_allocate(runner->allocator, &runner->environment));
   const iree_vm_ref_type_table_t* table = NULL;
@@ -712,13 +531,22 @@ static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner) {
       runner->allocator, &runner->native_module);
   iree_allocator_free(runner->allocator, stages);
   IREE_RETURN_IF_ERROR(status);
-  const struct iree_file_toc_t* image = loom_serve_qwen_model_data_create();
-  IREE_RETURN_IF_ERROR(iree_vm_bytecode_module_create(
+  char* path = NULL;
+  IREE_RETURN_IF_ERROR(iree_file_path_join(
+      source_directory, IREE_SV("control.loom"), runner->allocator, &path));
+  iree_const_byte_span_t image = iree_const_byte_span_empty();
+  status = loom_serve_jit_compile_vm(
+      iree_make_cstring_view(path), IREE_SV("step"), runner->allocator, &image);
+  iree_allocator_free(runner->allocator, path);
+  IREE_RETURN_IF_ERROR(status);
+  status = iree_vm_bytecode_module_create_trusted(
       runner->environment, IREE_SV("model"),
-      (iree_vm_bytecode_module_storage_t){
-          iree_make_const_byte_span(image[0].data, image[0].size),
-          iree_allocator_null()},
-      runner->allocator, &runner->bytecode_module));
+      (iree_vm_bytecode_module_storage_t){image, runner->allocator},
+      runner->allocator, &runner->bytecode_module);
+  if (!iree_status_is_ok(status)) {
+    iree_allocator_free(runner->allocator, (void*)image.data);
+  }
+  IREE_RETURN_IF_ERROR(status);
   iree_vm_module_t* libraries[] = {runner->native_module};
   IREE_RETURN_IF_ERROR(iree_vm_program_create(
       (iree_vm_program_modules_t){runner->bytecode_module,
@@ -739,59 +567,6 @@ static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner) {
         runner->process, IREE_SV("runner"),
         iree_make_cstring_view(runner->stages[i].name), &runner->functions[i]);
   }
-  return status;
-}
-
-static iree_status_t qwen_read_capacities(loom_serve_qwen_model_t* model,
-                                          iree_string_view_t directory,
-                                          iree_host_size_t* out_prefill,
-                                          iree_host_size_t* out_context,
-                                          iree_host_size_t* out_spans) {
-  iree_io_file_contents_t* contents = NULL;
-  IREE_RETURN_IF_ERROR(qwen_read_artifact(directory, IREE_SV("config.json"),
-                                          model->allocator, &contents));
-  iree_string_view_t text = qwen_file_text(contents);
-  iree_string_view_t value = iree_string_view_empty();
-  uint64_t prefill = 0;
-  uint64_t context = 0;
-  uint64_t spans = 0;
-  iree_status_t status = iree_json_lookup_object_value(
-      text, IREE_SV("runner.qwen38.prefill_token_count"), &value);
-  if (iree_status_is_ok(status)) {
-    status = iree_json_parse_uint64(value, &prefill);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_json_lookup_object_value(
-        text, IREE_SV("qwen38.attention.cache_capacity"), &value);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_json_parse_uint64(value, &context);
-  }
-  if (iree_status_is_ok(status) && out_spans) {
-    status = iree_json_lookup_object_value(
-        text, IREE_SV("runner.qwen38.span_capacity"), &value);
-    if (iree_status_is_ok(status)) {
-      status = iree_json_parse_uint64(value, &spans);
-    }
-    if (iree_status_is_ok(status) && (spans < 1 || spans > QWEN_ROW_CAPACITY)) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "invalid Qwen epoch span capacity");
-    }
-  }
-  if (iree_status_is_ok(status) &&
-      (prefill < 1 || prefill > QWEN_TOKEN_CAPACITY || context < prefill ||
-       context > 262144)) {
-    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "invalid Qwen prefill/context capacities");
-  }
-  if (iree_status_is_ok(status)) {
-    *out_prefill = (iree_host_size_t)prefill;
-    *out_context = (iree_host_size_t)context;
-    if (out_spans) {
-      *out_spans = (iree_host_size_t)spans;
-    }
-  }
-  iree_io_file_contents_free(contents);
   return status;
 }
 
@@ -964,6 +739,57 @@ static iree_status_t qwen_allocate_mtp(loom_serve_qwen_model_t* model) {
   return status;
 }
 
+// The adapter owns model dimensions; the compiler owns placement, launch
+// counts, and native entry mapping. Shape values are applied once during
+// command materialization and travel with its kernel source requests.
+static iree_status_t qwen_compile_stage(loom_serve_qwen_model_t* model,
+                                        iree_string_view_t root,
+                                        loom_serve_qwen_shape_t shape,
+                                        iree_host_size_t token_capacity,
+                                        iree_host_size_t q8_capacity,
+                                        qwen_stage_t* stage) {
+  const struct {
+    // Model-authored configuration symbol.
+    const char* key;
+    // Integer specialization supplied to command and kernel materialization.
+    iree_host_size_t value;
+  } values[] = {
+      {"runner.qwen38.prefill_token_count", shape.token_capacity},
+      {"runner.qwen38.span_capacity", shape.span_capacity},
+      {"ggml.linear_q4k_q8_1_x4.token_capacity", token_capacity},
+      {"ggml.linear_q4k_q8_1_x4.output_capacity", 48},
+      {"ggml.linear_q5k_q8_1_x4.token_capacity", token_capacity},
+      {"ggml.linear_q5k_q8_1_x4.output_capacity", 17408},
+      {"ggml.linear_q6k_f32_decode.output_capacity", 5120},
+      {"ggml.linear_q6k_q8_1_x4.token_capacity", token_capacity},
+      {"ggml.linear_q6k_q8_1_x4.output_capacity", 248320},
+      {"ggml.linear_q8_0_q8_1_x4.token_capacity", q8_capacity},
+      {"ggml.linear_q8_0_q8_1_x4.output_capacity",
+       q8_capacity == 1 ? 1024 : 5120},
+      {"ggml.quantize_q8_1_x4.group_capacity", 136 * token_capacity},
+      {"qwen38.attention.cache_capacity", model->context_capacity},
+      {"qwen38.attention.decode_split_count", 10},
+      {"qwen38.greedy_argmax.output_capacity", 248320},
+  };
+  char text[IREE_ARRAYSIZE(values)][32];
+  loomc_config_binding_t bindings[IREE_ARRAYSIZE(values)];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
+    snprintf(text[i], sizeof(text[i]), "%zu", values[i].value);
+    bindings[i] =
+        (loomc_config_binding_t){loomc_make_cstring_view(values[i].key),
+                                 loomc_make_cstring_view(text[i])};
+  }
+  const loomc_config_options_t config = {
+      .bindings = bindings,
+      .binding_count = IREE_ARRAYSIZE(bindings),
+      .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+  };
+  IREE_RETURN_IF_ERROR(
+      loom_serve_jit_compile(model->jit, root, &config, &stage->compiled));
+  stage->program = *loom_serve_jit_stage_program(stage->compiled);
+  return iree_ok_status();
+}
+
 static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
                                      const loom_serve_qwen_options_t* options) {
   bool retain_profile_metadata = false;
@@ -975,146 +801,106 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
           ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
           : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
   model->shape_count = options->epoch_count;
-  const bool uses_mtp = !iree_string_view_is_empty(options->mtp_directory);
-  if (uses_mtp && !model->shape_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "MTP requires packed target shapes");
+  model->prefill_capacity = options->prefill_capacity;
+  if (options->enable_mtp) {
+    iree_host_size_t packed_capacity = 0;
+    for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
+      packed_capacity =
+          iree_max(packed_capacity, options->epoch_shapes[i].token_capacity);
+    }
+    // MTP single-row prefill uses a packed stage to keep draft state current.
+    // Publish that path's usable capacity to every frontend before it chunks.
+    model->prefill_capacity =
+        iree_min(model->prefill_capacity, packed_capacity);
   }
-  iree_host_size_t stage_count = options->epoch_count + 2;
-  if (uses_mtp) {
+  model->context_capacity = options->context_capacity;
+  iree_host_size_t stage_count = model->shape_count + 2;
+  if (options->enable_mtp) {
     model->mtp.first_stage = stage_count;
-    stage_count += 2 * options->epoch_count + 1;
+    stage_count += 2 * model->shape_count + 1;
   }
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       model->allocator, stage_count, sizeof(*model->stages),
       (void**)&model->stages));
   model->stage_count = stage_count;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      model->allocator, model->stage_count, sizeof(*model->functions),
+      model->allocator, stage_count, sizeof(*model->functions),
       (void**)&model->functions));
-  if (options->epoch_count) {
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        model->allocator, options->epoch_count, sizeof(*model->shapes),
+  if (model->shape_count) {
+    IREE_RETURN_IF_ERROR(iree_allocator_clone(
+        model->allocator,
+        iree_make_const_byte_span(options->epoch_shapes,
+                                  model->shape_count * sizeof(*model->shapes)),
         (void**)&model->shapes));
   }
+  IREE_RETURN_IF_ERROR(qwen_create_device(model));
+  IREE_RETURN_IF_ERROR(loom_serve_jit_create(
+      model->device, model->dispatch, options->source_directory,
+      &options->kernel_sanitizer, model->allocator, &model->jit));
+  IREE_RETURN_IF_ERROR(qwen_load_tokenizer(model, options->tokenizer_path));
   snprintf(model->stages[0].name, sizeof(model->stages[0].name), "prefill");
   snprintf(model->stages[1].name, sizeof(model->stages[1].name), "decode");
-  IREE_RETURN_IF_ERROR(qwen_read_capacities(model, options->prefill_directory,
-                                            &model->prefill_capacity,
-                                            &model->context_capacity, NULL));
-  iree_host_size_t decode_prefill_capacity = 0;
-  iree_host_size_t decode_context_capacity = 0;
-  IREE_RETURN_IF_ERROR(qwen_read_capacities(model, options->decode_directory,
-                                            &decode_prefill_capacity,
-                                            &decode_context_capacity, NULL));
-  if (model->context_capacity != decode_context_capacity) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "prefill/decode context capacities differ");
-  }
+  const loom_serve_qwen_shape_t isolated = {options->prefill_capacity,
+                                            model->row_count};
+  IREE_RETURN_IF_ERROR(qwen_compile_stage(model, IREE_SV("qwen38_prefill"),
+                                          isolated, QWEN_TOKEN_CAPACITY, 1,
+                                          &model->stages[0]));
+  IREE_RETURN_IF_ERROR(qwen_compile_stage(model,
+                                          IREE_SV("qwen38_text_decode_greedy"),
+                                          isolated, 1, 1, &model->stages[1]));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
-       i < options->epoch_count && iree_status_is_ok(status); ++i) {
-    snprintf(model->stages[i + 2].name, sizeof(model->stages[i + 2].name),
-             "epoch_%zu", i);
-    iree_host_size_t epoch_context = 0;
-    status = qwen_read_capacities(
-        model, options->epoch_directories[i], &model->shapes[i].token_capacity,
-        &epoch_context, &model->shapes[i].span_capacity);
-    if (iree_status_is_ok(status) && epoch_context != model->context_capacity) {
-      status =
-          iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                           "epoch %zu/isolated context capacities differ", i);
-    }
+       i < model->shape_count && iree_status_is_ok(status); ++i) {
+    qwen_stage_t* stage = &model->stages[i + 2];
+    snprintf(stage->name, sizeof(stage->name), "epoch_%zu", i);
+    status =
+        qwen_compile_stage(model, IREE_SV("qwen38_epoch"), model->shapes[i],
+                           QWEN_TOKEN_CAPACITY, 1, stage);
   }
-  IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(qwen_load_tokenizer(model, options->tokenizer_path));
-  IREE_RETURN_IF_ERROR(qwen_stage_read(options->prefill_directory,
-                                       model->allocator, &model->stages[0]));
-  IREE_RETURN_IF_ERROR(qwen_stage_read(options->decode_directory,
-                                       model->allocator, &model->stages[1]));
-  for (iree_host_size_t i = 0;
-       i < options->epoch_count && iree_status_is_ok(status); ++i) {
-    status = qwen_stage_read(options->epoch_directories[i], model->allocator,
-                             &model->stages[i + 2]);
-  }
-  IREE_RETURN_IF_ERROR(status);
   for (iree_host_size_t i = model->shape_count + 2;
-       i < model->stage_count && iree_status_is_ok(status); ++i) {
+       i < stage_count && iree_status_is_ok(status); ++i) {
     qwen_stage_t* stage = &model->stages[i];
     const iree_host_size_t ordinal = i - model->mtp.first_stage;
     const bool verifies = ordinal >= 1 + model->shape_count;
     const iree_host_size_t shape_index =
         ordinal == 0 ? 0 : (ordinal - 1) % model->shape_count;
-    char relative[32];
-    if (ordinal == 0) {
-      snprintf(relative, sizeof(relative), "propose");
-    } else {
-      snprintf(relative, sizeof(relative), "%s%zu",
-               verifies ? "verify" : "warm",
-               model->shapes[shape_index].token_capacity);
-    }
+    const loom_serve_qwen_shape_t shape = ordinal == 0
+                                              ? (loom_serve_qwen_shape_t){32, 8}
+                                              : model->shapes[shape_index];
+    const iree_string_view_t root = ordinal == 0 ? IREE_SV("qwen38_mtp_propose")
+                                    : verifies   ? IREE_SV("qwen38_mtp_verify")
+                                                 : IREE_SV("qwen38_mtp_warm");
     snprintf(stage->name, sizeof(stage->name), "mtp_%zu", ordinal);
-    status = iree_file_path_join(options->mtp_directory,
-                                 iree_make_cstring_view(relative),
-                                 model->allocator, &stage->directory);
-    if (iree_status_is_ok(status)) {
-      status = qwen_stage_read(iree_make_cstring_view(stage->directory),
-                               model->allocator, stage);
-    }
+    status = qwen_compile_stage(model, root, shape, QWEN_TOKEN_CAPACITY,
+                                QWEN_TOKEN_CAPACITY, stage);
     if (iree_status_is_ok(status)) {
       const uint32_t fixed_count = ordinal == 0 ? 5 : verifies ? 1 : 7;
       const uint32_t binding_count = ordinal == 0 ? 6 : verifies ? 8 : 7;
-      const uint32_t transient_index = binding_count - 1;
       const loom_cmd_program_requirements_t requirements =
           stage->program.requirements;
       if (requirements.fixed_buffer_count != fixed_count ||
           stage->program.parameter_roots.count != fixed_count ||
           requirements.rebindable_binding_count != binding_count ||
-          requirements.transient.binding_index != transient_index ||
+          requirements.transient.binding_index != binding_count - 1 ||
           requirements.launch_counts.required_byte_length != 0) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "MTP %s command has an incompatible layout",
-                                  relative);
+        status =
+            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                             "MTP command has an incompatible model layout");
       }
-    }
-    iree_host_size_t tokens = 0, context = 0, spans = 0;
-    if (iree_status_is_ok(status)) {
-      status =
-          qwen_read_capacities(model, iree_make_cstring_view(stage->directory),
-                               &tokens, &context, &spans);
-    }
-    if (iree_status_is_ok(status) &&
-        (context != model->context_capacity ||
-         tokens !=
-             (ordinal == 0 ? 32 : model->shapes[shape_index].token_capacity) ||
-         spans !=
-             (ordinal == 0 ? 8 : model->shapes[shape_index].span_capacity))) {
-      status = iree_make_status(
-          IREE_STATUS_INVALID_ARGUMENT,
-          "MTP %s shape/context does not match target residency", relative);
     }
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(qwen_check_layouts(model));
-  IREE_RETURN_IF_ERROR(qwen_create_device(model));
   IREE_RETURN_IF_ERROR(qwen_load_weights(model, options->weights_path));
-  IREE_RETURN_IF_ERROR(
-      qwen_stage_prepare(model, options->prefill_directory, &model->stages[0]));
-  IREE_RETURN_IF_ERROR(
-      qwen_stage_prepare(model, options->decode_directory, &model->stages[1]));
-  for (iree_host_size_t i = 0;
-       i < options->epoch_count && iree_status_is_ok(status); ++i) {
-    status = qwen_stage_prepare(model, options->epoch_directories[i],
-                                &model->stages[i + 2]);
-  }
-  for (iree_host_size_t i = model->shape_count + 2;
-       i < model->stage_count && iree_status_is_ok(status); ++i) {
-    status = qwen_stage_prepare(
-        model, iree_make_cstring_view(model->stages[i].directory),
-        &model->stages[i]);
+  for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
+       ++i) {
+    qwen_stage_t* stage = &model->stages[i];
+    status = loom_serve_jit_stage_record(
+        stage->compiled, iree_hal_queue_family(model->dispatch),
+        model->command_mode, stage->fixed_buffers, &stage->command);
   }
   IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(qwen_create_program(model));
+  IREE_RETURN_IF_ERROR(qwen_create_program(model, options->source_directory));
   IREE_RETURN_IF_ERROR(qwen_allocate_rows(model));
   IREE_RETURN_IF_ERROR(qwen_allocate_mtp(model));
   return iree_hal_begin_device_group_profiling_from_flags(
@@ -1128,6 +914,25 @@ iree_status_t loom_serve_qwen_model_create(
   if (options->row_count < 1 || options->row_count > QWEN_ROW_CAPACITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "Qwen row count must be in [1, 8]");
+  }
+  if (options->prefill_capacity < 1 ||
+      options->prefill_capacity > QWEN_TOKEN_CAPACITY ||
+      options->context_capacity < options->prefill_capacity ||
+      options->context_capacity > 262144 ||
+      (options->enable_mtp && !options->epoch_count)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "invalid model capacities or MTP without epoch shapes");
+  }
+  for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
+    const loom_serve_qwen_shape_t shape = options->epoch_shapes[i];
+    if (shape.token_capacity < 1 ||
+        shape.token_capacity > QWEN_TOKEN_CAPACITY ||
+        shape.token_capacity > options->context_capacity ||
+        shape.span_capacity < 1 || shape.span_capacity > QWEN_ROW_CAPACITY) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "epoch %zu has invalid token/span capacities", i);
+    }
   }
   loom_serve_qwen_model_t* model = NULL;
   IREE_RETURN_IF_ERROR(
@@ -1183,9 +988,7 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
   iree_hal_buffer_release(model->workspace);
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
     iree_hal_command_buffer_release(model->stages[i].command);
-    iree_io_file_contents_free(model->stages[i].contents);
-    iree_io_file_contents_free(model->stages[i].manifest);
-    iree_allocator_free(model->allocator, model->stages[i].directory);
+    loom_serve_jit_stage_destroy(model->stages[i].compiled);
     for (iree_host_size_t j = 0;
          j < IREE_ARRAYSIZE(model->stages[i].fixed_buffers); ++j) {
       iree_hal_buffer_release(model->stages[i].fixed_buffers[j]);
@@ -1197,6 +1000,7 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
   iree_hal_buffer_release(model->weights);
   loom_serve_execution_release(model->execution);
   iree_hal_device_group_release(model->group);
+  loom_serve_jit_destroy(model->jit);
   iree_hal_device_release(model->device);
   iree_async_frontier_tracker_release(model->frontier_tracker);
   iree_async_proactor_pool_release(model->proactor_pool);
@@ -1560,15 +1364,9 @@ iree_status_t loom_serve_qwen_row_prefill(loom_serve_qwen_row_t* row,
   const iree_time_t start = iree_time_now();
   if (model->mtp.first_stage) {
     iree_host_size_t shape_index = 0;
-    for (; shape_index < model->shape_count; ++shape_index) {
-      if (model->shapes[shape_index].token_capacity >= count) {
-        break;
-      }
-    }
-    if (shape_index == model->shape_count) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "MTP prefill chunk exceeds all loaded packed shapes");
+    // The public prefill capacity is bounded by the largest prepared shape.
+    while (model->shapes[shape_index].token_capacity < count) {
+      ++shape_index;
     }
     const loom_serve_qwen_span_t span = {
         (iree_host_size_t)(row - model->rows),

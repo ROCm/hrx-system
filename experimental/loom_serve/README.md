@@ -1,7 +1,7 @@
 # Loom model runner experiment
 
-This branch-local runner connects compiled model-control VM code to prepared
-HAL commands. Its private interfaces are intended to change with real models.
+This branch-local runner JIT-compiles portable model source into VM control,
+command programs, and GPU executables using the public Loom C API. Its private interfaces are intended to change with real models.
 It is not a general HAL VM module or a serving framework.
 
 `command.c` combines a parsed portable command program with loaded executable
@@ -29,14 +29,14 @@ to its execution object and named timeline, not a global completion namespace.
 Queue rejection advances neither frontier. Final drain joins both branches and
 propagates their failures before releasing any borrowed storage.
 
-The GPU integration test compiles Qwen generation-state kernels, command programs,
+The control integration test compiles Qwen generation-state kernels, command programs,
 and a VM entry from source. Two retained rows share code, commands, and one VM
 process while one row pauses and resumes. Checked outputs cover token history,
 position, padding, and EOS. A rejected native binding must leave the execution
 domain usable. Feedback forks preserve the work frontier while later VM calls
 consume independent retained state. This is an ownership/control witness,
-**not a full Qwen model run or a performance result**. The test artifacts
-currently target gfx1151.
+**not a full Qwen model run or a performance result**. The test compiles its
+portable fixtures in process for the live GPU, using the serving JIT path.
 
 A source-authored continuation command reuses one transient count tuple across
 eight producer/consumer steps. A direct heartbeat and an indirect state update
@@ -49,6 +49,16 @@ From the worktree root:
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve:control_test
+```
+
+The separate `jit_test` uses the serving compiler path itself: source catalog,
+two configuration variants, live GPU profile, native command loading, VM JIT,
+and shared retained device state. It destroys compiler/source storage before
+executing the prepared commands and verifies the device result. It also checks
+that rejected configuration leaves the compiler reusable.
+
+```sh
+build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve:jit_test
 ```
 
 Weights, KV pools, model forward stages, scheduling policy, and transport are
@@ -81,7 +91,9 @@ itself drain captured records into the sink. Profiling retains command metadata
 only when requested. Instrumented device timings explain kernel costs;
 throughput comparisons run with profiling off.
 
-The server accepts repeated `--epoch=/path/to/shape` options. These cached
+The server accepts repeated `--epoch=tokens:spans` options (for example,
+`--epoch=32:8 --epoch=128:8 --epoch=512:8`). Startup specializes and caches these
+shapes from the same source catalog and live device profile. These cached
 commands share the same weights, retained rows, residual storage, maximum-sized
 workspace, and VM process. Each is a native runner export resolved once at load
 time; selecting another shape allocates no device backing and copies no retained
@@ -100,28 +112,41 @@ the same rows for repeated runs without reloading weights. This is stage-level
 interleaving, not batched model math. Greedy selection and device position/history
 updates are compiled stages. The host stops on EOS or its requested token limit.
 
-Model math is supplied as separately compiled artifacts, not built into this
-binary. Each stage directory contains:
+Model math arrives as portable text under `--model`, not native artifacts.
+The directory contains `sources.txt` (one relative source path per line),
+`control.loom` (the shared VM program), command roots, and kernel libraries.
+Editing these files changes the next process's model without rebuilding the
+server. The binary embeds the JIT; it never invokes `loom-link` or
+`loom-compile`, loads a prepared artifact directory, or falls back to stale code.
 
-```text
-manifest.json                 Version 2 loom-command-set manifest, one root.
-config.json                   Compile-time model capacities from the stage driver.
-commands/<artifact>           Portable command named by that root.
-kernels/<request-stem>.hsaco   Compiled image for each manifest entry.
-```
+`jit.c` indexes the catalog once and retains the compiler, pipeline, scratch
+workspace, and live HAL target profile across stage specializations.
+`loomc_cmd_program_product_build` produces portable command bytes and
+independently owned kernel source requests. Their producer-supplied binding
+ordinals map emitted kernels to command entries; filenames and JSON do not
+participate. Each request is lowered in memory and emitted from the same module,
+preserving concrete target facts through native emission. Loaded executables and
+recorded commands have independent ownership. VM control is also compiled at
+startup and transferred directly into the VM's trusted in-process loading path.
+A compile error terminates preparation with its source diagnostics.
 
-The manifest supplies entry names and the root-local entry mapping. It is not
-an execution language: command order, arguments, parameter placement, and
-transient requirements come from the portable command artifact. Both stages
-must place every parameter identically; the loader compares their keys,
-fixed-buffer indices, offsets, lengths, and alignments before sharing weights.
-Allocation satisfies both stages' published slab size/alignment requirements.
+The model adapter supplies dimensions and configuration. Command products supply
+parameter placement, launch counts, buffer requirements, and entry mapping.
+All target stages must place the shared weights identically; model preparation
+checks this before allocating the one weight slab. MTP references existing
+target weight views and allocates only its additional parameter groups.
+`jit_stage` records expose the root, compiled request count, entry count, and
+cold compilation/load duration. Warm execution reuses commands and storage.
 
-The [model sources and compiler driver](models/qwen38/README.md) reproduce these
-artifacts. Configuration stays with its compiled stage; the loader checks that
-both stages declare the same context capacity. Prefill accepts active chunks
-up to the compiled launch capacity (at most 512); the caller enforces remaining
-context capacity. The seven rebindable slots are:
+The [model source guide](models/qwen38/README.md) describes the math and
+differential checks. The current source and host storage envelope is 512 input
+tokens and eight resident rows. JIT removes offline preparation as a prerequisite;
+larger envelopes still require changing the authored bounds and backing
+together, then qualifying the resulting kernels. Shapes are prepared at startup,
+not inserted into the fixed native-module export table during a running session.
+These are explicit properties of this adapter, not restrictions of the JIT.
+
+The seven rebindable slots are:
 
 | Slot | Buffer contract |
 | --- | --- |
@@ -146,8 +171,7 @@ The CLI retains output tokens on the host while the fixed device ring wraps.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve:qwen -- \
-  --prefill=/path/to/compiled/prefill \
-  --decode=/path/to/compiled/decode \
+  --model=experimental/loom_serve/models/qwen38 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --prompt='The secret word is MAPLE. Remember it and reply only READY.' \
@@ -259,9 +283,8 @@ build's instrumentation and are not automatically performance data.
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve:qwen_server -- \
-  --prefill=/path/to/compiled/prefill \
-  --decode=/path/to/compiled/decode \
-  --epoch=/path/to/compiled/epoch \
+  --model=experimental/loom_serve/models/qwen38 \
+  --epoch=128:8 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --rows=4 --port=8080 --max_tokens=384
@@ -270,7 +293,7 @@ build_tools/bin/iree-bazel-run --config=asan \
 The default `--scheduler=packed` requires `--epoch`. `--scheduler=isolated`
 executes the same ready-span plan using ordinary per-row prefill/decode stages;
 `--scheduler=matched` uses prefill math for length-one decode inputs as well.
-Loading the same epoch artifact in all modes holds planner token/span limits
+Preparing the same epoch specialization in all modes holds planner token/span limits
 fixed. `--chunk_size` caps each row's contribution, not the whole epoch. The
 fixed prepared shape still computes padding; the epoch log exposes useful work
 separately from its capacity.
@@ -284,7 +307,7 @@ events record it. Comparing separate against mixed with `--scheduler=packed`
 isolates cohort mixing, while packed against isolated measures shared versus
 per-row traversals. Neither option alone enables speculative decoding.
 
-`--mtp=/path/to/bundle --mtp_depth=3` enables three-token MTP proposals under
+`--mtp --mtp_depth=3` enables three-token MTP proposals under
 packed scheduling. Only admitted verifier rows are drafted; known prompt chunks
 fill the remaining shape capacity. The shared target command verifies pending
 anchors and candidates, commits accepted recurrent transitions, and catches MTP
@@ -364,8 +387,8 @@ target first, then place the observer inside the benchmark lease when measuring:
 ```sh
 python -B -m experimental.loom_serve.observe --log=/private/runs/run.jsonl -- \
   bazel-bin/experimental/loom_serve/qwen_server \
-  --prefill=/path/to/compiled/prefill --decode=/path/to/compiled/decode \
-  --epoch=/path/to/compiled/epoch \
+  --model=experimental/loom_serve/models/qwen38 \
+  --epoch=128:8 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json --rows=8
 ```

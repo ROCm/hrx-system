@@ -9,15 +9,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/qwen_model.h"
+#include "experimental/loom_serve/qwen_flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, prefill, "", "Compiled isolated prefill directory.");
-IREE_FLAG(string, decode, "", "Compiled isolated decode directory.");
-IREE_FLAG(string, epoch, "", "Compiled packed epoch directory.");
-IREE_FLAG(string, weights, "", "Qwen3.8-27B UD-Q5_K_XL GGUF.");
-IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json.");
 IREE_FLAG_LIST(string, prompt_file,
                "Rendered chat prompt; one file per independent resident row.");
 IREE_FLAG(int32_t, retained_tokens, 1024,
@@ -365,8 +360,7 @@ static iree_status_t qwen_workload_print(loom_serve_qwen_model_t* model,
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   const iree_host_size_t row_count = FLAG_prompt_file_list().count;
-  if (!FLAG_prefill[0] || !FLAG_decode[0] || !FLAG_epoch[0] ||
-      !FLAG_weights[0] || !FLAG_tokenizer[0] || row_count < 1 ||
+  if (loom_serve_qwen_shape_count_from_flags() != 1 || row_count < 1 ||
       row_count > QWEN_WORKLOAD_ROWS || FLAG_retained_tokens < 0 ||
       FLAG_prefill_rows < 0 ||
       (iree_host_size_t)FLAG_prefill_rows > row_count || FLAG_max_tokens < 1 ||
@@ -378,20 +372,10 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
-  const iree_string_view_t epoch_directory = iree_make_cstring_view(FLAG_epoch);
-  const loom_serve_qwen_options_t options = {
-      .prefill_directory = iree_make_cstring_view(FLAG_prefill),
-      .decode_directory = iree_make_cstring_view(FLAG_decode),
-      .epoch_count = 1,
-      .epoch_directories = &epoch_directory,
-      .weights_path = iree_make_cstring_view(FLAG_weights),
-      .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
-      .row_count = row_count,
-  };
   loom_serve_qwen_model_t* model = NULL;
   qwen_workload_row_t rows[QWEN_WORKLOAD_ROWS] = {0};
   iree_status_t status =
-      loom_serve_qwen_model_create(&options, allocator, &model);
+      loom_serve_qwen_model_create_from_flags(row_count, allocator, &model);
   if (iree_status_is_ok(status) &&
       (loom_serve_qwen_model_shapes(model)[0].span_capacity < row_count ||
        loom_serve_qwen_model_shapes(model)[0].token_capacity < row_count ||
