@@ -13,17 +13,12 @@
 #include <string.h>
 
 #include "experimental/loom_serve/qwen_chat.h"
-#include "experimental/loom_serve/qwen_model.h"
+#include "experimental/loom_serve/qwen_flags.h"
 #include "experimental/loom_serve/qwen_schedule.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, prefill, "", "Compiled isolated prefill directory.");
-IREE_FLAG(string, decode, "", "Compiled isolated decode directory.");
-IREE_FLAG_LIST(string, epoch, "Cached epoch directories in index order.");
-IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF.");
-IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json.");
 IREE_FLAG(string, workload, "",
           "JSON sessions containing request/response turns.");
 IREE_FLAG_LIST(string, window,
@@ -418,11 +413,10 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  const iree_flag_string_list_t epochs = FLAG_epoch_list();
+  const iree_host_size_t epoch_count = loom_serve_qwen_shape_count_from_flags();
   const iree_flag_string_list_t windows = FLAG_window_list();
-  if (!FLAG_prefill[0] || !FLAG_decode[0] || !FLAG_weights[0] ||
-      !FLAG_tokenizer[0] || !FLAG_workload[0] || !epochs.count ||
-      epochs.count > QWEN_REPLAY_SHAPES || !windows.count) {
+  if (!FLAG_workload[0] || !epoch_count || epoch_count > QWEN_REPLAY_SHAPES ||
+      !windows.count) {
     fprintf(stderr, "Invalid replay flags; see --help.\n");
     return EXIT_FAILURE;
   }
@@ -451,20 +445,12 @@ int main(int argc, char** argv) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "replay requires one through eight sessions");
   }
-  const loom_serve_qwen_options_t options = {
-      .prefill_directory = iree_make_cstring_view(FLAG_prefill),
-      .decode_directory = iree_make_cstring_view(FLAG_decode),
-      .epoch_count = epochs.count,
-      .epoch_directories = epochs.values,
-      .weights_path = iree_make_cstring_view(FLAG_weights),
-      .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
-      .row_count = row_count,
-  };
   loom_serve_qwen_model_t* model = NULL;
   qwen_replay_row_t rows[QWEN_REPLAY_ROWS] = {0};
   qwen_replay_window_t* policies = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_qwen_model_create(&options, allocator, &model);
+    status =
+        loom_serve_qwen_model_create_from_flags(row_count, allocator, &model);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_replay_prepare(model, sessions, row_count, rows, allocator);

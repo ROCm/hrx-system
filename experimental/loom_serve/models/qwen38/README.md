@@ -5,19 +5,21 @@ The prefill, greedy decode and packed epoch roots use command programs and kerne
 their artifacts are independent of the host scheduler. Parameter placement must
 match across roots so all stages share one resident weight slab.
 
-`compile.py` is a cold, offline driver of the normal Loom tools. It links each
-root, emits a portable command plus kernel requests, and compiles exactly those
-requests into HSACO images. The generated JSON contains configuration and an
-artifact index, not executable host policy. Compilation stops on the first
-failure. An output directory is usable only after the whole command succeeds.
+The runner consumes this directory directly with `--model`. Its
+`sources.txt` catalog indexes all command/kernel providers once; `control.loom`
+is the model VM entry. `--prefill_capacity`, `--context_capacity`, and repeated
+`--epoch=tokens:spans` select JIT specializations. Native code is generated for
+the actual HAL device, not selected from precompiled directories.
 
-`--stage=mtp` prepares block-64 warm/carry/proposal and target verification
-commands. It emits `propose` at the fixed 32-token/eight-span proposal shape and
-`warm<prefill-capacity>` and `verify<prefill-capacity>` for a matching target
-epoch. Each loaded target shape needs both variants. Shared embedding, target
-normalization and full-vocabulary
-output roots resolve to existing target weight views; the extra block-64 groups
-load once. There is no command ABI or HAL extension.
+`--mtp` prepares block-64 proposal, cache catch-up, and target verification.
+The proposal shape is 32 tokens/eight spans; each target epoch gets matching
+catch-up and verifier variants. Shared embedding, target normalization, and
+full-vocabulary output roots reference the existing weight slab. Extra block-64
+parameter groups load once. There is no command ABI or HAL extension.
+
+The serving path uses `loomc` in process for command products, native kernels,
+and VM bytecode. Kernel experiments use `iree-test-loom`,
+`iree-benchmark-loom`, and native compile reports independently of serving.
 
 The model's optional MTP bundle warms its private cache after committed target
 epochs. `loom_serve_qwen_model_verify` packs four-input verifiers with ordinary
@@ -35,7 +37,7 @@ capture, and only the accepted prefixes replay into retained state. Attention
 tails beyond the accepted position stay unreachable. MTP catch-up then consumes
 accepted inputs paired with committed target hidden. All buffers and commands
 are prepared once. The HTTP scheduler selects this optional path with
-`--mtp=/path/to/bundle --mtp_depth=3`; depth zero keeps MTP warm without
+`--mtp --mtp_depth=3`; depth zero keeps MTP warm without
 proposing. Whole verifier spans share a target epoch with known prompt input.
 
 Both MTP input projections consume the normalized embedding/hidden matrix
@@ -59,7 +61,7 @@ distinct activation rows. Their numerical tolerance accounts for F16 operand
 rounding. Target verification, not draft arithmetic agreement, determines
 committed outputs; full-model qualification also observes draft acceptance.
 
-The real-weight `qwen_epoch_check --mtp=/path/to/bundle` compares distinct
+The real-weight `qwen_epoch_check --mtp` compares distinct
 resident histories against ordinary target continuations: compact-row
 permutation, zero/partial/full draft
 acceptance, output-credit truncation, mixed known/speculative epochs, and
@@ -93,10 +95,13 @@ sanitization. They use the corresponding kernels plus `gdn_spans.loom`,
 From the repository root:
 
 ```sh
-build_tools/bin/iree-bazel-build -c opt \
-  //loom/src/loom/tools/loom-link //loom/src/loom/tools/loom-compile
-python -B experimental/loom_serve/models/qwen38/compile.py \
-  --output=/path/to/artifacts --context-capacity=512 --prefill-capacity=512
+build_tools/bin/iree-bazel-build --config=asan //experimental/loom_serve:qwen
+# Run on a qualified GPU host with the source directory available.
+bazel-bin/experimental/loom_serve/qwen \
+  --model=experimental/loom_serve/models/qwen38 \
+  --prefill_capacity=512 --context_capacity=2048 \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json --prompt='What is 2+2?' --max_tokens=16
 ```
 
 The prefill capacity selects a fixed dispatch schedule. Its control buffer holds
@@ -140,7 +145,7 @@ Eight deterministic trials cross the old-history/input boundary. The complete
 parallel-kernel differential separately checks all channels, Q/K normalization,
 history publication and untouched padding at lengths 1, 2, 3, 5, 511 and 512.
 
-Full-model qualification additionally requires fresh artifacts and actual
+Full-model qualification additionally requires source-only JIT and actual
 generated text through the runner. Kernel differential success alone does not
 establish retained-session or end-to-end model correctness. The shared-row CLI
 and retained pi service checks are described in the parent README.
@@ -286,11 +291,11 @@ weights; they belong in a bounded GPU run, not a concurrent small-test sweep.
 
 ### Device sanitizer diagnostics
 
-Host `--config=asan` does not instrument GPU kernels. `compile.py` forwards
-`--sanitizer` and `--sanitizer-reporting` to each kernel compilation; for example,
-`--sanitizer='access|operation' --sanitizer-reporting=default` enables device
-access/operation checks and structured reports. Instrumented artifacts belong in
-a separate output directory from performance artifacts.
+Host `--config=asan` does not instrument GPU kernels. The runner's
+`--kernel_sanitizer='access|operation' --kernel_sanitizer_reporting=default`
+selects device assertions in the JIT pipeline. All stages in that residency use
+the selected checks; performance runs use `--kernel_sanitizer=none`. The offline
+inspection tool separately exposes `--sanitizer`/`--sanitizer-reporting`.
 
 The runner uses the HAL stderr event sink for device diagnostics. Access checks
 also require runtime shadow state: add `--amdgpu_asan=true` and
@@ -299,10 +304,9 @@ stop on an address-sanitizer failure. `--amdgpu_asan_shadow_mode=premapped`
 maps poisoned shadow across the covered reservation, allowing covered stray
 addresses to report instead of faulting on an unmapped shadow page.
 
-Stages can be instrumented independently with `--stage`; record exactly which
-artifacts were instrumented when interpreting a result. Compilation failure
-leaves an incomplete stage, not a usable partially sanitized artifact set.
-Sanitizer runs diagnose correctness, not throughput.
+The startup compiler reports failures before generation begins. Host and device
+sanitizer configurations are separate evidence; record both when interpreting a
+run. Sanitizer runs diagnose correctness, not throughput.
 
 For tuning, hold the GGUF, tokenizer, prompts, capacity and generated length
 fixed. Recompile changed requests and rerun both numerical checks and the
@@ -404,22 +408,18 @@ makes some resident origins exceed 4 GiB. Full-model output/continuation checks
 complement the whole-state kernel differentials above.
 
 ```sh
-python -B experimental/loom_serve/models/qwen38/compile.py \
-  --stage=all --output=/path/to/artifacts \
-  --context-capacity=16384 --prefill-capacity=32 --span-capacity=4
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve:qwen_epoch_check -- \
-  --prefill=/path/to/artifacts/prefill --decode=/path/to/artifacts/decode \
-  --epoch=/path/to/artifacts/epoch \
+  --model=experimental/loom_serve/models/qwen38 \
+  --prefill_capacity=32 --context_capacity=16384 --epoch=32:4 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json
 ```
 
-Build the linker/compiler first as shown above. `--stage=both` retains the two
-isolated roots; `--stage=epoch` emits only the packed root. Stage placement and
-context must agree. The optional packed VM configuration is selected once at
-model creation, not instantiated per session. The HTTP service currently uses
-the isolated configuration; this witness exercises the packed public model API.
+The server and this witness use the same source-driven model creation path.
+Each JIT stage uses the residency's context and parameter layout. The HTTP
+service's default packed scheduler invokes the same packed API exercised here;
+`--scheduler=isolated` provides the independent-row scheduling comparison.
 
 The same manual executable has bounded completed-work comparisons. Build its
 exact target with the optimized flags used below, stop build activity, then run
@@ -463,8 +463,8 @@ example, after building the exact executable with the optimized flags below:
 
 ```sh
 benchmark-lock -- bazel-bin/experimental/loom_serve/qwen_workload \
-  --prefill=/path/to/artifacts/prefill --decode=/path/to/artifacts/decode \
-  --epoch=/path/to/artifacts/epoch \
+  --model=experimental/loom_serve/models/qwen38 \
+  --prefill_capacity=32 --context_capacity=16384 --epoch=32:4 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --prompt_file=/path/to/review-0.txt --prompt_file=/path/to/review-1.txt \

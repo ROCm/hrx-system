@@ -1,0 +1,31 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @increment.delta : %value: index where [range(%value, 1, 8)]
+
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+
+kernel.def target(@wave32) @increment() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %delta = config.get @increment.delta : index
+  %c0_offset = index.constant 0 : offset
+  %data = buffer.view %storage[%c0_offset] : buffer -> view<1xi32>
+  %value = view.load %data[0] : view<1xi32> -> i32
+  %delta_i32 = index.cast %delta : index to i32
+  %next = scalar.addi %value, %delta_i32 : i32
+  view.store %next, %data[0] : i32, view<1xi32>
+  kernel.return
+}
+
+command.program.def public @advance() launch(%storage: buffer) {
+  kernel.launch @increment(%storage) : (buffer)
+  command.return
+}

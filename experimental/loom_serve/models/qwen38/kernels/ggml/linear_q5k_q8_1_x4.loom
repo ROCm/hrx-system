@@ -21,7 +21,9 @@ config.decl @ggml.linear_q5k_q8_1_x4.token_capacity : %value: index where [range
 
 config.decl @ggml.linear_q5k_q8_1_x4.output_capacity : %value: index where [range(%value, 1, 262144)]
 
-kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count$2: index, %input_size$3: index) launch(%token_count$4: index, %input_size$5: index, %input: buffer, %output: buffer)
+amdgpu.target<gfx11-generic> @ggml_q5k_gfx11_wave32 {subgroup_size = 32}
+
+kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer)
 
 // Decodes one Q5_K scale/minimum pair from a loaded 16-byte block header.
 template.def<@ggml.q5k.scale_min.header> device @ggml_q5k_scale_min_header(%header_words: vector<4xi32>, %group: index) -> (f32, f32) {
@@ -300,7 +302,7 @@ func.def inline @ggml_q5k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffe
 // 256-thread workgroup exposes enough independent rows to saturate decode.
 // Workload values size the exact launch; configured capacities only constrain
 // device-body specialization and buffer addressing.
-kernel.def export("ggml_linear_q5k_q8_1_x4") @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %subgroup_size = target.subgroup.size : index
@@ -365,7 +367,7 @@ kernel.def export("ggml_linear_q5k_q8_1_x4") @ggml_linear_q5k_q8_1_x4(%token_cou
 // Four-row target-verification schedule. One subgroup owns an output channel
 // and retains four accumulators so immutable Q5_K bytes are read and decoded
 // once for the complete MTP target batch.
-kernel.def export("ggml_linear_q5k_q8_1_x4_m4") @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) {
+kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %subgroup_size = target.subgroup.size : index

@@ -9,19 +9,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/qwen_model.h"
+#include "experimental/loom_serve/qwen_flags.h"
 #include "iree/base/tooling/flags.h"
 
-IREE_FLAG(string, prefill, "",
-          "Isolated prefill artifacts, using the same schedule.");
-IREE_FLAG(string, decode, "", "Isolated decode artifact directory.");
-IREE_FLAG_LIST(
-    string, epoch,
-    "Packed epoch directory; repeat to cycle through cached shapes.");
-IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF.");
-IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json.");
-IREE_FLAG(string, mtp, "",
-          "Optional MTP bundle; checks proposals and accepted continuation.");
 IREE_FLAG(string, compare, "",
           "Optional completed-work ABABA comparison: single, mixed, full or "
           "decode. Empty runs the correctness witness.");
@@ -238,7 +228,7 @@ static iree_status_t qwen_check_verified_epoch(
 
 static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
                                                  iree_allocator_t allocator) {
-  if (!FLAG_mtp[0]) {
+  if (!loom_serve_qwen_mtp_from_flags()) {
     return iree_ok_status();
   }
   qwen_check_row_t rows[4] = {
@@ -664,14 +654,12 @@ static iree_status_t qwen_check_compare(loom_serve_qwen_model_t* model,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  const iree_flag_string_list_t epochs = FLAG_epoch_list();
-  if (!FLAG_prefill[0] || !FLAG_decode[0] || !epochs.count ||
-      !FLAG_weights[0] || !FLAG_tokenizer[0]) {
-    fprintf(stderr,
-            "Provide prefill, decode, epoch, weights and tokenizer paths.\n");
+  const iree_host_size_t epoch_count = loom_serve_qwen_shape_count_from_flags();
+  if (!epoch_count) {
+    fprintf(stderr, "Provide at least one --epoch=tokens:spans shape.\n");
     return EXIT_FAILURE;
   }
-  if (FLAG_compare[0] && epochs.count != 1) {
+  if (FLAG_compare[0] && epoch_count != 1) {
     fprintf(stderr,
             "The isolated comparison requires exactly one epoch shape.\n");
     return EXIT_FAILURE;
@@ -682,20 +670,10 @@ int main(int argc, char** argv) {
     fprintf(stderr, "compare must be single, mixed, full or decode.\n");
     return EXIT_FAILURE;
   }
-  const loom_serve_qwen_options_t options = {
-      .prefill_directory = iree_make_cstring_view(FLAG_prefill),
-      .decode_directory = iree_make_cstring_view(FLAG_decode),
-      .epoch_count = epochs.count,
-      .epoch_directories = epochs.values,
-      .weights_path = iree_make_cstring_view(FLAG_weights),
-      .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
-      .mtp_directory = iree_make_cstring_view(FLAG_mtp),
-      .row_count = 8,
-  };
   const iree_allocator_t allocator = iree_allocator_system();
   loom_serve_qwen_model_t* model = NULL;
   iree_status_t status =
-      loom_serve_qwen_model_create(&options, allocator, &model);
+      loom_serve_qwen_model_create_from_flags(8, allocator, &model);
   if (iree_status_is_ok(status)) {
     status = FLAG_compare[0] ? qwen_check_compare(model, allocator)
                              : qwen_check_run(model, allocator);

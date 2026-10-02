@@ -10,6 +10,7 @@
 #include "experimental/loom_serve/qwen_schedule.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
+#include "loomc/sanitizer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,17 +26,21 @@ typedef struct loom_serve_qwen_model_t loom_serve_qwen_model_t;
 typedef struct loom_serve_qwen_row_t loom_serve_qwen_row_t;
 
 typedef struct loom_serve_qwen_options_t {
-  // Compiled prefill directory, including its compile-time config.json.
-  iree_string_view_t prefill_directory;
-  // Compiled decode directory with identical parameter placement and context.
-  iree_string_view_t decode_directory;
+  // Portable model source directory, including sources.txt and control.loom.
+  iree_string_view_t source_directory;
+  // Maximum input count specialized into isolated prefill.
+  iree_host_size_t prefill_capacity;
+  // Retained attention positions per resident row.
+  iree_host_size_t context_capacity;
   // Number of cached packed-epoch stages; zero selects isolated execution.
   iree_host_size_t epoch_count;
-  // Borrowed directories with identical weights and retained-state placement.
-  const iree_string_view_t* epoch_directories;
-  // Optional MTP bundle: propose, warm<capacity>, verify<capacity>.
-  // Uses the same retained rows and canonical target embedding/output weights.
-  iree_string_view_t mtp_directory;
+  // Borrowed shapes specialized from the shared catalog during creation.
+  const loom_serve_qwen_shape_t* epoch_shapes;
+  // Prepare MTP proposal, catch-up, and verification using shared target
+  // weights.
+  bool enable_mtp;
+  // Device assertion classes/reporting applied to every JIT kernel pipeline.
+  loomc_sanitizer_options_t kernel_sanitizer;
   // Canonical UD-Q5_K_XL GGUF file loaded once during creation.
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
@@ -112,10 +117,12 @@ iree_tokenizer_t* loom_serve_qwen_model_tokenizer(
     loom_serve_qwen_model_t* model);
 iree_host_size_t loom_serve_qwen_model_context_capacity(
     const loom_serve_qwen_model_t* model);
+// Maximum chunk accepted by row_prefill. With MTP this is also bounded by the
+// largest packed shape, since prefill must advance both target and draft state.
 iree_host_size_t loom_serve_qwen_model_prefill_capacity(
     const loom_serve_qwen_model_t* model);
-// Shapes are in artifact option order and borrow model-owned immutable storage.
-// Zero means no packed-epoch stages were loaded.
+// Shapes are in option order and borrow model-owned immutable storage.
+// Zero means no packed-epoch stages were prepared.
 iree_host_size_t loom_serve_qwen_model_shape_count(
     const loom_serve_qwen_model_t* model);
 const loom_serve_qwen_shape_t* loom_serve_qwen_model_shapes(

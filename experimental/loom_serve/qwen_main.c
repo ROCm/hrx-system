@@ -10,14 +10,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/qwen_model.h"
+#include "experimental/loom_serve/qwen_flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, prefill, "", "Compiled prefill artifact directory.");
-IREE_FLAG(string, decode, "", "Compiled decode artifact directory.");
-IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF path.");
-IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
 IREE_FLAG_LIST(string, prompt, "User prompt; repeat for independent rows.");
 IREE_FLAG(string, prompt_file, "",
           "Already rendered chat text, instead of prompt.");
@@ -285,26 +281,18 @@ int main(int argc, char** argv) {
   const iree_flag_string_list_t prompts = FLAG_prompt_list();
   const iree_host_size_t row_count =
       FLAG_rows ? (iree_host_size_t)FLAG_rows : iree_max(prompts.count, 1);
-  if (!FLAG_weights[0] || !FLAG_tokenizer[0] || !FLAG_prefill[0] ||
-      !FLAG_decode[0] || FLAG_rows < 0 || row_count > 8 ||
-      FLAG_max_tokens < 1 || FLAG_iterations < 1 || FLAG_chunk_size < 0 ||
+  if (FLAG_rows < 0 || row_count > 8 || FLAG_max_tokens < 1 ||
+      FLAG_iterations < 1 || FLAG_chunk_size < 0 ||
       (FLAG_prompt_file[0] && prompts.count)) {
     fprintf(stderr,
             "Provide model paths and positive lengths; use 1-8 rows "
             "and either prompts or one rendered prompt file.\n");
     return EXIT_FAILURE;
   }
-  const loom_serve_qwen_options_t options = {
-      .prefill_directory = iree_make_cstring_view(FLAG_prefill),
-      .decode_directory = iree_make_cstring_view(FLAG_decode),
-      .weights_path = iree_make_cstring_view(FLAG_weights),
-      .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
-      .row_count = row_count,
-  };
   iree_allocator_t allocator = iree_allocator_system();
   loom_serve_qwen_model_t* model = NULL;
   iree_status_t status =
-      loom_serve_qwen_model_create(&options, allocator, &model);
+      loom_serve_qwen_model_create_from_flags(row_count, allocator, &model);
   if (iree_status_is_ok(status)) {
     status = qwen_run(model, row_count, allocator);
   }
