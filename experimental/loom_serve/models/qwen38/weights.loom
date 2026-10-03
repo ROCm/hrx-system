@@ -1,0 +1,66 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Read-only UTF-8 byte strings: "blk.", ".ffn_gate.weight",
+// ".ffn_up.weight", "qwen38_prepare_ffn", and the empty no-preparation root.
+global.rodata.def @block = bytes("626c6b2e")
+global.rodata.def @gate = bytes("2e66666e5f676174652e776569676874")
+global.rodata.def @up = bytes("2e66666e5f75702e776569676874")
+global.rodata.def @prepare = bytes("7177656e33385f707265706172655f66666e")
+global.rodata.def @unchanged = bytes("")
+
+func.def @ends_with(%key: buffer, %suffix: buffer) -> (i1) {
+  %length = buffer.length %key
+  %count = buffer.length %suffix
+  %fits = index.cmp uge, %length, %count : offset
+  %matches = scf.if %fits -> (i1) {
+    %start = index.sub %length, %count : offset
+    %zero = index.constant 0 : offset
+    %comparison = buffer.compare %key[%start], %suffix[%zero], %count
+    %zero_i32 = scalar.constant 0 : i32
+    %equal = scalar.cmpi eq, %comparison, %zero_i32 : i32
+    scf.yield %equal : i1
+  } else {
+    %false = scalar.constant false : i1
+    scf.yield %false : i1
+  }
+  func.return %matches : i1
+}
+
+// Both target and MTP FFN gate/up tensors use K5120/N17408 Q5_K. All other
+// tensors retain their file representation. The loader sees only this policy's
+// result and command reflection; it has no Qwen naming or layout knowledge.
+func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
+  %length = buffer.length %key
+  %four = index.constant 4 : offset
+  %fits = index.cmp uge, %length, %four : offset
+  %is_block = scf.if %fits -> (i1) {
+    %prefix = global.load @block : buffer
+    %zero = index.constant 0 : offset
+    %comparison = buffer.compare %key[%zero], %prefix[%zero], %four
+    %zero_i32 = scalar.constant 0 : i32
+    %equal = scalar.cmpi eq, %comparison, %zero_i32 : i32
+    scf.yield %equal : i1
+  } else {
+    %false = scalar.constant false : i1
+    scf.yield %false : i1
+  }
+  %gate = global.load @gate : buffer
+  %up = global.load @up : buffer
+  %is_gate = func.call @ends_with(%key, %gate) : (buffer, buffer) -> (i1)
+  %is_up = func.call @ends_with(%key, %up) : (buffer, buffer) -> (i1)
+  %is_ffn = scalar.ori %is_gate, %is_up : i1
+  %needs_preparation = scalar.andi %is_block, %is_ffn : i1
+  %root, %bytes = scf.if %needs_preparation -> (buffer, i64) {
+    %prepare = global.load @prepare : buffer
+    %size = scalar.constant 61276160 : i64
+    scf.yield %prepare, %size : buffer, i64
+  } else {
+    %unchanged = global.load @unchanged : buffer
+    %size = scalar.constant 0 : i64
+    scf.yield %unchanged, %size : buffer, i64
+  }
+  func.return %root, %bytes : buffer, i64
+}

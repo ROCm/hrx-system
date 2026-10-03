@@ -40,7 +40,8 @@ same declared inputs; a fresh-device qualification records a real execution.
 The authoring loop is source-driven. Editing model `.loom` files changes the
 next runner process without rebuilding the C executable; editing the C adapter
 requires building its exact target again. `sources.txt` lists source providers,
-while `control.loom` is loaded separately. An added library must be present in
+while `control.loom` and the cold `weights.loom` policy are loaded separately.
+An added command/kernel library must be present in
 that catalog; a generated HSACO or compiler subprocess is not part of this
 deployment path.
 
@@ -52,7 +53,7 @@ deployment path.
 | [`jit.h`](../jit.h), [`jit.c`](../jit.c) | Public `loomc` embedding, source indexing, live device facts, native request ownership, reusable command recording |
 | [`command.h`](../command.h), [`execution.h`](../execution.h), [`module.h`](../module.h), [`control_test.cc`](../control_test.cc) | Buffer borrowing/retention, exact queues and timelines, accepted work, feedback lifetime, drain after failure |
 | [`qwen_model.h`](../qwen_model.h), [`qwen_model.c`](../qwen_model.c), [`epoch.loom`](../models/qwen38/epoch.loom) | A concrete residency: weight placement, row origins, mutable state, scratch, descriptors, packed traversal and progress |
-| [`qwen_weights.c`](../qwen_weights.c), [`prepare.loom`](../models/qwen38/prepare.loom), [`prepared_q5.loom`](../models/qwen38/tests/prepared_q5.loom) | File bytes through shared final storage and in-place preparation into every consuming projection, with explicit readiness and exact comparisons |
+| [`weights.h`](../weights.h), [`weights.loom`](../models/qwen38/weights.loom), [`weights_test.cc`](../weights_test.cc) | Model-owned VM policy selecting cached preparers, actual file bytes into shared final storage, and transformation exactly once per unique tensor |
 | [`qwen_schedule.h`](../qwen_schedule.h), [`qwen_service.c`](../qwen_service.c) | Ready spans versus model rows, canonical history, output credit, admission and scheduling policy |
 
 The detailed [authoring](MODEL_AUTHORING.md) and [runner](RUNNER.md) guides

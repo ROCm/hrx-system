@@ -137,6 +137,7 @@ build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve:qwen_chat_test \
   //experimental/loom_serve:block_pool_test \
   //experimental/loom_serve:qwen_schedule_test \
+  //experimental/loom_serve:program_test \
   //experimental/loom_serve:benchmark_service_test
 ```
 
@@ -145,11 +146,16 @@ Then, with the GPU runner available:
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve:jit_test \
+  //experimental/loom_serve:weights_test \
   //experimental/loom_serve:control_test
 ```
 
-Success means both GPU targets pass, not skip: three JIT cases and eight control
-cases. Test output is under `bazel-testlogs/experimental/loom_serve/`; adding
+Success means all GPU targets pass, not skip: three JIT cases, five weight-loader
+cases, and eight control cases. The CPU program test exercises Qwen's actual
+source weight policy without loading the model. The loader tests use a small
+safetensors file, distinct source-selected preparers, shared roots prepared
+exactly once, unchanged tensors, and failing policy/file inputs.
+Test output is under `bazel-testlogs/experimental/loom_serve/`; adding
 `--test_output=all` shows individual cases. The `JitTest` source-to-VM case checks
 that two independently specialized eight-kernel stages change shared device
 values from 100 to 110, 112, ..., 124. It also verifies successful reuse after

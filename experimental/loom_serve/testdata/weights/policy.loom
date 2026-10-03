@@ -1,0 +1,54 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Command names are UTF-8 byte strings, not host pointers.
+global.rodata.def @add3 = bytes("61646433")
+global.rodata.def @add7 = bytes("61646437")
+global.rodata.def @absent = bytes("616273656e745f636f6d6d616e64")
+global.rodata.def @unchanged = bytes("")
+
+func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
+  %zero = index.constant 0 : offset
+  %letter = buffer.load.i8.u %key[%zero]
+  %a = scalar.constant 97 : i32
+  %b = scalar.constant 98 : i32
+  %s = scalar.constant 115 : i32
+  %m = scalar.constant 109 : i32
+  %is_a = scalar.cmpi eq, %letter, %a : i32
+  %is_b = scalar.cmpi eq, %letter, %b : i32
+  %is_size = scalar.cmpi eq, %letter, %s : i32
+  %is_missing = scalar.cmpi eq, %letter, %m : i32
+  %root, %bytes = scf.if %is_a -> (buffer, i64) {
+    %root = global.load @add3 : buffer
+    %bytes = scalar.constant 32 : i64
+    scf.yield %root, %bytes : buffer, i64
+  } else {
+    %root, %bytes = scf.if %is_b -> (buffer, i64) {
+      %root = global.load @add7 : buffer
+      %bytes = scalar.constant 32 : i64
+      scf.yield %root, %bytes : buffer, i64
+    } else {
+      %root, %bytes = scf.if %is_size -> (buffer, i64) {
+        %root = global.load @add3 : buffer
+        %bytes = scalar.constant 64 : i64
+        scf.yield %root, %bytes : buffer, i64
+      } else {
+        %root, %bytes = scf.if %is_missing -> (buffer, i64) {
+          %root = global.load @absent : buffer
+          %bytes = scalar.constant 32 : i64
+          scf.yield %root, %bytes : buffer, i64
+        } else {
+          %root = global.load @unchanged : buffer
+          %bytes = scalar.constant 0 : i64
+          scf.yield %root, %bytes : buffer, i64
+        }
+        scf.yield %root, %bytes : buffer, i64
+      }
+      scf.yield %root, %bytes : buffer, i64
+    }
+    scf.yield %root, %bytes : buffer, i64
+  }
+  func.return %root, %bytes : buffer, i64
+}

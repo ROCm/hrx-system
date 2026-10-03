@@ -7,7 +7,8 @@ match across roots so all stages share one resident weight slab.
 
 The runner consumes this directory directly with `--model`. Its
 `sources.txt` catalog indexes all command/kernel providers once; `control.loom`
-is the model VM entry. `--prefill_capacity` bounds the automatic packed token
+is the inference VM entry, and `weights.loom` owns cold tensor preparation
+policy. `--prefill_capacity` bounds the automatic packed token
 catalog; `--rows` bounds its independent span axis. Repeated
 `--epoch=tokens:spans` replace that catalog with explicit JIT specializations.
 `--context_capacity` sets the logical attention ceiling. Native code is
@@ -92,7 +93,7 @@ the same model/server/path arguments as `check_capacity.py`.
 
 ## Online weight residency
 
-`qwen_weights.c` resolves the complete target/MTP placement before submitting
+The generic `weights.c` resolves the complete target/MTP placement before submitting
 I/O. Shared roots retain views of the original allocation; only new roots
 allocate storage and contribute file reads. The normal `file` parameter mode
 uses asynchronous file handles and HAL queue reads targeting device-local
@@ -102,6 +103,14 @@ performance but still incurs a staging-to-final transfer. Scoped-mappable
 dual-local placements eliminated that transfer in experiments but regressed
 serving throughput; they are not the default. Host visibility alone also does
 not justify placing streaming weights across PCIe on a discrete device.
+
+`weights.loom` exports `prepare_weight(buffer key) -> (buffer root, i64 bytes)`.
+It selects `qwen38_prepare_ffn` and 61,276,160 bytes for block FFN gate/up keys;
+all other keys return an empty root and zero to retain their original bytes.
+Those name and shape rules live only in source. The loader validates the
+returned size, JITs each distinct preparer once, and releases the cold policy
+process before inference begins. The command name is ordinary UTF-8 rodata,
+not an encoded host pointer or a new command-program ABI.
 
 FFN gate/up tensors use a lossless block permutation:
 `[channel][K256][176 bytes]` becomes

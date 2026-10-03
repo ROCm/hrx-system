@@ -1,0 +1,88 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
+
+kernel.def target(@wave32) @add() {
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%eight, %one, %one) : index
+} launch(%storage: buffer, %delta: i32) {
+  %zero = index.constant 0 : offset
+  %element = kernel.workitem.id<x> : index
+  %view = buffer.view %storage[%zero] : buffer -> view<8xi32>
+  %value = view.load %view[%element] : view<8xi32> -> i32
+  %next = scalar.addi %value, %delta : i32
+  view.store %next, %view[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.program.def public @add3() launch(%storage: buffer) {
+  %delta = scalar.constant 3 : i32
+  kernel.launch @add(%storage, %delta) : (buffer, i32)
+  command.return
+}
+
+command.program.def public @add7() launch(%storage: buffer) {
+  %delta = scalar.constant 7 : i32
+  kernel.launch @add(%storage, %delta) : (buffer, i32)
+  command.return
+}
+
+kernel.def target(@wave32) @consume() {
+  %one = index.constant 1 : index
+  %eight = index.constant 8 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%eight, %one, %one) : index
+} launch(%a: view<8xi32>, %b: view<8xi32>, %raw: view<8xi32>, %output: buffer) {
+  %zero = index.constant 0 : offset
+  %element = kernel.workitem.id<x> : index
+  %output_view = buffer.view %output[%zero] : buffer -> view<8xi32>
+  %av = view.load %a[%element] : view<8xi32> -> i32
+  %bv = view.load %b[%element] : view<8xi32> -> i32
+  %rv = view.load %raw[%element] : view<8xi32> -> i32
+  %ab = scalar.addi %av, %bv : i32
+  %sum = scalar.addi %ab, %rv : i32
+  view.store %sum, %output_view[%element] : i32, view<8xi32>
+  kernel.return
+}
+
+command.program.def public @target() launch(%weights: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %b = command.parameter %weights, "b" : view<8xi32>
+  %raw = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @consume(%a, %b, %raw, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.program.def public @auxiliary() launch(%shared: buffer, %private: buffer, %output: buffer) {
+  %a = command.parameter %shared, "a" : view<8xi32>
+  %d = command.parameter %private, "d" : view<8xi32>
+  kernel.launch @consume(%a, %d, %d, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.program.def public @raw() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "raw" : view<8xi32>
+  kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.program.def public @size() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "size" : view<8xi32>
+  kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.program.def public @missing() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "missing" : view<8xi32>
+  kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
+command.program.def public @unavailable() launch(%weights: buffer, %output: buffer) {
+  %data = command.parameter %weights, "unavailable" : view<8xi32>
+  kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}

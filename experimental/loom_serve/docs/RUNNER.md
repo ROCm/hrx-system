@@ -20,8 +20,9 @@ provides automatically.
 | [`command`](../command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
 | [`execution`](../execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
 | [`module`](../module.h) | Named prepared stages; typed VM imports accepting buffers and returning a submission value | Per-session VM state or a general HAL instruction set |
+| [`program`](../program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
 | [`qwen_model`](../qwen_model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
-| [`qwen_weights`](../qwen_weights.h) | Shared parameter residency, model-specific preparation, file-read/preparation readiness | Session state or queue ordering from submission order |
+| [`weights`](../weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
 | [`qwen_schedule`](../qwen_schedule.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Tokens, attention state, measured kernel cost |
 | [`qwen_service`](../qwen_service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
 | [`http_server`](../http_server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
@@ -52,9 +53,17 @@ maximum workspace; proposal storage follows resident count and verification
 capture follows each compiled span capacity. Neither a shape change nor a row's
 page growth allocates more device backing during steady-state execution.
 
-`qwen_load_weights` delegates cold residency to `loom_serve_qwen_weights_load`.
+`qwen_load_weights` delegates cold residency to `loom_serve_weights_load`.
 It resolves all target/MTP parameter sharing before I/O, so each unique tensor
-is loaded once. A source-JIT preparation command permutes FFN gate/up Q5 blocks
+is loaded once. The model's [`weights.loom`](../models/qwen38/weights.loom)
+export `prepare_weight(buffer key) -> (buffer command_root, i64 byte_length)`
+selects each tensor's transformation. Empty root and zero length mean unchanged
+file bytes. Otherwise the loader checks the exact reflected size and JITs each
+distinct root once. This query owns Qwen's tensor-name and shape rules; the
+native loader has none. Its pure cold VM process is destroyed before the shared
+inference process is created, and no session receives VM state.
+
+Qwen selects a preparation command that permutes FFN gate/up Q5 blocks
 in place into eight-channel groups; all other tensors retain their checkpoint
 encoding. The inference commands consume this final layout directly, including
 decode, narrow and wide packed work, and MTP. No session, shape, or preparer
