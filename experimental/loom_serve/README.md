@@ -313,8 +313,11 @@ isolates cohort mixing, while packed against isolated measures shared versus
 per-row traversals. Neither option alone enables speculative decoding.
 
 `--mtp --mtp_depth=3` enables three-token MTP proposals under
-packed scheduling. Only admitted verifier rows are drafted; known prompt chunks
-fill the remaining shape capacity. The shared target command verifies pending
+packed scheduling. At least one configured epoch must admit the anchor plus
+three proposals; an infeasible shape table is rejected before listening. Narrow
+shapes can coexist with that wider shape. Only admitted verifier rows are
+drafted; known prompt chunks fill the remaining shape capacity. The shared
+target command verifies pending
 anchors and candidates, commits accepted recurrent transitions, and catches MTP
 up to the accepted target hidden state. The host streams every accepted output,
 including a rejection replacement or EOS; only the final output stays pending.

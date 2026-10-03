@@ -30,6 +30,13 @@ py_binary(
     srcs = ["benchmark_service.py"],
 )
 
+py_binary(
+    name = "check_service",
+    testonly = True,
+    srcs = ["check_service.py"],
+    deps = [":benchmark_service_lib"],
+)
+
 py_library(
     name = "benchmark_service_lib",
     testonly = True,

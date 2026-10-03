@@ -250,6 +250,27 @@ results. Device access instrumentation is a separate option described in the
 model guide. Shared hardware runs use the environment's benchmark lease around
 execution, not around the build.
 
+The [server lifecycle check](../check_service.py) automates startup and shutdown
+around a retained four-client witness. It also verifies that depth-three MTP
+rejects shape tables unable to fit four inputs, accepts the four-token boundary,
+and accepts narrow shapes alongside a wider one. Depth zero also accepts a
+one-token shape.
+After building `qwen_server` as above, this runs sequential residencies, never
+multiple weight copies at once:
+
+```sh
+python3.12 -B -m experimental.loom_serve.check_service \
+  --server=bazel-bin/experimental/loom_serve/qwen_server \
+  --model=experimental/loom_serve/models/qwen38 \
+  --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
+  --tokenizer="$model_dir/tokenizer.json" \
+  --output=/path/to/run-evidence/service-check
+```
+
+Success ends with an `event: pass` record after eight retained requests and
+clean server retirement. Per-case stderr is kept in a new output directory;
+an existing directory is rejected to preserve previous evidence.
+
 ## What another model author can take away
 
 The reusable unit is the source-to-command JIT and coarse queue/timeline

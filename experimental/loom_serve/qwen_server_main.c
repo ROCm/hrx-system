@@ -94,7 +94,15 @@ int main(int argc, char** argv) {
       }
     }
     chunk_size = FLAG_chunk_size ? (iree_host_size_t)FLAG_chunk_size : capacity;
-    if (chunk_size > capacity) {
+    const iree_host_size_t minimum_capacity =
+        (iree_host_size_t)FLAG_mtp_depth + 1;
+    if (capacity < minimum_capacity) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "mtp_depth=%d requires an epoch shape with at least %zu tokens; "
+          "largest capacity is %zu",
+          FLAG_mtp_depth, minimum_capacity, capacity);
+    } else if (chunk_size > capacity) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "chunk_size exceeds compiled stage capacity");
     }
