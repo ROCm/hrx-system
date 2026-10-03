@@ -5,6 +5,8 @@
 // LDS so each wave owns four complete query rows for online softmax. F16
 // probabilities then cross LDS for four sequential 64-channel P*V tiles.
 // K and V retain the production token-major persistent cache layout.
+// The shared body receives logical and physical extents explicitly; only
+// concrete wrappers resolve the model's cache-capacity configuration.
 
 amdgpu.target<gfx11-generic> @qwen38_attention_prefill_gfx11_wave64 {subgroup_size = 64}
 
@@ -12,15 +14,14 @@ config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value
 
 kernel.decl @qwen38_attention_prefill_reference(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
 
-func.decl @qwen38_kv_position(%map: buffer, %map_origin: offset, %position: index, %pool_capacity: index) -> (index)
+func.decl @qwen38_kv_position(%logical_capacity: index, %map: buffer, %map_origin: offset, %position: index, %pool_capacity: index) -> (index)
 
-template.decl @qwen38.attention.wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+template.decl @qwen38.attention.wmma(%logical_capacity: index, %query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
 
-template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index) {
-  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
+template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%logical_capacity: index, %query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index) {
   %zero = index.constant 0 : index
   %paged = index.cmp ne, %pool_capacity, %zero : index
-  %physical_capacity = scf.select %paged, %pool_capacity, %cache_capacity : index
+  %physical_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -67,7 +68,7 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
   %maximum_query_token = index.min %maximum_query_token0, %last_query_token : index
   %maximum_position = index.add %position_base, %maximum_query_token : index
   %context_count0 = index.add %maximum_position, %c1 : index
-  %context_count = index.assume %context_count0 [range(%context_count0, 1, 262144), le(%context_count0, %cache_capacity)] : index
+  %context_count = index.assume %context_count0 [range(%context_count0, 1, 262144), le(%context_count0, %logical_capacity)] : index
   %full_block_count = index.div %context_count, %c64 : index
   %full_context_count0 = index.mul %full_block_count, %c64 : index
   %full_context_count = index.assume %full_context_count0 [range(%full_context_count0, 0, 262144), mul(%full_context_count0, 64)] : index
@@ -142,7 +143,7 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   %full_max, %full_sum, %full_output0, %full_output1, %full_output2, %full_output3 = scf.for %key_origin = [%c0 to %full_context_count step %c64](%current_max = %negative_f32x4 : vector<4xf32>, %current_sum = %c0_f32x4 : vector<4xf32>, %current_output0 = %output_zero0 : vector<4xf16>, %current_output1 = %output_zero1 : vector<4xf16>, %current_output2 = %output_zero2 : vector<4xf16>, %current_output3 = %output_zero3 : vector<4xf16>) -> (vector<4xf32>, vector<4xf32>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
-    %physical_key_origin = func.call @qwen38_kv_position(%map, %map_origin, %key_origin, %pool_capacity) : (buffer, offset, index, index) -> (index)
+    %physical_key_origin = func.call @qwen38_kv_position(%logical_capacity, %map, %map_origin, %key_origin, %pool_capacity) : (index, buffer, offset, index, index) -> (index)
     %score_key_origin0 = index.add %physical_key_origin, %subgroup_score_column : index
     %last_full_key_tile_start = index.sub %physical_capacity, %c15 : index
     %score_key_origin = index.assume %score_key_origin0 [lt(%score_key_origin0, %last_full_key_tile_start)] : index
@@ -245,7 +246,7 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
 
   %tail_score_wave = index.cmp eq, %subgroup, %c0 : index
   %final_max, %final_sum, %final_output0, %final_output1, %final_output2, %final_output3 = scf.for %tail_key_origin = [%full_context_count to %context_count step %c16](%current_max = %full_max : vector<4xf32>, %current_sum = %full_sum : vector<4xf32>, %current_output0 = %full_output0 : vector<4xf16>, %current_output1 = %full_output1 : vector<4xf16>, %current_output2 = %full_output2 : vector<4xf16>, %current_output3 = %full_output3 : vector<4xf16>) -> (vector<4xf32>, vector<4xf32>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
-    %physical_tail_origin = func.call @qwen38_kv_position(%map, %map_origin, %tail_key_origin, %pool_capacity) : (buffer, offset, index, index) -> (index)
+    %physical_tail_origin = func.call @qwen38_kv_position(%logical_capacity, %map, %map_origin, %tail_key_origin, %pool_capacity) : (index, buffer, offset, index, index) -> (index)
     %tail_remaining = index.sub %context_count, %tail_key_origin : index
     %tail_key_count = index.min %tail_remaining, %c16 : index
     scf.for %load_iteration = [%c0 to %c16 step %c1] unroll {
@@ -462,7 +463,8 @@ kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attenti
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
   %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
-  template.apply<@qwen38.attention.wmma>(%query_tile, %query_head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  %logical_capacity = config.get @qwen38.attention.cache_capacity : index
+  template.apply<@qwen38.attention.wmma>(%logical_capacity, %query_tile, %query_head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
   kernel.return
 }
 
