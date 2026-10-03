@@ -416,6 +416,79 @@ the existing narrow recipe. At capacity 512, the new geometry halves logical
 weight/metadata acquisition while preserving activation payload; physical
 DRAM traffic and bandwidth saturation are not inferred from source counts.
 
+### Span-cardinality checkpoint
+
+Commit `895113fbc4` keeps more ready sessions in an epoch when cached recipes
+admit the same number of useful tokens, before breaking ties by smaller
+capacity. A full prompt therefore cannot displace ready decode/verifier peers
+merely because a single-span recipe also fills the token budget. The policy
+still has no measured execution-cost model.
+
+The following 2026-10-03 experiment changes only the cached shape catalog.
+Both arms use that commit's optimized executable, SHA256
+`6e8a95dd400f0cc5995616bd037e72a1911a19ffc67cf4069ae6fdf2c2d9587c`,
+the model sources at `2446d3198f`, eight resident rows, 16K allocated context,
+MTP depth three and the same gfx1151 system and high/performance policies. Control A has
+token capacities 32/128/256/512 with eight spans each. Adaptive B caches the
+cross-product of those token capacities with 1/2/4/8 spans. One lease covers
+both ABABA sequences, with a fresh residency for every window.
+
+| Active clients | A0 seconds | B1 seconds | A2 seconds | B3 seconds | A4 seconds |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 2 | 57.162 | 52.740 | 56.937 | 52.489 | 56.848 |
+| 8 | 121.472 | 120.975 | 122.038 | 121.052 | 120.564 |
+
+With two active clients, mean window time falls from 56.982 to 52.614 seconds:
+**8.30% higher throughput**, reaching **14.597 aggregate output tokens/s**.
+Both candidates beat all controls, beyond the 0.55%/0.48% within-arm spreads.
+All windows complete 5,783 appended inputs and 768 outputs, with retained
+follow-ups, matching credits/frontiers and clean retirement. Controls have
+identical replies and 157 epochs; both candidates change one reply and take
+150 epochs. The result includes batching and acceptance changes, not only
+cheaper dispatches. Authored target-head work falls from 4,832 padded rows to
+1,156; actual requests are 1,148/1,112 rows. Logical padding is not physical
+memory traffic, and the eight-row MTP proposal recipe remains unchanged.
+
+At eight clients, mean times are 121.358/121.013 seconds. The apparent 0.29%
+gain is below the 1.21% control spread, and the last control beats both
+candidates: **no full-load speedup qualifies**. Every window still completes
+28,534 appended inputs and 3,072 outputs with valid retained state and clean
+retirement. Epoch counts are 182/180/183/181/178 and replies differ. Across
+client counts the prompt sets also differ, so these rows are not a controlled
+concurrency-scaling curve. Neither row is a new external-runtime ratio.
+
+GPU peaks are 59–66 C for the two-client sequence and 60–61 C for eight;
+package-power medians remain 99.1–100.0 W. Cold JIT preparation grows from
+16 to 52 stages, approximately 2.62 to 8.81 seconds. Warm-filesystem-cache
+process-to-ready grows from about 5.42 to 11.63 seconds, outside the scored
+window. The logged arenas remain 18.819 GiB of unique weights, 9.169 GiB of
+retained state and 0.201 GiB of shared workspace. Loaded native stage images
+grow with the catalog; those arena figures are not total residency accounting.
+No per-session copy of the weights or programs is introduced.
+
+The existing eight-span benchmark above remains the baseline. To reproduce
+the optional adaptive configuration, replace its four `--epoch` arguments
+with `"${epoch_options[@]}"` after constructing this array in Bash:
+
+```bash
+epoch_options=()
+for tokens in 32 128 256 512; do
+  for spans in 1 2 4 8; do
+    epoch_options+=("--epoch=$tokens:$spans")
+  done
+done
+```
+
+Keep `--rows=8` in both arms and change only the benchmark client's `--clients`
+between two and eight. The [narrow-recipe differential](README.md#reproduce-full-qwen-and-retained-http-output)
+at `215e9c0385` passes both complementary catalogs and the five-token/single-span
+boundary with real retained target/MTP state. Actual eight-client HTTP checks
+also pass output limits, retained codewords, natural EOS, ownership conflict,
+cancellation after verification and reuse, including host ASAN. These checks
+use ordinary device kernels, not full-model device-access instrumentation.
+Allocated 16K capacity does not establish performance with 16K occupied history;
+that remains a distinct measurement axis.
+
 ### Current matched-MTP qualification
 
 A 2026-10-03 refresh pinned llama.cpp to
