@@ -97,15 +97,15 @@ class JitTest : public ::testing::Test {
     return nullptr;
   }
 
-  iree_status_t Compile(const char* delta, size_t index) {
+  iree_status_t Compile(const char* delta, size_t index,
+                        iree_string_view_t root = IREE_SV("advance")) {
     const loomc_config_binding_t binding = {
         loomc_make_cstring_view("increment.delta"),
         loomc_make_cstring_view(delta)};
     const loomc_config_options_t config = {
         &binding, 1, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
     loom_serve_jit_stage_t* stage = nullptr;
-    auto status =
-        loom_serve_jit_compile(jit_, IREE_SV("advance"), &config, &stage);
+    auto status = loom_serve_jit_compile(jit_, root, &config, &stage);
     if (iree_status_is_ok(status)) {
       status = loom_serve_jit_stage_record(
           stage, iree_hal_queue_family(dispatch_),
@@ -174,9 +174,9 @@ class JitTest : public ::testing::Test {
   // Device state shared across the variants.
   iree_hal_buffer_t* buffer_ = nullptr;
   // Upload backing retained until teardown drains accepted work.
-  int32_t input_ = 100;
+  std::array<int32_t, 8> input_ = {100, 100, 100, 100, 100, 100, 100, 100};
   // Feedback backing retained until teardown drains accepted work.
-  int32_t output_ = 0;
+  std::array<int32_t, 8> output_ = {};
   // VM reference type registry.
   iree_vm_environment_t* environment_ = nullptr;
   // HAL types borrowed from the environment.
@@ -198,6 +198,10 @@ class JitTest : public ::testing::Test {
 };
 
 TEST_F(JitTest, SourceToVmToGpuWithSharedVariantState) {
+  // A failed native task must join its accepted siblings before compiler reuse.
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Compile("3", 0, IREE_SV("invalid_native")));
+  ASSERT_EQ(commands_[0], nullptr);
   IREE_ASSERT_OK(Compile("3", 0));
   IREE_ASSERT_OK(Compile("7", 1));
   IREE_ASSERT_OK(PrepareVm());
@@ -211,7 +215,7 @@ TEST_F(JitTest, SourceToVmToGpuWithSharedVariantState) {
       iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
   iree_hal_transfer_operation_t upload = {};
   upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
-  upload.upload.source = &input_;
+  upload.upload.source = input_.data();
   upload.upload.target_buffer = buffer_;
   upload.upload.length = sizeof(input_);
   uint64_t completion = 0;
@@ -232,18 +236,24 @@ TEST_F(JitTest, SourceToVmToGpuWithSharedVariantState) {
   iree_hal_transfer_operation_t download = {};
   download.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
   download.download.source_buffer = buffer_;
-  download.download.target = &output_;
+  download.download.target = output_.data();
   download.download.length = sizeof(output_);
   IREE_ASSERT_OK(
       loom_serve_execution_feedback(execution_, 1, &download, &completion));
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
-  EXPECT_EQ(output_, 110);
+  for (size_t i = 0; i < output_.size(); ++i) {
+    EXPECT_EQ(output_[i], 110 + 2 * i) << "specialized element " << i;
+  }
 }
 
 TEST_F(JitTest, InvalidConfigurationLeavesCompilerReusable) {
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Compile("99", 0));
-  EXPECT_EQ(commands_[0], nullptr);
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Compile("99", 0));
+  ASSERT_EQ(commands_[0], nullptr);
   IREE_ASSERT_OK(Compile("3", 0));
+}
+
+TEST_F(JitTest, CommandWithoutNativeRequests) {
+  IREE_ASSERT_OK(Compile("3", 0, IREE_SV("idle")));
 }
 
 }  // namespace

@@ -39,6 +39,12 @@ records commands, creates the VM program/native exports, and allocates retained
 rows and MTP state. Each stage can have different kernel choices while binding
 the same model storage. No session gets another copy of the weights or code.
 
+The source JIT shares immutable compiler state and uses the standard loomc task
+pool for concurrent native requests. Each worker owns reusable scratch; each
+stage call drains its task queue before returning a complete stage or failure.
+This startup join governs compiler/result lifetime, not GPU inference ordering.
+The pool is independent of session count and idle during warm serving.
+
 The packed server constructs a bounded Cartesian catalog of token classes and
 independent span classes, including exact terminal sizes for odd residency
 counts. Explicit `--epoch` lists replace it for experiments. Shapes share one

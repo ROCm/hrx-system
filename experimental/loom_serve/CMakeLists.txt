@@ -192,6 +192,8 @@ loom_cc_library(
     loom::binding::c::target::amdgpu::iree_hal
     loom::binding::c::target::cmd
     loom::binding::c::target::vm
+    loom::binding::c::task_pool
+    loom::binding::c::task_queue
     loom::target::arch::cmd::program
   PUBLIC
 )

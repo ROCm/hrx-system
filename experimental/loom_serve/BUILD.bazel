@@ -303,6 +303,8 @@ loom_cc_library(
     deps = [
         ":command",
         "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//loom/binding/c:task_queue",
         "//loom/binding/c/target/amdgpu",
         "//loom/binding/c/target/amdgpu:iree_hal",
         "//loom/binding/c/target/cmd",

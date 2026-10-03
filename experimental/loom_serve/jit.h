@@ -15,9 +15,10 @@
 extern "C" {
 #endif
 
-// Model-resident source catalog, compiler, live device profile, and reusable
-// compilation workspace. Compilation calls are serialized by the caller;
-// execution of already prepared commands does not access this object.
+// Model-resident source catalog, compiler, live device profile, and standard
+// loomc task pool with worker-local scratch. Compilation calls are serialized
+// by the caller; independent native requests within a call run concurrently.
+// Execution of already prepared commands does not access this object.
 typedef struct loom_serve_jit_t loom_serve_jit_t;
 typedef struct loom_serve_jit_stage_t loom_serve_jit_stage_t;
 
@@ -37,6 +38,7 @@ void loom_serve_jit_destroy(loom_serve_jit_t* jit);
 // portable command bytes and loaded executables independently of the compiler.
 // config is non-null; an empty binding list represents a fully specified root.
 // No compiler subprocess, artifact directory, or disk cache is involved.
+// All accepted tasks finish before this call returns, including on failure.
 iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
                                      iree_string_view_t root,
                                      const loomc_config_options_t* config,
