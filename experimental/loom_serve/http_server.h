@@ -22,14 +22,26 @@ extern "C" {
 typedef struct loom_serve_http_server_t loom_serve_http_server_t;
 typedef struct loom_serve_http_connection_t loom_serve_http_connection_t;
 
-// Binds loopback (port zero selects an ephemeral port) and starts network I/O.
-// Sixteen connections, 16 KiB headers, 64 headers and 1 MiB bodies are bounded
-// independently of model capacity. The executable calls
+// Transport budgets are independent of active model rows and queued admission.
+typedef struct loom_serve_http_server_options_t {
+  // Loopback TCP port; zero selects an ephemeral port.
+  uint16_t port;
+  // Maximum simultaneous connections, including queued and draining requests.
+  iree_host_size_t connection_capacity;
+  // Per-connection framing limits; completed bytes remain owned until release.
+  loom_serve_http_request_limits_t request_limits;
+} loom_serve_http_server_options_t;
+
+// Defaults to port 8080, 64 connections, 16 KiB headers, 64 headers and 8 MiB
+// bodies. Body storage grows on demand within these explicit bounds.
+loom_serve_http_server_options_t loom_serve_http_server_options_default(void);
+
+// Binds loopback and starts network I/O. The executable calls
 // iree_async_signal_block_default before creating any threads if it wants
 // SIGINT/SIGTERM delivery here. The server owns those signal subscriptions.
 iree_status_t loom_serve_http_server_create(
-    uint16_t port, iree_allocator_t host_allocator,
-    loom_serve_http_server_t** out_server);
+    const loom_serve_http_server_options_t* options,
+    loom_serve_http_server_t** out_server, iree_allocator_t host_allocator);
 
 // Stops admission, cancels/drains accepted I/O and joins the polling thread.
 // The application first relinquishes all connection/request views. Returns

@@ -75,9 +75,10 @@ contents or command names by the native submission code.
 `qwen_model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: shared
 parameter storage prepared in place at startup, cached prefill/decode commands,
 model VM process, residual buffer and packed workspace. One preallocated arena
-partitions private retained state among up to eight rows. Rows are data, not VM
-processes. A single host owner multiplexes their stages through the shared
-execution timeline.
+partitions private recurrent state among up to eight rows. With
+`--pool_capacity=N`, attention pages grow from a shared physical budget rather
+than reserving every row's logical context. Rows are data, not VM processes.
+A single host owner multiplexes their stages through the shared timeline.
 
 Packed target completion forks compact result downloads from cache-only MTP
 catch-up. The catch-up stage consumes committed target state, not the downloaded
@@ -105,7 +106,7 @@ commands share the same weights, retained rows, residual storage, maximum-sized
 workspace, and VM process. Each is a native runner export resolved once at load
 time; selecting another shape allocates no device backing and copies no retained
 state. The scheduler evaluates ready spans against each shape and chooses the
-most input tokens, breaking ties by smaller token and span capacities. This
+most input tokens, then the most participating spans, then smaller capacities. This
 occupancy policy is intentionally distinct from measured cost-based selection.
 Supplying one shape gives a fixed-shape control; `--chunk_size` independently
 limits each row's prompt contribution. Epoch records report the selected shape
@@ -165,8 +166,9 @@ The seven rebindable slots are:
 | 5 | Eight i32 progress values; generated count at 0 and EOS flag at 7. |
 | 6 | Shared scratch sized/aligned for the larger requirement of both stages. |
 
-Slots 1 through 5 are private arena spans; 0 and 6 are shared. The current roots
-use contiguous per-row KV, not paged KV. At a 16K context, two retained rows use
+Slots 1 through 5 are private arena spans; 0 and 6 are shared. These isolated
+roots use contiguous per-row KV; pooled calls route through packed page maps.
+With dense addressing at a 16K context, two retained rows use
 2.292 GiB, alongside the 18.504 GiB parameter slab and shared scratch. The host
 does not infer these model semantics from kernel reflection.
 
@@ -218,8 +220,10 @@ response; retained sessions belong above this connection lifetime.
 
 The listener binds loopback only. Request framing bounds headers and body
 storage, rejects ambiguous framing and pipelining, and retains request views
-until application release. Sixteen connection slots bound admission; excess
-connections are diagnosed and closed. Send completion returns credit, and
+until application release. `--connections` bounds simultaneous peers, defaulting
+to 64; excess connections are diagnosed and closed. `--request_body_bytes`
+defaults to 8 MiB per peer and is independent of logical token context. Body
+storage grows on demand within this bound. Send completion returns credit, and
 deactivation joins outstanding operations before a slot is reused. Shutdown
 joins both the accept target and its cancellation receipt before stopping the
 poll owner. An unrecoverable proactor failure aborts the experimental process
@@ -252,7 +256,15 @@ starvation when token/span capacity cannot fit every ready row and distributes
 large prompt chunks. Network progress runs independently. Each row has one
 pending copied SSE packet; exhausted carrier credit pauses that row before its
 next epoch. The packed path shares matrix work and weight residency, not just
-host submission. Existing contiguous retained rows and F16 KV remain unchanged.
+host submission. F16 cache math is the same in dense and pooled layouts.
+
+`--pool_capacity` specifies a shared token-position budget in multiples of 64;
+`--context_capacity` specifies the logical ceiling of each row. Admission reserves
+enough page-rounded capacity to complete the request, including speculative
+writes. Pages are physically assigned only as a row grows. Idle cache can yield
+to admission, but active completion guarantees are never overcommitted.
+The [model guide](models/qwen38/README.md#pooled-kv-and-reserved-admission)
+describes the layout, memory accounting, and real-model correctness witness.
 
 `qwen_chat.{h,c}` owns the text-only, non-thinking Qwen template and XML tool
 translation. The supported endpoint is `POST /v1/chat/completions`, with model
@@ -269,21 +281,26 @@ suffix-only prefill. The GPU retains the original generated tokens, including
 their original XML spelling; canonical history is comparison data, not replayed
 replacement state. A changed history resets and replays explicitly. Idle rows
 form an LRU cache and may be evicted by another session. Untagged requests always
-replay; overlapping requests for one named session return 409; fully occupied
-rows return 503. There is no durable server-side conversation store.
+replay. Overlapping active or queued requests for one named session return 409.
+Requests waiting for rows or completion credit enter a bounded FIFO without
+owning device state. `--pending_requests` defaults to 32; exceeding that queue
+returns 503. A request too large even for an otherwise empty pool returns 400
+with a capacity diagnostic. There is no durable server-side conversation store.
 
 Disconnect cancels at a completed model stage and invalidates the checkpoint.
 SIGINT/SIGTERM stop admission, finish the current stage, relinquish request
 views, drain transport I/O and release model residency. Request diagnostics are
-JSON events on stderr: `admit`, `complete`, `cancel`, `evict`, `epoch`, and
-`heartbeat`. Admission
-reports retained/appended tokens and cache hit versus replay. Completion adds
+JSON events on stderr: `enqueue`, `admit`, `complete`, `cancel`, `cancel_queued`,
+`evict`, `epoch`, and `heartbeat`. Admission reports retained/appended tokens,
+cache hit versus replay, completion reservation, and queue time. Completion adds
 per-request prefill/decode epoch counts and end-to-end timing. Each epoch reports
 its actual rows, consumed positions, prompt/decode counts, selected outputs,
 token shape, traversal count and completed model duration. Shared epoch time is
 not attributed in full to every constituent row. An independent host observer
-reports current activity, active/backpressured rows, completed counters and
-interval rates every second, including while model execution is waiting.
+reports current activity, active/backpressured rows, queued requests, pool
+capacity/reserved/resident positions, completed counters and interval rates
+every second, including while model execution is waiting. Reserved and resident
+pool counts overlap: one is a completion guarantee, the other is physical use.
 `--heartbeat_ms=0` disables periodic reports. All durations include the host
 build's instrumentation and are not automatically performance data.
 

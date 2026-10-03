@@ -6,6 +6,7 @@
 
 #include "experimental/loom_serve/http_server.h"
 
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -16,7 +17,6 @@
 #include "iree/net/carrier/tcp/carrier.h"
 
 enum {
-  HTTP_CONNECTION_CAPACITY = 16,
   HTTP_SEND_CAPACITY = 8,
 };
 
@@ -57,6 +57,8 @@ struct loom_serve_http_connection_t {
 struct loom_serve_http_server_t {
   // Allocator owning this server and its connection resources.
   iree_allocator_t allocator;
+  // Immutable connection and request budgets established before network I/O.
+  loom_serve_http_server_options_t options;
   // Protects peer publication, ownership, send counts and shutdown facts.
   iree_slim_mutex_t mutex;
   // Advisory wakeup for the single application owner.
@@ -84,7 +86,7 @@ struct loom_serve_http_server_t {
   iree_status_t failure;
   // Fixed connection identities; a slot is reused only after caller and I/O
   // retire.
-  loom_serve_http_connection_t connections[HTTP_CONNECTION_CAPACITY];
+  loom_serve_http_connection_t* connections;
 };
 
 static void http_notify(loom_serve_http_server_t* server) {
@@ -172,9 +174,8 @@ static void http_connection_send_completed(void* user_data,
 static iree_status_t http_connection_create(
     loom_serve_http_connection_t* connection, iree_async_socket_t* socket) {
   loom_serve_http_server_t* server = connection->server;
-  const loom_serve_http_request_limits_t limits = {16384, 1024 * 1024, 64};
   IREE_RETURN_IF_ERROR(loom_serve_http_request_parser_create(
-      limits, &connection->parser, server->allocator));
+      server->options.request_limits, &connection->parser, server->allocator));
   iree_async_slab_t* slab = NULL;
   const iree_async_slab_options_t slab_options = {
       .buffer_size = 16384,
@@ -236,7 +237,7 @@ static void http_accept_completed(void* user_data,
   if (iree_status_is_ok(status) &&
       !iree_any_bit_set(server->flags, HTTP_SERVER_STOPPING) &&
       !iree_any_bit_set(flags, IREE_ASYNC_COMPLETION_FLAG_CANCELLED)) {
-    for (iree_host_size_t i = 0; i < HTTP_CONNECTION_CAPACITY; ++i) {
+    for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
       if (!server->connections[i].flags) {
         connection = &server->connections[i];
         connection->flags = HTTP_CONNECTION_OCCUPIED;
@@ -311,7 +312,7 @@ static void http_shutdown_received(iree_async_proactor_t* proactor,
       iree_status_abort(status);
     }
   }
-  for (iree_host_size_t i = 0; i < HTTP_CONNECTION_CAPACITY; ++i) {
+  for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
     loom_serve_http_connection_t* connection = &server->connections[i];
     if (connection->carrier) {
       http_connection_close(connection);
@@ -345,7 +346,7 @@ static bool http_server_drained(void* user_data) {
   bool drained =
       iree_any_bit_set(server->flags, HTTP_SERVER_SHUTDOWN_RECEIVED) &&
       !server->accept.pending;
-  for (iree_host_size_t i = 0; i < HTTP_CONNECTION_CAPACITY; ++i) {
+  for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
     const http_connection_flags_t flags = server->connections[i].flags;
     drained &= !flags || iree_any_bit_set(flags, HTTP_CONNECTION_DRAINED);
   }
@@ -396,7 +397,7 @@ iree_status_t loom_serve_http_server_destroy(loom_serve_http_server_t* server) {
       }
     }
   }
-  for (iree_host_size_t i = 0; i < HTTP_CONNECTION_CAPACITY; ++i) {
+  for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
     if (server->connections[i].flags) {
       http_connection_reclaim(&server->connections[i]);
     }
@@ -417,12 +418,12 @@ iree_status_t loom_serve_http_server_destroy(loom_serve_http_server_t* server) {
   iree_async_proactor_release(server->proactor);
   iree_notification_deinitialize(&server->notification);
   iree_slim_mutex_deinitialize(&server->mutex);
+  iree_allocator_free(server->allocator, server->connections);
   iree_allocator_free(server->allocator, server);
   return status;
 }
 
-static iree_status_t http_server_initialize(loom_serve_http_server_t* server,
-                                            uint16_t port) {
+static iree_status_t http_server_initialize(loom_serve_http_server_t* server) {
   IREE_RETURN_IF_ERROR(iree_async_signal_ignore_broken_pipe());
   iree_async_proactor_options_t options = iree_async_proactor_options_default();
   options.threading_mode = IREE_ASYNC_PROACTOR_THREADING_CROSS_THREAD;
@@ -449,11 +450,11 @@ static iree_status_t http_server_initialize(loom_serve_http_server_t* server,
       IREE_ASYNC_SOCKET_OPTION_REUSE_ADDR | IREE_ASYNC_SOCKET_OPTION_NO_DELAY,
       &server->listener));
   iree_async_address_t address;
-  IREE_RETURN_IF_ERROR(
-      iree_async_address_from_ipv4(IREE_SV("127.0.0.1"), port, &address));
+  IREE_RETURN_IF_ERROR(iree_async_address_from_ipv4(
+      IREE_SV("127.0.0.1"), server->options.port, &address));
   IREE_RETURN_IF_ERROR(iree_async_socket_bind(server->listener, &address));
-  IREE_RETURN_IF_ERROR(
-      iree_async_socket_listen(server->listener, HTTP_CONNECTION_CAPACITY));
+  IREE_RETURN_IF_ERROR(iree_async_socket_listen(
+      server->listener, server->options.connection_capacity));
   IREE_RETURN_IF_ERROR(iree_async_socket_query_local_address(server->listener,
                                                              &server->address));
   iree_async_cancel_request_initialize(
@@ -476,20 +477,38 @@ static iree_status_t http_server_initialize(loom_serve_http_server_t* server,
                                            server->allocator, &server->thread);
 }
 
+loom_serve_http_server_options_t loom_serve_http_server_options_default(void) {
+  return (loom_serve_http_server_options_t){
+      .port = 8080,
+      .connection_capacity = 64,
+      .request_limits = {16384, 8 * 1024 * 1024, 64},
+  };
+}
+
 iree_status_t loom_serve_http_server_create(
-    uint16_t port, iree_allocator_t host_allocator,
-    loom_serve_http_server_t** out_server) {
+    const loom_serve_http_server_options_t* options,
+    loom_serve_http_server_t** out_server, iree_allocator_t host_allocator) {
   *out_server = NULL;
+  if (!options->connection_capacity || options->connection_capacity > INT_MAX) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "connection_capacity must be in [1, INT_MAX]");
+  }
   loom_serve_http_server_t* server = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*server), (void**)&server));
   server->allocator = host_allocator;
   iree_slim_mutex_initialize(&server->mutex);
   iree_notification_initialize(&server->notification);
-  for (iree_host_size_t i = 0; i < HTTP_CONNECTION_CAPACITY; ++i) {
-    server->connections[i].server = server;
+  iree_status_t status = iree_allocator_malloc_array(
+      host_allocator, options->connection_capacity,
+      sizeof(*server->connections), (void**)&server->connections);
+  if (iree_status_is_ok(status)) {
+    server->options = *options;
+    for (iree_host_size_t i = 0; i < options->connection_capacity; ++i) {
+      server->connections[i].server = server;
+    }
+    status = http_server_initialize(server);
   }
-  iree_status_t status = http_server_initialize(server, port);
   if (iree_status_is_ok(status)) {
     *out_server = server;
   } else {
@@ -520,7 +539,7 @@ loom_serve_http_connection_t* loom_serve_http_server_take_request(
     const loom_serve_http_request_t** out_request) {
   *out_request = NULL;
   loom_serve_http_connection_t* selected = NULL;
-  for (iree_host_size_t i = 0; i < HTTP_CONNECTION_CAPACITY; ++i) {
+  for (iree_host_size_t i = 0; i < server->options.connection_capacity; ++i) {
     loom_serve_http_connection_t* connection = &server->connections[i];
     iree_slim_mutex_lock(&server->mutex);
     const http_connection_flags_t flags = connection->flags;

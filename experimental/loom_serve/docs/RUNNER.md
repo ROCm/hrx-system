@@ -58,6 +58,20 @@ the layout, allocation strategy, and startup profiling recipe.
 
 ## One real packed epoch
 
+Before scheduling, `qwen_enqueue` validates a bounded request without assigning
+a device row. `qwen_admit_pending` selects an idle row for the oldest request,
+prepares its actual retained append, and reserves page-rounded completion and
+speculative capacity. Active guarantees must fit before any idle cache is
+displaced. Physical pages are assigned as epochs grow; idle rows are reclaimed
+in LRU order only when admission needs their pages. A completed response gives
+back unused credit before network output finishes draining.
+
+Pending requests borrow HTTP payloads until admission, rejection, cancellation,
+or shutdown. Connection and body-byte budgets belong to transport; pending
+request count belongs to the service. A queued request has no recurrent slot,
+page map, or VM instance. Admission is retried on credit/row changes, not on
+every decode step. Current policy reserves rather than overcommits capacity.
+
 `qwen_prepare_ready` first resolves output backpressure and cancellation. A
 prompt row contributes its remaining known tokens with minimum one. A decoding
 row contributes one pending token, or four reserved inputs for an indivisible
@@ -133,7 +147,7 @@ The small control tests exercise these contracts with actual queues.
 | --- | --- |
 | More rows or wider epochs | Host fixed arrays, descriptor capacities, authored views, scratch sizing, shape selection, and full-sized correctness/performance qualification |
 | Online shape insertion | Stage publication and immutable native export lifetime; cached code and in-flight bindings must remain valid |
-| Capacity-managed pooled sessions | The explicit pooled layout already supplies growable private page maps; admission still needs completion reservations and a bounded request queue |
+| Overcommitted pooled sessions | Replace full-completion admission guarantees with explicit held/offloaded residency and a policy for restoring older sessions; kernels still consume only resident pages |
 | Shared prefix cache | Add shared ownership, partial-tail copy-on-write, recurrent snapshots, and retirement to the private-page lifecycle |
 | Device-owned continuation | Admission/completion rings with credit and cancellation; row progress and token routing leave the host epoch wait without recycling in-flight buffers |
 | Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |

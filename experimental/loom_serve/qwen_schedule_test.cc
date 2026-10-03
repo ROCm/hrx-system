@@ -245,4 +245,32 @@ TEST(QwenScheduleTest, FillsGapsWithoutSplittingOrStarvingVerifiers) {
   }
 }
 
+TEST(QwenScheduleTest, CompletionReservationCoversLegalWriteHighWater) {
+  for (iree_host_size_t context = 1; context <= 260; ++context) {
+    for (iree_host_size_t input = 1; input <= context; ++input) {
+      for (iree_host_size_t outputs = 1;
+           outputs <= iree_min(17, context - input + 1); ++outputs) {
+        for (iree_host_size_t depth : {0u, 3u}) {
+          // Every selected count is reachable by accepting only the anchor.
+          // Enumerate the service's actual launch rule instead of reproducing
+          // the closed-form reservation calculation.
+          iree_host_size_t high_water = input;
+          for (iree_host_size_t selected = 1; selected < outputs; ++selected) {
+            const iree_host_size_t position = input + selected - 1;
+            const bool verify =
+                depth && outputs - selected > 1 && context - position >= 4;
+            high_water = iree_max(high_water, position + (verify ? 4 : 1));
+          }
+          const iree_host_size_t expected = ((high_water + 63) / 64) * 64;
+          ASSERT_EQ(loom_serve_qwen_request_reservation(context, input, outputs,
+                                                        depth, 64),
+                    expected)
+              << "context=" << context << " input=" << input
+              << " outputs=" << outputs << " depth=" << depth;
+        }
+      }
+    }
+  }
+}
+
 }  // namespace

@@ -39,6 +39,17 @@ typedef struct loom_serve_qwen_shape_t {
   iree_host_size_t span_capacity;
 } loom_serve_qwen_shape_t;
 
+// Reserves page-rounded capacity for a validated request through completion.
+// input_count includes retained and appended input. The final selected output
+// stays pending and does not enter KV. Legal speculative steps may transiently
+// write past that committed endpoint, even when output credit is only two.
+// Positive input/output counts already fit context_capacity; proposal_depth is
+// zero or three and block_size is positive. No allocation or state mutation.
+iree_host_size_t loom_serve_qwen_request_reservation(
+    iree_host_size_t context_capacity, iree_host_size_t input_count,
+    iree_host_size_t output_count, iree_host_size_t proposal_depth,
+    iree_host_size_t block_size);
+
 // Packs trusted ready spans without allocating or modifying row state. Every
 // admitted row gets its minimum_count before remaining capacity is filled from
 // longer known spans. chunk_size limits expansion, never an indivisible

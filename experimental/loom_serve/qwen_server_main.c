@@ -23,6 +23,12 @@ IREE_FLAG(string, packing, "mixed",
 IREE_FLAG(int32_t, port, 8080,
           "Loopback TCP port; zero selects an ephemeral port.");
 IREE_FLAG(int32_t, rows, 4, "Retained model rows (1-8).");
+IREE_FLAG(int32_t, connections, 64,
+          "Maximum simultaneous TCP connections, including queued requests.");
+IREE_FLAG(int32_t, pending_requests, 32,
+          "Maximum validated requests waiting for a model row or KV credit.");
+IREE_FLAG(int32_t, request_body_bytes, 8 * 1024 * 1024,
+          "Maximum HTTP request body bytes per connection.");
 IREE_FLAG(int32_t, chunk_size, 0,
           "Prefill tokens per scheduling turn; zero uses compiled capacity.");
 IREE_FLAG(int32_t, max_tokens, 512,
@@ -35,7 +41,8 @@ int main(int argc, char** argv) {
   const iree_host_size_t epoch_count = loom_serve_qwen_shape_count_from_flags();
   if (FLAG_port < 0 || FLAG_port > 65535 || FLAG_rows < 1 || FLAG_rows > 8 ||
       FLAG_chunk_size < 0 || FLAG_max_tokens < 1 || FLAG_max_tokens > 16384 ||
-      FLAG_heartbeat_ms < 0) {
+      FLAG_heartbeat_ms < 0 || FLAG_connections < 1 ||
+      FLAG_pending_requests < 1 || FLAG_request_body_bytes < 1) {
     fprintf(stderr,
             "Provide model paths, 1-8 rows, a valid port and positive token "
             "limits.\n");
@@ -108,8 +115,13 @@ int main(int argc, char** argv) {
     }
   }
   if (iree_status_is_ok(status)) {
-    status =
-        loom_serve_http_server_create((uint16_t)FLAG_port, allocator, &server);
+    loom_serve_http_server_options_t server_options =
+        loom_serve_http_server_options_default();
+    server_options.port = (uint16_t)FLAG_port;
+    server_options.connection_capacity = (iree_host_size_t)FLAG_connections;
+    server_options.request_limits.body_byte_capacity =
+        (iree_host_size_t)FLAG_request_body_bytes;
+    status = loom_serve_http_server_create(&server_options, &server, allocator);
   }
   if (iree_status_is_ok(status)) {
     char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
@@ -129,6 +141,7 @@ int main(int argc, char** argv) {
           .row_count = (iree_host_size_t)FLAG_rows,
           .chunk_size = chunk_size,
           .default_max_tokens = (iree_host_size_t)FLAG_max_tokens,
+          .pending_capacity = (iree_host_size_t)FLAG_pending_requests,
           .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
           .schedule_mode = schedule_mode,
           .packing_mode = packing_mode,
