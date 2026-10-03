@@ -14,6 +14,7 @@ heartbeat progress are independent of the model owner's GPU wait.
 | [`execution`](../execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
 | [`module`](../module.h) | Named prepared stages; typed VM imports accepting buffers and returning a submission value | Per-session VM state or a general HAL instruction set |
 | [`qwen_model`](../qwen_model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
+| [`qwen_weights`](../qwen_weights.h) | Shared parameter residency, model-specific preparation, file-read/preparation readiness | Session state or queue ordering from submission order |
 | [`qwen_schedule`](../qwen_schedule.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Tokens, attention state, measured kernel cost |
 | [`qwen_service`](../qwen_service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
 | [`http_server`](../http_server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
@@ -31,13 +32,22 @@ records commands, creates the VM program/native exports, and allocates retained
 rows and MTP state. Each stage can have different kernel choices while binding
 the same model storage. No session gets another copy of the weights or code.
 
-`qwen_load_weights` uses an IREE parameter provider to gather directly into the
-target parameter slab. Additional MTP roots reuse views where possible. The
-current kernels consume the canonical quantized checkpoint layout. This loader
-waits for setup gathers; it does not yet implement the proposed overlapped
-read/repack pipeline. The corresponding extension needs bounded staging,
-read-to-preparation dependency edges, and a measured peak-memory contract, not
-a second full-sized weight copy.
+`qwen_load_weights` delegates cold residency to `loom_serve_qwen_weights_load`.
+It resolves all target/MTP parameter sharing before I/O, so each unique tensor
+is loaded once. A source-JIT preparation command permutes FFN gate/up Q5 blocks
+in place into eight-channel groups; all other tensors retain their checkpoint
+encoding. The inference commands consume this final layout directly, including
+decode, narrow and wide packed work, and MTP. No session, shape, or preparer
+owns a second weight image.
+
+Four independent loading lanes each have read-ready and prepared-ready
+timelines. A lane's next read waits for its previous preparation, while other
+lanes can overlap. Consecutive unchanged tensors share a readiness group;
+each transformed tensor has its own read-to-dispatch edge. The loader makes
+one terminal host join, not a wait after every tensor. Failed readiness
+abandons the model; accepted queue operations retain resources until retirement.
+The [model guide](../models/qwen38/README.md#online-weight-residency) defines
+the layout, allocation strategy, and startup profiling recipe.
 
 ## One real packed epoch
 
@@ -117,7 +127,7 @@ The small control tests exercise these contracts with actual queues.
 | Online shape insertion | Stage publication and immutable native export lifetime; cached code and in-flight bindings must remain valid |
 | Shared block-pool/prefix cache | Replace contiguous row origins with a page-map contract; explicit shared ownership, partial-tail copy-on-write, and recurrent snapshots |
 | Device-owned continuation | Admission/completion rings with credit and cancellation; row progress and token routing leave the host epoch wait without recycling in-flight buffers |
-| Pipelined weight preparation | Bounded staging and queue read/transform dependencies into final storage, with startup peak residency measured |
+| Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |
 | NPU/GPU or collective execution | Target packages, actual queue/device domains, shared-memory/coherency contracts, and cross-device completion/ownership |
 
 The present stage boundary accepts either kernels composed into commands or a

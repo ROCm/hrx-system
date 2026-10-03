@@ -16,17 +16,16 @@
 #include "experimental/loom_serve/execution.h"
 #include "experimental/loom_serve/jit.h"
 #include "experimental/loom_serve/module.h"
+#include "experimental/loom_serve/qwen_weights.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/init.h"
 #include "iree/io/file_contents.h"
-#include "iree/io/parameter_index_provider.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/vocab/vocab.h"
 #include "iree/tooling/device_util.h"
-#include "iree/tooling/parameter_util.h"
 #include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
 
@@ -95,8 +94,6 @@ struct loom_serve_qwen_model_t {
   loom_serve_qwen_shape_t* shapes;
   // Cold-resolved native exports in the one shared VM process.
   iree_vm_function_t* functions;
-  // Target parameter slab; auxiliary stages retain views of shared tensors.
-  iree_hal_buffer_t* weights;
   // Context specialization shared by every compiled stage.
   iree_host_size_t context_capacity;
   // Maximum active input chunk accepted by the selected row-prefill path.
@@ -297,214 +294,24 @@ static iree_status_t qwen_allocate_buffer(loom_serve_qwen_model_t* runner,
       iree_hal_device_allocator(runner->device), params, length, out_buffer);
 }
 
-static iree_status_t qwen_parameter_span(void* user_data, iree_host_size_t i,
-                                         iree_string_view_t* out_key,
-                                         iree_io_parameter_span_t* out_span) {
-  const loom_cmd_program_t* program = (const loom_cmd_program_t*)user_data;
-  const loom_cmd_program_parameter_t parameter =
-      loom_cmd_program_parameter_at(program, i);
-  *out_key = parameter.key;
-  *out_span = (iree_io_parameter_span_t){
-      .buffer_offset = parameter.byte_offset,
-      .length = parameter.byte_length,
-  };
-  return iree_ok_status();
-}
-
-typedef struct qwen_root_parameters_t {
-  // Borrowed parsed program whose parameter records back the enumeration.
-  const loom_cmd_program_t* program;
-  // Parameter ordinals selected once for this fixed root during cold loading.
-  const uint32_t* indices;
-} qwen_root_parameters_t;
-
-static iree_status_t qwen_root_parameter_span(
-    void* user_data, iree_host_size_t i, iree_string_view_t* out_key,
-    iree_io_parameter_span_t* out_span) {
-  const qwen_root_parameters_t* parameters = user_data;
-  return qwen_parameter_span((void*)parameters->program, parameters->indices[i],
-                             out_key, out_span);
-}
-
-// Cold artifact placement resolves shared tensors to existing storage. MTP
-// command roots group their new parameters independently; shared embedding,
-// normalization and output roots are views, not second copies of target data.
-static bool qwen_find_parameter(loom_serve_qwen_model_t* model,
-                                iree_host_size_t before_stage,
-                                iree_string_view_t key,
-                                loom_cmd_program_parameter_t* out_parameter,
-                                iree_hal_buffer_t** out_buffer) {
-  for (iree_host_size_t i = 0; i < before_stage; ++i) {
-    const qwen_stage_t* stage = &model->stages[i];
-    for (uint32_t j = 0; j < stage->program.parameters.count; ++j) {
-      const loom_cmd_program_parameter_t parameter =
-          loom_cmd_program_parameter_at(&stage->program, j);
-      if (iree_string_view_equal(parameter.key, key)) {
-        *out_parameter = parameter;
-        *out_buffer = stage->fixed_buffers[parameter.fixed_buffer_index];
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-static iree_status_t qwen_load_auxiliary_weights(
-    loom_serve_qwen_model_t* model, iree_host_size_t stage_index,
-    iree_io_parameter_provider_t* provider, iree_hal_semaphore_t* ready,
-    uint64_t* ready_value) {
-  qwen_stage_t* stage = &model->stages[stage_index];
-  const loom_cmd_program_t* program = &stage->program;
-  if (!program->parameter_roots.count) {
-    return iree_ok_status();
-  }
-  uint32_t* indices = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_allocator_malloc_array(model->allocator, program->parameters.count,
-                                  sizeof(*indices), (void**)&indices));
-  iree_status_t status = iree_ok_status();
-  for (uint32_t root_index = 0;
-       root_index < program->parameter_roots.count && iree_status_is_ok(status);
-       ++root_index) {
-    const loom_cmd_program_parameter_root_t root =
-        loom_cmd_program_parameter_root_at(program, root_index);
-    iree_host_size_t count = 0;
-    for (uint32_t i = 0; i < program->parameters.count; ++i) {
-      if (loom_cmd_program_parameter_at(program, i).fixed_buffer_index ==
-          root.fixed_buffer_index) {
-        indices[count++] = i;
-      }
-    }
-    if (!count) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "MTP stage %s has an empty parameter root",
-                                stage->name);
-      continue;
-    }
-    const loom_cmd_program_parameter_t first =
-        loom_cmd_program_parameter_at(program, indices[0]);
-    loom_cmd_program_parameter_t existing = {0};
-    iree_hal_buffer_t* source = NULL;
-    const bool shared =
-        qwen_find_parameter(model, stage_index, first.key, &existing, &source);
-    uint64_t origin = 0;
-    if (shared) {
-      if (existing.byte_offset < first.byte_offset) {
-        status =
-            iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                             "shared parameter root begins before storage");
-      } else {
-        origin = existing.byte_offset - first.byte_offset;
-      }
-    }
-    for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-      const loom_cmd_program_parameter_t parameter =
-          loom_cmd_program_parameter_at(program, indices[i]);
-      iree_hal_buffer_t* prior_buffer = NULL;
-      const bool found = qwen_find_parameter(model, stage_index, parameter.key,
-                                             &existing, &prior_buffer);
-      if (found != shared ||
-          (found && (prior_buffer != source ||
-                     existing.byte_offset != origin + parameter.byte_offset ||
-                     existing.byte_length != parameter.byte_length))) {
-        status = iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "stage %s parameter root cannot share the existing placement",
-            stage->name);
-      }
-    }
-    if (iree_status_is_ok(status) && shared) {
-      status = iree_hal_buffer_subspan(
-          source, origin, root.required_byte_length, model->allocator,
-          &stage->fixed_buffers[root.fixed_buffer_index]);
-    } else if (iree_status_is_ok(status)) {
-      status = qwen_allocate_buffer(
-          model, root.required_byte_length, root.minimum_alignment,
-          &stage->fixed_buffers[root.fixed_buffer_index]);
-      if (iree_status_is_ok(status)) {
-        ++*ready_value;
-        qwen_root_parameters_t parameters = {program, indices};
-        status = iree_io_parameter_provider_gather(
-            provider, model->device, model->transfer,
-            iree_hal_semaphore_list_empty(),
-            (iree_hal_semaphore_list_t){1, &ready, ready_value},
-            iree_string_view_empty(),
-            stage->fixed_buffers[root.fixed_buffer_index], count,
-            (iree_io_parameter_enumerator_t){qwen_root_parameter_span,
-                                             &parameters});
-        if (iree_status_is_ok(status)) {
-          status = iree_hal_semaphore_wait(ready, *ready_value,
-                                           iree_infinite_timeout(),
-                                           IREE_ASYNC_WAIT_FLAG_NONE);
-        }
-      }
-    }
-  }
-  iree_allocator_free(model->allocator, indices);
-  return status;
-}
-
-static iree_status_t qwen_load_weights(loom_serve_qwen_model_t* runner,
+// Weight placement and preparation are cold model-wide work. Session rows
+// never own weights and every compiled shape retains views of this residency.
+static iree_status_t qwen_load_weights(loom_serve_qwen_model_t* model,
                                        iree_string_view_t weights_path) {
-  const loom_cmd_program_t* program = &runner->stages[0].program;
-  const loom_cmd_program_parameter_root_t root =
-      loom_cmd_program_parameter_root_at(program, 0);
-  uint64_t length = root.required_byte_length;
-  uint64_t alignment = root.minimum_alignment;
-  for (iree_host_size_t i = 1; i < runner->shape_count + 2; ++i) {
-    const loom_cmd_program_parameter_root_t stage_root =
-        loom_cmd_program_parameter_root_at(&runner->stages[i].program, 0);
-    length = iree_max(length, stage_root.required_byte_length);
-    alignment = iree_max(alignment, stage_root.minimum_alignment);
+  loom_serve_qwen_weight_stage_t* stages = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      model->allocator, model->stage_count, sizeof(*stages), (void**)&stages));
+  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
+    stages[i] = (loom_serve_qwen_weight_stage_t){
+        .program = &model->stages[i].program,
+        .buffers = model->stages[i].fixed_buffers,
+    };
   }
-  IREE_RETURN_IF_ERROR(
-      qwen_allocate_buffer(runner, length, alignment, &runner->weights));
-  fprintf(stderr, "Loading %u parameters into one %.3f GiB weight slab...\n",
-          program->parameters.count, length / 1073741824.0);
-  iree_io_parameter_index_t* index = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_io_parameter_index_create(runner->allocator, &index));
-  iree_status_t status = iree_tooling_append_parameter_file_to_index(
-      weights_path, index, runner->allocator);
-  iree_io_parameter_provider_t* provider = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_io_parameter_index_provider_create(
-        iree_string_view_empty(), index, 4, runner->allocator, &provider);
-  }
-  iree_hal_semaphore_t* ready = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_create(runner->device,
-                                       IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
-                                       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready);
-  }
-  uint64_t ready_value = 1;
-  if (iree_status_is_ok(status)) {
-    status = iree_io_parameter_provider_gather(
-        provider, runner->device, runner->transfer,
-        iree_hal_semaphore_list_empty(),
-        (iree_hal_semaphore_list_t){1, &ready, &ready_value},
-        iree_string_view_empty(), runner->weights, program->parameters.count,
-        (iree_io_parameter_enumerator_t){qwen_parameter_span, (void*)program});
-    if (iree_status_is_ok(status)) {
-      status =
-          iree_hal_semaphore_wait(ready, ready_value, iree_infinite_timeout(),
-                                  IREE_ASYNC_WAIT_FLAG_NONE);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < runner->shape_count + 2; ++i) {
-      runner->stages[i].fixed_buffers[0] = runner->weights;
-      iree_hal_buffer_retain(runner->weights);
-    }
-  }
-  for (iree_host_size_t i = runner->shape_count + 2;
-       i < runner->stage_count && iree_status_is_ok(status); ++i) {
-    status =
-        qwen_load_auxiliary_weights(runner, i, provider, ready, &ready_value);
-  }
-  iree_hal_semaphore_release(ready);
-  iree_io_parameter_provider_release(provider);
-  iree_io_parameter_index_release(index);
+  iree_status_t status = loom_serve_qwen_weights_load(
+      model->device, model->transfer, model->dispatch, model->jit,
+      model->command_mode, model->shape_count + 2, model->stage_count, stages,
+      weights_path, model->allocator);
+  iree_allocator_free(model->allocator, stages);
   return status;
 }
 
@@ -893,6 +700,8 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(qwen_check_layouts(model));
+  IREE_RETURN_IF_ERROR(iree_hal_begin_device_group_profiling_from_flags(
+      model->group, model->allocator, &model->profiling));
   IREE_RETURN_IF_ERROR(qwen_load_weights(model, options->weights_path));
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {
@@ -905,8 +714,7 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
   IREE_RETURN_IF_ERROR(qwen_create_program(model, options->source_directory));
   IREE_RETURN_IF_ERROR(qwen_allocate_rows(model));
   IREE_RETURN_IF_ERROR(qwen_allocate_mtp(model));
-  return iree_hal_begin_device_group_profiling_from_flags(
-      model->group, model->allocator, &model->profiling);
+  return iree_ok_status();
 }
 
 iree_status_t loom_serve_qwen_model_create(
@@ -999,7 +807,6 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
   iree_allocator_free(model->allocator, model->functions);
   iree_allocator_free(model->allocator, model->shapes);
   iree_allocator_free(model->allocator, model->stages);
-  iree_hal_buffer_release(model->weights);
   loom_serve_execution_release(model->execution);
   iree_hal_device_group_release(model->group);
   loom_serve_jit_destroy(model->jit);

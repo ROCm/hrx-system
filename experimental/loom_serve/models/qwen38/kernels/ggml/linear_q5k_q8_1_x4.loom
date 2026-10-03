@@ -164,7 +164,7 @@ func.def inline @ggml_q5k_q8_1_x4_activation_chunk(%q8_input: buffer, %q8_row_by
 // Computes one lane's partial for a complete Q5_K row. The active target's
 // subgroup size controls whether each loop iteration covers two or four
 // consecutive 256-value blocks.
-func.def inline @ggml_q5k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
+func.def inline @ggml_q5k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %weight_block_stride: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %subgroup_size = target.subgroup.size : index
   %c0 = index.constant 0 : index
@@ -222,7 +222,9 @@ func.def inline @ggml_q5k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
       %q8_s = scalar.extf %q8_s_f16 : f16 to f32
       %q8_words = vector.load %q8_words_view[%q8_word_index] : view<32xi32> -> vector<4xi32>
       %q8_values = vector.bitcast %q8_words : vector<4xi32> to vector<16xi8>
-      %q5_values, %d_scale, %dmin_scale = template.apply<@ggml.q5k.chunk>(%weight, %weight_row_byte_base, %q5_block, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+      %weight_block_add = index.scale %q5_block, %weight_block_stride : index, offset -> offset
+      %weight_block_base = index.add %weight_row_byte_base, %weight_block_add : offset
+      %q5_values, %d_scale, %dmin_scale = template.apply<@ggml.q5k.chunk>(%weight, %weight_block_base, %c0, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
       %dot = template.apply<@ggml.qk.unsigned_q8_1_dot>(%q5_values, %d_scale, %dmin_scale, %q8_values, %q8_d, %q8_s) : (vector<16xi8>, f32, f32, vector<16xi8>, f32, f32) -> (f32)
       scf.yield %dot : f32
     } else {
@@ -237,7 +239,7 @@ func.def inline @ggml_q5k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
 // Computes four activation rows for one output channel while decoding every
 // Q5_K weight packet once. Each returned scalar is reduced independently by
 // the owning subgroup.
-func.def inline @ggml_q5k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row0_byte_base: offset, %q8_row1_byte_base: offset, %q8_row2_byte_base: offset, %q8_row3_byte_base: offset, %lane: index) -> (f32, f32, f32, f32) {
+func.def inline @ggml_q5k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %weight_block_stride: offset, %q8_input: buffer, %q8_row0_byte_base: offset, %q8_row1_byte_base: offset, %q8_row2_byte_base: offset, %q8_row3_byte_base: offset, %lane: index) -> (f32, f32, f32, f32) {
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %subgroup_size = target.subgroup.size : index
   %c0 = index.constant 0 : index
@@ -276,7 +278,9 @@ func.def inline @ggml_q5k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffe
       %iteration_q8_group = index.mul %iteration, %q8_groups_per_iteration : index
       %q8_group0 = index.add %iteration_q8_group, %lane_q8_group : index
       %q8_group = index.assume %q8_group0 [lt(%q8_group0, %q8_group_count)] : index
-      %q5_values, %d_scale, %dmin_scale = template.apply<@ggml.q5k.chunk>(%weight, %weight_row_byte_base, %q5_block, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
+      %weight_block_add = index.scale %q5_block, %weight_block_stride : index, offset -> offset
+      %weight_block_base = index.add %weight_row_byte_base, %weight_block_add : offset
+      %q5_values, %d_scale, %dmin_scale = template.apply<@ggml.q5k.chunk>(%weight, %weight_block_base, %c0, %q5_group, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
       %q8_values0, %q8_d0, %q8_s0 = func.call @ggml_q5k_q8_1_x4_activation_chunk(%q8_input, %q8_row0_byte_base, %q8_group, %q8_inner_block, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
       %q8_values1, %q8_d1, %q8_s1 = func.call @ggml_q5k_q8_1_x4_activation_chunk(%q8_input, %q8_row1_byte_base, %q8_group, %q8_inner_block, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
       %q8_values2, %q8_d2, %q8_s2 = func.call @ggml_q5k_q8_1_x4_activation_chunk(%q8_input, %q8_row2_byte_base, %q8_group, %q8_inner_block, %q5_half) : (buffer, offset, index, index, index) -> (vector<16xi8>, f32, f32)
@@ -302,18 +306,9 @@ func.def inline @ggml_q5k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffe
 // 256-thread workgroup exposes enough independent rows to saturate decode.
 // Workload values size the exact launch; configured capacities only constrain
 // device-body specialization and buffer addressing.
-kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
-  %subgroup_size = target.subgroup.size : index
-  %workgroup_size = index.constant 256 : index
-  %c1 = index.constant 1 : index
-  %subgroups_per_workgroup = index.div %workgroup_size, %subgroup_size : index
-  %output_padding = index.sub %subgroups_per_workgroup, %c1 : index
-  %padded_output_size = index.add %bounded_output_size, %output_padding : index
-  %output_tiles = index.div %padded_output_size, %subgroups_per_workgroup : index
-  kernel.launch.config workgroups(%output_tiles, %bounded_token_count, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
-} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+template.decl @ggml.q5k.q8_1_x4.single.body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@ggml.q5k.q8_1_x4.single.body> device @ggml_q5k_q8_1_x4_single_body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
   %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
@@ -341,12 +336,18 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggm
   %safe_channel = index.assume %safe_channel0 [lt(%safe_channel0, %output_capacity)] : index
   %q5_block_count = index.div %bounded_input_size, %c256 : index
   %weight_row_bytes = index.scale %q5_block_count, %c176_bytes : index, offset -> offset
-  %weight_row_byte_base = index.scale %safe_channel, %weight_row_bytes : index, offset -> offset
+  %weight_group = index.div %safe_channel, %weight_channels : index
+  %weight_within_group = index.rem %safe_channel, %weight_channels : index
+  %weight_group_bytes = index.scale %weight_channels, %weight_row_bytes : index, offset -> offset
+  %weight_group_base = index.scale %weight_group, %weight_group_bytes : index, offset -> offset
+  %weight_channel_add = index.scale %weight_within_group, %c176_bytes : index, offset -> offset
+  %weight_row_byte_base = index.add %weight_group_base, %weight_channel_add : offset
+  %weight_block_stride = index.scale %weight_channels, %c176_bytes : index, offset -> offset
   %q8_group_count = index.div %bounded_input_size, %c128 : index
   %q8_row_bytes = index.scale %q8_group_count, %c144_bytes : index, offset -> offset
   %q8_row_byte_base = index.scale %token, %q8_row_bytes : index, offset -> offset
   %lane_acc = scf.if %valid_channel -> (f32) {
-    %value = func.call @ggml_q5k_q8_1_x4_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, buffer, offset, index) -> (f32)
+    %value = func.call @ggml_q5k_q8_1_x4_row_lane(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %weight_block_stride, %q8_noalias, %q8_row_byte_base, %lane) : (index, buffer, offset, offset, buffer, offset, index) -> (f32)
     scf.yield %value : f32
   } else {
     %c0_f32 = scalar.constant 0.0 : f32
@@ -361,14 +362,11 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggm
       view.store %dot, %output_view[%token, %channel0] : f32, view<[%bounded_token_count]x[%bounded_output_size]xf32>
     }
   }
-  kernel.return
+  template.return
 }
 
-// Four-row target-verification schedule. One subgroup owns an output channel
-// and retains four accumulators so immutable Q5_K bytes are read and decoded
-// once for the complete MTP target batch.
-kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
+kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggml_linear_q5k_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %subgroup_size = target.subgroup.size : index
   %workgroup_size = index.constant 256 : index
@@ -377,8 +375,37 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @
   %output_padding = index.sub %subgroups_per_workgroup, %c1 : index
   %padded_output_size = index.add %bounded_output_size, %output_padding : index
   %output_tiles = index.div %padded_output_size, %subgroups_per_workgroup : index
-  kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+  kernel.launch.config workgroups(%output_tiles, %bounded_token_count, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 1 : index
+  template.apply<@ggml.q5k.q8_1_x4.single.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Eight-channel block order retains the same Q8 activation and reduction math.
+kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_channel8") @ggml_linear_q5k_q8_1_x4_channel8(%token_count: index, %input_size: index, %output_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 8, 262144), mul(%output_size, 8)] : index
+  %subgroup_size = target.subgroup.size : index
+  %workgroup_size = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  %subgroups_per_workgroup = index.div %workgroup_size, %subgroup_size : index
+  %output_padding = index.sub %subgroups_per_workgroup, %c1 : index
+  %padded_output_size = index.add %bounded_output_size, %output_padding : index
+  %output_tiles = index.div %padded_output_size, %subgroups_per_workgroup : index
+  kernel.launch.config workgroups(%output_tiles, %bounded_token_count, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 8 : index
+  template.apply<@ggml.q5k.q8_1_x4.single.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Four-row target-verification schedule. One subgroup owns an output channel
+// and retains four accumulators so immutable Q5_K bytes are read and decoded
+// once for the complete MTP target batch.
+template.decl @ggml.q5k.q8_1_x4.four.body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+
+template.def<@ggml.q5k.q8_1_x4.four.body> device @ggml_q5k_q8_1_x4_four_body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
   %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
@@ -407,7 +434,13 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @
   %safe_channel = index.assume %safe_channel0 [lt(%safe_channel0, %output_capacity)] : index
   %q5_block_count = index.div %bounded_input_size, %c256 : index
   %weight_row_bytes = index.scale %q5_block_count, %c176_bytes : index, offset -> offset
-  %weight_row_byte_base = index.scale %safe_channel, %weight_row_bytes : index, offset -> offset
+  %weight_group = index.div %safe_channel, %weight_channels : index
+  %weight_within_group = index.rem %safe_channel, %weight_channels : index
+  %weight_group_bytes = index.scale %weight_channels, %weight_row_bytes : index, offset -> offset
+  %weight_group_base = index.scale %weight_group, %weight_group_bytes : index, offset -> offset
+  %weight_channel_add = index.scale %weight_within_group, %c176_bytes : index, offset -> offset
+  %weight_row_byte_base = index.add %weight_group_base, %weight_channel_add : offset
+  %weight_block_stride = index.scale %weight_channels, %c176_bytes : index, offset -> offset
   %q8_group_count = index.div %bounded_input_size, %c128 : index
   %q8_row_bytes = index.scale %q8_group_count, %c144_bytes : index, offset -> offset
   %q8_row0_byte_base = index.scale %c0, %q8_row_bytes : index, offset -> offset
@@ -415,7 +448,7 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @
   %q8_row2_byte_base = index.scale %c2, %q8_row_bytes : index, offset -> offset
   %q8_row3_byte_base = index.scale %c3, %q8_row_bytes : index, offset -> offset
   %lane0, %lane1, %lane2, %lane3 = scf.if %valid_channel -> (f32, f32, f32, f32) {
-    %value0, %value1, %value2, %value3 = func.call @ggml_q5k_q8_1_x4_row_lane_m4(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %q8_noalias, %q8_row0_byte_base, %q8_row1_byte_base, %q8_row2_byte_base, %q8_row3_byte_base, %lane) : (index, buffer, offset, buffer, offset, offset, offset, offset, index) -> (f32, f32, f32, f32)
+    %value0, %value1, %value2, %value3 = func.call @ggml_q5k_q8_1_x4_row_lane_m4(%bounded_input_size, %weight_noalias, %weight_row_byte_base, %weight_block_stride, %q8_noalias, %q8_row0_byte_base, %q8_row1_byte_base, %q8_row2_byte_base, %q8_row3_byte_base, %lane) : (index, buffer, offset, offset, buffer, offset, offset, offset, offset, index) -> (f32, f32, f32, f32)
     scf.yield %value0, %value1, %value2, %value3 : f32, f32, f32, f32
   } else {
     %c0_f32 = scalar.constant 0.0 : f32
@@ -443,6 +476,41 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @
       view.store %dot3, %output_row3[%channel0] : f32, view<[%bounded_output_size]xf32>
     }
   }
+  template.return
+}
+
+kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
+  %subgroup_size = target.subgroup.size : index
+  %workgroup_size = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  %subgroups_per_workgroup = index.div %workgroup_size, %subgroup_size : index
+  %output_padding = index.sub %subgroups_per_workgroup, %c1 : index
+  %padded_output_size = index.add %bounded_output_size, %output_padding : index
+  %output_tiles = index.div %padded_output_size, %subgroups_per_workgroup : index
+  kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 1 : index
+  template.apply<@ggml.q5k.q8_1_x4.four.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Eight-channel block order retains the same Q8 activation and reduction math.
+kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4_channel8") @ggml_linear_q5k_q8_1_x4_m4_channel8(%token_count: index, %input_size: index, %output_size: index) {
+  %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
+  %bounded_output_size = index.assume %output_size [range(%output_size, 8, 262144), mul(%output_size, 8)] : index
+  %subgroup_size = target.subgroup.size : index
+  %workgroup_size = index.constant 256 : index
+  %c1 = index.constant 1 : index
+  %subgroups_per_workgroup = index.div %workgroup_size, %subgroup_size : index
+  %output_padding = index.sub %subgroups_per_workgroup, %c1 : index
+  %padded_output_size = index.add %bounded_output_size, %output_padding : index
+  %output_tiles = index.div %padded_output_size, %subgroups_per_workgroup : index
+  kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
+} launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 8 : index
+  template.apply<@ggml.q5k.q8_1_x4.four.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
