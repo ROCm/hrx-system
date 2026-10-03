@@ -161,6 +161,26 @@ The first run's 15 command-stage preparation events total 1.823 seconds,
 including native compilation and loading. Source indexing, VM setup and weight
 loading are outside that sum. All model inputs are portable source, checkpoint
 and tokenizer files; no prepared native image is a deployment input.
+The measured optimized Linux executable is 13,941,680 bytes (13.30 MiB),
+including the embedded JIT. That is executable size, not the size of its model
+sources, checkpoint, loaded memory, or external ROCr/system libraries.
+
+A subsequent leased refresh used clean upstream
+`bed0a856606ee4a24a164066f73d2379447033f5` with the same Vulkan settings:
+
+| Serving configuration | Whole window | Appended inputs | Outputs |
+| --- | ---: | ---: | ---: |
+| Upstream target-only | 161.991 s | 28,727 | 3,072 |
+| Upstream MTP depth 3 | 160.893 s | 28,533 | 2,880 |
+| Loom source-JIT control afterward | 131.590 s | 28,534 | 3,072 |
+
+The target-only row passes retained-output and retirement checks, but one
+follow-up reprocesses more history, so its input work differs. The MTP row
+uses the real draft context and accepts 62.6% of proposals; two requests stop
+at EOS, including a four-token follow-up containing only `### Re-e`. Its
+shorter window is not equivalent completed work. These observations remain
+separate from the repeated pinned-control ratio above; HIP and other tuning
+configurations have not been qualified by these runs.
 
 Prompt-containing epochs account for about 90.5 seconds, versus 41.6-42.5
 seconds in decode-only epochs. This is the reason to profile wide model math
