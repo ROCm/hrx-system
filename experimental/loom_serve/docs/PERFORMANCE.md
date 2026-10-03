@@ -188,6 +188,63 @@ next: removing host decode overhead alone cannot explain away most of the
 remaining window. Dispatch profiling is a separate diagnostic run, never one
 of the scored controls.
 
+### FFN block read-ahead checkpoint
+
+Commit `92f4875240` specializes the fused wide feed-forward kernel's model
+dimensions through JIT configuration and pipelines next-block weight reads
+across current matrix work. The [model guide](../models/qwen38/README.md#fused-feed-forward-projection)
+records the source contract and complete source-level differential checks.
+Arithmetic, weight format, retained state, scheduling policy and MTP depth
+remain unchanged. This adds no HAL or command-program ABI extension.
+
+The following A/B/C/B/A comparison used the same device, power policy, corpus
+and settings above under one lease. Both Loom arms used the same optimized
+executable, SHA256
+`05560c0e167dc7537c3191cb9bf4d4b034d6dd76d609305d0eb4f450550ff452`.
+Only `--model` changed: the source catalog at `f13ac7a028` versus the new
+catalog. Each launch recorded source hashes, and both control source maps
+matched that baseline commit. No precompiled model artifact was substituted.
+
+| Run order | Serving configuration | Whole window | Aggregate output tokens/s |
+| --- | --- | ---: | ---: |
+| 1 | Loom, previous source | 131.991 s | 23.274 |
+| 2 | Loom, block read-ahead | 128.826 s | 23.846 |
+| 3 | Pinned llama.cpp `f7b384c1`, Vulkan, target-only | 162.680 s | 18.884 |
+| 4 | Loom, block read-ahead | 129.450 s | 23.731 |
+| 5 | Loom, previous source | 132.444 s | 23.195 |
+
+Every window completes 16 length-limited responses, 28,534 appended inputs
+and 3,072 outputs, with all second turns retaining state. Request frontiers,
+output credits, epoch counters and clean shutdown agree with client usage.
+Loom retires 183/177/183/182 epochs in its four windows. GPU maxima in run
+order are 64/62/62/60/61 C, and package-power medians remain about 100 W.
+
+Mean Loom time improves from 132.217 to 129.138 seconds: **2.38% higher
+throughput**, versus 0.34% control spread and 0.48% candidate spread. Both
+candidates beat both controls. Mean candidate throughput is **23.789 output
+tokens/s, 26.0% ahead of this pinned comparator**. The comparator remains
+target-only while Loom uses MTP; the newer-upstream qualification differences
+above still apply. This is not a best-backend or same-MTP claim.
+
+Equal token counts do not imply identical trajectories. Six replies differ
+between the two controls; the candidate windows differ from the first control
+in six and four replies, and all 16 comparator replies differ. Those histories
+change subsequent batching. The full-server result therefore measures this
+closed-loop workload; isolated kernel tests provide separate causal evidence.
+The 15 JIT-stage preparations take 1.974/1.962 seconds for the candidates versus
+1.829/1.836 seconds for the controls, excluding indexing, VM setup and loading.
+
+Locked, completion-inclusive kernel A/B/A/B/A measurements use production
+K=5120/N=17408, 128/256/512 token capacities, two physical binding sets and
+canonical weights. Both read-ahead windows beat every original window at
+each capacity, with individual gains of roughly 6-11%. A second comparison
+holds dimensions, packet order and unrolling fixed and varies only pipelining;
+it also improves all three capacities. Native inspection confirms next-block
+loads outstanding across matrix instructions, 51,200 bytes of LDS, no spills,
+and unchanged modeled occupancy despite increased register use. This is
+partial weight-read overlap, not a claim of fully saturated memory bandwidth.
+The host still drains each epoch before scheduling the next cohort.
+
 ## Traffic and batching hypotheses
 
 For one completed traversal, let `D` be modeled bytes reaching the relevant

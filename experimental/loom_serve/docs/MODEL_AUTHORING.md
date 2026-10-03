@@ -65,6 +65,15 @@ active count are different facts: padding can exist without advancing the
 persistent state of inactive rows. The [facts guide](../../../loom/docs/src/guide/facts-and-specialization.md)
 explains both domains and path-dependent refinement.
 
+The fused [FFN block read-ahead](../models/qwen38/kernels/qwen38/ffn_gate_up_prefetch.loom)
+is a concrete example: `qwen38.ffn.input_size` and `qwen38.ffn.output_size`
+configure the body, allowing an exact block loop to pipeline weight acquisition.
+Its workload carries token capacity, and its five launch buffers carry live count,
+activations, two weight views and output. There is no runtime K/N scalar to
+rediscover or a host readback to learn the active count. The
+[model guide](../models/qwen38/README.md#fused-feed-forward-projection) includes
+the matching configuration and seeded full-array checks.
+
 An authored target contract fixes algorithmic requirements such as subgroup
 width. `loomc_target_profile_create_amdgpu_iree_hal` supplies the actual device
 facts for native specialization. The Q4/Q5/Q8 wave32 entries explicitly name
@@ -121,6 +130,12 @@ tolerance and input/history preservation bitwise. Kernel-level checks can name
 an explicit oracle function with the intended serial semantics. The
 [checks guide](../../../loom/docs/src/guide/checks-and-benchmarks.md) owns the
 syntax and observation contract.
+
+`iree-test-loom --library` merges the libraries' embedded check records too.
+An explicit `--case=@name` selects the intended case and all its samples;
+an empty selection runs every loaded record. The FFN recipe iterates its
+complete owned case list so provider benchmarks do not silently broaden the
+suite or require additional fixture-only dependencies.
 
 Useful cases exercise boundaries that realistic batching creates: one active
 token, full tiles, odd tails, inactive rows, distinct resident origins, repeated
