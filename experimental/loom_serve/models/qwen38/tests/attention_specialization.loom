@@ -1,0 +1,204 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Independent concrete wrappers bind the same motifs to two logical extents
+// and physical pools in one composition, without model configuration symbols.
+// Both use resident row one; its page-map stride differs between geometries.
+amdgpu.target<gfx11-generic> @cache_specialization_wave64 {subgroup_size = 64}
+
+func.decl @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset)
+template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token: index, %lane: index, %control: buffer, %epsilon: f32, %key: buffer, %value: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+template.decl @qwen38.attention.wmma(%logical_capacity: index, %tile: index, %head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+
+kernel.def @cache_81_prepare() {
+  %one = index.constant 1 : index
+  %heads = index.constant 4 : index
+  %tokens = index.constant 96 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%heads, %tokens, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%control: buffer, %rows: buffer, %key: buffer, %value: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer) {
+  %logical_capacity = index.constant 81 : index
+  %pool_capacity = index.constant 128 : index
+  %head_value = kernel.workgroup.id<x> : index
+  %head = index.assume %head_value [range(%head_value, 0, 3)] : index
+  %token = kernel.workgroup.id<y> : index
+  %lane_value = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_value [range(%lane_value, 0, 255)] : index
+  %row = index.constant 1 : index
+  %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
+  %origin = index.constant 0 : offset
+  %token_begin = index.constant 0 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  kernel.return
+}
+
+kernel.def target(@cache_specialization_wave64) @cache_81_attention() {
+  %one = index.constant 1 : index
+  %tiles = index.constant 6 : index
+  %heads = index.constant 24 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%tiles, %heads, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%control: buffer, %rows: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  %logical_capacity = index.constant 81 : index
+  %pool_capacity = index.constant 128 : index
+  %tile = kernel.workgroup.id<x> : index
+  %head_value = kernel.workgroup.id<y> : index
+  %head = index.assume %head_value [range(%head_value, 0, 23)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup_value = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup_value [range(%subgroup_value, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %row = index.constant 1 : index
+  %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
+  %origin = index.constant 0 : offset
+  %token_begin = index.constant 0 : index
+  %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
+  template.apply<@qwen38.attention.wmma>(%logical_capacity, %tile, %head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  kernel.return
+}
+
+kernel.def @cache_145_prepare() {
+  %one = index.constant 1 : index
+  %heads = index.constant 4 : index
+  %tokens = index.constant 160 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%heads, %tokens, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%control: buffer, %rows: buffer, %key: buffer, %value: buffer, %weight: buffer, %key_cache: buffer, %value_cache: buffer) {
+  %logical_capacity = index.constant 145 : index
+  %pool_capacity = index.constant 192 : index
+  %head_value = kernel.workgroup.id<x> : index
+  %head = index.assume %head_value [range(%head_value, 0, 3)] : index
+  %token = kernel.workgroup.id<y> : index
+  %lane_value = kernel.workitem.id<x> : index
+  %lane = index.assume %lane_value [range(%lane_value, 0, 255)] : index
+  %row = index.constant 1 : index
+  %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
+  %origin = index.constant 0 : offset
+  %token_begin = index.constant 0 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %control, %epsilon, %key, %value, %weight, %key_cache, %value_cache, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  kernel.return
+}
+
+kernel.def target(@cache_specialization_wave64) @cache_145_attention() {
+  %one = index.constant 1 : index
+  %tiles = index.constant 10 : index
+  %heads = index.constant 24 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%tiles, %heads, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%control: buffer, %rows: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer) {
+  %logical_capacity = index.constant 145 : index
+  %pool_capacity = index.constant 192 : index
+  %tile = kernel.workgroup.id<x> : index
+  %head_value = kernel.workgroup.id<y> : index
+  %head = index.assume %head_value [range(%head_value, 0, 23)] : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup_value = kernel.subgroup.id : index
+  %subgroup = index.assume %subgroup_value [range(%subgroup_value, 0, 3)] : index
+  %lane = kernel.subgroup.lane.id : index
+  %row = index.constant 1 : index
+  %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
+  %origin = index.constant 0 : offset
+  %token_begin = index.constant 0 : index
+  %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
+  template.apply<@qwen38.attention.wmma>(%logical_capacity, %tile, %head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+  kernel.return
+}
+
+// Metadata uses independent byte offsets and page permutations {1, 0} and
+// {2, 0, 1}, not the helpers under test. Other entries remain invalid.
+kernel.def @independent_cache_maps() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%small: buffer, %large: buffer) {
+  %small_origin = index.constant 1032 : offset
+  %large_origin = index.constant 1036 : offset
+  %small_map = buffer.view %small[%small_origin] : buffer -> view<2xi32>
+  %large_map = buffer.view %large[%large_origin] : buffer -> view<3xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  view.store %one, %small_map[0] : i32, view<2xi32>
+  view.store %zero, %small_map[1] : i32, view<2xi32>
+  view.store %two, %large_map[0] : i32, view<3xi32>
+  view.store %zero, %large_map[1] : i32, view<3xi32>
+  view.store %one, %large_map[2] : i32, view<3xi32>
+  kernel.return
+}
+
+// Full blocks and a 17-token tail are prepared into noncontiguous pages.
+// Zero Q/K and constant V give a closed-form gated attention result. Every
+// physical cache element is checked, including the unused 47-token region,
+// and every padded output token must retain its sentinel.
+check.case public @attention_independent_specializations {
+  %rows_small = check.generate.fill value(-1) : tensor<260xi32>
+  %rows_large = check.generate.fill value(-1) : tensor<262xi32>
+  kernel.launch @independent_cache_maps(%rows_small, %rows_large) : (tensor<260xi32>, tensor<262xi32>)
+  %key = check.generate.fill value(0.0) : tensor<160x1024xf32>
+  %value = check.generate.fill value(0.25) : tensor<160x1024xf32>
+  %weight = check.generate.fill value(1.0) : tensor<256xf32>
+  %query = check.generate.fill value(0.0) : tensor<160x6144xf32>
+  %gate = check.generate.fill value(0.5) : tensor<160x6144xf32>
+  %expected_key_guard = check.generate.fill value(1.0) : tensor<47x1024xf16>
+  %expected_value_guard = check.generate.fill value(9.125) : tensor<47x1024xf16>
+  %control_small = check.generate.iota offset(81) step(-81) : tensor<2xi32>
+  %key_small = check.generate.fill value(1.0) : tensor<128x1024xf16>
+  %value_small = check.generate.fill value(9.125) : tensor<128x1024xf16>
+  %output_small = check.generate.fill value(9.125) : tensor<96x6144xf32>
+  kernel.launch @cache_81_prepare(%control_small, %rows_small, %key, %value, %weight, %key_small, %value_small) : (tensor<2xi32>, tensor<260xi32>, tensor<160x1024xf32>, tensor<160x1024xf32>, tensor<256xf32>, tensor<128x1024xf16>, tensor<128x1024xf16>)
+  kernel.launch @cache_81_attention(%control_small, %rows_small, %query, %gate, %key_small, %value_small, %output_small) : (tensor<2xi32>, tensor<260xi32>, tensor<160x6144xf32>, tensor<160x6144xf32>, tensor<128x1024xf16>, tensor<128x1024xf16>, tensor<96x6144xf32>)
+  %key_small_prefix = check.tensor.view %key_small offset(0) : tensor<128x1024xf16> -> tensor<17x1024xf16>
+  %expected_key_small_prefix = check.generate.fill value(0.0) : tensor<17x1024xf16>
+  check.expect.close actual(%key_small_prefix) expected(%expected_key_small_prefix) atol(0.0) rtol(0.0) nan(same) : tensor<17x1024xf16>
+  %value_small_prefix = check.tensor.view %value_small offset(0) : tensor<128x1024xf16> -> tensor<17x1024xf16>
+  %expected_value_small_prefix = check.generate.fill value(0.25) : tensor<17x1024xf16>
+  check.expect.close actual(%value_small_prefix) expected(%expected_value_small_prefix) atol(0.0) rtol(0.0) nan(same) : tensor<17x1024xf16>
+  %key_small_guard = check.tensor.view %key_small offset(34816) : tensor<128x1024xf16> -> tensor<47x1024xf16>
+  check.expect.close actual(%key_small_guard) expected(%expected_key_guard) atol(0.0) rtol(0.0) nan(same) : tensor<47x1024xf16>
+  %value_small_guard = check.tensor.view %value_small offset(34816) : tensor<128x1024xf16> -> tensor<47x1024xf16>
+  check.expect.close actual(%value_small_guard) expected(%expected_value_guard) atol(0.0) rtol(0.0) nan(same) : tensor<47x1024xf16>
+  %key_small_last = check.tensor.view %key_small offset(131072) : tensor<128x1024xf16> -> tensor<64x1024xf16>
+  %expected_key_small_last = check.generate.fill value(0.0) : tensor<64x1024xf16>
+  check.expect.close actual(%key_small_last) expected(%expected_key_small_last) atol(0.0) rtol(0.0) nan(same) : tensor<64x1024xf16>
+  %value_small_last = check.tensor.view %value_small offset(131072) : tensor<128x1024xf16> -> tensor<64x1024xf16>
+  %expected_value_small_last = check.generate.fill value(0.25) : tensor<64x1024xf16>
+  check.expect.close actual(%value_small_last) expected(%expected_value_small_last) atol(0.0) rtol(0.0) nan(same) : tensor<64x1024xf16>
+  %active_small = check.tensor.view %output_small offset(0) : tensor<96x6144xf32> -> tensor<81x6144xf32>
+  %expected_small = check.generate.fill value(0.125) : tensor<81x6144xf32>
+  check.expect.close actual(%active_small) expected(%expected_small) atol(0.001) rtol(0.001) nan(same) : tensor<81x6144xf32>
+  %tail_small = check.tensor.view %output_small offset(1990656) : tensor<96x6144xf32> -> tensor<15x6144xf32>
+  %expected_tail_small = check.generate.fill value(9.125) : tensor<15x6144xf32>
+  check.expect.bitwise actual(%tail_small) expected(%expected_tail_small) : tensor<15x6144xf32>
+  %control_large = check.generate.iota offset(145) step(-145) : tensor<2xi32>
+  %key_large = check.generate.fill value(1.0) : tensor<192x1024xf16>
+  %value_large = check.generate.fill value(9.125) : tensor<192x1024xf16>
+  %output_large = check.generate.fill value(9.125) : tensor<160x6144xf32>
+  kernel.launch @cache_145_prepare(%control_large, %rows_large, %key, %value, %weight, %key_large, %value_large) : (tensor<2xi32>, tensor<262xi32>, tensor<160x1024xf32>, tensor<160x1024xf32>, tensor<256xf32>, tensor<192x1024xf16>, tensor<192x1024xf16>)
+  kernel.launch @cache_145_attention(%control_large, %rows_large, %query, %gate, %key_large, %value_large, %output_large) : (tensor<2xi32>, tensor<262xi32>, tensor<160x6144xf32>, tensor<160x6144xf32>, tensor<192x1024xf16>, tensor<192x1024xf16>, tensor<160x6144xf32>)
+  %key_large_prefix = check.tensor.view %key_large offset(0) : tensor<192x1024xf16> -> tensor<81x1024xf16>
+  %expected_key_large_prefix = check.generate.fill value(0.0) : tensor<81x1024xf16>
+  check.expect.close actual(%key_large_prefix) expected(%expected_key_large_prefix) atol(0.0) rtol(0.0) nan(same) : tensor<81x1024xf16>
+  %value_large_prefix = check.tensor.view %value_large offset(0) : tensor<192x1024xf16> -> tensor<81x1024xf16>
+  %expected_value_large_prefix = check.generate.fill value(0.25) : tensor<81x1024xf16>
+  check.expect.close actual(%value_large_prefix) expected(%expected_value_large_prefix) atol(0.0) rtol(0.0) nan(same) : tensor<81x1024xf16>
+  %key_large_guard = check.tensor.view %key_large offset(165888) : tensor<192x1024xf16> -> tensor<47x1024xf16>
+  check.expect.close actual(%key_large_guard) expected(%expected_key_guard) atol(0.0) rtol(0.0) nan(same) : tensor<47x1024xf16>
+  %value_large_guard = check.tensor.view %value_large offset(165888) : tensor<192x1024xf16> -> tensor<47x1024xf16>
+  check.expect.close actual(%value_large_guard) expected(%expected_value_guard) atol(0.0) rtol(0.0) nan(same) : tensor<47x1024xf16>
+  %key_large_last = check.tensor.view %key_large offset(262144) : tensor<192x1024xf16> -> tensor<64x1024xf16>
+  %expected_key_large_last = check.generate.fill value(0.0) : tensor<64x1024xf16>
+  check.expect.close actual(%key_large_last) expected(%expected_key_large_last) atol(0.0) rtol(0.0) nan(same) : tensor<64x1024xf16>
+  %value_large_last = check.tensor.view %value_large offset(262144) : tensor<192x1024xf16> -> tensor<64x1024xf16>
+  %expected_value_large_last = check.generate.fill value(0.25) : tensor<64x1024xf16>
+  check.expect.close actual(%value_large_last) expected(%expected_value_large_last) atol(0.0) rtol(0.0) nan(same) : tensor<64x1024xf16>
+  %active_large = check.tensor.view %output_large offset(0) : tensor<160x6144xf32> -> tensor<145x6144xf32>
+  %expected_large = check.generate.fill value(0.125) : tensor<145x6144xf32>
+  check.expect.close actual(%active_large) expected(%expected_large) atol(0.001) rtol(0.001) nan(same) : tensor<145x6144xf32>
+  %tail_large = check.tensor.view %output_large offset(3563520) : tensor<160x6144xf32> -> tensor<15x6144xf32>
+  %expected_tail_large = check.generate.fill value(9.125) : tensor<15x6144xf32>
+  check.expect.bitwise actual(%tail_large) expected(%expected_tail_large) : tensor<15x6144xf32>
+  check.return
+}

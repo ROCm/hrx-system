@@ -85,6 +85,19 @@ rediscover or a host readback to learn the active count. The
 [model guide](../models/qwen38/README.md#fused-feed-forward-projection) includes
 the matching configuration and seeded full-array checks.
 
+The [cache-map helpers](../models/qwen38/kernels/qwen38/spans.loom) and shared
+KV preparation/WMMA templates likewise receive logical capacity explicitly.
+That capacity sizes each row's logical page map and bounds absolute positions;
+physical pool capacity independently sizes the shared K/V planes. The concrete
+dense and packed wrappers resolve configuration without adding launch arguments
+or device metadata loads. The
+[attention specialization case](../models/qwen38/tests/attention_specialization.loom)
+combines 81/145-position logical caches with 128/192-position physical pools
+in one composition without any model configuration bindings. It checks different
+map strides, scattered pages, complete cache contents, and masked output tails.
+These motifs still implement Qwen's fixed head geometry and RoPE; explicit
+cache operands alone do not make them arbitrary-model attention.
+
 An authored target contract fixes algorithmic requirements such as subgroup
 width. `loomc_target_profile_create_amdgpu_iree_hal` supplies the actual device
 facts for native specialization. The Q4/Q5/Q8 wave32 entries explicitly name

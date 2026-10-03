@@ -9,13 +9,13 @@ func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, 
 
 func.decl @qwen38_row_kv_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
 
-func.decl @qwen38_row_kv_map_origin(%row: index) -> (offset)
+func.decl @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset)
 
 template.decl @qwen38.attention.query_prepare(%head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %query_gate_projection: buffer, %norm_weight: buffer, %query: buffer, %gate: buffer, %control_origin: offset, %token_begin: index)
 
-template.decl @qwen38.attention.kv_prepare(%head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+template.decl @qwen38.attention.kv_prepare(%logical_capacity: index, %head: index, %token0: index, %lane: index, %control: buffer, %epsilon: f32, %key_projection: buffer, %value_projection: buffer, %norm_weight: buffer, %key_cache: buffer, %value_cache: buffer, %control_origin: offset, %token_begin: index, %key_origin: offset, %value_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
 
-template.decl @qwen38.attention.wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+template.decl @qwen38.attention.wmma(%logical_capacity: index, %query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
 
 config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
@@ -71,11 +71,11 @@ kernel.def export("qwen38_attention_kv_prepare_spans") @qwen38_attention_kv_prep
     %zero = index.constant 0 : index
     %paged = index.cmp ne, %pool_capacity, %zero : index
     %cache_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
-    %map_origin = func.call @qwen38_row_kv_map_origin(%row) : (index) -> (offset)
+    %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
     %cache_row_bytes = index.constant 2048 : offset
     %cache_bytes = index.scale %cache_capacity, %cache_row_bytes : index, offset -> offset
     %value_origin = index.add %key_origin, %cache_bytes : offset
-    template.apply<@qwen38.attention.kv_prepare>(%head, %token, %lane, %epoch, %epsilon, %key_projection, %value_projection, %weight, %state, %state, %control_origin, %token_begin, %key_origin, %value_origin, %rows, %map_origin, %pool_capacity) : (index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+    template.apply<@qwen38.attention.kv_prepare>(%logical_capacity, %head, %token, %lane, %epoch, %epsilon, %key_projection, %value_projection, %weight, %state, %state, %control_origin, %token_begin, %key_origin, %value_origin, %rows, %map_origin, %pool_capacity) : (index, index, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
   }
   kernel.return
 }
@@ -120,11 +120,11 @@ kernel.def target(@qwen38_attention_spans_gfx11_wave64) export("qwen38_attention
       %zero = index.constant 0 : index
       %paged = index.cmp ne, %pool_capacity, %zero : index
       %cache_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
-      %map_origin = func.call @qwen38_row_kv_map_origin(%row) : (index) -> (offset)
+      %map_origin = func.call @qwen38_row_kv_map_origin(%logical_capacity, %row) : (index, index) -> (offset)
       %cache_row_bytes = index.constant 2048 : offset
       %cache_bytes = index.scale %cache_capacity, %cache_row_bytes : index, offset -> offset
       %value_origin = index.add %key_origin, %cache_bytes : offset
-      template.apply<@qwen38.attention.wmma>(%query_tile, %head, %workitem, %subgroup, %lane, %epoch_noalias, %query_noalias, %gate_noalias, %state_noalias, %state_noalias, %output_noalias, %control_origin, %token_begin, %key_origin, %value_origin, %rows_noalias, %map_origin, %pool_capacity) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
+      template.apply<@qwen38.attention.wmma>(%logical_capacity, %query_tile, %head, %workitem, %subgroup, %lane, %epoch_noalias, %query_noalias, %gate_noalias, %state_noalias, %state_noalias, %output_noalias, %control_origin, %token_begin, %key_origin, %value_origin, %rows_noalias, %map_origin, %pool_capacity) : (index, index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
     }
   }
   kernel.return

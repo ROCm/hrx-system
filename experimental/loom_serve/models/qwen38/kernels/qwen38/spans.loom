@@ -18,15 +18,14 @@
 // Metadata is immutable for the entire queued epoch; the completion edge owns
 // permission to refill epoch storage. Resident origins remain cold data;
 // optional page maps are published before the work that first consumes them.
-config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
 
 // Packed cache page maps follow room for 64 origin pairs. A mapping covers
 // only the resident logical prefix; entries beyond that prefix are not read.
-func.def public inline @qwen38_row_kv_map_origin(%row: index) -> (offset) {
-  %capacity = config.get @qwen38.attention.cache_capacity : index
+// Its row stride uses the caller's logical capacity, not the physical pool.
+func.def public inline @qwen38_row_kv_map_origin(%logical_capacity: index, %row: index) -> (offset) {
   %sixty_three = index.constant 63 : index
   %sixty_four = index.constant 64 : index
-  %padded_capacity = index.add %capacity, %sixty_three : index
+  %padded_capacity = index.add %logical_capacity, %sixty_three : index
   %block_count = index.div %padded_capacity, %sixty_four : index
   %word_bytes = index.constant 4 : offset
   %row_bytes = index.scale %block_count, %word_bytes : index, offset -> offset
@@ -39,14 +38,14 @@ func.def public inline @qwen38_row_kv_map_origin(%row: index) -> (offset) {
 // A zero physical capacity selects contiguous addressing for the independent
 // dense kernels. Paged callers provide a resident map and a multiple-of-64
 // physical extent. Logical positions still own RoPE and causal masking.
-func.def public inline @qwen38_kv_position(%map: buffer, %map_origin: offset, %position: index, %pool_capacity: index) -> (index) {
+// Capacity and map geometry are explicit; this helper owns no configuration.
+func.def public inline @qwen38_kv_position(%logical_capacity: index, %map: buffer, %map_origin: offset, %position: index, %pool_capacity: index) -> (index) {
   %zero = index.constant 0 : index
   %paged = index.cmp ne, %pool_capacity, %zero : index
   %physical = scf.if %paged -> (index) {
-    %capacity = config.get @qwen38.attention.cache_capacity : index
     %sixty_three = index.constant 63 : index
     %sixty_four = index.constant 64 : index
-    %padded_capacity = index.add %capacity, %sixty_three : index
+    %padded_capacity = index.add %logical_capacity, %sixty_three : index
     %map_count = index.div %padded_capacity, %sixty_four : index
     %block_count = index.div %pool_capacity, %sixty_four : index
     %logical_block = index.div %position, %sixty_four : index

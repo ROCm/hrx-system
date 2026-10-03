@@ -624,6 +624,26 @@ unused pages and guards. With the same libraries above, select
 `--config=qwen38.attention.cache_capacity=192`, and
 `--config=qwen38.attention.pool_capacity=256`. Repeat with `--sanitizer=access`.
 
+The shared KV-map helpers, KV preparation and WMMA body take logical capacity
+as an explicit operand. Concrete wrappers resolve configuration; the logical
+extent sizes per-row page maps while physical capacity sizes the K/V planes.
+`tests/attention_specialization.loom` composes two independent logical extents
+(81 and 145) and pools (128 and 192) without any configuration bindings. Its
+known-value case checks every physical cache element, different map strides
+and permutations, full blocks, partial blocks and untouched output padding:
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/attention_specialization.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/spans.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_prefill.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_prefill_wmma.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_common.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
+  --case=@attention_independent_specializations
+```
+
 The retained `qwen_epoch_check --mtp` witness places unequal prefixes directly
 before page boundaries, derives accepted candidates from target execution,
 injects mismatches, resets/reuses rows, and continues untouched histories.
