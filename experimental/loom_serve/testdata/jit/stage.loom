@@ -8,24 +8,155 @@ config.decl @increment.delta : %value: index where [range(%value, 1, 8)]
 
 amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
 
-kernel.def target(@wave32) @increment() {
+func.def @increment_element(%element: index, %storage: buffer) {
+  %delta = config.get @increment.delta : index
+  %c0_offset = index.constant 0 : offset
+  %data = buffer.view %storage[%c0_offset] : buffer -> view<8xi32>
+  %value = view.load %data[%element] : view<8xi32> -> i32
+  %delta_i32 = index.cast %delta : index to i32
+  %element_i32 = index.cast %element : index to i32
+  %increment = scalar.addi %delta_i32, %element_i32 : i32
+  %next = scalar.addi %value, %increment : i32
+  view.store %next, %data[%element] : i32, view<8xi32>
+  func.return
+}
+
+kernel.def target(@wave32) @increment_0() {
   %width = target.subgroup.size : index
   %c32 = index.constant 32 : index
   %groups = index.div %width, %c32 : index
   %c1 = index.constant 1 : index
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
-  %delta = config.get @increment.delta : index
-  %c0_offset = index.constant 0 : offset
-  %data = buffer.view %storage[%c0_offset] : buffer -> view<1xi32>
-  %value = view.load %data[0] : view<1xi32> -> i32
-  %delta_i32 = index.cast %delta : index to i32
-  %next = scalar.addi %value, %delta_i32 : i32
-  view.store %next, %data[0] : i32, view<1xi32>
+  %element = index.constant 0 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave32) @increment_1() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %element = index.constant 1 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave32) @increment_2() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %element = index.constant 2 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave32) @increment_3() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %element = index.constant 3 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave32) @increment_4() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %element = index.constant 4 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave32) @increment_5() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %element = index.constant 5 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave32) @increment_6() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %element = index.constant 6 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
+  kernel.return
+}
+
+kernel.def target(@wave32) @increment_7() {
+  %width = target.subgroup.size : index
+  %c32 = index.constant 32 : index
+  %groups = index.div %width, %c32 : index
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %element = index.constant 7 : index
+  func.call @increment_element(%element, %storage) : (index, buffer)
   kernel.return
 }
 
 command.program.def public @advance() launch(%storage: buffer) {
-  kernel.launch @increment(%storage) : (buffer)
+  kernel.launch @increment_0(%storage) : (buffer)
+  kernel.launch @increment_1(%storage) : (buffer)
+  kernel.launch @increment_2(%storage) : (buffer)
+  kernel.launch @increment_3(%storage) : (buffer)
+  kernel.launch @increment_4(%storage) : (buffer)
+  kernel.launch @increment_5(%storage) : (buffer)
+  kernel.launch @increment_6(%storage) : (buffer)
+  kernel.launch @increment_7(%storage) : (buffer)
+  command.return
+}
+
+// A CPU import cannot be resolved by native GPU compilation. Keeping this in a
+// separate root exercises failure after the command product publishes its work.
+func.decl import("host") @host_only(%value: i32) -> (i32)
+kernel.def target(@wave32) @requires_host() {
+  %c1 = index.constant 1 : index
+  kernel.launch.config workgroups(%c1, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
+} launch(%storage: buffer) {
+  %c0 = index.constant 0 : offset
+  %data = buffer.view %storage[%c0] : buffer -> view<8xi32>
+  %value = view.load %data[0] : view<8xi32> -> i32
+  %result = func.call @host_only(%value) : (i32) -> (i32)
+  view.store %result, %data[0] : i32, view<8xi32>
+  kernel.return
+}
+
+command.program.def public @invalid_native() launch(%storage: buffer) {
+  kernel.launch @increment_0(%storage) : (buffer)
+  kernel.launch @increment_1(%storage) : (buffer)
+  kernel.launch @increment_2(%storage) : (buffer)
+  kernel.launch @increment_3(%storage) : (buffer)
+  kernel.launch @increment_4(%storage) : (buffer)
+  kernel.launch @increment_5(%storage) : (buffer)
+  kernel.launch @increment_6(%storage) : (buffer)
+  kernel.launch @increment_7(%storage) : (buffer)
+  kernel.launch @requires_host(%storage) : (buffer)
+  command.return
+}
+
+command.program.def public @idle() launch() {
   command.return
 }

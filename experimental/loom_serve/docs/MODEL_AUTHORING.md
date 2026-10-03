@@ -95,15 +95,23 @@ root. The minimal corresponding catalog and programs are in
 
 The real embedding sequence in [`jit.c`](../jit.c) is:
 
-1. Create the target environment, context, workspace, prepared compiler and
-   pipeline; obtain the live HAL profile and freeze the source index.
+1. Create the target environment, context, prepared compiler and pipeline;
+   obtain the live HAL profile and freeze the source index. A standard
+   `loomc_task_pool_t` supplies up to four physical-core workers by default,
+   each with a reusable `loomc_workspace_t`. Product construction uses separate
+   caller scratch.
 2. Call `loomc_cmd_program_product_build` with the root and configuration. Its
    request sink takes ownership of reachable native source requests.
-3. Use the requests' binding/root ordinals and product requirements to build
-   native specialization records. Deserialization, compilation, and emission
-   use the same module, preserving prepared compiler facts.
-4. Load the emitted executable through the selected queue family, resolve its
-   named entries, and retain them in command-local requirement order.
+3. Submit each request through a `loomc_task_queue_t` on that shared pool.
+   Its binding/root ordinals and product requirements supply the native
+   specialization records. Each task deserializes, compiles, and emits from the
+   same private module, preserving prepared compiler facts. Compiler, pipeline,
+   profile and product are immutable and shared; mutable scratch is selected by
+   the task's mutually exclusive worker ordinal.
+4. Each task loads its executable through the selected queue family and resolves
+   its disjoint requirement slots. Drain the stage's queue before binding those
+   entries in command-local order or releasing partial results after a failure.
+   The worker population and scratch survive for subsequent stages.
 5. Allocate/load fixed parameter roots. `loom_serve_jit_stage_record` creates
    reusable commands retaining those buffers and executables.
 6. JIT the VM source, transfer its image to the trusted in-process VM loader,
@@ -112,6 +120,10 @@ The real embedding sequence in [`jit.c`](../jit.c) is:
 This is cold-path setup. Already recorded commands do not depend on the source
 index or compiler workspace remaining alive. A compile failure returns source
 diagnostics and releases partial state; it never substitutes a stale artifact.
+The [task-pool embedding example](../../../loom/binding/c/example/jit_task_pool.c)
+shows the public ownership protocol without a model dependency. In this runner,
+stage calls remain synchronous; their native kernel requests compile in parallel.
+No task queue or compiler work is introduced into the serving epoch path.
 
 The Qwen adapter validates shared parameter placement across its independently
 compiled roots before assigning one weight slab. Auxiliary MTP roots either

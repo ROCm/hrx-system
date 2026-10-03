@@ -15,13 +15,15 @@
 #include "loomc/target/amdgpu/iree_hal.h"
 #include "loomc/target/cmd/program.h"
 #include "loomc/target/vm.h"
+#include "loomc/task_pool.h"
+#include "loomc/task_queue.h"
 
 typedef struct jit_compiler_t {
   // Target package retained by the context and prepared compiler.
   loomc_target_environment_t* environment;
   // Shared immutable parser and dialect configuration.
   loomc_context_t* context;
-  // Scratch reused by serialized cold-path compilation calls.
+  // Caller scratch for command products or isolated VM compilation.
   loomc_workspace_t* workspace;
   // Prepared compiler reused for every kernel in the residency.
   loomc_compiler_t* compiler;
@@ -44,6 +46,15 @@ struct loom_serve_jit_t {
   jit_compiler_t kernel;
   // Frozen source providers, shared across all shape specializations.
   loomc_link_index_t* index;
+  // Concurrent native compilation, independent of serving execution.
+  struct {
+    // Standard worker population retained across stage specializations.
+    loomc_task_pool_t* pool;
+    // Mutable scratch indexed by the pool's mutually exclusive worker ordinal.
+    loomc_workspace_t** workspaces;
+    // Number of initialized workspace entries, including during setup failure.
+    iree_host_size_t workspace_count;
+  } compilation;
 };
 
 struct loom_serve_jit_stage_t {
@@ -183,10 +194,36 @@ static iree_status_t jit_index_sources(loom_serve_jit_t* jit,
   return status;
 }
 
+static iree_status_t jit_initialize_compilation(loom_serve_jit_t* jit) {
+  const loomc_allocator_t allocator = loomc_allocator_from_iree(jit->allocator);
+  IREE_RETURN_IF_ERROR(iree_status_from_loomc(
+      loomc_task_pool_allocate(NULL, allocator, &jit->compilation.pool)));
+  const iree_host_size_t worker_count =
+      loomc_task_pool_worker_count(jit->compilation.pool);
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      jit->allocator, worker_count, sizeof(*jit->compilation.workspaces),
+      (void**)&jit->compilation.workspaces));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < worker_count && iree_status_is_ok(status);
+       ++i) {
+    status = iree_status_from_loomc(loomc_workspace_create(
+        NULL, allocator, &jit->compilation.workspaces[i]));
+    if (iree_status_is_ok(status)) {
+      ++jit->compilation.workspace_count;
+    }
+  }
+  return status;
+}
+
 void loom_serve_jit_destroy(loom_serve_jit_t* jit) {
   if (!jit) {
     return;
   }
+  loomc_task_pool_free(jit->compilation.pool);
+  for (iree_host_size_t i = 0; i < jit->compilation.workspace_count; ++i) {
+    loomc_workspace_release(jit->compilation.workspaces[i]);
+  }
+  iree_allocator_free(jit->allocator, jit->compilation.workspaces);
   loomc_link_index_release(jit->index);
   jit_compiler_deinitialize(&jit->kernel);
   iree_hal_queue_release(jit->dispatch);
@@ -246,6 +283,9 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
     status = jit_index_sources(jit, source_directory);
   }
   if (iree_status_is_ok(status)) {
+    status = jit_initialize_compilation(jit);
+  }
+  if (iree_status_is_ok(status)) {
     *out_jit = jit;
   } else {
     loom_serve_jit_destroy(jit);
@@ -255,8 +295,8 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
 
 // Keeps prepared-low function facts in the same module through native emission.
 static iree_status_t jit_emit(
-    jit_compiler_t* compiler, loomc_source_t* source,
-    iree_host_size_t specialization_count,
+    const jit_compiler_t* compiler, loomc_workspace_t* workspace,
+    loomc_source_t* source, iree_host_size_t specialization_count,
     const loomc_target_specialization_t* specializations,
     iree_string_view_t format, iree_allocator_t allocator,
     iree_const_byte_span_t* out_image) {
@@ -265,8 +305,7 @@ static iree_status_t jit_emit(
   loomc_module_t* module = NULL;
   loomc_result_t* result = NULL;
   loomc_status_t operation = loomc_module_deserialize_from_source(
-      compiler->context, compiler->workspace, source, NULL, ca, &module,
-      &result);
+      compiler->context, workspace, source, NULL, ca, &module, &result);
   iree_status_t status = jit_result(operation, result);
   const loomc_target_specialization_options_t target_options = {
       .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
@@ -280,8 +319,8 @@ static iree_status_t jit_emit(
   if (iree_status_is_ok(status)) {
     result = NULL;
     operation =
-        loomc_compile_module(compiler->compiler, compiler->workspace,
-                             compiler->pipeline, module, &options, ca, &result);
+        loomc_compile_module(compiler->compiler, workspace, compiler->pipeline,
+                             module, &options, ca, &result);
     status = jit_result(operation, result);
   }
   if (iree_status_is_ok(status)) {
@@ -290,8 +329,8 @@ static iree_status_t jit_emit(
         .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
     };
     result = NULL;
-    operation = loomc_emit_module(compiler->environment, compiler->workspace,
-                                  module, &emit_options, ca, &result);
+    operation = loomc_emit_module(compiler->environment, workspace, module,
+                                  &emit_options, ca, &result);
     // Retain result until the primary artifact bytes have been copied.
     loomc_result_retain(result);
     status = jit_result(operation, result);
@@ -313,6 +352,8 @@ typedef struct jit_request_t {
   struct jit_request_t* next;
   // Immutable request transferred by the product builder.
   loomc_request_t* request;
+  // Task outcome consumed by the caller after the stage queue drains.
+  iree_status_t status;
 } jit_request_t;
 
 typedef struct jit_requests_t {
@@ -338,6 +379,7 @@ static loomc_status_t jit_publish(void* user_data, loomc_request_t* request) {
 }
 
 static iree_status_t jit_load_request(loom_serve_jit_t* jit,
+                                      loomc_workspace_t* workspace,
                                       loomc_product_t* product,
                                       loomc_request_t* request,
                                       loom_serve_command_entry_t* entries) {
@@ -360,8 +402,9 @@ static iree_status_t jit_load_request(loom_serve_jit_t* jit,
   }
   iree_const_byte_span_t image;
   iree_status_t status = jit_emit(
-      &jit->kernel, loomc_request_source(request), root_count, specializations,
-      IREE_SV(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO), jit->allocator, &image);
+      &jit->kernel, workspace, loomc_request_source(request), root_count,
+      specializations, IREE_SV(LOOMC_ARTIFACT_FORMAT_AMDGPU_HSACO),
+      jit->allocator, &image);
   iree_allocator_free(jit->allocator, specializations);
   iree_hal_executable_t* executable = NULL;
   if (iree_status_is_ok(status)) {
@@ -388,6 +431,60 @@ static iree_status_t jit_load_request(loom_serve_jit_t* jit,
     }
   }
   iree_hal_executable_release(executable);
+  return status;
+}
+
+typedef struct jit_task_t {
+  // Queue-owned work record, destroyed after execution or rejected submission.
+  loomc_task_t base;
+  // Shared compiler/profile and worker-local scratch, borrowed through the
+  // join.
+  loom_serve_jit_t* jit;
+  // Immutable parent bindings, borrowed through the join.
+  loomc_product_t* product;
+  // Caller-owned request and terminal result slot.
+  jit_request_t* request;
+  // Parent requirement slots, disjoint across published requests.
+  loom_serve_command_entry_t* entries;
+} jit_task_t;
+
+static void jit_task_execute(loomc_task_t* base,
+                             loomc_host_size_t worker_ordinal) {
+  jit_task_t* task = (jit_task_t*)base;
+  task->request->status = jit_load_request(
+      task->jit, task->jit->compilation.workspaces[worker_ordinal],
+      task->product, task->request->request, task->entries);
+}
+
+static void jit_task_destroy(loomc_task_t* base) {
+  jit_task_t* task = (jit_task_t*)base;
+  iree_allocator_free(task->jit->allocator, task);
+}
+
+static const loomc_task_vtable_t jit_task_vtable = {
+    .execute = jit_task_execute,
+    .destroy = jit_task_destroy,
+};
+
+static iree_status_t jit_submit_request(loom_serve_jit_t* jit,
+                                        loomc_task_sink_t sink,
+                                        loomc_product_t* product,
+                                        jit_request_t* request,
+                                        loom_serve_command_entry_t* entries) {
+  jit_task_t* task = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(jit->allocator, sizeof(*task), (void**)&task));
+  loomc_task_initialize(&jit_task_vtable, &task->base);
+  task->jit = jit;
+  task->product = product;
+  task->request = request;
+  task->entries = entries;
+  iree_status_t status =
+      iree_status_from_loomc(loomc_task_sink_submit(sink, &task->base));
+  if (!iree_status_is_ok(status)) {
+    // A rejecting sink leaves task ownership with its caller.
+    loomc_task_destroy(&task->base);
+  }
   return status;
 }
 
@@ -439,15 +536,31 @@ iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
   if (iree_status_is_ok(status)) {
     loomc_cmd_program_product_program_at(product, 0, &program);
     requirement_count = loomc_product_requirement_count(product);
+  }
+  if (iree_status_is_ok(status) && requirement_count) {
     status = iree_allocator_malloc_array(jit->allocator, requirement_count,
                                          sizeof(*requirements),
                                          (void**)&requirements);
   }
+  loomc_task_queue_t* queue = NULL;
+  if (iree_status_is_ok(status) && requests.head) {
+    status = iree_status_from_loomc(loomc_task_queue_allocate(
+        jit->compilation.pool, loomc_allocator_from_iree(jit->allocator),
+        &queue));
+  }
+  const loomc_task_sink_t sink = loomc_task_queue_sink(queue);
   iree_host_size_t request_count = 0;
   for (jit_request_t* node = requests.head; node && iree_status_is_ok(status);
        node = node->next) {
-    status = jit_load_request(jit, product, node->request, requirements);
+    status = jit_submit_request(jit, sink, product, node, requirements);
     ++request_count;
+  }
+  // Drains accepted tasks even after rejection; none may outlive these borrowed
+  // product/request/entry slots. The worker population survives for later
+  // stages.
+  loomc_task_queue_free(queue);
+  for (jit_request_t* node = requests.head; node; node = node->next) {
+    status = iree_status_join(status, node->status);
   }
   if (iree_status_is_ok(status)) {
     loomc_byte_span_t image;
@@ -459,7 +572,7 @@ iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
       status = loom_cmd_program_parse(stage->image, &stage->program);
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && program.entry_requirement_count) {
     status = iree_allocator_malloc_array(
         jit->allocator, program.entry_requirement_count,
         sizeof(*stage->entries), (void**)&stage->entries);
@@ -494,8 +607,9 @@ iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
   if (iree_status_is_ok(status)) {
     fprintf(stderr,
             "{\"event\":\"jit_stage\",\"root\":\"%.*s\",\"kernels\":%zu,"
-            "\"entries\":%zu,\"duration_ms\":%.3f}\n",
+            "\"entries\":%zu,\"workers\":%zu,\"duration_ms\":%.3f}\n",
             (int)root.size, root.data, request_count, stage->entry_count,
+            jit->compilation.workspace_count,
             (double)(iree_time_now() - start) / 1000000.0);
     *out_stage = stage;
   } else {
@@ -548,7 +662,7 @@ iree_status_t loom_serve_jit_compile_vm(iree_string_view_t source_path,
         .target_profile = compiler.profile,
     };
     status =
-        jit_emit(&compiler, source, 1, &specialization,
+        jit_emit(&compiler, compiler.workspace, source, 1, &specialization,
                  IREE_SV(LOOMC_ARTIFACT_FORMAT_VM), host_allocator, out_image);
   }
   loomc_source_release(source);

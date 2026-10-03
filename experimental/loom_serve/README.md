@@ -130,8 +130,11 @@ Editing these files changes the next process's model without rebuilding the
 server. The binary embeds the JIT; it never invokes `loom-link` or
 `loom-compile`, loads a prepared artifact directory, or falls back to stale code.
 
-`jit.c` indexes the catalog once and retains the compiler, pipeline, scratch
-workspace, and live HAL target profile across stage specializations.
+`jit.c` indexes the catalog once and retains the immutable compiler, pipeline,
+and live HAL target profile across stage specializations. Its standard loomc
+task pool supplies up to four physical-core workers, each with private reusable
+scratch. Stage calls are synchronous; their independent native requests compile
+and load concurrently, and the stage queue drains even after a task fails.
 `loomc_cmd_program_product_build` produces portable command bytes and
 independently owned kernel source requests. Their producer-supplied binding
 ordinals map emitted kernels to command entries; filenames and JSON do not
@@ -146,8 +149,9 @@ parameter placement, launch counts, buffer requirements, and entry mapping.
 All target stages must place the shared weights identically; model preparation
 checks this before allocating the one weight slab. MTP references existing
 target weight views and allocates only its additional parameter groups.
-`jit_stage` records expose the root, compiled request count, entry count, and
-cold compilation/load duration. Warm execution reuses commands and storage.
+`jit_stage` records expose the root, compiled request count, entry count, pool
+worker count, and cold compilation/load duration. Warm execution reuses commands
+and storage without compiler tasks.
 
 The [model source guide](models/qwen38/README.md) describes the math and
 differential checks. The current source and host storage envelope is 512 input
