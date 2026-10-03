@@ -355,6 +355,67 @@ staging. Direct final-buffer reads without an inference penalty remain an
 unmet requirement, as do measured cold-I/O saturation and autonomous device
 continuation. Removing a startup transfer is not itself a serving improvement.
 
+### Q6 token-reuse checkpoint
+
+Commit `2446d3198f` increases weight reuse in the FFN-down projection. The
+shared metadata contraction gives each subgroup eight output fragments
+instead of four, covering 256 token rows per workgroup. The attention and
+recurrent-layer command programs select this geometry for their 256- and
+512-token recipes. Smaller and intermediate recipes retain their previous
+geometry. Runtime active counts remain device data; this changes neither
+host scheduling nor canonical weights, accumulation order, shared global
+scratch, or in-place residual ownership. The [model guide](../models/qwen38/README.md#q6-metadata-contractions)
+contains the source-level comparison recipe.
+
+The 2026-10-03 A/B/A/B/A below uses the same eight-client retained-review
+workload, MTP depth three, 16K contexts, gfx1151 system and high/performance
+policies. All five runs use the same optimized executable, SHA256
+`3ae93a14d6a96bf0470a31d0e57fb7f5682cdb75b73bc33d88ae507460beac09`.
+Only the source catalog changes, from `bce7929d3a` to `2446d3198f`; every
+launch records its complete model-source identities. One measurement lease
+covers the five fresh residencies, without concurrent builds or transfers.
+
+| Run order | FFN-down recipe | Whole window | Aggregate output tokens/s |
+| --- | --- | ---: | ---: |
+| 1 | Previous | 123.325 s | 24.910 |
+| 2 | Wider token reuse | 119.061 s | 25.802 |
+| 3 | Previous | 122.678 s | 25.041 |
+| 4 | Wider token reuse | 118.899 s | 25.837 |
+| 5 | Previous | 122.473 s | 25.083 |
+
+Mean time falls from 122.826 to 118.980 seconds: **3.23% higher throughput**,
+or **25.819 aggregate output tokens/s**. Both candidates beat every control;
+control and candidate spreads are 0.69% and 0.14%. Every window completes
+16 length-limited responses, 28,534 appended inputs and 3,072 outputs, with
+retained follow-ups, consistent output credits/frontiers and clean retirement.
+Epoch counts are 184/180/184/180/182. Replies or usage differ from the first
+control in 0/5/2/6/3 turns; these remain closed-loop cohorts, not identical
+token trajectories. This is a controlled self-improvement, not a refreshed
+llama.cpp or MTP-matched competitor ratio.
+
+GPU maxima are 60–61 C, NVMe peaks at 37.85 C, and package-power medians remain
+about 100 W. Mean cold JIT-stage preparation grows from 2.566 to 2.601 seconds;
+mean warm-cache process-to-ready grows from 5.340 to 5.379 seconds. Those
+startup differences are outside the scored window and do not measure cold
+storage bandwidth.
+
+The six older metadata entries emit byte-identical native code before/after,
+both normally and with access instrumentation. The new entry uses 96 VGPRs
+and 43,008 bytes of LDS, with no spills or private storage; access checks use
+112 VGPRs without spills. All 90 public-library and 64 production-weight
+bitwise/access samples pass, followed by host-ASAN full-model/MTP and retained
+HTTP lifetime checks. That is focused device-access coverage, not a claim
+that every full-model kernel was device-instrumented.
+
+A separate completion-inclusive kernel ABABA screen fixes dispatch capacity
+while varying device active count. All nine full and underfilled 256/512
+cases improve projection throughput by 11.25–19.12%, beyond their respective
+within-arm spreads, with two physical binding sets and no timing warnings.
+This does not justify choosing a wide recipe for one ready token instead of
+the existing narrow recipe. At capacity 512, the new geometry halves logical
+weight/metadata acquisition while preserving activation payload; physical
+DRAM traffic and bandwidth saturation are not inferred from source counts.
+
 ## Traffic and batching hypotheses
 
 For one completed traversal, let `D` be modeled bytes reaching the relevant

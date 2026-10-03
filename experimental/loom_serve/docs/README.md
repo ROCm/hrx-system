@@ -39,6 +39,12 @@ The [prepared-weight checkpoint](PERFORMANCE.md#prepared-weight-checkpoint)
 records its small measured throughput gain, startup cost, and rejected mapped
 memory placements; file loading still uses bounded staging.
 
+The [Q6 token-reuse checkpoint](PERFORMANCE.md#q6-token-reuse-checkpoint)
+specializes the existing command programs for wider weight reuse at 256/512
+tokens. The locked eight-agent comparison improves whole-server throughput
+3.23% to 25.819 output tokens/s, with unchanged weights and host scheduling.
+This is a self-comparison; a current MTP-matched competitor result is separate.
+
 The concrete adapter currently admits up to eight rows and 512 packed input
 tokens, with startup-selected shapes and a common context capacity. Its caches
 are contiguous F16 attention storage plus recurrent state, not a paged prefix
