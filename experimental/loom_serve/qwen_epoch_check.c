@@ -273,6 +273,19 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
                            "violet birch willow falcon",
                            "silver pine oak robin", "golden elm ash eagle"};
   int32_t inputs[4][4];
+  int32_t padding[32];
+  iree_host_size_t padding_count = 0;
+  IREE_RETURN_IF_ERROR(iree_tokenizer_encode(
+      loom_serve_qwen_model_tokenizer(model),
+      IREE_SV("Background context unrelated to the requested list.\n"),
+      IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_tokenizer_make_token_output(padding, NULL, NULL,
+                                       IREE_ARRAYSIZE(padding)),
+      allocator, &padding_count));
+  if (!padding_count) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "verification padding tokenized to no inputs");
+  }
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
     char prompt[512];
@@ -287,6 +300,27 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
         IREE_TOKENIZER_ENCODE_FLAG_NONE,
         iree_tokenizer_make_token_output(rows[i].input, NULL, NULL, 512),
         allocator, &rows[i].input_count);
+    if (iree_status_is_ok(status)) {
+      // Unequal retained prefixes end immediately before a page boundary.
+      // Verification must provision a second page even when acceptance keeps
+      // only the anchor in the first page. These are ordinary model inputs;
+      // both independent runs consume the same complete history.
+      const iree_host_size_t length =
+          ((rows[i].input_count + 64) / 64 + i) * 64 - 1;
+      if (length > IREE_ARRAYSIZE(rows[i].input)) {
+        status =
+            iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                             "verification prefix exceeds fixture storage");
+      } else {
+        const iree_host_size_t count = length - rows[i].input_count;
+        memmove(rows[i].input + count, rows[i].input,
+                rows[i].input_count * sizeof(int32_t));
+        for (iree_host_size_t j = 0; j < count; ++j) {
+          rows[i].input[j] = padding[j % padding_count];
+        }
+        rows[i].input_count = length;
+      }
+    }
     const iree_host_size_t indices[] = {rows[i].packed, rows[i].isolated};
     for (iree_host_size_t j = 0; j < 2 && iree_status_is_ok(status); ++j) {
       status = loom_serve_qwen_row_reset(

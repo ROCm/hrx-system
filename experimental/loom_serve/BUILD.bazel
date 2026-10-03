@@ -129,6 +129,24 @@ py_test(
 )
 
 loom_cc_library(
+    name = "block_pool",
+    srcs = ["block_pool.c"],
+    hdrs = ["block_pool.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "block_pool_test",
+    srcs = ["block_pool_test.cc"],
+    deps = [
+        ":block_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "http_request",
     srcs = ["http_request.c"],
     hdrs = ["http_request.h"],
@@ -360,6 +378,7 @@ loom_cc_library(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":block_pool",
         ":command",
         ":execution",
         ":jit",

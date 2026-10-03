@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Shared Qwen3.8-27B residency and fixed retained rows.
+// Shared Qwen3.8-27B residency and retained row state.
 
 #include "experimental/loom_serve/qwen_model.h"
 
@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/loom_serve/block_pool.h"
 #include "experimental/loom_serve/command.h"
 #include "experimental/loom_serve/execution.h"
 #include "experimental/loom_serve/jit.h"
@@ -40,6 +41,8 @@ enum {
   QWEN_BINDING_COUNT = 7,
   QWEN_TOKEN_CAPACITY = 512,
   QWEN_ROW_CAPACITY = 8,
+  QWEN_BLOCK_TOKENS = 64,
+  QWEN_MAP_ORIGIN = 1024,
   QWEN_SPAN_CAPACITY = 64,
   QWEN_EPOCH_SELECTION = 3 + 5 * QWEN_SPAN_CAPACITY,
   QWEN_EPOCH_WORDS = QWEN_EPOCH_SELECTION + QWEN_SPAN_CAPACITY,
@@ -102,8 +105,19 @@ struct loom_serve_qwen_model_t {
   iree_host_size_t row_count;
   // Fixed row records, owned by this model.
   loom_serve_qwen_row_t* rows;
-  // One device allocation partitioned into private retained row spans.
+  // Private recurrent/control spans followed by pooled KV, or dense row KV.
   iree_hal_buffer_t* row_arena;
+  // Private-page ownership shared by target and draft cache planes.
+  struct {
+    // Physical token capacity shared by rows; zero selects dense comparison.
+    iree_host_size_t capacity;
+    // Maximum logical block count per row, independent of physical capacity.
+    iree_host_size_t blocks_per_row;
+    // Fixed free-ID metadata; owned IDs are returned only after retirement.
+    loom_serve_block_pool_t pool;
+    // Fixed row-major host maps, retained through queued uploads.
+    uint32_t* maps;
+  } cache;
   // Model-wide residual storage, serialized by the execution timeline.
   iree_hal_buffer_t* residual;
   // Model-wide packed transient storage for the larger stage.
@@ -176,6 +190,8 @@ struct loom_serve_qwen_row_t {
   iree_hal_buffer_t* buffers[QWEN_BINDING_COUNT];
   // Number of input tokens actually consumed into KV/GDN state.
   iree_host_size_t position;
+  // Owned physical pages, including any in-flight speculative suffix.
+  uint32_t block_count;
   // Whether the latest completed work selected a token at the current position.
   bool has_prediction;
   // Completed stage counts and end-to-end host durations.
@@ -395,7 +411,23 @@ static iree_status_t qwen_load_tokenizer(loom_serve_qwen_model_t* model,
   return iree_ok_status();
 }
 
+static uint64_t qwen_row_table_length(const loom_serve_qwen_model_t* model) {
+  return model->cache.capacity
+             ? QWEN_MAP_ORIGIN + model->row_count *
+                                     model->cache.blocks_per_row *
+                                     sizeof(uint32_t)
+             : sizeof(model->epoch.origins);
+}
+
 static iree_status_t qwen_allocate_rows(loom_serve_qwen_model_t* model) {
+  if (model->cache.capacity) {
+    IREE_RETURN_IF_ERROR(loom_serve_block_pool_initialize(
+        (uint32_t)(model->cache.capacity / QWEN_BLOCK_TOKENS), model->allocator,
+        &model->cache.pool));
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        model->allocator, model->row_count * model->cache.blocks_per_row,
+        sizeof(*model->cache.maps), (void**)&model->cache.maps));
+  }
   uint64_t workspace_length = 0;
   uint64_t workspace_alignment = 0;
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
@@ -414,7 +446,7 @@ static iree_status_t qwen_allocate_rows(loom_serve_qwen_model_t* model) {
       0,
       12,
       156893184,
-      model->context_capacity * 65536ull,
+      model->cache.capacity ? 0 : model->context_capacity * 65536ull,
       QWEN_TOKEN_CAPACITY * sizeof(int32_t),
       8 * sizeof(int32_t),
       0,
@@ -425,8 +457,10 @@ static iree_status_t qwen_allocate_rows(loom_serve_qwen_model_t* model) {
     offsets[i] = stride;
     stride += (lengths[i] + 255) & ~255ull;
   }
-  IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, stride * model->row_count,
-                                            256, &model->row_arena));
+  const uint64_t row_bytes = stride * model->row_count;
+  const uint64_t pool_bytes = model->cache.capacity * 65536ull;
+  IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, row_bytes + pool_bytes, 256,
+                                            &model->row_arena));
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(model->allocator, model->row_count,
                                   sizeof(*model->rows), (void**)&model->rows));
@@ -439,12 +473,15 @@ static iree_status_t qwen_allocate_rows(loom_serve_qwen_model_t* model) {
     row->buffers[QWEN_WORKSPACE] = model->workspace;
     model->epoch.origins[i][0] = (int64_t)(i * stride + offsets[QWEN_GDN]);
     model->epoch.origins[i][1] =
-        (int64_t)(i * stride + offsets[QWEN_ATTENTION]);
+        (int64_t)(model->cache.capacity ? row_bytes
+                                        : i * stride + offsets[QWEN_ATTENTION]);
     for (iree_host_size_t binding = QWEN_CONTROL;
          binding <= QWEN_PROGRESS && iree_status_is_ok(status); ++binding) {
-      status = iree_hal_buffer_subspan(
-          model->row_arena, i * stride + offsets[binding], lengths[binding],
-          model->allocator, &row->buffers[binding]);
+      if (lengths[binding]) {
+        status = iree_hal_buffer_subspan(
+            model->row_arena, i * stride + offsets[binding], lengths[binding],
+            model->allocator, &row->buffers[binding]);
+      }
     }
   }
   if (iree_status_is_ok(status) && model->stage_count > 2) {
@@ -452,7 +489,7 @@ static iree_status_t qwen_allocate_rows(loom_serve_qwen_model_t* model) {
     model->epoch.buffers[3] = model->row_arena;
     model->epoch.buffers[6] = model->workspace;
     const uint64_t epoch_lengths[] = {
-        0, sizeof(model->epoch.metadata), sizeof(model->epoch.origins),
+        0, sizeof(model->epoch.metadata), qwen_row_table_length(model),
         0, sizeof(model->epoch.tokens),   sizeof(model->epoch.outputs),
         0,
     };
@@ -472,7 +509,8 @@ static iree_status_t qwen_allocate_rows(loom_serve_qwen_model_t* model) {
     for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
       fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
       fills[i].fill.target_buffer = buffers[i];
-      fills[i].fill.length = iree_hal_buffer_byte_length(buffers[i]);
+      fills[i].fill.length =
+          i == 0 ? row_bytes : iree_hal_buffer_byte_length(buffers[i]);
       fills[i].fill.pattern = &zero;
       fills[i].fill.pattern_length = sizeof(zero);
     }
@@ -497,7 +535,7 @@ static iree_status_t qwen_allocate_rows(loom_serve_qwen_model_t* model) {
     fprintf(stderr,
             "Residency: %zu rows, %.3f GiB retained arena, %.3f GiB shared "
             "workspace, %zu-token context, %zu-token prefill capacity.\n",
-            model->row_count, stride * model->row_count / 1073741824.0,
+            model->row_count, (row_bytes + pool_bytes) / 1073741824.0,
             workspace_length / 1073741824.0, model->context_capacity,
             model->prefill_capacity);
   }
@@ -514,15 +552,20 @@ static iree_status_t qwen_allocate_mtp(loom_serve_qwen_model_t* model) {
                                             &model->mtp.committed));
   IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, sizeof(model->mtp.records),
                                             256, &model->mtp.results));
-  IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, sizeof(model->mtp.origins),
+  IREE_RETURN_IF_ERROR(qwen_allocate_buffer(model, qwen_row_table_length(model),
                                             256, &model->mtp.row_table));
   iree_status_t status = qwen_allocate_buffer(
-      model, model->row_count * model->context_capacity * 4096ull, 256,
-      &model->mtp.cache);
+      model,
+      (model->cache.capacity ? model->cache.capacity
+                             : model->row_count * model->context_capacity) *
+          4096ull,
+      256, &model->mtp.cache);
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < model->row_count; ++i) {
       model->mtp.origins[i][1] =
-          (int64_t)(i * model->context_capacity * 4096ull);
+          model->cache.capacity
+              ? 0
+              : (int64_t)(i * model->context_capacity * 4096ull);
     }
     const uint32_t zero = 0;
     const iree_hal_transfer_operation_t transfers[] = {
@@ -575,6 +618,7 @@ static iree_status_t qwen_compile_stage(loom_serve_qwen_model_t* model,
        q8_capacity == 1 ? 1024 : 5120},
       {"ggml.quantize_q8_1_x4.group_capacity", 136 * token_capacity},
       {"qwen38.attention.cache_capacity", model->context_capacity},
+      {"qwen38.attention.pool_capacity", model->cache.capacity},
       {"qwen38.attention.decode_split_count", 10},
       {"qwen38.ffn.input_size", 5120},
       {"qwen38.ffn.output_size", 17408},
@@ -611,18 +655,21 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
           : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
   model->shape_count = options->epoch_count;
   model->prefill_capacity = options->prefill_capacity;
-  if (options->enable_mtp) {
+  if (options->enable_mtp || options->pool_capacity) {
     iree_host_size_t packed_capacity = 0;
     for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
       packed_capacity =
           iree_max(packed_capacity, options->epoch_shapes[i].token_capacity);
     }
-    // MTP single-row prefill uses a packed stage to keep draft state current.
+    // Pooled/MTP single-row prefill uses the same packed addressing path.
     // Publish that path's usable capacity to every frontend before it chunks.
     model->prefill_capacity =
         iree_min(model->prefill_capacity, packed_capacity);
   }
   model->context_capacity = options->context_capacity;
+  model->cache.capacity = options->pool_capacity;
+  model->cache.blocks_per_row =
+      (options->context_capacity + QWEN_BLOCK_TOKENS - 1) / QWEN_BLOCK_TOKENS;
   iree_host_size_t stage_count = model->shape_count + 2;
   if (options->enable_mtp) {
     model->mtp.first_stage = stage_count;
@@ -729,10 +776,13 @@ iree_status_t loom_serve_qwen_model_create(
       options->prefill_capacity > QWEN_TOKEN_CAPACITY ||
       options->context_capacity < options->prefill_capacity ||
       options->context_capacity > 262144 ||
-      (options->enable_mtp && !options->epoch_count)) {
+      (options->enable_mtp && !options->epoch_count) ||
+      options->pool_capacity > 4194304 ||
+      options->pool_capacity % QWEN_BLOCK_TOKENS ||
+      (options->pool_capacity && !options->epoch_count)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "invalid model capacities or MTP without epoch shapes");
+        "invalid model capacities; pooled KV and MTP require epoch shapes");
   }
   for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
     const loom_serve_qwen_shape_t shape = options->epoch_shapes[i];
@@ -784,6 +834,8 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
     }
   }
   iree_allocator_free(model->allocator, model->rows);
+  iree_allocator_free(model->allocator, model->cache.maps);
+  loom_serve_block_pool_deinitialize(&model->cache.pool);
   iree_hal_buffer_release(model->epoch.buffers[1]);
   iree_hal_buffer_release(model->epoch.buffers[2]);
   iree_hal_buffer_release(model->epoch.buffers[4]);
@@ -848,6 +900,22 @@ const loom_serve_qwen_shape_t* loom_serve_qwen_model_shapes(
   return model->shapes;
 }
 
+// Only a retired frontier may release pages. A rejected suffix within the
+// retained last page stays private; subsequent appends overwrite it before use.
+static void qwen_trim_blocks(loom_serve_qwen_row_t* row) {
+  loom_serve_qwen_model_t* model = row->model;
+  if (!model->cache.capacity) {
+    return;
+  }
+  const uint32_t keep =
+      (uint32_t)((row->position + QWEN_BLOCK_TOKENS - 1) / QWEN_BLOCK_TOKENS);
+  const iree_host_size_t row_index = (iree_host_size_t)(row - model->rows);
+  loom_serve_block_pool_release(
+      &model->cache.pool, row->block_count - keep,
+      model->cache.maps + row_index * model->cache.blocks_per_row + keep);
+  row->block_count = keep;
+}
+
 iree_status_t loom_serve_qwen_row_reset(loom_serve_qwen_row_t* row) {
   const uint32_t zero = 0;
   iree_hal_transfer_operation_t fills[] = {
@@ -882,6 +950,7 @@ iree_status_t loom_serve_qwen_row_reset(loom_serve_qwen_row_t* row) {
   }
   if (iree_status_is_ok(status)) {
     row->position = 0;
+    qwen_trim_blocks(row);
     row->has_prediction = false;
     memset(&row->transfer, 0, sizeof(row->transfer));
     memset(&row->metrics, 0, sizeof(row->metrics));
@@ -941,6 +1010,53 @@ static iree_status_t qwen_invoke_stage(loom_serve_qwen_model_t* model,
                      iree_vm_variant_span_from_ptr(arguments, count));
 }
 
+// The whole epoch has passed its capacity check. Publish only newly assigned
+// map entries on the existing ordered transfer path. The fixed host maps stay
+// alive until completion, including partial submission failure and destruction.
+static iree_status_t qwen_grow_blocks(loom_serve_qwen_model_t* model,
+                                      iree_host_size_t span_count,
+                                      const loom_serve_qwen_span_t* spans) {
+  if (!model->cache.capacity) {
+    return iree_ok_status();
+  }
+  iree_hal_transfer_operation_t uploads[2 * QWEN_ROW_CAPACITY] = {0};
+  iree_host_size_t upload_count = 0;
+  for (iree_host_size_t i = 0; i < span_count; ++i) {
+    const loom_serve_qwen_span_t* span = &spans[i];
+    loom_serve_qwen_row_t* row = &model->rows[span->row_index];
+    const uint32_t needed =
+        (uint32_t)((row->position + span->token_count + QWEN_BLOCK_TOKENS - 1) /
+                   QWEN_BLOCK_TOKENS);
+    const uint32_t count = needed - row->block_count;
+    if (!count) {
+      continue;
+    }
+    const iree_host_size_t map_index =
+        span->row_index * model->cache.blocks_per_row + row->block_count;
+    uint32_t* blocks = model->cache.maps + map_index;
+    loom_serve_block_pool_acquire(&model->cache.pool, count, blocks);
+    row->block_count = needed;
+    uploads[upload_count++] = (iree_hal_transfer_operation_t){
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+        .upload = {.source = blocks,
+                   .target_buffer = model->epoch.buffers[2],
+                   .target_offset =
+                       QWEN_MAP_ORIGIN + map_index * sizeof(*blocks),
+                   .length = count * sizeof(*blocks)},
+    };
+    if (model->mtp.first_stage) {
+      uploads[upload_count] = uploads[upload_count - 1];
+      uploads[upload_count++].upload.target_buffer = model->mtp.row_table;
+    }
+  }
+  if (!upload_count) {
+    return iree_ok_status();
+  }
+  uint64_t completion = 0;
+  return loom_serve_execution_transfer(model->execution, upload_count, uploads,
+                                       &completion);
+}
+
 // One allocation-free epoch path owns input validation, immutable uploads,
 // target/catch-up ordering, and the final host publication frontier.
 static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
@@ -962,6 +1078,7 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
   // any work. The device consumes this one established partition invariant.
   uint32_t resident_mask = 0;
   iree_host_size_t token_count = 0;
+  uint32_t required_blocks = 0;
   bool proposes = false;
   for (iree_host_size_t i = 0; i < span_count; ++i) {
     const loom_serve_qwen_span_t* span = &spans[i];
@@ -999,10 +1116,24 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
                                 "invalid speculative Qwen span %zu", i);
       }
     }
+    if (model->cache.capacity) {
+      const loom_serve_qwen_row_t* row = &model->rows[span->row_index];
+      required_blocks += (uint32_t)((row->position + span->token_count +
+                                     QWEN_BLOCK_TOKENS - 1) /
+                                    QWEN_BLOCK_TOKENS) -
+                         row->block_count;
+    }
     resident_mask |= resident_bit;
     token_count += span->token_count;
     proposes |= generates;
   }
+
+  if (required_blocks > model->cache.pool.available) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "epoch needs %u KV blocks; %u are available",
+                            required_blocks, model->cache.pool.available);
+  }
+  IREE_RETURN_IF_ERROR(qwen_grow_blocks(model, span_count, spans));
 
   memset(model->epoch.tokens, 0, sizeof(model->epoch.tokens));
   iree_host_size_t token_begin = 0;
@@ -1121,6 +1252,7 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
       out_results[i].output_count = (iree_host_size_t)record[1];
       memcpy(out_results[i].tokens, record + 2, sizeof(out_results[i].tokens));
       row->position += out_results[i].consumed_count;
+      qwen_trim_blocks(row);
       row->has_prediction = out_results[i].output_count != 0;
       if (row->has_prediction) {
         row->transfer.tokens[0] =
@@ -1131,6 +1263,7 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
       continue;
     }
     row->position += span->token_count;
+    qwen_trim_blocks(row);
     const int32_t output = model->epoch.metadata[3 + 5 * i + 4];
     row->has_prediction = output >= 0;
     if (row->has_prediction) {
@@ -1171,7 +1304,7 @@ iree_status_t loom_serve_qwen_row_prefill(loom_serve_qwen_row_t* row,
                             "prefill chunk exceeds stage or context capacity");
   }
   const iree_time_t start = iree_time_now();
-  if (model->mtp.first_stage) {
+  if (model->mtp.first_stage || model->cache.capacity) {
     iree_host_size_t shape_index = 0;
     // The public prefill capacity is bounded by the largest prepared shape.
     while (model->shapes[shape_index].token_capacity < count) {
@@ -1231,7 +1364,7 @@ iree_status_t loom_serve_qwen_row_decode(loom_serve_qwen_row_t* row) {
                             "Qwen context is full");
   }
   const iree_time_t start = iree_time_now();
-  if (row->model->mtp.first_stage) {
+  if (row->model->mtp.first_stage || row->model->cache.capacity) {
     const int32_t token = row->transfer.tokens[0];
     const loom_serve_qwen_span_t span = {
         (iree_host_size_t)(row - row->model->rows),

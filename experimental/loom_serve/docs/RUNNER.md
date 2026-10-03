@@ -5,6 +5,13 @@ is a model program, not a container for each chat session. One host owner
 multiplexes rows through shared code, weights, and workspace. Transport and
 heartbeat progress are independent of the model owner's GPU wait.
 
+The current bytecode `control.loom` selects isolated prefill/decode. Packed
+target, MTP proposal, verification, and catch-up are still sequenced by the
+native model adapter, which invokes cached native stage exports in that same
+VM process. Moving those model decisions into source-authored VM control is a
+separate ownership change, not something the generic submission module already
+provides automatically.
+
 ## Boundaries and the information each owns
 
 | Component | Receives and owns | Does not infer |
@@ -59,8 +66,9 @@ MTP verifier when context and output credit permit it.
 `loom_serve_qwen_schedule_shapes` evaluates the same readiness against each
 cached shape. It admits each selected row's minimum, fills remaining token
 capacity from longer spans, and advances rotating priority only for the winning
-plan. The objective currently maximizes useful tokens and breaks ties with
-smaller token/span capacities. It is not a latency-constrained cost model.
+plan. The objective currently maximizes useful tokens, then participating
+spans, then prefers smaller token/span capacities. It is not a latency-constrained
+cost model.
 
 `qwen_execute_epoch` constructs spans with stable resident row indices. Packed
 activation offsets are temporary; a row's KV and recurrent state do not move
@@ -125,7 +133,8 @@ The small control tests exercise these contracts with actual queues.
 | --- | --- |
 | More rows or wider epochs | Host fixed arrays, descriptor capacities, authored views, scratch sizing, shape selection, and full-sized correctness/performance qualification |
 | Online shape insertion | Stage publication and immutable native export lifetime; cached code and in-flight bindings must remain valid |
-| Shared block-pool/prefix cache | Replace contiguous row origins with a page-map contract; explicit shared ownership, partial-tail copy-on-write, and recurrent snapshots |
+| Capacity-managed pooled sessions | The explicit pooled layout already supplies growable private page maps; admission still needs completion reservations and a bounded request queue |
+| Shared prefix cache | Add shared ownership, partial-tail copy-on-write, recurrent snapshots, and retirement to the private-page lifecycle |
 | Device-owned continuation | Admission/completion rings with credit and cancellation; row progress and token routing leave the host epoch wait without recycling in-flight buffers |
 | Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |
 | NPU/GPU or collective execution | Target packages, actual queue/device domains, shared-memory/coherency contracts, and cross-device completion/ownership |

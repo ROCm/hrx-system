@@ -11,6 +11,30 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    block_pool
+  HDRS
+    "block_pool.h"
+  SRCS
+    "block_pool.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    block_pool_test
+  SRCS
+    "block_pool_test.cc"
+  DEPS
+    ::block_pool
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     http_request
   HDRS
     "http_request.h"
@@ -268,6 +292,7 @@ loom_cc_library(
   SRCS
     "qwen_model.c"
   DEPS
+    ::block_pool
     ::command
     ::execution
     ::jit

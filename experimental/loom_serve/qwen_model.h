@@ -30,8 +30,12 @@ typedef struct loom_serve_qwen_options_t {
   iree_string_view_t source_directory;
   // Maximum input count specialized into isolated prefill.
   iree_host_size_t prefill_capacity;
-  // Retained attention positions per resident row.
+  // Logical attention-position ceiling per row, not a pooled reservation.
   iree_host_size_t context_capacity;
+  // Shared physical token capacity, a multiple of 64. Nonzero selects paged
+  // packed execution; zero retains dense addressing for comparison. This is
+  // independent of the per-row logical context ceiling and requires epochs.
+  iree_host_size_t pool_capacity;
   // Number of cached packed-epoch stages; zero selects isolated execution.
   iree_host_size_t epoch_count;
   // Borrowed shapes specialized from the shared catalog during creation.
@@ -117,8 +121,8 @@ iree_tokenizer_t* loom_serve_qwen_model_tokenizer(
     loom_serve_qwen_model_t* model);
 iree_host_size_t loom_serve_qwen_model_context_capacity(
     const loom_serve_qwen_model_t* model);
-// Maximum chunk accepted by row_prefill. With MTP this is also bounded by the
-// largest packed shape, since prefill must advance both target and draft state.
+// Maximum chunk accepted by row_prefill. Pooled/MTP execution is also bounded
+// by the largest packed shape, which owns mapped target/draft state updates.
 iree_host_size_t loom_serve_qwen_model_prefill_capacity(
     const loom_serve_qwen_model_t* model);
 // Shapes are in option order and borrow model-owned immutable storage.
@@ -156,8 +160,9 @@ iree_status_t loom_serve_qwen_model_verify(
     iree_host_size_t span_count, const loom_serve_qwen_span_t* spans,
     const uint32_t* output_limits, loom_serve_qwen_result_t* out_results);
 
-// Clears recurrent state and position without allocating or changing ownership.
-// Attention beyond the new logical prefix is inaccessible and need not clear.
+// Clears recurrent state and position, then releases retired private KV pages.
+// Backing allocations remain fixed. Attention beyond the new logical prefix
+// is inaccessible and need not clear before its pages are assigned again.
 iree_status_t loom_serve_qwen_row_reset(loom_serve_qwen_row_t* row);
 
 // Appends one active chunk at the retained absolute position and selects the
