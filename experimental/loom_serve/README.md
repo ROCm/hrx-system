@@ -363,6 +363,11 @@ hidden reasoning. The summary records the exact corpus SHA256, and each reply
 records the submitted history hash. Preserve full replies and usage to expose
 work differences when comparing engines or kernel math.
 
+The checked-in [source-review corpus](testdata/source_review.json) freezes eight
+two-turn reviews of public compiler tests. Its [provenance](testdata/README.md)
+and [measurement recipe](docs/PERFORMANCE.md#retained-review-benchmark) make the
+full-model performance witness reproducible without private recordings.
+
 ### Fixed-trajectory model replay
 
 `qwen_replay` isolates model/scheduler costs from generated-text divergence.

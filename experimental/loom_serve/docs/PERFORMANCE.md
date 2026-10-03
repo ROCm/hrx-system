@@ -60,6 +60,114 @@ epoch, state/weight/workspace residency, cold JIT/startup time, and energy when
 measurable. Service token counters include selected EOS; text-visible output can
 use a separate count. Summing per-session token rates is not aggregate throughput.
 
+## Retained-review benchmark
+
+The checked-in [source-review workload](../testdata/source_review.json) contains
+eight independent two-turn reviews with different prompt lengths. Each turn
+requests at most 192 output tokens. Its [provenance](../testdata/README.md)
+records the public source excerpts and immutable corpus hash. A fresh agent
+needs no private recordings to reproduce this window.
+
+After the correctness checks in the [packet README](README.md), build the exact
+optimized `qwen_server` target with the flags above. Set `model_dir` to the
+pinned checkpoint directory from that README. On the qualified execution host,
+select a new `run_dir`, acquire its measurement lease, and start one residency:
+
+```sh
+python3.12 -B -m experimental.loom_serve.observe \
+  --log="$run_dir/observe.jsonl" -- \
+  bazel-bin/experimental/loom_serve/qwen_server \
+  --model=experimental/loom_serve/models/qwen38 \
+  --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
+  --tokenizer="$model_dir/tokenizer.json" \
+  --prefill_capacity=512 --context_capacity=16384 --rows=8 \
+  --epoch=32:8 --epoch=128:8 --epoch=256:8 --epoch=512:8 \
+  --mtp --mtp_depth=3 --scheduler=packed --packing=mixed \
+  --port=8080 --heartbeat_ms=1000
+```
+
+The output directory already exists; `observe.jsonl` must be new. Readiness is
+the JSON `ready` event, followed by a successful `/healthz` response. Once ready,
+run the client in another terminal on that host while the same lease is held:
+
+```sh
+python3.12 -B experimental/loom_serve/benchmark_service.py \
+  --url=http://127.0.0.1:8080 --clients=8 --session-prefix=review-0 \
+  --workload=experimental/loom_serve/testdata/source_review.json \
+  > "$run_dir/clients.jsonl"
+```
+
+The qualified Qwen window completes 16 requests, 28,534 appended input tokens,
+and 3,072 output tokens. Each second turn has a nonzero retained-prefix hit.
+The client records full replies, submitted-history hashes and usage; it rejects
+empty or incomplete responses and missing retention. An earlier EOS remains
+visible in `finish_reason` and output counts; it is not equivalent completed
+work merely because the client exits successfully. These are bounded review
+continuations, not a claim that every review finishes within 192 tokens.
+
+After client completion, SIGINT/SIGTERM to the observer drains the owned server.
+The final heartbeat must report every issued epoch completed, and `run_end`
+must record exit zero. Sum epoch prompt and selected-output counters against
+the client summary before using the time. This is whole-cohort elapsed time
+including prompt work, SSE and retained follow-ups, excluding model loading
+and JIT. Repeating a window means a fresh residency and a new output directory;
+otherwise old session rows or warm request histories change the experiment.
+
+The comparison configuration for the pinned Vulkan llama.cpp control is:
+
+```sh
+llama-server -m "$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
+  --host 127.0.0.1 --port 8080 --alias qwen3.8-27b --parallel 8 \
+  --kv-unified --kv-unified-per-slot 16384 --cont-batching \
+  --flash-attn on --gpu-layers all --device Vulkan0 --fit off \
+  --cache-type-k f16 --cache-type-v f16 --batch-size 2048 --ubatch-size 512 \
+  --threads 2 --threads-batch 2 --backend-sampling \
+  --jinja --reasoning off --chat-template-kwargs '{"enable_thinking":false}' \
+  --temp 0 --repeat-penalty 1 --presence-penalty 0 --frequency-penalty 0 \
+  --spec-type none
+```
+
+Run it through the same observer/client, with readiness from the server and
+its `/health` endpoint. Executable and loaded-library identities both matter:
+the server executable can be a small loader. This control is explicitly
+target-only; Loom uses depth-three MTP. The resulting ratio compares complete
+serving configurations, not equal speculative algorithms or equal generated
+text. Requalification of newer upstream, another backend, or MTP uses the same
+completed-output and retained-state gates before replacing the control.
+
+### Measured source-JIT checkpoint
+
+On 2026-10-02, commit `3ffe90573b` completed the following interleaved window on
+a gfx1151 Strix Halo engineering system with 128 GB unified memory. The GPU
+policy was `high`, CPU governors were `performance`, and measured package-power
+medians were about 100 W. A single measurement lease covered all three windows.
+
+| Run order | Serving configuration | Whole window | Aggregate output tokens/s |
+| --- | --- | ---: | ---: |
+| 1 | Loom, source JIT, MTP depth 3 | 133.022 s | 23.094 |
+| 2 | llama.cpp `f7b384c1e5c5b2c5b321a4a7cefea04b15b54cb7`, Vulkan, target-only | 163.620 s | 18.775 |
+| 3 | Loom, same configuration | 132.200 s | 23.238 |
+
+All three complete the same 28,534 appended inputs and 3,072 outputs over 16
+retained requests. Client/epoch accounting and clean retirement pass; both
+Loom runs retire all 182 epochs. Peak GPU temperatures are 64/62/61 C. The
+mean Loom window gives **23.4% higher throughput than this pinned control**,
+with 0.62% spread between Loom repeats. This is not a latest-upstream/HIP,
+same-MTP, bitwise-output, or universally best-backend claim. Replies differ
+across engines and three replies differ between Loom repeats, changing the
+follow-up histories despite equal aggregate token work.
+
+The first run's 15 command-stage preparation events total 1.823 seconds,
+including native compilation and loading. Source indexing, VM setup and weight
+loading are outside that sum. All model inputs are portable source, checkpoint
+and tokenizer files; no prepared native image is a deployment input.
+
+Prompt-containing epochs account for about 90.5 seconds, versus 41.6-42.5
+seconds in decode-only epochs. This is the reason to profile wide model math
+next: removing host decode overhead alone cannot explain away most of the
+remaining window. Dispatch profiling is a separate diagnostic run, never one
+of the scored controls.
+
 ## Traffic and batching hypotheses
 
 For one completed traversal, let `D` be modeled bytes reaching the relevant

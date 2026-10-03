@@ -44,6 +44,23 @@ class BenchmarkServiceTest(unittest.TestCase):
             path.write_text(json.dumps(self.workload(), indent=2))
             self.assertNotEqual(benchmark_service.load_workload(path)[1], digest)
 
+    def test_published_source_review_workload(self):
+        workload, _ = benchmark_service.load_workload(
+            Path(__file__).parent / "testdata/source_review.json"
+        )
+        self.assertEqual(len(workload["sessions"]), 8)
+        self.assertTrue(
+            all(len(session["turns"]) == 2 for session in workload["sessions"])
+        )
+        self.assertEqual(
+            sum(
+                turn["max_tokens"]
+                for session in workload["sessions"]
+                for turn in session["turns"]
+            ),
+            3072,
+        )
+
     def test_rejects_invalid_turns_before_starting_workers(self):
         for turn in (
             {},
