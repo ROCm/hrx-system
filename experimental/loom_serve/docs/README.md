@@ -229,6 +229,30 @@ With `--mtp` it also exercises speculative verification. That differential
 compares implementations in this runner; it does not replace the independent
 numerical oracle required for a new model port.
 
+The resident comparison rows are independent of each recipe's span capacity.
+The checker partitions its fixed cohort into legal epochs, retaining the same
+isolated-row oracle across compact-slot changes. These complementary catalogs
+exercise one-, two-, four- and eight-span verification recipes and all four
+token capacities:
+
+```sh
+check_shapes() {
+  bazel-bin/experimental/loom_serve/qwen_epoch_check \
+    --model=experimental/loom_serve/models/qwen38 \
+    --prefill_capacity=512 --context_capacity=2048 --mtp \
+    --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
+    --tokenizer="$model_dir/tokenizer.json" "$@"
+}
+check_shapes --epoch=32:1 --epoch=128:2 --epoch=256:4 --epoch=512:8
+check_shapes --epoch=32:2 --epoch=128:1 --epoch=256:8 --epoch=512:4
+check_shapes --epoch=5:1
+```
+
+Each call owns one residency and releases it before the next starts. The last
+call exercises a single narrow recipe at the fixture's five-token minimum;
+this is correctness coverage, not a suggested performance setting. The server's
+smaller-token boundary checks below have a different purpose.
+
 After the check exits and releases the residency, start one server:
 
 ```sh

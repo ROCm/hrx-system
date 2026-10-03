@@ -65,6 +65,21 @@ static iree_status_t qwen_check_prediction(loom_serve_qwen_model_t* model,
   return iree_ok_status();
 }
 
+// Returns the number of consecutive spans fitting one legal epoch. Each
+// fixture span fits the smallest accepted token capacity. Partitioning changes
+// compact slots without changing any resident row history.
+static iree_host_size_t qwen_check_batch_count(
+    loom_serve_qwen_shape_t shape, iree_host_size_t count,
+    const loom_serve_qwen_span_t* spans) {
+  iree_host_size_t batch_count = 0;
+  iree_host_size_t remaining = shape.token_capacity;
+  while (batch_count < iree_min(count, shape.span_capacity) &&
+         spans[batch_count].token_count <= remaining) {
+    remaining -= spans[batch_count++].token_count;
+  }
+  return batch_count;
+}
+
 static iree_status_t qwen_check_epoch(loom_serve_qwen_model_t* model,
                                       iree_host_size_t* next_shape,
                                       qwen_check_row_t rows[4],
@@ -73,9 +88,18 @@ static iree_status_t qwen_check_epoch(loom_serve_qwen_model_t* model,
                                       const loom_serve_qwen_span_t* spans) {
   const iree_host_size_t shape_index =
       (*next_shape)++ % loom_serve_qwen_model_shape_count(model);
-  IREE_RETURN_IF_ERROR(
-      loom_serve_qwen_model_epoch(model, shape_index, count, spans));
+  iree_host_size_t epoch_count = 0;
   iree_status_t status = iree_ok_status();
+  for (iree_host_size_t offset = 0;
+       offset < count && iree_status_is_ok(status);) {
+    const iree_host_size_t batch_count =
+        qwen_check_batch_count(loom_serve_qwen_model_shapes(model)[shape_index],
+                               count - offset, spans + offset);
+    status = loom_serve_qwen_model_epoch(model, shape_index, batch_count,
+                                         spans + offset);
+    ++epoch_count;
+    offset += batch_count;
+  }
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     qwen_check_row_t* row = &rows[logical_rows[i]];
     // Length-one decode input uses the same dense schedule here. Comparing to
@@ -100,18 +124,19 @@ static iree_status_t qwen_check_epoch(loom_serve_qwen_model_t* model,
     }
   }
   if (iree_status_is_ok(status)) {
-    fprintf(stderr,
-            "Matched packed epoch: shape %zu, %zu spans; positions "
-            "[%zu,%zu,%zu,%zu].\n",
-            shape_index, count,
-            loom_serve_qwen_row_position(
-                loom_serve_qwen_model_row(model, rows[0].packed)),
-            loom_serve_qwen_row_position(
-                loom_serve_qwen_model_row(model, rows[1].packed)),
-            loom_serve_qwen_row_position(
-                loom_serve_qwen_model_row(model, rows[2].packed)),
-            loom_serve_qwen_row_position(
-                loom_serve_qwen_model_row(model, rows[3].packed)));
+    fprintf(
+        stderr,
+        "Matched packed fixture: shape %zu, %zu spans in %zu epochs; positions "
+        "[%zu,%zu,%zu,%zu].\n",
+        shape_index, count, epoch_count,
+        loom_serve_qwen_row_position(
+            loom_serve_qwen_model_row(model, rows[0].packed)),
+        loom_serve_qwen_row_position(
+            loom_serve_qwen_model_row(model, rows[1].packed)),
+        loom_serve_qwen_row_position(
+            loom_serve_qwen_model_row(model, rows[2].packed)),
+        loom_serve_qwen_row_position(
+            loom_serve_qwen_model_row(model, rows[3].packed)));
   }
   return status;
 }
@@ -134,9 +159,16 @@ static iree_status_t qwen_check_verified_epoch(
     const loom_serve_qwen_span_t spans[4], const uint32_t limits[4],
     const iree_host_size_t* expected_counts) {
   loom_serve_qwen_result_t results[4];
-  IREE_RETURN_IF_ERROR(loom_serve_qwen_model_verify(model, shape_index, 4,
-                                                    spans, limits, results));
   iree_status_t status = iree_ok_status();
+  for (iree_host_size_t offset = 0; offset < 4 && iree_status_is_ok(status);) {
+    const iree_host_size_t batch_count =
+        qwen_check_batch_count(loom_serve_qwen_model_shapes(model)[shape_index],
+                               4 - offset, spans + offset);
+    status = loom_serve_qwen_model_verify(model, shape_index, batch_count,
+                                          spans + offset, limits + offset,
+                                          results + offset);
+    offset += batch_count;
+  }
   for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
     qwen_check_row_t* fixture = &rows[order[i]];
     loom_serve_qwen_row_t* reference =
@@ -301,7 +333,7 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
   uint32_t invalid_limits[] = {5, 4, 2, 4};
   loom_serve_qwen_result_t rejected[4];
   IREE_RETURN_IF_ERROR(
-      qwen_check_error(loom_serve_qwen_model_verify(model, 0, 4, spans,
+      qwen_check_error(loom_serve_qwen_model_verify(model, 0, 1, spans,
                                                     invalid_limits, rejected),
                        IREE_STATUS_INVALID_ARGUMENT));
   IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(model, 0, rows, order, spans,
@@ -363,14 +395,19 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
 
 static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
                                     iree_allocator_t allocator) {
+  iree_host_size_t widest_shape = 0;
   for (iree_host_size_t i = 0; i < loom_serve_qwen_model_shape_count(model);
        ++i) {
     const loom_serve_qwen_shape_t shape =
         loom_serve_qwen_model_shapes(model)[i];
-    if (shape.token_capacity < 10 || shape.span_capacity < 4) {
+    if (shape.token_capacity < 5) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "witness requires at least 10 tokens and four spans in every shape");
+          "witness requires at least five tokens in every shape");
+    }
+    if (shape.span_capacity >
+        loom_serve_qwen_model_shapes(model)[widest_shape].span_capacity) {
+      widest_shape = i;
     }
   }
   iree_host_size_t next_shape = 0;
@@ -432,10 +469,16 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
       {rows[2].packed, 1, &decode_tokens[2], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
       {rows[3].packed, 1, &decode_tokens[3], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
   };
-  loom_serve_qwen_span_t repeated[] = {first[0], first[0]};
-  IREE_RETURN_IF_ERROR(
-      qwen_check_error(loom_serve_qwen_model_epoch(model, 0, 2, repeated),
-                       IREE_STATUS_INVALID_ARGUMENT));
+  loom_serve_qwen_span_t repeated[] = {first[2], first[2]};
+  // A one-span catalog rejects this call at the span-count boundary, before
+  // inspecting duplicate rows. Wider catalogs reach input validation.
+  const iree_status_code_t repeated_code =
+      loom_serve_qwen_model_shapes(model)[widest_shape].span_capacity > 1
+          ? IREE_STATUS_INVALID_ARGUMENT
+          : IREE_STATUS_OUT_OF_RANGE;
+  IREE_RETURN_IF_ERROR(qwen_check_error(
+      loom_serve_qwen_model_epoch(model, widest_shape, 2, repeated),
+      repeated_code));
   IREE_RETURN_IF_ERROR(
       qwen_check_epoch(model, &next_shape, rows, 4, first_order, first));
   IREE_RETURN_IF_ERROR(
