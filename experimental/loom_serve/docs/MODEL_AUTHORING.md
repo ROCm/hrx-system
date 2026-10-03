@@ -34,7 +34,7 @@ expands around the new model.
 | Ordinary functions and templates | Reusable arithmetic, layouts, target-selected implementation motifs | [Authoring corpus](../../../loom/src/loom/test/corpus/authoring/README.md) |
 | Kernels | Workload-to-launch mapping and one device invocation | [Token embedding](../models/qwen38/kernels/qwen38/token_embedding.loom) |
 | Command programs | Parameter roots, transient lifetimes, layer composition, dispatch dependencies | [Packed epoch](../models/qwen38/epoch.loom) |
-| VM control | Coarse model orchestration through typed runner imports | [Qwen control](../models/qwen38/control.loom) |
+| VM control and policy | Coarse orchestration through typed imports; source queries returning ordinary values and buffers | [Qwen control](../models/qwen38/control.loom), [weight policy](../models/qwen38/weights.loom) |
 
 A kernel's workload arguments establish launch geometry and specialization;
 its launch arguments supply the values and buffers consumed by that invocation.
@@ -58,16 +58,25 @@ containing model dimensions and shape capacities. The same configuration is
 applied while materializing the command and its native source requests. The
 compiler retains the relationship between a kernel's launch math and body.
 
-Values fixed for a specialization belong in `config.decl`/`config.get` or
-specialization arguments. Current active lengths, token IDs, row origins, and
-positions belong in workload arguments or device descriptors. Capacity and
-active count are different facts: padding can exist without advancing the
-persistent state of inactive rows. The [facts guide](../../../loom/docs/src/guide/facts-and-specialization.md)
+Configuration is a model entry/specialization boundary. Reusable functions,
+templates, and motifs receive dimensions and layout facts as explicit SSA
+operands, rather than reading ambient model-named configuration symbols.
+A concrete wrapper can resolve configuration and apply the same template with
+different constant operands; the reusable body retains compile-time facts
+without depending on that model's keys. Launch arguments that remain runtime
+values are a different contract from template operands fixed by that wrapper.
+
+Current active lengths, token IDs, row origins, and positions belong in workload
+arguments or device descriptors. Capacity and active count are different facts:
+padding can exist without advancing the persistent state of inactive rows.
+The [facts guide](../../../loom/docs/src/guide/facts-and-specialization.md)
 explains both domains and path-dependent refinement.
 
 The fused [FFN block read-ahead](../models/qwen38/kernels/qwen38/ffn_gate_up_prefetch.loom)
-is a concrete example: `qwen38.ffn.input_size` and `qwen38.ffn.output_size`
-configure the body, allowing an exact block loop to pipeline weight acquisition.
+currently reads `qwen38.ffn.input_size` and `qwen38.ffn.output_size` inside its
+body template, allowing an exact block loop to pipeline weight acquisition.
+That direct dependency is model coupling, not a requirement for specialization:
+the reusable form passes K/N from the concrete kernel wrapper into the template.
 Its workload carries token capacity, and its five launch buffers carry live count,
 activations, two weight views and output. There is no runtime K/N scalar to
 rediscover or a host readback to learn the active count. The
@@ -134,8 +143,31 @@ IO machinery, but its model adapter must establish names, encoding, orientation,
 and size rather than treating a matching byte count as numerical equivalence.
 
 Checkpoint encoding and inference layout need not be identical.
-[`qwen_weights.c`](../qwen_weights.c) loads each unique tensor into final
-residency and schedules the ordinary source-JIT
+[`weights.c`](../weights.c) loads each unique tensor into final
+residency. It calls the model's source-JIT weight policy with the tensor name as
+a read-only, non-NUL-terminated VM buffer. `prepare_weight` returns a command
+root buffer and its required tensor byte length; an empty root and zero length
+request unchanged file bytes. The loader validates the result against actual
+reflection and caches each distinct command. A model needing no transformation
+can return the same empty root and zero for every key. Preparers expose one
+mutable tensor binding, no fixed buffers, and no global scratch; their source
+wrappers fix any configuration needed for compilation.
+
+A model whose kernels consume the checkpoint representation directly can start
+with this complete `weights.loom`; it needs no preparation kernels or C policy:
+
+```text
+global.rodata.def @unchanged = bytes("")
+
+func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
+  %root = global.load @unchanged : buffer
+  %bytes = scalar.constant 0 : i64
+  func.return %root, %bytes : buffer, i64
+}
+```
+
+Qwen's [`weights.loom`](../models/qwen38/weights.loom) owns the tensor-name
+predicate and Q5 dimensions and selects the ordinary source-JIT
 [`prepare.loom`](../models/qwen38/prepare.loom) command after its read. Each
 workgroup captures eight complete Q5 rows before rewriting its disjoint range;
 the permutation requires only workgroup-local storage. The target and MTP
@@ -144,6 +176,13 @@ own format and preparation contract, not Qwen's tensor-name predicate or
 dimensions. Layout qualification covers every consuming shape and the complete
 startup ownership path, including byte copies and peak residency. A faster
 projection alone does not establish a better serving configuration.
+
+This is a cold policy query, not a graph language interpreted by C. The same
+[`program`](../program.h) owner handles pure startup queries and the inference
+VM linked against native submission exports. The startup query process is gone
+before inference begins. Common native pipelines can consume model-owned query
+results while additional control moves into VM source; modality-specific state
+and scheduling contracts still need an actual caller before being generalized.
 
 ## Correctness that survives optimization
 

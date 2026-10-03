@@ -268,22 +268,93 @@ endif()
 
 loom_cc_library(
   NAME
-    qwen_weights
+    program
   HDRS
-    "qwen_weights.h"
+    "program.h"
   SRCS
-    "qwen_weights.c"
+    "program.c"
   DEPS
     ::jit
+    iree::base
+    iree::vm
+    iree::vm::bytecode::module
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    weights
+  HDRS
+    "weights.h"
+  SRCS
+    "weights.c"
+  DEPS
+    ::jit
+    ::program
     iree::base
     iree::hal
     iree::io::parameter_index
     iree::io::parameter_index_provider
     iree::io::parameter_provider
     iree::tooling::parameter_util
+    iree::vm
     loom::target::arch::cmd::program
   PUBLIC
 )
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    program_test
+  SRCS
+    "program_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen38/weights.loom"
+  DEPS
+    ::program
+    iree::base
+    iree::base::tooling::flags
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+  ARGS
+    "--policy_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen38/weights.loom}}"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    weights_test
+  SRCS
+    "weights_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/weights/policy.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/weights/sources.txt"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/weights/stages.loom"
+  DEPS
+    ::execution
+    ::jit
+    ::weights
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::base::tooling::flags
+    iree::hal
+    iree::hal::drivers
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::testing::temp_file
+    loom::binding::c::loomc
+  ARGS
+    "--weight_sources={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/weights/sources.txt}}"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
 
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
@@ -299,8 +370,9 @@ loom_cc_library(
     ::execution
     ::jit
     ::module
+    ::program
     ::qwen_schedule
-    ::qwen_weights
+    ::weights
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -315,7 +387,6 @@ loom_cc_library(
     iree::tokenizer::vocab
     iree::tooling::device_util
     iree::vm
-    iree::vm::bytecode::module
     loom::binding::c::loomc
     loom::target::arch::cmd::program
   PUBLIC

@@ -23,14 +23,14 @@ from urllib.parse import urlsplit
 from experimental.loom_serve import benchmark_service, check_service
 
 
-def request(address, index, barrier=None):
+def request(address, index, barrier=None, *, long_prompt=False):
     messages = [
         {"role": "system", "content": "Follow instructions exactly. Do not use tools."},
         {
             "role": "user",
             "content": (
                 "Background: this repository has kernels and documentation.\n"
-                * (index % 4)
+                * (128 if long_prompt else index % 4)
                 + "Count from 1 through 1000, one number per line, without commentary."
             ),
         },
@@ -66,7 +66,14 @@ def main():
         "--heartbeat_ms=1000",
     ]
     reference = None
-    for capacity in (0, 256 * arguments.rows):
+    # One prompt exceeds two largest-shape epochs while the short rows decode.
+    # Even if it is packed first, the rotating next epoch finishes short rows
+    # before it can finish, leaving real decode work to mix into its final chunk.
+    # Arrival skew alone cannot establish mixed-work coverage: all short prompts
+    # may be ready together and fit in a single epoch. Completion reservations
+    # cover the long prompt too, so admission does not serialize this witness.
+    pooled_capacity = 256 * arguments.rows + (1024 if arguments.rows > 1 else 0)
+    for capacity in (0, pooled_capacity):
         events = []
         log_path = arguments.output / f"pool-{capacity}.log"
         shapes = (
@@ -84,12 +91,26 @@ def main():
                 barrier = threading.Barrier(arguments.rows)
                 with ThreadPoolExecutor(max_workers=arguments.rows) as clients:
                     futures = [
-                        clients.submit(request, address, index, barrier)
+                        clients.submit(
+                            request,
+                            address,
+                            index,
+                            barrier,
+                            long_prompt=arguments.rows > 1
+                            and index == arguments.rows - 1,
+                        )
                         for index in range(arguments.rows)
                     ]
                     results = [future.result() for future in futures]
             else:
-                results = [request(address, index) for index in range(arguments.rows)]
+                results = [
+                    request(
+                        address,
+                        index,
+                        long_prompt=arguments.rows > 1 and index == arguments.rows - 1,
+                    )
+                    for index in range(arguments.rows)
+                ]
         (arguments.output / f"pool-{capacity}.json").write_text(
             json.dumps(results, indent=2) + "\n"
         )

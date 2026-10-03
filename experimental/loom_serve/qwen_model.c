@@ -17,7 +17,8 @@
 #include "experimental/loom_serve/execution.h"
 #include "experimental/loom_serve/jit.h"
 #include "experimental/loom_serve/module.h"
-#include "experimental/loom_serve/qwen_weights.h"
+#include "experimental/loom_serve/program.h"
+#include "experimental/loom_serve/weights.h"
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/path.h"
@@ -27,7 +28,6 @@
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/vocab/vocab.h"
 #include "iree/tooling/device_util.h"
-#include "iree/vm/bytecode/module.h"
 #include "iree/vm/sync.h"
 
 enum {
@@ -128,17 +128,8 @@ struct loom_serve_qwen_model_t {
   iree_hal_module_types_t types;
   // Native stage submission module retained by program.
   iree_vm_module_t* native_module;
-  // Compiled model-control module retained by program.
-  iree_vm_module_t* bytecode_module;
-  // Shared linked model program.
-  iree_vm_program_t* program;
-  // Fixed invocation backing, independent of token count.
-  iree_alignas(iree_alignof(iree_max_align_t)) uint8_t
-      invocation_storage[16384];
-  // Invocation borrowing invocation_storage.
-  iree_vm_invocation_t* invocation;
-  // One model process; request state is not VM process state.
-  iree_vm_process_t* process;
+  // Shared source-JIT model program; request state is not VM process state.
+  loom_serve_program_t* program;
   // Cold-resolved model step function.
   iree_vm_function_t step;
   // Reusable packed-epoch bindings and transfer payloads. Device buffers at
@@ -313,20 +304,28 @@ static iree_status_t qwen_allocate_buffer(loom_serve_qwen_model_t* runner,
 // Weight placement and preparation are cold model-wide work. Session rows
 // never own weights and every compiled shape retains views of this residency.
 static iree_status_t qwen_load_weights(loom_serve_qwen_model_t* model,
-                                       iree_string_view_t weights_path) {
-  loom_serve_qwen_weight_stage_t* stages = NULL;
+                                       iree_string_view_t weights_path,
+                                       iree_string_view_t source_directory) {
+  loom_serve_weight_stage_t* stages = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       model->allocator, model->stage_count, sizeof(*stages), (void**)&stages));
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    stages[i] = (loom_serve_qwen_weight_stage_t){
+    stages[i] = (loom_serve_weight_stage_t){
         .program = &model->stages[i].program,
         .buffers = model->stages[i].fixed_buffers,
     };
   }
-  iree_status_t status = loom_serve_qwen_weights_load(
-      model->device, model->transfer, model->dispatch, model->jit,
-      model->command_mode, model->shape_count + 2, model->stage_count, stages,
-      weights_path, model->allocator);
+  char* policy_path = NULL;
+  iree_status_t status =
+      iree_file_path_join(source_directory, IREE_SV("weights.loom"),
+                          model->allocator, &policy_path);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_weights_load(
+        model->device, model->transfer, model->dispatch, model->jit,
+        model->command_mode, model->shape_count + 2, model->stage_count, stages,
+        weights_path, iree_make_cstring_view(policy_path), model->allocator);
+  }
+  iree_allocator_free(model->allocator, policy_path);
   iree_allocator_free(model->allocator, stages);
   return status;
 }
@@ -357,37 +356,20 @@ static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner,
   char* path = NULL;
   IREE_RETURN_IF_ERROR(iree_file_path_join(
       source_directory, IREE_SV("control.loom"), runner->allocator, &path));
-  iree_const_byte_span_t image = iree_const_byte_span_empty();
-  status = loom_serve_jit_compile_vm(
-      iree_make_cstring_view(path), IREE_SV("step"), runner->allocator, &image);
+  iree_vm_module_t* libraries[] = {runner->native_module};
+  status = loom_serve_program_create(
+      runner->environment, iree_make_cstring_view(path), IREE_SV("step"),
+      iree_vm_module_span_from_array(libraries), runner->allocator,
+      &runner->program);
   iree_allocator_free(runner->allocator, path);
   IREE_RETURN_IF_ERROR(status);
-  status = iree_vm_bytecode_module_create_trusted(
-      runner->environment, IREE_SV("model"),
-      (iree_vm_bytecode_module_storage_t){image, runner->allocator},
-      runner->allocator, &runner->bytecode_module);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(runner->allocator, (void*)image.data);
-  }
-  IREE_RETURN_IF_ERROR(status);
-  iree_vm_module_t* libraries[] = {runner->native_module};
-  IREE_RETURN_IF_ERROR(iree_vm_program_create(
-      (iree_vm_program_modules_t){runner->bytecode_module,
-                                  iree_vm_module_span_from_array(libraries)},
-      runner->allocator, &runner->program));
-  IREE_RETURN_IF_ERROR(iree_vm_invocation_initialize(
-      iree_make_byte_span(runner->invocation_storage,
-                          sizeof(runner->invocation_storage)),
-      &runner->invocation));
-  IREE_RETURN_IF_ERROR(iree_vm_process_create(
-      runner->program, runner->invocation, iree_vm_variant_span_empty(),
-      runner->allocator, &runner->process));
+  iree_vm_process_t* process = loom_serve_program_process(runner->program);
   IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
-      runner->process, IREE_SV("model"), IREE_SV("step"), &runner->step));
+      process, IREE_SV("model"), IREE_SV("step"), &runner->step));
   for (iree_host_size_t i = 2;
        i < runner->stage_count && iree_status_is_ok(status); ++i) {
     status = iree_vm_process_lookup_function(
-        runner->process, IREE_SV("runner"),
+        process, IREE_SV("runner"),
         iree_make_cstring_view(runner->stages[i].name), &runner->functions[i]);
   }
   return status;
@@ -749,7 +731,8 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
   IREE_RETURN_IF_ERROR(qwen_check_layouts(model));
   IREE_RETURN_IF_ERROR(iree_hal_begin_device_group_profiling_from_flags(
       model->group, model->allocator, &model->profiling));
-  IREE_RETURN_IF_ERROR(qwen_load_weights(model, options->weights_path));
+  IREE_RETURN_IF_ERROR(qwen_load_weights(model, options->weights_path,
+                                         options->source_directory));
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {
     qwen_stage_t* stage = &model->stages[i];
@@ -817,13 +800,8 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
                              : iree_ok_status();
   status = iree_status_join(
       status, iree_hal_end_profiling_from_flags(model->profiling));
-  iree_vm_process_release(model->process);
-  if (model->invocation) {
-    iree_vm_invocation_deinitialize(model->invocation);
-  }
-  iree_vm_program_release(model->program);
+  loom_serve_program_destroy(model->program);
   iree_vm_module_release(model->native_module);
-  iree_vm_module_release(model->bytecode_module);
   iree_vm_environment_free(model->environment);
   if (model->rows) {
     for (iree_host_size_t i = 0; i < model->row_count; ++i) {
@@ -978,8 +956,8 @@ static iree_status_t qwen_invoke(loom_serve_qwen_model_t* model,
                                  iree_vm_variant_span_t arguments) {
   iree_vm_variant_t results[1] = {0};
   iree_status_t status =
-      iree_vm_invoke(model->invocation, function, arguments,
-                     iree_vm_variant_span_from_array(results));
+      iree_vm_invoke(loom_serve_program_invocation(model->program), function,
+                     arguments, iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(arguments);
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   return status;
