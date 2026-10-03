@@ -261,7 +261,8 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
   }
   %verifying_spans = scalar.andi %verifying, %uses_spans : i1
   scf.if %verifying_spans {
-    %layer_bytes = index.constant 1323008 : offset
+    %span_bytes = index.constant 165376 : offset
+    %layer_bytes = index.scale %span_capacity, %span_bytes : index, offset -> offset
     %layer_origin = index.scale %gdn_ordinal, %layer_bytes : index, offset -> offset
     kernel.launch @qwen38_gdn_capture_spans[%span_capacity](%token_count_data, %qkv, %alpha, %beta, %transition_capture, %layer_origin) : [index](buffer, buffer, buffer, buffer, buffer, offset)
   }

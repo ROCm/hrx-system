@@ -25,7 +25,10 @@ IREE_FLAG_LIST(string, window,
                "Comma-separated epoch indexes allowed in one replay window; "
                "repeat to interleave policies in the same residency.");
 
-enum { QWEN_REPLAY_ROWS = 8, QWEN_REPLAY_SHAPES = 8 };
+enum {
+  QWEN_REPLAY_ROWS = LOOM_SERVE_QWEN_ROW_CAPACITY,
+  QWEN_REPLAY_SHAPES = 8
+};
 
 static volatile sig_atomic_t qwen_replay_interrupted = 0;
 
@@ -443,7 +446,7 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status) &&
       (!row_count || row_count > QWEN_REPLAY_ROWS)) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                              "replay requires one through eight sessions");
+                              "replay requires one through sixteen sessions");
   }
   loom_serve_qwen_model_t* model = NULL;
   qwen_replay_row_t rows[QWEN_REPLAY_ROWS] = {0};

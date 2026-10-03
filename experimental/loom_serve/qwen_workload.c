@@ -28,7 +28,7 @@ IREE_FLAG(string, baseline, "practical",
           "practical uses ordinary decode; matched uses the prefill math for "
           "length-one inputs and requires identical outputs.");
 
-enum { QWEN_WORKLOAD_ROWS = 8 };
+enum { QWEN_WORKLOAD_ROWS = LOOM_SERVE_QWEN_ROW_CAPACITY };
 
 typedef struct qwen_workload_row_t {
   // Borrowed device residency, shared across every replay window.

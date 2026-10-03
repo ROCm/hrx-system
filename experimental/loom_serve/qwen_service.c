@@ -214,7 +214,7 @@ typedef struct qwen_service_t {
   // Shared typed tool-call serialization scratch used at generation end.
   iree_string_builder_t tool_calls;
   // Fixed retained rows sharing one model, command set and execution timeline.
-  qwen_session_t sessions[8];
+  qwen_session_t sessions[LOOM_SERVE_QWEN_ROW_CAPACITY];
 } qwen_service_t;
 
 static int qwen_heartbeat_main(void* argument) {
@@ -993,11 +993,11 @@ static void qwen_separate_ready(const qwen_service_t* service,
 static iree_status_t qwen_execute_epoch(
     qwen_service_t* service, iree_host_size_t shape_index,
     iree_host_size_t count, const loom_serve_qwen_scheduled_span_t* scheduled) {
-  loom_serve_qwen_span_t spans[8];
-  loom_serve_qwen_result_t results[8] = {0};
-  int32_t decode_tokens[8];
-  iree_host_size_t positions[8];
-  uint32_t output_limits[8] = {0};
+  loom_serve_qwen_span_t spans[LOOM_SERVE_QWEN_ROW_CAPACITY];
+  loom_serve_qwen_result_t results[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
+  int32_t decode_tokens[LOOM_SERVE_QWEN_ROW_CAPACITY];
+  iree_host_size_t positions[LOOM_SERVE_QWEN_ROW_CAPACITY];
+  uint32_t output_limits[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
   iree_host_size_t proposal_count = 0;
   iree_host_size_t prefill_count = 0, decode_count = 0, output_count = 0;
   iree_host_size_t input_count = 0, accepted_drafts = 0;
@@ -1259,7 +1259,7 @@ iree_status_t loom_serve_qwen_service_run(
       }
       progress = true;
     }
-    loom_serve_qwen_ready_span_t ready[8] = {0};
+    loom_serve_qwen_ready_span_t ready[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
     for (iree_host_size_t i = 0;
          i < service.row_count && iree_status_is_ok(status); ++i) {
       qwen_prepare_ready(&service, &service.sessions[i], &progress, &ready[i]);
@@ -1269,8 +1269,8 @@ iree_status_t loom_serve_qwen_service_run(
       if (service.packing_mode == LOOM_SERVE_QWEN_PACKING_SEPARATE) {
         qwen_separate_ready(&service, ready);
       }
-      loom_serve_qwen_scheduled_span_t spans[8];
-      loom_serve_qwen_scheduled_span_t scratch[8];
+      loom_serve_qwen_scheduled_span_t spans[LOOM_SERVE_QWEN_ROW_CAPACITY];
+      loom_serve_qwen_scheduled_span_t scratch[LOOM_SERVE_QWEN_ROW_CAPACITY];
       iree_host_size_t shape_index = 0;
       const iree_host_size_t count = loom_serve_qwen_schedule_shapes(
           service.row_count, ready, service.shape_count, service.shapes,

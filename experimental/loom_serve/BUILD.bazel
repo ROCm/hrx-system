@@ -61,6 +61,16 @@ py_library(
     srcs = ["benchmark_service.py"],
 )
 
+py_binary(
+    name = "check_rows",
+    testonly = True,
+    srcs = ["check_rows.py"],
+    deps = [
+        ":benchmark_service_lib",
+        ":check_service_lib",
+    ],
+)
+
 py_test(
     name = "benchmark_service_test",
     size = "small",

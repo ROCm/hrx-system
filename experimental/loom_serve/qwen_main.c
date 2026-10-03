@@ -19,7 +19,8 @@ IREE_FLAG(string, prompt_file, "",
           "Already rendered chat text, instead of prompt.");
 IREE_FLAG(string, followup, "",
           "Second user turn appended to each retained row.");
-IREE_FLAG(int32_t, rows, 0, "Retained rows (1-8); zero uses the prompt count.");
+IREE_FLAG(int32_t, rows, 0,
+          "Retained rows (1-16); zero uses the prompt count.");
 IREE_FLAG(int32_t, max_tokens, 128,
           "Maximum selected tokens per turn, including EOS.");
 IREE_FLAG(int32_t, chunk_size, 0,
@@ -220,7 +221,7 @@ static iree_status_t qwen_run(loom_serve_qwen_model_t* model,
   int32_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       allocator, 2 * capacity * row_count, sizeof(int32_t), (void**)&storage));
-  qwen_cli_row_t rows[8] = {0};
+  qwen_cli_row_t rows[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
   for (iree_host_size_t i = 0; i < row_count; ++i) {
     rows[i].row = loom_serve_qwen_model_row(model, i);
     rows[i].input = storage + i * capacity * 2;
@@ -281,11 +282,11 @@ int main(int argc, char** argv) {
   const iree_flag_string_list_t prompts = FLAG_prompt_list();
   const iree_host_size_t row_count =
       FLAG_rows ? (iree_host_size_t)FLAG_rows : iree_max(prompts.count, 1);
-  if (FLAG_rows < 0 || row_count > 8 || FLAG_max_tokens < 1 ||
-      FLAG_iterations < 1 || FLAG_chunk_size < 0 ||
+  if (FLAG_rows < 0 || row_count > LOOM_SERVE_QWEN_ROW_CAPACITY ||
+      FLAG_max_tokens < 1 || FLAG_iterations < 1 || FLAG_chunk_size < 0 ||
       (FLAG_prompt_file[0] && prompts.count)) {
     fprintf(stderr,
-            "Provide model paths and positive lengths; use 1-8 rows "
+            "Provide model paths and positive lengths; use 1-16 rows "
             "and either prompts or one rendered prompt file.\n");
     return EXIT_FAILURE;
   }

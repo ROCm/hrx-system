@@ -75,7 +75,7 @@ contents or command names by the native submission code.
 `qwen_model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: shared
 parameter storage prepared in place at startup, cached prefill/decode commands,
 model VM process, residual buffer and packed workspace. One preallocated arena
-partitions private recurrent state among up to eight rows. With
+partitions private recurrent state among up to sixteen rows. With
 `--pool_capacity=N`, attention pages grow from a shared physical budget rather
 than reserving every row's logical context. Rows are data, not VM processes.
 A single host owner multiplexes their stages through the shared timeline.
@@ -148,8 +148,8 @@ cold compilation/load duration. Warm execution reuses commands and storage.
 
 The [model source guide](models/qwen38/README.md) describes the math and
 differential checks. The current source and host storage envelope is 512 input
-tokens and eight resident rows. JIT removes offline preparation as a prerequisite;
-larger envelopes still require changing the authored bounds and backing
+tokens and sixteen resident rows. JIT removes offline preparation as a
+prerequisite; larger envelopes still require changing the authored bounds and backing
 together, then qualifying the resulting kernels. Shapes are prepared at startup,
 not inserted into the fixed native-module export table during a running session.
 These are explicit properties of this adapter, not restrictions of the JIT.

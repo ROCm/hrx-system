@@ -25,6 +25,10 @@ extern "C" {
 typedef struct loom_serve_qwen_model_t loom_serve_qwen_model_t;
 typedef struct loom_serve_qwen_row_t loom_serve_qwen_row_t;
 
+// Four-input verification uses at most 64 selected-token entries per epoch.
+// Retained arenas are sized to row_count, not this control-payload bound.
+enum { LOOM_SERVE_QWEN_ROW_CAPACITY = 16 };
+
 typedef struct loom_serve_qwen_options_t {
   // Portable model source directory, including sources.txt and control.loom.
   iree_string_view_t source_directory;
@@ -49,7 +53,7 @@ typedef struct loom_serve_qwen_options_t {
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
   iree_string_view_t tokenizer_path;
-  // Number of retained rows preallocated in one fixed state arena (1-8).
+  // Number of retained rows preallocated in one fixed state arena (1-16).
   iree_host_size_t row_count;
 } loom_serve_qwen_options_t;
 
