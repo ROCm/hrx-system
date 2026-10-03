@@ -28,6 +28,7 @@ py_binary(
     name = "benchmark_service",
     testonly = True,
     srcs = ["benchmark_service.py"],
+    data = ["testdata/source_review.json"],
 )
 
 py_binary(
@@ -47,6 +48,7 @@ py_test(
     name = "benchmark_service_test",
     size = "small",
     srcs = ["benchmark_service_test.py"],
+    data = ["testdata/source_review.json"],
     deps = [":benchmark_service_lib"],
 )
 
