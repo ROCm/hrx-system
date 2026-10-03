@@ -72,11 +72,12 @@ contents or command names by the native submission code.
 
 ## Shared Qwen execution
 
-`qwen_model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: one GGUF
-parameter slab, prepared prefill/decode commands, model VM process, residual
-buffer and packed workspace. One preallocated arena partitions private retained
-state among up to eight rows. Rows are data, not VM processes. A single host
-owner multiplexes their stages through the shared execution timeline.
+`qwen_model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: shared
+parameter storage prepared in place at startup, cached prefill/decode commands,
+model VM process, residual buffer and packed workspace. One preallocated arena
+partitions private retained state among up to eight rows. Rows are data, not VM
+processes. A single host owner multiplexes their stages through the shared
+execution timeline.
 
 Packed target completion forks compact result downloads from cache-only MTP
 catch-up. The catch-up stage consumes committed target state, not the downloaded
@@ -85,8 +86,9 @@ host positions and recycling payloads; it does not yet provide autonomous
 inter-epoch device continuation.
 
 The Qwen tools use IREE's standard device profiling flags. Profiling begins
-after model loading and residency initialization; shutdown drains accepted
-work before ending the session and propagates profiling failures. For aggregate
+after command specialization and before weight loading, so it includes startup
+transfers and preparation as well as inference. Shutdown drains accepted work
+before ending the session and propagates profiling failures. For aggregate
 execution statistics, add `--print_device_statistics=true`. Per-dispatch
 attribution can use `--device_profiling_mode=dispatch-events` with that flag,
 or `--device_profiling_output=/path/to/profile` instead of aggregate printing.
