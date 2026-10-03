@@ -408,6 +408,9 @@ typedef struct iree_hal_amdgpu_driver_options_t {
 
   // Default device options when none are provided during device creation.
   iree_hal_amdgpu_logical_device_options_t default_device_options;
+
+  // Queues to provision per GPU agent. Zero uses the topology default.
+  iree_host_size_t default_gpu_agent_queue_count;
 } iree_hal_amdgpu_driver_options_t;
 
 // Initializes the given |out_options| with default driver creation options.

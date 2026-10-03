@@ -492,6 +492,11 @@ static iree_status_t iree_hal_amdgpu_driver_create_device_by_id(
   iree_status_t status =
       iree_hal_amdgpu_topology_initialize_from_gpu_agent_mask(
           &driver->libhsa, (uint64_t)device_id, &topology);
+  if (iree_status_is_ok(status) &&
+      driver->options.default_gpu_agent_queue_count != 0) {
+    topology.gpu_agent_queue_count =
+        driver->options.default_gpu_agent_queue_count;
+  }
 
   // Create the logical device composed of all physical devices specified.
   if (iree_status_is_ok(status)) {
@@ -548,6 +553,11 @@ static iree_status_t iree_hal_amdgpu_driver_create_device_by_path(
   iree_hal_amdgpu_topology_t topology;
   iree_status_t status = iree_hal_amdgpu_topology_initialize_from_path(
       &libhsa, device_path, &topology);
+  if (iree_status_is_ok(status) &&
+      driver->options.default_gpu_agent_queue_count != 0) {
+    topology.gpu_agent_queue_count =
+        driver->options.default_gpu_agent_queue_count;
+  }
 
   // Create the logical device composed of all physical devices specified.
   if (iree_status_is_ok(status)) {
