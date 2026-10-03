@@ -10,15 +10,18 @@
 
 IREE_FLAG(string, model, "experimental/loom_serve/models/qwen38",
           "Portable model source directory; JIT compiled for the live device.");
-IREE_FLAG(int32_t, prefill_capacity, 512, "Isolated prefill specialization.");
+IREE_FLAG(int32_t, prefill_capacity, 512,
+          "Maximum automatic packed shape and isolated prefill capacity.");
 IREE_FLAG(int32_t, context_capacity, 16384,
           "Retained tokens per resident row.");
-IREE_FLAG(int32_t, pool_capacity, 0,
+IREE_FLAG(int32_t, pool_capacity, -1,
           "Shared target/draft KV token capacity (multiple of 64); requires "
-          "packed epochs. Zero selects the dense comparison layout.");
+          "packed epochs. -1 uses the entry point default (65536 for the "
+          "packed server, zero for tools). Zero selects dense comparison.");
 IREE_FLAG_LIST(
     string, epoch,
-    "Packed JIT shape as tokens:spans, e.g. 128:8; repeat to cache shapes.");
+    "Packed JIT shape as tokens:spans; repeated flags replace the automatic "
+    "catalog bounded by prefill_capacity and resident rows.");
 IREE_FLAG(bool, mtp, false, "JIT MTP proposal, catch-up, and verifier stages.");
 IREE_FLAG(string, weights, "", "Canonical Qwen3.8-27B UD-Q5_K_XL GGUF path.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
@@ -72,29 +75,45 @@ static iree_status_t qwen_sanitizer_from_flags(
   return iree_ok_status();
 }
 
-iree_host_size_t loom_serve_qwen_shape_count_from_flags(void) {
+iree_host_size_t loom_serve_qwen_explicit_shape_count_from_flags(void) {
   return FLAG_epoch_list().count;
 }
 
 bool loom_serve_qwen_mtp_from_flags(void) { return FLAG_mtp; }
 
 iree_status_t loom_serve_qwen_model_create_from_flags(
-    iree_host_size_t row_count, iree_allocator_t host_allocator,
-    loom_serve_qwen_model_t** out_model) {
+    const loom_serve_qwen_flag_defaults_t* defaults,
+    loom_serve_qwen_model_t** out_model, iree_allocator_t host_allocator) {
   *out_model = NULL;
   if (!FLAG_model[0] || !FLAG_weights[0] || !FLAG_tokenizer[0] ||
-      FLAG_prefill_capacity < 1 || FLAG_context_capacity < 1 ||
-      FLAG_pool_capacity < 0) {
+      FLAG_prefill_capacity < 1 || FLAG_prefill_capacity > 512 ||
+      FLAG_context_capacity < 1 || FLAG_pool_capacity < -1 ||
+      defaults->row_count < 1 ||
+      defaults->row_count > LOOM_SERVE_QWEN_ROW_CAPACITY) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "provide model sources, weights, tokenizer and positive capacities");
+        "provide model sources, weights, tokenizer, 1-16 rows, positive "
+        "context and prefill capacity in [1, 512]");
   }
   const iree_flag_string_list_t epochs = FLAG_epoch_list();
   loomc_sanitizer_options_t sanitizer;
   IREE_RETURN_IF_ERROR(qwen_sanitizer_from_flags(&sanitizer));
+  const iree_host_size_t pool_capacity =
+      FLAG_pool_capacity < 0 ? defaults->pool_capacity
+                             : (iree_host_size_t)FLAG_pool_capacity;
+  loom_serve_qwen_shape_t automatic[LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY];
+  iree_host_size_t automatic_count = 0;
+  if (!epochs.count &&
+      (defaults->automatic_shapes || pool_capacity || FLAG_mtp)) {
+    automatic_count = loom_serve_qwen_default_shapes(
+        defaults->row_count, (iree_host_size_t)FLAG_prefill_capacity,
+        automatic);
+  }
   loom_serve_qwen_shape_t* shapes = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      host_allocator, epochs.count, sizeof(*shapes), (void**)&shapes));
+  if (epochs.count) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        host_allocator, epochs.count, sizeof(*shapes), (void**)&shapes));
+  }
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < epochs.count && iree_status_is_ok(status);
        ++i) {
@@ -114,14 +133,14 @@ iree_status_t loom_serve_qwen_model_create_from_flags(
       .source_directory = iree_make_cstring_view(FLAG_model),
       .prefill_capacity = (iree_host_size_t)FLAG_prefill_capacity,
       .context_capacity = (iree_host_size_t)FLAG_context_capacity,
-      .pool_capacity = (iree_host_size_t)FLAG_pool_capacity,
-      .epoch_count = epochs.count,
-      .epoch_shapes = shapes,
+      .pool_capacity = pool_capacity,
+      .epoch_count = epochs.count ? epochs.count : automatic_count,
+      .epoch_shapes = epochs.count ? shapes : automatic,
       .enable_mtp = FLAG_mtp,
       .kernel_sanitizer = sanitizer,
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
-      .row_count = row_count,
+      .row_count = defaults->row_count,
   };
   if (iree_status_is_ok(status)) {
     status = loom_serve_qwen_model_create(&options, host_allocator, out_model);

@@ -416,7 +416,8 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  const iree_host_size_t epoch_count = loom_serve_qwen_shape_count_from_flags();
+  const iree_host_size_t epoch_count =
+      loom_serve_qwen_explicit_shape_count_from_flags();
   const iree_flag_string_list_t windows = FLAG_window_list();
   if (!FLAG_workload[0] || !epoch_count || epoch_count > QWEN_REPLAY_SHAPES ||
       !windows.count) {
@@ -448,12 +449,13 @@ int main(int argc, char** argv) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "replay requires one through sixteen sessions");
   }
+  const loom_serve_qwen_flag_defaults_t defaults = {.row_count = row_count};
   loom_serve_qwen_model_t* model = NULL;
   qwen_replay_row_t rows[QWEN_REPLAY_ROWS] = {0};
   qwen_replay_window_t* policies = NULL;
   if (iree_status_is_ok(status)) {
     status =
-        loom_serve_qwen_model_create_from_flags(row_count, allocator, &model);
+        loom_serve_qwen_model_create_from_flags(&defaults, &model, allocator);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_replay_prepare(model, sessions, row_count, rows, allocator);

@@ -6,10 +6,11 @@
 
 """Qualify variable resident-row counts through real concurrent HTTP output.
 
-Sequential dense execution provides the text/usage oracle. Concurrent pooled
-execution must advance every configured resident row, exercise MTP and mixed
-epochs, and reproduce that output. The caller owns GPU exclusion and the outer
-hang deadline; the client barrier establishes arrivals without timed sleeps.
+Sequential dense execution with explicit shapes provides the text/usage oracle.
+Concurrent pooled execution must advance every configured resident row, exercise
+MTP and mixed epochs, and reproduce that output. The candidate uses the automatic
+catalog by default. The caller owns GPU exclusion and the outer hang deadline;
+the client barrier establishes arrivals without timed sleeps.
 """
 
 import argparse
@@ -46,6 +47,9 @@ def main():
     for name in ("server", "model", "weights", "tokenizer", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--rows", type=int, choices=range(1, 17), default=16)
+    parser.add_argument(
+        "--catalog", choices=("automatic", "explicit"), default="automatic"
+    )
     arguments = parser.parse_args()
     arguments.output.mkdir(parents=True, exist_ok=False)
     command = [str(arguments.server.resolve())] + [
@@ -55,9 +59,7 @@ def main():
     command += [
         f"--rows={arguments.rows}",
         "--context_capacity=2048",
-        "--prefill_capacity=128",
-        f"--epoch=64:{arguments.rows}",
-        f"--epoch=128:{arguments.rows}",
+        "--prefill_capacity=512",
         "--mtp",
         "--mtp_depth=3",
         "--port=0",
@@ -67,8 +69,13 @@ def main():
     for capacity in (0, 256 * arguments.rows):
         events = []
         log_path = arguments.output / f"pool-{capacity}.log"
+        shapes = (
+            [f"--epoch=64:{arguments.rows}", f"--epoch=128:{arguments.rows}"]
+            if not capacity or arguments.catalog == "explicit"
+            else []
+        )
         with check_service.running_server(
-            command + [f"--pool_capacity={capacity}"], log_path, events.append
+            command + shapes + [f"--pool_capacity={capacity}"], log_path, events.append
         ) as (_, endpoint):
             if endpoint is None:
                 raise RuntimeError(f"server did not become ready: {log_path}")
@@ -107,6 +114,19 @@ def main():
                 epoch["prefill_tokens"] and epoch["decode_tokens"] for epoch in epochs
             ):
                 raise RuntimeError("workload did not mix prompt and generated input")
+            if arguments.catalog == "automatic":
+                for epoch in epochs:
+                    expected_spans = 1
+                    while expected_spans < epoch["spans"]:
+                        expected_spans = min(expected_spans * 2, arguments.rows)
+                    if epoch["span_capacity"] != expected_spans:
+                        raise RuntimeError("catalog did not shrink to the ready cohort")
+                if arguments.rows == 16 and not any(
+                    epoch["token_capacity"] == 512 for epoch in epochs
+                ):
+                    raise RuntimeError(
+                        "workload did not exercise the largest token shape"
+                    )
             for event in events:
                 if event and event.get("event") == "heartbeat":
                     pool = event["pool"]
@@ -121,6 +141,12 @@ def main():
                     "epochs": len(epochs),
                     "maximum_spans": max(epoch["spans"] for epoch in epochs),
                     "maximum_verifiers": max(epoch["mtp"]["rows"] for epoch in epochs),
+                    "shapes": sorted(
+                        {
+                            (epoch["token_capacity"], epoch["span_capacity"])
+                            for epoch in epochs
+                        }
+                    ),
                 }
             ),
             flush=True,
