@@ -152,11 +152,10 @@ and retained pi service checks are described in the parent README.
 
 ### Fused feed-forward projection
 
-The owned-output Q5 gate/up kernel views F16 activations as complete 256-channel
-blocks. Each four-element packet is wholly inside one block, so its load needs
-no K-axis mask. Active-token and output-channel tails remain masked. This view
-preserves the canonical contiguous activation layout and does not add padding
-or alter the contraction or F32 SwiGLU calculation.
+The Q5 gate/up kernels view F16 activations as complete 256-channel blocks.
+Each four-element packet is wholly inside one block, so its load needs no
+K-axis mask. This view preserves the canonical contiguous activation layout
+and does not add padding or alter the contraction or F32 SwiGLU calculation.
 
 Each workgroup stages complete canonical Q5 blocks for both projections once
 per 256 input channels. Metadata and code decoding then read the local slab
@@ -165,12 +164,51 @@ retires all block readers, the same allocation holds the per-wave output
 transpose. The model keeps one unchanged global weight residency; encoded
 staging and publication share storage only within the workgroup.
 
-The eight quantization groups pipeline activation acquisition one group ahead
+Both wide model paths use
+[`ffn_gate_up_prefetch.loom`](kernels/qwen38/ffn_gate_up_prefetch.loom).
+`qwen_compile_stage` binds `qwen38.ffn.input_size=5120` and
+`qwen38.ffn.output_size=17408` through the existing JIT configuration. The
+device body reads these exact dimensions with `config.get`; passing constants
+as launch arguments would still leave them runtime values in that body. The
+kernel requires complete 256-input/64-output-channel tiles. Token capacity
+sets the grid while the actual token count stays in its device control buffer.
+
+The outer block loop pipelines encoded weight and activation acquisition over
+eight unrolled quantization groups. Of each projection's 704 sixteen-byte
+packets, the partial 192-thread round precedes the complete 512-thread round.
+This ordering leaves the complete next-block loads outstanding across current
+matrix work; it does not fetch padding packets. The workgroup barriers retain
+ownership of the single LDS stage. Padded activation lanes load bounded row
+zero and then select positive zero. Read-ahead adds neither a second LDS stage
+nor another global weight residency.
+
+`tests/ffn_gate_up_prefetch.loom` compares complete output arrays bitwise with
+the independently staged paired-wave implementation at the production K/N.
+Three seeds exercise active counts 1, 128, 129, 256, 511 and 512, plus a zero
+grid. Inactive output rows retain their original bytes. Explicit selection
+keeps checks embedded in the provider libraries outside this suite. On a
+qualified GPU test runner:
+
+```sh
+for shape in 128_1 128_128 256_129 256_256 512_511 512_512 0_1; do
+  build_tools/bin/iree-bazel-run --config=asan \
+    //loom/src/loom/tools/iree-test-loom -- \
+    experimental/loom_serve/models/qwen38/tests/ffn_gate_up_prefetch.loom \
+    --library=experimental/loom_serve/models/qwen38/kernels/qwen38/ffn_gate_up_prefetch.loom \
+    --library=experimental/loom_serve/models/qwen38/kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom \
+    --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q5k_f16_wmma.loom \
+    --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom \
+    --config=qwen38.ffn.input_size=5120 --config=qwen38.ffn.output_size=17408 \
+    --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
+    --case="@ffn_prefetch_${shape}_case" || exit
+done
+```
+
+The generic owned-output entry remains available for other channel geometry.
+Its inner quantization loop pipelines activation acquisition one group ahead
 of matrix consumption. Local weight and metadata rows are initialized even for
 padded channels, so decoding can remain converged and select positive zero at
-the consumer. Padded activation lanes load bounded row zero and then select
-positive zero. The workgroup barriers retain ownership of the single LDS stage;
-read-ahead adds neither a second stage nor another global weight residency.
+the consumer. Its active-token and output-channel tails remain masked.
 
 `tests/ffn_gate_up.loom` compares complete outputs with the paired-wave schedule,
 including inactive rows, partial output channels and four token tiles at the
