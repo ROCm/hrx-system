@@ -155,7 +155,12 @@ command.program.def public @qwen38_mtp_propose() launch(%embedding_parameters: b
   %spans = config.get @runner.qwen38.span_capacity : index
   %control_bytes = index.constant 1548 : offset
   %token_bytes = index.constant 2048 : offset
-  %output_bytes = index.constant 32 : offset
+  %three_outputs = index.constant 3 : index
+  %four_outputs = index.constant 4 : index
+  %padded_spans = index.add %spans, %three_outputs : index
+  %output_groups = index.div %padded_spans, %four_outputs : index
+  %group_bytes = index.constant 16 : offset
+  %output_bytes = index.scale %output_groups, %group_bytes : index, offset -> offset
   %hidden_bytes = index.constant 10485760 : offset
   %draft = buffer.alloca<global> align(256) %control_bytes : buffer
   %origins = buffer.alloca<global> align(256) %output_bytes : buffer

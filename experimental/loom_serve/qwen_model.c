@@ -40,7 +40,7 @@ enum {
   QWEN_WORKSPACE = 6,
   QWEN_BINDING_COUNT = 7,
   QWEN_TOKEN_CAPACITY = 512,
-  QWEN_ROW_CAPACITY = 8,
+  QWEN_ROW_CAPACITY = LOOM_SERVE_QWEN_ROW_CAPACITY,
   QWEN_BLOCK_TOKENS = 64,
   QWEN_MAP_ORIGIN = 1024,
   QWEN_SPAN_CAPACITY = 64,
@@ -720,9 +720,9 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
     const bool verifies = ordinal >= 1 + model->shape_count;
     const iree_host_size_t shape_index =
         ordinal == 0 ? 0 : (ordinal - 1) % model->shape_count;
-    const loom_serve_qwen_shape_t shape = ordinal == 0
-                                              ? (loom_serve_qwen_shape_t){32, 8}
-                                              : model->shapes[shape_index];
+    const loom_serve_qwen_shape_t shape =
+        ordinal == 0 ? (loom_serve_qwen_shape_t){32, model->row_count}
+                     : model->shapes[shape_index];
     const iree_string_view_t root = ordinal == 0 ? IREE_SV("qwen38_mtp_propose")
                                     : verifies   ? IREE_SV("qwen38_mtp_verify")
                                                  : IREE_SV("qwen38_mtp_warm");
@@ -770,7 +770,7 @@ iree_status_t loom_serve_qwen_model_create(
   *out_model = NULL;
   if (options->row_count < 1 || options->row_count > QWEN_ROW_CAPACITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "Qwen row count must be in [1, 8]");
+                            "Qwen row count must be in [1, 16]");
   }
   if (options->prefill_capacity < 1 ||
       options->prefill_capacity > QWEN_TOKEN_CAPACITY ||

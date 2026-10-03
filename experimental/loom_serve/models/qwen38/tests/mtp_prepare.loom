@@ -7,7 +7,7 @@ kernel.decl @qwen38_mtp_shift_spans(%span_capacity: index) launch(%epoch: buffer
 kernel.decl @qwen38_mtp_save_carry(%span_capacity: index) launch(%epoch: buffer, %normalized: buffer, %carry: buffer)
 kernel.decl @qwen38_mtp_gather_carry(%span_capacity: index) launch(%epoch: buffer, %carry: buffer, %hidden: buffer)
 
-// Three independent spans of 3, 1, and 5 tokens visit resident rows 6, 1, and 4.
+// Three independent spans of 3, 1, and 5 tokens visit resident rows 14, 9, and 12.
 kernel.def @mtp_carry_metadata() {
   %one = index.constant 1 : index
   kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
@@ -26,7 +26,7 @@ kernel.def @mtp_carry_metadata() {
   view.store %v4, %view[4] : i32, view<387xi32>
   %v5 = scalar.constant 0 : i32
   view.store %v5, %view[5] : i32, view<387xi32>
-  %v6 = scalar.constant 6 : i32
+  %v6 = scalar.constant 14 : i32
   view.store %v6, %view[6] : i32, view<387xi32>
   %v7 = scalar.constant -1 : i32
   view.store %v7, %view[7] : i32, view<387xi32>
@@ -36,7 +36,7 @@ kernel.def @mtp_carry_metadata() {
   view.store %v9, %view[9] : i32, view<387xi32>
   %v10 = scalar.constant 3 : i32
   view.store %v10, %view[10] : i32, view<387xi32>
-  %v11 = scalar.constant 1 : i32
+  %v11 = scalar.constant 9 : i32
   view.store %v11, %view[11] : i32, view<387xi32>
   %v12 = scalar.constant -1 : i32
   view.store %v12, %view[12] : i32, view<387xi32>
@@ -46,7 +46,7 @@ kernel.def @mtp_carry_metadata() {
   view.store %v14, %view[14] : i32, view<387xi32>
   %v15 = scalar.constant 4 : i32
   view.store %v15, %view[15] : i32, view<387xi32>
-  %v16 = scalar.constant 4 : i32
+  %v16 = scalar.constant 12 : i32
   view.store %v16, %view[16] : i32, view<387xi32>
   %v17 = scalar.constant -1 : i32
   view.store %v17, %view[17] : i32, view<387xi32>
@@ -56,28 +56,28 @@ kernel.def @mtp_carry_metadata() {
 // Exact copy identities cover carry-in, within-span shift, publication, and
 // gathering from noncontiguous rows. Inactive rows and padded tokens stay intact.
 check.case public @mtp_carry_spans {
-  %spans = check.literal value(8) : index
+  %spans = check.param.choice values([3, 8, 16]) : index
   %epoch = check.generate.fill value(-99) : tensor<387xi32>
   %normalized = check.generate.iota offset(0.25) step(0.0000152587890625) : tensor<512x5120xf32>
-  %carry = check.generate.iota offset(-1.0) step(0.000030517578125) : tensor<8x5120xf32>
-  %initial_carry = check.generate.iota offset(-1.0) step(0.000030517578125) : tensor<8x5120xf32>
+  %carry = check.generate.iota offset(-1.0) step(0.000030517578125) : tensor<16x5120xf32>
+  %initial_carry = check.generate.iota offset(-1.0) step(0.000030517578125) : tensor<16x5120xf32>
   %shifted = check.generate.fill value(17.0) : tensor<512x5120xf32>
   %hidden = check.generate.fill value(17.0) : tensor<512x5120xf32>
   %padding = check.generate.fill value(17.0) : tensor<503x5120xf32>
   kernel.launch @mtp_carry_metadata(%epoch) : (tensor<387xi32>)
-  kernel.launch @qwen38_mtp_shift_spans[%spans](%epoch, %normalized, %carry, %shifted) : [index](tensor<387xi32>, tensor<512x5120xf32>, tensor<8x5120xf32>, tensor<512x5120xf32>)
-  kernel.launch @qwen38_mtp_save_carry[%spans](%epoch, %normalized, %carry) : [index](tensor<387xi32>, tensor<512x5120xf32>, tensor<8x5120xf32>)
+  kernel.launch @qwen38_mtp_shift_spans[%spans](%epoch, %normalized, %carry, %shifted) : [index](tensor<387xi32>, tensor<512x5120xf32>, tensor<16x5120xf32>, tensor<512x5120xf32>)
+  kernel.launch @qwen38_mtp_save_carry[%spans](%epoch, %normalized, %carry) : [index](tensor<387xi32>, tensor<512x5120xf32>, tensor<16x5120xf32>)
   %actual0 = check.tensor.view %shifted offset(0) : tensor<512x5120xf32> -> tensor<1x5120xf32>
-  %expected0 = check.tensor.view %initial_carry offset(122880) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %expected0 = check.tensor.view %initial_carry offset(286720) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual0) expected(%expected0) : tensor<1x5120xf32>
   %actual1 = check.tensor.view %shifted offset(20480) : tensor<512x5120xf32> -> tensor<2x5120xf32>
   %expected1 = check.tensor.view %normalized offset(0) : tensor<512x5120xf32> -> tensor<2x5120xf32>
   check.expect.equal actual(%actual1) expected(%expected1) : tensor<2x5120xf32>
   %actual2 = check.tensor.view %shifted offset(61440) : tensor<512x5120xf32> -> tensor<1x5120xf32>
-  %expected2 = check.tensor.view %initial_carry offset(20480) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %expected2 = check.tensor.view %initial_carry offset(184320) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual2) expected(%expected2) : tensor<1x5120xf32>
   %actual3 = check.tensor.view %shifted offset(81920) : tensor<512x5120xf32> -> tensor<1x5120xf32>
-  %expected3 = check.tensor.view %initial_carry offset(81920) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %expected3 = check.tensor.view %initial_carry offset(245760) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual3) expected(%expected3) : tensor<1x5120xf32>
   %actual4 = check.tensor.view %shifted offset(102400) : tensor<512x5120xf32> -> tensor<4x5120xf32>
   %expected4 = check.tensor.view %normalized offset(81920) : tensor<512x5120xf32> -> tensor<4x5120xf32>
@@ -85,28 +85,28 @@ check.case public @mtp_carry_spans {
   %actual5 = check.tensor.view %shifted offset(184320) : tensor<512x5120xf32> -> tensor<503x5120xf32>
   %expected5 = check.tensor.view %padding offset(0) : tensor<503x5120xf32> -> tensor<503x5120xf32>
   check.expect.equal actual(%actual5) expected(%expected5) : tensor<503x5120xf32>
-  %actual6 = check.tensor.view %carry offset(122880) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %actual6 = check.tensor.view %carry offset(286720) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   %expected6 = check.tensor.view %normalized offset(40960) : tensor<512x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual6) expected(%expected6) : tensor<1x5120xf32>
-  %actual7 = check.tensor.view %carry offset(20480) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %actual7 = check.tensor.view %carry offset(184320) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   %expected7 = check.tensor.view %normalized offset(61440) : tensor<512x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual7) expected(%expected7) : tensor<1x5120xf32>
-  %actual8 = check.tensor.view %carry offset(81920) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %actual8 = check.tensor.view %carry offset(245760) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   %expected8 = check.tensor.view %normalized offset(163840) : tensor<512x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual8) expected(%expected8) : tensor<1x5120xf32>
-  %actual9 = check.tensor.view %carry offset(0) : tensor<8x5120xf32> -> tensor<1x5120xf32>
-  %expected9 = check.tensor.view %initial_carry offset(0) : tensor<8x5120xf32> -> tensor<1x5120xf32>
-  check.expect.equal actual(%actual9) expected(%expected9) : tensor<1x5120xf32>
-  %actual10 = check.tensor.view %carry offset(40960) : tensor<8x5120xf32> -> tensor<2x5120xf32>
-  %expected10 = check.tensor.view %initial_carry offset(40960) : tensor<8x5120xf32> -> tensor<2x5120xf32>
+  %actual9 = check.tensor.view %carry offset(0) : tensor<16x5120xf32> -> tensor<9x5120xf32>
+  %expected9 = check.tensor.view %initial_carry offset(0) : tensor<16x5120xf32> -> tensor<9x5120xf32>
+  check.expect.equal actual(%actual9) expected(%expected9) : tensor<9x5120xf32>
+  %actual10 = check.tensor.view %carry offset(204800) : tensor<16x5120xf32> -> tensor<2x5120xf32>
+  %expected10 = check.tensor.view %initial_carry offset(204800) : tensor<16x5120xf32> -> tensor<2x5120xf32>
   check.expect.equal actual(%actual10) expected(%expected10) : tensor<2x5120xf32>
-  %actual11 = check.tensor.view %carry offset(102400) : tensor<8x5120xf32> -> tensor<1x5120xf32>
-  %expected11 = check.tensor.view %initial_carry offset(102400) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %actual11 = check.tensor.view %carry offset(266240) : tensor<16x5120xf32> -> tensor<1x5120xf32>
+  %expected11 = check.tensor.view %initial_carry offset(266240) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual11) expected(%expected11) : tensor<1x5120xf32>
-  %actual12 = check.tensor.view %carry offset(143360) : tensor<8x5120xf32> -> tensor<1x5120xf32>
-  %expected12 = check.tensor.view %initial_carry offset(143360) : tensor<8x5120xf32> -> tensor<1x5120xf32>
+  %actual12 = check.tensor.view %carry offset(307200) : tensor<16x5120xf32> -> tensor<1x5120xf32>
+  %expected12 = check.tensor.view %initial_carry offset(307200) : tensor<16x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual12) expected(%expected12) : tensor<1x5120xf32>
-  kernel.launch @qwen38_mtp_gather_carry[%spans](%epoch, %carry, %hidden) : [index](tensor<387xi32>, tensor<8x5120xf32>, tensor<512x5120xf32>)
+  kernel.launch @qwen38_mtp_gather_carry[%spans](%epoch, %carry, %hidden) : [index](tensor<387xi32>, tensor<16x5120xf32>, tensor<512x5120xf32>)
   %actual20 = check.tensor.view %hidden offset(0) : tensor<512x5120xf32> -> tensor<1x5120xf32>
   %expected20 = check.tensor.view %normalized offset(40960) : tensor<512x5120xf32> -> tensor<1x5120xf32>
   check.expect.equal actual(%actual20) expected(%expected20) : tensor<1x5120xf32>

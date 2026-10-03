@@ -12,9 +12,9 @@ is the model VM entry. `--prefill_capacity`, `--context_capacity`, and repeated
 the actual HAL device, not selected from precompiled directories.
 
 `--mtp` prepares block-64 proposal, cache catch-up, and target verification.
-The proposal shape is 32 tokens/eight spans; each target epoch gets matching
-catch-up and verifier variants. Shared embedding, target normalization, and
-full-vocabulary output roots reference the existing weight slab. Extra block-64
+The proposal uses a 32-token projection tile and the configured resident-row
+count (1–16); each target epoch gets matching catch-up and verifier variants.
+Shared embedding, target normalization, and full-vocabulary output roots reference the existing weight slab. Extra block-64
 parameter groups load once. There is no command ABI or HAL extension.
 
 ## Pooled KV and reserved admission
@@ -73,6 +73,13 @@ python -B -m experimental.loom_serve.check_capacity \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json --output=/path/to/new-results
 ```
+
+`check_rows.py` exercises the complete resident-row family through TCP. It
+compares sequential dense output with a concurrent pooled cohort, requires every
+configured row to execute, and requires a full-cohort MTP epoch. Unequal prompts
+also exercise mixed prefill/decode for multirow runs. Set `--rows` to any value
+from 1 through 16; 1, 3, and 16 cover the single, non-power-of-two, and maximum
+residencies. It takes the same model/server/path arguments as `check_capacity.py`.
 
 ## Online weight residency
 
@@ -170,9 +177,10 @@ hidden chain lives in the shared command workspace; only committed target
 carry persists between epochs. Supplied candidates can use the same verifier
 without requesting proposal generation. Device greedy acceptance stops at
 mismatch, EOS or output credit. Known
-spans publish directly; speculative GDN transitions occupy a 63,504,384-byte
-capture, and only the accepted prefixes replay into retained state. Attention
-tails beyond the accepted position stay unreachable. MTP catch-up then consumes
+spans publish directly; speculative GDN capture uses 7,938,048 bytes per compiled
+span, independently of token capacity. Only accepted prefixes replay into
+retained state; capture and replay scratch both scale with the span shape.
+Attention tails beyond the accepted position stay unreachable. MTP catch-up then consumes
 accepted inputs paired with committed target hidden. All buffers and commands
 are prepared once. The HTTP scheduler selects this optional path with
 `--mtp --mtp_depth=3`; depth zero keeps MTP warm without
@@ -207,8 +215,8 @@ subsequent retained target continuations. Forced proposals come from ordinary
 target execution, not baked token fixtures. Natural device-generated proposals
 are checked through their accepted outputs and subsequent retained continuation.
 `tests/mtp_proposal.loom` additionally checks compacted anchors, all three
-publication positions, reversed resident rows, one/eight generated spans,
-interleaved supplied candidates and known input, and untouched token storage.
+publication positions, reversed resident rows, all counts from one through
+sixteen, interleaved supplied candidates and known input, and untouched token storage.
 The focused carry check additionally compares exact copy
 identities and untouched rows/padding without loading model weights:
 
@@ -222,11 +230,11 @@ build_tools/bin/iree-bazel-run --config=asan \
 ```
 
 `tests/mtp_accept.loom` compares acceptance records and both derived descriptor
-tables against an independent minimum-frontier oracle across four fixtures,
-including EOS and untouched storage. `tests/gdn_speculation.loom` compares the
-entire eight-row recurrent/history slab bitwise before and after accepted
+tables against an independent minimum-frontier oracle across all counts from
+one through sixteen and four mismatch/EOS/credit patterns, including untouched
+inactive storage. `tests/gdn_speculation.loom` compares the entire sixteen-row recurrent/history slab bitwise before and after accepted
 publication: known work commits once, speculative work remains unpublished
-until replay, and inactive rows remain unchanged. Both support device access
+until replay, and rejected transitions never publish. Both support device access
 sanitization. They use the corresponding kernels plus `gdn_spans.loom`,
 `gdn_prefill.loom`, `gdn_common.loom`, and `spans.loom` for the GDN check.
 

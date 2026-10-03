@@ -21,7 +21,7 @@ kernel.def export("qwen38_mtp_proposal_prepare") @qwen38_mtp_proposal_prepare() 
   %tokens = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
   %draft_header = buffer.view %draft[%origin] : buffer -> view<3xi32>
   %draft_spans = buffer.view %draft[%descriptor_origin] : buffer -> view<64x5xi32>
-  %mapping = buffer.view %origins[%origin] : buffer -> view<8xi32>
+  %mapping = buffer.view %origins[%origin] : buffer -> view<16xi32>
   %inputs = buffer.view %draft_tokens[%origin] : buffer -> view<512xi32>
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -35,12 +35,12 @@ kernel.def export("qwen38_mtp_proposal_prepare") @qwen38_mtp_proposal_prepare() 
   }
   %span_word = view.load %header[1] : view<3xi32> -> i32
   %span_value = index.cast %span_word : i32 to index
-  %span_count = index.assume %span_value [range(%span_value, 1, 8)] : index
+  %span_count = index.assume %span_value [range(%span_value, 1, 16)] : index
   %count = scf.for %span = [%zero to %span_count step %one](%count = %zero : index) -> (index) {
     %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
     %generated = scalar.cmpi eq, %flag, %generated_word : i32
     %next = scf.if %generated -> (index) {
-      %slot = index.assume %count [range(%count, 0, 7)] : index
+      %slot = index.assume %count [range(%count, 0, 15)] : index
       %position = view.load %spans[%span, 1] : view<64x5xi32> -> i32
       %begin_word = view.load %spans[%span, 2] : view<64x5xi32> -> i32
       %row = view.load %spans[%span, 3] : view<64x5xi32> -> i32
@@ -53,7 +53,7 @@ kernel.def export("qwen38_mtp_proposal_prepare") @qwen38_mtp_proposal_prepare() 
       view.store %slot_word, %draft_spans[%slot, 2] : i32, view<64x5xi32>
       view.store %row, %draft_spans[%slot, 3] : i32, view<64x5xi32>
       view.store %slot_word, %draft_spans[%slot, 4] : i32, view<64x5xi32>
-      view.store %begin_word, %mapping[%slot] : i32, view<8xi32>
+      view.store %begin_word, %mapping[%slot] : i32, view<16xi32>
       view.store %anchor, %inputs[%slot] : i32, view<512xi32>
       %incremented = index.add %count, %one : index
       scf.yield %incremented : index
@@ -80,8 +80,8 @@ kernel.def export("qwen38_mtp_proposal_advance") @qwen38_mtp_proposal_advance(%r
   %descriptor_origin = index.constant 12 : offset
   %header = buffer.view %draft[%origin] : buffer -> view<3xi32>
   %spans = buffer.view %draft[%descriptor_origin] : buffer -> view<64x5xi32>
-  %mapping = buffer.view %origins[%origin] : buffer -> view<8xi32>
-  %outputs = buffer.view %predictions[%origin] : buffer -> view<8xi32>
+  %mapping = buffer.view %origins[%origin] : buffer -> view<16xi32>
+  %outputs = buffer.view %predictions[%origin] : buffer -> view<16xi32>
   %inputs = buffer.view %draft_tokens[%origin] : buffer -> view<512xi32>
   %target = buffer.view %target_tokens[%origin] : buffer -> view<512xi32>
   %zero = index.constant 0 : index
@@ -90,10 +90,10 @@ kernel.def export("qwen38_mtp_proposal_advance") @qwen38_mtp_proposal_advance(%r
   %relative = index.add %round, %one : index
   %count_word = view.load %header[1] : view<3xi32> -> i32
   %count_value = index.cast %count_word : i32 to index
-  %count = index.assume %count_value [range(%count_value, 1, 8)] : index
+  %count = index.assume %count_value [range(%count_value, 1, 16)] : index
   scf.for %slot = [%zero to %count step %one] {
-    %prediction = view.load %outputs[%slot] : view<8xi32> -> i32
-    %begin_word = view.load %mapping[%slot] : view<8xi32> -> i32
+    %prediction = view.load %outputs[%slot] : view<16xi32> -> i32
+    %begin_word = view.load %mapping[%slot] : view<16xi32> -> i32
     %begin_value = index.cast %begin_word : i32 to index
     %begin = index.assume %begin_value [range(%begin_value, 0, 508)] : index
     %destination = index.add %begin, %relative : index

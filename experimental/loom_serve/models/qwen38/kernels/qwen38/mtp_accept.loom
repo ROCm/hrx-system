@@ -26,8 +26,8 @@ kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
   %eos_view = buffer.view %metadata[%eos_origin] : buffer -> view<1xi32>
   %eos = view.load %eos_view[0] : view<1xi32> -> i32
   %tokens = buffer.view %inputs[%origin] : buffer -> view<512xi32>
-  %selected = buffer.view %predictions[%origin] : buffer -> view<32xi32>
-  %outputs = buffer.view %results[%origin] : buffer -> view<8x6xi32>
+  %selected = buffer.view %predictions[%origin] : buffer -> view<64xi32>
+  %outputs = buffer.view %results[%origin] : buffer -> view<16x6xi32>
   %accepted_header = buffer.view %committed[%origin] : buffer -> view<3xi32>
   %accepted = buffer.view %committed[%descriptor_origin] : buffer -> view<64x5xi32>
   %replay_header = buffer.view %replay[%origin] : buffer -> view<3xi32>
@@ -45,7 +45,7 @@ kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
   %total = view.load %header[0] : view<3xi32> -> i32
   %span_word = view.load %header[1] : view<3xi32> -> i32
   %span_value = index.cast %span_word : i32 to index
-  %spans = index.assume %span_value [range(%span_value, 1, 8)] : index
+  %spans = index.assume %span_value [range(%span_value, 1, 16)] : index
   view.store %total, %accepted_header[0] : i32, view<3xi32>
   view.store %span_word, %accepted_header[1] : i32, view<3xi32>
   view.store %zero_word, %accepted_header[2] : i32, view<3xi32>
@@ -61,11 +61,11 @@ kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
     %selection = index.cast %selection_word : i32 to index
     scf.for %token = [%zero to %four step %one] {
       %slot = index.add %token, %two : index
-      view.store %zero_word, %outputs[%span, %slot] : i32, view<8x6xi32>
+      view.store %zero_word, %outputs[%span, %slot] : i32, view<16x6xi32>
     }
     %consumed_word, %emitted_word = scf.if %speculative -> (i32, i32) {
       %speculative_begin = index.assume %begin [range(%begin, 0, 508)] : index
-      %speculative_selection = index.assume %selection [range(%selection, 0, 28)] : index
+      %speculative_selection = index.assume %selection [range(%selection, 0, 60)] : index
       %limit_word = view.load %options[%span, 1] : view<64x2xi32> -> i32
       %limit = index.cast %limit_word : i32 to index
       %output_count, %continuing = scf.for %token = [%zero to %four step %one](%count = %zero : index, %live = %true : i1) -> (index, i1) {
@@ -73,9 +73,9 @@ kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
         %emit = scalar.andi %live, %credited : i1
         %next_count, %next_live = scf.if %emit -> (index, i1) {
           %prediction_index = index.add %speculative_selection, %token : index
-          %prediction = view.load %selected[%prediction_index] : view<32xi32> -> i32
+          %prediction = view.load %selected[%prediction_index] : view<64xi32> -> i32
           %slot = index.add %token, %two : index
-          view.store %prediction, %outputs[%span, %slot] : i32, view<8x6xi32>
+          view.store %prediction, %outputs[%span, %slot] : i32, view<16x6xi32>
           %next_count = index.add %count, %one : index
           %has_draft = index.cmp ult, %token, %three : index
           %matches = scf.if %has_draft -> (i1) {
@@ -100,17 +100,17 @@ kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
     } else {
       %has_output = scalar.cmpi sge, %selection_word, %zero_word : i32
       %emitted = scf.if %has_output -> (i32) {
-        %known_selection = index.assume %selection [range(%selection, 0, 31)] : index
-        %prediction = view.load %selected[%known_selection] : view<32xi32> -> i32
-        view.store %prediction, %outputs[%span, 2] : i32, view<8x6xi32>
+        %known_selection = index.assume %selection [range(%selection, 0, 63)] : index
+        %prediction = view.load %selected[%known_selection] : view<64xi32> -> i32
+        view.store %prediction, %outputs[%span, 2] : i32, view<16x6xi32>
         scf.yield %one_word : i32
       } else {
         scf.yield %zero_word : i32
       }
       scf.yield %count_word, %emitted : i32, i32
     }
-    view.store %consumed_word, %outputs[%span, 0] : i32, view<8x6xi32>
-    view.store %emitted_word, %outputs[%span, 1] : i32, view<8x6xi32>
+    view.store %consumed_word, %outputs[%span, 0] : i32, view<16x6xi32>
+    view.store %emitted_word, %outputs[%span, 1] : i32, view<16x6xi32>
     view.store %consumed_word, %accepted[%span, 0] : i32, view<64x5xi32>
     view.store %position, %accepted[%span, 1] : i32, view<64x5xi32>
     view.store %begin_word, %accepted[%span, 2] : i32, view<64x5xi32>
@@ -131,7 +131,8 @@ kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
     }
     scf.yield %next_replay : index
   }
-  %capture_count = scalar.constant 32 : i32
+  %capture_extent = index.mul %spans, %four : index
+  %capture_count = index.cast %capture_extent : index to i32
   %replay_word = index.cast %replay_count : index to i32
   view.store %capture_count, %replay_header[0] : i32, view<3xi32>
   view.store %replay_word, %replay_header[1] : i32, view<3xi32>

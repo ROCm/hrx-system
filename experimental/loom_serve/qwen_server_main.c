@@ -22,7 +22,7 @@ IREE_FLAG(string, packing, "mixed",
           "mixed or separate prompt/decode cohorts, with the same kernels.");
 IREE_FLAG(int32_t, port, 8080,
           "Loopback TCP port; zero selects an ephemeral port.");
-IREE_FLAG(int32_t, rows, 4, "Retained model rows (1-8).");
+IREE_FLAG(int32_t, rows, 4, "Retained model rows (1-16).");
 IREE_FLAG(int32_t, connections, 64,
           "Maximum simultaneous TCP connections, including queued requests.");
 IREE_FLAG(int32_t, pending_requests, 32,
@@ -39,12 +39,13 @@ IREE_FLAG(int32_t, heartbeat_ms, 1000,
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   const iree_host_size_t epoch_count = loom_serve_qwen_shape_count_from_flags();
-  if (FLAG_port < 0 || FLAG_port > 65535 || FLAG_rows < 1 || FLAG_rows > 8 ||
-      FLAG_chunk_size < 0 || FLAG_max_tokens < 1 || FLAG_max_tokens > 16384 ||
-      FLAG_heartbeat_ms < 0 || FLAG_connections < 1 ||
-      FLAG_pending_requests < 1 || FLAG_request_body_bytes < 1) {
+  if (FLAG_port < 0 || FLAG_port > 65535 || FLAG_rows < 1 ||
+      FLAG_rows > LOOM_SERVE_QWEN_ROW_CAPACITY || FLAG_chunk_size < 0 ||
+      FLAG_max_tokens < 1 || FLAG_max_tokens > 16384 || FLAG_heartbeat_ms < 0 ||
+      FLAG_connections < 1 || FLAG_pending_requests < 1 ||
+      FLAG_request_body_bytes < 1) {
     fprintf(stderr,
-            "Provide model paths, 1-8 rows, a valid port and positive token "
+            "Provide model paths, 1-16 rows, a valid port and positive token "
             "limits.\n");
     return EXIT_FAILURE;
   }

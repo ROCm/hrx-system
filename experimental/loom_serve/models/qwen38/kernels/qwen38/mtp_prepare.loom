@@ -16,7 +16,7 @@ func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, 
 // Shifts committed target hidden rows within each independent span. The prior
 // carry is read-only for this dispatch; publication runs after all readers.
 kernel.def export("qwen38_mtp_shift_spans") @qwen38_mtp_shift_spans(%span_capacity: index) {
-  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
   %tiles = index.constant 5 : index
   %threads = index.constant 256 : index
   %one = index.constant 1 : index
@@ -44,13 +44,15 @@ kernel.def export("qwen38_mtp_shift_spans") @qwen38_mtp_shift_spans(%span_capaci
     %element = index.mul %packet, %four : index
     %byte_zero = index.constant 0 : offset
     %inputs = buffer.view %normalized[%byte_zero] : buffer -> view<512x5120xf32>
-    %prior = buffer.view %carry[%byte_zero] : buffer -> view<8x5120xf32>
+    %carry_row_bytes = index.constant 20480 : offset
+    %carry_origin = index.scale %row, %carry_row_bytes : index, offset -> offset
+    %prior = buffer.view %carry[%carry_origin] : buffer -> view<5120xf32>
     %outputs = buffer.view %shifted[%byte_zero] : buffer -> view<512x5120xf32>
     scf.for %token = [%zero to %count step %one] {
       %destination = index.add %begin, %token : index
       %first = index.cmp eq, %token, %zero : index
       %hidden = scf.if %first -> (vector<4xf32>) {
-        %value = vector.load %prior[%row, %element] : view<8x5120xf32> -> vector<4xf32>
+        %value = vector.load %prior[%element] : view<5120xf32> -> vector<4xf32>
         scf.yield %value : vector<4xf32>
       } else {
         %source = index.sub %destination, %one : index
@@ -66,7 +68,7 @@ kernel.def export("qwen38_mtp_shift_spans") @qwen38_mtp_shift_spans(%span_capaci
 // Saves the last committed target hidden row only after shifting has consumed
 // the previous carry. Distinct spans own distinct resident carry rows.
 kernel.def export("qwen38_mtp_save_carry") @qwen38_mtp_save_carry(%span_capacity: index) {
-  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
   %tiles = index.constant 5 : index
   %threads = index.constant 256 : index
   %one = index.constant 1 : index
@@ -92,9 +94,11 @@ kernel.def export("qwen38_mtp_save_carry") @qwen38_mtp_save_carry(%span_capacity
     %element = index.mul %packet, %four : index
     %byte_zero = index.constant 0 : offset
     %inputs = buffer.view %normalized[%byte_zero] : buffer -> view<512x5120xf32>
-    %outputs = buffer.view %carry[%byte_zero] : buffer -> view<8x5120xf32>
+    %carry_row_bytes = index.constant 20480 : offset
+    %carry_origin = index.scale %row, %carry_row_bytes : index, offset -> offset
+    %outputs = buffer.view %carry[%carry_origin] : buffer -> view<5120xf32>
     %value = vector.load %inputs[%last, %element] : view<512x5120xf32> -> vector<4xf32>
-    vector.store %value, %outputs[%row, %element] : vector<4xf32>, view<8x5120xf32>
+    vector.store %value, %outputs[%element] : vector<4xf32>, view<5120xf32>
   }
   kernel.return
 }
@@ -102,7 +106,7 @@ kernel.def export("qwen38_mtp_save_carry") @qwen38_mtp_save_carry(%span_capacity
 // Copies committed resident carry into the compact private proposal matrix.
 // Later draft rounds overwrite only that matrix, never committed target carry.
 kernel.def export("qwen38_mtp_gather_carry") @qwen38_mtp_gather_carry(%span_capacity: index) {
-  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
   %tiles = index.constant 5 : index
   %threads = index.constant 256 : index
   %one = index.constant 1 : index
@@ -120,9 +124,11 @@ kernel.def export("qwen38_mtp_gather_carry") @qwen38_mtp_gather_carry(%span_capa
     %four = index.constant 4 : index
     %element = index.mul %packet, %four : index
     %byte_zero = index.constant 0 : offset
-    %inputs = buffer.view %carry[%byte_zero] : buffer -> view<8x5120xf32>
+    %carry_row_bytes = index.constant 20480 : offset
+    %carry_origin = index.scale %row, %carry_row_bytes : index, offset -> offset
+    %inputs = buffer.view %carry[%carry_origin] : buffer -> view<5120xf32>
     %outputs = buffer.view %hidden[%byte_zero] : buffer -> view<512x5120xf32>
-    %value = vector.load %inputs[%row, %element] : view<8x5120xf32> -> vector<4xf32>
+    %value = vector.load %inputs[%element] : view<5120xf32> -> vector<4xf32>
     vector.store %value, %outputs[%begin, %element] : vector<4xf32>, view<512x5120xf32>
   }
   kernel.return

@@ -25,7 +25,7 @@ func.def public inline @qwen38_span_speculative(%epoch: buffer, %span: index) ->
 }
 
 kernel.def export("qwen38_gdn_conv_verify_spans") @qwen38_gdn_conv_verify_spans(%span_capacity: index) {
-  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
   %heads = index.constant 16 : index
   %threads = index.constant 256 : index
   %one = index.constant 1 : index
@@ -49,7 +49,7 @@ kernel.def export("qwen38_gdn_conv_verify_spans") @qwen38_gdn_conv_verify_spans(
 }
 
 kernel.def export("qwen38_gdn_recurrent_verify_spans") @qwen38_gdn_recurrent_verify_spans(%span_capacity: index) {
-  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
   %heads = index.constant 48 : index
   %columns = index.constant 32 : index
   %threads = index.constant 32 : index
@@ -75,11 +75,11 @@ kernel.def export("qwen38_gdn_recurrent_verify_spans") @qwen38_gdn_recurrent_ver
   kernel.return
 }
 
-// Each layer retains 32 compact transitions, independently of the target's
+// Each layer retains four transitions per compiled span, independently of its
 // padded token capacity. Slot 4*span names that span's four input transitions.
 // Known prompt/decode spans leave their slots untouched and are never replayed.
 kernel.def export("qwen38_gdn_capture_spans") @qwen38_gdn_capture_spans(%span_capacity: index) {
-  %spans = index.assume %span_capacity [range(%span_capacity, 1, 8)] : index
+  %spans = index.assume %span_capacity [range(%span_capacity, 1, 16)] : index
   %tiles = index.constant 41 : index
   %threads = index.constant 256 : index
   %one = index.constant 1 : index
@@ -119,8 +119,10 @@ kernel.def export("qwen38_gdn_capture_spans") @qwen38_gdn_capture_spans(%span_ca
           %source_origin = index.scale %begin, %gate_row_bytes : index, offset -> offset
           %span_origin = index.scale %span, %gate_span_bytes : index, offset -> offset
           %target_origin = index.add %layer_origin, %span_origin : offset
-          %alpha_offset = index.constant 1310720 : offset
-          %beta_offset = index.constant 1316864 : offset
+          %span_capacity = kernel.workgroup.count<y> : index
+          %alpha_offset = index.scale %span_capacity, %qkv_span_bytes : index, offset -> offset
+          %gate_bytes = index.scale %span_capacity, %gate_span_bytes : index, offset -> offset
+          %beta_offset = index.add %alpha_offset, %gate_bytes : offset
           %alpha_origin = index.add %target_origin, %alpha_offset : offset
           %beta_origin = index.add %target_origin, %beta_offset : offset
           %input_a = buffer.view %alpha[%source_origin] : buffer -> view<192xf32>
