@@ -4,8 +4,11 @@ This packet explains a working source-driven model runner and the boundaries a
 second model port can reuse. The implementation is experimental, intentionally
 small in scope, and available on
 [`users/benvanik/loom-serve`](https://github.com/ROCm/hrx-system/tree/users/benvanik/loom-serve).
-The first published in-process JIT implementation is commit `6e26aa8eda`, based
-on mask-safety commit `47682d1bc30944f4ddd863cd1f613f95dcf898bb`.
+The branch includes main's final compiler-correctness fixes through `1618350bab`
+(PR 1216). Commit `f076aa0955` adds shared, source-JIT weight preparation during
+loading. Earlier performance checkpoints identify their measured historical
+commits; the branch's serving changes were replayed unchanged onto this main
+base before the prepared-weight comparison.
 
 | Question | Guide |
 | --- | --- |
@@ -29,6 +32,12 @@ and MTP proposal/acceptance happen on device. The full-model differential and
 four-client, eight-turn retained HTTP witness passed after the JIT conversion
 on gfx1151. The small JIT/control integration tests also passed on gfx1100.
 These are correctness witnesses, not a newly established performance lead.
+
+FFN weights are now permuted in place once during startup, without another
+resident weight image. All target and MTP projection variants share that layout.
+The [prepared-weight checkpoint](PERFORMANCE.md#prepared-weight-checkpoint)
+records its small measured throughput gain, startup cost, and rejected mapped
+memory placements; file loading still uses bounded staging.
 
 The concrete adapter currently admits up to eight rows and 512 packed input
 tokens, with startup-selected shapes and a common context capacity. Its caches

@@ -292,6 +292,69 @@ seconds versus 1.965 seconds for the control. That cold cost is outside the
 scored serving window, and neither instruction overlap nor modeled occupancy
 establishes measured DRAM saturation.
 
+### Prepared-weight checkpoint
+
+Commit `f076aa0955` prepares FFN gate/up Q5 blocks in eight-channel order once
+at startup. Every target and MTP consumer shares those final bytes; neither
+quantization nor arithmetic changes. The source-JIT preparer uses only
+workgroup-local scratch. Four independent read/preparation timelines replace
+the separate target and auxiliary loading joins. The [model guide](../models/qwen38/README.md#online-weight-residency)
+describes the layout and exact source-level comparisons.
+
+This A/B/A/B/A uses baseline `ca760be2a0` and the prepared candidate, both built
+on main `1618350bab` with the optimized flags above. One lease covers the same
+eight-client, two-turn, MTP3 workload on the same gfx1151 system and power
+policy. Executable and model-source identities were captured for every window.
+The baseline executable SHA256 is
+`063e0d8388eeb8c1d36eb87e4978f6c7b5b9c14d0bd796b36ea42cc95d2ec35f`;
+the prepared executable is
+`3ae93a14d6a96bf0470a31d0e57fb7f5682cdb75b73bc33d88ae507460beac09`.
+
+| Run order | Weight layout | Whole window | Aggregate output tokens/s |
+| --- | --- | ---: | ---: |
+| 1 | Canonical | 125.952 s | 24.390 |
+| 2 | Prepared | 125.233 s | 24.530 |
+| 3 | Canonical | 126.424 s | 24.299 |
+| 4 | Prepared | 125.553 s | 24.468 |
+| 5 | Canonical | 125.923 s | 24.396 |
+
+Mean time falls from 126.100 to 125.393 seconds: **0.56% higher throughput**,
+or **24.499 aggregate output tokens/s**. Both candidates beat all controls;
+control and candidate spreads are 0.40% and 0.26%. This is a small closed-loop
+self-improvement, not a refreshed llama.cpp ratio. Every window completes
+16 requests, 28,534 appended inputs and 3,072 outputs with retained follow-ups,
+matching credits/frontiers and clean retirement. Epoch counts are
+178/180/183/181/180; reply/usage differences from the first control are
+0/4/3/1/3. Equal work totals still do not mean identical histories or cohorts.
+GPU maxima are 61/62/61/61/61 C and package-power medians remain about 100 W.
+
+The separate startup profile records four unique weight allocations totaling
+20,207,190,016 bytes and 130 in-place preparation dispatches for 7,965,900,800
+bytes of FFN tensors. Preparation sums about **73.6 ms of GPU work once at
+startup**, not per request or epoch. Warm process-to-ready grows by about
+325 ms, including about 256 ms of additional JIT work. Warm filesystem-cache
+timing is not cold NVMe throughput, and summed dispatch duration does not
+identify the startup critical path. Native consumers have no spills or private
+storage and unchanged LDS; the narrow kernel grows from 136 to 144 VGPRs.
+All 54 exact/access samples across 17 public cases and real retained/MTP/HTTP
+lifecycle checks pass on the final compiler base.
+
+Allocation profiling also exposes a cost that one-image accounting alone
+would miss: device-local roots receive 20,207,181,824 bytes through HAL staging.
+Two scoped-mappable dual-local alternatives remove that startup copy and pass
+the numerical/lifecycle checks, but neither qualifies for inference performance.
+Device-preferred placement gives a variable -3.50% mean throughput result;
+system placement gives -3.66%, with both candidates slower than every control.
+The latter control windows are 126.642/125.885/126.075 seconds versus
+128.716/133.287 seconds for the candidates. These experiments change only final
+weight allocation policy, not model sources or inference kernels. They do not
+establish a precise cache-policy mechanism.
+
+The committed path retains the faster device-local placement and bounded
+staging. Direct final-buffer reads without an inference penalty remain an
+unmet requirement, as do measured cold-I/O saturation and autonomous device
+continuation. Removing a startup transfer is not itself a serving improvement.
+
 ## Traffic and batching hypotheses
 
 For one completed traversal, let `D` be modeled bytes reaching the relevant
