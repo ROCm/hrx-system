@@ -245,6 +245,53 @@ and unchanged modeled occupancy despite increased register use. This is
 partial weight-read overlap, not a claim of fully saturated memory bandwidth.
 The host still drains each epoch before scheduling the next cohort.
 
+### Narrow projection read-ahead checkpoint
+
+Commit `ad4229c093` applies whole-block read-ahead to the 32-token Q5
+projection. Complete and partial channel tiles specialize the same body;
+gate and up remain separate kernels. Canonical encoded weights, arithmetic,
+the command interface, scheduler and MTP policy are unchanged.
+
+The source-only A/B/A/B/A comparison below uses baseline `2006b80c6e`, the
+same optimized executable and the same eight-client retained-review protocol
+as the preceding checkpoint. Every launch records the appropriate source
+hashes. One lease covers all five windows on the same hardware and power
+policy.
+
+| Run order | Model source | Whole window | Aggregate output tokens/s |
+| --- | --- | ---: | ---: |
+| 1 | Baseline | 129.292 s | 23.760 |
+| 2 | Narrow read-ahead | 126.277 s | 24.328 |
+| 3 | Baseline | 128.281 s | 23.947 |
+| 4 | Narrow read-ahead | 125.373 s | 24.503 |
+| 5 | Baseline | 129.801 s | 23.667 |
+
+Every window completes 16 length-limited responses, 28,534 appended input
+tokens and 3,072 outputs, with all second turns retaining state. Client usage,
+output credits, epoch frontiers and clean retirement agree. Mean window time
+falls from 129.125 to 125.825 seconds: **2.62% higher throughput**, reaching
+**24.415 aggregate output tokens/s**. Both candidate windows beat all three
+controls; control and candidate spreads are 1.18% and 0.72%. GPU maxima are
+61/62/61/61/60 C and package-power medians remain about 100 W.
+
+This is another closed-loop self-comparison, not a refreshed external-runtime
+ratio. Relative to the first control, 3/5/4/4 replies differ in the remaining
+windows; those histories affect batching. Completed epoch counts are
+178/183/178/180/183. The independent kernel differential and access checks
+cover every channel-tail class, all production widths and zero workgroups;
+real-model checks cover packed/isolated shapes, MTP, retained follow-ups,
+request cancellation, conflicting session ownership and reuse after retirement.
+
+Isolated, completion-inclusive ABABA measurements improve all three production
+widths by roughly 1.35-1.50x, with two physical binding sets. Native evidence
+shows complete packet reads outstanding across 32 matrix instructions. LDS
+remains 23,040 bytes with no spills or private storage; VGPR use grows from 40
+to 136 while modeled occupancy remains five waves. Native image size grows
+from 9,232 to 46,056 bytes. The 15 JIT-stage preparations total about 2.318
+seconds versus 1.965 seconds for the control. That cold cost is outside the
+scored serving window, and neither instruction overlap nor modeled occupancy
+establishes measured DRAM saturation.
+
 ## Traffic and batching hypotheses
 
 For one completed traversal, let `D` be modeled bytes reaching the relevant
