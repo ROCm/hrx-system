@@ -39,6 +39,18 @@ typedef struct loom_serve_qwen_shape_t {
   iree_host_size_t span_capacity;
 } loom_serve_qwen_shape_t;
 
+// Five token classes through 512 and five span classes through 16.
+enum { LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY = 25 };
+
+// Cold catalog construction for validated row_count in [1, 16] and maximum
+// token capacity in [1, 512]. Token classes start at 32; span classes at one.
+// Each axis doubles and includes its exact terminal capacity, including odd
+// counts. Shapes with more spans than tokens are omitted. Writes at most
+// DEFAULT_SHAPE_CAPACITY entries and returns the nonzero count.
+iree_host_size_t loom_serve_qwen_default_shapes(
+    iree_host_size_t row_count, iree_host_size_t token_capacity,
+    loom_serve_qwen_shape_t* shapes);
+
 // Reserves page-rounded capacity for a validated request through completion.
 // input_count includes retained and appended input. The final selected output
 // stays pending and does not enter KV. Legal speculative steps may transiently

@@ -291,9 +291,10 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   iree_allocator_t allocator = iree_allocator_system();
+  const loom_serve_qwen_flag_defaults_t defaults = {.row_count = row_count};
   loom_serve_qwen_model_t* model = NULL;
   iree_status_t status =
-      loom_serve_qwen_model_create_from_flags(row_count, allocator, &model);
+      loom_serve_qwen_model_create_from_flags(&defaults, &model, allocator);
   if (iree_status_is_ok(status)) {
     status = qwen_run(model, row_count, allocator);
   }

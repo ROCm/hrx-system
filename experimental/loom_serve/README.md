@@ -99,9 +99,12 @@ itself drain captured records into the sink. Profiling retains command metadata
 only when requested. Instrumented device timings explain kernel costs;
 throughput comparisons run with profiling off.
 
-The server accepts repeated `--epoch=tokens:spans` options (for example,
-`--epoch=32:8 --epoch=128:8 --epoch=512:8`). Startup specializes and caches these
-shapes from the same source catalog and live device profile. These cached
+The packed server generates its JIT catalog automatically: token classes
+32/64/128/256/512 up to `--prefill_capacity`, crossed with span classes
+1/2/4/8/16 up to `--rows`. Each axis includes its exact terminal capacity,
+including non-power-of-two configurations. Repeated `--epoch=tokens:spans`
+options replace this catalog for controlled experiments. Startup specializes
+and caches these shapes from the same source and live device profile. Cached
 commands share the same weights, retained rows, residual storage, maximum-sized
 workspace, and VM process. Each is a native runner export resolved once at load
 time; selecting another shape allocates no device backing and copies no retained
@@ -308,19 +311,30 @@ build's instrumentation and are not automatically performance data.
 build_tools/bin/iree-bazel-run --config=asan \
   //experimental/loom_serve:qwen_server -- \
   --model=experimental/loom_serve/models/qwen38 \
-  --epoch=128:8 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
-  --rows=4 --port=8080 --max_tokens=384
+  --mtp --mtp_depth=3 --port=8080 --max_tokens=384
 ```
 
-The default `--scheduler=packed` requires `--epoch`. `--scheduler=isolated`
-executes the same ready-span plan using ordinary per-row prefill/decode stages;
-`--scheduler=matched` uses prefill math for length-one decode inputs as well.
-Preparing the same epoch specialization in all modes holds planner token/span limits
-fixed. `--chunk_size` caps each row's contribution, not the whole epoch. The
-fixed prepared shape still computes padding; the epoch log exposes useful work
-separately from its capacity.
+The packed server defaults to sixteen resident slots and a shared pool of
+65,536 positions: 4 GiB of target KV plus 256 MiB of draft KV with MTP. This
+backing is fixed at startup; individual sessions acquire pages as they grow.
+Recurrent state adds 149.625 MiB per slot; `--rows` reduces that separate cost.
+`--context_capacity` remains the per-row logical limit (16,384 by default).
+For a shared 256K-position budget and a 256K per-session ceiling, set
+`--pool_capacity=262144 --context_capacity=262144`. Distribution among sessions
+then follows actual admitted request credit, including MTP provisional writes
+and page rounding, not a partition into sixteen fixed context slabs.
+
+`--scheduler=isolated` executes the same ready-span plan using ordinary per-row
+prefill/decode stages; `--scheduler=matched` uses prefill math for length-one
+decode inputs as well.
+These controls and the CLI tools retain dense KV by default; explicit
+`--pool_capacity=0` also selects dense addressing in the packed server.
+Preparing the same explicit epochs and KV layout in all compared modes holds
+planner limits and storage fixed. `--chunk_size` caps each row's contribution,
+not the whole epoch. Each cached shape still computes padding; the epoch log
+exposes useful work separately from its capacity.
 
 `--packing=separate` is a same-kernel scheduling ablation: each epoch batches
 only prompts or only decode inputs, selected by the first ready row in the

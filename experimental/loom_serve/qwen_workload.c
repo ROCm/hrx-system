@@ -360,7 +360,7 @@ static iree_status_t qwen_workload_print(loom_serve_qwen_model_t* model,
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   const iree_host_size_t row_count = FLAG_prompt_file_list().count;
-  if (loom_serve_qwen_shape_count_from_flags() != 1 || row_count < 1 ||
+  if (loom_serve_qwen_explicit_shape_count_from_flags() != 1 || row_count < 1 ||
       row_count > QWEN_WORKLOAD_ROWS || FLAG_retained_tokens < 0 ||
       FLAG_prefill_rows < 0 ||
       (iree_host_size_t)FLAG_prefill_rows > row_count || FLAG_max_tokens < 1 ||
@@ -372,10 +372,11 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
+  const loom_serve_qwen_flag_defaults_t defaults = {.row_count = row_count};
   loom_serve_qwen_model_t* model = NULL;
   qwen_workload_row_t rows[QWEN_WORKLOAD_ROWS] = {0};
   iree_status_t status =
-      loom_serve_qwen_model_create_from_flags(row_count, allocator, &model);
+      loom_serve_qwen_model_create_from_flags(&defaults, &model, allocator);
   if (iree_status_is_ok(status) &&
       (loom_serve_qwen_model_shapes(model)[0].span_capacity < row_count ||
        loom_serve_qwen_model_shapes(model)[0].token_capacity < row_count ||

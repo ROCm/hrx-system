@@ -165,11 +165,14 @@ multi-turn responses. These checks protect different boundaries.
 ## Shape and layout evolution
 
 JIT makes specialization cheap to request; it does not remove authored storage
-bounds. The current adapter prepares its shape table at startup, shares a
-maximum workspace, and resolves immutable native exports once. Expanding its
-512-token/eight-row envelope requires updating the host arrays, source/view
-bounds, descriptor producers, workspace sizing, and numerical tail coverage
-together. Adding runtime variants additionally requires publishing new callable
+bounds. The current adapter generates token and span classes independently at
+startup, shares a maximum workspace, and resolves immutable native exports once.
+Its sixteen-row bound comes from four-input verification fitting a 64-entry
+selected-output table, not from assigning sixteen full contexts. The private
+KV pool separates shared physical capacity from per-row logical context.
+Expanding the 512-token/sixteen-row envelope requires updating host arrays,
+source/view bounds, descriptor producers, workspace sizing, and numerical tail
+coverage together. Adding runtime variants additionally requires publishing new callable
 stages without invalidating in-flight command or VM references.
 
 The next model does not need a general serving framework first. A small

@@ -39,6 +39,13 @@ records commands, creates the VM program/native exports, and allocates retained
 rows and MTP state. Each stage can have different kernel choices while binding
 the same model storage. No session gets another copy of the weights or code.
 
+The packed server constructs a bounded Cartesian catalog of token classes and
+independent span classes, including exact terminal sizes for odd residency
+counts. Explicit `--epoch` lists replace it for experiments. Shapes share one
+maximum workspace; proposal storage follows resident count and verification
+capture follows each compiled span capacity. Neither a shape change nor a row's
+page growth allocates more device backing during steady-state execution.
+
 `qwen_load_weights` delegates cold residency to `loom_serve_qwen_weights_load`.
 It resolves all target/MTP parameter sharing before I/O, so each unique tensor
 is loaded once. A source-JIT preparation command permutes FFN gate/up Q5 blocks

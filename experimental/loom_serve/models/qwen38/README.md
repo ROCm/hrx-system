@@ -7,9 +7,11 @@ match across roots so all stages share one resident weight slab.
 
 The runner consumes this directory directly with `--model`. Its
 `sources.txt` catalog indexes all command/kernel providers once; `control.loom`
-is the model VM entry. `--prefill_capacity`, `--context_capacity`, and repeated
-`--epoch=tokens:spans` select JIT specializations. Native code is generated for
-the actual HAL device, not selected from precompiled directories.
+is the model VM entry. `--prefill_capacity` bounds the automatic packed token
+catalog; `--rows` bounds its independent span axis. Repeated
+`--epoch=tokens:spans` replace that catalog with explicit JIT specializations.
+`--context_capacity` sets the logical attention ceiling. Native code is
+generated for the actual HAL device, not selected from precompiled directories.
 
 `--mtp` prepares block-64 proposal, cache catch-up, and target verification.
 The proposal uses a 32-token projection tile and the configured resident-row
@@ -21,9 +23,12 @@ parameter groups load once. There is no command ABI or HAL extension.
 
 `--pool_capacity=N` selects a shared physical token budget for packed target
 and MTP KV. `N` is a multiple of 64; `--context_capacity` remains each row's
-logical ceiling. The default zero retains dense addressing for comparison.
-Pooled execution requires `--epoch` shapes and has no failure fallback to the
-dense layout. Single-row calls use the same packed addressing path.
+logical ceiling. The packed server defaults to 65,536 shared positions and
+sixteen resident slots. The isolated CLI and experiment tools default to dense
+KV; explicit zero selects dense addressing in any caller. Pooled execution
+generates cached shapes automatically when no `--epoch` is supplied and has no
+failure fallback to the dense layout. Single-row calls use the same packed
+addressing path.
 
 Physical pages are assigned only when a span first writes them. Every target
 layer uses the same page IDs in disjoint layer-major K/V planes. Draft KV uses
@@ -79,7 +84,11 @@ compares sequential dense output with a concurrent pooled cohort, requires every
 configured row to execute, and requires a full-cohort MTP epoch. Unequal prompts
 also exercise mixed prefill/decode for multirow runs. Set `--rows` to any value
 from 1 through 16; 1, 3, and 16 cover the single, non-power-of-two, and maximum
-residencies. It takes the same model/server/path arguments as `check_capacity.py`.
+residencies. The dense control uses explicit 64/128-token shapes; the candidate
+uses the automatic catalog and verifies cohort-sized selection. At sixteen
+rows it also requires a 512-token shape to execute. `--catalog=explicit` holds
+both arms to the same shapes for addressing/row-family comparisons. It takes
+the same model/server/path arguments as `check_capacity.py`.
 
 ## Online weight residency
 

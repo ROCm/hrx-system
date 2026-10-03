@@ -47,10 +47,15 @@ This is a self-comparison. The [current matched-MTP qualification](PERFORMANCE.m
 records incomplete retained follow-ups in both tested llama.cpp backends;
 no current MTP-to-MTP throughput ratio is claimed.
 
-The concrete adapter currently admits up to eight rows and 512 packed input
-tokens, with startup-selected shapes and a common context capacity. Its caches
-are contiguous F16 attention storage plus recurrent state, not a paged prefix
-pool. The host still schedules and reads completion records between epochs.
+The concrete adapter supports 1–16 resident rows and up to 512 packed input
+tokens, with an automatic source-JIT token/span catalog. Private F16 attention
+pages grow from one shared pool rather than reserving a full context per row.
+Admission reserves each request's complete high-water credit and queues excess
+work. The real HTTP differential covers single, odd, and sixteen-row cohorts;
+the [model guide](../models/qwen38/README.md#pooled-kv-and-reserved-admission)
+describes those checks and capacity-pressure/reuse coverage. Recurrent state
+remains private, and this pool does not yet share prefixes or page to storage.
+The host still schedules and reads completion records between epochs.
 The [runner guide](RUNNER.md#extension-boundaries) identifies the exact changes
 needed to move those boundaries. The intended 20–40-agent deployment, NPU
 execution, autonomous device scheduler, and cross-session prefix sharing are
@@ -79,11 +84,13 @@ route here, not a claim that this service already runs on Windows, NVIDIA, or
 the NPU.
 
 The full-model witness used a 128-GB unified-memory gfx1151 machine. The GGUF
-alone occupies 18.830 GiB on disk. At 2K context, eight target rows add about
-2.169 GiB of retained device storage, before shared workspace, MTP weights/cache,
-compiler, and runtime overhead. There is no automatic CPU/disk spill. The
-startup `Streaming` and `Residency` lines expose major allocations, not total
-peak memory. The small tests and the proposed 135M port avoid this large-model
+alone occupies 18.830 GiB on disk. The packed server defaults to 65,536 shared
+KV positions (4 GiB target plus 256 MiB draft with MTP) and sixteen recurrent
+slots (149.625 MiB each), before shared workspace, compiler, and runtime
+overhead. `--rows` and `--pool_capacity` control these distinct memory costs;
+`--context_capacity` is a logical per-session limit. There is no automatic
+CPU/disk spill. The startup `Streaming` and `Residency` lines expose major
+allocations, not total peak memory. The small tests and the proposed 135M port avoid this large-model
 capacity requirement. Build storage and the model download need separate
 budgets; model files belong on persistent storage with over 21 GB free, not a
 temporary RAM filesystem.
@@ -128,6 +135,7 @@ build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve:http_request_test \
   //experimental/loom_serve:http_server_test \
   //experimental/loom_serve:qwen_chat_test \
+  //experimental/loom_serve:block_pool_test \
   //experimental/loom_serve:qwen_schedule_test \
   //experimental/loom_serve:benchmark_service_test
 ```
@@ -258,8 +266,7 @@ After the check exits and releases the residency, start one server:
 ```sh
 bazel-bin/experimental/loom_serve/qwen_server \
   --model=experimental/loom_serve/models/qwen38 \
-  --prefill_capacity=128 --context_capacity=2048 \
-  --epoch=32:8 --epoch=128:8 --mtp --mtp_depth=3 \
+  --context_capacity=2048 --pool_capacity=8192 --mtp --mtp_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \
   --rows=4 --port=8080 --heartbeat_ms=1000
@@ -311,6 +318,16 @@ python3.12 -B -m experimental.loom_serve.check_service \
 Success ends with an `event: pass` record after eight retained requests and
 clean server retirement. Per-case stderr is kept in a new output directory;
 an existing directory is rejected to preserve previous evidence.
+
+The [pooled row-family check](../check_rows.py) compares exact streaming output,
+usage, and finish reasons against a sequential dense control. Its candidate
+uses no manual epoch flags and checks that the automatic catalog follows the
+ready cohort. Run with `--rows=1`, `--rows=3`, and `--rows=16` in separate
+output directories; the last case requires a full sixteen-row verifier and a
+512-token shape. [check_capacity.py](../check_capacity.py) separately checks
+reserved admission, queued cancellation, idle eviction, and retained reuse
+under an intentionally small shared pool. Both take the same model/server/path
+arguments as the lifecycle check above.
 
 ## What another model author can take away
 
