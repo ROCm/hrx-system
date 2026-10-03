@@ -17,6 +17,7 @@ kernels/qwen38/attention_prefill_wmma.loom
 kernels/qwen38/attention_spans.loom
 kernels/qwen38/decode_control.loom
 kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom
+kernels/qwen38/ffn_gate_up_prefetch.loom
 kernels/qwen38/gdn_common.loom
 kernels/qwen38/gdn_decode.loom
 kernels/qwen38/gdn_prefill.loom

@@ -769,6 +769,8 @@ static iree_status_t qwen_compile_stage(loom_serve_qwen_model_t* model,
       {"ggml.quantize_q8_1_x4.group_capacity", 136 * token_capacity},
       {"qwen38.attention.cache_capacity", model->context_capacity},
       {"qwen38.attention.decode_split_count", 10},
+      {"qwen38.ffn.input_size", 5120},
+      {"qwen38.ffn.output_size", 17408},
       {"qwen38.greedy_argmax.output_capacity", 248320},
   };
   char text[IREE_ARRAYSIZE(values)][32];
