@@ -5,7 +5,9 @@ command programs, and GPU executables using the public Loom C API. Its private i
 It is not a general HAL VM module or a serving framework.
 
 The [model-authoring packet](docs/README.md) walks through reproduction,
-compiler/runtime ownership, a second-model port, and performance experiments.
+compiler/runtime ownership, a proposed second-model port, and performance
+experiments. Its [agent entry point](docs/AGENT_START.md) gives a first assignment,
+source-reading order, observable success gates, and failure triage.
 
 `command.c` combines a parsed portable command program with loaded executable
 reflection. Recording retains fixed buffers and code. Rebindable slots include
