@@ -44,7 +44,8 @@ typedef struct loom_serve_qwen_service_options_t {
   // Whether prompt and decode inputs may share an epoch, independent of math.
   loom_serve_qwen_packing_mode_t packing_mode;
   // Proposal depth: zero or three. Three requires packed scheduling and an MTP
-  // bundle on the borrowed model. Zero with a bundle measures warm target-only.
+  // bundle on the borrowed model, with at least one epoch shape admitting four
+  // tokens. Zero with a bundle measures warm target-only.
   iree_host_size_t mtp_depth;
 } loom_serve_qwen_service_options_t;
 
