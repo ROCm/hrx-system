@@ -65,7 +65,7 @@ The full-model witness used a 128-GB unified-memory gfx1151 machine. The GGUF
 alone occupies 18.830 GiB on disk. At 2K context, eight target rows add about
 2.169 GiB of retained device storage, before shared workspace, MTP weights/cache,
 compiler, and runtime overhead. There is no automatic CPU/disk spill. The
-startup `Loading` and `Residency` lines expose major allocations, not total
+startup `Streaming` and `Residency` lines expose major allocations, not total
 peak memory. The small tests and the proposed 135M port avoid this large-model
 capacity requirement. Build storage and the model download need separate
 budgets; model files belong on persistent storage with over 21 GB free, not a

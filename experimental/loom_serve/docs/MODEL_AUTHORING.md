@@ -120,6 +120,18 @@ loads bytes into those destinations. Another checkpoint format can reuse the
 IO machinery, but its model adapter must establish names, encoding, orientation,
 and size rather than treating a matching byte count as numerical equivalence.
 
+Checkpoint encoding and inference layout need not be identical.
+[`qwen_weights.c`](../qwen_weights.c) loads each unique tensor into final
+residency and schedules the ordinary source-JIT
+[`prepare.loom`](../models/qwen38/prepare.loom) command after its read. Each
+workgroup captures eight complete Q5 rows before rewriting its disjoint range;
+the permutation requires only workgroup-local storage. The target and MTP
+consumers then use that same prepared encoding. An alternative model owns its
+own format and preparation contract, not Qwen's tensor-name predicate or
+dimensions. Layout qualification covers every consuming shape and the complete
+startup ownership path, including byte copies and peak residency. A faster
+projection alone does not establish a better serving configuration.
+
 ## Correctness that survives optimization
 
 [`gdn_convolution.loom`](../models/qwen38/tests/gdn_convolution.loom) is a small

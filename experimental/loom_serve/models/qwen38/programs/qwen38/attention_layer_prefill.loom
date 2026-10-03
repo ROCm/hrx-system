@@ -12,13 +12,17 @@ config.decl @qwen38.attention.decode_split_count : %value: index where [range(%v
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_capacity: index, %input_size_data: index, %input: buffer, %output: buffer)
 kernel.decl @ggml_linear_q8_0_q8_1_x4(%token_count: index, %input_size: index, %output_size: index) launch(%token_capacity: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @ggml_linear_q5k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4_m4_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @ggml_linear_q6k_q8_1_x4_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @ggml_linear_q6k_f32_decode_m4(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: index, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.decl @qwen38_linear_q5k_f16_wmma(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q5k_f16_wmma_c128_t128_wave32(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch(%token_count: index) launch(%control: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
+kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8(%token_count: index) launch(%control: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q6k_f16_wmma_x64(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q6k_f16_wmma_c64t32_f32acc(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q6k_f16_wmma_c64t32_f32acc_residual(%token_count: index, %input_size: index, %output_size: index) launch(%control: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer)
@@ -242,24 +246,24 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
     %post_normalized_q8 = buffer.alloca<global> align(256) %post_normalized_q8_bytes : buffer
     kernel.launch @ggml_quantize_q8_1_x4_f32[%verification_depth, %hidden_size](%verification_depth, %hidden_size, %post_normalized, %post_normalized_q8) : [index, index](index, index, buffer, buffer)
     command.concurrent {
-      kernel.launch @ggml_linear_q5k_q8_1_x4_m4[%verification_depth, %hidden_size, %ffn_size](%verification_depth, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
-      kernel.launch @ggml_linear_q5k_q8_1_x4_m4[%verification_depth, %hidden_size, %ffn_size](%verification_depth, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+      kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%verification_depth, %hidden_size, %ffn_size](%verification_depth, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_gate_weight, %ffn_gate) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
+      kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%verification_depth, %hidden_size, %ffn_size](%verification_depth, %hidden_size, %ffn_size, %post_normalized_q8, %ffn_up_weight, %ffn_up) : [index, index, index](index, index, index, buffer, view<61276160xi8>, buffer)
     }
   } else {
     scf.if %uses_x64 {
       scf.if %uses_c64t32 {
         command.concurrent {
-          kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%c64t32_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
-          kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%c64t32_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
+          kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8[%c64t32_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
+          kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8[%c64t32_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
         }
       } else {
         command.concurrent {
-          kernel.launch @qwen38_linear_q5k_f16_wmma[%x64_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
-          kernel.launch @qwen38_linear_q5k_f16_wmma[%x64_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
+          kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%x64_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_gate_weight, %ffn_gate) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
+          kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%x64_token_count, %hidden_size, %ffn_size](%control, %hidden_size, %ffn_size, %post_normalized, %ffn_up_weight, %ffn_up) : [index, index, index](buffer, index, index, buffer, view<61276160xi8>, buffer)
         }
       }
     } else {
-      kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%x128_token_count](%control, %post_normalized, %ffn_gate_weight, %ffn_up_weight, %swiglu) : [index](buffer, buffer, view<61276160xi8>, view<61276160xi8>, buffer)
+      kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%x128_token_count](%control, %post_normalized, %ffn_gate_weight, %ffn_up_weight, %swiglu) : [index](buffer, buffer, view<61276160xi8>, view<61276160xi8>, buffer)
     }
   }
 

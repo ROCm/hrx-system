@@ -52,6 +52,7 @@ deployment path.
 | [`jit.h`](../jit.h), [`jit.c`](../jit.c) | Public `loomc` embedding, source indexing, live device facts, native request ownership, reusable command recording |
 | [`command.h`](../command.h), [`execution.h`](../execution.h), [`module.h`](../module.h), [`control_test.cc`](../control_test.cc) | Buffer borrowing/retention, exact queues and timelines, accepted work, feedback lifetime, drain after failure |
 | [`qwen_model.h`](../qwen_model.h), [`qwen_model.c`](../qwen_model.c), [`epoch.loom`](../models/qwen38/epoch.loom) | A concrete residency: weight placement, row origins, mutable state, scratch, descriptors, packed traversal and progress |
+| [`qwen_weights.c`](../qwen_weights.c), [`prepare.loom`](../models/qwen38/prepare.loom), [`prepared_q5.loom`](../models/qwen38/tests/prepared_q5.loom) | File bytes through shared final storage and in-place preparation into every consuming projection, with explicit readiness and exact comparisons |
 | [`qwen_schedule.h`](../qwen_schedule.h), [`qwen_service.c`](../qwen_service.c) | Ready spans versus model rows, canonical history, output credit, admission and scheduling policy |
 
 The detailed [authoring](MODEL_AUTHORING.md) and [runner](RUNNER.md) guides

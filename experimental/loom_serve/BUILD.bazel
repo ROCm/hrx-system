@@ -336,6 +336,22 @@ loom_cc_binary(
 )
 
 loom_cc_library(
+    name = "qwen_weights",
+    srcs = ["qwen_weights.c"],
+    hdrs = ["qwen_weights.h"],
+    deps = [
+        ":jit",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:parameter_index",
+        "//runtime/src/iree/io:parameter_index_provider",
+        "//runtime/src/iree/io:parameter_provider",
+        "//runtime/src/iree/tooling:parameter_util",
+    ],
+)
+
+loom_cc_library(
     name = "qwen_model",
     srcs = ["qwen_model.c"],
     hdrs = ["qwen_model.h"],
@@ -349,6 +365,7 @@ loom_cc_library(
         ":jit",
         ":module",
         ":qwen_schedule",
+        ":qwen_weights",
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/async",
@@ -359,15 +376,11 @@ loom_cc_library(
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers",
         "//runtime/src/iree/io:file_handle",
-        "//runtime/src/iree/io:parameter_index",
-        "//runtime/src/iree/io:parameter_index_provider",
-        "//runtime/src/iree/io:parameter_provider",
         "//runtime/src/iree/module/hal:types",
         "//runtime/src/iree/tokenizer",
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/tokenizer/vocab",
         "//runtime/src/iree/tooling:device_util",
-        "//runtime/src/iree/tooling:parameter_util",
         "//runtime/src/iree/vm",
         "//runtime/src/iree/vm/bytecode:module",
     ],

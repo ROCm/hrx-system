@@ -1,6 +1,6 @@
 # Qwen3.8-27B GPU stages
 
-These sources implement the UD-Q5_K_XL GGUF layout for the experimental runner.
+These sources consume UD-Q5_K_XL GGUF weights for the experimental runner.
 The prefill, greedy decode and packed epoch roots use command programs and kernels;
 their artifacts are independent of the host scheduler. Parameter placement must
 match across roots so all stages share one resident weight slab.
@@ -16,6 +16,87 @@ The proposal shape is 32 tokens/eight spans; each target epoch gets matching
 catch-up and verifier variants. Shared embedding, target normalization, and
 full-vocabulary output roots reference the existing weight slab. Extra block-64
 parameter groups load once. There is no command ABI or HAL extension.
+
+## Online weight residency
+
+`qwen_weights.c` resolves the complete target/MTP placement before submitting
+I/O. Shared roots retain views of the original allocation; only new roots
+allocate storage and contribute file reads. The normal `file` parameter mode
+uses asynchronous file handles and HAL queue reads targeting device-local
+storage. The current placement uses HAL's bounded staging path on the qualified
+GPU, including unified-memory hardware. This preserves the measured inference
+performance but still incurs a staging-to-final transfer. Scoped-mappable
+dual-local placements eliminated that transfer in experiments but regressed
+serving throughput; they are not the default. Host visibility alone also does
+not justify placing streaming weights across PCIe on a discrete device.
+
+FFN gate/up tensors use a lossless block permutation:
+`[channel][K256][176 bytes]` becomes
+`[channel / 8][K256][channel % 8][176 bytes]`. All block headers and codes remain
+unchanged. Other tensors keep their original encoding. This gives adjacent
+channels a compact block stream without padding, expanded scales, or another
+resident image. The isolated decode, four-token verifier, narrow 32-token,
+generic small-batch, and wide fused FFN entries all consume the same format.
+Their `_channel8` entry points specialize shared arithmetic implementations;
+canonical entries remain useful for other model tensors and exact comparisons.
+
+`prepare.loom` is an ordinary source-JIT command. Each workgroup captures eight
+complete K5120 rows in 28,160 bytes of local memory, then publishes the
+permutation into that same owned range. No workgroup overwrites another's
+unread input. Target and MTP tensors are prepared once during creation, never
+on an inference path.
+
+Four loading lanes each carry read-ready and prepared-ready timelines. A lane's
+next read waits for its previous preparation; different lanes can overlap.
+Consecutive canonical spans share a readiness group, while each prepared tensor
+has its own read-to-dispatch edge. One terminal join makes all weights ready.
+Queue submission order alone establishes no dependency. A failed lane aborts
+the model, propagates failure to unsubmitted dependents, and leaves accepted
+operations' resources retained until queue retirement and device teardown.
+
+The existing profiling flags also cover startup reads and preparation, so their
+overlap can be inspected separately from inference timings. A layout's kernel
+gain is not an endpoint gain, and a warm filesystem-cache load does not measure
+cold NVMe throughput.
+
+`queue-events,dispatch-events,memory-events` provides host queue records,
+preparation dispatch timing, and final allocation accounting. Device-queue
+timing uses a distinct timestamp path on AMDGPU and disables host-clock fitting
+when selected alongside those events. A read event marks completion publication,
+not the duration of file transfer. Startup copy payload is a separate ledger:
+a single final weight image can still receive every byte through staging.
+
+`tests/prepared_q5.loom` evaluates canonical projections, permutes their weights
+in place, and compares every output bit through each prepared consumer. It
+covers channel tails, partial active spans, all production wide shapes, and
+zero grids without model downloads or baked numerical outputs. On a qualified
+GPU runner, select its owned cases with these providers and specializations:
+
+```sh
+model=experimental/loom_serve/models/qwen38
+for case in narrow narrow_zero generic_1_1 generic_4_4 generic_8_8 \
+            generic_64_33 generic_64_64 generic_0_1 q8_1 q8_4 \
+            wide_128_1 wide_128_128 wide_256_129 wide_256_256 \
+            wide_512_511 wide_512_512 wide_0_1; do
+  build_tools/bin/iree-bazel-run --config=asan \
+    //loom/src/loom/tools/iree-test-loom -- \
+    "$model/tests/prepared_q5.loom" \
+    --library="$model/prepare.loom" \
+    --library="$model/kernels/qwen38/linear_q5k_f16_wmma.loom" \
+    --library="$model/kernels/qwen38/ffn_gate_up_prefetch.loom" \
+    --library="$model/kernels/ggml/linear_q5k_q8_1_x4.loom" \
+    --library="$model/kernels/ggml/linear_qk_common.loom" \
+    --library="$model/kernels/ggml/quantize_q8_1_x4.loom" \
+    --config=qwen38.ffn.input_size=5120 --config=qwen38.ffn.output_size=17408 \
+    --config=ggml.linear_q5k_q8_1_x4.token_capacity=4 \
+    --config=ggml.linear_q5k_q8_1_x4.output_capacity=17408 \
+    --config=ggml.quantize_q8_1_x4.group_capacity=160 \
+    --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
+    --case="@qwen38_prepared_$case" || exit
+done
+```
+
+## Model execution
 
 The serving path uses `loomc` in process for command products, native kernels,
 and VM bytecode. Kernel experiments use `iree-test-loom`,
@@ -233,8 +314,8 @@ a single matrix. Four wave64 subgroups share a 64-channel tile. Partial packet
 rounds retire before complete rounds, whose reads overlap the current block's
 eight unrolled matrix groups. Complete and partial channel tiles specialize
 the same body; tails never fetch nonexistent channels. The final barrier allows
-the encoded slab to hold the output transpose. The command program and
-canonical global weight layout are unchanged.
+the encoded slab to hold the output transpose. Canonical and prepared global
+weight layouts specialize the same local contraction schedule.
 
 `tests/linear_q5k_f16_wmma.loom` checks every output against the generic
 global-decoding schedule at the three production projection widths and every

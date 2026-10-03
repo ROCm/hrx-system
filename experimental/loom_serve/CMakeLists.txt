@@ -240,6 +240,25 @@ loom_cc_binary(
 )
 endif()
 
+loom_cc_library(
+  NAME
+    qwen_weights
+  HDRS
+    "qwen_weights.h"
+  SRCS
+    "qwen_weights.c"
+  DEPS
+    ::jit
+    iree::base
+    iree::hal
+    iree::io::parameter_index
+    iree::io::parameter_index_provider
+    iree::io::parameter_provider
+    iree::tooling::parameter_util
+    loom::target::arch::cmd::program
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME
@@ -254,6 +273,7 @@ loom_cc_library(
     ::jit
     ::module
     ::qwen_schedule
+    ::qwen_weights
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -262,15 +282,11 @@ loom_cc_library(
     iree::hal
     iree::hal::drivers
     iree::io::file_handle
-    iree::io::parameter_index
-    iree::io::parameter_index_provider
-    iree::io::parameter_provider
     iree::module::hal::types
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::tokenizer::vocab
     iree::tooling::device_util
-    iree::tooling::parameter_util
     iree::vm
     iree::vm::bytecode::module
     loom::binding::c::loomc

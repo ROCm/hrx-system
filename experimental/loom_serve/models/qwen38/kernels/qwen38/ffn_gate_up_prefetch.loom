@@ -6,7 +6,8 @@
 // Fused Q5 gate/up and SwiGLU over complete 64-channel, 128-token tiles.
 // Configured model dimensions specialize the K256 read-ahead loop. Token
 // capacity determines the grid; active tokens stay device-resident. Canonical
-// weights are staged once per block without a second LDS or global weight bank.
+// blocks are staged once, from canonical rows or grouped channels, without
+// a second LDS or global weight bank.
 // The partial 192-thread packet round is ordered before the complete 512-thread
 // round so only the latter remains outstanding across the unrolled matrix work.
 
@@ -16,21 +17,9 @@ amdgpu.target<gfx11-generic> @qwen38_ffn_block_prefetch_gfx11_wave32 {subgroup_s
 config.decl @qwen38.ffn.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
 config.decl @qwen38.ffn.output_size : %value: index where [range(%value, 64, 32768), mul(%value, 64)]
 
-kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch") @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch(%token_count0: index) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
-  %output_size = config.get @qwen38.ffn.output_size : index
-  %c1 = index.constant 1 : index
-  %c63 = index.constant 63 : index
-  %c64 = index.constant 64 : index
-  %c127 = index.constant 127 : index
-  %c128 = index.constant 128 : index
-  %c512 = index.constant 512 : index
-  %padded_output_size = index.add %output_size, %c63 : index
-  %output_tiles = index.div %padded_output_size, %c64 : index
-  %padded_token_count = index.add %token_count, %c127 : index
-  %token_tiles = index.div %padded_token_count, %c128 : index
-  kernel.launch.config workgroups(%output_tiles, %token_tiles, %c1) workgroup_size(%c512, %c1, %c1) : index
-} launch(%token_count_data: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+template.decl @qwen38.ffn_gate_up_q5k.block_prefetch.body(%weight_channels: index, %token_count_data: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
+
+template.def<@qwen38.ffn_gate_up_q5k.block_prefetch.body> device @qwen38_ffn_gate_up_q5k_block_prefetch_body(%weight_channels: index, %token_count_data: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -79,6 +68,7 @@ kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_ga
   %lane0 = kernel.subgroup.lane.id : index
   %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
   %quant_block_count = index.div %input_size, %c256 : index
+  %weight_group_count = index.div %output_size, %weight_channels : index
   %channel_tile_base = index.mul %channel_tile, %c64 : index
   %token_tile_base = index.mul %token_tile, %c128 : index
   %channel_group0 = index.rem %subgroup, %c4 : index
@@ -102,8 +92,8 @@ kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_ga
   // The final workgroup barrier retires raw readers before result publication.
   %raw_stage = buffer.alloca<workgroup> align(16) %raw_stage_bytes : buffer
   %raw_stage_view = buffer.view %raw_stage[%c0_offset] : buffer -> view<128x44xi32>
-  %gate_raw_view = buffer.view %gate_weight_noalias[%c0_offset] : buffer -> view<[%output_size]x[%quant_block_count]x44xi32>
-  %up_raw_view = buffer.view %up_weight_noalias[%c0_offset] : buffer -> view<[%output_size]x[%quant_block_count]x44xi32>
+  %gate_raw_view = buffer.view %gate_weight_noalias[%c0_offset] : buffer -> view<[%weight_group_count]x[%quant_block_count]x[%weight_channels]x44xi32>
+  %up_raw_view = buffer.view %up_weight_noalias[%c0_offset] : buffer -> view<[%weight_group_count]x[%quant_block_count]x[%weight_channels]x44xi32>
   %weight_stage_view = buffer.view %weight_stage[%c0_offset] : buffer -> view<128x40xf16>
   %activation_stage_physical_view = buffer.view %activation_stage[%c0_offset] : buffer -> view<128x40xf16>
   %metadata_stage_view = buffer.view %metadata_stage[%c0_offset] : buffer -> view<128x8x2xf32>
@@ -126,8 +116,10 @@ kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_ga
     %partial_valid = index.cmp ult, %partial_task, %raw_load_count : index
     %partial_gate, %partial_up = scf.if %partial_valid -> (vector<4xi32>, vector<4xi32>) {
       %bounded_channel = index.assume %partial_channel [ge(%partial_channel, 0), lt(%partial_channel, %output_size)] : index
-      %gate_packet = vector.load %gate_raw_view[%bounded_channel, %quant_block, %partial_word] : view<[%output_size]x[%quant_block_count]x44xi32> -> vector<4xi32>
-      %up_packet = vector.load %up_raw_view[%bounded_channel, %quant_block, %partial_word] : view<[%output_size]x[%quant_block_count]x44xi32> -> vector<4xi32>
+      %partial_group = index.div %bounded_channel, %weight_channels : index
+      %partial_within_group = index.rem %bounded_channel, %weight_channels : index
+      %gate_packet = vector.load %gate_raw_view[%partial_group, %quant_block, %partial_within_group, %partial_word] : view<[%weight_group_count]x[%quant_block_count]x[%weight_channels]x44xi32> -> vector<4xi32>
+      %up_packet = vector.load %up_raw_view[%partial_group, %quant_block, %partial_within_group, %partial_word] : view<[%weight_group_count]x[%quant_block_count]x[%weight_channels]x44xi32> -> vector<4xi32>
       scf.yield %gate_packet, %up_packet : vector<4xi32>, vector<4xi32>
     } else {
       scf.yield %zero_raw_packet, %zero_raw_packet : vector<4xi32>, vector<4xi32>
@@ -143,8 +135,10 @@ kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_ga
     %complete_packet = index.rem %complete_task, %c11 : index
     %complete_word = index.mul %complete_packet, %c4 : index
     %complete_channel = index.add %channel_tile_base, %complete_row : index
-    %complete_gate = vector.load %gate_raw_view[%complete_channel, %quant_block, %complete_word] : view<[%output_size]x[%quant_block_count]x44xi32> -> vector<4xi32>
-    %complete_up = vector.load %up_raw_view[%complete_channel, %quant_block, %complete_word] : view<[%output_size]x[%quant_block_count]x44xi32> -> vector<4xi32>
+    %complete_group = index.div %complete_channel, %weight_channels : index
+    %complete_within_group = index.rem %complete_channel, %weight_channels : index
+    %complete_gate = vector.load %gate_raw_view[%complete_group, %quant_block, %complete_within_group, %complete_word] : view<[%weight_group_count]x[%quant_block_count]x[%weight_channels]x44xi32> -> vector<4xi32>
+    %complete_up = vector.load %up_raw_view[%complete_group, %quant_block, %complete_within_group, %complete_word] : view<[%weight_group_count]x[%quant_block_count]x[%weight_channels]x44xi32> -> vector<4xi32>
     vector.store %complete_gate, %raw_stage_view[%complete_row, %complete_word] : vector<4xi32>, view<128x44xi32>
     %complete_up_row = index.add %complete_row, %c64 : index
     vector.store %complete_up, %raw_stage_view[%complete_up_row, %complete_word] : vector<4xi32>, view<128x44xi32>
@@ -307,5 +301,46 @@ kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_ga
     %mask = vector.mask.range [%channel0 to %output_size step %c1] : index -> vector<8xi1>
     vector.store.mask %values, %output_view[%bounded_token, %channel0], %mask : vector<8xf16>, view<[%token_count]x[%output_size]xf16>, vector<8xi1>
   }
+  template.return
+}
+
+kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch") @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %output_size = config.get @qwen38.ffn.output_size : index
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %c127 = index.constant 127 : index
+  %c128 = index.constant 128 : index
+  %c512 = index.constant 512 : index
+  %padded_output_size = index.add %output_size, %c63 : index
+  %output_tiles = index.div %padded_output_size, %c64 : index
+  %padded_token_count = index.add %token_count, %c127 : index
+  %token_tiles = index.div %padded_token_count, %c128 : index
+  kernel.launch.config workgroups(%output_tiles, %token_tiles, %c1) workgroup_size(%c512, %c1, %c1) : index
+} launch(%token_count_data: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 1 : index
+  template.apply<@qwen38.ffn_gate_up_q5k.block_prefetch.body>(%weight_channels, %token_count_data, %input, %gate_weight, %up_weight, %output) : (index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Prepared eight-channel block order shares the canonical contraction schedule.
+kernel.def target(@qwen38_ffn_block_prefetch_gfx11_wave32) export("qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8") @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8(%token_count0: index) {
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
+  %output_size = config.get @qwen38.ffn.output_size : index
+  %c1 = index.constant 1 : index
+  %c63 = index.constant 63 : index
+  %c64 = index.constant 64 : index
+  %c127 = index.constant 127 : index
+  %c128 = index.constant 128 : index
+  %c512 = index.constant 512 : index
+  %padded_output_size = index.add %output_size, %c63 : index
+  %output_tiles = index.div %padded_output_size, %c64 : index
+  %padded_token_count = index.add %token_count, %c127 : index
+  %token_tiles = index.div %padded_token_count, %c128 : index
+  kernel.launch.config workgroups(%output_tiles, %token_tiles, %c1) workgroup_size(%c512, %c1, %c1) : index
+} launch(%token_count_data: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer) {
+  %weight_channels = index.constant 8 : index
+  template.apply<@qwen38.ffn_gate_up_q5k.block_prefetch.body>(%weight_channels, %token_count_data, %input, %gate_weight, %up_weight, %output) : (index, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }

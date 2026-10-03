@@ -1,0 +1,326 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Canonical projection, in-place preparation, then the same projection over
+// grouped blocks. Every consumer sees the same bytes, with no second weight
+// image. Distinct finite headers/codes cover both packet and channel boundaries.
+
+kernel.decl @qwen38_prepare_q5k_channel8(%outputs: index) launch(%weight: buffer)
+kernel.decl @ggml_quantize_q8_1_x4_f32(%tokens: index, %inputs: index) launch(%tokens: index, %inputs: index, %input: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_channel8(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4(%tokens: index, %inputs: index, %outputs: index) launch(%tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4_channel8(%tokens: index, %inputs: index, %outputs: index) launch(%tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4_m4(%tokens: index, %inputs: index, %outputs: index) launch(%tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @ggml_linear_q5k_q8_1_x4_m4_channel8(%tokens: index, %inputs: index, %outputs: index) launch(%tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch(%tokens: index) launch(%control: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer)
+kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8(%tokens: index) launch(%control: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer)
+
+check.case public @qwen38_prepared_narrow {
+  %tokens = check.literal value(32) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.param.choice values([48, 64, 80, 96, 112, 128, 17408]) name("channels") : index
+  %control = check.generate.fill value(32) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<32x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<[%outputs]x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<32x[%outputs]xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<32x[%outputs]xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<[%outputs]x20x176xi8>, tensor<32x[%outputs]xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<[%outputs]x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<[%outputs]x20x176xi8>, tensor<32x[%outputs]xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<32x[%outputs]xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_narrow_zero {
+  %tokens = check.literal value(0) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(32) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<32x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_c64t32_f32acc_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<32x17408xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_generic_1_1 {
+  %tokens = check.literal value(1) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(1) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<32x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<32x17408xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_generic_4_4 {
+  %tokens = check.literal value(4) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(4) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<32x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<32x17408xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_generic_8_8 {
+  %tokens = check.literal value(8) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(8) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<32x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<32x17408xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_generic_64_33 {
+  %tokens = check.literal value(64) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(33) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<64x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<64x17408xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<64x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<64x5120xf32>, tensor<17408x20x176xi8>, tensor<64x17408xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<64x5120xf32>, tensor<17408x20x176xi8>, tensor<64x17408xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<64x17408xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_generic_64_64 {
+  %tokens = check.literal value(64) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(64) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<64x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<64x17408xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<64x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<64x5120xf32>, tensor<17408x20x176xi8>, tensor<64x17408xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<64x5120xf32>, tensor<17408x20x176xi8>, tensor<64x17408xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<64x17408xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_generic_0_1 {
+  %tokens = check.literal value(0) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(1) : tensor<1xi32>
+  %seed = check.param.seed base(934871) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<32x5120xf32>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<32x17408xf32>
+  kernel.launch @qwen38_linear_q5k_f16_wmma[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %expected) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_linear_q5k_f16_wmma_channel8[%tokens, %inputs, %outputs](%control, %inputs, %outputs, %input, %weight, %actual) : [index, index, index](tensor<1xi32>, index, index, tensor<32x5120xf32>, tensor<17408x20x176xi8>, tensor<32x17408xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<32x17408xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_q8_1 {
+  %tokens = check.literal value(1) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.param.choice values([8, 48, 17408]) name("channels") : index
+  %seed = check.param.seed base(459123) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<1x5120xf32>
+  %q8 = check.generate.fill value(0) : tensor<1x5760xi8>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<[%outputs]x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<1x[%outputs]xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<1x[%outputs]xf32>
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%tokens, %inputs](%tokens, %inputs, %input, %q8) : [index, index](index, index, tensor<1x5120xf32>, tensor<1x5760xi8>)
+  kernel.launch @ggml_linear_q5k_q8_1_x4[%tokens, %inputs, %outputs](%tokens, %inputs, %outputs, %q8, %weight, %expected) : [index, index, index](index, index, index, tensor<1x5760xi8>, tensor<[%outputs]x20x176xi8>, tensor<1x[%outputs]xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<[%outputs]x20x176xi8>)
+  kernel.launch @ggml_linear_q5k_q8_1_x4_channel8[%tokens, %inputs, %outputs](%tokens, %inputs, %outputs, %q8, %weight, %actual) : [index, index, index](index, index, index, tensor<1x5760xi8>, tensor<[%outputs]x20x176xi8>, tensor<1x[%outputs]xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<1x[%outputs]xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_q8_4 {
+  %tokens = check.literal value(4) : index
+  %inputs = check.literal value(5120) : index
+  %outputs = check.param.choice values([8, 48, 17408]) name("channels") : index
+  %seed = check.param.seed base(459123) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<4x5120xf32>
+  %q8 = check.generate.fill value(0) : tensor<4x5760xi8>
+  %weight = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<[%outputs]x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<4x[%outputs]xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<4x[%outputs]xf32>
+  kernel.launch @ggml_quantize_q8_1_x4_f32[%tokens, %inputs](%tokens, %inputs, %input, %q8) : [index, index](index, index, tensor<4x5120xf32>, tensor<4x5760xi8>)
+  kernel.launch @ggml_linear_q5k_q8_1_x4_m4[%tokens, %inputs, %outputs](%tokens, %inputs, %outputs, %q8, %weight, %expected) : [index, index, index](index, index, index, tensor<4x5760xi8>, tensor<[%outputs]x20x176xi8>, tensor<4x[%outputs]xf32>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](tensor<[%outputs]x20x176xi8>)
+  kernel.launch @ggml_linear_q5k_q8_1_x4_m4_channel8[%tokens, %inputs, %outputs](%tokens, %inputs, %outputs, %q8, %weight, %actual) : [index, index, index](index, index, index, tensor<4x5760xi8>, tensor<[%outputs]x20x176xi8>, tensor<4x[%outputs]xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<4x[%outputs]xf32>
+  check.return
+}
+
+check.case public @qwen38_prepared_wide_128_1 {
+  %tokens = check.literal value(128) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(1) : tensor<1xi32>
+  %seed = check.param.seed base(71393) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<128x5120xf16>
+  %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %up_seed = check.literal value(91783) : i64
+  %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<128x17408xf16>
+  %actual = check.generate.fill value(-17.0) : tensor<128x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%tokens](%control, %input, %gate, %up, %expected) : [index](tensor<1xi32>, tensor<128x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<128x17408xf16>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%gate) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%up) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%tokens](%control, %input, %gate, %up, %actual) : [index](tensor<1xi32>, tensor<128x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<128x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<128x17408xf16>
+  check.return
+}
+
+check.case public @qwen38_prepared_wide_128_128 {
+  %tokens = check.literal value(128) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(128) : tensor<1xi32>
+  %seed = check.param.seed base(71393) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<128x5120xf16>
+  %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %up_seed = check.literal value(91783) : i64
+  %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<128x17408xf16>
+  %actual = check.generate.fill value(-17.0) : tensor<128x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%tokens](%control, %input, %gate, %up, %expected) : [index](tensor<1xi32>, tensor<128x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<128x17408xf16>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%gate) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%up) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%tokens](%control, %input, %gate, %up, %actual) : [index](tensor<1xi32>, tensor<128x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<128x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<128x17408xf16>
+  check.return
+}
+
+check.case public @qwen38_prepared_wide_256_129 {
+  %tokens = check.literal value(256) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(129) : tensor<1xi32>
+  %seed = check.param.seed base(71393) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<256x5120xf16>
+  %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %up_seed = check.literal value(91783) : i64
+  %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<256x17408xf16>
+  %actual = check.generate.fill value(-17.0) : tensor<256x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%tokens](%control, %input, %gate, %up, %expected) : [index](tensor<1xi32>, tensor<256x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<256x17408xf16>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%gate) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%up) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%tokens](%control, %input, %gate, %up, %actual) : [index](tensor<1xi32>, tensor<256x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<256x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<256x17408xf16>
+  check.return
+}
+
+check.case public @qwen38_prepared_wide_256_256 {
+  %tokens = check.literal value(256) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(256) : tensor<1xi32>
+  %seed = check.param.seed base(71393) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<256x5120xf16>
+  %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %up_seed = check.literal value(91783) : i64
+  %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<256x17408xf16>
+  %actual = check.generate.fill value(-17.0) : tensor<256x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%tokens](%control, %input, %gate, %up, %expected) : [index](tensor<1xi32>, tensor<256x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<256x17408xf16>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%gate) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%up) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%tokens](%control, %input, %gate, %up, %actual) : [index](tensor<1xi32>, tensor<256x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<256x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<256x17408xf16>
+  check.return
+}
+
+check.case public @qwen38_prepared_wide_512_511 {
+  %tokens = check.literal value(512) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(511) : tensor<1xi32>
+  %seed = check.param.seed base(71393) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<512x5120xf16>
+  %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %up_seed = check.literal value(91783) : i64
+  %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<512x17408xf16>
+  %actual = check.generate.fill value(-17.0) : tensor<512x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%tokens](%control, %input, %gate, %up, %expected) : [index](tensor<1xi32>, tensor<512x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<512x17408xf16>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%gate) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%up) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%tokens](%control, %input, %gate, %up, %actual) : [index](tensor<1xi32>, tensor<512x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<512x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<512x17408xf16>
+  check.return
+}
+
+check.case public @qwen38_prepared_wide_512_512 {
+  %tokens = check.literal value(512) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(512) : tensor<1xi32>
+  %seed = check.param.seed base(71393) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<512x5120xf16>
+  %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %up_seed = check.literal value(91783) : i64
+  %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<512x17408xf16>
+  %actual = check.generate.fill value(-17.0) : tensor<512x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%tokens](%control, %input, %gate, %up, %expected) : [index](tensor<1xi32>, tensor<512x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<512x17408xf16>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%gate) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%up) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%tokens](%control, %input, %gate, %up, %actual) : [index](tensor<1xi32>, tensor<512x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<512x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<512x17408xf16>
+  check.return
+}
+
+check.case public @qwen38_prepared_wide_0_1 {
+  %tokens = check.literal value(0) : index
+  %outputs = check.literal value(17408) : index
+  %control = check.generate.fill value(1) : tensor<1xi32>
+  %seed = check.param.seed base(71393) count(2) : i64
+  %input = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<128x5120xf16>
+  %gate = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %up_seed = check.literal value(91783) : i64
+  %up = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<17408x20x176xi8>
+  %expected = check.generate.fill value(-17.0) : tensor<128x17408xf16>
+  %actual = check.generate.fill value(-17.0) : tensor<128x17408xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch[%tokens](%control, %input, %gate, %up, %expected) : [index](tensor<1xi32>, tensor<128x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<128x17408xf16>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%gate) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%up) : [index](tensor<17408x20x176xi8>)
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_block_prefetch_channel8[%tokens](%control, %input, %gate, %up, %actual) : [index](tensor<1xi32>, tensor<128x5120xf16>, tensor<17408x20x176xi8>, tensor<17408x20x176xi8>, tensor<128x17408xf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<128x17408xf16>
+  check.return
+}
