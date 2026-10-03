@@ -885,6 +885,21 @@ iree_host_size_t loom_serve_qwen_model_context_capacity(
   return model->context_capacity;
 }
 
+loom_serve_qwen_pool_usage_t loom_serve_qwen_model_pool_usage(
+    const loom_serve_qwen_model_t* model) {
+  return (loom_serve_qwen_pool_usage_t){
+      .block_size = QWEN_BLOCK_TOKENS,
+      .capacity = model->cache.capacity,
+      .available =
+          (iree_host_size_t)model->cache.pool.available * QWEN_BLOCK_TOKENS,
+  };
+}
+
+iree_host_size_t loom_serve_qwen_row_pool_usage(
+    const loom_serve_qwen_row_t* row) {
+  return (iree_host_size_t)row->block_count * QWEN_BLOCK_TOKENS;
+}
+
 iree_host_size_t loom_serve_qwen_model_prefill_capacity(
     const loom_serve_qwen_model_t* model) {
   return model->prefill_capacity;

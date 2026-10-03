@@ -8,6 +8,21 @@
 
 #include <string.h>
 
+iree_host_size_t loom_serve_qwen_request_reservation(
+    iree_host_size_t context_capacity, iree_host_size_t input_count,
+    iree_host_size_t output_count, iree_host_size_t proposal_depth,
+    iree_host_size_t block_size) {
+  iree_host_size_t extent = input_count + output_count - 1;
+  if (proposal_depth && output_count >= 3 &&
+      context_capacity - input_count >= proposal_depth + 1) {
+    // The last two-output verifier writes one anchor and three drafts, while
+    // only two inputs can commit. Near the context limit only legal launches
+    // contribute; an ordinary single-output tail requires no extra credit.
+    extent = iree_min(context_capacity, extent + proposal_depth - 1);
+  }
+  return ((extent + block_size - 1) / block_size) * block_size;
+}
+
 iree_host_size_t loom_serve_qwen_schedule(
     iree_host_size_t row_count, const loom_serve_qwen_ready_span_t* ready,
     iree_host_size_t token_capacity, iree_host_size_t span_capacity,

@@ -17,7 +17,7 @@ catch-up and verifier variants. Shared embedding, target normalization, and
 full-vocabulary output roots reference the existing weight slab. Extra block-64
 parameter groups load once. There is no command ABI or HAL extension.
 
-## Pooled KV layout experiment
+## Pooled KV and reserved admission
 
 `--pool_capacity=N` selects a shared physical token budget for packed target
 and MTP KV. `N` is a multiple of 64; `--context_capacity` remains each row's
@@ -39,14 +39,40 @@ of MTP KV, independent of their distribution across rows. Recurrent/history
 state additionally costs 149.625 MiB per resident row. These are storage
 formulas, not a long-context throughput or quality result.
 
-This option qualifies the model-storage boundary. The current HTTP admission
-path does not reserve completion credit or queue requests against this budget;
-an epoch exceeding free pages fails before submission. Consequently it is not
-yet the ordinary capacity-managed server configuration. The integration point
-is request admission: reserve requested completion and speculative high-water
-credit, assign pages during growth, and return surplus credit on completion or
-cancellation. Logical reservations remain separate from physical page ownership
-so later held/offloaded sessions can retain their logical identity.
+The HTTP service reserves page-rounded credit for retained input, appended
+input, requested output, and the speculative high-water mark before admission.
+It assigns physical pages only during growth. A request that fits alone but
+cannot fit alongside active guarantees waits in a bounded FIFO without a GPU
+row. An impossible-alone request returns 400 with the required and available
+capacity; rejected admission preserves an existing checkpoint.
+
+Idle retained rows yield pages in LRU order when needed for admission. Active
+requests keep their completion guarantee. Completion returns surplus credit
+before terminal output drains; finish and cancellation release the active
+reservation. Idle pages remain available for retained follow-ups until displaced.
+`--pending_requests`, `--connections`, and `--request_body_bytes` bound host-side
+waiting storage separately. Same named-session overlap, active or queued,
+returns 409; an exhausted pending queue returns 503.
+
+Logical reservations and physical page ownership are distinct. Overcommitting
+active guarantees requires held/offloaded residency and is not enabled by this
+policy. Direct model API callers still submit bounded epochs; exceeding free
+pages rejects the whole epoch before device submission.
+
+`check_capacity.py` is the complete HTTP witness. Given a built server, model
+directory, weights, tokenizer, and a new output directory, it compares sequential
+dense responses with concurrent requests using a deliberately constrained shared
+pool. It exercises queued cancellation, same-session conflict, idle eviction,
+an impossible request, and retained continuation. Its client-visible text,
+usage, and completion reasons must match; admission and heartbeat accounting
+must remain within the pool. Run it on the qualified model execution host:
+
+```sh
+python -B -m experimental.loom_serve.check_capacity \
+  --server=/path/to/qwen_server --model=experimental/loom_serve/models/qwen38 \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json --output=/path/to/new-results
+```
 
 ## Online weight residency
 

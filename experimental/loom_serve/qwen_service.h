@@ -37,6 +37,8 @@ typedef struct loom_serve_qwen_service_options_t {
   iree_host_size_t chunk_size;
   // Output bound when a request omits max_tokens.
   iree_host_size_t default_max_tokens;
+  // Positive bound on validated requests waiting without a model row.
+  iree_host_size_t pending_capacity;
   // Reporting interval in nanoseconds; zero disables periodic heartbeats.
   iree_duration_t heartbeat_interval;
   // Execution choice; the planner and HTTP lifecycle are shared by all modes.
@@ -53,11 +55,14 @@ typedef struct loom_serve_qwen_service_options_t {
 // and transport are borrowed. Each epoch gathers credited ready rows, executes
 // their known/verifier spans and commits outputs before reusing the workspace.
 // Heartbeats observe a copied snapshot and continue during model waits.
-// X-Loom-Session selects retained state; idle rows are an LRU prefix cache, not
-// durable sessions. Busy named sessions reject concurrent requests. Untagged
-// requests always replay. Peer cancellation discards its checkpoint at a
-// completed stage boundary. Return relinquishes every connection view before
-// the caller destroys transport/model. Capacities match the created model.
+// Admission reserves completion capacity before assigning physical pages as
+// execution grows. Excess work waits in a bounded FIFO; impossible requests
+// reject before altering retained state. Idle cache yields to admitted work.
+// X-Loom-Session selects retained state, not a durable session. Active or
+// queued named sessions reject overlapping requests. Untagged requests always
+// replay. Peer cancellation discards its checkpoint at a completed stage
+// boundary. Return relinquishes every connection view before the caller
+// destroys transport/model. Capacities match the created model.
 iree_status_t loom_serve_qwen_service_run(
     loom_serve_qwen_model_t* model, loom_serve_http_server_t* server,
     const loom_serve_qwen_service_options_t* options,

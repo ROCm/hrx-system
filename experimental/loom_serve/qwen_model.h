@@ -103,6 +103,17 @@ typedef struct loom_serve_qwen_metrics_t {
   iree_duration_t decode_duration;
 } loom_serve_qwen_metrics_t;
 
+// Physical pooled capacity measured in token positions, including page
+// rounding. Dense comparison storage reports zero capacity and availability.
+typedef struct loom_serve_qwen_pool_usage_t {
+  // Number of positions in one indivisible private cache page.
+  iree_host_size_t block_size;
+  // Total positions backed by target and optional draft storage.
+  iree_host_size_t capacity;
+  // Positions in pages not currently owned by any row.
+  iree_host_size_t available;
+} loom_serve_qwen_pool_usage_t;
+
 // Cold setup allocates all device state and prepares immutable stages. Options
 // strings are borrowed only for this call. Failure releases partial ownership.
 iree_status_t loom_serve_qwen_model_create(
@@ -121,6 +132,14 @@ iree_tokenizer_t* loom_serve_qwen_model_tokenizer(
     loom_serve_qwen_model_t* model);
 iree_host_size_t loom_serve_qwen_model_context_capacity(
     const loom_serve_qwen_model_t* model);
+// Copies physical pool accounting at the single owner's completed-stage
+// boundary. Request completion reservations are service policy, not physical
+// ownership.
+loom_serve_qwen_pool_usage_t loom_serve_qwen_model_pool_usage(
+    const loom_serve_qwen_model_t* model);
+// Positions in the row's owned pages; zero for dense comparison storage.
+iree_host_size_t loom_serve_qwen_row_pool_usage(
+    const loom_serve_qwen_row_t* row);
 // Maximum chunk accepted by row_prefill. Pooled/MTP execution is also bounded
 // by the largest packed shape, which owns mapped target/draft state updates.
 iree_host_size_t loom_serve_qwen_model_prefill_capacity(

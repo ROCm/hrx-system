@@ -14,7 +14,6 @@ shutdown are explicit; an outer test runner owns any hang deadline.
 import argparse
 import contextlib
 import json
-import shutil
 import signal
 import subprocess
 import threading
@@ -26,20 +25,34 @@ from experimental.loom_serve import benchmark_service
 
 
 @contextlib.contextmanager
-def running_server(command, log_path):
+def running_server(command, log_path, on_event=None):
     with log_path.open("x") as log, ThreadPoolExecutor(max_workers=1) as readers:
         process = subprocess.Popen(
             command, stdout=log, stderr=subprocess.PIPE, text=True, bufsize=1
         )
         address = None
         drain = None
+
+        def record(line):
+            log.write(line)
+            log.flush()
+            if on_event and line.startswith("{"):
+                on_event(json.loads(line))
+
+        def consume():
+            try:
+                for line in process.stderr:
+                    record(line)
+            finally:
+                if on_event:
+                    on_event(None)
+
         try:
             for line in process.stderr:
-                log.write(line)
-                log.flush()
+                record(line)
                 if line.startswith('{"event":"ready"'):
                     address = json.loads(line)["address"]
-                    drain = readers.submit(shutil.copyfileobj, process.stderr, log)
+                    drain = readers.submit(consume)
                     break
             yield process, address
         finally:

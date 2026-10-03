@@ -62,6 +62,10 @@ typedef struct qwen_session_t {
     const char* finish_reason;
     // Application admission time; network framing is not included.
     iree_time_t start_time;
+    // Time spent awaiting row and completion capacity before admission.
+    iree_duration_t queue_duration;
+    // Page-rounded completion credit, including the row's owned pages.
+    iree_host_size_t reserved_tokens;
     // First selected token time, including a possible immediate EOS.
     iree_time_t first_token_time;
     // Completed epochs that consumed prompt input for this request.
@@ -70,6 +74,21 @@ typedef struct qwen_session_t {
     uint64_t decode_steps;
   } request;
 } qwen_session_t;
+
+// A queued request owns no model row. Its rendered chat owns host text while
+// name/tool views borrow the connection's bounded, immutable HTTP payload.
+typedef struct qwen_pending_request_t {
+  // Claimed transport identity, relinquished by admission, rejection or abort.
+  loom_serve_http_connection_t* connection;
+  // Validated canonical prompt and tool descriptors.
+  loom_serve_qwen_chat_t chat;
+  // Validated local session key borrowing the claimed request headers.
+  iree_string_view_t name;
+  // Monotonic receipt identity, also used when this request is admitted.
+  uint64_t serial;
+  // Application receipt time, before model admission.
+  iree_time_t arrival_time;
+} qwen_pending_request_t;
 
 typedef struct qwen_heartbeat_snapshot_t {
   // Current application activity; literals outlive the reporting thread.
@@ -80,6 +99,17 @@ typedef struct qwen_heartbeat_snapshot_t {
   iree_time_t last_completion;
   // Requests currently holding retained rows.
   iree_host_size_t active_rows;
+  // Validated requests waiting without a device row or completion reservation.
+  iree_host_size_t queued_requests;
+  // Pool accounting in token positions; reserved and resident overlap.
+  struct {
+    // Total physical capacity; zero selects the dense comparison layout.
+    iree_host_size_t capacity;
+    // Active completion credit including already resident active pages.
+    iree_host_size_t reserved;
+    // Physically owned pages across active and idle rows.
+    iree_host_size_t resident;
+  } pool;
   // Active requests still consuming prompt input.
   iree_host_size_t prefill_rows;
   // Active requests generating output.
@@ -159,6 +189,24 @@ typedef struct qwen_service_t {
   qwen_heartbeat_t heartbeat;
   // Monotonic request identity, independent of TCP connection identity.
   uint64_t next_serial;
+  // Cold admission queue, independent of device slots and epoch span capacity.
+  struct {
+    // Fixed host queue storage; entries own their chat and HTTP claim.
+    qwen_pending_request_t* values;
+    // Number of queued entries in FIFO order.
+    iree_host_size_t count;
+    // Maximum queued request count, allocated once during initialization.
+    iree_host_size_t capacity;
+    // A new head or released credit/row makes another admission pass useful.
+    bool changed;
+  } pending;
+  // Request policy over the model's physical pool, not a second page allocator.
+  struct {
+    // Immutable physical geometry; availability is queried at observation.
+    loom_serve_qwen_pool_usage_t geometry;
+    // Sum of active requests' completion credit in token positions.
+    iree_host_size_t reserved;
+  } pool;
   // Shared cold input rendering scratch, never borrowed by device work.
   iree_string_builder_t input_text;
   // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
@@ -187,6 +235,8 @@ static int qwen_heartbeat_main(void* argument) {
         stderr,
         "{\"event\":\"heartbeat\",\"phase\":\"%s\",\"phase_ms\":%.3f,"
         "\"since_completion_ms\":%.3f,\"active_rows\":%zu,"
+        "\"queued_requests\":%zu,\"pool\":{\"capacity_tokens\":%zu,"
+        "\"reserved_tokens\":%zu,\"resident_tokens\":%zu},"
         "\"prefill_rows\":%zu,\"decode_rows\":%zu,"
         "\"backpressured_rows\":%zu,\"issued_epochs\":%" PRIu64
         ",\"completed_epochs\":%" PRIu64 ",\"traversals\":%" PRIu64
@@ -200,11 +250,13 @@ static int qwen_heartbeat_main(void* argument) {
         "\"interval_output_tokens_per_second\":%.3f}\n",
         state.phase, (now - state.phase_start) / 1e6,
         (now - state.last_completion) / 1e6, state.active_rows,
-        state.prefill_rows, state.decode_rows, state.backpressured_rows,
-        state.issued_epochs, state.completed_epochs, state.traversals,
-        state.prefill_tokens, state.decode_tokens, state.output_tokens,
-        state.model_duration / 1e6, state.epoch_spans, state.epoch_tokens,
-        state.mtp.proposed_tokens, state.mtp.accepted_inputs,
+        state.queued_requests, state.pool.capacity, state.pool.reserved,
+        state.pool.resident, state.prefill_rows, state.decode_rows,
+        state.backpressured_rows, state.issued_epochs, state.completed_epochs,
+        state.traversals, state.prefill_tokens, state.decode_tokens,
+        state.output_tokens, state.model_duration / 1e6, state.epoch_spans,
+        state.epoch_tokens, state.mtp.proposed_tokens,
+        state.mtp.accepted_inputs,
         seconds > 0 ? (state.prefill_tokens - previous_prefill) / seconds : 0,
         seconds > 0 ? (state.output_tokens - previous_output) / seconds : 0);
     previous_time = now;
@@ -222,6 +274,8 @@ static int qwen_heartbeat_main(void* argument) {
 }
 
 static void qwen_observe(qwen_service_t* service, const char* phase) {
+  const loom_serve_qwen_pool_usage_t pool =
+      loom_serve_qwen_model_pool_usage(service->model);
   iree_host_size_t active = 0, prefill = 0, decode = 0, backpressured = 0;
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     const qwen_session_t* session = &service->sessions[i];
@@ -241,6 +295,10 @@ static void qwen_observe(qwen_service_t* service, const char* phase) {
     state->phase_start = iree_time_now();
   }
   state->active_rows = active;
+  state->queued_requests = service->pending.count;
+  state->pool.capacity = pool.capacity;
+  state->pool.reserved = service->pool.reserved;
+  state->pool.resident = pool.capacity - pool.available;
   state->prefill_rows = prefill;
   state->decode_rows = decode;
   state->backpressured_rows = backpressured;
@@ -312,7 +370,10 @@ static iree_status_t qwen_reject(qwen_service_t* service,
   return status;
 }
 
-static void qwen_request_release(qwen_session_t* session) {
+static void qwen_request_release(qwen_service_t* service,
+                                 qwen_session_t* session) {
+  service->pool.reserved -= session->request.reserved_tokens;
+  service->pending.changed = true;
   loom_serve_qwen_chat_deinitialize(&session->request.chat);
   iree_tokenizer_decode_state_deinitialize(session->decoder);
   session->decoder = NULL;
@@ -320,7 +381,8 @@ static void qwen_request_release(qwen_session_t* session) {
   iree_string_builder_reset(&session->packet);
 }
 
-static void qwen_request_cancel(qwen_session_t* session) {
+static void qwen_request_cancel(qwen_service_t* service,
+                                qwen_session_t* session) {
   fprintf(stderr,
           "{\"event\":\"cancel\",\"request\":%" PRIu64
           ",\"session\":\"%s\",\"position\":%zu}\n",
@@ -328,10 +390,11 @@ static void qwen_request_cancel(qwen_session_t* session) {
           loom_serve_qwen_row_position(session->row));
   loom_serve_http_connection_abort(session->request.connection);
   iree_string_builder_reset(&session->checkpoint);
-  qwen_request_release(session);
+  qwen_request_release(service, session);
 }
 
-static void qwen_request_finish(qwen_session_t* session) {
+static void qwen_request_finish(qwen_service_t* service,
+                                qwen_session_t* session) {
   fprintf(
       stderr,
       "{\"event\":\"complete\",\"request\":%" PRIu64
@@ -343,15 +406,16 @@ static void qwen_request_finish(qwen_session_t* session) {
       ","
       "\"decode_steps\":%" PRIu64
       ","
-      "\"model_ttft_ms\":%.3f,\"request_ms\":%.3f}\n",
+      "\"queue_ms\":%.3f,\"model_ttft_ms\":%.3f,\"request_ms\":%.3f}\n",
       session->serial, session->name, session->request.finish_reason,
       session->request.retained_count, session->request.input_count,
       session->request.output_count, loom_serve_qwen_row_position(session->row),
       session->request.prefill_steps, session->request.decode_steps,
+      session->request.queue_duration / 1e6,
       (session->request.first_token_time - session->request.start_time) / 1e6,
       (iree_time_now() - session->request.start_time) / 1e6);
   loom_serve_http_connection_finish(session->request.connection);
-  qwen_request_release(session);
+  qwen_request_release(service, session);
 }
 
 static bool qwen_session_name_valid(iree_string_view_t name) {
@@ -434,9 +498,187 @@ static iree_status_t qwen_prepare_input(qwen_service_t* service,
   return iree_ok_status();
 }
 
-static iree_status_t qwen_admit(qwen_service_t* service,
-                                loom_serve_http_connection_t* connection,
-                                const loom_serve_http_request_t* request) {
+// Removal transfers no resources: the caller first releases the queued chat
+// and connection, or transfers both into an admitted request.
+static void qwen_pending_remove(qwen_service_t* service,
+                                iree_host_size_t index) {
+  --service->pending.count;
+  memmove(service->pending.values + index, service->pending.values + index + 1,
+          (service->pending.count - index) * sizeof(*service->pending.values));
+  service->pending.changed = true;
+}
+
+static void qwen_pending_cancel_failed(qwen_service_t* service,
+                                       bool* out_progress) {
+  for (iree_host_size_t i = 0; i < service->pending.count;) {
+    qwen_pending_request_t* request = &service->pending.values[i];
+    if (!loom_serve_http_connection_failed(request->connection)) {
+      ++i;
+      continue;
+    }
+    fprintf(stderr,
+            "{\"event\":\"cancel_queued\",\"request\":%" PRIu64
+            ",\"session\":\"%.*s\"}\n",
+            request->serial, (int)request->name.size, request->name.data);
+    loom_serve_qwen_chat_deinitialize(&request->chat);
+    loom_serve_http_connection_abort(request->connection);
+    qwen_pending_remove(service, i);
+    *out_progress = true;
+  }
+}
+
+static iree_status_t qwen_evict(qwen_session_t* session) {
+  fprintf(stderr,
+          "{\"event\":\"evict\",\"session\":\"%s\",\"position\":%zu,"
+          "\"resident_tokens\":%zu}\n",
+          session->name, loom_serve_qwen_row_position(session->row),
+          loom_serve_qwen_row_pool_usage(session->row));
+  IREE_RETURN_IF_ERROR(loom_serve_qwen_row_reset(session->row));
+  session->name[0] = 0;
+  session->serial = 0;
+  iree_string_builder_reset(&session->checkpoint);
+  return iree_ok_status();
+}
+
+// Active guarantees take priority over idle cache. No cache is displaced until
+// the new request fits alongside every active request's full completion credit.
+static iree_status_t qwen_reclaim_idle(qwen_service_t* service,
+                                       qwen_session_t* selected,
+                                       iree_host_size_t reservation) {
+  if (!service->pool.geometry.capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t charged = service->pool.reserved + reservation;
+  for (iree_host_size_t i = 0; i < service->row_count; ++i) {
+    qwen_session_t* session = &service->sessions[i];
+    if (session != selected && !session->request.connection) {
+      charged += loom_serve_qwen_row_pool_usage(session->row);
+    }
+  }
+  iree_status_t status = iree_ok_status();
+  while (charged > service->pool.geometry.capacity &&
+         iree_status_is_ok(status)) {
+    qwen_session_t* oldest = NULL;
+    for (iree_host_size_t i = 0; i < service->row_count; ++i) {
+      qwen_session_t* session = &service->sessions[i];
+      if (session != selected && !session->request.connection &&
+          loom_serve_qwen_row_pool_usage(session->row) &&
+          (!oldest || session->serial < oldest->serial)) {
+        oldest = session;
+      }
+    }
+    // Admission already proved active credit fits; excess is owned idle cache.
+    charged -= loom_serve_qwen_row_pool_usage(oldest->row);
+    status = qwen_evict(oldest);
+  }
+  return status;
+}
+
+static iree_status_t qwen_admit_pending(qwen_service_t* service) {
+  if (!service->pending.changed) {
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_ok_status();
+  while (service->pending.count && iree_status_is_ok(status)) {
+    qwen_pending_request_t* pending = &service->pending.values[0];
+    qwen_session_t* session = qwen_session_select(service, pending->name);
+    if (!session) {
+      break;
+    }
+    iree_host_size_t input_count = 0, retained_count = 0;
+    status = qwen_prepare_input(service, session, &pending->chat, pending->name,
+                                &input_count, &retained_count);
+    iree_host_size_t reservation = 0;
+    if (iree_status_is_ok(status) && service->pool.geometry.capacity) {
+      reservation = loom_serve_qwen_request_reservation(
+          service->context_capacity, retained_count + input_count,
+          pending->chat.max_tokens, service->mtp_depth,
+          service->pool.geometry.block_size);
+      if (reservation > service->pool.geometry.capacity) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "request needs %zu page-rounded KV positions including completion "
+            "and speculative credit, but the shared pool holds %zu; compact "
+            "history, lower max_tokens, or increase pool_capacity",
+            reservation, service->pool.geometry.capacity);
+      }
+    }
+    if (!iree_status_is_ok(status)) {
+      loom_serve_http_connection_t* connection = pending->connection;
+      loom_serve_qwen_chat_deinitialize(&pending->chat);
+      qwen_pending_remove(service, 0);
+      status = qwen_reject(service, connection, 400, "Bad Request", status);
+      continue;
+    }
+    if (reservation >
+        service->pool.geometry.capacity - service->pool.reserved) {
+      break;
+    }
+    if (!retained_count && loom_serve_qwen_row_position(session->row)) {
+      status = qwen_evict(session);
+    }
+    if (iree_status_is_ok(status)) {
+      status = qwen_reclaim_idle(service, session, reservation);
+    }
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
+    const qwen_pending_request_t request = *pending;
+    qwen_pending_remove(service, 0);
+    if (request.name.size) {
+      memcpy(session->name, request.name.data, request.name.size);
+    }
+    session->name[request.name.size] = 0;
+    session->serial = request.serial;
+    session->request.connection = request.connection;
+    session->request.chat = request.chat;
+    session->request.phase = QWEN_REQUEST_PREFILL;
+    session->request.input_count = input_count;
+    session->request.retained_count = retained_count;
+    session->request.start_time = iree_time_now();
+    session->request.queue_duration =
+        session->request.start_time - request.arrival_time;
+    session->request.reserved_tokens = reservation;
+    service->pool.reserved += reservation;
+    iree_string_builder_reset(&session->response);
+    iree_string_builder_reset(&session->checkpoint);
+    status = iree_tokenizer_decode_state_initialize(
+        loom_serve_qwen_model_tokenizer(service->model),
+        IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
+        session->decoder_storage, &session->decoder);
+    if (iree_status_is_ok(status)) {
+      status = iree_string_builder_append_cstring(
+          &session->packet,
+          "HTTP/1.1 200 OK\r\nContent-Type: "
+          "text/event-stream\r\nCache-Control: "
+          "no-cache\r\nConnection: close\r\n\r\n");
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_qwen_chat_event(
+          session->serial, IREE_SV("{\"role\":\"assistant\"}"),
+          iree_string_view_empty(), &session->packet);
+    }
+    if (iree_status_is_ok(status)) {
+      fprintf(stderr,
+              "{\"event\":\"admit\",\"request\":%" PRIu64
+              ",\"session\":\"%s\",\"row\":%zu,\"cache\":\"%s\","
+              "\"retained_tokens\":%zu,\"appended_tokens\":%zu,"
+              "\"max_tokens\":%zu,\"reservation_tokens\":%zu,"
+              "\"pool_reserved_tokens\":%zu,\"queue_ms\":%.3f}\n",
+              session->serial, session->name,
+              (iree_host_size_t)(session - service->sessions),
+              retained_count ? "hit" : "replay", retained_count, input_count,
+              request.chat.max_tokens, reservation, service->pool.reserved,
+              session->request.queue_duration / 1e6);
+    }
+  }
+  service->pending.changed = false;
+  return status;
+}
+
+static iree_status_t qwen_enqueue(qwen_service_t* service,
+                                  loom_serve_http_connection_t* connection,
+                                  const loom_serve_http_request_t* request) {
   if (iree_string_view_equal(request->method, IREE_SV("GET")) &&
       iree_string_view_equal(request->target, IREE_SV("/healthz"))) {
     iree_status_t status = loom_serve_http_connection_send(
@@ -483,13 +725,20 @@ static iree_status_t qwen_admit(qwen_service_t* service,
             "X-Loom-Session must be at most 64 ASCII identifier characters"));
   }
   qwen_session_t* session = qwen_session_select(service, name);
-  if (!session || session->request.connection) {
+  bool busy = session && session->request.connection;
+  for (iree_host_size_t i = 0; name.size && i < service->pending.count; ++i) {
+    busy |= iree_string_view_equal(name, service->pending.values[i].name);
+  }
+  if (busy) {
     return qwen_reject(
-        service, connection, session ? 409 : 503,
-        session ? "Conflict" : "Service Unavailable",
-        iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                         session ? "session already has an active request"
-                                 : "all model rows are active"));
+        service, connection, 409, "Conflict",
+        iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                         "session already has an active or queued request"));
+  }
+  if (service->pending.count == service->pending.capacity) {
+    return qwen_reject(service, connection, 503, "Service Unavailable",
+                       iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                        "pending request queue is full"));
   }
   loom_serve_qwen_chat_t chat;
   iree_status_t status = loom_serve_qwen_chat_initialize(
@@ -497,65 +746,20 @@ static iree_status_t qwen_admit(qwen_service_t* service,
   if (!iree_status_is_ok(status)) {
     return qwen_reject(service, connection, 400, "Bad Request", status);
   }
-  iree_host_size_t input_count = 0;
-  iree_host_size_t retained_count = 0;
-  status = qwen_prepare_input(service, session, &chat, name, &input_count,
-                              &retained_count);
-  if (!iree_status_is_ok(status)) {
-    loom_serve_qwen_chat_deinitialize(&chat);
-    return qwen_reject(service, connection, 400, "Bad Request", status);
-  }
-  if (session->name[0] &&
-      !iree_string_view_equal(name, iree_make_cstring_view(session->name))) {
-    fprintf(stderr,
-            "{\"event\":\"evict\",\"session\":\"%s\",\"position\":%zu}\n",
-            session->name, loom_serve_qwen_row_position(session->row));
-  }
-  if (name.size) {
-    memcpy(session->name, name.data, name.size);
-  }
-  session->name[name.size] = 0;
-  session->serial = ++service->next_serial;
-  session->request.connection = connection;
-  session->request.chat = chat;
-  session->request.phase = QWEN_REQUEST_PREFILL;
-  session->request.input_count = input_count;
-  session->request.retained_count = retained_count;
-  session->request.start_time = iree_time_now();
-  iree_string_builder_reset(&session->response);
-  iree_string_builder_reset(&session->checkpoint);
-  if (!retained_count) {
-    status = loom_serve_qwen_row_reset(session->row);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_tokenizer_decode_state_initialize(
-        loom_serve_qwen_model_tokenizer(service->model),
-        IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
-        session->decoder_storage, &session->decoder);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_cstring(
-        &session->packet,
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: "
-        "no-cache\r\nConnection: close\r\n\r\n");
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_qwen_chat_event(
-        session->serial, IREE_SV("{\"role\":\"assistant\"}"),
-        iree_string_view_empty(), &session->packet);
-  }
-  if (iree_status_is_ok(status)) {
-    fprintf(stderr,
-            "{\"event\":\"admit\",\"request\":%" PRIu64
-            ",\"session\":\"%s\","
-            "\"row\":%zu,\"cache\":\"%s\",\"retained_tokens\":%zu,\"appended_"
-            "tokens\":%zu,\"max_tokens\":%zu}\n",
-            session->serial, session->name,
-            (iree_host_size_t)(session - service->sessions),
-            retained_count ? "hit" : "replay", retained_count, input_count,
-            chat.max_tokens);
-  }
-  return status;
+  const uint64_t serial = ++service->next_serial;
+  service->pending.changed |= service->pending.count == 0;
+  service->pending.values[service->pending.count++] = (qwen_pending_request_t){
+      .connection = connection,
+      .chat = chat,
+      .name = name,
+      .serial = serial,
+      .arrival_time = iree_time_now(),
+  };
+  fprintf(stderr,
+          "{\"event\":\"enqueue\",\"request\":%" PRIu64
+          ",\"session\":\"%.*s\",\"queued_requests\":%zu}\n",
+          serial, (int)name.size, name.data, service->pending.count);
+  return iree_ok_status();
 }
 
 static iree_status_t qwen_emit_text(qwen_service_t* service,
@@ -702,6 +906,13 @@ static iree_status_t qwen_selected_tokens(qwen_service_t* service,
     session->request.phase = QWEN_REQUEST_FINISHING;
     status = packet_status;
   }
+  if (session->request.phase == QWEN_REQUEST_FINISHING) {
+    const iree_host_size_t resident =
+        loom_serve_qwen_row_pool_usage(session->row);
+    service->pool.reserved -= session->request.reserved_tokens - resident;
+    session->request.reserved_tokens = resident;
+    service->pending.changed = true;
+  }
   return status;
 }
 
@@ -710,15 +921,15 @@ static iree_status_t qwen_selected_tokens(qwen_service_t* service,
 // staging packet is output credit even while the preceding send is in flight;
 // waiting for that send would split an otherwise ready cohort. A full staging
 // packet behind a busy carrier pauses only that row.
-static void qwen_prepare_ready(const qwen_service_t* service,
-                               qwen_session_t* session, bool* out_progress,
+static void qwen_prepare_ready(qwen_service_t* service, qwen_session_t* session,
+                               bool* out_progress,
                                loom_serve_qwen_ready_span_t* out_ready) {
   *out_ready = (loom_serve_qwen_ready_span_t){0};
   if (!session->request.connection) {
     return;
   }
   if (loom_serve_http_connection_failed(session->request.connection)) {
-    qwen_request_cancel(session);
+    qwen_request_cancel(service, session);
     *out_progress = true;
     return;
   }
@@ -732,12 +943,12 @@ static void qwen_prepare_ready(const qwen_service_t* service,
         iree_string_builder_view(&session->packet));
     if (!iree_status_is_ok(status)) {
       qwen_diagnose("Chat stream peer failed", status);
-      qwen_request_cancel(session);
+      qwen_request_cancel(service, session);
       return;
     }
     iree_string_builder_reset(&session->packet);
     if (session->request.phase == QWEN_REQUEST_FINISHING) {
-      qwen_request_finish(session);
+      qwen_request_finish(service, session);
       return;
     }
   }
@@ -942,6 +1153,9 @@ static iree_status_t qwen_execute_epoch(
 }
 
 static iree_status_t qwen_service_initialize(qwen_service_t* service) {
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      service->allocator, service->pending.capacity,
+      sizeof(*service->pending.values), (void**)&service->pending.values));
   iree_host_size_t decoder_size = 0;
   IREE_RETURN_IF_ERROR(iree_tokenizer_decode_state_calculate_size(
       loom_serve_qwen_model_tokenizer(service->model), &decoder_size));
@@ -982,6 +1196,8 @@ iree_status_t loom_serve_qwen_service_run(
       .chunk_size = options->chunk_size,
       .context_capacity = loom_serve_qwen_model_context_capacity(model),
       .default_max_tokens = options->default_max_tokens,
+      .pending = {.capacity = options->pending_capacity},
+      .pool = {.geometry = loom_serve_qwen_model_pool_usage(model)},
       .schedule_mode = options->schedule_mode,
       .packing_mode = options->packing_mode,
       .mtp_depth = options->mtp_depth,
@@ -1024,6 +1240,8 @@ iree_status_t loom_serve_qwen_service_run(
     const iree_wait_token_t token =
         iree_notification_prepare_wait(notification);
     bool progress = false;
+    qwen_pending_cancel_failed(&service, &progress);
+    status = qwen_admit_pending(&service);
     // Drain a bounded cohort before selecting work, without allowing a stream
     // of new requests or health probes to starve active rows.
     qwen_observe(&service, "admit");
@@ -1035,7 +1253,10 @@ iree_status_t loom_serve_qwen_service_run(
       if (!connection) {
         break;
       }
-      status = qwen_admit(&service, connection, request);
+      status = qwen_enqueue(&service, connection, request);
+      if (iree_status_is_ok(status)) {
+        status = qwen_admit_pending(&service);
+      }
       progress = true;
     }
     loom_serve_qwen_ready_span_t ready[8] = {0};
@@ -1071,7 +1292,7 @@ iree_status_t loom_serve_qwen_service_run(
   for (iree_host_size_t i = 0; i < service.row_count; ++i) {
     qwen_session_t* session = &service.sessions[i];
     if (session->request.connection) {
-      qwen_request_cancel(session);
+      qwen_request_cancel(&service, session);
     }
     iree_allocator_free(host_allocator, session->decoder_storage.data);
     iree_allocator_free(host_allocator, session->tokens);
@@ -1093,5 +1314,10 @@ iree_status_t loom_serve_qwen_service_run(
   iree_string_builder_deinitialize(&service.tool_calls);
   iree_string_builder_deinitialize(&service.scratch);
   iree_string_builder_deinitialize(&service.input_text);
+  for (iree_host_size_t i = 0; i < service.pending.count; ++i) {
+    loom_serve_qwen_chat_deinitialize(&service.pending.values[i].chat);
+    loom_serve_http_connection_abort(service.pending.values[i].connection);
+  }
+  iree_allocator_free(host_allocator, service.pending.values);
   return status;
 }

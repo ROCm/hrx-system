@@ -10,6 +10,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <cerrno>
+#include <cstring>
 #include <string>
 
 #include "iree/async/proactor.h"
@@ -22,8 +24,12 @@ class HttpServerTest : public ::testing::Test {
  protected:
   void SetUp() override {
     IREE_ASSERT_OK(iree_async_signal_block_default());
-    IREE_ASSERT_OK(
-        loom_serve_http_server_create(0, iree_allocator_system(), &server_));
+    auto options = loom_serve_http_server_options_default();
+    options.port = 0;
+    options.connection_capacity = 24;
+    options.request_limits.body_byte_capacity = 2 * 1024 * 1024;
+    IREE_ASSERT_OK(loom_serve_http_server_create(&options, &server_,
+                                                 iree_allocator_system()));
   }
 
   void TearDown() override {
@@ -57,14 +63,19 @@ class HttpServerTest : public ::testing::Test {
     }
   }
 
-  static void Write(int client, const std::string& bytes) {
+  static ::testing::AssertionResult Write(int client,
+                                          const std::string& bytes) {
     size_t offset = 0;
     while (offset < bytes.size()) {
       ssize_t count = send(client, bytes.data() + offset, bytes.size() - offset,
                            MSG_NOSIGNAL);
-      ASSERT_GT(count, 0);
+      if (count <= 0) {
+        return ::testing::AssertionFailure()
+               << "send failed: " << strerror(errno);
+      }
       offset += count;
     }
+    return ::testing::AssertionSuccess();
   }
 
   static std::string Read(int client) {
@@ -84,10 +95,10 @@ class HttpServerTest : public ::testing::Test {
 
 TEST_F(HttpServerTest, FragmentedRequestAndOrderedStreamingResponse) {
   int client = Connect();
-  Write(client,
-        "POST /v1/chat/completions HTTP/1.1\r\nHost: local\r\nContent-");
-  Write(client, "Length: 5\r\n\r\nhe");
-  Write(client, "llo");
+  ASSERT_TRUE(Write(
+      client, "POST /v1/chat/completions HTTP/1.1\r\nHost: local\r\nContent-"));
+  ASSERT_TRUE(Write(client, "Length: 5\r\n\r\nhe"));
+  ASSERT_TRUE(Write(client, "llo"));
   ASSERT_EQ(shutdown(client, SHUT_WR), 0);
   const loom_serve_http_request_t* request = nullptr;
   auto* connection = Take(&request);
@@ -109,7 +120,7 @@ TEST_F(HttpServerTest, ConnectionSlotsRecycleAfterDrain) {
   for (int iteration = 0; iteration < 32; ++iteration) {
     SCOPED_TRACE(iteration);
     int client = Connect();
-    Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n");
+    ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));
     const loom_serve_http_request_t* request = nullptr;
     auto* connection = Take(&request);
     ASSERT_NE(connection, nullptr);
@@ -124,9 +135,36 @@ TEST_F(HttpServerTest, ConnectionSlotsRecycleAfterDrain) {
   }
 }
 
+TEST_F(HttpServerTest, ConfiguredBodiesAndClaimsOutliveOtherPeers) {
+  int clients[20];
+  loom_serve_http_connection_t* connections[20];
+  const loom_serve_http_request_t* requests[20];
+  // More than the former fixed connection limit can wait for application
+  // admission. A long request is allowed by this server's byte budget.
+  const std::string body(1024 * 1024 + 1, 'x');
+  for (int i = 0; i < 20; ++i) {
+    clients[i] = Connect();
+    const std::string payload = i == 0 ? body : std::to_string(i);
+    ASSERT_TRUE(Write(clients[i],
+                      "POST /v1/chat/completions HTTP/1.1\r\nHost: "
+                      "local\r\nContent-Length: " +
+                          std::to_string(payload.size()) + "\r\n\r\n" +
+                          payload));
+    connections[i] = Take(&requests[i]);
+    ASSERT_NE(connections[i], nullptr);
+  }
+  for (int i = 19; i >= 0; --i) {
+    EXPECT_EQ(std::string(requests[i]->body.data, requests[i]->body.size),
+              i == 0 ? body : std::to_string(i));
+    loom_serve_http_connection_abort(connections[i]);
+    EXPECT_EQ(Read(clients[i]), "");
+    ASSERT_EQ(close(clients[i]), 0);
+  }
+}
+
 TEST_F(HttpServerTest, PeerResetReturnsOwnershipAndListenerSurvives) {
   int client = Connect();
-  Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n");
+  ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));
   const loom_serve_http_request_t* request = nullptr;
   auto* connection = Take(&request);
   ASSERT_NE(connection, nullptr);
@@ -144,7 +182,7 @@ TEST_F(HttpServerTest, PeerResetReturnsOwnershipAndListenerSurvives) {
       connection, iree_infinite_timeout());
   loom_serve_http_connection_abort(connection);
   client = Connect();
-  Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n");
+  ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));
   connection = Take(&request);
   ASSERT_NE(connection, nullptr);
   IREE_ASSERT_OK(loom_serve_http_connection_send(
@@ -156,7 +194,7 @@ TEST_F(HttpServerTest, PeerResetReturnsOwnershipAndListenerSurvives) {
 
 TEST_F(HttpServerTest, ShutdownDrainsOpenConnectionAndAccept) {
   int client = Connect();
-  Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n");
+  ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));
   const loom_serve_http_request_t* request = nullptr;
   ASSERT_NE(Take(&request), nullptr);
   // Abandon application views before destroying the server with I/O pending.
