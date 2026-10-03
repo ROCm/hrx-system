@@ -57,6 +57,7 @@ kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128(%token_count
 kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_x128_input_f16(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer)
 
 kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer)
+kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16(%token_count: index, %input_size: index, %output_size: index) launch(%token_count_data: buffer, %input_size_data: index, %output_size_data: index, %input: buffer, %weight: buffer, %residual: buffer)
 
 kernel.decl @qwen38_rmsnorm_f32_prefill(%token_count$33: index) launch(%token_count$34: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 
@@ -108,6 +109,8 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
   %c4 = index.constant 4 : index
   %c65 = index.constant 65 : index
   %c481 = index.constant 481 : index
+  %c256 = index.constant 256 : index
+  %c512 = index.constant 512 : index
   %epsilon = scalar.constant 9.9999999999999995e-07 : f32
   %verifying = index.cmp eq, %verification_depth, %c4 : index
   %isolated = index.cmp eq, %span_capacity, %c0 : index
@@ -135,6 +138,15 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
     scf.yield %token_count : index
   }
   %uses_ffn_down_c128 = index.cmp uge, %schedule_token_count, %c481 : index
+  // Larger token tiles amortize the FFN-down weights for these wide recipes.
+  %schedule_is_256 = index.cmp eq, %schedule_token_count, %c256 : index
+  %schedule_is_512 = index.cmp eq, %schedule_token_count, %c512 : index
+  %uses_ffn_down_t256 = scalar.ori %schedule_is_256, %schedule_is_512 : i1
+  %ffn_down_t256_token_count = scf.if %uses_ffn_down_t256 -> (index) {
+    scf.yield %token_count : index
+  } else {
+    scf.yield %c0 : index
+  }
   %ffn_down_x128_token_count = scf.if %uses_x64 -> (index) {
     scf.yield %c0 : index
   } else {
@@ -373,10 +385,14 @@ command.program.def public @qwen38_gdn_layer_prefill(%token_count: index, %sched
         kernel.launch @qwen38_residual_add_f32_prefill[%x64_token_count](%token_capacity, %residual, %ffn_output, %residual) : [index](index, buffer, buffer, buffer)
       }
     } else {
-      scf.if %uses_ffn_down_c128 {
-        kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16[%ffn_down_c128_token_count, %ffn_size, %hidden_size](%token_count_data, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %residual) : [index, index, index](buffer, index, index, buffer, view<73113600xi8>, buffer)
+      scf.if %uses_ffn_down_t256 {
+        kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16[%ffn_down_t256_token_count, %ffn_size, %hidden_size](%token_count_data, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %residual) : [index, index, index](buffer, index, index, buffer, view<73113600xi8>, buffer)
       } else {
-        kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_x128_input_f16[%ffn_down_x128_token_count, %ffn_size, %hidden_size](%token_count_data, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %residual) : [index, index, index](buffer, index, index, buffer, view<73113600xi8>, buffer)
+        scf.if %uses_ffn_down_c128 {
+          kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16[%ffn_down_c128_token_count, %ffn_size, %hidden_size](%token_count_data, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %residual) : [index, index, index](buffer, index, index, buffer, view<73113600xi8>, buffer)
+        } else {
+          kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_x128_input_f16[%ffn_down_x128_token_count, %ffn_size, %hidden_size](%token_count_data, %ffn_size, %hidden_size, %swiglu, %ffn_down_weight, %residual) : [index, index, index](buffer, index, index, buffer, view<73113600xi8>, buffer)
+        }
       }
     }
   }
