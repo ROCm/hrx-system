@@ -14,6 +14,43 @@ The first port pins checkpoint, configuration, and tokenizer files to that same
 revision. The choice is a bounded portability experiment, not an assertion that
 an arbitrary Hugging Face model can already be loaded by this runner.
 
+## Obtain the exact inputs
+
+The pinned repository has a single `model.safetensors`, 269,060,552 bytes,
+with SHA-256
+`5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c`.
+The [publisher's file metadata](https://huggingface.co/api/models/HuggingFaceTB/SmolLM2-135M-Instruct/revision/12fd25f77366fa6b3b4b768ec3050bf629380bac?blobs=true)
+provides that identity. The complete download below is about 272 MB, retained
+once on persistent storage; it does not require a second checkpoint or a clone
+of the model repository.
+
+```sh
+small_model_dir=/path/to/models/smollm2-135m-instruct
+(
+  set -eu
+  mkdir -p "$small_model_dir"
+  model_url=https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/resolve/12fd25f77366fa6b3b4b768ec3050bf629380bac
+  for filename in config.json generation_config.json model.safetensors \
+      tokenizer.json tokenizer_config.json special_tokens_map.json; do
+    curl --fail --location --continue-at - \
+      --output "$small_model_dir/$filename" "$model_url/$filename"
+  done
+  cd "$small_model_dir"
+  sha256sum --check <<'CHECKSUMS'
+5af571cbf074e6d21a03528d2330792e532ca608f24ac70a143f6b369968ab8c  model.safetensors
+CHECKSUMS
+)
+```
+
+The checkpoint checksum must report `OK`. Tokenizer configuration and special
+tokens are inputs to the independent prompt/reference path, even though the
+IREE tokenizer loader consumes `tokenizer.json` itself. The publisher's
+configuration records Transformers 4.42.3; its
+[Llama implementation](https://github.com/huggingface/transformers/blob/v4.42.3/src/transformers/models/llama/modeling_llama.py)
+is a concrete mathematical reference. A reference run records the actual
+framework versions, dtype and attention implementation, token IDs, and greedy
+outputs. That development oracle is separate from the shipped Loom runner.
+
 ## Numerical contract
 
 The publisher's [configuration](https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct/blob/12fd25f77366fa6b3b4b768ec3050bf629380bac/config.json)
@@ -39,6 +76,25 @@ Derived dense two-byte KV storage is
 8K row, or 1.40625 GiB for eight. Even a tiny weight set can become a cache-memory
 exercise. These are storage calculations, not an allocation measurement or
 throughput estimate.
+
+The pinned safetensors header was inspected directly. It stores these BF16
+tensors, with the same naming pattern across layers 0 through 29:
+
+| Tensor name | Stored shape |
+| --- | --- |
+| `model.embed_tokens.weight` | `[49152, 576]` |
+| `model.layers.0.input_layernorm.weight`, `post_attention_layernorm.weight` | `[576]` each; the latter has the same layer prefix |
+| `model.layers.0.self_attn.q_proj.weight`, `o_proj.weight` | `[576, 576]` each; the latter has the same attention prefix |
+| `model.layers.0.self_attn.k_proj.weight`, `v_proj.weight` | `[192, 576]` each; the latter has the same attention prefix |
+| `model.layers.0.mlp.gate_proj.weight`, `up_proj.weight` | `[1536, 576]` each; the latter has the same MLP prefix |
+| `model.layers.0.mlp.down_proj.weight` | `[576, 1536]` |
+| `model.norm.weight` | `[576]` |
+
+There is no separate `lm_head.weight` in this checkpoint: the tied output uses
+the embedding tensor. Dense projection storage is `[output, input]`, consumed
+as `X * W^T`. An equal byte length does not establish that orientation. Qwen's
+extra query/key normalization, gating, recurrent state, and quantization are
+not part of this model's transformer block.
 
 ## What is reusable, and what changes
 
@@ -67,6 +123,14 @@ The first gate inventories the pinned tensors and renders/tokenizes a short
 prompt with the reference implementation. It records exact IDs, special-token
 policy, projection orientation, and representative layer values. This is where
 a template or tied-weight misunderstanding is cheapest to discover.
+
+A useful first layer caller loads the embedding plus layer-zero tensors,
+embeds a short token sequence, and runs pre-attention RMS normalization,
+Q/K/V projection, RoPE, causal grouped-query attention, output projection and
+residual, then post-attention RMS normalization, SwiGLU and the second residual.
+Its explicit inputs include token positions and cache origins; its outputs are
+the hidden states and updated K/V. Comparing those intermediates locates a
+wrong rotation, head mapping, or transpose before thirty layers amplify it.
 
 Next, one real-weight transformer block runs through the actual source catalog,
 live-profile JIT, parameter loading, command recording, and retained KV. An
