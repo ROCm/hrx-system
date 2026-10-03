@@ -13,6 +13,9 @@ IREE_FLAG(string, model, "experimental/loom_serve/models/qwen38",
 IREE_FLAG(int32_t, prefill_capacity, 512, "Isolated prefill specialization.");
 IREE_FLAG(int32_t, context_capacity, 16384,
           "Retained tokens per resident row.");
+IREE_FLAG(int32_t, pool_capacity, 0,
+          "Shared target/draft KV token capacity (multiple of 64); requires "
+          "packed epochs. Zero selects the dense comparison layout.");
 IREE_FLAG_LIST(
     string, epoch,
     "Packed JIT shape as tokens:spans, e.g. 128:8; repeat to cache shapes.");
@@ -80,7 +83,8 @@ iree_status_t loom_serve_qwen_model_create_from_flags(
     loom_serve_qwen_model_t** out_model) {
   *out_model = NULL;
   if (!FLAG_model[0] || !FLAG_weights[0] || !FLAG_tokenizer[0] ||
-      FLAG_prefill_capacity < 1 || FLAG_context_capacity < 1) {
+      FLAG_prefill_capacity < 1 || FLAG_context_capacity < 1 ||
+      FLAG_pool_capacity < 0) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "provide model sources, weights, tokenizer and positive capacities");
@@ -110,6 +114,7 @@ iree_status_t loom_serve_qwen_model_create_from_flags(
       .source_directory = iree_make_cstring_view(FLAG_model),
       .prefill_capacity = (iree_host_size_t)FLAG_prefill_capacity,
       .context_capacity = (iree_host_size_t)FLAG_context_capacity,
+      .pool_capacity = (iree_host_size_t)FLAG_pool_capacity,
       .epoch_count = epochs.count,
       .epoch_shapes = shapes,
       .enable_mtp = FLAG_mtp,

@@ -7,6 +7,7 @@
 // Packed spans use verification depth zero.
 
 config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+config.decl @qwen38.attention.pool_capacity : %value: index where [range(%value, 0, 4194304)]
 config.decl @qwen38.attention.decode_split_count : %value: index where [range(%value, 1, 64)]
 
 kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) launch(%token_capacity: index, %input_size_data: index, %input: buffer, %output: buffer)
@@ -132,7 +133,11 @@ command.program.def public @qwen38_attention_layer_prefill(%token_count: index, 
   %ffn_gate_weight = command.parameter %parameters, "blk.{}.ffn_gate.weight"[%layer] : view<61276160xi8>
   %ffn_up_weight = command.parameter %parameters, "blk.{}.ffn_up.weight"[%layer] : view<61276160xi8>
 
-  %cache_capacity = config.get @qwen38.attention.cache_capacity : index
+  %logical_capacity = config.get @qwen38.attention.cache_capacity : index
+  %pool_capacity = config.get @qwen38.attention.pool_capacity : index
+  %has_pool = index.cmp ne, %pool_capacity, %c0 : index
+  %paged = scalar.andi %uses_spans, %has_pool : i1
+  %cache_capacity = scf.select %paged, %pool_capacity, %logical_capacity : index
   %cache_token_bytes = index.constant 2048 : offset
   %cache_bytes = index.scale %cache_capacity, %cache_token_bytes : index, offset -> offset
   %attention_layer_cache_bytes, %key_cache_offset, %value_cache_offset = buffer.pack [align(256) %cache_bytes, align(256) %cache_bytes] : offset

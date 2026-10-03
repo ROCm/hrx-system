@@ -12,10 +12,15 @@ config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value
 
 kernel.decl @qwen38_attention_prefill_reference(%token_count: index) launch(%control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer)
 
-template.decl @qwen38.attention.wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset)
+func.decl @qwen38_kv_position(%map: buffer, %map_origin: offset, %position: index, %pool_capacity: index) -> (index)
 
-template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset) {
+template.decl @qwen38.attention.wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index)
+
+template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: index, %query_head: index, %workitem: index, %subgroup: index, %lane: index, %control: buffer, %query: buffer, %gate: buffer, %key_cache: buffer, %value_cache: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %key_cache_origin: offset, %value_cache_origin: offset, %map: buffer, %map_origin: offset, %pool_capacity: index) {
   %cache_capacity = config.get @qwen38.attention.cache_capacity : index
+  %zero = index.constant 0 : index
+  %paged = index.cmp ne, %pool_capacity, %zero : index
+  %physical_capacity = scf.select %paged, %pool_capacity, %cache_capacity : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index
@@ -100,8 +105,8 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
   %activation_origin = index.scale %token_begin, %activation_row_bytes : index, offset -> offset
   %query_view = buffer.view %query[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
   %gate_view = buffer.view %gate[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
-  %key_view = buffer.view %key_cache[%key_cache_origin] : buffer -> view<[%cache_capacity]x1024xf16>
-  %value_view = buffer.view %value_cache[%value_cache_origin] : buffer -> view<[%cache_capacity]x1024xf16>
+  %key_view = buffer.view %key_cache[%key_cache_origin] : buffer -> view<[%physical_capacity]x1024xf16>
+  %value_view = buffer.view %value_cache[%value_cache_origin] : buffer -> view<[%physical_capacity]x1024xf16>
   %output_view = buffer.view %output[%activation_origin] : buffer -> view<[%token_count]x6144xf32>
   %query_stage = buffer.alloca<workgroup> align(16) %query_stage_bytes : buffer
   %score_stage = buffer.alloca<workgroup> align(16) %score_stage_bytes : buffer
@@ -137,14 +142,15 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
   kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
   %full_max, %full_sum, %full_output0, %full_output1, %full_output2, %full_output3 = scf.for %key_origin = [%c0 to %full_context_count step %c64](%current_max = %negative_f32x4 : vector<4xf32>, %current_sum = %c0_f32x4 : vector<4xf32>, %current_output0 = %output_zero0 : vector<4xf16>, %current_output1 = %output_zero1 : vector<4xf16>, %current_output2 = %output_zero2 : vector<4xf16>, %current_output3 = %output_zero3 : vector<4xf16>) -> (vector<4xf32>, vector<4xf32>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
-    %score_key_origin0 = index.add %key_origin, %subgroup_score_column : index
-    %last_full_key_tile_start = index.sub %context_count, %c15 : index
+    %physical_key_origin = func.call @qwen38_kv_position(%map, %map_origin, %key_origin, %pool_capacity) : (buffer, offset, index, index) -> (index)
+    %score_key_origin0 = index.add %physical_key_origin, %subgroup_score_column : index
+    %last_full_key_tile_start = index.sub %physical_capacity, %c15 : index
     %score_key_origin = index.assume %score_key_origin0 [lt(%score_key_origin0, %last_full_key_tile_start)] : index
     %score_init_values = vector.constant 0.0 : vector<4xf32>
     %score_init = vector.fragment<init> %score_init_values shape [%m, %n] : vector<4xf32>
     %score_fragment = scf.for %head_tile = [%c0 to %c256 step %c16](%score_accumulator = %score_init : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
       %key_channel = index.add %key_value_head_base, %head_tile : index
-      %key_fragment = vector.fragment.load<lhs> %key_view[%score_key_origin, %key_channel] shape [%m, %k] : view<[%cache_capacity]x1024xf16> -> vector<16xf16>
+      %key_fragment = vector.fragment.load<lhs> %key_view[%score_key_origin, %key_channel] shape [%m, %k] : view<[%physical_capacity]x1024xf16> -> vector<16xf16>
       %query_fragment = vector.fragment.load<rhs> %query_transposed_view[%head_tile, %c0] shape [%k, %n] : view<256x16xf16, %query_transposed_layout> -> vector<16xf16>
       %next_score_accumulator = vector.mma %key_fragment, %query_fragment, %score_accumulator : vector<16xf16>, vector<16xf16>, vector<4xf32>
       scf.yield %next_score_accumulator : vector<4xf32>
@@ -208,10 +214,10 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
       %value_channel = index.add %value_channel0, %subgroup_product_channel : index
       %product_init = vector.fragment<init> %c0_f16x8 shape [%m, %n] : vector<8xf16>
       %product_fragment = scf.for %key_tile = [%c0 to %c64 step %c16](%product_accumulator = %product_init : vector<8xf16>) -> (vector<8xf16>) unroll schedule(recurrence) {
-        %value_token0 = index.add %key_origin, %key_tile : index
+        %value_token0 = index.add %physical_key_origin, %key_tile : index
         %value_token = index.assume %value_token0 [lt(%value_token0, %last_full_key_tile_start)] : index
         %probability_fragment = vector.fragment.load<lhs> %probability_stage_view[%c0, %key_tile] shape [%m, %k] : view<16x64xf16, %probability_transposed_layout> -> vector<16xf16>
-        %value_fragment = vector.fragment.load<rhs> %value_view[%value_token, %value_channel] shape [%k, %n] : view<[%cache_capacity]x1024xf16> -> vector<16xf16>
+        %value_fragment = vector.fragment.load<rhs> %value_view[%value_token, %value_channel] shape [%k, %n] : view<[%physical_capacity]x1024xf16> -> vector<16xf16>
         %next_product_accumulator = vector.mma %probability_fragment, %value_fragment, %product_accumulator : vector<16xf16>, vector<16xf16>, vector<8xf16>
         scf.yield %next_product_accumulator : vector<8xf16>
       }
@@ -239,6 +245,7 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
 
   %tail_score_wave = index.cmp eq, %subgroup, %c0 : index
   %final_max, %final_sum, %final_output0, %final_output1, %final_output2, %final_output3 = scf.for %tail_key_origin = [%full_context_count to %context_count step %c16](%current_max = %full_max : vector<4xf32>, %current_sum = %full_sum : vector<4xf32>, %current_output0 = %full_output0 : vector<4xf16>, %current_output1 = %full_output1 : vector<4xf16>, %current_output2 = %full_output2 : vector<4xf16>, %current_output3 = %full_output3 : vector<4xf16>) -> (vector<4xf32>, vector<4xf32>, vector<4xf16>, vector<4xf16>, vector<4xf16>, vector<4xf16>) {
+    %physical_tail_origin = func.call @qwen38_kv_position(%map, %map_origin, %tail_key_origin, %pool_capacity) : (buffer, offset, index, index) -> (index)
     %tail_remaining = index.sub %context_count, %tail_key_origin : index
     %tail_key_count = index.min %tail_remaining, %c16 : index
     scf.for %load_iteration = [%c0 to %c16 step %c1] unroll {
@@ -247,10 +254,10 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
       %tail_key_channel = index.rem %linear, %c256 : index
       %tail_key_valid = index.cmp ult, %tail_key_row, %tail_key_count : index
       %tail_key_value = scf.if %tail_key_valid -> (f16) {
-        %tail_key_token0 = index.add %tail_key_origin, %tail_key_row : index
-        %tail_key_token = index.assume %tail_key_token0 [lt(%tail_key_token0, %context_count)] : index
+        %tail_key_token0 = index.add %physical_tail_origin, %tail_key_row : index
+        %tail_key_token = index.assume %tail_key_token0 [lt(%tail_key_token0, %physical_capacity)] : index
         %global_key_channel = index.add %key_value_head_base, %tail_key_channel : index
-        %loaded = view.load %key_view[%tail_key_token, %global_key_channel] : view<[%cache_capacity]x1024xf16> -> f16
+        %loaded = view.load %key_view[%tail_key_token, %global_key_channel] : view<[%physical_capacity]x1024xf16> -> f16
         scf.yield %loaded : f16
       } else {
         scf.yield %c0_f16 : f16
@@ -319,10 +326,10 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%query_tile: 
       %tail_value_channel = index.rem %linear, %c256 : index
       %tail_value_valid = index.cmp ult, %tail_value_row, %tail_key_count : index
       %tail_value = scf.if %tail_value_valid -> (f16) {
-        %tail_value_token0 = index.add %tail_key_origin, %tail_value_row : index
-        %tail_value_token = index.assume %tail_value_token0 [lt(%tail_value_token0, %context_count)] : index
+        %tail_value_token0 = index.add %physical_tail_origin, %tail_value_row : index
+        %tail_value_token = index.assume %tail_value_token0 [lt(%tail_value_token0, %physical_capacity)] : index
         %global_value_channel = index.add %key_value_head_base, %tail_value_channel : index
-        %loaded = view.load %value_view[%tail_value_token, %global_value_channel] : view<[%cache_capacity]x1024xf16> -> f16
+        %loaded = view.load %value_view[%tail_value_token, %global_value_channel] : view<[%physical_capacity]x1024xf16> -> f16
         scf.yield %loaded : f16
       } else {
         scf.yield %c0_f16 : f16
@@ -455,7 +462,7 @@ kernel.def target(@qwen38_attention_prefill_gfx11_wave64) export("qwen38_attenti
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
   %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias = buffer.assume.noalias %query, %gate, %key_cache, %value_cache, %output : buffer, buffer, buffer, buffer, buffer
-  template.apply<@qwen38.attention.wmma>(%query_tile, %query_head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+  template.apply<@qwen38.attention.wmma>(%query_tile, %query_head, %workitem, %subgroup, %lane, %control, %query_noalias, %gate_noalias, %key_noalias, %value_noalias, %output_noalias, %origin, %token_begin, %origin, %origin, %control, %origin, %token_begin) : (index, index, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset, buffer, offset, index)
   kernel.return
 }
 

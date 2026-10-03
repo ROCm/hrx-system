@@ -17,6 +17,37 @@ catch-up and verifier variants. Shared embedding, target normalization, and
 full-vocabulary output roots reference the existing weight slab. Extra block-64
 parameter groups load once. There is no command ABI or HAL extension.
 
+## Pooled KV layout experiment
+
+`--pool_capacity=N` selects a shared physical token budget for packed target
+and MTP KV. `N` is a multiple of 64; `--context_capacity` remains each row's
+logical ceiling. The default zero retains dense addressing for comparison.
+Pooled execution requires `--epoch` shapes and has no failure fallback to the
+dense layout. Single-row calls use the same packed addressing path.
+
+Physical pages are assigned only when a span first writes them. Every target
+layer uses the same page IDs in disjoint layer-major K/V planes. Draft KV uses
+those IDs in its own allocation. New mappings upload before their consuming
+commands on the existing timeline; existing mappings need no per-epoch update.
+Verification provisions its full speculative extent, then releases rejected
+full pages after target execution, catch-up, and feedback retire. Reset returns
+the row's pages without clearing or copying KV. Recurrent/history state stays
+private and exact, with its own fixed per-row cost.
+
+For example, 262,144 pooled positions cost 16 GiB of target F16 KV and 1 GiB
+of MTP KV, independent of their distribution across rows. Recurrent/history
+state additionally costs 149.625 MiB per resident row. These are storage
+formulas, not a long-context throughput or quality result.
+
+This option qualifies the model-storage boundary. The current HTTP admission
+path does not reserve completion credit or queue requests against this budget;
+an epoch exceeding free pages fails before submission. Consequently it is not
+yet the ordinary capacity-managed server configuration. The integration point
+is request admission: reserve requested completion and speculative high-water
+credit, assign pages during growth, and return surplus credit on completion or
+cancellation. Logical reservations remain separate from physical page ownership
+so later held/offloaded sessions can retain their logical identity.
+
 ## Online weight residency
 
 `qwen_weights.c` resolves the complete target/MTP placement before submitting
@@ -503,7 +534,8 @@ build_tools/bin/iree-bazel-run --config=asan \
   --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_prefill_wmma.loom \
   --library=experimental/loom_serve/models/qwen38/kernels/qwen38/attention_common.loom \
   --device=amdgpu --target=amdgpu:gfx1151 --case=@mixed_attention_spans \
-  --config=qwen38.attention.cache_capacity=257
+  --config=qwen38.attention.cache_capacity=257 \
+  --config=qwen38.attention.pool_capacity=0
 ```
 
 The same GPU sanitizer flags apply. These comparisons qualify state routing
@@ -511,6 +543,23 @@ against the same math, not independent model accuracy or full-model mixed
 execution. Metadata remains immutable until the epoch's completion edge permits
 reuse. The service's packed scheduler gathers credited ready rows into this
 entry; isolated and matched-math controls use the same ready-span partition.
+
+`tests/attention_pages.loom` runs the same production packed kernels against
+dense preparation/attention, using a fixture-owned permutation of physical
+pages. It crosses a page boundary at absolute position 61, selects a nonzero
+layer and row, and compares every output and physical cache element, including
+unused pages and guards. With the same libraries above, select
+`--case=@scattered_attention_pages`,
+`--config=qwen38.attention.cache_capacity=192`, and
+`--config=qwen38.attention.pool_capacity=256`. Repeat with `--sanitizer=access`.
+
+The retained `qwen_epoch_check --mtp` witness places unequal prefixes directly
+before page boundaries, derives accepted candidates from target execution,
+injects mismatches, resets/reuses rows, and continues untouched histories.
+Run the identical catalog with `--pool_capacity=0` and a nonzero capacity and
+compare both selected tokens and committed-frontier records. A large physical
+pool also exercises layer byte addresses above 4 GiB even with short occupied
+histories. Host-ASAN runs qualify lifetime correctness, not performance.
 
 ## Complete packed model witness
 
