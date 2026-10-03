@@ -58,8 +58,10 @@ iree_host_size_t loom_serve_qwen_schedule(
     loom_serve_qwen_scheduled_span_t* spans);
 
 // Evaluates each cached shape against the same readiness and rotating cursor.
-// Chooses the most useful tokens, breaking ties by smaller token then span
-// capacity. This is an occupancy policy, not a measured execution-cost model.
+// Chooses the most useful tokens, breaking ties by more ready rows advanced,
+// then smaller token and span capacity. Equally occupied prompt-only shapes
+// cannot displace plans that also advance ready peers. This is an occupancy
+// policy, not a measured execution-cost model.
 // shapes is nonempty; each shape satisfies schedule's capacity contract.
 // spans and scratch each have row_count entries. Only the winning plan advances
 // cursor. Returns its span count and writes its index, including for empty

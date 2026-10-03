@@ -63,7 +63,9 @@ iree_host_size_t loom_serve_qwen_schedule_shapes(
     const bool smaller = shapes[i].token_capacity < best.token_capacity ||
                          (shapes[i].token_capacity == best.token_capacity &&
                           shapes[i].span_capacity < best.span_capacity);
-    if (i == 0 || tokens > best_tokens || (tokens == best_tokens && smaller)) {
+    if (i == 0 || tokens > best_tokens ||
+        (tokens == best_tokens &&
+         (count > best_count || (count == best_count && smaller)))) {
       best_count = count;
       best_tokens = tokens;
       best_shape = i;
