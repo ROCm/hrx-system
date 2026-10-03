@@ -172,6 +172,32 @@ TEST(QwenScheduleTest, ShapePlanningHonorsChunkLimitBeforeSizing) {
   EXPECT_EQ(spans[0].token_count, 64);
 }
 
+TEST(QwenScheduleTest, EquallyOccupiedShapesKeepReadyPeers) {
+  const loom_serve_qwen_shape_t catalogs[][2] = {{{512, 1}, {512, 4}},
+                                                 {{512, 4}, {512, 1}}};
+  for (iree_host_size_t minimum : {1u, 4u}) {
+    SCOPED_TRACE(minimum);
+    const loom_serve_qwen_ready_span_t ready[] = {
+        {512, 1}, {minimum, minimum}, {1, 1}, {minimum, minimum}};
+    for (const auto& shapes : catalogs) {
+      SCOPED_TRACE(shapes[0].span_capacity);
+      loom_serve_qwen_scheduled_span_t spans[4], scratch[4];
+      iree_host_size_t cursor = 0, shape = 0;
+      const iree_host_size_t count = loom_serve_qwen_schedule_shapes(
+          4, ready, 2, shapes, 512, &cursor, spans, scratch, &shape);
+      EXPECT_EQ(count, 4);
+      EXPECT_EQ(shapes[shape].span_capacity, 4);
+      EXPECT_EQ(cursor, 1);
+      const iree_host_size_t expected[] = {512 - 2 * minimum - 1, minimum, 1,
+                                           minimum};
+      for (iree_host_size_t i = 0; i < count; ++i) {
+        EXPECT_EQ(spans[i].row_index, i);
+        EXPECT_EQ(spans[i].token_count, expected[i]);
+      }
+    }
+  }
+}
+
 TEST(QwenScheduleTest, ReservesWholeVerifiersBeforePromptExpansion) {
   const loom_serve_qwen_ready_span_t ready[] = {
       {80, 1}, {4, 4}, {3, 1}, {4, 4}, {50, 1}, {4, 4}, {1, 1}, {4, 4}};
