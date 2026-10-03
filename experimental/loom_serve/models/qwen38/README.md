@@ -357,11 +357,17 @@ The C64/C128 metadata-staged Q6 contractions acquire codes and activations one
 K32 group ahead of matrix consumption. Metadata scaling stays in the ordered
 consumer; shared storage is not double-buffered. Padded channels and tokens
 read valid source rows and are selected to positive zero after acquisition.
-The six projection/residual and F32/F16-input entries preserve their F16
-operands, F32 accumulation order, canonical weights, dispatch mapping and
-output layout.
+The projection/residual and F32/F16-input entries share F16 operands, F32
+accumulation order, canonical weights and output layout. The C128/T256
+F16-input residual entry gives each subgroup eight output fragments instead
+of four, reusing the decoded weights across twice as many token rows. Its
+43,008-byte LDS allocation retains the four shared result transpose slots.
+The attention and GDN command programs select this entry for the 256- and
+512-token FFN-down recipes; smaller and intermediate recipes retain their
+own tile geometry. This is a model-source specialization, with no additional
+weight image, global scratch allocation or host dispatch policy.
 
-`tests/linear_q6k_f16_wmma_metadata.loom` compares all six entries bitwise with
+`tests/linear_q6k_f16_wmma_metadata.loom` compares all seven entries bitwise with
 the independent global-decoding schedule and separate residual addition.
 Seeded channel-varying weights, single/partial/full token tiles, zero grids,
 channel tails and untouched output padding exercise the shared contract.
@@ -375,6 +381,8 @@ build_tools/bin/iree-bazel-run --config=asan \
   --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q6k_f16_wmma.loom \
   --library=experimental/loom_serve/models/qwen38/kernels/qwen38/layer_prefill.loom \
   --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q6k_q8_1_x4.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q8_0_q8_1_x4.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/quantize_q8_1_x4.loom \
   --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_qk_common.loom \
   --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
 ```

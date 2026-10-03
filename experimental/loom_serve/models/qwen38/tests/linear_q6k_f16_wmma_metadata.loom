@@ -10,6 +10,7 @@ kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_x128(%tokens: index, %
 kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_x128_input_f16(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16(%tokens: index, %inputs: index, %outputs: index) launch(%control: buffer, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @qwen38_residual_add_f32_prefill(%tokens: index) launch(%tokens: index, %lhs: buffer, %rhs: buffer, %output: buffer)
 
 // The global-decoding schedule independently acquires Q6 codes and scales.
@@ -49,6 +50,9 @@ check.case public @qwen38_q6_metadata_single {
   %actual5 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<128x5120xf32>
   kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual5) : [index, index, index](tensor<1xi32>, index, index, tensor<128x2048xf16>, tensor<5120x8x210xi8>, tensor<128x5120xf32>)
   check.expect.bitwise actual(%actual5) expected(%residual) : tensor<128x5120xf32>
+  %actual6 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<128x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual6) : [index, index, index](tensor<1xi32>, index, index, tensor<128x2048xf16>, tensor<5120x8x210xi8>, tensor<128x5120xf32>)
+  check.expect.bitwise actual(%actual6) expected(%residual) : tensor<128x5120xf32>
   check.return
 }
 
@@ -84,6 +88,9 @@ check.case public @qwen38_q6_metadata_full128 {
   %actual5 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<128x5120xf32>
   kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual5) : [index, index, index](tensor<1xi32>, index, index, tensor<128x2048xf16>, tensor<5120x8x210xi8>, tensor<128x5120xf32>)
   check.expect.bitwise actual(%actual5) expected(%residual) : tensor<128x5120xf32>
+  %actual6 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<128x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual6) : [index, index, index](tensor<1xi32>, index, index, tensor<128x2048xf16>, tensor<5120x8x210xi8>, tensor<128x5120xf32>)
+  check.expect.bitwise actual(%actual6) expected(%residual) : tensor<128x5120xf32>
   check.return
 }
 
@@ -119,6 +126,9 @@ check.case public @qwen38_q6_metadata_partial256 {
   %actual5 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<256x5120xf32>
   kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual5) : [index, index, index](tensor<1xi32>, index, index, tensor<256x2048xf16>, tensor<5120x8x210xi8>, tensor<256x5120xf32>)
   check.expect.bitwise actual(%actual5) expected(%residual) : tensor<256x5120xf32>
+  %actual6 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<256x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual6) : [index, index, index](tensor<1xi32>, index, index, tensor<256x2048xf16>, tensor<5120x8x210xi8>, tensor<256x5120xf32>)
+  check.expect.bitwise actual(%actual6) expected(%residual) : tensor<256x5120xf32>
   check.return
 }
 
@@ -154,6 +164,9 @@ check.case public @qwen38_q6_metadata_partial512 {
   %actual5 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<512x5120xf32>
   kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual5) : [index, index, index](tensor<1xi32>, index, index, tensor<512x2048xf16>, tensor<5120x8x210xi8>, tensor<512x5120xf32>)
   check.expect.bitwise actual(%actual5) expected(%residual) : tensor<512x5120xf32>
+  %actual6 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<512x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual6) : [index, index, index](tensor<1xi32>, index, index, tensor<512x2048xf16>, tensor<5120x8x210xi8>, tensor<512x5120xf32>)
+  check.expect.bitwise actual(%actual6) expected(%residual) : tensor<512x5120xf32>
   check.return
 }
 
@@ -189,6 +202,9 @@ check.case public @qwen38_q6_metadata_zero {
   %actual5 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<128x5120xf32>
   kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t128_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual5) : [index, index, index](tensor<1xi32>, index, index, tensor<128x2048xf16>, tensor<5120x8x210xi8>, tensor<128x5120xf32>)
   check.expect.bitwise actual(%actual5) expected(%residual) : tensor<128x5120xf32>
+  %actual6 = check.generate.iota offset(-0.5) step(0.000000059604644775390625) : tensor<128x5120xf32>
+  kernel.launch @qwen38_linear_q6k_f16_wmma_metadata_residual_c128_t256_input_f16[%capacity, %inputs, %outputs](%control, %inputs, %outputs, %input_f16, %weight, %actual6) : [index, index, index](tensor<1xi32>, index, index, tensor<128x2048xf16>, tensor<5120x8x210xi8>, tensor<128x5120xf32>)
+  check.expect.bitwise actual(%actual6) expected(%residual) : tensor<128x5120xf32>
   check.return
 }
 
