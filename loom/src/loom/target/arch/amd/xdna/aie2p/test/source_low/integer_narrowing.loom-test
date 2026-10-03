@@ -1,0 +1,115 @@
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @trunci_i16x31_i8x31(%input: vector<31xi16>) -> (vector<31xi8>) {
+  %result = vector.trunci %input : vector<31xi16> to vector<31xi8>
+  func.return %result : vector<31xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i16x31_i8x31(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  set.saturation 0
+  set.pack-size 1
+  %5 = vpack.w.trunc %input
+  %6 = slice %input[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %result = concat(%5, %6) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  return %result
+}
+
+// ====
+
+func.def @trunci_i16x33_i8x33(%input: vector<33xi16>) -> (vector<33xi8>) {
+  %result = vector.trunci %input : vector<33xi16> to vector<33xi8>
+  func.return %result : vector<33xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i16x33_i8x33(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
+  set.saturation 0
+  set.pack-size 1
+  %result = vpack.x.trunc %input
+  return %result
+}
+
+// ====
+
+func.def @trunci_i32x15_i16x15(%input: vector<15xi32>) -> (vector<15xi16>) {
+  %result = vector.trunci %input : vector<15xi32> to vector<15xi16>
+  func.return %result : vector<15xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i32x15_i16x15(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = mova.i32 2
+  %result = vshuffle %input, %input, %5
+  return %result
+}
+
+// ====
+
+func.def @trunci_i32x17_i8x17(%input: vector<17xi32>) -> (vector<17xi8>) {
+  %result = vector.trunci %input : vector<17xi32> to vector<17xi8>
+  func.return %result : vector<17xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i32x17_i8x17(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %6 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %7 = mova.i32 2
+  %8 = vshuffle %5, %6, %7
+  %9 = mova.i32 0
+  %result = vshuffle %8, %8, %9
+  return %result
+}
+
+// ====
+
+func.def @trunci_i64x7_i32x7(%input: vector<7xi64>) -> (vector<7xi32>) {
+  %result = vector.trunci %input : vector<7xi64> to vector<7xi32>
+  func.return %result : vector<7xi32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i64x7_i32x7(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = mova.i32 4
+  %result = vshuffle %input, %input, %5
+  return %result
+}
+
+// ====
+
+func.def @trunci_i64x9_i16x9(%input: vector<9xi64>) -> (vector<9xi16>) {
+  %result = vector.trunci %input : vector<9xi64> to vector<9xi16>
+  func.return %result : vector<9xi16>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i64x9_i16x9(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %6 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %7 = mova.i32 4
+  %8 = vshuffle %5, %6, %7
+  %9 = mova.i32 2
+  %result = vshuffle %8, %8, %9
+  return %result
+}
+
+// ====
+
+func.def @trunci_i64x9_i8x9(%input: vector<9xi64>) -> (vector<9xi8>) {
+  %result = vector.trunci %input : vector<9xi64> to vector<9xi8>
+  func.return %result : vector<9xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @trunci_i64x9_i8x9(%input: reg<aie2p.vec256 x4>) -> (reg<aie2p.vec256 x2>) asm {
+  %5 = slice %input[0] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %6 = slice %input[2] : reg<aie2p.vec256 x4> -> reg<aie2p.vec256 x2>
+  %7 = mova.i32 4
+  %8 = vshuffle %5, %6, %7
+  %9 = mova.i32 2
+  %10 = vshuffle %8, %8, %9
+  %11 = mova.i32 0
+  %result = vshuffle %10, %10, %11
+  return %result
+}

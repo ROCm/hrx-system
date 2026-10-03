@@ -29,11 +29,14 @@ from loom.target.arch.amd.xdna.aie2p.contracts.packet_conversion import (
     INTEGER_PACK_INSTRUCTIONS,
     INTEGER_PACK_RULE_SHAPES,
     INTEGER_SHIFT_RULE_SHAPES,
+    INTEGER_TRUNCATION_INSTRUCTIONS,
+    INTEGER_TRUNCATION_RULE_SHAPES,
     INTEGER_WIDEN_RULE_SHAPES,
     MXFP8_E4M3FN_E8M0_X8_SCHEMA,
     MXFP8_E4M3FN_E8M0_X32_SCHEMA,
     Float8PacketFormat,
     FloatPacketSourceFormat,
+    IntegerPackInstruction,
 )
 from loom.target.arch.amd.xdna.aie2p.core_descriptors import (
     AIE2P_CORE_DESCRIPTOR_SET,
@@ -249,10 +252,10 @@ def _evaluate_mxfp8_packet_descriptor(
     raise AssertionError(f"unmodeled MXFP8 packet descriptor {descriptor_key}")
 
 
-def _evaluate_fp8_packet_lane(
+def _evaluate_packet_lane(
     rule: DescriptorRule, input_value: int, *, scale_value: int | None = None
 ) -> int:
-    """Evaluates one replicated lane through a native FP8 packet program."""
+    """Evaluates one replicated lane through a native packet program."""
 
     values: dict[ValueRef, int]
     if scale_value is None:
@@ -293,8 +296,13 @@ def _evaluate_fp8_packet_lane(
             elif descriptor_key == "sub.i8x64":
                 value = (operands["s1"] - operands["s2"]) & 0xFF
             elif descriptor_key == "shuffle.x.configured":
-                assert operands["mod"] == 20
-                value = (operands["s1"] & 0xFF) | ((operands["s2"] & 0xFF) << 8)
+                control = operands["mod"]
+                if control == 20:
+                    value = (operands["s1"] & 0xFF) | ((operands["s2"] & 0xFF) << 8)
+                else:
+                    assert control in (0, 2, 4)
+                    sublane_bits = 8 << (control // 2)
+                    value = operands["s1"] & ((1 << sublane_bits) - 1)
             elif descriptor_key == "splat.i16x32":
                 value = operands["src"] & 0xFFFF
             elif descriptor_key == "splat.i32x16":
@@ -358,6 +366,7 @@ def _evaluate_fp8_packet_lane(
                 "pack.x.trunc.configured",
             ):
                 assert state["saturation"] == 0
+                assert state["pack-size"] in (0, 1)
                 output_bits = 4 << state["pack-size"]
                 value = operands["src"] & ((1 << output_bits) - 1)
             elif descriptor_key in (
@@ -369,6 +378,83 @@ def _evaluate_fp8_packet_lane(
                 raise AssertionError(f"unmodeled packet descriptor {descriptor_key}")
         values[result_ref] = value
     return values[ValueRef.result("result")]
+
+
+def _evaluate_integer_truncation_lanes(
+    rule: DescriptorRule,
+    input_values: tuple[int, ...],
+    *,
+    input_bits: int,
+    result_bits: int,
+    source_carrier_count: int,
+) -> tuple[int, ...]:
+    """Evaluates lane compaction across physical X-register boundaries."""
+
+    unit_bits = 256
+    unit_mask = (1 << unit_bits) - 1
+    input_mask = (1 << input_bits) - 1
+    packed_input = sum(
+        (value & input_mask) << (lane * input_bits)
+        for lane, value in enumerate(input_values)
+    )
+    values: dict[ValueRef, int | tuple[int, ...]] = {
+        ValueRef.operand("input"): tuple(
+            (packed_input >> (unit * unit_bits)) & unit_mask
+            for unit in range(source_carrier_count * 2)
+        )
+    }
+
+    for emit in rule.emit:
+        if isinstance(emit, EmitRegisterSlice):
+            source_units = values[emit.source]
+            assert isinstance(source_units, tuple)
+            result_units = source_units[
+                emit.unit_offset : emit.unit_offset + emit.unit_count
+            ]
+            assert len(result_units) == emit.unit_count
+            values[emit.result] = result_units
+            continue
+
+        assert isinstance(emit, EmitDescriptorOp)
+        result_ref = next(iter(emit.results.values()))
+        if emit.form is DescriptorEmitForm.CONST:
+            values[result_ref] = emit.immediates["i"]
+            continue
+
+        assert emit.descriptor.key == "amd.xdna.aie2p.shuffle.x.configured"
+        low_units = values[emit.operands["s1"]]
+        high_units = values[emit.operands["s2"]]
+        control = values[emit.operands["mod"]]
+        assert isinstance(low_units, tuple) and len(low_units) == 2
+        assert isinstance(high_units, tuple) and len(high_units) == 2
+        assert isinstance(control, int) and control in (0, 2, 4)
+
+        sublane_bits = 8 << (control // 2)
+        sublane_mask = (1 << sublane_bits) - 1
+        group_bits = sublane_bits * 2
+        packed_result = 0
+        result_offset = 0
+        for source_units in (low_units, high_units):
+            packed_source = source_units[0] | (source_units[1] << unit_bits)
+            for source_offset in range(0, unit_bits * 2, group_bits):
+                packed_result |= (
+                    (packed_source >> source_offset) & sublane_mask
+                ) << result_offset
+                result_offset += sublane_bits
+        assert result_offset == unit_bits * 2
+        values[result_ref] = (
+            packed_result & unit_mask,
+            (packed_result >> unit_bits) & unit_mask,
+        )
+
+    result_units = values[ValueRef.result("result")]
+    assert isinstance(result_units, tuple) and len(result_units) == 2
+    packed_result = result_units[0] | (result_units[1] << unit_bits)
+    result_mask = (1 << result_bits) - 1
+    return tuple(
+        (packed_result >> (lane * result_bits)) & result_mask
+        for lane in range(len(input_values))
+    )
 
 
 def _reference_f16_to_f32(input_bits: int) -> int:
@@ -1197,7 +1283,7 @@ def _assert_mxfp8_packet_decode_matches_oracle(
     rule = _rule(f"native_mxfp8_e4m3fn_e8m0x{lane_count}_to_bfloat16x{lane_count}")
     for payload_bits, scale_bits in values:
         expected = _reference_mxfp8_e4m3fn_e8m0_to_bf16(payload_bits, scale_bits)
-        actual = _evaluate_fp8_packet_lane(rule, payload_bits, scale_value=scale_bits)
+        actual = _evaluate_packet_lane(rule, payload_bits, scale_value=scale_bits)
         assert actual == expected, (
             hex(payload_bits),
             hex(scale_bits),
@@ -1239,12 +1325,12 @@ def _assert_float8_packet_widening_matches_oracles(
             mantissa_bits=fp8_format.mantissa_bits,
             has_infinity=fp8_format.has_infinity,
         )
-        assert _evaluate_fp8_packet_lane(bf16_rule, bits) == (expected_f32 >> 16), (
+        assert _evaluate_packet_lane(bf16_rule, bits) == (expected_f32 >> 16), (
             fp8_format.element,
             hex(bits),
             "bf16",
         )
-        assert _evaluate_fp8_packet_lane(f32_rule, bits) == expected_f32, (
+        assert _evaluate_packet_lane(f32_rule, bits) == expected_f32, (
             fp8_format.element,
             hex(bits),
             "f32",
@@ -1315,7 +1401,7 @@ def _assert_float8_packet_narrowing_matches_oracle(
             mantissa_bits=fp8_format.mantissa_bits,
             has_infinity=fp8_format.has_infinity,
         )
-        assert _evaluate_fp8_packet_lane(rule, bits) == expected, (
+        assert _evaluate_packet_lane(rule, bits) == expected, (
             source_format.element,
             fp8_format.element,
             hex(bits),
@@ -1552,7 +1638,6 @@ def test_native_integer_widening_covers_each_logical_carrier_interval() -> None:
 def test_native_integer_packing_covers_each_logical_carrier_interval() -> None:
     expected_truncation_lanes = {
         ("i16", "i8"): set(range(1, 65)),
-        ("i32", "i16"): set(range(1, 33)),
     }
     covered_truncation_lanes = {key: set() for key in expected_truncation_lanes}
     for rule_shape in INTEGER_PACK_RULE_SHAPES:
@@ -1607,29 +1692,136 @@ def test_native_integer_packing_covers_each_logical_carrier_interval() -> None:
     } == set(INTEGER_PACK_INSTRUCTIONS)
 
 
+def test_native_integer_shuffle_truncation_covers_every_remaining_width() -> None:
+    expected_lanes_and_controls = {
+        ("i32", "i16"): (set(range(1, 33)), (2,)),
+        ("i32", "i8"): (set(range(1, 33)), (2, 0)),
+        ("i64", "i32"): (set(range(1, 17)), (4,)),
+        ("i64", "i16"): (set(range(1, 17)), (4, 2)),
+        ("i64", "i8"): (set(range(1, 17)), (4, 2, 0)),
+    }
+    covered_lanes = {key: set() for key in expected_lanes_and_controls}
+    for rule_shape in INTEGER_TRUNCATION_RULE_SHAPES:
+        instruction = rule_shape.instruction
+        key = (instruction.input_element, instruction.result_element)
+        assert instruction.shuffle_controls == expected_lanes_and_controls[key][1]
+        logical_lane_counts = set(
+            range(rule_shape.minimum_lane_count, rule_shape.maximum_lane_count + 1)
+        )
+        assert covered_lanes[key].isdisjoint(logical_lane_counts)
+        covered_lanes[key].update(logical_lane_counts)
+
+        rule = _rule(rule_shape.report_key)
+        assert rule.source_op is vector.vector_trunci
+        assert rule.descriptor.key == "amd.xdna.aie2p.shuffle.x.configured"
+        assert rule.guards == (
+            Guard.value_type("input", rule_shape.input_type),
+            Guard.value_type("result", rule_shape.result_type),
+        )
+        descriptor_emits = tuple(
+            emit for emit in rule.emit if isinstance(emit, EmitDescriptorOp)
+        )
+        assert [emit.descriptor.key for emit in descriptor_emits] == [
+            descriptor_key
+            for _ in instruction.shuffle_controls
+            for descriptor_key in (
+                "amd.xdna.aie2p.constant.i32.mova",
+                "amd.xdna.aie2p.shuffle.x.configured",
+            )
+        ]
+        assert [
+            descriptor_emits[index].immediates["i"]
+            for index in range(0, len(descriptor_emits), 2)
+        ] == list(instruction.shuffle_controls)
+        assert sum(isinstance(emit, EmitRegisterSlice) for emit in rule.emit) == (
+            2 if rule_shape.source_carrier_count == 2 else 0
+        )
+
+    assert covered_lanes == {
+        key: lanes for key, (lanes, _) in expected_lanes_and_controls.items()
+    }
+    assert {shape.instruction for shape in INTEGER_TRUNCATION_RULE_SHAPES} == set(
+        INTEGER_TRUNCATION_INSTRUCTIONS
+    )
+
+
+def test_native_integer_shuffle_truncation_preserves_every_lane() -> None:
+    for rule_shape in INTEGER_TRUNCATION_RULE_SHAPES:
+        instruction = rule_shape.instruction
+        input_bits = int(instruction.input_element[1:])
+        result_bits = int(instruction.result_element[1:])
+        input_mask = (1 << input_bits) - 1
+        result_mask = (1 << result_bits) - 1
+        rule = _rule(rule_shape.report_key)
+        for lane_count in range(
+            rule_shape.minimum_lane_count, rule_shape.maximum_lane_count + 1
+        ):
+            input_values = tuple(
+                (
+                    ((lane + 1) * 0x9E3779B97F4A7C15 ^ lane_count * 0xD1B54A32D192ED03)
+                    & input_mask
+                    & ~result_mask
+                )
+                | ((lane * 37 + lane_count * 11) & result_mask)
+                for lane in range(lane_count)
+            )
+            assert _evaluate_integer_truncation_lanes(
+                rule,
+                input_values,
+                input_bits=input_bits,
+                result_bits=result_bits,
+                source_carrier_count=rule_shape.source_carrier_count,
+            ) == tuple(value & result_mask for value in input_values)
+
+
+def test_integer_pack_rejects_unrepresentable_control_values() -> None:
+    with pytest.raises(ValueError, match="one-bit crPackSize"):
+        IntegerPackInstruction("i32", 16, "i16", None)
+
+
 def test_native_integer_truncation_preserves_low_bits_at_boundaries() -> None:
     boundary_values = {
         "i16": (0, 1, 0x7F, 0x80, 0xFF, 0x100, 0x7FFF, 0x8000, 0xFFFF),
         "i32": (
             0,
             1,
+            0x200,
             0x7FFF,
             0x8000,
             0xFFFF,
             0x10000,
+            0x12345678,
             0x7FFFFFFF,
             0x80000000,
             0xFFFFFFFF,
         ),
+        "i64": (
+            0,
+            1,
+            0x100,
+            0x10000,
+            0x100000000,
+            0x123456789ABCDEF0,
+            0x7FFFFFFFFFFFFFFF,
+            0x8000000000000000,
+            0xFFFFFFFFFFFFFFFF,
+        ),
     }
-    for rule_shape in INTEGER_PACK_RULE_SHAPES:
+    for rule_shape in (*INTEGER_PACK_RULE_SHAPES, *INTEGER_TRUNCATION_RULE_SHAPES):
         instruction = rule_shape.instruction
-        if instruction.bit_width is not None:
+        if isinstance(instruction, IntegerPackInstruction) and (
+            instruction.bit_width is not None
+        ):
             continue
         rule = _rule(rule_shape.report_key)
-        result_mask = (1 << instruction.output_element_bits) - 1
+        result_bits = (
+            instruction.output_element_bits
+            if isinstance(instruction, IntegerPackInstruction)
+            else int(instruction.result_element[1:])
+        )
+        result_mask = (1 << result_bits) - 1
         for input_value in boundary_values[instruction.input_element]:
-            assert _evaluate_fp8_packet_lane(rule, input_value) == (
+            assert _evaluate_packet_lane(rule, input_value) == (
                 input_value & result_mask
             )
 
