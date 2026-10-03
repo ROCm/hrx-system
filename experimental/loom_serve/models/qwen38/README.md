@@ -331,9 +331,11 @@ staging and publication share storage only within the workgroup.
 Both wide model paths use
 [`ffn_gate_up_prefetch.loom`](kernels/qwen38/ffn_gate_up_prefetch.loom).
 `qwen_compile_stage` binds `qwen38.ffn.input_size=5120` and
-`qwen38.ffn.output_size=17408` through the existing JIT configuration. The
-device body reads these exact dimensions with `config.get`; passing constants
-as launch arguments would still leave them runtime values in that body. The
+`qwen38.ffn.output_size=17408` through the existing JIT configuration. Concrete
+kernel wrappers resolve these dimensions and pass them as SSA operands to the
+shared template; its body has no model configuration dependency. Template
+application retains those compile-time facts, unlike ordinary launch arguments
+that remain runtime values in the device body. The
 kernel requires complete 256-input/64-output-channel tiles. Token capacity
 sets the grid while the actual token count stays in its device control buffer.
 
@@ -366,6 +368,23 @@ for shape in 128_1 128_128 256_129 256_256 512_511 512_512 0_1; do
     --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
     --case="@ffn_prefetch_${shape}_case" || exit
 done
+```
+
+`tests/ffn_prefetch_specialization.loom` also uses the shared motif at K256/N64
+and K768/N128 in the same module, without model configuration. It checks
+single/odd block counts and active-token tails against the independently staged
+paired-wave implementation with three seeds:
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  experimental/loom_serve/models/qwen38/tests/ffn_prefetch_specialization.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/ffn_gate_up_prefetch.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q5k_f16_wmma.loom \
+  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
+  --case=@ffn_independent_specializations
 ```
 
 The generic owned-output entry remains available for other channel geometry.

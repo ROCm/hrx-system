@@ -1,0 +1,69 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Two concrete wrappers use one motif with independent compile-time geometry.
+// Neither this module nor the motif body reads a model configuration symbol.
+// The single-block and odd-block contractions exercise pipeline fill/drain;
+// each independent reference also checks untouched inactive output rows.
+amdgpu.target<gfx11-generic> @ffn_specialization_wave32 {subgroup_size = 32}
+
+template.decl @qwen38.ffn_gate_up_q5k.block_prefetch.body(%inputs: index, %outputs: index, %weight_channels: index, %count: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer)
+kernel.decl @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_output_f16(%capacity: index, %inputs: index, %outputs: index) launch(%count: buffer, %inputs: index, %outputs: index, %input: buffer, %gate: buffer, %up: buffer, %output: buffer)
+
+kernel.def target(@ffn_specialization_wave32) @ffn_k256_n64() {
+  %one = index.constant 1 : index
+  %threads = index.constant 512 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%count: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer) {
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 64 : index
+  %weight_channels = index.constant 1 : index
+  template.apply<@qwen38.ffn_gate_up_q5k.block_prefetch.body>(%inputs, %outputs, %weight_channels, %count, %input, %gate, %up, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@ffn_specialization_wave32) @ffn_k768_n128() {
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %threads = index.constant 512 : index
+  kernel.launch.config workgroups(%two, %two, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%count: buffer, %input: buffer, %gate: buffer, %up: buffer, %output: buffer) {
+  %inputs = index.constant 768 : index
+  %outputs = index.constant 128 : index
+  %weight_channels = index.constant 1 : index
+  template.apply<@qwen38.ffn_gate_up_q5k.block_prefetch.body>(%inputs, %outputs, %weight_channels, %count, %input, %gate, %up, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+check.case public @ffn_independent_specializations {
+  %seed = check.param.seed base(93719) count(3) : i64
+  %up_seed = check.literal value(53921) : i64
+  %capacity1 = check.literal value(128) : index
+  %inputs1 = check.literal value(256) : index
+  %outputs1 = check.literal value(64) : index
+  %count1 = check.generate.fill value(1) : tensor<1xi32>
+  %input1 = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<128x256xf16>
+  %gate1 = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<64x1x176xi8>
+  %up1 = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<64x1x176xi8>
+  %expected1 = check.generate.fill value(-13.0) : tensor<128x64xf16>
+  %actual1 = check.generate.fill value(-13.0) : tensor<128x64xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_output_f16[%capacity1, %inputs1, %outputs1](%count1, %inputs1, %outputs1, %input1, %gate1, %up1, %expected1) : [index, index, index](tensor<1xi32>, index, index, tensor<128x256xf16>, tensor<64x1x176xi8>, tensor<64x1x176xi8>, tensor<128x64xf16>)
+  kernel.launch @ffn_k256_n64(%count1, %input1, %gate1, %up1, %actual1) : (tensor<1xi32>, tensor<128x256xf16>, tensor<64x1x176xi8>, tensor<64x1x176xi8>, tensor<128x64xf16>)
+  check.expect.bitwise actual(%actual1) expected(%expected1) : tensor<128x64xf16>
+
+  %capacity2 = check.literal value(256) : index
+  %inputs2 = check.literal value(768) : index
+  %outputs2 = check.literal value(128) : index
+  %count2 = check.generate.fill value(129) : tensor<1xi32>
+  %input2 = check.generate.random.uniform seed(%seed) range(-1.0 to 1.0) : tensor<256x768xf16>
+  %gate2 = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<128x3x176xi8>
+  %up2 = check.generate.random.uniform seed(%up_seed) range(0 to 31) : tensor<128x3x176xi8>
+  %expected2 = check.generate.fill value(-13.0) : tensor<256x128xf16>
+  %actual2 = check.generate.fill value(-13.0) : tensor<256x128xf16>
+  kernel.launch @qwen38_ffn_gate_up_q5k_f16_wmma_c64_t128_wave32_output_f16[%capacity2, %inputs2, %outputs2](%count2, %inputs2, %outputs2, %input2, %gate2, %up2, %expected2) : [index, index, index](tensor<1xi32>, index, index, tensor<256x768xf16>, tensor<128x3x176xi8>, tensor<128x3x176xi8>, tensor<256x128xf16>)
+  kernel.launch @ffn_k768_n128(%count2, %input2, %gate2, %up2, %actual2) : (tensor<1xi32>, tensor<256x768xf16>, tensor<128x3x176xi8>, tensor<128x3x176xi8>, tensor<256x128xf16>)
+  check.expect.bitwise actual(%actual2) expected(%expected2) : tensor<256x128xf16>
+  check.return
+}

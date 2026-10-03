@@ -73,10 +73,12 @@ The [facts guide](../../../loom/docs/src/guide/facts-and-specialization.md)
 explains both domains and path-dependent refinement.
 
 The fused [FFN block read-ahead](../models/qwen38/kernels/qwen38/ffn_gate_up_prefetch.loom)
-currently reads `qwen38.ffn.input_size` and `qwen38.ffn.output_size` inside its
-body template, allowing an exact block loop to pipeline weight acquisition.
-That direct dependency is model coupling, not a requirement for specialization:
-the reusable form passes K/N from the concrete kernel wrapper into the template.
+resolves `qwen38.ffn.input_size` and `qwen38.ffn.output_size` in its concrete
+kernel wrappers and passes K/N into the body template. The exact block loop
+still pipelines weight acquisition; the template itself has no config reads.
+The [independent-specialization case](../models/qwen38/tests/ffn_prefetch_specialization.loom)
+applies that same motif at K256/N64 and K768/N128 in one module without Qwen
+config bindings, comparing both against independently staged contractions.
 Its workload carries token capacity, and its five launch buffers carry live count,
 activations, two weight views and output. There is no runtime K/N scalar to
 rediscover or a host readback to learn the active count. The
