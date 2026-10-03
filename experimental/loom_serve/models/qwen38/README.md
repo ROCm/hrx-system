@@ -228,24 +228,31 @@ build_tools/bin/iree-bazel-run --config=asan \
   --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
 ```
 
-The narrow 32-token Q5 projection uses the same encoded-block staging lifetime
-for a single matrix. Four wave64 subgroups share a 64-channel tile; the final
-barrier allows its encoded slab to hold the output transpose. The command
-program and canonical global weight layout are unchanged.
+The narrow 32-token Q5 projection pipelines complete encoded weight blocks for
+a single matrix. Four wave64 subgroups share a 64-channel tile. Partial packet
+rounds retire before complete rounds, whose reads overlap the current block's
+eight unrolled matrix groups. Complete and partial channel tiles specialize
+the same body; tails never fetch nonexistent channels. The final barrier allows
+the encoded slab to hold the output transpose. The command program and
+canonical global weight layout are unchanged.
 
 `tests/linear_q5k_f16_wmma.loom` checks every output against the generic
-global-decoding schedule at the three production projection widths and a
-48-channel tail, with distinct activation rows and channel-varying finite
-weights. Run it with the Q5 libraries and device access instrumentation:
+global-decoding schedule at the three production projection widths and every
+16-channel tail class, with distinct activation rows and channel-varying finite
+weights. A zero-grid case checks disabled dispatches. Select the two owned cases
+with the Q5 libraries and device access instrumentation:
 
 ```sh
-build_tools/bin/iree-bazel-run --config=asan \
-  //loom/src/loom/tools/iree-test-loom -- \
-  experimental/loom_serve/models/qwen38/tests/linear_q5k_f16_wmma.loom \
-  --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q5k_f16_wmma.loom \
-  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_qk_common.loom \
-  --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
+for case in qwen38_narrow_q5_block_staging qwen38_narrow_q5_zero_grid; do
+  build_tools/bin/iree-bazel-run --config=asan \
+    //loom/src/loom/tools/iree-test-loom -- \
+    experimental/loom_serve/models/qwen38/tests/linear_q5k_f16_wmma.loom \
+    --library=experimental/loom_serve/models/qwen38/kernels/qwen38/linear_q5k_f16_wmma.loom \
+    --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom \
+    --library=experimental/loom_serve/models/qwen38/kernels/ggml/linear_qk_common.loom \
+    --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
+    --case="@$case" || exit
+done
 ```
 
 The wide Q5 projection pipelines the eight quantization groups inside each
