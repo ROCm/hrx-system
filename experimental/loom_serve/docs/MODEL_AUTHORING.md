@@ -97,9 +97,10 @@ The real embedding sequence in [`jit.c`](../jit.c) is:
 
 1. Create the target environment, context, prepared compiler and pipeline;
    obtain the live HAL profile and freeze the source index. A standard
-   `loomc_task_pool_t` supplies up to four physical-core workers by default,
-   each with a reusable `loomc_workspace_t`. Product construction uses separate
-   caller scratch.
+   `loomc_task_pool_t` supplies physical-core workers, each with a reusable
+   `loomc_workspace_t`. The runner requests up to eight with
+   `loomc_task_pool_options_t.max_worker_count`; processor affinity and topology
+   may provide fewer. Product construction uses separate caller scratch.
 2. Call `loomc_cmd_program_product_build` with the root and configuration. Its
    request sink takes ownership of reachable native source requests.
 3. Submit each request through a `loomc_task_queue_t` on that shared pool.

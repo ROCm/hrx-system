@@ -132,7 +132,7 @@ server. The binary embeds the JIT; it never invokes `loom-link` or
 
 `jit.c` indexes the catalog once and retains the immutable compiler, pipeline,
 and live HAL target profile across stage specializations. Its standard loomc
-task pool supplies up to four physical-core workers, each with private reusable
+task pool supplies up to eight physical-core workers, each with private reusable
 scratch. Stage calls are synchronous; their independent native requests compile
 and load concurrently, and the stage queue drains even after a task fails.
 `loomc_cmd_program_product_build` produces portable command bytes and

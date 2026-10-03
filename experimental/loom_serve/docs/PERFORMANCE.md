@@ -60,6 +60,49 @@ epoch, state/weight/workspace residency, cold JIT/startup time, and energy when
 measurable. Service token counters include selected EOS; text-visible output can
 use a separate count. Summing per-session token rates is not aggregate throughput.
 
+## Concurrent source compilation
+
+The 2026-10-03 gfx1151 checkpoint prepares the automatic 25-shape catalog with
+MTP enabled: 79 stages and 1,491 native kernel requests. Kernel requests within
+each stage share immutable compiler state and use worker-local scratch. Stage
+construction and final binding remain synchronous; no compiler task runs during
+warm inference. This lets useful shape families remain a scheduling choice
+rather than an offline artifact-management burden.
+
+An optimized, leased ABABA comparison used four workers from `9478fca24b`
+against the same source with `max_worker_count = 8` in [`jit.c`](../jit.c).
+Both arms used sixteen resident rows, 512-token prefill capacity, 16,384-token
+logical contexts, a shared 65,536-position KV pool, and MTP depth three. No
+explicit `--epoch` overrides were supplied. All model sources, weights,
+workspace sizes, command programs and warm scheduling were identical.
+
+| Median startup metric | Four workers | Eight workers |
+| --- | ---: | ---: |
+| Sum of `jit_stage` compile/load durations | 5.271 s | 4.604 s |
+| Process launch to `ready`, warm filesystem cache | 7.919 s | 7.257 s |
+| Aggregate process CPU time through readiness | 15.79 s | 16.12 s |
+| Peak host RSS through readiness | 426.8 MiB | 493.6 MiB |
+
+Eight workers reduce compile/load time by 12.7% at a cost of about 67 MiB more
+peak host memory and 2.1% more startup CPU time. The worker count is a maximum;
+processor affinity and topology can supply fewer. Host RSS excludes device
+backing and does not isolate workspace storage from allocator retention.
+
+Each fresh residency then served barrier-released cohorts of one, three and
+sixteen clients using [`check_rows.request`](../check_rows.py), in that order.
+These short counting prompts request 48–72 output tokens and reuse row tags
+between cohorts. Full text, usage and finish reasons matched across all five
+runs, totaling 5,880 output tokens. Median aggregate throughput was
+12.16/31.20/77.78 tokens/s with four workers and 12.17/31.29/79.35 with eight.
+The sixteen-client controls varied from 76.13 to 79.02 tokens/s; the difference
+is not attributed to faster model execution. This establishes no observed
+warm regression, not a coding-agent or long-context performance improvement.
+
+The runner selects eight workers. The full serving ASAN suite separately
+passes all twelve targets, including source-to-VM-to-GPU execution, native
+compilation failure followed by reuse, and commands without native requests.
+The fixture also executes prepared commands after destroying compiler storage.
+
 ## Retained-review benchmark
 
 The checked-in [source-review workload](../testdata/source_review.json) contains

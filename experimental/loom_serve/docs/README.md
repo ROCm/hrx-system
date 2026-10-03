@@ -148,12 +148,14 @@ build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve:control_test
 ```
 
-Success means both GPU targets pass, not skip: two JIT cases and eight control
+Success means both GPU targets pass, not skip: three JIT cases and eight control
 cases. Test output is under `bazel-testlogs/experimental/loom_serve/`; adding
 `--test_output=all` shows individual cases. The `JitTest` source-to-VM case checks
-that independently specialized increments of three and seven change shared
-device state from 100 to 110. A compiler that merely accepts the source does
-not satisfy this gate.
+that two independently specialized eight-kernel stages change shared device
+values from 100 to 110, 112, ..., 124. It also verifies successful reuse after
+a native compilation failure, and the separate cases cover invalid
+configuration and a command with no native requests. A compiler that merely
+accepts the source does not satisfy this gate.
 
 [`jit_test.cc`](../jit_test.cc) is the smallest complete embedding example:
 source catalog, two configurations, actual device-profile specialization, native

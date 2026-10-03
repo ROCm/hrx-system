@@ -196,8 +196,13 @@ static iree_status_t jit_index_sources(loom_serve_jit_t* jit,
 
 static iree_status_t jit_initialize_compilation(loom_serve_jit_t* jit) {
   const loomc_allocator_t allocator = loomc_allocator_from_iree(jit->allocator);
+  const loomc_task_pool_options_t options = {
+      .type = LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
+      .structure_size = sizeof(loomc_task_pool_options_t),
+      .max_worker_count = 8,
+  };
   IREE_RETURN_IF_ERROR(iree_status_from_loomc(
-      loomc_task_pool_allocate(NULL, allocator, &jit->compilation.pool)));
+      loomc_task_pool_allocate(&options, allocator, &jit->compilation.pool)));
   const iree_host_size_t worker_count =
       loomc_task_pool_worker_count(jit->compilation.pool);
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
