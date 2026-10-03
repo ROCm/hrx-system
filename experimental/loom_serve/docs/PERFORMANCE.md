@@ -416,6 +416,48 @@ the existing narrow recipe. At capacity 512, the new geometry halves logical
 weight/metadata acquisition while preserving activation payload; physical
 DRAM traffic and bandwidth saturation are not inferred from source counts.
 
+### Current matched-MTP qualification
+
+A 2026-10-03 refresh pinned llama.cpp to
+[`eec18f5d32099fb15d4ba15003a231bcc72757d5`](https://github.com/ggml-org/llama.cpp/tree/eec18f5d32099fb15d4ba15003a231bcc72757d5).
+Both Vulkan and HIP were built from that clean source. HIP used ROCm 10.0.0,
+targeted gfx1151, and enabled its default graph and matrix implementations.
+The server loader, implementation libraries and runtime dependencies were
+identified separately. The model, F16 target/draft caches, eight 16K slots,
+batch 2048, microbatch 512, greedy sampling and natural EOS policy matched the
+retained-review protocol above.
+
+For real MTP, replace `--spec-type none` in the comparator command with
+`--spec-type draft-mtp --spec-draft-n-max 3` and add
+`--spec-draft-type-k f16 --spec-draft-type-v f16`. HIP selects `--device ROCm0`
+and requires its runtime libraries on the execution host. Proposal acceptance
+and creation of the MTP context were verified in the server log; merely
+passing a speculation flag is not that evidence.
+
+| Qualification window | Outputs, of 3,072 requested | Result |
+| --- | ---: | --- |
+| Vulkan, target-only | 3,072 | Complete bounded responses |
+| Vulkan, MTP depths 1 / 2 / 3 | 2,883 / 2,884 / 2,885 | One short follow-up in each window |
+| HIP, target-only | 3,072 | Complete bounded responses |
+| HIP, first MTP depth-3 screen | 3,072 | Complete bounded responses |
+| HIP, first fresh interleaved MTP arm | 2,516 | Three follow-ups stop after 5 / 5 / 10 tokens |
+
+The interleaved comparison stopped at that failed HIP arm, before measuring a
+Loom arm. All 16 requests retired without context truncation or transport
+failure, and the GPU peaked at 61 C. A preceding successful HIP screen cannot
+replace the failed measured arm. **There is no qualified current MTP-to-MTP
+throughput ratio from this experiment.** The preceding Loom self-improvements
+stand independently; they are not divided by an incomplete competitor window.
+
+Fresh full-prefill replay of one captured short Vulkan continuation produced
+192 tokens from the same 6,357 input IDs. An additional retained Vulkan run
+with verbose token logging also completed all requested outputs. The behavior
+therefore is not established as deterministic or Vulkan-specific. These
+receipts do not identify its cause; the next diagnostic needs the selected
+terminal token and target/draft retained frontiers from a failing run without
+altering sampling. No EOS suppression, source workaround or filtered samples
+were used to turn the failure into a score.
+
 ## Traffic and batching hypotheses
 
 For one completed traversal, let `D` be modeled bytes reaching the relevant

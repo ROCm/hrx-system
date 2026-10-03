@@ -43,7 +43,9 @@ The [Q6 token-reuse checkpoint](PERFORMANCE.md#q6-token-reuse-checkpoint)
 specializes the existing command programs for wider weight reuse at 256/512
 tokens. The locked eight-agent comparison improves whole-server throughput
 3.23% to 25.819 output tokens/s, with unchanged weights and host scheduling.
-This is a self-comparison; a current MTP-matched competitor result is separate.
+This is a self-comparison. The [current matched-MTP qualification](PERFORMANCE.md#current-matched-mtp-qualification)
+records incomplete retained follow-ups in both tested llama.cpp backends;
+no current MTP-to-MTP throughput ratio is claimed.
 
 The concrete adapter currently admits up to eight rows and 512 packed input
 tokens, with startup-selected shapes and a common context capacity. Its caches
