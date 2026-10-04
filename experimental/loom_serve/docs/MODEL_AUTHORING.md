@@ -53,10 +53,20 @@ lifetime and represent local shared storage.
 
 ## Configuration and live target facts
 
-[`qwen_compile_stage`](../qwen_model.c) supplies a `loomc_config_options_t`
-containing model dimensions and shape capacities. The same configuration is
-applied while materializing the command and its native source requests. The
-compiler retains the relationship between a kernel's launch math and body.
+The model's [`config.loom`](../models/qwen38/config.loom) supplies fixed typed
+`config.def` values through the ordinary source catalog.
+[`qwen_compile_stage`](../qwen_model.c) supplies run-dependent overrides in
+`loomc_config_options_t`. Both feed the same command materialization and native
+source requests; the compiler retains the relationship between a kernel's
+launch math and body. Kernel declarations still constrain accepted values with
+their range and multiple predicates. The small JIT caller exercises a source
+default, a different explicit override, and an invalid override followed by
+successful compiler reuse.
+
+Ten shape-dependent or derived bindings remain in the adapter, including Q8
+output bounds and quantizer group capacity. Stage selection and state geometry
+also remain native model policy; fixed source defaults alone are not a complete
+model-owned bootstrap.
 
 Configuration is a model entry/specialization boundary. Reusable functions,
 templates, and motifs receive dimensions and layout facts as explicit SSA

@@ -335,6 +335,7 @@ loom_cc_test(
     srcs = ["jit_test.cc"],
     args = ["--jit_sources=$(rootpath :testdata/jit/sources.txt)"],
     data = [
+        "testdata/jit/config.loom",
         "testdata/jit/control.loom",
         "testdata/jit/sources.txt",
         "testdata/jit/stage.loom",

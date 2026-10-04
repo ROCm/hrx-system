@@ -9,9 +9,9 @@ The shared `control.loom` has isolated and packed entry points. Source owns
 prefill/decode selection and the proposal, target/verify, feedback, and catch-up
 sequence. The native model adapter publishes validated descriptors, invokes
 that program once per epoch, joins both timelines, and commits host progress.
-Cold stage configuration, state geometry, and descriptor construction still
-live in the model adapter; moving the submission chain does not make those
-model-independent.
+Cold stage selection, dynamic configuration, state geometry, and descriptor
+construction still live in the model adapter; moving the submission chain does
+not make those model-independent.
 
 ## Boundaries and the information each owns
 
@@ -40,6 +40,10 @@ isolated and packed stages, checks their layout agreement, loads shared weights,
 records commands, creates the VM program/native capabilities, and allocates retained
 rows and MTP state. Each stage can have different kernel choices while binding
 the same model storage. No session gets another copy of the weights or code.
+
+The model catalog includes `config.loom` for fixed specialization bounds.
+Native startup supplies run-dependent overrides to the same public compiler
+configuration interface; reusable device helpers still take explicit operands.
 
 The source JIT shares immutable compiler state and uses the standard loomc task
 pool for concurrent native requests. Each worker owns reusable scratch; each

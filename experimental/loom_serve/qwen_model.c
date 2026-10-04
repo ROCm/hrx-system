@@ -573,9 +573,9 @@ static iree_status_t qwen_allocate_mtp(loom_serve_qwen_model_t* model) {
   return status;
 }
 
-// The adapter owns model dimensions; the compiler owns placement, launch
-// counts, and native entry mapping. Shape values are applied once during
-// command materialization and travel with its kernel source requests.
+// The source catalog supplies fixed specialization defaults. These overrides
+// select run-dependent bounds; the compiler owns placement, launch counts and
+// native entry mapping. Applied values travel with the kernel source requests.
 static iree_status_t qwen_compile_stage(loom_serve_qwen_model_t* model,
                                         iree_string_view_t root,
                                         loom_serve_qwen_shape_t shape,
@@ -591,22 +591,14 @@ static iree_status_t qwen_compile_stage(loom_serve_qwen_model_t* model,
       {"runner.qwen38.prefill_token_count", shape.token_capacity},
       {"runner.qwen38.span_capacity", shape.span_capacity},
       {"ggml.linear_q4k_q8_1_x4.token_capacity", token_capacity},
-      {"ggml.linear_q4k_q8_1_x4.output_capacity", 48},
       {"ggml.linear_q5k_q8_1_x4.token_capacity", token_capacity},
-      {"ggml.linear_q5k_q8_1_x4.output_capacity", 17408},
-      {"ggml.linear_q6k_f32_decode.output_capacity", 5120},
       {"ggml.linear_q6k_q8_1_x4.token_capacity", token_capacity},
-      {"ggml.linear_q6k_q8_1_x4.output_capacity", 248320},
       {"ggml.linear_q8_0_q8_1_x4.token_capacity", q8_capacity},
       {"ggml.linear_q8_0_q8_1_x4.output_capacity",
        q8_capacity == 1 ? 1024 : 5120},
       {"ggml.quantize_q8_1_x4.group_capacity", 136 * token_capacity},
       {"qwen38.attention.cache_capacity", model->context_capacity},
       {"qwen38.attention.pool_capacity", model->cache.capacity},
-      {"qwen38.attention.decode_split_count", 10},
-      {"qwen38.ffn.input_size", 5120},
-      {"qwen38.ffn.output_size", 17408},
-      {"qwen38.greedy_argmax.output_capacity", 248320},
   };
   char text[IREE_ARRAYSIZE(values)][32];
   loomc_config_binding_t bindings[IREE_ARRAYSIZE(values)];
@@ -1030,8 +1022,8 @@ static iree_status_t qwen_grow_blocks(loom_serve_qwen_model_t* model,
                                        &completion);
 }
 
-// One allocation-free epoch path owns input validation, immutable uploads,
-// target/catch-up ordering, and the final host publication frontier.
+// One allocation-free epoch path validates inputs, publishes immutable uploads,
+// invokes source-owned submissions, and joins the host publication frontier.
 static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
                                 iree_host_size_t shape_index,
                                 iree_host_size_t span_count,
