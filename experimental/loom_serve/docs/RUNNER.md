@@ -67,7 +67,10 @@ page growth allocates more device backing during steady-state execution.
 
 `qwen_load_weights` delegates cold residency to `loom_serve_weights_load`.
 It resolves all target/MTP parameter sharing before I/O, so each unique tensor
-is loaded once. The model's [`weights.loom`](../models/qwen38/weights.loom)
+is loaded once. Each call selects explicit reflected roots from one checkpoint
+domain. Distinct domains, such as an immutable base and its LoRA adapter, load
+separately and cannot collide through equal tensor names. Recorded commands
+can bind roots from both domains. The model's [`weights.loom`](../models/qwen38/weights.loom)
 export `prepare_weight(buffer key) -> (buffer command_root, i64 byte_length)`
 selects each tensor's transformation. Empty root and zero length mean unchanged
 file bytes. Otherwise the loader checks the exact reflected size and JITs each

@@ -69,6 +69,13 @@ command.program.def public @raw() launch(%weights: buffer, %output: buffer) {
   command.return
 }
 
+command.program.def public @domains() launch(%base: buffer, %adapter: buffer, %output: buffer) {
+  %left = command.parameter %base, "raw" : view<8xi32>
+  %right = command.parameter %adapter, "raw" : view<8xi32>
+  kernel.launch @consume(%left, %right, %right, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}
+
 command.program.def public @size() launch(%weights: buffer, %output: buffer) {
   %data = command.parameter %weights, "size" : view<8xi32>
   kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)

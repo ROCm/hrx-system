@@ -22,6 +22,30 @@ namespace {
 
 class WeightsTest : public ::testing::Test {
  protected:
+  void WriteCheckpoint(const std::string& path, int32_t offset) {
+    // Actual safetensors input exercises file indexing and queued reads. Each
+    // tensor has eight distinct words; transformations are not idempotent.
+    const std::string header =
+        R"({"a":{"dtype":"I32","shape":[8],"data_offsets":[0,32]},)"
+        R"("b":{"dtype":"I32","shape":[8],"data_offsets":[32,64]},)"
+        R"("raw":{"dtype":"I32","shape":[8],"data_offsets":[64,96]},)"
+        R"("d":{"dtype":"I32","shape":[8],"data_offsets":[96,128]}})";
+    std::ofstream file(path, std::ios::binary);
+    for (unsigned i = 0; i < 8; ++i) {
+      file.put(
+          static_cast<char>(static_cast<uint64_t>(header.size()) >> (8 * i)));
+    }
+    file.write(header.data(), header.size());
+    for (int tensor = 1; tensor <= 4; ++tensor) {
+      for (int element = 0; element < 8; ++element) {
+        const int32_t value = offset + tensor * 10 + element;
+        file.write(reinterpret_cast<const char*>(&value), sizeof(value));
+      }
+    }
+    file.close();
+    ASSERT_TRUE(file.good());
+  }
+
   void SetUp() override {
     IREE_ASSERT_OK(loom_serve_device_create(IREE_SV("amdgpu"), allocator_,
                                             &device_owner_));
@@ -34,28 +58,7 @@ class WeightsTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_jit_create(
         device_, dispatch_, iree_make_cstring_view(directory_.c_str()), nullptr,
         allocator_, &jit_));
-
-    // Actual safetensors input exercises file indexing and queued reads. Each
-    // tensor has eight distinct words; transformations are not idempotent.
-    const std::string header =
-        R"({"a":{"dtype":"I32","shape":[8],"data_offsets":[0,32]},)"
-        R"("b":{"dtype":"I32","shape":[8],"data_offsets":[32,64]},)"
-        R"("raw":{"dtype":"I32","shape":[8],"data_offsets":[64,96]},)"
-        R"("d":{"dtype":"I32","shape":[8],"data_offsets":[96,128]}})";
-    std::ofstream file(path_.path(), std::ios::binary);
-    for (unsigned i = 0; i < 8; ++i) {
-      file.put(
-          static_cast<char>(static_cast<uint64_t>(header.size()) >> (8 * i)));
-    }
-    file.write(header.data(), header.size());
-    for (int tensor = 1; tensor <= 4; ++tensor) {
-      for (int element = 0; element < 8; ++element) {
-        const int32_t value = tensor * 10 + element;
-        file.write(reinterpret_cast<const char*>(&value), sizeof(value));
-      }
-    }
-    file.close();
-    ASSERT_TRUE(file.good());
+    WriteCheckpoint(path_.path(), 0);
     iree_hal_buffer_params_t params = {};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
@@ -86,6 +89,9 @@ class WeightsTest : public ::testing::Test {
     if (path_.Exists()) {
       EXPECT_TRUE(path_.Remove());
     }
+    if (adapter_path_.Exists()) {
+      EXPECT_TRUE(adapter_path_.Remove());
+    }
   }
 
   iree_status_t Compile(iree_host_size_t index, const char* root) {
@@ -95,25 +101,47 @@ class WeightsTest : public ::testing::Test {
                                   &compiled_[index]);
   }
 
-  iree_status_t Load(iree_host_size_t shared_count, iree_host_size_t count) {
-    std::array<loom_serve_weight_stage_t, 3> stages = {};
-    for (iree_host_size_t i = 0; i < count; ++i) {
-      stages[i] = {loom_serve_jit_stage_program(compiled_[i]),
-                   buffers_[i].data()};
-    }
+  loom_serve_weight_root_t Root(iree_host_size_t stage_index,
+                                uint32_t root_index) {
+    const loom_cmd_program_t* program =
+        loom_serve_jit_stage_program(compiled_[stage_index]);
+    const loom_cmd_program_parameter_root_t root =
+        loom_cmd_program_parameter_root_at(program, root_index);
+    return {program, root, &buffers_[stage_index][root.fixed_buffer_index]};
+  }
+
+  iree_status_t LoadRoots(iree_host_size_t shared_count,
+                          iree_host_size_t root_count,
+                          const loom_serve_weight_root_t* roots,
+                          const std::string& path) {
     const std::string policy = directory_ + "/policy.loom";
     return loom_serve_weights_load(
         device_, transfer_, dispatch_, jit_,
-        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, shared_count, count,
-        stages.data(), iree_make_cstring_view(path_.path().c_str()),
+        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, shared_count, root_count, roots,
+        iree_make_cstring_view(path.c_str()),
         iree_make_cstring_view(policy.c_str()), allocator_);
   }
 
+  iree_status_t Load(iree_host_size_t shared_count, iree_host_size_t count) {
+    std::array<loom_serve_weight_root_t, 6> roots = {};
+    iree_host_size_t root_count = 0;
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      const loom_cmd_program_t* program =
+          loom_serve_jit_stage_program(compiled_[i]);
+      for (uint32_t r = 0; r < program->parameter_roots.count; ++r) {
+        roots[root_count++] = Root(i, r);
+      }
+    }
+    return LoadRoots(shared_count, root_count, roots.data(), path_.path());
+  }
+
   void Run(iree_host_size_t index, int32_t first) {
-    IREE_ASSERT_OK(loom_serve_jit_stage_record(
-        compiled_[index], iree_hal_queue_family(dispatch_),
-        IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, buffers_[index].data(),
-        &commands_[index]));
+    if (!commands_[index]) {
+      IREE_ASSERT_OK(loom_serve_jit_stage_record(
+          compiled_[index], iree_hal_queue_family(dispatch_),
+          IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, buffers_[index].data(),
+          &commands_[index]));
+    }
     const iree_hal_buffer_binding_t binding = {output_buffer_, 0,
                                                sizeof(output_)};
     uint64_t completion = 0;
@@ -150,6 +178,8 @@ class WeightsTest : public ::testing::Test {
   std::string directory_;
   // Owned test archive removed after queue resources retire.
   iree::testing::TempFilePath path_{"loom_weights", ".safetensors"};
+  // Independent checkpoint with colliding keys and distinct values.
+  iree::testing::TempFilePath adapter_path_{"loom_adapter", ".safetensors"};
   // Compiled immutable parameter reflections.
   std::array<loom_serve_jit_stage_t*, 3> compiled_ = {};
   // Populated owned weight roots, including partially failed loads.
@@ -176,6 +206,24 @@ TEST_F(WeightsTest, MultiplePreparersAndSharedRootsPrepareEachTensorOnce) {
 TEST_F(WeightsTest, CanonicalWeightsNeedNoPreparationOrLeadingSharedGroup) {
   IREE_ASSERT_OK(Compile(0, "raw"));
   IREE_ASSERT_OK(Load(0, 1));
+  Run(0, 90);
+}
+
+TEST_F(WeightsTest, SeparateCheckpointDomainsRetainSharedBaseStorage) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  IREE_ASSERT_OK(Compile(1, "domains"));
+  const loom_serve_weight_root_t base[] = {Root(1, 0), Root(0, 0)};
+  IREE_ASSERT_OK(LoadRoots(2, 2, base, path_.path()));
+  EXPECT_EQ(buffers_[0][0], buffers_[1][0]);
+  EXPECT_EQ(buffers_[1][1], nullptr);
+  Run(0, 90);
+
+  const loom_serve_weight_root_t adapter = Root(1, 1);
+  IREE_ASSERT_OK(LoadRoots(0, 1, &adapter, adapter_path_.path()));
+  EXPECT_NE(buffers_[1][0], buffers_[1][1]);
+  Run(1, 290);
+  Run(1, 290);
   Run(0, 90);
 }
 

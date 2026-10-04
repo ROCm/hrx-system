@@ -190,9 +190,10 @@ pointwise operations, while the normalization reduction accumulates in F32.
 The model-independent, test-only `component_check` executes one command twice
 and compares its entire BF16 output. Repeated `--input` arguments supply raw
 buffers in command binding order; the output and optional reflected workspace
-follow them. All fixed roots come from the specified checkpoint. A model with
-several checkpoint domains uses separate component invocations here, not a
-flattened tensor namespace. This tool is not the image server.
+follow them. Repeated `--weights` paths supply checkpoints in reflected
+parameter-root order. Each root is loaded from its own checkpoint domain;
+equal tensor names in different domains remain independent. Parameter-free
+commands need no checkpoint. This tool is not the image server.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \

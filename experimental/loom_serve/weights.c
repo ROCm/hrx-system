@@ -410,50 +410,42 @@ iree_status_t loom_serve_weights_load(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
     iree_hal_queue_t* dispatch, loom_serve_jit_t* jit,
     iree_hal_command_buffer_mode_t command_mode,
-    iree_host_size_t shared_stage_count, iree_host_size_t stage_count,
-    const loom_serve_weight_stage_t* stages, iree_string_view_t weights_path,
+    iree_host_size_t shared_root_count, iree_host_size_t root_count,
+    const loom_serve_weight_root_t* roots, iree_string_view_t weights_path,
     iree_string_view_t policy_path, iree_allocator_t host_allocator) {
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_host_size_t capacity =
-      shared_stage_count ? stages[0].program->parameters.count : 0;
-  for (iree_host_size_t i = shared_stage_count; i < stage_count; ++i) {
-    capacity += stages[i].program->parameters.count;
+      shared_root_count ? roots[0].program->parameters.count : 0;
+  for (iree_host_size_t i = shared_root_count; i < root_count; ++i) {
+    capacity += roots[i].program->parameters.count;
   }
   weight_span_t* spans = NULL;
   iree_status_t status = iree_allocator_malloc_array(
       host_allocator, capacity, sizeof(*spans), (void**)&spans);
   iree_host_size_t span_count = 0;
-  if (shared_stage_count && iree_status_is_ok(status)) {
-    loom_cmd_program_parameter_root_t root =
-        loom_cmd_program_parameter_root_at(stages[0].program, 0);
-    for (iree_host_size_t i = 1; i < shared_stage_count; ++i) {
-      const loom_cmd_program_parameter_root_t other =
-          loom_cmd_program_parameter_root_at(stages[i].program, 0);
+  if (shared_root_count && iree_status_is_ok(status)) {
+    loom_cmd_program_parameter_root_t root = roots[0].root;
+    for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
+      const loom_cmd_program_parameter_root_t other = roots[i].root;
       root.required_byte_length =
           iree_max(root.required_byte_length, other.required_byte_length);
       root.minimum_alignment =
           iree_max(root.minimum_alignment, other.minimum_alignment);
     }
-    status = weight_resolve_root(device, stages[0].program, root, &span_count,
-                                 spans, host_allocator, &stages[0].buffers[0]);
+    status = weight_resolve_root(device, roots[0].program, root, &span_count,
+                                 spans, host_allocator, roots[0].buffer);
   }
   if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 1; i < shared_stage_count; ++i) {
-      stages[i].buffers[0] = stages[0].buffers[0];
-      iree_hal_buffer_retain(stages[i].buffers[0]);
+    for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
+      *roots[i].buffer = *roots[0].buffer;
+      iree_hal_buffer_retain(*roots[i].buffer);
     }
   }
-  for (iree_host_size_t i = shared_stage_count;
-       i < stage_count && iree_status_is_ok(status); ++i) {
-    const loom_cmd_program_t* program = stages[i].program;
-    for (uint32_t r = 0;
-         r < program->parameter_roots.count && iree_status_is_ok(status); ++r) {
-      const loom_cmd_program_parameter_root_t root =
-          loom_cmd_program_parameter_root_at(program, r);
-      status = weight_resolve_root(device, program, root, &span_count, spans,
-                                   host_allocator,
-                                   &stages[i].buffers[root.fixed_buffer_index]);
-    }
+  for (iree_host_size_t i = shared_root_count;
+       i < root_count && iree_status_is_ok(status); ++i) {
+    status = weight_resolve_root(device, roots[i].program, roots[i].root,
+                                 &span_count, spans, host_allocator,
+                                 roots[i].buffer);
   }
   iree_io_parameter_index_t* index = NULL;
   if (iree_status_is_ok(status)) {

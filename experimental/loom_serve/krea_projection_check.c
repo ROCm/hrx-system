@@ -132,10 +132,12 @@ static iree_status_t projection_initialize(projection_check_t* check,
                                 "projection source has incompatible bindings");
       continue;
     }
-    const loom_serve_weight_stage_t stage = {program, &check->weights[i]};
+    const loom_serve_weight_root_t root = {
+        program, loom_cmd_program_parameter_root_at(program, 0),
+        &check->weights[i]};
     status = loom_serve_weights_load(
         device, loom_serve_device_transfer_queue(check->owner), dispatch,
-        check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &stage,
+        check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
         iree_make_cstring_view(checkpoints[i]),
         iree_make_cstring_view(policy_path), allocator);
     if (iree_status_is_ok(status)) {

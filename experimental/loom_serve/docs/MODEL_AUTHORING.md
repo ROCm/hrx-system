@@ -252,9 +252,12 @@ A first tensor-in/tensor-out adapter has this ownership flow:
    run-dependent specialization.
 2. It passes the stages' reflected parameter roots to
    `loom_serve_weights_load`, with its own source weight policy. The adapter
-   establishes identical parameter placement for the shared-stage prefix;
+   establishes identical parameter placement for the shared-root prefix;
    equal allocation sizes alone do not establish that contract. An unchanged
-   checkpoint layout uses the empty preparation root shown above.
+   checkpoint layout uses the empty preparation root shown above. Each load
+   selects explicit roots from one checkpoint domain; base and adapter files
+   load their own roots before the composed command is recorded. Equal tensor
+   keys across different domains never imply shared residency.
 3. It allocates model input, output and persistent-state buffers. Reflected
    transient requirements supply workspace size and alignment. It records the
    stages with `loom_serve_jit_stage_record`; recorded commands retain their
