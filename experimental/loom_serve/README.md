@@ -72,6 +72,19 @@ Weights, KV pools, model forward stages, scheduling policy, and transport are
 separate from this coarse execution boundary. None is inferred from buffer
 contents or command names by the native submission code.
 
+## Native Krea image generation
+
+The [Krea 2 Turbo guide](models/krea2/README.md#generate-an-image-natively)
+provides a second, non-autoregressive caller: prompt and seed through native
+IREE tokenization, source-JIT text encoding, conditioning, eight denoising steps
+and the complete VAE to a PPM image, with optional softwatercolor LoRA.
+[`generate.c`](models/krea2/generate.c) uses the same device, source compiler,
+weight loader and execution timelines as Qwen. Its cold request leaf owns
+model-specific prompt layout and mathematical tables; the shared runner knows
+none of those semantics. All model loops and buffer lifetimes are authored in
+command programs. This is a one-image CLI, not an image HTTP service or a
+claim that the Qwen packed scheduler can schedule arbitrary modalities.
+
 ## Shared Qwen execution
 
 `qwen_model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: shared

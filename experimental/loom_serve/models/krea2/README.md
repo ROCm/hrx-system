@@ -1,14 +1,17 @@
-# Krea 2 Turbo component port
+# Krea 2 Turbo source-JIT image generator
 
-This is a **native token-IDs-to-RGB port, not an image-serving endpoint**.
+This includes a **native prompt-to-image CLI, not an HTTP image endpoint**.
 The `sample_image` and `sample_image_adapted` roots run through Loom's live
 source JIT, queued safetensors loading, command programs and shared device
 ownership. Their caller supplies validated token IDs, initial packed noise,
 timesteps, encoder/DiT rotary tables, the encoder key mask, Euler deltas and
 the VAE affine table. The command computes its own Qwen3-VL taps and derives
-the combined text/image key mask on-device. Prompt tokenization and
-request-data construction are still external; this is not yet a native
-prompt-to-image path.
+the combined text/image key mask on-device. The native
+[`krea2_generate`](generate.c) caller uses IREE tokenization and constructs
+the small request tables and initial noise, then writes the final image.
+No captured tensors, Python inference library or compiled model artifact is
+required by that path. The independent reference libraries below are used
+only for numerical qualification.
 
 The command fuses the encoder taps into 2,560-wide text features and projects
 them into the DiT's 6,144-wide prefix once. It batches time conditioning, then
@@ -70,6 +73,58 @@ The weight-file SHA256 values are:
 | `text_encoder/model.safetensors` | `8434db05292f95e0041589a7c82abeb39385be59c85b54ae11caa7b45e9f4f13` |
 | `vae/diffusion_pytorch_model.safetensors` | `ab1b61103959913d6c7e628cf793dbb2ca4726a40a3b3ae206c52b8e75bf6f08` |
 | `softwatercolor.safetensors` | `3805e8655f19fbcac116542685e3f78f3a642e8fbfb857b5352bb32a4b3d445a` |
+
+## Generate an image natively
+
+Build with the repository's configured build service. Run the resulting binary
+on a qualified GFX11 AMDGPU host with the source tree and checkpoints above:
+
+```sh
+build_tools/bin/iree-bazel-build --config=asan \
+  //experimental/loom_serve:krea2_generate
+bazel-bin/experimental/loom_serve/krea2_generate \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" \
+  --prompt="A small brass robot tending red flowers in a sunlit greenhouse, watercolor illustration" \
+  --seed=42 --height=384 --width=384 --text_tokens=512 \
+  --output=/path/to/robot.ppm
+```
+
+Add `--adapter="$krea_adapter/softwatercolor.safetensors" --strength=1`
+for watercolor adaptation. Strength zero retains the base image. Output is
+binary PPM; an image viewer or `magick robot.ppm robot.png` can convert it.
+The executable prints reflected weight/workspace bytes and the JIT's kernel
+count. The instrumented build is for correctness, not timing comparisons.
+Use the execution host's normal exclusive-run mechanism on a shared device.
+
+This caller creates one immutable set of encoder, Turbo, optional LoRA and VAE
+parameter domains, then one retained command and reflected scratch allocation.
+Request inputs upload once. A single source command runs all model stages;
+only completed F32 RGB comes back. Both normal completion and failure drain
+accepted work before borrowed upload/readback storage is freed.
+
+The native request leaf is [`request.h`](request.h)/[`request.c`](request.c).
+Model-specific constants and prompt layout remain there, not in the shared
+runner. The cold C math preserves F32-to-BF16 encoder rotary and F64-to-F32 DiT
+rotary. It does not silently substitute the current VM's F32-only approximate
+transcendentals for the canonical F64 path. Device model control remains in
+the `.loom` command program; this finite transform needs no host step loop or
+per-request VM instance.
+
+`--seed` is an unsigned decimal 64-bit key for Philox4x32-10 followed by a
+double-precision Box-Muller transform, rounded through F32 to BF16 in packed
+order. It defines this runner's sequence, not PyTorch's CPU generator sequence.
+Same-request repetition is checked; cross-platform libm differences are not
+promised to yield identical random floating-point bits. Comparisons with other
+implementations consume the same initial noise.
+
+Pixel dimensions are multiples of 16, and their patch-grid area must be a
+multiple of 16. `--text_tokens` is a positive multiple of 16 and bounds
+retained text including the suffix. The native tokenizer truncates prompt text,
+right-pads before the live suffix, and masks the additional physical tile rows.
+These values specialize the live source, not a precompiled shape catalog.
+The CLI currently runs one fresh image per invocation; it is not the Qwen
+HTTP endpoint and does not claim concurrent image scheduling.
 
 ## Independent numerical reference
 
@@ -181,10 +236,9 @@ The native checker queues work through the existing execution domain and waits
 only for its complete-array observations. Cleanup drains accepted work while
 borrowed host payloads remain alive.
 
-The remaining native producer is Qwen3-VL text encoding.
-The denoising qualification below receives captured conditioning and uses an
+The early denoising qualification below receives captured conditioning and uses an
 external VAE for its preview images; the later image-command qualification
-includes native text fusion, projection and VAE decoding.
+includes native text encoding, fusion, projection and VAE decoding.
 This component does not yet establish a generic model bootstrap, image request
 scheduler, full-model weight-preparation strategy, or throughput result.
 
@@ -1518,8 +1572,9 @@ is:
 
 Output remains F32 `[3,latent_height*8,latent_width*8]` RGB in `[-1,1]`.
 Only that completed output returns to the host. Request tokenization, initial
-noise and the small mathematical tables still come from the caller; removing
-captured hidden states does not yet make this a native prompt-serving endpoint.
+noise and the small mathematical tables come from the native caller described
+above. The component check here deliberately isolates the device command from
+that request producer.
 
 ```sh
 python -B experimental/loom_serve/models/krea2/check_encoded_sample.py \
@@ -1563,3 +1618,70 @@ On 8-bit RGB, base/active-adapter pixel RMSE is 12.9284/8.6123 against the
 canonical images and 9.6886/9.5391 against the previous native images using
 external encoder taps. These are observations for one prompt, not a general
 image-quality or performance claim. Retained output occupies 45 MiB.
+
+### Native prompt/seed qualification
+
+[`check_request.py`](check_request.py) invokes the actual C request producer
+without loading model weights or a GPU. It compares fourteen prompt/shape cases
+against the real Hugging Face tokenizer, Diffusers rotary and scheduler, VAE
+configuration and an independently implemented Philox/Box-Muller sequence.
+The integer noise oracle first passes the published
+[Random123 known answers](https://github.com/DEShawResearch/random123/blob/main/tests/kat_vectors).
+Every request is prepared twice. Cases include empty input, Unicode, embedded
+and terminal special tokens, long/truncated text, three seeds including all-one
+bits, and 32/512 retained text rows at 256×384/384×384 pixels.
+
+```sh
+build_tools/bin/iree-bazel-build --config=asan \
+  //experimental/loom_serve:krea2_request_check \
+  //experimental/loom_serve:krea2_generate \
+  //experimental/loom_serve:component_check
+build_tools/bin/iree-bazel-test --config=asan \
+  //experimental/loom_serve:krea2_request_test
+python -B experimental/loom_serve/models/krea2/check_request.py \
+  --native=bazel-bin/experimental/loom_serve/krea2_request_check \
+  --checkpoint="$krea_weights" \
+  --encoder_reference=/path/to/new-encoder-reference \
+  --output=/path/to/new-request-results
+python -B experimental/loom_serve/models/krea2/check_generate.py \
+  --native bazel-bin/experimental/loom_serve/krea2_generate \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --requests=/path/to/new-request-results \
+  --output=/path/to/new-generation-results
+```
+
+The request matrix passed 154 input comparisons with zero differing bits,
+including both rotary formats, shifted schedule and BF16 normal noise.
+All 28 preparations were deterministic; output occupies 13.35 MiB. Empty,
+negative, trailing-junk, fractional and overflowing seeds are rejected before
+checkpoint access. Encoder trig uses the established BF16 primitive envelope
+for cross-library math, although no value required it in this run. The C tests
+additionally exercise admission and failed-allocation ownership without
+accessing a tokenizer or device.
+
+The generation driver tests the actual prompt/seed CLI at two image/text shapes,
+repeated base output, zero-strength identity and active adaptation. A separate
+canonical reference process consumes the same initial noise but owns all other
+conditioning and model arithmetic. Finally, the native command observer runs
+twice with independently checked input files; its quantized RGB must equal the
+production CLI's PPM pixels exactly. Reference pixel errors are reported and
+images inspected separately, not counted as independent primitive passes.
+Retained image/reference output stays below 64 MiB; checkpoints are reused.
+
+The first fresh-prompt qualification passed all four final-pixel composition
+checks. Repeated base and zero-strength PPM files were byte-identical; active
+LoRA changed both images. The independently generated reference images used
+the same initial noise, not a supposedly equivalent seed from another PRNG.
+
+| Prompt / image shape / text rows | Base pixel RMSE | Active LoRA pixel RMSE | Workspace |
+| --- | ---: | ---: | ---: |
+| Deer in forest / 384×384 / 512 | 5.56493 | 14.21315 | 317.8 MiB |
+| Brass robot in greenhouse / 256×384 / 32 | 20.82349 | 10.35997 | 137.2 MiB |
+
+RMSE is over 8-bit RGB channels against the independent reference. Visual
+inspection preserves both prompts' subjects, composition and distinct adapter
+rendering, but the outputs are not reference-identical. These are bounded
+numerical/ownership witnesses, not distributional quality or performance
+measurements. Final image/reference artifacts occupy 15.3 MiB.

@@ -415,6 +415,76 @@ loom_cc_library(
 )
 endif()
 
+loom_cc_library(
+  NAME
+    krea2_request
+  HDRS
+    "models/krea2/request.h"
+  SRCS
+    "models/krea2/request.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::tokenizer
+    iree::tokenizer::vocab
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    krea2_request_test
+  SRCS
+    "models/krea2/request_test.cc"
+  DEPS
+    ::krea2_request
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_binary(
+  NAME
+    krea2_request_check
+  SRCS
+    "models/krea2/request_check.c"
+  DEPS
+    ::krea2_request
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::path
+    iree::base::tooling::flags
+    iree::io::file_handle
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+  TESTONLY
+)
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    krea2_generate
+  SRCS
+    "models/krea2/generate.c"
+  DEPS
+    ::device
+    ::execution
+    ::jit
+    ::krea2_request
+    ::weights
+    iree::base
+    iree::base::internal
+    iree::base::internal::json
+    iree::base::internal::path
+    iree::base::tooling::flags
+    iree::hal
+    iree::io::file_handle
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    loom::binding::c::loomc
+    loom::target::arch::cmd::program
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_binary(
   NAME
