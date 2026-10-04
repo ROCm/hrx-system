@@ -58,20 +58,22 @@ template.def<@attention.masked_gqa_128_bf16> device @masked_gqa_128_bf16(%tokens
   %mask_view = buffer.view %mask[%origin] : buffer -> view<[%tokens]xi8>
   %query_bytes = index.constant 4352 : offset
   %score_bytes = index.constant 6144 : offset
-  %probability_bytes = index.constant 3072 : offset
+  %probability_bytes = index.constant 2304 : offset
   %product_bytes = index.constant 8192 : offset
   %query_stage = buffer.alloca<workgroup> align(16) %query_bytes : buffer
   %score_stage = buffer.alloca<workgroup> align(16) %score_bytes : buffer
   %probability_high_stage = buffer.alloca<workgroup> align(16) %probability_bytes : buffer
   %probability_low_stage = buffer.alloca<workgroup> align(16) %probability_bytes : buffer
+  %probability_tail_stage = buffer.alloca<workgroup> align(16) %probability_bytes : buffer
   %product_stage = buffer.alloca<workgroup> align(16) %product_bytes : buffer
   %query_layout = encoding.layout.strided [1, 136] : encoding<layout>
-  %probability_layout = encoding.layout.strided [1, 24] : encoding<layout>
+  %probability_layout = encoding.layout.strided [1, 18] : encoding<layout>
   %query_stage_view = buffer.view %query_stage[%origin] : buffer -> view<16x136xbf16>
   %query_transposed = buffer.view %query_stage[%origin] : buffer -> view<128x16xbf16, %query_layout>
   %scores = buffer.view %score_stage[%origin] : buffer -> view<64x24xf32>
   %probability_high_view = buffer.view %probability_high_stage[%origin] : buffer -> view<16x64xbf16, %probability_layout>
   %probability_low_view = buffer.view %probability_low_stage[%origin] : buffer -> view<16x64xbf16, %probability_layout>
+  %probability_tail_view = buffer.view %probability_tail_stage[%origin] : buffer -> view<16x64xbf16, %probability_layout>
   %products = buffer.view %product_stage[%origin] : buffer -> view<16x128xf32>
 
   scf.for %iteration = [%start to %loads step %unit] unroll {
@@ -136,31 +138,39 @@ template.def<@attention.masked_gqa_128_bf16> device @masked_gqa_128_bf16(%tokens
     %score2 = view.load %scores[%lane, %row2] : view<64x24xf32> -> f32
     %score3 = view.load %scores[%lane, %row3] : view<64x24xf32> -> f32
     %raw_scores = vector.from_elements %score0, %score1, %score2, %score3 : vector<4xf32>
-    %scaled_scores = vector.mulf %raw_scores, %scale : vector<4xf32>
-    %masked_scores = vector.select %valid_rows, %scaled_scores, %lowest : vector<4xf32>
+    // Keep the running maximum in raw-dot-product units. Subtracting it
+    // before scaling avoids cancellation between rounded scaled logits.
+    %masked_scores = vector.select %valid_rows, %raw_scores, %lowest : vector<4xf32>
     %block_max = kernel.subgroup.reduce<maxnumf> %masked_scores : vector<4xf32>
     %next_max = vector.maxnumf %current_max, %block_max : vector<4xf32>
-    %delta = vector.subf %masked_scores, %next_max : vector<4xf32>
+    %raw_delta = vector.subf %masked_scores, %next_max : vector<4xf32>
+    %delta = vector.mulf %raw_delta, %scale : vector<4xf32>
     %exponentials = vector.expf<afn> %delta : vector<4xf32>
     %probability = vector.select %valid_rows, %exponentials, %zero4 : vector<4xf32>
     %block_sum = kernel.subgroup.reduce<addf> %probability : vector<4xf32>
-    %old_delta = vector.subf %current_max, %next_max : vector<4xf32>
+    %old_raw_delta = vector.subf %current_max, %next_max : vector<4xf32>
+    %old_delta = vector.mulf %old_raw_delta, %scale : vector<4xf32>
     %old_scale = vector.expf<afn> %old_delta : vector<4xf32>
     %scaled_sum = vector.mulf %current_sum, %old_scale : vector<4xf32>
     %next_sum = vector.addf %scaled_sum, %block_sum : vector<4xf32>
 
-    // Preserve the F32 probability using two BF16 contractions. The residual
-    // is signed and small; both products accumulate directly in F32.
+    // A third BF16 term retains the residual lost by a two-term expansion.
+    // Independent contractions keep small corrections intact until the sum.
     %probability_high = vector.fptrunc %probability : vector<4xf32> to vector<4xbf16>
     %high_f32 = vector.extf %probability_high : vector<4xbf16> to vector<4xf32>
     %residual = vector.subf %probability, %high_f32 : vector<4xf32>
     %probability_low = vector.fptrunc %residual : vector<4xf32> to vector<4xbf16>
+    %low_f32 = vector.extf %probability_low : vector<4xbf16> to vector<4xf32>
+    %tail = vector.subf %residual, %low_f32 : vector<4xf32>
+    %probability_tail = vector.fptrunc %tail : vector<4xf32> to vector<4xbf16>
     scf.for %row_offset = [%start to %rows_per_wave step %unit] unroll {
       %row = index.add %row0, %row_offset : index
       %high = vector.extract %probability_high[%row_offset] : vector<4xbf16> -> bf16
       %low = vector.extract %probability_low[%row_offset] : vector<4xbf16> -> bf16
+      %tail = vector.extract %probability_tail[%row_offset] : vector<4xbf16> -> bf16
       view.store %high, %probability_high_view[%row, %lane] : bf16, view<16x64xbf16, %probability_layout>
       view.store %low, %probability_low_view[%row, %lane] : bf16, view<16x64xbf16, %probability_layout>
+      view.store %tail, %probability_tail_view[%row, %lane] : bf16, view<16x64xbf16, %probability_layout>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
@@ -168,21 +178,25 @@ template.def<@attention.masked_gqa_128_bf16> device @masked_gqa_128_bf16(%tokens
       %channel = index.add %product_column, %channel_tile : index
       %global_channel = index.add %key_value_channel, %channel : index
       %initial = vector.fragment<init> %zero4 shape [%tile, %tile] : vector<4xf32>
-      %result = scf.for %key_tile = [%start to %keys_per_tile step %tile](%accumulator = %initial : vector<4xf32>) -> (vector<4xf32>) unroll schedule(recurrence) {
+      %high_result, %low_result, %tail_result = scf.for %key_tile = [%start to %keys_per_tile step %tile](%high_accumulator = %initial : vector<4xf32>, %low_accumulator = %initial : vector<4xf32>, %tail_accumulator = %initial : vector<4xf32>) -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) unroll schedule(recurrence) {
         %token = index.add %key_origin, %key_tile : index
         %tile_valid = index.cmp ult, %token, %tokens : index
-        %next = scf.if %tile_valid -> (vector<4xf32>) {
+        %next_high, %next_low, %next_tail = scf.if %tile_valid -> (vector<4xf32>, vector<4xf32>, vector<4xf32>) {
           %lhs_high = vector.fragment.load<lhs> %probability_high_view[%start, %key_tile] shape [%tile, %tile] : view<16x64xbf16, %probability_layout> -> vector<16xbf16>
           %lhs_low = vector.fragment.load<lhs> %probability_low_view[%start, %key_tile] shape [%tile, %tile] : view<16x64xbf16, %probability_layout> -> vector<16xbf16>
+          %lhs_tail = vector.fragment.load<lhs> %probability_tail_view[%start, %key_tile] shape [%tile, %tile] : view<16x64xbf16, %probability_layout> -> vector<16xbf16>
           %rhs = vector.fragment.load<rhs> %value_view[%token, %global_channel] shape [%tile, %tile] : view<[%tokens]x[%key_value_width]xbf16> -> vector<16xbf16>
-          %high_product = vector.mma %lhs_high, %rhs, %accumulator : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
-          %product = vector.mma %lhs_low, %rhs, %high_product : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
-          scf.yield %product : vector<4xf32>
+          %high_product = vector.mma %lhs_high, %rhs, %high_accumulator : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
+          %low_product = vector.mma %lhs_low, %rhs, %low_accumulator : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
+          %tail_product = vector.mma %lhs_tail, %rhs, %tail_accumulator : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
+          scf.yield %high_product, %low_product, %tail_product : vector<4xf32>, vector<4xf32>, vector<4xf32>
         } else {
-          scf.yield %accumulator : vector<4xf32>
+          scf.yield %high_accumulator, %low_accumulator, %tail_accumulator : vector<4xf32>, vector<4xf32>, vector<4xf32>
         }
-        scf.yield %next : vector<4xf32>
+        scf.yield %next_high, %next_low, %next_tail : vector<4xf32>, vector<4xf32>, vector<4xf32>
       }
+      %correction = vector.addf %low_result, %tail_result : vector<4xf32>
+      %result = vector.addf %high_result, %correction : vector<4xf32>
       vector.fragment.store<result> %result, %products[%start, %channel] shape [%tile, %tile] : vector<4xf32>, view<16x128xf32>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)

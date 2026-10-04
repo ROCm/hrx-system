@@ -11,4 +11,5 @@ kernels/attention.loom
 block_pointwise.loom
 kernels/pointwise.loom
 transformer.loom
+stack.loom
 block_adapters.loom

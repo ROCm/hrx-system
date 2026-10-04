@@ -1,0 +1,39 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+template.decl @krea2.block_forward(%tokens: index, %layer: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.transformer_stack(%tokens: index, %layers: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+
+// A block writes its final output only after all original-input consumers.
+// Later layers can therefore advance caller storage in place. Internal
+// intermediates remain separate, with lifetimes packed across layer boundaries.
+template.def<@krea2.transformer_stack> @krea2_transformer_stack(%tokens: index, %layers: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  template.apply<@krea2.block_forward>(%tokens, %zero, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  scf.for %layer = [%one to %layers step %one] unroll {
+    template.apply<@krea2.block_forward>(%tokens, %layer, %adapted, %parameters, %adapter, %output, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
+  template.return
+}
+
+command.program.def public @transformer_stack() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %layers = index.constant 28 : index
+  %adapted = scalar.constant false : i1
+  // Adapter and strength operands have no uses in the base specialization.
+  template.apply<@krea2.transformer_stack>(%tokens, %layers, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %input, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @transformer_stack_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %layers = index.constant 28 : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.transformer_stack>(%tokens, %layers, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

@@ -6,10 +6,11 @@ source JIT, queued safetensors loading, command programs, and shared device
 ownership. The first transformer block's normalization and fused time
 modulation, dense projections, fused Q/K normalization/rotation, masked
 attention, gated residuals, and SwiGLU have independent component comparisons.
-One complete transformer block, with or without LoRA, also runs as a single
-queued command. Full text
-conditioning, all DiT layers, denoising, and VAE decoding are not yet
-implemented here.
+All 28 transformer blocks, with or without LoRA, run as one queued command
+with shared kernels and reusable single-block workspace. The caller still
+supplies combined hidden states, time modulation, rotary tables, and a mask.
+Native text conditioning, time conditioning, the final velocity head,
+denoising updates, and VAE decoding are the remaining prompt-to-image path.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -336,10 +337,18 @@ one valid key, which the model guarantees through its image tokens.
 Some actual Krea heads have logits around 30,000 with much smaller differences
 between keys. Computing those logits directly in F32 loses meaningful bits
 before softmax subtraction. This implementation contracts `Q * (K - K_last)`;
-the shared per-query offset cancels mathematically in softmax. Centered keys
-and softmax probabilities each use a high BF16 value plus a BF16 residual.
-Their native matrix products accumulate in F32, as does the running output.
-No F64 device arithmetic or expanded global tensor is required.
+the shared per-query offset cancels mathematically in softmax. The online
+maximum remains in unscaled dot-product units; subtraction precedes scaling
+to preserve small logit differences. Centered keys use two BF16 terms, while
+softmax probabilities use three. The three probability/value contractions
+accumulate independently in F32, combining the two corrections before adding
+the high term. This preserves small contributions through cancellation without
+F64 device arithmetic or an expanded global tensor.
+
+The probability tiles use a padded 18-element column stride in LDS. The
+gfx1151 compile report records 25,600 bytes of workgroup storage, 128 vector
+registers, 28 scalar registers, and no spills. This retains the original
+two-term kernel's modeled occupancy tier; it does not establish equal runtime.
 
 ```sh
 python -B experimental/loom_serve/models/krea2/check_attention.py \
@@ -360,8 +369,8 @@ All 24 repeated comparisons pass, covering 58,195,968 output elements. Ungated
 attention uses the unchanged BF16 envelope against F64. Gate fusion is bitwise
 equivalent to CPU gating of that independently qualified attention output.
 The script separately records composed F64 error: full-size gated relative L2
-is 3.10e-5 for base inputs and 9.84e-5 for adapter-conditioned inputs. Eleven
-base values and three style values exceed a single-operation envelope after
+is 1.35e-5 for base inputs and 5.00e-5 for adapter-conditioned inputs. Two
+base values and no style values exceed a single-operation envelope after
 the additional BF16 rounding; exact gate equivalence accounts for the fusion.
 The external model's corresponding relative L2 values are 1.13e-3 and 1.45e-3.
 These numbers describe this component boundary, not full-model image quality
@@ -451,13 +460,14 @@ does not represent an entire prompt/image request.
 
 That exact command-composition check passes at both 16 image rows and all
 1088 captured rows. Against the independent complete-block calculation,
-full-size relative L2 error is 0.00039353; the pinned external model's error
-is 0.00107261. The complete block has 38,790 values outside the single-operation
+full-size relative L2 error is 0.00038576; the pinned external model's error
+is 0.00107261. The complete block has 37,803 values outside the single-operation
 BF16 envelope, versus 371,847 for the external block; those counts remain
 visible because accumulated rounding is not a single-operation error bound.
-The acceptance gate requires exact native composition and complete-block
-relative L2 no worse than the external baseline. It does not loosen the
-individual component tolerances. These are block-zero accuracy observations,
+The acceptance gate requires independently qualified components and exact
+native composition. Complete-block relative L2 remains a diagnostic; the
+full-stack gate below measures accumulated error at its consumer boundary.
+These are block-zero accuracy observations,
 not a full-model image or performance result.
 
 ### Block LoRA projections
@@ -528,22 +538,94 @@ block with that native chain bit-for-bit. Zero strength also must reproduce
 the original base command exactly. Each phase runs at 16 and 1088 tokens,
 twice per native command, retaining approximately 900 MiB of regenerable
 tensors. Full-size accumulated error is measured against a separate CPU/F64
-block and must be no worse than the corresponding external block.
+block alongside the corresponding external block.
 
 Both phases pass all component and exact-composition gates. Zero strength
 preserves the base block bit-for-bit at both shapes. For the 1088-token active
 adapter case, relative L2 error against the independent block calculation is
-0.00046856, versus 0.00246784 for the external model. Maximum absolute BF16
-error is 4 versus 8; the single-operation envelope counts are 61,419 versus
+0.00047224, versus 0.00246784 for the external model. Maximum absolute BF16
+error is 4 versus 8; the single-operation envelope counts are 60,420 versus
 661,300 and remain visible as accumulated block error. This qualifies one
 LoRA-enabled block, not the full 28-block denoiser or an image.
 
-The same source also passes at layer 27 using actual final-layer inputs,
-including every component, exact queued composition, and zero-strength
-identity at 16 and 1088 rows. Full-size relative L2 error is 0.00030801 for
-base and 0.00049999 for the active adapter; the external block's respective
-errors are 0.00099433 and 0.00117133. Layer-zero retained outputs remain
-bit-for-bit unchanged. Layer selection changes parameter keys, not numerical
-kernels: the base and adapted commands still use ten and fifteen kernels.
-This establishes parameterized block execution, not yet native composition
-of the entire stack.
+The layer-27 fixture exercises actual final-layer inputs, including every
+component, exact queued composition, and zero-strength identity at 16 and
+1088 rows. Layer selection changes parameter keys, not numerical kernels:
+the base and adapted commands still use ten and fifteen kernels.
+
+### Complete transformer stack
+
+[`stack.loom`](stack.loom) composes all 28 blocks into `transformer_stack` and
+`transformer_stack_adapted`. Both receive the initial combined text/image
+hidden states, shared time modulation, rotary tables, and key mask. The
+adapted root additionally receives the adapter parameter root and strength.
+These are transformer-stack boundaries, not prompt-to-image entry points.
+
+The first block writes caller-owned output. Subsequent blocks advance it in
+place: the block's final residual is its only output writer, and all original
+input consumers finish before that write. Intermediate values remain separate
+within each block. Command-program lifetime planning reuses that transient
+storage across layers; the host neither loops over layers nor allocates their
+intermediates. Layer identity changes parameter keys, not cached kernels.
+
+[`check_stack.py`](check_stack.py) uses the captured first-step inputs from
+`reference_stack.py`. It advances separate native and CPU/F64 chains. Each
+native block is observed against independent arithmetic on its actual incoming
+state, alongside the external block on that same state. These local rankings
+are diagnostics: valid BF16 rounding can make one block locally farther from
+F64 while the complete stack is closer. The native image rows consumed by the
+final head must be no farther from
+the independent F64 chain than the external image rows. All-row differences
+remain diagnostics: the model discards text rows before its head, and padded
+text rows are never valid attention keys. This accumulated gate supplements
+the individual component and exact-fusion checks above.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_stack.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_stack_reference" --image_rows=576 \
+  --output=/path/to/new-stack-results
+```
+
+The single queued stack must equal the separate native chain byte-for-byte
+on repeated executions. Zero-strength LoRA must equal the base stack exactly.
+Reflection must show ten base or fifteen adapted kernels, exactly 28 unique
+layers of parameters, and the same workspace size as a single block.
+`--rows 16` selects the reduced-shape stress check; `--rows 1088` selects the
+entire captured 384x384/text sequence. Neither run is a performance benchmark.
+`--image_rows` supplies the consumer boundary explicitly; 384x384 images have
+576 packed image rows. Reduced-shape checks use the smaller retained suffix.
+`--phase=base` or `--phase=style` limits a diagnostic run to one phase.
+
+The driver retains less than 200 MiB across both default shapes and phases,
+overwriting its per-layer scratch tensors. Only this qualification process
+loads an independent external model alongside the native model. The native
+command uses one immutable copy of each required base and adapter tensor.
+
+Both shapes pass repeated exact composition and zero-strength identity. At
+1088 rows, the 576 image rows have these relative L2 errors against the
+independent F64 chain:
+
+| Phase | Loom | External implementation | Transient workspace |
+| --- | ---: | ---: | ---: |
+| Base | 0.87358% | 0.90045% | 149.8125 MiB |
+| Softwatercolor, strength 1 | 1.49491% | 1.62224% | 150.078125 MiB |
+
+The base stack references 364 unique parameter tensors and ten kernels;
+the adapted stack references 812 tensors across two checkpoint roots and
+fifteen kernels. Each tensor has one storage range, and workspace matches a
+single block exactly. These are first-step transformer-state measurements,
+not denoised-image quality or server throughput.
+
+For explicit whole-block numerical checks, `component_check` accepts a
+positive `--relative_l2_tolerance` to select an aggregate error gate. Zero
+retains the default elementwise gate. Its JSON records both the selected
+comparison and element-envelope differences, and nonfinite pairs fail in
+either mode. Exact composition uses zero absolute and relative elementwise
+tolerances, followed by a byte comparison in the Python driver. Local stack
+observations use `--report_only`: both executions report their differences
+without an error bound, while nonfinite pairs and execution failures still
+fail. The driver applies the unchanged accumulated bound at the image-row
+consumer boundary.
