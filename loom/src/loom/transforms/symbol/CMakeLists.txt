@@ -241,6 +241,7 @@ loom_cc_library(
     loom::error::error_defs
     loom::ir
     loom::ops::cfg
+    loom::ops::command
     loom::ops::func
     loom::ops::low
     loom::ops::op_defs
