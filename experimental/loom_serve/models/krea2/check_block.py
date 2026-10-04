@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Qualify normalization independently, then the exact modulation fusion.
+"""Qualify normalization, modulation fusion, and normalized rotary embeddings.
 
 The scalar BF16 modulation rounds after each multiply/add. A single BF16
 normalization step can become several output steps after cancellation, so a
@@ -19,6 +19,7 @@ import subprocess
 
 import numpy as np
 import torch
+from diffusers.models.embeddings import apply_rotary_emb
 from safetensors import safe_open
 
 parser = argparse.ArgumentParser()
@@ -46,6 +47,13 @@ def encoded(value):
 with safe_open(str(args.checkpoint), framework="pt") as checkpoint:
     # The executed reference loads the table as BF16, despite F32 file storage.
     table = checkpoint.get_tensor("blocks.0.mod.lin").reshape(6, 6144).bfloat16()
+    head_scales = {
+        name: checkpoint.get_tensor(f"blocks.0.attn.qknorm.{letter}norm.scale")
+        .bfloat16()
+        .add(1)
+        .double()
+        for name, letter in (("query", "q"), ("key", "k"))
+    }
 
 for phase in ("base", "style"):
     source = args.reference / f"{phase}-block0-input.bf16"
@@ -122,4 +130,140 @@ for phase in ("base", "style"):
         ),
         flush=True,
     )
-print("PASS: independent normalization and bitwise modulation fusion.", flush=True)
+    cosine_path = args.reference / f"{phase}-block0-cosine.f32"
+    sine_path = args.reference / f"{phase}-block0-sine.f32"
+    cosine = torch.from_numpy(np.fromfile(cosine_path, dtype="<f4")).reshape(rows, 128)
+    sine = torch.from_numpy(np.fromfile(sine_path, dtype="<f4")).reshape(rows, 128)
+    for name, heads in (("query", 48), ("key", 12)):
+        source_path = args.reference / f"{phase}-block0-{name}.bf16"
+        values = load(source_path).reshape(rows, heads, 128).double()
+        normalized = (
+            values
+            * (values.square().mean(dim=-1, keepdim=True) + 1e-5).rsqrt()
+            * head_scales[name]
+        ).bfloat16()
+        external_norm = load(
+            args.reference / f"{phase}-block0-{name}_norm.bf16"
+        ).reshape_as(normalized)
+        error = external_norm.float() - normalized.float()
+        print(
+            json.dumps(
+                dict(
+                    phase=phase,
+                    component=name,
+                    check="external_head_norm_vs_f64",
+                    different=int((error != 0).sum()),
+                    relative_l2=float(error.norm() / normalized.float().norm()),
+                )
+            ),
+            flush=True,
+        )
+
+        expected_norm_path = args.output / f"{phase}-{name}-norm-f64.bf16"
+        actual_norm_path = args.output / f"{phase}-{name}-norm.bf16"
+        expected_norm_path.write_bytes(encoded(normalized))
+        subprocess.run(
+            [
+                *args.checker,
+                "--model=" + str(args.model),
+                "--weights=" + str(args.checkpoint),
+                f"--config=krea2.block_tokens={rows}",
+                f"--root=block0_{name}_norm",
+                "--input=" + str(source_path),
+                "--expected=" + str(expected_norm_path),
+                "--actual=" + str(actual_norm_path),
+            ],
+            check=True,
+        )
+        qualified_norm = load(actual_norm_path).reshape_as(normalized)
+
+        # Evaluate the published interleaved rotation independently, and check
+        # that interpretation against the pinned library's actual operation.
+        # As with modulation, exact fusion uses independently qualified norm
+        # results; cancellation can amplify a single BF16 normalization step.
+        pairs = qualified_norm.float().reshape(rows, heads, 64, 2)
+        rotated = torch.stack((-pairs[..., 1], pairs[..., 0]), dim=-1).flatten(-2)
+        expected = (
+            qualified_norm.float() * cosine[:, None, :] + rotated * sine[:, None, :]
+        ).bfloat16()
+        library_rotated = apply_rotary_emb(
+            qualified_norm.unsqueeze(0), (cosine, sine), sequence_dim=1
+        ).squeeze(0)
+        assert encoded(expected) == encoded(library_rotated), (
+            "rotary oracle disagreement"
+        )
+        f64_rotated = (
+            apply_rotary_emb(normalized.unsqueeze(0), (cosine, sine), sequence_dim=1)
+            .squeeze(0)
+            .float()
+        )
+        for count in (rows, 16):
+            # The small specialization takes the last image rows, not the
+            # unrotated text prefix. Tables retain their original coordinates.
+            start = rows - count
+            prefix = args.output / f"{phase}-{name}-rotary-{count}"
+            input_path = source_path
+            cosine_input = cosine_path
+            sine_input = sine_path
+            if count != rows:
+                input_path = prefix.with_suffix(".input.bf16")
+                input_path.write_bytes(encoded(values[start:].bfloat16()))
+                cosine_input = prefix.with_suffix(".cosine.f32")
+                cosine_input.write_bytes(cosine[start:].numpy().astype("<f4").tobytes())
+                sine_input = prefix.with_suffix(".sine.f32")
+                sine_input.write_bytes(sine[start:].numpy().astype("<f4").tobytes())
+            expected_path = prefix.with_suffix(".expected.bf16")
+            expected_path.write_bytes(encoded(expected[start:]))
+            print(
+                json.dumps(
+                    dict(phase=phase, component=name, check="fused_rotary", rows=count)
+                ),
+                flush=True,
+            )
+            subprocess.run(
+                [
+                    *args.checker,
+                    "--model=" + str(args.model),
+                    "--weights=" + str(args.checkpoint),
+                    f"--config=krea2.block_tokens={count}",
+                    f"--root=block0_{name}_rotary",
+                    "--input=" + str(input_path),
+                    "--input=" + str(cosine_input),
+                    "--input=" + str(sine_input),
+                    "--expected=" + str(expected_path),
+                    "--actual=" + str(prefix.with_suffix(".actual.bf16")),
+                    "--atol=0",
+                    "--rtol=0",
+                ],
+                check=True,
+            )
+            actual_path = prefix.with_suffix(".actual.bf16")
+            assert actual_path.read_bytes() == expected_path.read_bytes(), (
+                "non-bitwise rotary fusion"
+            )
+            actual = load(actual_path).reshape(count, heads, 128).float()
+            reference = f64_rotated[start:]
+            error = actual - reference
+            print(
+                json.dumps(
+                    dict(
+                        phase=phase,
+                        component=name,
+                        check="rotary_vs_f64_normalization",
+                        rows=count,
+                        different=int((error != 0).sum()),
+                        outside_single_bf16_envelope=int(
+                            (
+                                error.abs()
+                                > 0.0001220703125 + 0.0078125 * reference.abs()
+                            ).sum()
+                        ),
+                        relative_l2=float(error.norm() / reference.norm()),
+                    )
+                ),
+                flush=True,
+            )
+print(
+    "PASS: normalization, exact modulation fusion, and normalized rotary embeddings.",
+    flush=True,
+)
