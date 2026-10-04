@@ -160,6 +160,36 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    device
+  HDRS
+    "device.h"
+  SRCS
+    "device.c"
+  DEPS
+    ::execution
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::hal
+    iree::hal::drivers
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    device_test
+  SRCS
+    "device_test.cc"
+  DEPS
+    ::device
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     module
   HDRS
     "module.h"
@@ -226,16 +256,13 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/stage.loom"
   DEPS
+    ::device
     ::execution
     ::jit
     ::module
-    iree::async
-    iree::async::util::proactor_pool
     iree::base
-    iree::base::threading
     iree::base::tooling::flags
     iree::hal
-    iree::hal::drivers
     iree::module::hal::types
     iree::testing::gtest
     iree::testing::gtest_main
@@ -334,16 +361,13 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/weights/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/weights/stages.loom"
   DEPS
+    ::device
     ::execution
     ::jit
     ::weights
-    iree::async
-    iree::async::util::proactor_pool
     iree::base
-    iree::base::threading
     iree::base::tooling::flags
     iree::hal
-    iree::hal::drivers
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file
@@ -368,19 +392,16 @@ loom_cc_library(
   DEPS
     ::block_pool
     ::command
+    ::device
     ::execution
     ::jit
     ::module
     ::program
     ::qwen_schedule
     ::weights
-    iree::async
-    iree::async::util::proactor_pool
     iree::base
     iree::base::internal::path
-    iree::base::threading
     iree::hal
-    iree::hal::drivers
     iree::io::file_handle
     iree::module::hal::types
     iree::tokenizer

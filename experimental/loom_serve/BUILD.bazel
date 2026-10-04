@@ -284,6 +284,32 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "device",
+    srcs = ["device.c"],
+    hdrs = ["device.h"],
+    deps = [
+        ":execution",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers",
+    ],
+)
+
+loom_cc_test(
+    name = "device_test",
+    srcs = ["device_test.cc"],
+    deps = [
+        ":device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "module",
     srcs = ["module.c"],
     hdrs = ["module.h"],
@@ -347,17 +373,14 @@ loom_cc_test(
         "//loom/config/execute:amdgpu_hal",
     ]),
     deps = [
+        ":device",
         ":execution",
         ":jit",
         ":module",
         "//loom/binding/c:loomc",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers",
         "//runtime/src/iree/module/hal:types",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -447,17 +470,14 @@ loom_cc_test(
         "//loom/config/execute:amdgpu_hal",
     ]),
     deps = [
+        ":device",
         ":execution",
         ":jit",
         ":weights",
         "//loom/binding/c:loomc",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/testing:temp_file",
@@ -475,6 +495,7 @@ loom_cc_library(
     deps = [
         ":block_pool",
         ":command",
+        ":device",
         ":execution",
         ":jit",
         ":module",
@@ -483,13 +504,9 @@ loom_cc_library(
         ":weights",
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
-        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/module/hal:types",
         "//runtime/src/iree/tokenizer",

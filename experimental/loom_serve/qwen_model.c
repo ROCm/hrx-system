@@ -14,16 +14,13 @@
 
 #include "experimental/loom_serve/block_pool.h"
 #include "experimental/loom_serve/command.h"
+#include "experimental/loom_serve/device.h"
 #include "experimental/loom_serve/execution.h"
 #include "experimental/loom_serve/jit.h"
 #include "experimental/loom_serve/module.h"
 #include "experimental/loom_serve/program.h"
 #include "experimental/loom_serve/weights.h"
-#include "iree/async/frontier_tracker.h"
-#include "iree/async/util/proactor_pool.h"
 #include "iree/base/internal/path.h"
-#include "iree/base/threading/numa.h"
-#include "iree/hal/drivers/init.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tokenizer/vocab/vocab.h"
@@ -65,19 +62,17 @@ typedef struct qwen_stage_t {
 struct loom_serve_qwen_model_t {
   // Host allocation policy used for all owned resources.
   iree_allocator_t allocator;
-  // Async I/O service outliving device teardown.
-  iree_async_proactor_pool_t* proactor_pool;
-  // Completion registry outliving the device group.
-  iree_async_frontier_tracker_t* frontier_tracker;
-  // Owned GPU device and its allocation domain.
+  // Shared runtime owner outliving every model resource and host I/O payload.
+  loom_serve_device_t* device_owner;
+  // GPU device and allocation domain borrowed from device_owner.
   iree_hal_device_t* device;
-  // Device group owning the semaphore namespace.
+  // Semaphore namespace borrowed from device_owner.
   iree_hal_device_group_t* group;
   // Borrowed exact dispatch queue, retained by execution.
   iree_hal_queue_t* dispatch;
   // Borrowed exact transfer queue, retained by execution.
   iree_hal_queue_t* transfer;
-  // Ordered stage/input submissions with independently retired feedback.
+  // Borrowed stage/input timelines with independently retired feedback.
   loom_serve_execution_t* execution;
   // Optional flag-selected profiling session, ended after accepted work drains.
   iree_hal_profiling_from_flags_t* profiling;
@@ -199,58 +194,6 @@ struct loom_serve_qwen_row_t {
 static iree_string_view_t qwen_file_text(iree_io_file_contents_t* contents) {
   return iree_make_string_view((const char*)contents->const_buffer.data,
                                contents->const_buffer.data_length);
-}
-
-static iree_hal_queue_t* qwen_select_queue(
-    iree_hal_device_t* device, iree_hal_queue_family_role_flags_t role) {
-  const iree_hal_device_queue_spec_t* queues =
-      iree_hal_device_spec_queues(iree_hal_device_spec(device));
-  for (iree_host_size_t i = 0; i < queues->family_count; ++i) {
-    if (queues->families[i].provisioned_queue_count &&
-        iree_all_bits_set(queues->families[i].role_flags, role)) {
-      return iree_hal_device_queue(device, i, 0);
-    }
-  }
-  return NULL;
-}
-
-static iree_status_t qwen_create_device(loom_serve_qwen_model_t* runner) {
-  iree_hal_driver_registry_t* registry = NULL;
-  IREE_RETURN_IF_ERROR(
-      iree_hal_driver_registry_allocate(runner->allocator, &registry));
-  iree_status_t status = iree_hal_register_all_available_drivers(registry);
-  if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_create(
-        iree_numa_node_count(), NULL,
-        iree_async_proactor_pool_options_default(), runner->allocator,
-        &runner->proactor_pool);
-  }
-  if (iree_status_is_ok(status)) {
-    iree_hal_device_create_params_t params =
-        iree_hal_device_create_params_default();
-    params.proactor_pool = runner->proactor_pool;
-    params.event_sink = iree_hal_device_event_sink_stderr();
-    status = iree_hal_create_device(registry, IREE_SV("amdgpu"), &params,
-                                    runner->allocator, &runner->device);
-  }
-  iree_hal_driver_registry_free(registry);
-  IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(iree_async_frontier_tracker_create(
-      iree_async_frontier_tracker_options_default(), runner->allocator,
-      &runner->frontier_tracker));
-  IREE_RETURN_IF_ERROR(iree_hal_device_group_create_from_device(
-      runner->device, runner->frontier_tracker, runner->allocator,
-      &runner->group));
-  runner->dispatch = qwen_select_queue(
-      runner->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
-  runner->transfer = qwen_select_queue(
-      runner->device, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
-  if (!runner->dispatch || !runner->transfer) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "device needs dispatch and transfer queues");
-  }
-  return loom_serve_execution_create(runner->dispatch, runner->transfer,
-                                     runner->allocator, &runner->execution);
 }
 
 static iree_status_t qwen_check_layouts(loom_serve_qwen_model_t* runner) {
@@ -662,7 +605,13 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
                                   model->shape_count * sizeof(*model->shapes)),
         (void**)&model->shapes));
   }
-  IREE_RETURN_IF_ERROR(qwen_create_device(model));
+  IREE_RETURN_IF_ERROR(loom_serve_device_create(
+      IREE_SV("amdgpu"), model->allocator, &model->device_owner));
+  model->device = loom_serve_device_handle(model->device_owner);
+  model->group = loom_serve_device_group(model->device_owner);
+  model->dispatch = loom_serve_device_dispatch_queue(model->device_owner);
+  model->transfer = loom_serve_device_transfer_queue(model->device_owner);
+  model->execution = loom_serve_device_execution(model->device_owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       model->device, model->dispatch, options->source_directory,
       &options->kernel_sanitizer, model->allocator, &model->jit));
@@ -823,12 +772,8 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
   }
   iree_allocator_free(model->allocator, model->shapes);
   iree_allocator_free(model->allocator, model->stages);
-  loom_serve_execution_release(model->execution);
-  iree_hal_device_group_release(model->group);
   loom_serve_jit_destroy(model->jit);
-  iree_hal_device_release(model->device);
-  iree_async_frontier_tracker_release(model->frontier_tracker);
-  iree_async_proactor_pool_release(model->proactor_pool);
+  loom_serve_device_destroy(model->device_owner);
   iree_tokenizer_free(model->tokenizer);
   iree_allocator_free(model->allocator, model);
   return status;
