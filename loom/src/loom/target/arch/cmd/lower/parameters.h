@@ -99,14 +99,16 @@ typedef struct loom_cmd_parameter_layout_t {
 // Parameters are packed independently within each source root in source
 // traversal order using a canonical 256-byte minimum alignment.
 //
-// Exact ordinary view results rooted in launch bindings are preserved in the
-// same lower plan, so fixed/rebindable roles and subranges propagate without
-// per-launch rediscovery. |bindings| is populated in source launch-binding
-// order. |out_requirements| owns its tables through |host_allocator|.
-// |out_layout| references only |scratch_arena| storage and remains valid until
-// that arena is reset.
+// Exact view results rooted in launch bindings or parameter results are
+// preserved in the same lower plan. Parameter-relative offsets compose with
+// the parameter's placement; fixed/rebindable roles and subranges propagate
+// without per-launch rediscovery. |bindings| is populated in source
+// launch-binding order. |out_requirements| owns its tables through
+// |host_allocator|. |out_layout| references only |scratch_arena| storage and
+// remains valid until that arena is reset. The module's value-ordinal scratch
+// is acquired temporarily; no source IR is changed.
 iree_status_t loom_cmd_parameter_layout_build(
-    const loom_module_t* module, loom_func_like_t program,
+    loom_module_t* module, loom_func_like_t program,
     const loom_value_fact_table_t* fact_table,
     iree_arena_allocator_t* scratch_arena, iree_allocator_t host_allocator,
     loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
