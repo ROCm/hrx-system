@@ -284,6 +284,7 @@ for phase in ("base", "zero", "style"):
         for name, module in (
             ("attention_input", block.attn),
             ("feed_forward_input", block.ff),
+            ("feed_forward_product", block.ff.down),
             ("attention_context", block.attn.to_out[0]),
             ("attention_residual", block.norm2),
         ):
