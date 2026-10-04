@@ -286,10 +286,14 @@ advances one encoder hidden buffer in place and omits unused decoder/vision
 weights. It derives the downstream key mask from encoder visibility, so the
 caller cannot accidentally give two stages different text masks.
 
-The [native image CLI](../models/krea2/generate.c) is the complete caller:
-IREE prompt tokenization and cold request tables, source JIT, immutable weight
-loading, queued request upload, command execution, final RGB download and PPM
-output. It requires no external encoder or captured tensors. Its
+The [native image CLI](../models/krea2/generate.c) uses a
+[retained model leaf](../models/krea2/model.h): IREE prompt tokenization and
+cold request tables, source JIT, immutable weight loading, queued request upload,
+command execution and final RGB download. The CLI encodes that output as PPM.
+The model can serve successive serialized calls without warm JIT, weight loads
+or device allocations. Its output view lasts until the next call; the consumer
+copies or encodes it before then. It requires no external encoder or captured
+tensors. Its
 [request leaf](../models/krea2/request.h) contains model-specific template and
 numeric setup, separate from shared serving code. That cold C boundary retains
 canonical F64 rotary math that the current VM's F32 transcendental lowering

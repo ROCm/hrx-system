@@ -557,8 +557,41 @@ loom_cc_binary(
 )
 
 loom_cc_binary(
-    name = "krea2_generate",
-    srcs = ["models/krea2/generate.c"],
+    name = "krea2_model_check",
+    testonly = True,
+    srcs = ["models/krea2/model_check.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":krea2_model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_test(
+    name = "krea2_model_test",
+    srcs = ["models/krea2/model_test.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":krea2_model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "krea2_model",
+    srcs = ["models/krea2/model.c"],
+    hdrs = ["models/krea2/model.h"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
         "//runtime/config/hal:driver_amdgpu",
@@ -572,14 +605,28 @@ loom_cc_binary(
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:path",
-        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
         "//runtime/src/iree/tokenizer",
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+    ],
+)
+
+loom_cc_binary(
+    name = "krea2_generate",
+    srcs = ["models/krea2/generate.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":krea2_model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
     ],
 )
 

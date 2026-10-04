@@ -254,28 +254,23 @@ static void krea2_schedule(uint8_t* times, uint8_t* deltas) {
   }
 }
 
-iree_status_t loom_serve_krea2_request_create(
-    const iree_tokenizer_t* tokenizer,
-    loom_serve_krea2_request_options_t options, iree_string_view_t prompt,
-    iree_allocator_t host_allocator, loom_serve_krea2_request_t** out_request) {
-  *out_request = NULL;
-  if (!options.height || options.height > 8192 || options.height % 16 ||
-      !options.width || options.width > 8192 || options.width % 16 ||
-      !options.text_tokens || options.text_tokens > 65536 ||
-      options.text_tokens % 16 || !isfinite(options.strength)) {
+iree_status_t loom_serve_krea2_request_measure(
+    uint32_t height, uint32_t width, uint32_t text_tokens,
+    iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT]) {
+  if (!height || height > 8192 || height % 16 || !width || width > 8192 ||
+      width % 16 || !text_tokens || text_tokens > 65536 || text_tokens % 16) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "expected supported 16-aligned pixel/text extents "
-                            "and finite adapter strength");
+                            "expected supported 16-aligned pixel/text extents");
   }
-  const uint32_t images = (options.height / 16) * (options.width / 16);
-  const uint32_t texts = options.text_tokens;
+  const uint32_t images = (height / 16) * (width / 16);
+  const uint32_t texts = text_tokens;
   const uint32_t tokens = images + texts;
   if (images < 16 || images % 16 || tokens > 65536) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "image patches must be a multiple of 16; combined "
                             "text/image extent must fit 65536 tokens");
   }
-  const iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT] = {
+  const iree_host_size_t lengths[LOOM_SERVE_KREA2_INPUT_COUNT] = {
       images * 64 * 2,
       (texts + 34) * 4,
       (texts + 48) * 128 * 2,
@@ -287,6 +282,24 @@ iree_status_t loom_serve_krea2_request_create(
       8 * 4,
       4,
       2 * 16 * 4};
+  memcpy(sizes, lengths, sizeof(lengths));
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_krea2_request_create(
+    const iree_tokenizer_t* tokenizer,
+    loom_serve_krea2_request_options_t options, iree_string_view_t prompt,
+    iree_allocator_t host_allocator, loom_serve_krea2_request_t** out_request) {
+  *out_request = NULL;
+  if (!isfinite(options.strength)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "adapter strength must be finite");
+  }
+  iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT];
+  IREE_RETURN_IF_ERROR(loom_serve_krea2_request_measure(
+      options.height, options.width, options.text_tokens, sizes));
+  const uint32_t images = (options.height / 16) * (options.width / 16);
+  const uint32_t texts = options.text_tokens;
   iree_host_size_t total =
       iree_host_align(sizeof(loom_serve_krea2_request_t), 16);
   for (int i = 0; i < LOOM_SERVE_KREA2_INPUT_COUNT; ++i) {

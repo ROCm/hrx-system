@@ -50,6 +50,13 @@ typedef enum loom_serve_krea2_input_e loom_serve_krea2_input_t;
 
 typedef struct loom_serve_krea2_request_t loom_serve_krea2_request_t;
 
+// Validates external geometry and measures the exact input byte lengths. Model
+// residency and request allocation share this layout; no tokenizer or device
+// is needed to size the retained input buffers. Failure leaves sizes unchanged.
+iree_status_t loom_serve_krea2_request_measure(
+    uint32_t height, uint32_t width, uint32_t text_tokens,
+    iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT]);
+
 // Validates geometry/strength and encodes prefix+prompt with right truncation,
 // middle padding and a live suffix using the model's immutable tokenizer.
 // Builds the encoder/DiT rotary, shifted Euler schedule, packed BF16 normal

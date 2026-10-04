@@ -126,6 +126,57 @@ These values specialize the live source, not a precompiled shape catalog.
 The CLI currently runs one fresh image per invocation; it is not the Qwen
 HTTP endpoint and does not claim concurrent image scheduling.
 
+### Retained model ownership
+
+[`model.h`](model.h)/[`model.c`](model.c) is the reusable native residency
+behind the CLI. Creation loads the tokenizer, specializes and records one
+source command, streams each parameter domain once, and allocates the reusable
+device input/output/workspace buffers. Serialized `model_generate` calls take
+only prompt, seed and adapter strength. They neither compile nor reload weights
+nor allocate device backing. The image and text shape are fixed when this
+residency is created.
+
+The returned F32 NCHW RGB is borrowed until the next generation or destruction.
+A consumer encodes or copies it before submitting another request. Host request
+storage survives every accepted upload, including execution failure; teardown
+joins accepted work before releasing the device. Invalid request data rejected
+before submission leaves the model usable. A device execution failure is
+terminal for its owner. The application serializes calls; this leaf does not
+create an HTTP server, request queue, or implicit model worker.
+
+The full-checkpoint reuse witness alternates two prompts, applies LoRA, then
+repeats the original base image in one adapted residency. A nonfinite-strength
+request precedes every valid call. Its final pixels are compared exactly with
+isolated CLI outputs; repeated base F32 bytes must also match. An older qualified
+CLI can be supplied as `--generator` to test a residency refactor against its
+predecessor rather than against itself.
+
+```sh
+build_tools/bin/iree-bazel-build --config=asan \
+  //experimental/loom_serve:krea2_generate \
+  //experimental/loom_serve:krea2_model_check
+build_tools/bin/iree-bazel-test --config=asan \
+  //experimental/loom_serve:krea2_model_test \
+  //experimental/loom_serve:krea2_request_test
+python -B experimental/loom_serve/models/krea2/check_model.py \
+  --generator bazel-bin/experimental/loom_serve/krea2_generate \
+  --checker bazel-bin/experimental/loom_serve/krea2_model_check \
+  --model experimental/loom_serve/models/krea2 \
+  --checkpoint "$krea_weights" \
+  --adapter "$krea_adapter/softwatercolor.safetensors" \
+  --output /path/to/new-residency-results
+```
+
+This uses the reference environment's NumPy and Pillow only to compare output
+pixels. It retains less than 16 MiB of final images and logs and runs under the
+execution host's exclusive device lease.
+
+The first retained qualification passed all four exact pixel comparisons and
+the repeated F32 identity check, with one JIT, one residency and one load per
+parameter domain. The extracted CLI also reproduced both previously qualified
+image/text shapes exactly; all 154 independent request-input comparisons still
+had zero differing bits. These are correctness checks, not throughput results.
+
 ## Independent numerical reference
 
 Install a PyTorch build supporting the reference GPU in a separate Python
