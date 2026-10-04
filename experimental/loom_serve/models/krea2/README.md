@@ -1,14 +1,15 @@
 # Krea 2 Turbo source-JIT image generator
 
-This includes a **native prompt-to-image CLI, not an HTTP image endpoint**.
+This includes a native prompt-to-image CLI and a retained HTTP image server.
 The `sample_image` and `sample_image_adapted` roots run through Loom's live
 source JIT, queued safetensors loading, command programs and shared device
 ownership. Their caller supplies validated token IDs, initial packed noise,
 timesteps, encoder/DiT rotary tables, the encoder key mask, Euler deltas and
 the VAE affine table. The command computes its own Qwen3-VL taps and derives
 the combined text/image key mask on-device. The native
-[`krea2_generate`](generate.c) caller uses IREE tokenization and constructs
-the small request tables and initial noise, then writes the final image.
+[`krea2_generate`](generate.c) and [`krea2_server`](server.c) callers use IREE
+tokenization and construct the small request tables and initial noise, then
+return the final image. The server shares one residency across requests.
 No captured tensors, Python inference library or compiled model artifact is
 required by that path. The independent reference libraries below are used
 only for numerical qualification.
@@ -123,8 +124,9 @@ multiple of 16. `--text_tokens` is a positive multiple of 16 and bounds
 retained text including the suffix. The native tokenizer truncates prompt text,
 right-pads before the live suffix, and masks the additional physical tile rows.
 These values specialize the live source, not a precompiled shape catalog.
-The CLI currently runs one fresh image per invocation; it is not the Qwen
-HTTP endpoint and does not claim concurrent image scheduling.
+The CLI runs one fresh image per invocation. The image server below accepts
+concurrent clients and serializes complete images through one residency; it
+does not batch images or use the Qwen token scheduler.
 
 ### Retained model ownership
 
@@ -176,6 +178,103 @@ the repeated F32 identity check, with one JIT, one residency and one load per
 parameter domain. The extracted CLI also reproduced both previously qualified
 image/text shapes exactly; all 154 independent request-input comparisons still
 had zero differing bits. These are correctness checks, not throughput results.
+
+### Serve images over HTTP
+
+The server reuses the model leaf above and the runner's model-independent
+[`image_service`](../../image_service.h). It exposes one configured image/text
+shape and one optional adapter. Image execution runs on one worker; the
+application owner handles bounded admission, health, completed responses and
+peer cancellation while the existing `iree/net` TCP carrier owns network I/O.
+There is no inference subprocess or per-request JIT/model construction.
+
+```sh
+build_tools/bin/iree-bazel-build --config=asan \
+  //experimental/loom_serve:krea2_server
+bazel-bin/experimental/loom_serve/krea2_server \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" \
+  --adapter="$krea_adapter/softwatercolor.safetensors" \
+  --height=384 --width=384 --text_tokens=512 \
+  --port=8080 --connections=64 --pending_requests=32
+```
+
+It binds loopback only. `--port=0` requests an ephemeral port, reported by the
+`image_ready` JSONL event. `GET /healthz` reports active, queued and completed
+counts; `GET /v1/models` reports the model identifier, size and supported
+conditioning. Logs identify request lifecycle transitions without recording
+prompts. A complete request is:
+
+```sh
+curl --fail-with-body http://127.0.0.1:8080/v1/images/generations \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"krea2-turbo","prompt":"A deer grazing in the forest, Art Deco watercolor style","seed":"0","strength":1,"size":"384x384","n":1,"response_format":"b64_json"}' \
+  -o response.json
+jq -r '.data[0].b64_json' response.json | base64 --decode > image.png
+```
+
+`prompt` is required; an empty prompt is valid. `seed` defaults to zero and
+accepts an unsigned 64-bit integer or decimal string; the string avoids client
+JSON number precision loss. `strength` defaults to one; zero selects the base
+path when an adapter is loaded. A residency without an adapter accepts only
+strength one. Optional `model` and `size` must match the residency, `n` must be
+one, and the response format is `b64_json`. Unknown fields, duplicate fields,
+wrong types, invalid UTF-8, trailing JSON and nonfinite strengths reject before
+model submission. JSONC syntax follows the IREE parser. The body limit defaults
+to 64 KiB and is configurable with `--request_body_bytes`.
+
+The response is `{"created":<unix-seconds>,"data":[{"b64_json":"<PNG>"}]}`.
+PNG conversion is native C and consumes only completed F32 CHW RGB. An admitted
+response copies its bytes into transport-owned storage, so a slow reader does
+not hold the model's workspace or output. Excess pending images receive HTTP
+503; malformed generation requests receive 400. A queued peer reset removes
+that request. An active reset discards its eventual result without recycling
+device state early. SIGINT/SIGTERM stops admission and joins active generation
+before releasing inputs, weights or the device.
+
+Multiple weighted adapters and reference-image conditioning are not accepted
+by this schema. Discovery explicitly reports `reference_images:false`; passing
+such a field fails instead of silently ignoring it. Krea's community edit
+LoRAs require vision/VAE reference encoding and their trained conditioning
+contract, which this text-only encoder path does not implement. The single
+adapter boundary here is a concrete retained service foundation, not a claim
+that arbitrary LoRA combinations are already prepared or cached.
+
+The real-checkpoint HTTP witness consumes the isolated PPMs from
+`check_model.py` above. It decodes responses with Pillow and requires exact
+pixels for two prompts, active LoRA, and base repetition. It also exercises
+health during generation, queue overflow, a deliberately slow reader, queued
+and active resets, and shutdown with an image in flight. Final logs require
+one JIT, one residency and exactly one load per parameter domain.
+
+```sh
+build_tools/bin/iree-bazel-test --config=asan \
+  //experimental/loom_serve:image_request_test \
+  //experimental/loom_serve:image_output_test \
+  //experimental/loom_serve:http_request_test \
+  //experimental/loom_serve:http_server_test
+build_tools/bin/iree-bazel-build --config=asan \
+  //experimental/loom_serve:krea2_server
+python -B experimental/loom_serve/models/krea2/check_service.py \
+  --server bazel-bin/experimental/loom_serve/krea2_server \
+  --model experimental/loom_serve/models/krea2 \
+  --checkpoint "$krea_weights" \
+  --adapter "$krea_adapter/softwatercolor.safetensors" \
+  --isolated /path/to/new-residency-results \
+  --output /path/to/new-service-results
+```
+
+The HTTP witness runs on the same qualified device under its exclusive lease
+and retains less than 16 MiB. Its lifecycle events provide readiness/completion
+synchronization; it does not approximate readiness with sleeps. Host-ASAN
+results establish ownership/correctness, not image-generation performance.
+
+The first full-device HTTP qualification generated seven images in one model
+residency. All five returned PNGs matched the isolated CLI pixels exactly;
+the two other completed images retired safely after active peer reset and
+shutdown. Health, bounded overflow, queued cancellation and slow-reader
+independence passed. The run observed one JIT and four parameter-domain loads
+total. These are correctness results, not a throughput comparison.
 
 ## Independent numerical reference
 

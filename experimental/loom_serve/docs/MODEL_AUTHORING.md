@@ -298,9 +298,17 @@ tensors. Its
 numeric setup, separate from shared serving code. That cold C boundary retains
 canonical F64 rotary math that the current VM's F32 transcendental lowering
 cannot express unchanged. Model stage control already lives in `.loom`.
-The existing HTTP service and packed scheduler remain concrete Qwen consumers;
-changing their model directory does not turn them into an image or audio
-endpoint. No audio model or concurrent image service is claimed by this packet.
+The [finite-image service](../image_service.h) is a second concrete serving
+pipeline. Its serialized generator returns borrowed completed RGB; one worker
+encodes it before another model call, while the application owner admits bounded
+requests and serves health checks over the shared TCP transport. Transport-owned
+response bytes decouple slow readers from model memory. The
+[Krea entry point](../models/krea2/server.c) supplies only model creation and the
+coarse generator callback. Model math and stage loops remain source commands.
+The [HTTP witness](../models/krea2/check_service.py) checks real image pixels,
+overload, peer reset and in-flight shutdown using the actual checkpoint.
+This service queues images; it does not batch them. Qwen's packed token scheduler
+remains a separate consumer, and no audio model is claimed by this packet.
 
 A first tensor-in/tensor-out adapter has this ownership flow:
 

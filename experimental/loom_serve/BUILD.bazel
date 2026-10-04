@@ -192,6 +192,46 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "image_request",
+    srcs = ["image_request.c"],
+    hdrs = ["image_request.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "image_request_test",
+    srcs = ["image_request_test.cc"],
+    deps = [
+        ":image_request",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "image_output",
+    srcs = ["image_output.c"],
+    hdrs = ["image_output.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "image_output_test",
+    srcs = ["image_output_test.cc"],
+    deps = [
+        ":image_output",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "http_server",
     srcs = ["http_server.c"],
     hdrs = ["http_server.h"],
@@ -222,6 +262,25 @@ loom_cc_test(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "image_service",
+    srcs = ["image_service.c"],
+    hdrs = ["image_service.h"],
+    deps = [
+        ":http_request",
+        ":http_server",
+        ":image_output",
+        ":image_request",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:base64",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
     ],
 )
 
@@ -627,6 +686,24 @@ loom_cc_binary(
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_binary(
+    name = "krea2_server",
+    srcs = ["models/krea2/server.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":http_server",
+        ":image_request",
+        ":image_service",
+        ":krea2_model",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
     ],
 )
 

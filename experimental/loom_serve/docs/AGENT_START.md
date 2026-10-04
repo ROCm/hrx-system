@@ -26,8 +26,12 @@ For image or audio work, the
 starts from the same small JIT caller without importing Qwen's chat, cache, or
 stage-layout assumptions. The [Krea native CLI](../models/krea2/README.md#generate-an-image-natively)
 is a real prompt/seed-to-image caller with LoRA; its source commands and cold
-request leaf provide a concrete second model to study. Image HTTP scheduling
-and audio model adapters remain separate implementation work.
+request leaf provide a concrete second model to study. The
+[retained image server](../models/krea2/README.md#serve-images-over-http) adds
+bounded HTTP admission and native PNG responses without Qwen scheduling
+assumptions. Image batching, multiple-adapter composition and audio adapters
+remain distinct implementation boundaries, not capabilities implied by the
+shared transport.
 
 ## Establish a baseline before editing
 
