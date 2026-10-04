@@ -28,6 +28,7 @@
 ../kernels/image_attention.loom
 ../vae_upsample.loom
 ../vae_decoder.loom
+../sample.loom
 config.loom
 components.loom
 image.loom

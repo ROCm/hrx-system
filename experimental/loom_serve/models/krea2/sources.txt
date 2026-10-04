@@ -28,3 +28,4 @@ vae_attention.loom
 kernels/image_attention.loom
 vae_upsample.loom
 vae_decoder.loom
+sample.loom
