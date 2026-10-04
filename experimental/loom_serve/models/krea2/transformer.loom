@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-command.program.decl @krea2.block_attention_input(%layer: index) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_input(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
 command.program.decl @krea2.block_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_value(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
@@ -13,13 +13,13 @@ command.program.decl @krea2.block_query_rotary(%layer: index) launch(%parameters
 command.program.decl @krea2.block_key_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
 command.program.decl @krea2.block_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
 command.program.decl @krea2.block_attention_output(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
-command.program.decl @krea2.block_attention_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
-command.program.decl @krea2.block_feed_forward_input(%layer: index) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_residual(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_input(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_up(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_product() launch(%gate: buffer, %up: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_down(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
-command.program.decl @krea2.block_feed_forward_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_residual(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
 
 command.program.decl @krea2.block_query_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 command.program.decl @krea2.block_key_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
@@ -30,13 +30,13 @@ command.program.decl @krea2.block_feed_forward_gate_adapted(%layer: index) launc
 command.program.decl @krea2.block_feed_forward_up_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_down_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 
-template.decl @krea2.block_forward(%tokens: index, %layer: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.block_forward(%tokens: index, %layer: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
 
 // The caller supplies shared time modulation, rotary coordinates and key mask.
 // All intermediate storage is reflected as one reusable slab. Independent
 // projection branches may overlap; command dependencies order their consumers.
 // Adapter presence is a source specialization; strength remains device data.
-template.def<@krea2.block_forward> @krea2_block_forward(%tokens: index, %layer: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+template.def<@krea2.block_forward> @krea2_block_forward(%tokens: index, %layer: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
   %hidden_stride = index.constant 12288 : offset
   %key_value_stride = index.constant 3072 : offset
   %feed_forward_stride = index.constant 32768 : offset
@@ -45,7 +45,7 @@ template.def<@krea2.block_forward> @krea2_block_forward(%tokens: index, %layer: 
   %feed_forward_bytes = index.scale %tokens, %feed_forward_stride : index, offset -> offset
 
   %attention_input = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  command.program.launch @krea2.block_attention_input[%layer](%parameters, %input, %modulation, %attention_input) : [index](buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.block_attention_input[%layer, %modulation_offset](%parameters, %input, %modulation, %attention_input) : [index, offset](buffer, buffer, buffer, buffer)
   %query = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %key = buffer.alloca<global> align(256) %key_value_bytes : buffer
   %value = buffer.alloca<global> align(256) %key_value_bytes : buffer
@@ -97,10 +97,10 @@ template.def<@krea2.block_forward> @krea2_block_forward(%tokens: index, %layer: 
     scf.yield
   }
   %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  command.program.launch @krea2.block_attention_residual[%layer](%parameters, %input, %attention_output, %modulation, %residual) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.block_attention_residual[%layer, %modulation_offset](%parameters, %input, %attention_output, %modulation, %residual) : [index, offset](buffer, buffer, buffer, buffer, buffer)
 
   %feed_forward_input = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  command.program.launch @krea2.block_feed_forward_input[%layer](%parameters, %residual, %modulation, %feed_forward_input) : [index](buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.block_feed_forward_input[%layer, %modulation_offset](%parameters, %residual, %modulation, %feed_forward_input) : [index, offset](buffer, buffer, buffer, buffer)
   %feed_forward_gate = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
   %feed_forward_up = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
   command.concurrent {
@@ -129,6 +129,6 @@ template.def<@krea2.block_forward> @krea2_block_forward(%tokens: index, %layer: 
     command.program.launch @krea2.block_feed_forward_down[%layer](%parameters, %product, %feed_forward_output) : [index](buffer, buffer, buffer)
     scf.yield
   }
-  command.program.launch @krea2.block_feed_forward_residual[%layer](%parameters, %residual, %feed_forward_output, %modulation, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.block_feed_forward_residual[%layer, %modulation_offset](%parameters, %residual, %feed_forward_output, %modulation, %output) : [index, offset](buffer, buffer, buffer, buffer, buffer)
   template.return
 }

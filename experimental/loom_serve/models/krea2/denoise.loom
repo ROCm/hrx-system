@@ -1,0 +1,143 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.time_count : %value: index where [range(%value, 1, 256)]
+amdgpu.target<gfx11-generic> @denoise_wave32 {subgroup_size = 32}
+template.decl @diffusion.euler_bf16(%elements: index, %sample: buffer, %velocity: buffer, %delta: buffer, %output: buffer)
+template.decl @krea2.image_input(%rows: index, %first_row: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.time_conditioning(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %times: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.transformer_stack(%tokens: index, %layers: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.velocity_head(%rows: index, %first_row: index, %embedding_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.denoise_step(%tokens: index, %image_tokens: index, %capacity: index, %step: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %conditioning: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %state: buffer, %velocity: buffer, %output: buffer)
+template.decl @krea2.denoise(%tokens: index, %image_tokens: index, %count: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %output: buffer)
+
+// Only the immutable text prefix is copied. The image projection writes the
+// remaining rows directly; both producers complete before any block reads.
+kernel.def target(@denoise_wave32) @krea_denoise_text() {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %rows = index.sub %tokens, %images : index
+  %groups_per_row = index.constant 24 : index
+  %groups = index.mul %rows, %groups_per_row : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %rows = index.sub %tokens, %images : index
+  %width = index.constant 6144 : index
+  %elements = index.mul %rows, %width : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%elements]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %value = view.load %input_view[%element] : view<[%elements]xbf16> -> bf16
+  view.store %value, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+kernel.def target(@denoise_wave32) @krea_denoise_update() {
+  %rows = config.get @krea2.image_tokens : index
+  %rows_per_group = index.constant 4 : index
+  %groups = index.div %rows, %rows_per_group : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%sample: buffer, %velocity: buffer, %delta: buffer, %output: buffer) {
+  %rows = config.get @krea2.image_tokens : index
+  %width = index.constant 64 : index
+  %elements = index.mul %rows, %width : index
+  template.apply<@diffusion.euler_bf16>(%elements, %sample, %velocity, %delta, %output) : (index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.denoise_update(%step: index) launch(%sample: buffer, %velocity: buffer, %deltas: buffer, %output: buffer) {
+  %scalar_bytes = index.constant 4 : offset
+  %delta_offset = index.scale %step, %scalar_bytes : index, offset -> offset
+  %delta = buffer.view %deltas[%delta_offset] : buffer -> view<1xf32>
+  kernel.launch @krea_denoise_update(%sample, %velocity, %delta, %output) : (buffer, buffer, view<1xf32>, buffer)
+  command.return
+}
+
+// State and velocity storage are owned by the enclosing trajectory. The
+// stack advances state in place after its two input producers have joined.
+template.def<@krea2.denoise_step> @krea2_denoise_step(%tokens: index, %image_tokens: index, %capacity: index, %step: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %conditioning: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %state: buffer, %velocity: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %prefix = index.sub %tokens, %image_tokens : index
+  %text_rows = index.assume %prefix [range(%prefix, 0, 65536)] : index
+  %has_text = index.cmp ugt, %text_rows, %zero : index
+  command.concurrent {
+    scf.if %has_text {
+      kernel.launch @krea_denoise_text(%text, %state) : (buffer, buffer)
+      scf.yield
+    }
+    command.serial {
+      template.apply<@krea2.image_input>(%image_tokens, %text_rows, %adapted, %parameters, %adapter, %sample, %strength, %state) : (index, index, i1, buffer, buffer, buffer, buffer, buffer)
+    }
+  }
+  %embedding_bytes = index.constant 12288 : offset
+  %modulation_bytes = index.constant 73728 : offset
+  %embedding_offset = index.scale %step, %embedding_bytes : index, offset -> offset
+  %modulation_base = index.scale %capacity, %embedding_bytes : index, offset -> offset
+  %modulation_row = index.scale %step, %modulation_bytes : index, offset -> offset
+  %modulation_offset = index.add %modulation_base, %modulation_row : offset
+  %layers = index.constant 28 : index
+  template.apply<@krea2.transformer_stack>(%tokens, %layers, %modulation_offset, %adapted, %parameters, %adapter, %state, %conditioning, %cosine, %sine, %mask, %strength, %state) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.velocity_head>(%image_tokens, %text_rows, %embedding_offset, %adapted, %parameters, %adapter, %state, %conditioning, %strength, %velocity) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.denoise_update[%step](%sample, %velocity, %deltas, %output) : [index](buffer, buffer, buffer, buffer)
+  template.return
+}
+
+// Known times are conditioned once. The first update consumes immutable input
+// noise, and subsequent updates advance caller output without a host loop.
+template.def<@krea2.denoise> @krea2_denoise(%tokens: index, %image_tokens: index, %count: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %tile = index.constant 16 : index
+  %padding = index.constant 15 : index
+  %padded_count = index.add %count, %padding : index
+  %tiles = index.div %padded_count, %tile : index
+  %capacity = index.mul %tiles, %tile : index
+  %condition_stride = index.constant 86016 : offset
+  %state_stride = index.constant 12288 : offset
+  %velocity_stride = index.constant 128 : offset
+  %condition_bytes = index.scale %capacity, %condition_stride : index, offset -> offset
+  %state_bytes = index.scale %tokens, %state_stride : index, offset -> offset
+  %velocity_bytes = index.scale %image_tokens, %velocity_stride : index, offset -> offset
+  %conditioning = buffer.alloca<global> align(256) %condition_bytes : buffer
+  %state = buffer.alloca<global> align(256) %state_bytes : buffer
+  %velocity = buffer.alloca<global> align(256) %velocity_bytes : buffer
+  template.apply<@krea2.time_conditioning>(%capacity, %adapted, %parameters, %adapter, %times, %strength, %conditioning) : (index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.denoise_step>(%tokens, %image_tokens, %capacity, %zero, %adapted, %parameters, %adapter, %sample, %text, %conditioning, %cosine, %sine, %mask, %deltas, %strength, %state, %velocity, %output) : (index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  scf.for %step = [%one to %count step %one] unroll {
+    template.apply<@krea2.denoise_step>(%tokens, %image_tokens, %capacity, %step, %adapted, %parameters, %adapter, %output, %text, %conditioning, %cosine, %sine, %mask, %deltas, %strength, %state, %velocity, %output) : (index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
+  template.return
+}
+
+command.program.def public @denoise() launch(%parameters: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %count = config.get @krea2.time_count : index
+  %adapted = scalar.constant false : i1
+  template.apply<@krea2.denoise>(%tokens, %images, %count, %adapted, %parameters, %parameters, %sample, %text, %times, %cosine, %sine, %mask, %deltas, %sample, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @denoise_adapted() launch(%parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %count = config.get @krea2.time_count : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.denoise>(%tokens, %images, %count, %adapted, %parameters, %adapter, %sample, %text, %times, %cosine, %sine, %mask, %deltas, %strength, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

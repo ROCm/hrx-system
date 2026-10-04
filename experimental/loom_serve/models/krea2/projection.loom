@@ -10,7 +10,8 @@ amdgpu.target<gfx11-generic> @projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
-template.decl @projection.adapter_add_bf16(%elements: index, %delta: buffer, %strength: buffer, %output: buffer)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+template.decl @krea2.image_input(%rows: index, %first_row: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 
 // Each wrapper fixes shape facts before applying the reusable arithmetic.
 // No shape scalars remain in the device launch ABI.
@@ -49,7 +50,7 @@ kernel.def target(@projection_wave32) @krea_image_adapter_down() {
   kernel.return
 }
 
-kernel.def target(@projection_wave32) @krea_image_adapter_up() {
+kernel.def target(@projection_wave32) @krea_image_adapter_add() {
   %rows = config.get @krea2.image_tokens : index
   %tile = index.constant 16 : index
   %row_tiles = index.div %rows, %tile : index
@@ -57,53 +58,86 @@ kernel.def target(@projection_wave32) @krea_image_adapter_up() {
   %one = index.constant 1 : index
   %threads = index.constant 32 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%input: buffer, %weight: buffer, %output: buffer) {
+} launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
   %rows = config.get @krea2.image_tokens : index
   %inputs = index.constant 32 : index
   %outputs = index.constant 6144 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
   kernel.return
 }
 
-kernel.def target(@projection_wave32) @krea_image_adapter_add() {
+// The image projection writes directly into a selected hidden-state suffix.
+// Original checkpoint names and LoRA factors belong to separate roots.
+command.program.def public @krea2.image_projection(%first_row: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.image_tokens : index
-  %row_groups = index.constant 24 : index
-  %groups = index.mul %rows, %row_groups : index
-  %one = index.constant 1 : index
-  %threads = index.constant 256 : index
-  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%delta: buffer, %strength: buffer, %output: buffer) {
-  %rows = config.get @krea2.image_tokens : index
-  %outputs = index.constant 6144 : index
-  %elements = index.mul %rows, %outputs : index
-  template.apply<@projection.adapter_add_bf16>(%elements, %delta, %strength, %output) : (index, buffer, buffer, buffer)
-  kernel.return
-}
-
-// Original Krea checkpoint namespace. The immutable base is independent of
-// the adapter command's checkpoint namespace and runtime strength.
-command.program.def public @image_projection() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %row_bytes = index.constant 12288 : offset
+  %output_offset = index.scale %first_row, %row_bytes : index, offset -> offset
+  %output_view = buffer.view %output[%output_offset] : buffer -> view<[%rows]x6144xbf16>
   %weight = command.parameter %parameters, "first.weight" : view<6144x64xf32>
   %bias = command.parameter %parameters, "first.bias" : view<6144xf32>
-  kernel.launch @krea_image_projection(%input, %weight, %bias, %output) : (buffer, view<6144x64xf32>, view<6144xf32>, buffer)
+  kernel.launch @krea_image_projection(%input, %weight, %bias, %output_view) : (buffer, view<6144x64xf32>, view<6144xf32>, view<[%rows]x6144xbf16>)
   command.return
 }
 
-// This concrete official adapter has rank 32 and alpha/rank=1. Its factors
-// stay separate from base weights; no merge or per-strength model copy occurs.
+command.program.def public @krea2.image_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.img_in.lora_A.weight" : view<32x64xf32>
+  kernel.launch @krea_image_adapter_down(%input, %weight, %output) : (buffer, view<32x64xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.image_adapter_add(%first_row: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.image_tokens : index
+  %row_bytes = index.constant 12288 : offset
+  %output_offset = index.scale %first_row, %row_bytes : index, offset -> offset
+  %output_view = buffer.view %output[%output_offset] : buffer -> view<[%rows]x6144xbf16>
+  %weight = command.parameter %adapter, "transformer.img_in.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @krea_image_adapter_add(%input, %weight, %strength, %output_view, %output_view) : (buffer, view<6144x32xf32>, buffer, view<[%rows]x6144xbf16>, view<[%rows]x6144xbf16>)
+  command.return
+}
+
+template.def<@krea2.image_input> @krea2_image_input(%rows: index, %first_row: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  scf.if %adapted {
+    %rank_bytes = index.constant 64 : offset
+    %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %low_bytes : buffer
+    command.concurrent {
+      command.program.launch @krea2.image_projection[%first_row](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+      command.program.launch @krea2.image_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+    }
+    command.program.launch @krea2.image_adapter_add[%first_row](%adapter, %low, %strength, %output) : [index](buffer, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    command.program.launch @krea2.image_projection[%first_row](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+    scf.yield
+  }
+  template.return
+}
+
+command.program.def public @image_projection() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %first_row = index.constant 0 : index
+  command.program.launch @krea2.image_projection[%first_row](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+// Apply only the adapter to an existing base projection, without mutating
+// base parameters or materializing a full-width delta.
 command.program.def public @image_projection_adapter() launch(%parameters: buffer, %input: buffer, %strength: buffer, %output: buffer) {
   %rows = config.get @krea2.image_tokens : index
-  %low_row_bytes = index.constant 64 : offset
-  %output_row_bytes = index.constant 12288 : offset
-  %low_bytes = index.scale %rows, %low_row_bytes : index, offset -> offset
-  %output_bytes = index.scale %rows, %output_row_bytes : index, offset -> offset
-  %low_rank = buffer.alloca<global> align(256) %low_bytes : buffer
-  %delta = buffer.alloca<global> align(256) %output_bytes : buffer
-  %down = command.parameter %parameters, "transformer.img_in.lora_A.weight" : view<32x64xf32>
-  %up = command.parameter %parameters, "transformer.img_in.lora_B.weight" : view<6144x32xf32>
-  kernel.launch @krea_image_adapter_down(%input, %down, %low_rank) : (buffer, view<32x64xf32>, buffer)
-  kernel.launch @krea_image_adapter_up(%low_rank, %up, %delta) : (buffer, view<6144x32xf32>, buffer)
-  kernel.launch @krea_image_adapter_add(%delta, %strength, %output) : (buffer, buffer, buffer)
+  %first_row = index.constant 0 : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.program.launch @krea2.image_adapter_down(%parameters, %input, %low) : (buffer, buffer, buffer)
+  command.program.launch @krea2.image_adapter_add[%first_row](%parameters, %low, %strength, %output) : [index](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @image_projection_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.image_tokens : index
+  %first_row = index.constant 0 : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.image_input>(%rows, %first_row, %adapted, %parameters, %adapter, %input, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

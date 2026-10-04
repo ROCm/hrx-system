@@ -17,7 +17,11 @@
 ../velocity.loom
 ../time.loom
 ../kernels/time.loom
+../denoise.loom
+../kernels/diffusion.loom
 config.loom
 components.loom
+image.loom
 head.loom
 time.loom
+denoise.loom

@@ -5,3 +5,4 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 config.def @krea2.block_index = 0 : index
+config.def @krea2.step_index = 0 : index

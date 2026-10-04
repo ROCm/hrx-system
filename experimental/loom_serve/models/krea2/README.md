@@ -13,8 +13,9 @@ The final velocity head also runs natively, consuming image rows and a time
 embedding. A combined stack-to-head command produces velocities without an
 intermediate host readback. Native time conditioning batches all requested
 timesteps, including LoRA, into device-resident embedding/modulation tables.
-Native text conditioning, denoising updates, and VAE decoding are the
-remaining prompt-to-image path.
+A native denoising command composes time conditioning, image projection,
+the full stack, the velocity head, and Euler updates. Text conditioning and
+VAE decoding remain external; this is not yet a native prompt-to-image path.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -165,14 +166,16 @@ convert every full-model weight on each invocation.
 The adapter computes `base + strength * B(A X)` with the reference's BF16
 rounding boundaries. Its rank is 32 and alpha/rank is one. Base and adapter
 use separate immutable parameter roots and checkpoint loads. The loader reads
-only the requested tensors, not the whole 36.2 GB set. Low-rank and delta
+only the requested tensors, not the whole 36.2 GB set. The B contraction,
+scaling, and addition are fused; no full-width delta is materialized. Rank-32
 workspace comes from command reflection and is allocated once, not per run.
 The native checker queues work through the existing execution domain and waits
 only for its complete-array observations. Cleanup drains accepted work while
 borrowed host payloads remain alive.
 
-The remaining numerical gates include model conditioning,
-and the entire source-JIT denoising and VAE path to a comparable image.
+The remaining native producers are text conditioning and VAE decoding.
+The denoising qualification below receives captured conditioning and uses an
+external VAE for its preview images.
 This component does not yet establish a generic model bootstrap, image request
 scheduler, full-model weight-preparation strategy, or throughput result.
 
@@ -768,5 +771,97 @@ All 216 repeated comparisons pass over 63,994,880 values, with no primitive
 envelope violations or nonfinite pairs. For eight times, the base command has
 five kernels, six unique parameters, and 392 KiB of transient workspace.
 LoRA uses nine kernels, twelve parameters across two roots, and 393 KiB of
-workspace. These are component ownership and correctness results; denoising
-still has to consume the native tables before this is a native image path.
+workspace. The denoising command below consumes these native tables directly.
+
+### Native denoising trajectory
+
+[`denoise.loom`](denoise.loom) exposes `denoise` and `denoise_adapted`.
+The deterministic Euler trajectory is one source-JIT command: time tables
+are computed once, and all requested steps execute without a host step loop
+or intermediate readback. The first step reads immutable initial noise;
+later steps update caller-owned output in place. This is the Turbo path,
+without classifier-free guidance, stochastic sampling, or per-token schedules.
+
+The base command accepts a parameter root followed by these buffers:
+
+| Buffer | Representation |
+| --- | --- |
+| Initial sample | `image_tokens × 64` BF16 packed latent values |
+| Text prefix | `(block_tokens - image_tokens) × 6144` BF16 conditioned rows |
+| Times | `time_count` BF16 normalized timesteps |
+| Cosine and sine | Two `block_tokens × 128` F32 rotary tables |
+| Key mask | `block_tokens` bytes, with nonzero values marking live keys |
+| Deltas | `time_count` F32 Euler step deltas |
+| Output | `image_tokens × 64` BF16 packed latent values |
+
+The adapted command adds the immutable adapter root immediately after the
+base root, and an F32 strength buffer immediately before output. Both token
+counts are multiples of 16, with the combined count at least the image count.
+`time_count` selects the command's step count; times and deltas are device
+inputs, not values baked into its kernels.
+
+Each step copies only the immutable text prefix and projects the current
+latent directly into the combined state's image suffix. These independent
+producers join before the stack advances the state in place. The head binds
+the image suffix directly. Exact byte offsets select the step's embedding
+and modulation rows from the shared table; neither is copied or read back.
+The update keeps the F32 delta unrounded, rounds `delta × velocity` to BF16,
+then adds to the F32-upcast sample and rounds the result to BF16. Removing
+either BF16 boundary changes the model scheduler's semantics.
+
+[`check_denoise.py`](check_denoise.py) uses the reference environment and
+previously qualified time tables. It builds the independent staged native
+trajectory, checks the first and last composed steps bit-for-bit, then
+requires both executions of the complete command to match that trajectory
+bit-for-bit. Zero-strength LoRA must preserve the complete base trajectory.
+Base, A, and B image contractions each use the unchanged F64 primitive gate;
+B receives the actual rounded native A output. The fused image projection
+must then equal addition of the qualified native base and B values exactly.
+A primitive's tolerance is not an accumulated-chain tolerance near cancellation.
+External velocities on identical incoming states and retained external
+trajectories are reported separately; numerical drift is not confused with
+composition equality.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_denoise.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_reference" \
+  --stack_reference="$krea_stack_reference/1088" \
+  --time_results=/path/to/time-results \
+  --output=/path/to/new-denoise-results
+```
+
+The default runs all eight steps for base and active LoRA. `--steps=N`
+selects a prefix of the same eight-step schedule, not a newly configured
+N-step scheduler; `--phase=base` or `--phase=style` narrows the qualification.
+All eight steps additionally produce `*-native-denoise-external-vae.png`
+previews and pixel RMSE/PSNR against the retained reference. Those previews
+use the CPU/F32 external VAE and captured external text conditioning. They
+are not evidence of native text encoding, VAE execution, image serving, or
+throughput. Regenerable trajectory artifacts occupy less than 128 MiB.
+
+The full 384x384 qualification passes 126 repeated component/composition
+comparisons over 228,483,072 values, with no primitive-envelope violations
+or nonfinite pairs. The eight-step command matches the staged native chain
+bit-for-bit for base, zero strength, and active LoRA on both executions.
+
+| Eight-step command | Base | Softwatercolor, strength 1 |
+| --- | ---: | ---: |
+| Unique kernels | 20 | 33 |
+| Unique parameter tensors | 376 | 834 |
+| Parameter roots | 1 | 2 |
+| Parameter bytes | 25,382,416,640 | 25,821,294,848 |
+| Transient workspace bytes | 172,310,528 | 172,311,552 |
+| Final latent relative L2 versus external trajectory | 6.92078% | 4.46478% |
+| Preview pixel RMSE, 8-bit channels | 8.26228 | 9.32944 |
+| Preview PSNR | 29.78880 dB | 28.73369 dB |
+
+Transient storage is independent of step count; active LoRA adds only 1 KiB
+because its low-rank scratch fits already available lifetime gaps. The preview
+statistics use the same external CPU/F32 decoder on both trajectories. For the
+retained seed-42 deer prompt, the native previews preserve the composition
+and the adapter's visibly different rendering, but are not pixel-identical.
+This single prompt is a numerical and ownership witness, not a distributional
+image-quality evaluation or a performance measurement.

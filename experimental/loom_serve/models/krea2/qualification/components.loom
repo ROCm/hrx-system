@@ -10,9 +10,9 @@ config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536),
 config.decl @krea2.block_index : %value: index where [range(%value, 0, 27)]
 
 command.program.decl @krea2.block_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
-command.program.decl @krea2.block_attention_input(%layer: index) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_input(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
 command.program.decl @krea2.block_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
-command.program.decl @krea2.block_feed_forward_input(%layer: index) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_input(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
 command.program.decl @krea2.block_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_value(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
@@ -25,8 +25,8 @@ command.program.decl @krea2.block_query_norm(%layer: index) launch(%parameters: 
 command.program.decl @krea2.block_key_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_query_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
 command.program.decl @krea2.block_key_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
-command.program.decl @krea2.block_attention_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
-command.program.decl @krea2.block_feed_forward_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_residual(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_residual(%layer: index, %modulation_offset: offset) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_silu() launch(%input: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_product() launch(%gate: buffer, %up: buffer, %output: buffer)
 command.program.decl @krea2.block_attention_ungated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer)
@@ -64,7 +64,7 @@ command.program.decl @krea2.block_feed_forward_down_adapter_up(%layer: index) la
 command.program.decl @krea2.block_feed_forward_down_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
 command.program.decl @krea2.block_feed_forward_down_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 
-template.decl @krea2.block_forward(%tokens: index, %layer: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.block_forward(%tokens: index, %layer: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
 
 command.program.def public @qualify.block_norm1() launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %layer = config.get @krea2.block_index : index
@@ -74,7 +74,8 @@ command.program.def public @qualify.block_norm1() launch(%parameters: buffer, %i
 
 command.program.def public @qualify.block_attention_input() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer) {
   %layer = config.get @krea2.block_index : index
-  command.program.launch @krea2.block_attention_input[%layer](%parameters, %input, %modulation, %output) : [index](buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  command.program.launch @krea2.block_attention_input[%layer, %modulation_offset](%parameters, %input, %modulation, %output) : [index, offset](buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -86,7 +87,8 @@ command.program.def public @qualify.block_norm2() launch(%parameters: buffer, %i
 
 command.program.def public @qualify.block_feed_forward_input() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer) {
   %layer = config.get @krea2.block_index : index
-  command.program.launch @krea2.block_feed_forward_input[%layer](%parameters, %input, %modulation, %output) : [index](buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  command.program.launch @krea2.block_feed_forward_input[%layer, %modulation_offset](%parameters, %input, %modulation, %output) : [index, offset](buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -164,13 +166,15 @@ command.program.def public @qualify.block_key_rotary() launch(%parameters: buffe
 
 command.program.def public @qualify.block_attention_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
   %layer = config.get @krea2.block_index : index
-  command.program.launch @krea2.block_attention_residual[%layer](%parameters, %residual, %update, %modulation, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  command.program.launch @krea2.block_attention_residual[%layer, %modulation_offset](%parameters, %residual, %update, %modulation, %output) : [index, offset](buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
 command.program.def public @qualify.block_feed_forward_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
   %layer = config.get @krea2.block_index : index
-  command.program.launch @krea2.block_feed_forward_residual[%layer](%parameters, %residual, %update, %modulation, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  command.program.launch @krea2.block_feed_forward_residual[%layer, %modulation_offset](%parameters, %residual, %update, %modulation, %output) : [index, offset](buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -391,7 +395,8 @@ command.program.def public @qualify.block_forward() launch(%parameters: buffer, 
   %layer = config.get @krea2.block_index : index
   %adapted = scalar.constant false : i1
   // The false specialization removes all uses of adapter and strength operands.
-  template.apply<@krea2.block_forward>(%tokens, %layer, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %input, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  template.apply<@krea2.block_forward>(%tokens, %layer, %modulation_offset, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %input, %output) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -399,6 +404,7 @@ command.program.def public @qualify.block_forward_adapted() launch(%parameters: 
   %tokens = config.get @krea2.block_tokens : index
   %layer = config.get @krea2.block_index : index
   %adapted = scalar.constant true : i1
-  template.apply<@krea2.block_forward>(%tokens, %layer, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  template.apply<@krea2.block_forward>(%tokens, %layer, %modulation_offset, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

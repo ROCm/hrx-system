@@ -6,21 +6,21 @@
 
 config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-template.decl @krea2.transformer_stack(%tokens: index, %layers: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
-template.decl @krea2.velocity_head(%rows: index, %first_row: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
-template.decl @krea2.transformer_velocity(%tokens: index, %image_tokens: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.transformer_stack(%tokens: index, %layers: index, %modulation_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.velocity_head(%rows: index, %first_row: index, %embedding_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.transformer_velocity(%tokens: index, %image_tokens: index, %modulation_offset: offset, %embedding_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
 
 // Combined states remain device-transient. The head binds only their image
 // suffix; no text-row projection, suffix copy or host boundary is introduced.
-template.def<@krea2.transformer_velocity> @krea2_transformer_velocity(%tokens: index, %image_tokens: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %embedding: buffer, %strength: buffer, %output: buffer) {
+template.def<@krea2.transformer_velocity> @krea2_transformer_velocity(%tokens: index, %image_tokens: index, %modulation_offset: offset, %embedding_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %embedding: buffer, %strength: buffer, %output: buffer) {
   %layers = index.constant 28 : index
   %row_bytes = index.constant 12288 : offset
   %state_bytes = index.scale %tokens, %row_bytes : index, offset -> offset
   %state = buffer.alloca<global> align(256) %state_bytes : buffer
   %prefix_rows = index.sub %tokens, %image_tokens : index
   %first_image_row = index.assume %prefix_rows [range(%prefix_rows, 0, 65536)] : index
-  template.apply<@krea2.transformer_stack>(%tokens, %layers, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %state) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
-  template.apply<@krea2.velocity_head>(%image_tokens, %first_image_row, %adapted, %parameters, %adapter, %state, %embedding, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.transformer_stack>(%tokens, %layers, %modulation_offset, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %state) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.velocity_head>(%image_tokens, %first_image_row, %embedding_offset, %adapted, %parameters, %adapter, %state, %embedding, %strength, %output) : (index, index, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   template.return
 }
 
@@ -28,7 +28,9 @@ command.program.def public @transformer_velocity() launch(%parameters: buffer, %
   %tokens = config.get @krea2.block_tokens : index
   %image_tokens = config.get @krea2.image_tokens : index
   %adapted = scalar.constant false : i1
-  template.apply<@krea2.transformer_velocity>(%tokens, %image_tokens, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %embedding, %input, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  %embedding_offset = index.constant 0 : offset
+  template.apply<@krea2.transformer_velocity>(%tokens, %image_tokens, %modulation_offset, %embedding_offset, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %embedding, %input, %output) : (index, index, offset, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
@@ -36,6 +38,8 @@ command.program.def public @transformer_velocity_adapted() launch(%parameters: b
   %tokens = config.get @krea2.block_tokens : index
   %image_tokens = config.get @krea2.image_tokens : index
   %adapted = scalar.constant true : i1
-  template.apply<@krea2.transformer_velocity>(%tokens, %image_tokens, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %embedding, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  %modulation_offset = index.constant 0 : offset
+  %embedding_offset = index.constant 0 : offset
+  template.apply<@krea2.transformer_velocity>(%tokens, %image_tokens, %modulation_offset, %embedding_offset, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %embedding, %strength, %output) : (index, index, offset, offset, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

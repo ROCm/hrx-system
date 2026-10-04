@@ -1,0 +1,60 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.time_count : %value: index where [range(%value, 1, 256)]
+config.decl @krea2.step_index : %value: index where [range(%value, 0, 255)]
+command.program.decl @krea2.denoise_update(%step: index) launch(%sample: buffer, %velocity: buffer, %deltas: buffer, %output: buffer)
+template.decl @krea2.denoise_step(%tokens: index, %image_tokens: index, %capacity: index, %step: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %conditioning: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %state: buffer, %velocity: buffer, %output: buffer)
+
+command.program.def public @qualify.denoise_update() launch(%sample: buffer, %velocity: buffer, %deltas: buffer, %output: buffer) {
+  %step = config.get @krea2.step_index : index
+  command.program.launch @krea2.denoise_update[%step](%sample, %velocity, %deltas, %output) : [index](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.denoise_step() launch(%parameters: buffer, %sample: buffer, %text: buffer, %conditioning: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %count = config.get @krea2.time_count : index
+  %step = config.get @krea2.step_index : index
+  %adapted = scalar.constant false : i1
+  %tile = index.constant 16 : index
+  %padding = index.constant 15 : index
+  %padded_count = index.add %count, %padding : index
+  %tiles = index.div %padded_count, %tile : index
+  %capacity = index.mul %tiles, %tile : index
+  %state_stride = index.constant 12288 : offset
+  %velocity_stride = index.constant 128 : offset
+  %state_bytes = index.scale %tokens, %state_stride : index, offset -> offset
+  %velocity_bytes = index.scale %images, %velocity_stride : index, offset -> offset
+  %state = buffer.alloca<global> align(256) %state_bytes : buffer
+  %velocity = buffer.alloca<global> align(256) %velocity_bytes : buffer
+  template.apply<@krea2.denoise_step>(%tokens, %images, %capacity, %step, %adapted, %parameters, %parameters, %sample, %text, %conditioning, %cosine, %sine, %mask, %deltas, %sample, %state, %velocity, %output) : (index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.denoise_step_adapted() launch(%parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %conditioning: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %count = config.get @krea2.time_count : index
+  %step = config.get @krea2.step_index : index
+  %adapted = scalar.constant true : i1
+  %tile = index.constant 16 : index
+  %padding = index.constant 15 : index
+  %padded_count = index.add %count, %padding : index
+  %tiles = index.div %padded_count, %tile : index
+  %capacity = index.mul %tiles, %tile : index
+  %state_stride = index.constant 12288 : offset
+  %velocity_stride = index.constant 128 : offset
+  %state_bytes = index.scale %tokens, %state_stride : index, offset -> offset
+  %velocity_bytes = index.scale %images, %velocity_stride : index, offset -> offset
+  %state = buffer.alloca<global> align(256) %state_bytes : buffer
+  %velocity = buffer.alloca<global> align(256) %velocity_bytes : buffer
+  template.apply<@krea2.denoise_step>(%tokens, %images, %capacity, %step, %adapted, %parameters, %adapter, %sample, %text, %conditioning, %cosine, %sine, %mask, %deltas, %strength, %state, %velocity, %output) : (index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

@@ -17,3 +17,5 @@ head.loom
 velocity.loom
 time.loom
 kernels/time.loom
+denoise.loom
+kernels/diffusion.loom

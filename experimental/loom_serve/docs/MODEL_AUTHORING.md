@@ -51,6 +51,16 @@ storage; the runner allocates its backing during setup. It is not a per-token
 HAL queue allocation. Workgroup allocations inside kernels have a different
 lifetime and represent local shared storage.
 
+Schedule regions express dependencies, not hints. A command-program call
+preserves its implicitly serial body when expanded inside `command.concurrent`.
+A template expands into its caller's region instead; a multi-command template
+branch needs an explicit `command.serial` scope when its operations depend on
+one another. Krea's [denoising input phase](../models/krea2/denoise.loom) uses
+that nesting to overlap text copying with image projection while keeping the
+LoRA B/add consumer after its base and A producers. Buffer aliasing does not
+create that edge. Exact composition against separately executed native stages
+checks the dependency contract independently of floating-point oracle error.
+
 ## Configuration and live target facts
 
 The model's [`config.loom`](../models/qwen38/config.loom) supplies fixed typed
@@ -234,10 +244,14 @@ The reusable embedding accepts command programs and buffer bindings, not text
 tokens. [`jit_test.cc`](../jit_test.cc) exercises it without a tokenizer, chat
 request, KV cache, or Qwen adapter. That is the smaller starting point for an
 image or audio port. The [Krea component port](../models/krea2/README.md) adds
-real checkpoint and adapter evidence: its image-input projection matches the
-independent reference bit-for-bit at three source-JIT shapes, including
-zero-strength and retained-base identity. Its reproduction guide separates
-Loom component output from full-model reference images. The existing HTTP
+real checkpoint and adapter evidence: one source-JIT command now composes
+batched time conditioning, image projection, all 28 transformer layers, the
+velocity head, and eight Euler updates. Base, zero-strength, and active LoRA
+trajectories match their independently staged native components bit-for-bit;
+parameter roots stay immutable and one planned workspace serves every step.
+Its reproduction guide separates primitive numerical checks, exact composition,
+and accumulated image differences. Text conditioning and VAE decoding remain
+external, so its previews are mixed native/reference results. The existing HTTP
 service and packed scheduler remain concrete Qwen consumers; changing their
 model directory does not turn them into an image or audio endpoint. No complete
 image or audio model is qualified by this packet.
@@ -277,14 +291,17 @@ A first tensor-in/tensor-out adapter has this ownership flow:
    and accepted host payloads have retired; destroying it is not an implicit
    completion wait.
 
-The model's storage contract determines the pipeline shape. A denoising model
-can retain latent and conditioning buffers across repeated command invocations;
-its device commands can update a step counter and consume a preloaded schedule.
-An audio encoder can have one finite input/output transform. A streaming audio
-model additionally needs an explicit carried-state boundary, sample position,
-and publication rule for each chunk. These are proposed port shapes, not
-implemented model adapters. Their first witness includes real checkpoint bytes
-and independently checked output through the complete ownership flow above.
+The model's storage contract determines the pipeline shape. Krea's finite
+denoising trajectory retains its latent and conditioning buffers inside one
+source command with a specialized `scf.for` loop and a supplied device schedule.
+No host loop, per-step allocation, or device-to-host step-counter query is
+needed. A model with a different request/feedback boundary can instead retain
+state across coarse command invocations. An audio encoder could have one finite
+input/output transform; streaming audio additionally needs an explicit carried
+state, sample position, and publication rule for each chunk. Those audio shapes
+are candidates, not implemented adapters. Their first witness includes real
+checkpoint bytes and independently checked output through the ownership flow
+above.
 
 Iteration counts and command selection can live in ordinary source VM control.
 The current native imports expose coarse submission and feedback, not arbitrary

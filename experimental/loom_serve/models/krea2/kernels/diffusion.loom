@@ -1,0 +1,35 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @diffusion.euler_bf16(%elements: index, %sample: buffer, %velocity: buffer, %delta: buffer, %output: buffer)
+
+// The F32 delta remains unrounded. The scaled velocity rounds to BF16 before
+// F32 sample addition and the final BF16 store, matching the model scheduler.
+// Same-element input/output aliasing is safe; no neighboring sample is read.
+template.def<@diffusion.euler_bf16> device @diffusion_euler_bf16(%elements: index, %sample: buffer, %velocity: buffer, %delta: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %sample_view = buffer.view %sample[%origin] : buffer -> view<[%elements]xbf16>
+  %velocity_view = buffer.view %velocity[%origin] : buffer -> view<[%elements]xbf16>
+  %delta_view = buffer.view %delta[%origin] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %previous = view.load %sample_view[%element] : view<[%elements]xbf16> -> bf16
+  %speed = view.load %velocity_view[%element] : view<[%elements]xbf16> -> bf16
+  %duration = view.load %delta_view[%zero] : view<1xf32> -> f32
+  %previous_f32 = scalar.extf %previous : bf16 to f32
+  %speed_f32 = scalar.extf %speed : bf16 to f32
+  %update_f32 = scalar.mulf %speed_f32, %duration : f32
+  %update_bf16 = scalar.fptrunc %update_f32 : f32 to bf16
+  %update = scalar.extf %update_bf16 : bf16 to f32
+  %sum = scalar.addf %previous_f32, %update : f32
+  %result = scalar.fptrunc %sum : f32 to bf16
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  template.return
+}

@@ -9,7 +9,7 @@ amdgpu.target<gfx11-generic> @head_qualification_wave32 {subgroup_size = 32}
 template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
-command.program.decl @krea2.head_input(%first_row: index) launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer)
+command.program.decl @krea2.head_input(%first_row: index, %embedding_offset: offset) launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer)
 
 // Expose the unfused primitives to qualify production modulation and adapter
 // epilogues without requiring independent reductions to be bit-identical.
@@ -57,6 +57,7 @@ command.program.def public @qualify.head_adapter_up() launch(%adapter: buffer, %
 
 command.program.def public @qualify.head_input() launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer) {
   %first_row = index.constant 0 : index
-  command.program.launch @krea2.head_input[%first_row](%parameters, %input, %embedding, %output) : [index](buffer, buffer, buffer, buffer)
+  %embedding_offset = index.constant 0 : offset
+  command.program.launch @krea2.head_input[%first_row, %embedding_offset](%parameters, %input, %embedding, %output) : [index, offset](buffer, buffer, buffer, buffer)
   command.return
 }

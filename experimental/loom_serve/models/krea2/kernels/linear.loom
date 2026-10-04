@@ -8,7 +8,6 @@ template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outp
 template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
-template.decl @projection.adapter_add_bf16(%elements: index, %delta: buffer, %strength: buffer, %output: buffer)
 template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 
 // Complete 16x16 tiles, row-major activations and [output,input] checkpoint
@@ -171,31 +170,4 @@ template.def<@projection.adapter_epilogue_bf16> device @adapter_epilogue_bf16(%r
     scf.yield %sum : vector<8xf32>
   }
   template.return %combined : vector<8xf32>
-}
-
-// The low-rank result has already rounded to BF16. Scaling rounds at the
-// same boundary as the reference's BF16 multiply, before adding to the base.
-// A zero strength leaves every finite base element unchanged.
-template.def<@projection.adapter_add_bf16> device @adapter_add_bf16(%elements: index, %delta: buffer, %strength: buffer, %output: buffer) {
-  %origin = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %threads = index.constant 256 : index
-  %group = kernel.workgroup.id<x> : index
-  %lane = kernel.workitem.id<x> : index
-  %element = index.madd %group, %threads, %lane : index
-  %delta_view = buffer.view %delta[%origin] : buffer -> view<[%elements]xbf16>
-  %strength_view = buffer.view %strength[%origin] : buffer -> view<1xf32>
-  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
-  %update = view.load %delta_view[%element] : view<[%elements]xbf16> -> bf16
-  %scale = view.load %strength_view[%zero] : view<1xf32> -> f32
-  %base = view.load %output_view[%element] : view<[%elements]xbf16> -> bf16
-  %update_f32 = scalar.extf %update : bf16 to f32
-  %scaled_f32 = scalar.mulf %update_f32, %scale : f32
-  %scaled_bf16 = scalar.fptrunc %scaled_f32 : f32 to bf16
-  %scaled = scalar.extf %scaled_bf16 : bf16 to f32
-  %base_f32 = scalar.extf %base : bf16 to f32
-  %result_f32 = scalar.addf %base_f32, %scaled : f32
-  %result = scalar.fptrunc %result_f32 : f32 to bf16
-  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
-  template.return
 }
