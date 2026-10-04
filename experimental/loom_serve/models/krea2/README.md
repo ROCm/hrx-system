@@ -232,6 +232,15 @@ that request. An active reset discards its eventual result without recycling
 device state early. SIGINT/SIGTERM stops admission and joins active generation
 before releasing inputs, weights or the device.
 
+Timing events separate native request preparation, submission, the remaining
+device-completion wait, PNG encoding, JSON/base64 encoding, and transport
+admission. Durations are nanoseconds. Submission overlaps device execution;
+`completion_wait_ns` includes pending uploads and final readback, so it is not
+an isolated kernel timer. `send_call_ns` measures copying/queueing the response,
+not its asynchronous network drain. A client-side complete-response timer is
+the end-to-end latency boundary. Optimized builds and an isolated execution
+host are required for performance comparisons.
+
 Multiple weighted adapters and reference-image conditioning are not accepted
 by this schema. Discovery explicitly reports `reference_images:false`; passing
 such a field fails instead of silently ignoring it. Krea's community edit

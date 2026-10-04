@@ -104,10 +104,17 @@ static int image_worker_main(void* argument) {
       iree_byte_span_t png = iree_byte_span_empty();
       iree_status_t status = service->generator.generate(
           service->generator.self, &worker->job.request, &rgb);
+      const iree_time_t encode_begin = iree_time_now();
       if (iree_status_is_ok(status)) {
         status = loom_serve_image_encode_rgb_f32_png(
             service->options->width, service->options->height, rgb, &png,
             service->allocator);
+      }
+      if (iree_status_is_ok(status)) {
+        fprintf(stderr,
+                "{\"event\":\"image_encoding\",\"request\":%" PRIu64
+                ",\"png_ns\":%" PRId64 "}\n",
+                worker->job.id, iree_time_now() - encode_begin);
       }
       iree_slim_mutex_lock(&worker->mutex);
       worker->png = png;
@@ -251,13 +258,27 @@ static iree_status_t image_collect(image_service_t* service, bool* progress) {
             ",\"png_bytes\":%zu,\"completed\":%" PRIu64 "}\n",
             job.id, png.data_length, service->completed);
     if (service->connection) {
+      const iree_time_t encode_begin = iree_time_now();
       status = image_result_json(
           service, iree_make_const_byte_span(png.data, png.data_length));
+      if (iree_status_is_ok(status)) {
+        fprintf(stderr,
+                "{\"event\":\"image_response_encoding\",\"request\":%" PRIu64
+                ",\"json_ns\":%" PRId64 ",\"response_bytes\":%zu}\n",
+                job.id, iree_time_now() - encode_begin,
+                iree_string_builder_view(&service->response).size);
+      }
     }
   }
   if (service->connection) {
     if (iree_status_is_ok(status)) {
+      const iree_time_t send_begin = iree_time_now();
       image_response_send(service, service->connection);
+      // The carrier copies/queues bytes here; client drain is asynchronous.
+      fprintf(stderr,
+              "{\"event\":\"image_response_transport\",\"request\":%" PRIu64
+              ",\"send_call_ns\":%" PRId64 "}\n",
+              job.id, iree_time_now() - send_begin);
     } else {
       loom_serve_http_connection_abort(service->connection);
     }

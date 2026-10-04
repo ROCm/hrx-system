@@ -245,9 +245,11 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
   }
   const loom_serve_krea2_request_options_t options = {
       model->height, model->width, model->text_tokens, seed, strength};
+  const iree_time_t prepare_begin = iree_time_now();
   loom_serve_krea2_request_t* request = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_krea2_request_create(
       model->tokenizer, options, prompt, model->allocator, &request));
+  const iree_time_t prepare_end = iree_time_now();
   iree_hal_transfer_operation_t uploads[LOOM_SERVE_KREA2_INPUT_COUNT] = {0};
   for (iree_host_size_t i = 0; i < model->input_count; ++i) {
     const loom_serve_krea2_input_t kind =
@@ -282,9 +284,11 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
     status =
         loom_serve_execution_feedback(execution, 1, &download, &completion);
   }
+  const iree_time_t submit_end = iree_time_now();
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_feedback_wait(execution, completion);
   }
+  const iree_time_t completion_end = iree_time_now();
   if (iree_status_is_ok(status)) {
     *out_rgb = iree_make_const_byte_span(model->output.data,
                                          model->output.data_length);
@@ -292,5 +296,14 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
     status = iree_status_join(status, loom_serve_execution_drain(execution));
   }
   loom_serve_krea2_request_destroy(request);
+  if (iree_status_is_ok(status)) {
+    // Submission overlaps device work. The remaining wait includes queued
+    // transfers and final readback, not an isolated GPU execution interval.
+    fprintf(stderr,
+            "{\"event\":\"image_execution\",\"prepare_ns\":%" PRId64
+            ",\"submit_ns\":%" PRId64 ",\"completion_wait_ns\":%" PRId64 "}\n",
+            prepare_end - prepare_begin, submit_end - prepare_end,
+            completion_end - submit_end);
+  }
   return status;
 }
