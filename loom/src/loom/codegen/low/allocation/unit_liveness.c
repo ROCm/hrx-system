@@ -267,8 +267,8 @@ typedef struct loom_low_allocation_unit_use_t {
   uint16_t block_index;
 } loom_low_allocation_unit_use_t;
 
-// Sparse unit demands collected by the existing use-point producer. Only
-// multi-unit values need refinement beyond the canonical value dataflow.
+// Sparse unit demands collected by the existing use-point producer. Multi-unit
+// values and decomposed edge sources need refinement beyond SSA value dataflow.
 typedef struct loom_low_allocation_unit_use_index_t {
   // Mutable lifetime result receiving the recorded uses.
   loom_low_allocation_unit_liveness_t* unit_liveness;
@@ -300,6 +300,16 @@ static bool loom_low_allocation_unit_use_is_defined_in_block(
          definition_point <= block->end_point;
 }
 
+static iree_status_t loom_low_allocation_unit_use_index_allocate_heads(
+    loom_low_allocation_unit_use_index_t* index) {
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(index->arena, index->unit_liveness->point_count,
+                                sizeof(*index->heads), (void**)&index->heads));
+  memset(index->heads, 0xFF,
+         index->unit_liveness->point_count * sizeof(*index->heads));
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_allocation_unit_use_index_initialize(
     const loom_cfg_graph_t* cfg_graph, const loom_liveness_analysis_t* liveness,
     loom_low_allocation_unit_liveness_t* unit_liveness,
@@ -317,12 +327,7 @@ static iree_status_t loom_low_allocation_unit_use_index_initialize(
       cfg_graph->edge_count == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, unit_liveness->point_count, sizeof(*out_index->heads),
-      (void**)&out_index->heads));
-  memset(out_index->heads, 0xFF,
-         unit_liveness->point_count * sizeof(*out_index->heads));
-  return iree_ok_status();
+  return loom_low_allocation_unit_use_index_allocate_heads(out_index);
 }
 
 // Keep sparse CFG construction out of the register footprint of ordinary local
@@ -331,9 +336,14 @@ IREE_ATTRIBUTE_NOINLINE static iree_status_t
 loom_low_allocation_unit_use_index_record(
     loom_low_allocation_unit_use_index_t* index, uint32_t definition_point,
     iree_host_size_t unit_start, uint32_t unit_count) {
-  if (loom_low_allocation_unit_use_is_defined_in_block(
+  if (index->cfg_graph->edge_count == 0 ||
+      loom_low_allocation_unit_use_is_defined_in_block(
           definition_point, &index->liveness->blocks[index->block_index])) {
     return iree_ok_status();
+  }
+  if (index->heads == NULL) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_unit_use_index_allocate_heads(index));
   }
   for (uint32_t i = 0; i < unit_count; ++i) {
     uint32_t* head = &index->heads[unit_start + i];
@@ -565,6 +575,17 @@ loom_low_allocation_unit_liveness_note_contiguous_part_uses_at_point(
         loom_low_allocation_unit_liveness_note_unit_use_at_point(
             unit_use_index, liveness, source.value_ordinal, source.unit_offset,
             relation->unit_count, point));
+    const loom_liveness_interval_t* source_interval =
+        loom_liveness_interval_for_value_ordinal(liveness,
+                                                 source.value_ordinal);
+    if (source_interval->unit_count == 1) {
+      // Scalar SSA dataflow ends at the concat. Decomposed transport reads
+      // the source again at this edge, including on subsequent loop visits.
+      // Multi-unit sources already enter this worklist in note_unit_use.
+      IREE_RETURN_IF_ERROR(loom_low_allocation_unit_use_index_record(
+          unit_use_index, source_interval->definition_point,
+          unit_liveness->values[source.value_ordinal].unit_point_start, 1));
+    }
     if (source.value_ordinal == aggregate_ordinal) {
       // This read observes the aggregate's own captured storage and is
       // already represented by its direct SSA use at the edge.
@@ -1409,8 +1430,8 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
   }
 
   // Actual unit uses refine both local lifetime ends and CFG boundary demand.
-  // Scalar values keep the canonical value-granular boundaries. Terminator
-  // edge facts additionally decompose aggregate handoffs into their sources.
+  // Ordinary scalar uses keep canonical value-granular boundaries. Terminator
+  // edge facts additionally extend the decomposed component sources.
   IREE_RETURN_IF_ERROR(loom_low_allocation_write_interference_create(
       target, placement, liveness, decision_arena,
       &out_unit_liveness->write_interference));

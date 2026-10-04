@@ -177,3 +177,102 @@ CHECK: *"spill_count":0,*
 CHECK: *"name":"tuple"*"base":2,"count":4}*
 CHECK: *"name":"low"*"base":0,"count":2}*
 CHECK: *"name":"result"*"base":2,"count":4}*
+
+// ====
+
+// RUN: emit low-allocation-json @decomposed_scalar_backedge
+
+test.target<low_core> @target
+
+// Decomposed edge reads keep their original sources live across the backedge.
+low.func.def target<test.low.core>(@target) @decomposed_scalar_backedge(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %packed = concat(%seed, %seed) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.br ^outer(%condition: reg<test.i32>)
+^outer(%total: reg<test.i32>):
+  low.cond_br %condition, ^initialize, ^exit : reg<test.i32>
+^initialize:
+  low.br ^body(%packed: reg<test.i32 x2>)
+^body(%current: reg<test.i32 x2>):
+  %lane = slice %current[0] : reg<test.i32 x2> -> reg<test.i32>
+  %changed = test.add.i32 %lane, %total
+  low.br ^outer(%changed: reg<test.i32>)
+^exit:
+  return %total
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"decomposed_scalar_backedge","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":7,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":3,"name":"packed","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":11,"unit_count":2,"location":{"kind":"target_id","base":0,"count":2}},{"index":1,"value":{"id":1,"name":"seed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":11,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":2,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":11,"unit_count":1,"location":{"kind":"target_id","base":2,"count":1}},{"index":3,"value":{"id":4,"name":"total","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":3,"end_point":12,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}},{"index":4,"value":{"id":5,"name":"current","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":7,"end_point":8,"unit_count":2,"location":{"kind":"target_id","base":3,"count":2}},{"index":5,"value":{"id":6,"name":"lane","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":8,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":3,"count":1}},{"index":6,"value":{"id":7,"name":"changed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":9,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @decomposed_distinct_backedge
+
+test.target<low_core> @target
+
+// Decomposed edge reads keep their original sources live across the backedge.
+low.func.def target<test.low.core>(@target) @decomposed_distinct_backedge(%condition: reg<test.i32>, %seed: reg<test.i32>, %other: reg<test.i32>) -> (reg<test.i32>) asm {
+  %packed = concat(%seed, %other) : (reg<test.i32>, reg<test.i32>) -> reg<test.i32 x2>
+  low.br ^outer(%condition: reg<test.i32>)
+^outer(%total: reg<test.i32>):
+  low.cond_br %condition, ^initialize, ^exit : reg<test.i32>
+^initialize:
+  low.br ^body(%packed: reg<test.i32 x2>)
+^body(%current: reg<test.i32 x2>):
+  %lane = slice %current[0] : reg<test.i32 x2> -> reg<test.i32>
+  %changed = test.add.i32 %lane, %total
+  low.br ^outer(%changed: reg<test.i32>)
+^exit:
+  return %total
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"decomposed_distinct_backedge","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":8,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":4,"name":"packed","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":11,"unit_count":2,"location":{"kind":"target_id","base":0,"count":2}},{"index":1,"value":{"id":1,"name":"seed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":11,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":2,"value":{"id":2,"name":"other","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":11,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}},{"index":3,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":11,"unit_count":1,"location":{"kind":"target_id","base":2,"count":1}},{"index":4,"value":{"id":5,"name":"total","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":3,"end_point":12,"unit_count":1,"location":{"kind":"target_id","base":3,"count":1}},{"index":5,"value":{"id":6,"name":"current","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":7,"end_point":8,"unit_count":2,"location":{"kind":"target_id","base":4,"count":2}},{"index":6,"value":{"id":7,"name":"lane","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":8,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":4,"count":1}},{"index":7,"value":{"id":8,"name":"changed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":9,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":3,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @decomposed_wide_backedge
+
+test.target<low_core> @target
+
+// Decomposed edge reads keep their original sources live across the backedge.
+low.func.def target<test.low.core>(@target) @decomposed_wide_backedge(%condition: reg<test.i32>, %seed: reg<test.i32 x2>) -> (reg<test.i32>) asm {
+  %packed = concat(%seed, %seed) : (reg<test.i32 x2>, reg<test.i32 x2>) -> reg<test.i32 x4>
+  low.br ^outer(%condition: reg<test.i32>)
+^outer(%total: reg<test.i32>):
+  low.cond_br %condition, ^initialize, ^exit : reg<test.i32>
+^initialize:
+  low.br ^body(%packed: reg<test.i32 x4>)
+^body(%current: reg<test.i32 x4>):
+  %lane = slice %current[0] : reg<test.i32 x4> -> reg<test.i32>
+  %changed = test.add.i32 %lane, %total
+  low.br ^outer(%changed: reg<test.i32>)
+^exit:
+  return %total
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"decomposed_wide_backedge","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":7,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":3,"name":"packed","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":11,"unit_count":4,"location":{"kind":"target_id","base":0,"count":4}},{"index":1,"value":{"id":1,"name":"seed","type":"reg<test.i32 x2>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":11,"unit_count":2,"location":{"kind":"target_id","base":2,"count":2}},{"index":2,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":11,"unit_count":1,"location":{"kind":"target_id","base":4,"count":1}},{"index":3,"value":{"id":4,"name":"total","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":3,"end_point":12,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":4,"value":{"id":5,"name":"current","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":7,"end_point":8,"unit_count":4,"location":{"kind":"target_id","base":5,"count":4}},{"index":5,"value":{"id":6,"name":"lane","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":8,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":5,"count":1}},{"index":6,"value":{"id":7,"name":"changed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":9,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
+
+// ====
+
+// RUN: emit low-allocation-json @decomposed_scalar_only_backedge
+
+test.target<low_core> @target
+
+// Decomposed edge reads keep their original sources live across the backedge.
+low.func.def target<test.low.core>(@target) @decomposed_scalar_only_backedge(%condition: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  %packed = concat(%seed) : (reg<test.i32>) -> reg<test.i32>
+  low.br ^outer(%condition: reg<test.i32>)
+^outer(%total: reg<test.i32>):
+  low.cond_br %condition, ^initialize, ^exit : reg<test.i32>
+^initialize:
+  low.br ^body(%packed: reg<test.i32>)
+^body(%current: reg<test.i32>):
+  %changed = test.add.i32 %current, %total
+  low.br ^outer(%changed: reg<test.i32>)
+^exit:
+  return %total
+}
+
+// ----
+{"format":"loom.low.allocation.v0","function":"decomposed_scalar_only_backedge","target":"target","descriptor_set":"test.low.core","allocation_mode":"virtual","assignment_count":6,"remark_count":0,"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,"assignments":[{"index":0,"value":{"id":3,"name":"packed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":1,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":1,"value":{"id":1,"name":"seed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":0,"count":1}},{"index":2,"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":0,"end_point":10,"unit_count":1,"location":{"kind":"target_id","base":1,"count":1}},{"index":3,"value":{"id":4,"name":"total","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":3,"end_point":11,"unit_count":1,"location":{"kind":"target_id","base":2,"count":1}},{"index":4,"value":{"id":5,"name":"current","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":7,"end_point":8,"unit_count":1,"location":{"kind":"target_id","base":3,"count":1}},{"index":5,"value":{"id":6,"name":"changed","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_class":"test.i32"},"start_point":8,"end_point":9,"unit_count":1,"location":{"kind":"target_id","base":2,"count":1}}],"spill_plans":[],"copy_decisions":[],"remarks":[]}
