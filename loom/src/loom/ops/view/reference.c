@@ -568,6 +568,25 @@ iree_status_t loom_view_reference_make_buffer_view(
   return loom_value_facts_make_view_reference(context, view_reference, out);
 }
 
+iree_status_t loom_view_reference_make_unplaced_view(
+    loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t result_value_id, loom_value_facts_t buffer_facts,
+    loom_type_t result_type, loom_value_facts_t* out) {
+  loom_value_fact_buffer_reference_t buffer_reference =
+      loom_view_default_buffer_reference(LOOM_VALUE_ID_INVALID);
+  (void)loom_value_facts_query_buffer_reference(context, buffer_facts,
+                                                &buffer_reference);
+  loom_value_fact_view_reference_t view_reference =
+      loom_view_default_view_reference(result_value_id, result_type);
+  view_reference.footprint_byte_length = loom_view_footprint_facts(
+      context, module, result_type, view_reference.static_element_byte_count);
+  view_reference.memory_space = buffer_reference.memory_space;
+  view_reference.alias_scope_id = buffer_reference.alias_scope_id;
+  view_reference.nullability = buffer_reference.nullability;
+  view_reference.origin = buffer_reference.origin;
+  return loom_value_facts_make_view_reference(context, view_reference, out);
+}
+
 iree_status_t loom_view_reference_make_subview(
     loom_fact_context_t* context, const loom_module_t* module,
     loom_value_id_t source_value_id, loom_value_facts_t source_facts,

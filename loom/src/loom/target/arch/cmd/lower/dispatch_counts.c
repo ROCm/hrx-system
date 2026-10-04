@@ -156,6 +156,9 @@ loom_cmd_dispatch_count_classify_indirect_origin(
     return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_STATIC;
   }
   const loom_op_t* defining_op = loom_value_def_op(root_value);
+  if (defining_op && loom_command_parameter_isa(defining_op)) {
+    return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_STATIC;
+  }
   if (defining_op && loom_buffer_alloca_isa(defining_op)) {
     return LOOM_CMD_DISPATCH_COUNT_INDIRECT_ORIGIN_DYNAMIC;
   }

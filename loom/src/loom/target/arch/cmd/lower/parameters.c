@@ -45,7 +45,11 @@ typedef struct loom_cmd_parameter_source_range_t {
   // Source command-program launch-binding ordinal owning the storage root.
   uint16_t source_binding_ordinal;
 
-  // Byte offset relative to the source launch-binding range.
+  // One-based parameter row for parameter-relative ranges, or zero for ranges
+  // already relative to the launch binding.
+  iree_host_size_t parameter_row;
+
+  // Byte offset relative to the parameter or source launch-binding range.
   uint64_t byte_offset;
 
   // Exact byte length of the derived range.
@@ -53,8 +57,9 @@ typedef struct loom_cmd_parameter_source_range_t {
 } loom_cmd_parameter_source_range_t;
 
 typedef struct loom_cmd_parameter_build_t {
-  // Immutable source module containing the command program.
-  const loom_module_t* module;
+  // Source module whose ordinal scratch indexes parameter roots during the
+  // walk.
+  loom_module_t* module;
 
   // Source program launch-binding values in signature order.
   const loom_value_id_t* binding_values;
@@ -249,10 +254,19 @@ static iree_status_t loom_cmd_parameter_append_exact_view_ranges(
         exact_byte_offset < 0 || exact_byte_length < 0) {
       continue;
     }
+    const loom_value_id_t root_value =
+        loom_value_fact_view_reference_resolve_root_value(view_reference,
+                                                          result);
+    const loom_value_ordinal_t parameter_ordinal =
+        loom_module_value_ordinal_scratch_lookup(build->module, root_value);
+    const iree_host_size_t parameter_row =
+        parameter_ordinal != LOOM_VALUE_ORDINAL_INVALID
+            ? (iree_host_size_t)parameter_ordinal + 1
+            : 0;
     const uint16_t source_binding_ordinal =
-        loom_cmd_parameter_find_root_binding(
-            build, loom_value_fact_view_reference_resolve_root_value(
-                       view_reference, result));
+        parameter_row != 0
+            ? build->rows[parameter_row - 1].source_binding_ordinal
+            : loom_cmd_parameter_find_root_binding(build, root_value);
     if (source_binding_ordinal == UINT16_MAX) {
       continue;
     }
@@ -261,6 +275,7 @@ static iree_status_t loom_cmd_parameter_append_exact_view_ranges(
         (loom_cmd_parameter_source_range_t){
             .source_value = result,
             .source_binding_ordinal = source_binding_ordinal,
+            .parameter_row = parameter_row,
             .byte_offset = (uint64_t)exact_byte_offset,
             .byte_length = (uint64_t)exact_byte_length,
         };
@@ -318,6 +333,9 @@ static iree_status_t loom_cmd_parameter_visit(
           iree_max(view_reference.minimum_alignment,
                    (uint64_t)LOOM_CMD_PARAMETER_DEFAULT_ALIGNMENT),
   };
+  loom_module_value_ordinal_scratch_set(
+      build->module, result_value,
+      (loom_value_ordinal_t)(build->row_count - 1));
   if (!iree_host_size_checked_add(build->key_storage_length, key.size,
                                   &build->key_storage_length)) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -373,7 +391,7 @@ static iree_status_t loom_cmd_parameter_allocate_requirement_table(
 }
 
 iree_status_t loom_cmd_parameter_layout_build(
-    const loom_module_t* module, loom_func_like_t program,
+    loom_module_t* module, loom_func_like_t program,
     const loom_value_fact_table_t* fact_table,
     iree_arena_allocator_t* scratch_arena, iree_allocator_t host_allocator,
     loom_cmd_buffer_binding_t* bindings, iree_host_size_t binding_count,
@@ -407,11 +425,17 @@ iree_status_t loom_cmd_parameter_layout_build(
       .fact_table = fact_table,
       .scratch_arena = scratch_arena,
   };
+  loom_module_value_ordinal_scratch_acquire(module);
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
-  IREE_RETURN_IF_ERROR(loom_walk_function(
+  iree_status_t walk_status = loom_walk_function(
       module, program, LOOM_WALK_PRE_ORDER,
       (loom_walk_callback_t){loom_cmd_parameter_visit, &build}, scratch_arena,
-      &walk_result));
+      &walk_result);
+  for (iree_host_size_t i = 0; i < build.row_count; ++i) {
+    loom_module_value_ordinal_scratch_clear(module, build.rows[i].result_value);
+  }
+  loom_module_value_ordinal_scratch_release(module);
+  IREE_RETURN_IF_ERROR(walk_status);
   IREE_ASSERT_EQ(walk_result, LOOM_WALK_CONTINUE);
 
   bool* fixed_bindings = NULL;
@@ -543,24 +567,27 @@ iree_status_t loom_cmd_parameter_layout_build(
     IREE_ASSERT_LT(source->source_binding_ordinal, binding_count);
     const loom_cmd_buffer_binding_t binding =
         bindings[source->source_binding_ordinal];
+    const uint64_t parameter_offset =
+        source->parameter_row != 0
+            ? out_requirements->entries[source->parameter_row - 1].byte_offset
+            : 0;
+    const uint64_t byte_offset = parameter_offset + source->byte_offset;
     if (binding.role == LOOM_CMD_BUFFER_ROLE_FIXED) {
       loom_cmd_parameter_root_requirement_t* root =
           &out_requirements->roots[binding.resource_index];
-      root->required_byte_length =
-          iree_max(root->required_byte_length,
-                   source->byte_offset + source->byte_length);
+      root->required_byte_length = iree_max(root->required_byte_length,
+                                            byte_offset + source->byte_length);
     }
-    IREE_ASSERT_LE(binding.byte_offset, UINT64_MAX - source->byte_offset);
+    IREE_ASSERT_LE(binding.byte_offset, UINT64_MAX - byte_offset);
     if (binding.byte_length != UINT64_MAX) {
-      IREE_ASSERT_LE(source->byte_offset, binding.byte_length);
-      IREE_ASSERT_LE(source->byte_length,
-                     binding.byte_length - source->byte_offset);
+      IREE_ASSERT_LE(byte_offset, binding.byte_length);
+      IREE_ASSERT_LE(source->byte_length, binding.byte_length - byte_offset);
     }
     resolved_buffer_ranges[i] = (loom_cmd_buffer_range_t){
         .source_value = source->source_value,
         .role = binding.role,
         .resource_index = binding.resource_index,
-        .byte_offset = binding.byte_offset + source->byte_offset,
+        .byte_offset = binding.byte_offset + byte_offset,
         .byte_length = source->byte_length,
     };
   }

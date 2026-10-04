@@ -36,6 +36,15 @@ iree_status_t loom_view_reference_make_buffer_view(
     loom_value_facts_t byte_offset_facts, loom_type_t result_type,
     loom_value_facts_t* out);
 
+// Constructs a typed view whose placement within its source buffer is opaque.
+// Offsets are relative to the view's own root identity. Storage provenance and
+// alias scope survive, but source-buffer alignment does not constrain the new
+// origin, and no buffer SSA value directly materializes that origin.
+iree_status_t loom_view_reference_make_unplaced_view(
+    loom_fact_context_t* context, const loom_module_t* module,
+    loom_value_id_t result_value_id, loom_value_facts_t buffer_facts,
+    loom_type_t result_type, loom_value_facts_t* out);
+
 // Constructs view-reference facts for `view.subview`.
 iree_status_t loom_view_reference_make_subview(
     loom_fact_context_t* context, const loom_module_t* module,

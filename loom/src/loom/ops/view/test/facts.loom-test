@@ -737,3 +737,45 @@ func.def @finite_storage_or_zero(%condition: i1, %buffer: buffer) -> (i1) {
   %finite = scalar.constant true : i1
   func.return %finite : i1
 }
+
+// ====
+
+// Named parameters retain source storage properties without claiming a known
+// position or absolute alignment inside that storage. Derived offsets are
+// exact relative to the parameter result, including through view refinement.
+kernel.entry.decl @observe(%root: i1, %scope: i1, %space: i64, %alignment: i64, %offset_lo: i64, %offset_hi: i64, %length: i64)
+
+command.program.def @parameter_reference() launch(%parameters: buffer) {
+  %unique = buffer.assume.noalias %parameters : buffer
+  %aligned = buffer.assume.alignment %unique {minimum_alignment = 256} : buffer
+  %global = buffer.assume.memory_space<global> %aligned : buffer
+  %table = command.parameter %global, "table" : view<6x4xbf16>
+  %row = view.subview %table[5, 0] : view<6x4xbf16> -> view<1x4xbf16>
+  %refined = view.refine %row : view<1x4xbf16> -> view<1x4xbf16>
+  %root = test.fact_view_root_matches %refined, %table : view<1x4xbf16>, view<6x4xbf16> -> i1
+  %scope = test.fact_alias_scope_matches %refined, %unique : view<1x4xbf16>, buffer -> i1
+  %space = test.fact_view_memory_space %refined : view<1x4xbf16> -> i64
+  %root_alignment = test.fact_view_root_min_alignment %refined : view<1x4xbf16> -> i64
+  %offset_lo = test.fact_view_byte_offset_lo %refined : view<1x4xbf16> -> i64
+  %offset_hi = test.fact_view_byte_offset_hi %refined : view<1x4xbf16> -> i64
+  %length = test.fact_view_byte_length_hi %refined : view<1x4xbf16> -> i64
+  %groups = index.constant 1 : index
+  kernel.dispatch @observe[%groups](%root, %scope, %space, %root_alignment, %offset_lo, %offset_hi, %length) : [index](i1, i1, i64, i64, i64, i64, i64)
+  command.return
+}
+
+// ----
+kernel.entry.decl @observe(%root: i1, %scope: i1, %space: i64, %alignment: i64, %offset_lo: i64, %offset_hi: i64, %length: i64)
+
+command.program.def @parameter_reference() launch(%parameters: buffer) {
+  %root = scalar.constant true : i1
+  %scope = scalar.constant true : i1
+  %space = scalar.constant 1 : i64
+  %root_alignment = scalar.constant 1 : i64
+  %offset_lo = scalar.constant 40 : i64
+  %offset_hi = scalar.constant 40 : i64
+  %length = scalar.constant 8 : i64
+  %groups = index.constant 1 : index
+  kernel.dispatch @observe[%groups](%root, %scope, %space, %root_alignment, %offset_lo, %offset_hi, %length) : [index](i1, i1, i64, i64, i64, i64, i64)
+  command.return
+}
