@@ -1,0 +1,415 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @block_adapter_wave32 {subgroup_size = 32}
+template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+
+command.program.decl @block0_query() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @block0_key() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @block0_value() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @block0_gate() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @block0_attention_output() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @block0_feed_forward_gate() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @block0_feed_forward_up() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @block0_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer)
+
+// Concrete wrappers bind the official rank-32 adapter's dimensions. Device
+// arithmetic helpers receive SSA operands and contain no model configuration.
+// The F32 file factors round to BF16 before the matrix contractions.
+
+kernel.def target(@block_adapter_wave32) @block_adapter_linear_6144_32() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 2 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 32 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_adapter_wave32) @block_adapter_linear_16384_32() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 2 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 16384 : index
+  %outputs = index.constant 32 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_adapter_wave32) @block_adapter_linear_32_1536() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 96 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 1536 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_adapter_wave32) @block_adapter_linear_32_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 6144 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_adapter_wave32) @block_adapter_linear_32_16384() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 1024 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 16384 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_adapter_wave32) @block_adapter_add_1536() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 96 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 1536 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_adapter_wave32) @block_adapter_add_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 6144 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_adapter_wave32) @block_adapter_add_16384() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 1024 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 16384 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+// Factor commands expose independent numerical boundaries. The adapted
+// commands overlap base and A contractions, then add B(Ax) in place without
+// materializing a full-width delta. Base and adapter parameters never alias.
+
+command.program.def public @block0_query_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_q.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_query_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_q.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_linear_32_6144(%input, %weight, %output) : (buffer, view<6144x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_query_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_q.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_add_6144(%input, %weight, %strength, %base, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_query_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_query(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_query_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_query_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_key_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_k.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_key_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_k.lora_B.weight" : view<1536x32xf32>
+  kernel.launch @block_adapter_linear_32_1536(%input, %weight, %output) : (buffer, view<1536x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_key_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_k.lora_B.weight" : view<1536x32xf32>
+  kernel.launch @block_adapter_add_1536(%input, %weight, %strength, %base, %output) : (buffer, view<1536x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_key_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_key(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_key_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_key_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_value_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_v.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_value_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_v.lora_B.weight" : view<1536x32xf32>
+  kernel.launch @block_adapter_linear_32_1536(%input, %weight, %output) : (buffer, view<1536x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_value_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_v.lora_B.weight" : view<1536x32xf32>
+  kernel.launch @block_adapter_add_1536(%input, %weight, %strength, %base, %output) : (buffer, view<1536x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_value_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_value(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_value_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_value_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_gate.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_gate.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_linear_32_6144(%input, %weight, %output) : (buffer, view<6144x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_gate_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_gate.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_add_6144(%input, %weight, %strength, %base, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_gate(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_gate_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_gate_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_attention_output_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_out.0.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_attention_output_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_out.0.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_linear_32_6144(%input, %weight, %output) : (buffer, view<6144x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_attention_output_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.attn.to_out.0.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_add_6144(%input, %weight, %strength, %base, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_attention_output_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_attention_output(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_attention_output_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_attention_output_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.gate.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.gate.lora_B.weight" : view<16384x32xf32>
+  kernel.launch @block_adapter_linear_32_16384(%input, %weight, %output) : (buffer, view<16384x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_gate_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.gate.lora_B.weight" : view<16384x32xf32>
+  kernel.launch @block_adapter_add_16384(%input, %weight, %strength, %base, %output) : (buffer, view<16384x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_feed_forward_gate(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_feed_forward_gate_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_feed_forward_gate_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_up_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.up.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_up_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.up.lora_B.weight" : view<16384x32xf32>
+  kernel.launch @block_adapter_linear_32_16384(%input, %weight, %output) : (buffer, view<16384x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_up_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.up.lora_B.weight" : view<16384x32xf32>
+  kernel.launch @block_adapter_add_16384(%input, %weight, %strength, %base, %output) : (buffer, view<16384x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_up_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_feed_forward_up(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_feed_forward_up_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_feed_forward_up_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_down_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.down.lora_A.weight" : view<32x16384xf32>
+  kernel.launch @block_adapter_linear_16384_32(%input, %weight, %output) : (buffer, view<32x16384xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_down_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.down.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_linear_32_6144(%input, %weight, %output) : (buffer, view<6144x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_down_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.transformer_blocks.0.ff.down.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @block_adapter_add_6144(%input, %weight, %strength, %base, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_down_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %rank_bytes = index.constant 64 : offset
+  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+  %low = buffer.alloca<global> align(256) %low_bytes : buffer
+  command.concurrent {
+    command.program.launch @block0_feed_forward_down(%parameters, %input, %output) : (buffer, buffer, buffer)
+    command.program.launch @block0_feed_forward_down_adapter_down(%adapter, %input, %low) : (buffer, buffer, buffer)
+  }
+  command.program.launch @block0_feed_forward_down_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

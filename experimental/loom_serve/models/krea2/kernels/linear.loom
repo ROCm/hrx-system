@@ -9,16 +9,19 @@ template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: in
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
 template.decl @projection.adapter_add_bf16(%elements: index, %delta: buffer, %strength: buffer, %output: buffer)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 
 // Complete 16x16 tiles, row-major activations and [output,input] checkpoint
 // weights. F32 file values are rounded to BF16 before contraction, matching
 // a BF16 model load without reinterpreting the source bytes. Accumulation is
-// F32; the caller selects an epilogue before rounding the result to BF16.
+// F32 in 256-input partials; the caller selects an epilogue before rounding
+// the result to BF16.
 // Dimensions are explicit operands, without model configuration dependencies.
 template.def<@projection.linear_f32_as_bf16> device @linear_f32_weights_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %tile = index.constant 16 : index
+  %block_size = index.constant 256 : index
   %row_tile = kernel.workgroup.id<x> : index
   %output_tile = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
@@ -31,12 +34,18 @@ template.def<@projection.linear_f32_as_bf16> device @linear_f32_weights_as_bf16(
   %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xf32>
   %zeros = vector.constant 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
-  %result = scf.for %column = [%zero to %inputs step %tile](%acc = %initial : vector<8xf32>) -> (vector<8xf32>) {
-    %lhs = vector.fragment.load<lhs> %input_view[%row_origin, %column] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
-    %weights = vector.load %weight_view[%weight_row, %column] : view<[%outputs]x[%inputs]xf32> -> vector<16xf32>
-    %rounded = vector.fptrunc %weights : vector<16xf32> to vector<16xbf16>
-    %rhs = vector.fragment<rhs> %rounded shape [%tile, %tile] : vector<16xbf16>
-    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result = scf.for %block = [%zero to %inputs step %block_size](%total = %initial : vector<8xf32>) -> (vector<8xf32>) {
+    %block_limit = index.add %block, %block_size : index
+    %block_end = index.min %block_limit, %inputs : index
+    %partial = scf.for %column = [%block to %block_end step %tile](%acc = %initial : vector<8xf32>) -> (vector<8xf32>) {
+      %lhs = vector.fragment.load<lhs> %input_view[%row_origin, %column] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights = vector.load %weight_view[%weight_row, %column] : view<[%outputs]x[%inputs]xf32> -> vector<16xf32>
+      %rounded = vector.fptrunc %weights : vector<16xf32> to vector<16xbf16>
+      %rhs = vector.fragment<rhs> %rounded shape [%tile, %tile] : vector<16xbf16>
+      %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %next = vector.addf %total, %partial : vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
   template.return %result : vector<8xf32>
@@ -130,6 +139,38 @@ template.def<@projection.bias_f32_as_bf16> device @bias_projection_f32_as_bf16(%
   %values = vector.splat %value : vector<8xf32>
   %biased = vector.addf %result, %values : vector<8xf32>
   template.return %biased : vector<8xf32>
+}
+
+// Fusion preserves the BF16 B-projection and scaling boundaries. Reading
+// and writing the same base tile is safe: no other tile consumes its values.
+template.def<@projection.adapter_epilogue_bf16> device @adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %tile : index
+  %output_origin = index.mul %output_tile, %tile : index
+  %base_view = buffer.view %base[%origin] : buffer -> view<[%rows]x[%outputs]xbf16>
+  %strength_view = buffer.view %strength[%origin] : buffer -> view<1xf32>
+  %base_bf16 = vector.fragment.load<result> %base_view[%row_origin, %output_origin] shape [%tile, %tile] : view<[%rows]x[%outputs]xbf16> -> vector<8xbf16>
+  %base_f32 = vector.extf %base_bf16 : vector<8xbf16> to vector<8xf32>
+  %scale = view.load %strength_view[%zero] : view<1xf32> -> f32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %disabled = scalar.cmpf oeq, %scale, %zero_f32 : f32
+  %combined = scf.if %disabled -> (vector<8xf32>) {
+    scf.yield %base_f32 : vector<8xf32>
+  } else {
+    %delta_bf16 = vector.fptrunc %result : vector<8xf32> to vector<8xbf16>
+    %delta_f32 = vector.extf %delta_bf16 : vector<8xbf16> to vector<8xf32>
+    %scales = vector.splat %scale : vector<8xf32>
+    %scaled_f32 = vector.mulf %delta_f32, %scales : vector<8xf32>
+    %scaled_bf16 = vector.fptrunc %scaled_f32 : vector<8xf32> to vector<8xbf16>
+    %scaled = vector.extf %scaled_bf16 : vector<8xbf16> to vector<8xf32>
+    %sum = vector.addf %base_f32, %scaled : vector<8xf32>
+    scf.yield %sum : vector<8xf32>
+  }
+  template.return %combined : vector<8xf32>
 }
 
 // The low-rank result has already rounded to BF16. Scaling rounds at the

@@ -423,3 +423,40 @@ The acceptance gate requires exact native composition and complete-block
 relative L2 no worse than the external baseline. It does not loosen the
 individual component tolerances. These are block-zero accuracy observations,
 not a full-model image or performance result.
+
+### Block LoRA projections
+
+[`block_adapters.loom`](block_adapters.loom) applies the official adapter to
+all eight block-zero projections. Each adapted command binds separate base
+and adapter parameter roots. The base contraction and rank-32 A contraction
+have an explicit concurrent scope; the B contraction fuses BF16 rounding,
+strength multiplication, and addition into the base output. Its same-tile
+read/write permits in-place addition without a full-width delta buffer.
+The zero-strength branch preserves the base instead of adding a rounded zero.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_adapters.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights/turbo.safetensors" \
+  --adapter="$krea_adapter/softwatercolor.safetensors" \
+  --reference="$krea_reference" --output=/path/to/new-adapter-results
+```
+
+The independent CPU/F64 calculation checks the base, A, and B contractions.
+Both fusion and the complete two-domain command then require bitwise agreement
+with composition of those qualified native outputs. Actual base and
+adapter-conditioned inputs run at 16 and 1088 rows, with strengths 0, 0.5,
+and 1. All 576 repeated output comparisons pass: 2,135,506,944 element
+comparisons, none outside their respective accuracy or exactness gates.
+The output directory retains approximately 1.5 GiB of regenerable tensors;
+one oracle file is reused to avoid retaining every strength's expected output.
+
+At 1088 rows, the fused B epilogue removes 250.75 MiB of delta write/read
+traffic and eight dispatches across the block's projections. Each adapted
+projection needs only a 68 KiB rank-32 intermediate beyond its ordinary base
+output. Those are storage/traffic counts, not measured performance gains.
+The component path still reads the adapter's F32 file factors and rounds them
+to BF16 in the contraction. Compact startup-prepared adapter storage and a
+complete LoRA-enabled block are separate qualification boundaries; this does
+not yet establish full-model LoRA image generation.
