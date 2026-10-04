@@ -1,0 +1,116 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// check_linear_tiled.py binds each shape's compiler configuration and selects
+// the corresponding sample. Kernel workloads are not device ABI constants.
+// Link kernels/linear.loom and kernels/linear_tiled.loom with --library.
+// The single-wave helper is an exact arithmetic reference for the cooperative
+// helper: both retain four K16 chains and the same K256 combination order.
+// Cases cover each 16-row tail within a 64-row workgroup, the first workgroup
+// boundary, and both image sequence sizes. Buffers have exact logical extents;
+// distinct output sentinels also expose missing valid stores.
+
+config.decl @projection_test.rows : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @projection_test.inputs : %value: index where [range(%value, 256, 65536), mul(%value, 256)]
+config.decl @projection_test.outputs : %value: index where [range(%value, 64, 65536), mul(%value, 64)]
+
+amdgpu.target<gfx11-generic> @projection_test_wave32 {subgroup_size = 32}
+template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.def target(@projection_test_wave32) @linear_bf16_reference() {
+  %rows = config.get @projection_test.rows : index
+  %outputs = config.get @projection_test.outputs : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.div %outputs, %tile : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @projection_test.rows : index
+  %inputs = config.get @projection_test.inputs : index
+  %outputs = config.get @projection_test.outputs : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@projection_test_wave32) @linear_bf16_tiled() {
+  %rows = config.get @projection_test.rows : index
+  %outputs = config.get @projection_test.outputs : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %output_tiles = index.div %outputs, %tile : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @projection_test.rows : index
+  %inputs = config.get @projection_test.inputs : index
+  %outputs = config.get @projection_test.outputs : index
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+check.case public @linear_bf16_6144_6144 {
+  %rows = check.param.choice values([16, 32, 48, 64, 80, 1088, 4608]) name("rows") : index
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<[%rows]x6144xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<6144x6144xbf16>
+  %expected = check.generate.fill value(23.0) : tensor<[%rows]x6144xbf16>
+  %actual = check.generate.fill value(-17.0) : tensor<[%rows]x6144xbf16>
+  kernel.launch @linear_bf16_reference(%input, %weight, %expected) : (tensor<[%rows]x6144xbf16>, tensor<6144x6144xbf16>, tensor<[%rows]x6144xbf16>)
+  kernel.launch @linear_bf16_tiled(%input, %weight, %actual) : (tensor<[%rows]x6144xbf16>, tensor<6144x6144xbf16>, tensor<[%rows]x6144xbf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<[%rows]x6144xbf16>
+  check.return
+}
+
+check.case public @linear_bf16_6144_1536 {
+  %rows = check.param.choice values([16, 32, 48, 64, 80, 1088, 4608]) name("rows") : index
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<[%rows]x6144xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<1536x6144xbf16>
+  %expected = check.generate.fill value(23.0) : tensor<[%rows]x1536xbf16>
+  %actual = check.generate.fill value(-17.0) : tensor<[%rows]x1536xbf16>
+  kernel.launch @linear_bf16_reference(%input, %weight, %expected) : (tensor<[%rows]x6144xbf16>, tensor<1536x6144xbf16>, tensor<[%rows]x1536xbf16>)
+  kernel.launch @linear_bf16_tiled(%input, %weight, %actual) : (tensor<[%rows]x6144xbf16>, tensor<1536x6144xbf16>, tensor<[%rows]x1536xbf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<[%rows]x1536xbf16>
+  check.return
+}
+
+check.case public @linear_bf16_6144_16384 {
+  %rows = check.param.choice values([16, 32, 48, 64, 80, 1088, 4608]) name("rows") : index
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<[%rows]x6144xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<16384x6144xbf16>
+  %expected = check.generate.fill value(23.0) : tensor<[%rows]x16384xbf16>
+  %actual = check.generate.fill value(-17.0) : tensor<[%rows]x16384xbf16>
+  kernel.launch @linear_bf16_reference(%input, %weight, %expected) : (tensor<[%rows]x6144xbf16>, tensor<16384x6144xbf16>, tensor<[%rows]x16384xbf16>)
+  kernel.launch @linear_bf16_tiled(%input, %weight, %actual) : (tensor<[%rows]x6144xbf16>, tensor<16384x6144xbf16>, tensor<[%rows]x16384xbf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<[%rows]x16384xbf16>
+  check.return
+}
+
+check.case public @linear_bf16_16384_6144 {
+  %rows = check.param.choice values([16, 32, 48, 64, 80, 1088, 4608]) name("rows") : index
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<[%rows]x16384xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<6144x16384xbf16>
+  %expected = check.generate.fill value(23.0) : tensor<[%rows]x6144xbf16>
+  %actual = check.generate.fill value(-17.0) : tensor<[%rows]x6144xbf16>
+  kernel.launch @linear_bf16_reference(%input, %weight, %expected) : (tensor<[%rows]x16384xbf16>, tensor<6144x16384xbf16>, tensor<[%rows]x6144xbf16>)
+  kernel.launch @linear_bf16_tiled(%input, %weight, %actual) : (tensor<[%rows]x16384xbf16>, tensor<6144x16384xbf16>, tensor<[%rows]x6144xbf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<[%rows]x6144xbf16>
+  check.return
+}

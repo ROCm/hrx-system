@@ -518,6 +518,34 @@ BF16. The reusable contraction combines four independent accumulator chains
 every 256 inputs to shorten cancellation-sensitive reductions. It does not
 allocate global partial sums or copy/expand the weight matrices.
 
+The four DiT shapes use the cooperative
+[`linear_tiled_bf16`](kernels/linear_tiled.loom) motif. Eight wave32s share a
+64x64 output tile, acquiring K64 operand tiles into 18 KiB of padded LDS.
+The loop pipeline overlaps next-tile acquisition with current WMMA work while
+retaining the same four-chain/K256 arithmetic and final BF16 rounding. A last
+partial workgroup zero-fills absent input rows; every thread participates in
+the shared-memory barriers, and only complete valid 16-row fragments store.
+The supported row count therefore remains any positive multiple of 16.
+Model configuration and launch geometry stay in the concrete wrappers;
+dimensions enter the motif as SSA operands, not dispatch parameters.
+
+[`tests/linear_tiled.loom`](tests/linear_tiled.loom) compares this motif bitwise
+against the original single-wave motif at all four widths, covering
+16/32/48/64/80/1088/4608 rows. It links the real helper sources instead of
+copying their implementations. The checkpoint comparisons below independently
+exercise the actual command wrappers and numerical error envelope.
+
+```sh
+build_tools/bin/iree-bazel-build --config=asan \
+  //loom/src/loom/tools/iree-test-loom:iree-test-loom
+python -B experimental/loom_serve/models/krea2/tests/check_linear_tiled.py \
+  --checker=bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom
+```
+
+Run the check on the qualified execution host under its exclusive device
+lease. Compiler configuration and tensor sample selection are bound together
+by the driver; every invocation must report one passing sample and no skips.
+
 [`check_projections.py`](check_projections.py) compares every projection against
 an independent CPU/F64 contraction, rounded once to BF16, at the full captured
 token count and a separately JITed 16-row prefix. Each command runs twice.
