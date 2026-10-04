@@ -787,6 +787,26 @@ build_tools/bin/iree-bazel-run --config=asan \
 
 ## Four-row projection reuse
 
+Both Q5 body templates receive token/output capacity as explicit operands,
+separately from live token count and K/N. The four concrete kernels resolve
+configuration for the single/four-row schedules and canonical/channel8 layouts.
+Neither reusable body reads config or adds capacity arguments to the dispatch
+ABI. `tests/q5_specialization.loom` applies both bodies at capacity pairs 4/65
+and 32/96 in one composition without config bindings. It checks one/odd block
+depths, a 65-channel tail, and an untouched fifth output row:
+
+```sh
+model=experimental/loom_serve/models/qwen38
+build_tools/bin/iree-bazel-run --config=asan \
+  //loom/src/loom/tools/iree-test-loom -- \
+  "$model/tests/q5_specialization.loom" \
+  --library="$model/kernels/ggml/linear_q5k_q8_1_x4.loom" \
+  --library="$model/kernels/ggml/linear_qk_common.loom" \
+  --library="$model/kernels/ggml/quantize_q8_1_x4.loom" \
+  --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
+  --case=@q5_independent_specializations
+```
+
 The Q5 source contains independent-row and four-row weight-reuse schedules.
 Its differential uses distinct activation rows, a 65-channel output tail and
 K values 256, 768, 5120 and 17408. Fixed backing covers the largest sample;

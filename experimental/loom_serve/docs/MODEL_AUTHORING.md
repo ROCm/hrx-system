@@ -98,6 +98,15 @@ map strides, scattered pages, complete cache contents, and masked output tails.
 These motifs still implement Qwen's fixed head geometry and RoPE; explicit
 cache operands alone do not make them arbitrary-model attention.
 
+The [packed Q5 contraction bodies](../models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom)
+take token/output capacity independently of live token count and K/N. Their
+single-row and four-row schedules accept the same explicit bounds and weight
+ordering; canonical and channel-interleaved wrappers resolve the configuration.
+The [reuse case](../models/qwen38/tests/q5_specialization.loom) instantiates both
+schedules at two capacity pairs in one module without config bindings, including
+an odd channel tail and an untouched output row. Capacity constrains the body;
+it does not become the amount of work executed.
+
 An authored target contract fixes algorithmic requirements such as subgroup
 width. `loomc_target_profile_create_amdgpu_iree_hal` supplies the actual device
 facts for native specialization. The Q4/Q5/Q8 wave32 entries explicitly name

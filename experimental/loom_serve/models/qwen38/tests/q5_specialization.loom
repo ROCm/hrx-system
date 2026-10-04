@@ -1,0 +1,108 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Both row schedules compose at different capacity bounds without config.
+// Live counts and contraction extents remain distinct from those bounds.
+amdgpu.target<gfx11-generic> @q5_specialization_wave32 {subgroup_size = 32}
+
+template.decl @ggml.q5k.q8_1_x4.single.body(%token_capacity: index, %output_capacity: index, %weight_channels: index, %tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @ggml.q5k.q8_1_x4.four.body(%token_capacity: index, %output_capacity: index, %weight_channels: index, %tokens: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.def target(@q5_specialization_wave32) @q5_k256_single() {
+  %one = index.constant 1 : index
+  %channel_tiles = index.constant 9 : index
+  %rows = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%channel_tiles, %rows, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %token_capacity = index.constant 4 : index
+  %output_capacity = index.constant 65 : index
+  %weight_channels = index.constant 1 : index
+  %tokens = index.constant 4 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 65 : index
+  template.apply<@ggml.q5k.q8_1_x4.single.body>(%token_capacity, %output_capacity, %weight_channels, %tokens, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@q5_specialization_wave32) @q5_k256_four() {
+  %one = index.constant 1 : index
+  %channel_tiles = index.constant 9 : index
+  %rows = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%channel_tiles, %rows, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %token_capacity = index.constant 4 : index
+  %output_capacity = index.constant 65 : index
+  %weight_channels = index.constant 1 : index
+  %tokens = index.constant 4 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 65 : index
+  template.apply<@ggml.q5k.q8_1_x4.four.body>(%token_capacity, %output_capacity, %weight_channels, %tokens, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@q5_specialization_wave32) @q5_k768_single() {
+  %one = index.constant 1 : index
+  %channel_tiles = index.constant 12 : index
+  %rows = index.constant 4 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%channel_tiles, %rows, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %token_capacity = index.constant 32 : index
+  %output_capacity = index.constant 96 : index
+  %weight_channels = index.constant 1 : index
+  %tokens = index.constant 4 : index
+  %inputs = index.constant 768 : index
+  %outputs = index.constant 96 : index
+  template.apply<@ggml.q5k.q8_1_x4.single.body>(%token_capacity, %output_capacity, %weight_channels, %tokens, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@q5_specialization_wave32) @q5_k768_four() {
+  %one = index.constant 1 : index
+  %channel_tiles = index.constant 12 : index
+  %rows = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%channel_tiles, %rows, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %token_capacity = index.constant 32 : index
+  %output_capacity = index.constant 96 : index
+  %weight_channels = index.constant 1 : index
+  %tokens = index.constant 4 : index
+  %inputs = index.constant 768 : index
+  %outputs = index.constant 96 : index
+  template.apply<@ggml.q5k.q8_1_x4.four.body>(%token_capacity, %output_capacity, %weight_channels, %tokens, %inputs, %outputs, %input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Single/odd block depths and an odd output width exercise masked packet and
+// channel tails. Random packed bytes have finite floating headers. A fifth
+// output row remains untouched by both four-token invocations.
+check.case public @q5_independent_specializations {
+  %seed = check.param.seed base(37193) count(3) : i64
+  %weight_seed = check.literal value(97531) : i64
+  %input_256 = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<4x288xi8>
+  %weight_256 = check.generate.random.uniform seed(%weight_seed) range(0 to 31) : tensor<65x1x176xi8>
+  %single_256 = check.generate.fill value(-13.0) : tensor<5x65xf32>
+  %four_256 = check.generate.fill value(-13.0) : tensor<5x65xf32>
+  kernel.launch @q5_k256_single(%input_256, %weight_256, %single_256) : (tensor<4x288xi8>, tensor<65x1x176xi8>, tensor<5x65xf32>)
+  kernel.launch @q5_k256_four(%input_256, %weight_256, %four_256) : (tensor<4x288xi8>, tensor<65x1x176xi8>, tensor<5x65xf32>)
+  check.expect.bitwise actual(%four_256) expected(%single_256) : tensor<5x65xf32>
+  %tail_256 = check.tensor.view %four_256 offset(1040) : tensor<5x65xf32> -> tensor<65xf32>
+  %expected_tail_256 = check.generate.fill value(-13.0) : tensor<65xf32>
+  check.expect.bitwise actual(%tail_256) expected(%expected_tail_256) : tensor<65xf32>
+  %input_768 = check.generate.random.uniform seed(%seed) range(0 to 31) : tensor<4x864xi8>
+  %weight_768 = check.generate.random.uniform seed(%weight_seed) range(0 to 31) : tensor<96x3x176xi8>
+  %single_768 = check.generate.fill value(-13.0) : tensor<5x96xf32>
+  %four_768 = check.generate.fill value(-13.0) : tensor<5x96xf32>
+  kernel.launch @q5_k768_single(%input_768, %weight_768, %single_768) : (tensor<4x864xi8>, tensor<96x3x176xi8>, tensor<5x96xf32>)
+  kernel.launch @q5_k768_four(%input_768, %weight_768, %four_768) : (tensor<4x864xi8>, tensor<96x3x176xi8>, tensor<5x96xf32>)
+  check.expect.bitwise actual(%four_768) expected(%single_768) : tensor<5x96xf32>
+  %tail_768 = check.tensor.view %four_768 offset(1536) : tensor<5x96xf32> -> tensor<96xf32>
+  %expected_tail_768 = check.generate.fill value(-13.0) : tensor<96xf32>
+  check.expect.bitwise actual(%tail_768) expected(%expected_tail_768) : tensor<96xf32>
+  check.return
+}

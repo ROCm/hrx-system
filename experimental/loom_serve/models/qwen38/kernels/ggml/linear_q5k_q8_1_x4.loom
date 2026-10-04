@@ -305,13 +305,12 @@ func.def inline @ggml_q5k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffe
 // Dense raw-layout baseline. One subgroup owns one output channel while the
 // 256-thread workgroup exposes enough independent rows to saturate decode.
 // Workload values size the exact launch; configured capacities only constrain
-// device-body specialization and buffer addressing.
-template.decl @ggml.q5k.q8_1_x4.single.body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+// device-body specialization and buffer addressing. Concrete wrappers resolve
+// configuration and pass those bounds explicitly to the shared motifs.
+template.decl @ggml.q5k.q8_1_x4.single.body(%token_capacity: index, %output_capacity: index, %weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
 
-template.def<@ggml.q5k.q8_1_x4.single.body> device @ggml_q5k_q8_1_x4_single_body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+template.def<@ggml.q5k.q8_1_x4.single.body> device @ggml_q5k_q8_1_x4_single_body(%token_capacity: index, %output_capacity: index, %weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
-  %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
-  %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
@@ -378,7 +377,9 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4") @ggm
   kernel.launch.config workgroups(%output_tiles, %bounded_token_count, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %weight_channels = index.constant 1 : index
-  template.apply<@ggml.q5k.q8_1_x4.single.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
+  template.apply<@ggml.q5k.q8_1_x4.single.body>(%token_capacity, %output_capacity, %weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -396,19 +397,19 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_channe
   kernel.launch.config workgroups(%output_tiles, %bounded_token_count, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %weight_channels = index.constant 8 : index
-  template.apply<@ggml.q5k.q8_1_x4.single.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
+  template.apply<@ggml.q5k.q8_1_x4.single.body>(%token_capacity, %output_capacity, %weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
 // Four-row target-verification schedule. One subgroup owns an output channel
 // and retains four accumulators so immutable Q5_K bytes are read and decoded
 // once for the complete MTP target batch.
-template.decl @ggml.q5k.q8_1_x4.four.body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
+template.decl @ggml.q5k.q8_1_x4.four.body(%token_capacity: index, %output_capacity: index, %weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer)
 
-template.def<@ggml.q5k.q8_1_x4.four.body> device @ggml_q5k_q8_1_x4_four_body(%weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
+template.def<@ggml.q5k.q8_1_x4.four.body> device @ggml_q5k_q8_1_x4_four_body(%token_capacity: index, %output_capacity: index, %weight_channels: index, %token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %q8_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %q8_input, %weight, %output : buffer, buffer, buffer
-  %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
-  %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4), le(%token_count, %token_capacity)] : index
   %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
@@ -492,7 +493,9 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4") @
   kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %weight_channels = index.constant 1 : index
-  template.apply<@ggml.q5k.q8_1_x4.four.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
+  template.apply<@ggml.q5k.q8_1_x4.four.body>(%token_capacity, %output_capacity, %weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -510,7 +513,9 @@ kernel.def target(@ggml_q5k_gfx11_wave32) export("ggml_linear_q5k_q8_1_x4_m4_cha
   kernel.launch.config workgroups(%output_tiles, %c1, %c1) workgroup_size(%workgroup_size, %c1, %c1) : index
 } launch(%token_count: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer, %output: buffer) {
   %weight_channels = index.constant 8 : index
-  template.apply<@ggml.q5k.q8_1_x4.four.body>(%weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %token_capacity = config.get @ggml.linear_q5k_q8_1_x4.token_capacity : index
+  %output_capacity = config.get @ggml.linear_q5k_q8_1_x4.output_capacity : index
+  template.apply<@ggml.q5k.q8_1_x4.four.body>(%token_capacity, %output_capacity, %weight_channels, %token_count, %input_size, %output_size, %q8_input, %weight, %output) : (index, index, index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
