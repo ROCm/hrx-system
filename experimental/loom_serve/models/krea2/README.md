@@ -4,9 +4,9 @@ This is a **component port, not an image-serving implementation**. The image
 input projection and its official softwatercolor LoRA run through Loom's live
 source JIT, queued safetensors loading, command programs, and shared device
 ownership. The first transformer block's normalization and fused time
-modulation, dense projections, and fused Q/K normalization/rotation have
-independent component comparisons. Full text conditioning, DiT layers,
-denoising, and VAE decoding are not yet implemented here.
+modulation, dense projections, fused Q/K normalization/rotation, and masked
+attention have independent component comparisons. Full text conditioning,
+DiT layers, denoising, and VAE decoding are not yet implemented here.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -264,7 +264,7 @@ differences are reported separately. The shorter reductions were substantially
 closer to rounded F64 even when they differed from the library at more elements;
 matching the library's rounding errors is not the accuracy objective. Full-block
 and image accuracy remain separate gates; this is not a throughput measurement
-or a claim that attention itself is implemented.
+or a qualification of the attention operation described below.
 
 The 1088-row and 16-row qualifications pass all eight projections twice:
 133,398,528 output-element comparisons, with none outside the error envelope.
@@ -304,3 +304,48 @@ still establish the accumulated model-level error.
 At 1088 tokens the fused Q/K path avoids writing and rereading 8,355,840 BF16
 normalized elements: 31.875 MiB of intermediate traffic, plus two dispatches,
 per block. This is traffic accounting, not a measured throughput improvement.
+
+### Masked grouped-query attention
+
+[`block_attention.loom`](block_attention.loom) exposes ungated attention and
+attention with its sigmoid output gate. Both call the same config-free,
+128-channel attention template. Four wave64 subgroups process 16 query rows
+and successive 64-key tiles using LDS exchanges and F32 online-softmax state.
+Query-head grouping directly selects the original KV head; there is no
+KV-head replication or global attention-score matrix. A byte mask selects
+valid keys, independently of query position. Every request must have at least
+one valid key, which the model guarantees through its image tokens.
+
+Some actual Krea heads have logits around 30,000 with much smaller differences
+between keys. Computing those logits directly in F32 loses meaningful bits
+before softmax subtraction. This implementation contracts `Q * (K - K_last)`;
+the shared per-query offset cancels mathematically in softmax. Centered keys
+and softmax probabilities each use a high BF16 value plus a BF16 residual.
+Their native matrix products accumulate in F32, as does the running output.
+No F64 device arithmetic or expanded global tensor is required.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_attention.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --reference="$krea_reference" --output=/path/to/new-attention-results
+```
+
+The reference Python environment supplies independent CPU/F64 scores,
+softmax, and value contractions from the captured normalized/rotated inputs.
+No checkpoint argument is needed: these commands contain no fixed parameters.
+The native tool runs on the leased GPU. The result directory retains about
+180 MiB of regenerable tensors. The 16-row case uses image positions; the
+80-row case starts with 64 masked keys and ends with a partial 16-key tile.
+Both base and adapter-conditioned inputs also run at the full 1088 rows.
+
+All 24 repeated comparisons pass, covering 58,195,968 output elements. Ungated
+attention uses the unchanged BF16 envelope against F64. Gate fusion is bitwise
+equivalent to CPU gating of that independently qualified attention output.
+The script separately records composed F64 error: full-size gated relative L2
+is 3.10e-5 for base inputs and 9.84e-5 for adapter-conditioned inputs. Eleven
+base values and three style values exceed a single-operation envelope after
+the additional BF16 rounding; exact gate equivalence accounts for the fusion.
+The external model's corresponding relative L2 values are 1.13e-3 and 1.45e-3.
+These numbers describe this component boundary, not full-model image quality
+or execution performance.
