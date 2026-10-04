@@ -118,7 +118,11 @@ def main():
                 (affine, 2 * 16 * 4),
             ]
         else:
-            root = "sample_image_adapted" if adapted else "sample_image"
+            root = (
+                "qualify.sample_from_taps_adapted"
+                if adapted
+                else "qualify.sample_from_taps"
+            )
             weights.append(vae_weights)
             inputs.append((affine, 2 * 16 * 4))
         for path, size in [*inputs, (expected, output_bytes)]:
@@ -135,7 +139,7 @@ def main():
         configuration.update(overrides or {})
         return [
             *arguments.checker,
-            f"--model={arguments.model}",
+            f"--model={arguments.model / 'qualification'}",
             f"--root={root}",
             f"--weight_policy={arguments.model / 'weights.loom'}",
             *[f"--weights={path}" for path in weights],
