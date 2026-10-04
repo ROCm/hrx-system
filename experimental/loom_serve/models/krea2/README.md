@@ -1320,29 +1320,31 @@ later convolutions add into that destination. Equal-width blocks advance
 source-owned features in place. Spatial nearest-neighbor expansion is part of
 convolution indexing and never materializes an enlarged input image.
 
-The final 96-channel stage uses the config-free
-[`convolution_3x3_tiled_f32`](kernels/convolution_tiled.loom) helper for its
+The up1/up2/up3 equal-width convolutions (384/192/96 channels) use the config-free
+[`convolution_3x3_tiled_f32`](kernels/convolution_tiled.loom) helper for
 plain and residual convolutions. A workgroup owns 32 spatial positions by
 32 output channels, staging 32 reduction coordinates in 8,320 bytes of padded
 LDS. Each lane keeps eight independent F32 output accumulators. Cooperative
 acquisition shares inputs across output channels and coefficients across
 pixels, without a global im2col buffer, expanded weights, or additional
-dispatch. Other stages retain their original convolution leaves.
+dispatch. Up0, channel expansion, resize and RGB convolutions retain their
+original leaves.
 
 The helper flattens input-channel/row-tap/column-tap traversal without changing
 the FMA order of any output. Invalid border taps skip the FMA; inactive spatial
 lanes still participate in both tile barriers. Bias rounds separately, followed
 by the optional residual addition. The convolution input remains distinct from
-the output, while the residual may be that same output buffer. The up3 leaves
+the output, while the residual may be that same output buffer. These leaves
 select pipeline depth one and retain original three-plane temporal weight
 addressing. Geometry and scheduling enter as SSA specialization operands;
 the helper contains no model configuration or runtime scalar ABI.
 
 [`tests/convolution_tiled.loom`](tests/convolution_tiled.loom) links the actual
-scalar and cooperative helpers at the full 96-channel reduction depth. Four
-small spatial shapes (1x1, 1x2, 1x33 and 17x19) cover borders, row crossings
-and partial spatial tiles. Each runs with and without the residual epilogue,
-comparing distinct-output and genuinely aliased skip/output launches bitwise.
+scalar and cooperative helpers at full 96/192/384-channel reduction depths.
+Four small spatial shapes (1x1, 1x2, 1x33 and 17x19) cover borders, row crossings
+and partial spatial tiles; 17x19 also exercises both wider channel counts.
+Each runs with and without the residual epilogue, comparing distinct-output
+and genuinely aliased skip/output launches bitwise.
 The driver binds tensor samples and JIT geometry together:
 
 ```sh
