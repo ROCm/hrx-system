@@ -94,6 +94,14 @@ different constant operands; the reusable body retains compile-time facts
 without depending on that model's keys. Launch arguments that remain runtime
 values are a different contract from template operands fixed by that wrapper.
 
+Relationships between independently configured dimensions are selection
+requirements too. Krea's [image command](../models/krea2/sample.loom) resolves
+its DiT token counts and VAE latent grid, then applies a provider requiring
+equal patch counts and a nonnegative text prefix. A mismatched configuration
+has no eligible provider and fails JIT selection before parameter loading.
+That is distinct from `index.assume`, which promises an already established
+fact and cannot validate a caller's configuration.
+
 Current active lengths, token IDs, row origins, and positions belong in workload
 arguments or device descriptors. Capacity and active count are different facts:
 padding can exist without advancing the persistent state of inactive rows.
@@ -262,8 +270,12 @@ and accumulated image differences. A separate source command now runs the full
 still-image VAE from packed BF16 latent to F32 RGB, with folded spatial
 upsampling and in-place residuals. Its final pixels agree with the independent
 CPU decoder to at most one 8-bit level on the qualified base/LoRA images.
-Text conditioning remains external. The existing HTTP
-service and packed scheduler remain concrete Qwen consumers; changing their
+The [image root](../models/krea2/sample.loom) joins denoising and decoding
+without host latent readback, and repeats the exact RGB composition checks
+for base, zero-strength and active LoRA. The VAE reuses retired denoising
+scratch, so the whole command adds only the 72 KiB intermediate latent to the
+denoiser's workspace at 384x384. Text conditioning remains external. The
+existing HTTP service and packed scheduler remain concrete Qwen consumers; changing their
 model directory does not turn them into an image or audio endpoint. No complete
 image or audio model is qualified by this packet.
 

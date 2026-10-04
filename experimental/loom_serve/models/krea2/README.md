@@ -17,6 +17,8 @@ A native denoising command composes time conditioning, image projection,
 the full stack, the velocity head, and Euler updates. The complete native
 still-image VAE decodes those packed latents to clamped F32 RGB, including
 spatial attention, all residual blocks, and folded spatial upsampling.
+The `sample_image` and `sample_image_adapted` roots join denoising and decoding
+without a host latent readback, retaining separate immutable checkpoint domains.
 Text conditioning remains external; this is not yet an image-serving endpoint
 or a native prompt-to-image path.
 
@@ -1045,3 +1047,54 @@ and reference RGB/PNGs. Its temporary storage stays below 256 MiB at these
 shapes, and a failed check retains its exact inputs, command and expected
 output. Native text encoding and the image-serving adapter are separate
 remaining integration boundaries.
+
+### One native denoise-to-RGB command
+
+[`sample.loom`](sample.loom) exposes `sample_image` and `sample_image_adapted`.
+Both consume initial packed noise, precomputed text conditioning, timesteps,
+rotary tables, mask, Euler deltas and the VAE affine table. The adapted root
+also consumes a scalar LoRA strength. They produce one distinct NCHW F32 RGB
+buffer; the packed final latent is source-owned intermediate storage and never
+returns to the host. Checkpoint roots are ordered DiT/VAE or DiT/LoRA/VAE.
+
+The model entry checks its geometry through template selection: image-token
+count must equal `(latent_height / 2) * (latent_width / 2)`, and combined token
+count must cover the image suffix. Invalid relations reject compilation before
+weight loading. Neither a host graph walker nor a command-program ABI extension
+is involved.
+
+The exact composition check uses the earlier native trajectory and decoder
+results. It needs only Python's standard library and the native checker:
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_sample.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --denoise_results=/path/to/denoise-results \
+  --stack_reference=/path/to/stack-reference/1088 \
+  --input_results=/path/to/vae-input-results \
+  --decoder_results=/path/to/vae-decoder-results \
+  --output=/path/to/new-sample-results
+```
+
+This is an exact native-composition oracle. The preceding stage checks supply
+the independent numerical evidence; matching their output does not replace
+those checks or establish performance. Captured text is still external, so the
+command is not a complete native prompt-to-image implementation.
+
+Base, zero-strength LoRA and active LoRA pass twice, with zero differing bits
+over 2,654,208 F32 values. Both roots also reject each invalid geometry case.
+
+| Complete 384x384 command | Base | LoRA |
+| --- | ---: | ---: |
+| Unique kernels | 50 | 63 |
+| Parameter roots | 2 | 3 |
+| Parameters | 480 | 938 |
+| Parameter bytes | 25,668,517,132 | 26,107,395,340 |
+| Workspace bytes | 172,384,256 | 172,385,280 |
+
+The complete pipeline needs only 72 KiB more workspace than denoising alone:
+the decoder reuses storage retired by the denoiser. This is also smaller than
+the standalone decoder's allocation because the greedy packer sees a different
+set of reusable holes, not because the combined program performs less math.

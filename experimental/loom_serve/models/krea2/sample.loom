@@ -1,0 +1,63 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+command.program.decl @denoise() launch(%parameters: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %output: buffer)
+command.program.decl @denoise_adapted() launch(%parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %output: buffer)
+command.program.decl @vae_decode() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
+template.decl @krea2.sample_image(%tokens: index, %images: index, %patches: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer)
+
+// The source owns the final latent between denoising and decoding. Parameter
+// domains remain immutable and distinct; text conditioning is a caller input.
+// The geometry predicates are JIT selection requirements, not assumptions
+// about incoming configurations or runtime checks on trusted device work.
+template.def<@krea2.sample_image> @krea2_sample_image(%tokens: index, %images: index, %patches: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer) where [eq(%images, %patches), ge(%tokens, %images)] {
+  %patch_bytes = index.constant 128 : offset
+  %bytes = index.scale %images, %patch_bytes : index, offset -> offset
+  %latent = buffer.alloca<global> align(256) %bytes : buffer
+  scf.if %adapted {
+    command.program.launch @denoise_adapted(%parameters, %adapter, %sample, %text, %times, %cosine, %sine, %mask, %deltas, %strength, %latent) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    command.program.launch @denoise(%parameters, %sample, %text, %times, %cosine, %sine, %mask, %deltas, %latent) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    scf.yield
+  }
+  command.program.launch @vae_decode(%vae_parameters, %latent, %affine, %output) : (buffer, buffer, buffer, buffer)
+  template.return
+}
+
+// The output is a distinct NCHW F32 RGB buffer, clamped to [-1, 1], at eight
+// times the latent height and width. The input noise remains unchanged.
+command.program.def public @sample_image() launch(%parameters: buffer, %vae_parameters: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %affine: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %two = index.constant 2 : index
+  %rows = index.div %height, %two : index
+  %columns = index.div %width, %two : index
+  %patches = index.mul %rows, %columns : index
+  %adapted = scalar.constant false : i1
+  template.apply<@krea2.sample_image>(%tokens, %images, %patches, %adapted, %parameters, %parameters, %vae_parameters, %sample, %text, %times, %cosine, %sine, %mask, %deltas, %sample, %affine, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @sample_image_adapted() launch(%parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %two = index.constant 2 : index
+  %rows = index.div %height, %two : index
+  %columns = index.div %width, %two : index
+  %patches = index.mul %rows, %columns : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.sample_image>(%tokens, %images, %patches, %adapted, %parameters, %adapter, %vae_parameters, %sample, %text, %times, %cosine, %sine, %mask, %deltas, %strength, %affine, %output) : (index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
