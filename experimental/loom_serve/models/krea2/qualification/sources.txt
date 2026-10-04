@@ -33,6 +33,8 @@
 ../text_fusion_kernels.loom
 ../text_fusion_blocks.loom
 ../kernels/segmented_attention.loom
+../text_fusion.loom
+../kernels/layer_mix.loom
 config.loom
 components.loom
 image.loom
@@ -43,3 +45,4 @@ vae.loom
 text.loom
 text_fusion.loom
 text_fusion_kernels.loom
+text_fusion_projector.loom
