@@ -4,7 +4,8 @@ This is a **component port, not an image-serving implementation**. The image
 input projection and its official softwatercolor LoRA run through Loom's live
 source JIT, queued safetensors loading, command programs, and shared device
 ownership. The first transformer block's normalization and fused time
-modulation are also qualified. Full text conditioning, DiT layers, denoising, and VAE
+modulation are also qualified. Dense block projections have independent
+component comparisons. Full text conditioning, DiT layers, denoising, and VAE
 decoding are not yet implemented here.
 
 The independent [reference script](reference.py) runs the complete model using
@@ -173,7 +174,7 @@ Adding `--block-details` to the reference invocation captures raw tensors at
 the first denoising step's block-zero boundaries, for both base and adapter
 runs. `events.jsonl` records every file's shape and dtype. These intermediate
 files are regenerable qualification inputs, not deployment assets; retain
-them in temporary storage. The detailed 384x384 capture occupies about 592 MiB
+them in temporary storage. The detailed 384x384 capture occupies about 660 MiB
 in total.
 
 At 384x384 the block processes 1088 rows: 512 text positions and 576 image
@@ -227,3 +228,45 @@ match the projection check; `--atol=0 --rtol=0` requires exact numerical
 equality. Every output must be finite at any tolerance. `--actual=path` writes
 the first completed output before comparison, including on numerical failure,
 so a mismatch can be investigated without rerunning the model oracle.
+
+### Dense BF16 block projections
+
+[`block_projections.loom`](block_projections.loom) maps the eight attention and
+feed-forward matrices to four concrete contraction shapes. Weights remain in
+their native BF16 checkpoint representation; accumulation is F32 and output is
+BF16. The reusable contraction combines four independent accumulator chains
+every 256 inputs to shorten cancellation-sensitive reductions. It does not
+allocate global partial sums or copy/expand the weight matrices.
+
+[`check_projections.py`](check_projections.py) compares every projection against
+an independent CPU/F64 contraction, rounded once to BF16, at the full captured
+token count and a separately JITed 16-row prefix. Each command runs twice.
+The same BF16 error envelope applies to all shapes. The final feed-forward
+projection uses the actual captured
+`feed_forward_product` input, including the external model's SiLU/product
+rounding. These are base-model comparisons: style projections include an
+additional LoRA update and are not equivalent to the base matrix alone.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_projections.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights/turbo.safetensors" \
+  --reference="$krea_reference" --output=/path/to/new-projection-results
+```
+
+This driver uses the reference Python environment, with all Python tensor
+operations on the CPU. The result directory contains about 260 MiB of
+reproducible oracle/output tensors and small specialization inputs. F64 weights
+exist only in this test process, not the native runner. Library-versus-F64
+differences are reported separately. The shorter reductions were substantially
+closer to rounded F64 even when they differed from the library at more elements;
+matching the library's rounding errors is not the accuracy objective. Full-block
+and image accuracy remain separate gates; this is not a throughput measurement
+or a claim that attention itself is implemented.
+
+The 1088-row and 16-row qualifications pass all eight projections twice:
+133,398,528 output-element comparisons, with none outside the error envelope.
+For the longest, 16384-term feed-forward contraction, full-size relative L2
+error against rounded F64 is 2.19e-5. These checks cover every output value,
+not a sampled subset or a small synthetic matrix.

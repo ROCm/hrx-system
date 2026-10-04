@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
 template.decl @projection.adapter_add_bf16(%elements: index, %delta: buffer, %strength: buffer, %output: buffer)
@@ -36,6 +37,66 @@ template.def<@projection.linear_f32_as_bf16> device @linear_f32_weights_as_bf16(
     %rounded = vector.fptrunc %weights : vector<16xf32> to vector<16xbf16>
     %rhs = vector.fragment<rhs> %rounded shape [%tile, %tile] : vector<16xbf16>
     %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  template.return %result : vector<8xf32>
+}
+
+// Native BF16 checkpoint storage uses the same activation and accumulator
+// layout as the F32-storage path without a conversion or expanded weight copy.
+// Four independent chains are combined every 256 inputs, then accumulated
+// across blocks. This bounds cancellation-sensitive F32 recurrence lengths
+// without global partial sums or extra dispatches.
+// Input width is a multiple of 64; rows and output width are multiples of 16.
+template.def<@projection.linear_bf16> device @linear_bf16_weights(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %tile2 = index.constant 32 : index
+  %tile3 = index.constant 48 : index
+  %stride = index.constant 64 : index
+  %block_size = index.constant 256 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %lane_row = index.rem %lane, %tile : index
+  %row_origin = index.mul %row_tile, %tile : index
+  %output_origin = index.mul %output_tile, %tile : index
+  %weight_row = index.add %output_origin, %lane_row : index
+  %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
+  %input_view = buffer.view %input_noalias[%origin] : buffer -> view<[%rows]x[%inputs]xbf16>
+  %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
+  %zeros = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
+  %result = scf.for %block = [%zero to %inputs step %block_size](%total = %initial : vector<8xf32>) -> (vector<8xf32>) {
+    %block_limit = index.add %block, %block_size : index
+    %block_end = index.min %block_limit, %inputs : index
+    %result0, %result1, %result2, %result3 = scf.for %column = [%block to %block_end step %stride](%acc0 = %initial : vector<8xf32>, %acc1 = %initial : vector<8xf32>, %acc2 = %initial : vector<8xf32>, %acc3 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+      %column1 = index.add %column, %tile : index
+      %column2 = index.add %column, %tile2 : index
+      %column3 = index.add %column, %tile3 : index
+      %lhs0 = vector.fragment.load<lhs> %input_view[%row_origin, %column] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %lhs1 = vector.fragment.load<lhs> %input_view[%row_origin, %column1] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %lhs2 = vector.fragment.load<lhs> %input_view[%row_origin, %column2] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %lhs3 = vector.fragment.load<lhs> %input_view[%row_origin, %column3] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights0 = vector.load %weight_view[%weight_row, %column] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights1 = vector.load %weight_view[%weight_row, %column1] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights2 = vector.load %weight_view[%weight_row, %column2] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %weights3 = vector.load %weight_view[%weight_row, %column3] : view<[%outputs]x[%inputs]xbf16> -> vector<16xbf16>
+      %rhs0 = vector.fragment<rhs> %weights0 shape [%tile, %tile] : vector<16xbf16>
+      %rhs1 = vector.fragment<rhs> %weights1 shape [%tile, %tile] : vector<16xbf16>
+      %rhs2 = vector.fragment<rhs> %weights2 shape [%tile, %tile] : vector<16xbf16>
+      %rhs3 = vector.fragment<rhs> %weights3 shape [%tile, %tile] : vector<16xbf16>
+      %next0 = vector.mma %lhs0, %rhs0, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next1 = vector.mma %lhs1, %rhs1, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next2 = vector.mma %lhs2, %rhs2, %acc2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      %next3 = vector.mma %lhs3, %rhs3, %acc3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      scf.yield %next0, %next1, %next2, %next3 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+    }
+    %sum01 = vector.addf %result0, %result1 : vector<8xf32>
+    %sum23 = vector.addf %result2, %result3 : vector<8xf32>
+    %partial = vector.addf %sum01, %sum23 : vector<8xf32>
+    %next = vector.addf %total, %partial : vector<8xf32>
     scf.yield %next : vector<8xf32>
   }
   template.return %result : vector<8xf32>

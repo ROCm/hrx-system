@@ -1,0 +1,158 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+
+amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
+template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+
+kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %width = index.constant 6144 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %width, %width, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %width, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_projection_wave32) @block_linear_6144_1536() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 96 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 1536 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 1024 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 16384 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@block_projection_wave32) @block_linear_16384_6144() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 16384 : index
+  %outputs = index.constant 6144 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+command.program.def public @block0_query() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.wq.weight" : view<6144x6144xbf16>
+  kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @block0_key() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x1536xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.wk.weight" : view<1536x6144xbf16>
+  kernel.launch @block_linear_6144_1536(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<[%rows]x1536xbf16>)
+  command.return
+}
+
+command.program.def public @block0_value() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x1536xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.wv.weight" : view<1536x6144xbf16>
+  kernel.launch @block_linear_6144_1536(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<[%rows]x1536xbf16>)
+  command.return
+}
+
+command.program.def public @block0_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.gate.weight" : view<6144x6144xbf16>
+  kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @block0_attention_output() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.wo.weight" : view<6144x6144xbf16>
+  kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x16384xbf16>
+  %weight = command.parameter %parameters, "blocks.0.mlp.gate.weight" : view<16384x6144xbf16>
+  kernel.launch @block_linear_6144_16384(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<16384x6144xbf16>, view<[%rows]x16384xbf16>)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_up() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x16384xbf16>
+  %weight = command.parameter %parameters, "blocks.0.mlp.up.weight" : view<16384x6144xbf16>
+  kernel.launch @block_linear_6144_16384(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<16384x6144xbf16>, view<[%rows]x16384xbf16>)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x16384xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.0.mlp.down.weight" : view<6144x16384xbf16>
+  kernel.launch @block_linear_16384_6144(%input_view, %weight, %output_view) : (view<[%rows]x16384xbf16>, view<6144x16384xbf16>, view<[%rows]x6144xbf16>)
+  command.return
+}
