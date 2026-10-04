@@ -13,5 +13,7 @@
 ../transformer.loom
 ../stack.loom
 ../block_adapters.loom
+../head.loom
 config.loom
 components.loom
+head.loom
