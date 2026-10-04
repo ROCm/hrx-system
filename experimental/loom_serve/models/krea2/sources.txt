@@ -8,3 +8,5 @@ block_rotary.loom
 kernels/rotary.loom
 block_attention.loom
 kernels/attention.loom
+block_pointwise.loom
+kernels/pointwise.loom
