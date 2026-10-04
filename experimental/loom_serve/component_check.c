@@ -6,6 +6,7 @@
 
 // Independent real-tensor qualification of a source-JIT command component.
 
+#include <inttypes.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +30,9 @@ IREE_FLAG(string, actual, "",
           "Optional file overwritten with the first completed BF16 output.");
 IREE_FLAG(float, atol, 0.0001220703125f, "Absolute error tolerance.");
 IREE_FLAG(float, rtol, 0.0078125f, "Relative error tolerance.");
+IREE_FLAG(float, relative_l2_tolerance, 0.0f,
+          "Positive aggregate relative-L2 bound instead of the elementwise "
+          "gate; zero retains the elementwise gate. Nonfinite values fail.");
 
 typedef struct component_check_t {
   // Shared device/queues outliving all accepted work and borrowed payloads.
@@ -90,8 +94,9 @@ static iree_status_t component_compile(component_check_t* check,
 
 static iree_status_t component_initialize(component_check_t* check,
                                           iree_allocator_t allocator) {
-  if (!isfinite(FLAG_atol) || !isfinite(FLAG_rtol) || FLAG_atol < 0 ||
-      FLAG_rtol < 0) {
+  if (!isfinite(FLAG_atol) || !isfinite(FLAG_rtol) ||
+      !isfinite(FLAG_relative_l2_tolerance) || FLAG_atol < 0 || FLAG_rtol < 0 ||
+      FLAG_relative_l2_tolerance < 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "tolerances must be finite and nonnegative");
   }
@@ -131,6 +136,16 @@ static iree_status_t component_initialize(component_check_t* check,
   IREE_RETURN_IF_ERROR(component_compile(check, allocator));
   const loom_cmd_program_t* program =
       loom_serve_jit_stage_program(check->stage);
+  uint64_t parameter_bytes = 0;
+  for (uint32_t i = 0; i < program->parameter_roots.count; ++i) {
+    parameter_bytes +=
+        loom_cmd_program_parameter_root_at(program, i).required_byte_length;
+  }
+  printf("{\"workspace_bytes\":%" PRIu64 ",\"parameter_bytes\":%" PRIu64
+         ",\"parameter_roots\":%u,\"parameters\":%u,\"kernels\":%u}\n",
+         program->requirements.transient.required_byte_length, parameter_bytes,
+         program->parameter_roots.count, program->parameters.count,
+         program->requirements.executable_count);
   const bool workspace =
       program->requirements.transient.binding_index != UINT32_MAX;
   if (program->requirements.rebindable_binding_count !=
@@ -218,33 +233,57 @@ static iree_status_t component_compare(component_check_t* check,
   const iree_host_size_t count = reference.data_length / sizeof(uint16_t);
   iree_host_size_t different = 0;
   iree_host_size_t outside = 0;
+  iree_host_size_t nonfinite = 0;
   double squared_error = 0;
   double squared_expected = 0;
-  float maximum = 0;
+  double maximum = 0;
   for (iree_host_size_t i = 0; i < count; ++i) {
     const float actual_value = iree_math_bf16_to_f32(check->output[i]);
     const float expected_value = iree_math_bf16_to_f32(expected[i]);
-    const float error = fabsf(actual_value - expected_value);
     different += check->output[i] != expected[i];
-    if (!isfinite(actual_value) || !isfinite(expected_value) ||
-        error > FLAG_atol + FLAG_rtol * fabsf(expected_value)) {
-      if (outside < 4) {
+    if (!isfinite(actual_value) || !isfinite(expected_value)) {
+      ++nonfinite;
+      continue;
+    }
+    const double error = fabs((double)actual_value - expected_value);
+    if (error > FLAG_atol + FLAG_rtol * fabsf(expected_value)) {
+      if (outside < 4 && FLAG_relative_l2_tolerance == 0) {
         fprintf(stderr, "Mismatch[%zu]: actual=%g expected=%g\n", i,
                 actual_value, expected_value);
       }
       ++outside;
     }
-    maximum = fmaxf(maximum, error);
-    squared_error += (double)error * error;
+    maximum = fmax(maximum, error);
+    squared_error += error * error;
     squared_expected += (double)expected_value * expected_value;
   }
+  const double relative_l2 = squared_expected > 0
+                                 ? sqrt(squared_error / squared_expected)
+                                 : (squared_error > 0 ? INFINITY : 0);
   printf(
       "{\"iteration\":%d,\"elements\":%zu,\"different\":%zu,"
-      "\"outside_tolerance\":%zu,\"maximum_absolute_error\":%.9g,"
-      "\"relative_l2\":%.9g}\n",
-      iteration, count, different, outside, maximum,
-      sqrt(squared_error / fmax(squared_expected, 1e-30)));
-  if (outside) {
+      "\"outside_element_envelope\":%zu,\"nonfinite\":%zu,"
+      "\"maximum_absolute_error\":%.9g,\"relative_l2\":",
+      iteration, count, different, outside, nonfinite, maximum);
+  if (isfinite(relative_l2)) {
+    printf("%.9g", relative_l2);
+  } else {
+    // A nonzero error against an all-zero reference has no finite ratio.
+    fputs("null", stdout);
+  }
+  printf(",\"comparison\":\"%s\"}\n",
+         FLAG_relative_l2_tolerance > 0 ? "relative_l2" : "elementwise");
+  if (nonfinite) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "%zu nonfinite component pairs", nonfinite);
+  }
+  if (FLAG_relative_l2_tolerance > 0) {
+    if (relative_l2 > FLAG_relative_l2_tolerance) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "component relative L2 %.9g exceeds %.9g",
+                              relative_l2, FLAG_relative_l2_tolerance);
+    }
+  } else if (outside) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "%zu component elements exceed tolerance", outside);
   }
