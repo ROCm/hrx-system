@@ -97,8 +97,9 @@ values are a different contract from template operands fixed by that wrapper.
 Relationships between independently configured dimensions are selection
 requirements too. Krea's [image command](../models/krea2/sample.loom) resolves
 its DiT token counts and VAE latent grid, then applies a provider requiring
-equal patch counts and a nonnegative text prefix. A mismatched configuration
-has no eligible provider and fails JIT selection before parameter loading.
+equal patch counts, a nonnegative text prefix, and an equal number of projected
+text rows. A mismatched configuration has no eligible provider and fails JIT
+selection before parameter loading.
 That is distinct from `index.assume`, which promises an already established
 fact and cannot validate a caller's configuration.
 
@@ -270,12 +271,14 @@ and accumulated image differences. A separate source command now runs the full
 still-image VAE from packed BF16 latent to F32 RGB, with folded spatial
 upsampling and in-place residuals. Its final pixels agree with the independent
 CPU decoder to at most one 8-bit level on the qualified base/LoRA images.
-The [image root](../models/krea2/sample.loom) joins denoising and decoding
-without host latent readback, and repeats the exact RGB composition checks
-for base, zero-strength and active LoRA. The VAE reuses retired denoising
-scratch, so the whole command adds only the 72 KiB intermediate latent to the
-denoiser's workspace at 384x384. Text conditioning remains external. The
-existing HTTP service and packed scheduler remain concrete Qwen consumers; changing their
+The [image root](../models/krea2/sample.loom) projects fused text features once,
+retains the resulting prefix for denoising, and decodes without intermediate
+host readbacks. Exact RGB composition checks cover base, zero-strength and
+active LoRA. Earlier phases retire scratch before the VAE uses it, keeping
+the whole command near 170.7 MiB at 384x384 with 512 text rows. Its retained
+projected prefix is 6 MiB and its intermediate latent is 72 KiB. Qwen3-VL
+text encoding and layerwise/sequence fusion remain external. The existing
+HTTP service and packed scheduler remain concrete Qwen consumers; changing their
 model directory does not turn them into an image or audio endpoint. No complete
 image or audio model is qualified by this packet.
 
