@@ -1296,3 +1296,35 @@ and 0.001545. These aggregate diagnostics are separate from primitive acceptance
 and exact composition. The image command composes this stage with projection,
 denoising and decoding; native encoding and the image request adapter remain
 distinct subsequent boundaries.
+
+### Text encoder reference boundary
+
+[`reference_text_encoder.py`](reference_text_encoder.py) isolates the pinned
+Qwen3-VL encoder and tokenizer without loading the DiT or VAE. It uses the
+pipeline's actual prompt-layout method, checks cumulative rotary positions,
+and extracts embedding, shared rotary and layer-0/layer-34 primitive tensors.
+The full twelve-tap result must match the original reference capture exactly.
+Decoder hooks also establish that tuple indices 2, 5, ... 35 are decoder
+outputs 1, 4, ... 34, before final normalization.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/reference_text_encoder.py \
+  --checkpoint="$krea_weights" --reference="$krea_reference" \
+  --output=/path/to/new-encoder-reference
+```
+
+Run this in the pinned reference environment with exclusive GPU access.
+The fixed 512-feature request has 546 encoder positions: 34 prefix positions,
+prompt tokens, middle padding and five live suffix tokens. Padding does not
+advance RoPE position, but causal ordering still follows sequence position.
+Qwen3-VL uses BF16-rounded normalized values before multiplying its learned
+RMS scale, half-split rotary pairs and ungated causal attention. These are
+different arithmetic contracts from Krea's zero-centered RMS and DiT rotation.
+
+The original encoder and a second execution omitting decoder 35 and the final
+normalization both reproduce all 15,728,640 captured BF16 tap values bitwise.
+The selected text-only dependency set contains 386 tensors occupying
+7,843,069,440 bytes, excluding the vision model. This is a verified reference
+dependency boundary, not a native encoder or serving result. The capture
+retains 139,501,362 bytes of primitive/request fixtures plus a small manifest;
+the full tap result and checkpoints are reused, not duplicated on disk.
