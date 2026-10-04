@@ -4,12 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Check exact F32 convolution at four spatial shapes with and without skips.
+"""Check exact F32 convolution across spatial and channel shapes with skips.
 
-The recipe's sample ordinal controls tensor width; compiler configuration
-binds the matching geometry and residual epilogue. Every invocation compares
-both distinct-output and actual skip/output-alias launches with the original
-helper, using full 96-channel reductions and original three-plane weights.
+The recipe's sample ordinal selects tensor width or channel count; compiler
+configuration binds the matching geometry and residual epilogue. Every
+invocation compares both distinct-output and actual skip/output-alias launches
+with the original helper, using full reductions and original three-plane weights.
 """
 
 import argparse
@@ -26,14 +26,21 @@ args = parser.parse_args()
 fixture = pathlib.Path(__file__).with_name("convolution_tiled.loom")
 model = fixture.parent.parent
 
-for case, height, widths in (
-    ("single_row", 1, (1, 2, 33)),
-    ("spatial", 17, (19,)),
+for case, shapes in (
+    ("single_row", ((1, 1, 96), (1, 2, 96), (1, 33, 96))),
+    ("spatial", ((17, 19, 96), (17, 19, 192), (17, 19, 384))),
 ):
-    for sample, width in enumerate(widths):
+    for sample, (height, width, channels) in enumerate(shapes):
         for add_residual in (0, 1):
             print(
-                json.dumps(dict(height=height, width=width, add_residual=add_residual)),
+                json.dumps(
+                    dict(
+                        height=height,
+                        width=width,
+                        channels=channels,
+                        add_residual=add_residual,
+                    )
+                ),
                 flush=True,
             )
             result = subprocess.run(
@@ -48,6 +55,7 @@ for case, height, widths in (
                     f"--sample={sample}",
                     f"--config=convolution_test.height={height}",
                     f"--config=convolution_test.width={width}",
+                    f"--config=convolution_test.channels={channels}",
                     f"--config=convolution_test.add_residual={add_residual}",
                 ],
                 stdout=subprocess.PIPE,
@@ -66,4 +74,4 @@ for case, height, widths in (
                     raise RuntimeError(
                         f"{field}: expected {expected}, got {report[field]}"
                     )
-print("PASS: 8 cases, 16 exact distinct-output/alias comparisons.", flush=True)
+print("PASS: 12 cases, 24 exact distinct-output/alias comparisons.", flush=True)
