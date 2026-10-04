@@ -22,6 +22,8 @@
 ../vae.loom
 ../kernels/image.loom
 ../kernels/convolution.loom
+../vae_residual.loom
+../kernels/image_normalization.loom
 config.loom
 components.loom
 image.loom
