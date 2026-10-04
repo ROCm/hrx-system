@@ -51,6 +51,14 @@ storage; the runner allocates its backing during setup. It is not a per-token
 HAL queue allocation. Workgroup allocations inside kernels have a different
 lifetime and represent local shared storage.
 
+Transient reservation begins at its source allocation, not its first memory
+access. Placing an allocation immediately before its first producing command
+lets the planner reuse storage retired by earlier commands. Krea's
+[VAE attention](../models/krea2/vae_attention.loom) allocates its attended
+features after QKV projection; the preceding normalization buffer is then
+available for reuse. Its full-shape composition checks both output bits and
+the four-feature-plane scratch bound.
+
 Schedule regions express dependencies, not hints. A command-program call
 preserves its implicitly serial body when expanded inside `command.concurrent`.
 A template expands into its caller's region instead; a multi-command template

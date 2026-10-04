@@ -11,6 +11,10 @@ config.decl @qualify.outputs : %value: index where [range(%value, 1, 1152)]
 config.decl @qualify.extent : %value: index where [range(%value, 1, 3)]
 config.decl @qualify.planes : %value: index where [range(%value, 1, 3)]
 config.decl @qualify.upsample : %value: index where [range(%value, 1, 2)]
+config.decl @qualify.attention_tokens : %value: index where [range(%value, 1, 1048576)]
+config.decl @qualify.attention_channels : %value: index where [range(%value, 1, 512)]
+
+template.decl @attention.single_head_nchw_f32(%tokens: index, %channels: index, %qkv: buffer, %output: buffer)
 
 template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 amdgpu.target<gfx11-generic> @image_qualification_wave32 {subgroup_size = 32}
@@ -44,6 +48,23 @@ kernel.def target(@image_qualification_wave32) @qualify_image_convolution() {
 
 command.program.def public @qualify.image_convolution() launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
   kernel.launch @qualify_image_convolution(%input, %weight, %bias, %output) : (buffer, buffer, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@image_qualification_wave32) @qualify_image_attention() {
+  %tokens = config.get @qualify.attention_tokens : index
+  %threads = index.constant 128 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%tokens, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %tokens = config.get @qualify.attention_tokens : index
+  %channels = config.get @qualify.attention_channels : index
+  template.apply<@attention.single_head_nchw_f32>(%tokens, %channels, %input, %output) : (index, index, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @qualify.image_attention() launch(%input: buffer, %output: buffer) {
+  kernel.launch @qualify_image_attention(%input, %output) : (buffer, buffer)
   command.return
 }
 

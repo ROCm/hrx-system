@@ -16,6 +16,8 @@ timesteps, including LoRA, into device-resident embedding/modulation tables.
 A native denoising command composes time conditioning, image projection,
 the full stack, the velocity head, and Euler updates. Text conditioning and
 VAE decoding remain external; this is not yet a native prompt-to-image path.
+The native VAE prefix now reaches its first spatial attention block; the
+remaining decoder stages and final RGB output are still being qualified.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -943,3 +945,42 @@ The input-path regression retains all 64 passing comparisons and unchanged
 feature bits. Spatial attention, the remaining residual/upsampling stages,
 and final RGB remain outside this prefix. Residual fixtures occupy less than
 192 MiB and can be regenerated from the retained input results.
+
+### Bounded-memory VAE spatial attention
+
+[`vae_attention.loom`](vae_attention.loom) composes channel normalization,
+QKV projection, single-head noncausal spatial attention, and a fused output
+projection/skip. Its F32 [online attention helper](kernels/image_attention.loom)
+handles 1–512 channels with 128-key tiles. Each workgroup retains one query's
+output accumulators and a 512-byte probability tile, plus reduction storage.
+It does not materialize the 20.25 MiB score matrix for a 48x48 latent grid.
+
+The standalone command uses 13.5 MiB of global scratch at 48x48: QKV plus one
+feature plane reused between normalization and attended output. Allocation
+points express those lifetimes. The final projection may write the original
+input in place after QKV has consumed it. `vae_input_attention` exercises this
+ownership through the complete native input/residual/attention prefix.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_attention.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --input_results=/path/to/vae-input-results \
+  --residual_results=/path/to/vae-residual-results \
+  --output=/path/to/new-vae-attention-results
+```
+
+The driver checks 45 shape combinations crossing key-tile and channel-tail
+boundaries, then real base/LoRA features at 2x6 and 48x48. All 146 repeated
+comparisons pass over 34,655,004 values with unchanged 2e-5 primitive absolute
+and relative tolerances and no nonfinite pairs. Primitive attention uses an
+independent F64 softmax/contraction; fused addition, command composition, and
+the full in-place prefix match staged native results bit-for-bit.
+
+At 48x48, attention-block relative L2 against the independent F64 chain is
+3.58e-7 base and 3.72e-7 LoRA. The complete prefix uses ten unique kernels,
+15 parameters occupying 34,889,984 bytes, and 17,989,632 bytes of scratch.
+The preceding residual's 56-comparison regression retains identical output
+bits for every stage. These are correctness and memory results, not throughput
+measurements. Attention fixtures occupy less than 256 MiB; remaining residual
+and upsampling stages must still produce the final native RGB consumer.

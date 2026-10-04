@@ -1,0 +1,131 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @attention.single_head_nchw_f32(%tokens: index, %channels: index, %qkv: buffer, %output: buffer)
+
+// One query per 128-thread workgroup; each lane evaluates one key per tile,
+// then accumulates up to four output channels. The caller supplies 1..512
+// channels and positive token count. QKV is three contiguous channel-first
+// planes. Only one probability tile lives in LDS, independent of token count.
+template.def<@attention.single_head_nchw_f32> device @single_head_nchw_f32(%tokens: index, %channels: index, %qkv: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %threads = index.constant 128 : index
+  %query = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %negative_infinity = scalar.constant -inf : f32
+  %channels_i32 = index.cast %channels : index to i32
+  %channels_f32 = scalar.uitofp %channels_i32 : i32 to f32
+  %root_channels = scalar.sqrtf %channels_f32 : f32
+  %scale = scalar.divf %one_f32, %root_channels : f32
+  %qkv_view = buffer.view %qkv[%origin] : buffer -> view<3x[%channels]x[%tokens]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%channels]x[%tokens]xf32>
+  %probability_bytes = index.constant 512 : offset
+  %probability = buffer.alloca<workgroup> align(16) %probability_bytes : buffer
+  %probability_view = buffer.view %probability[%origin] : buffer -> view<128xf32>
+  %channel_offset0 = index.constant 0 : index
+  %channel0 = index.add %lane, %channel_offset0 : index
+  %valid_channel0 = index.cmp ult, %channel0, %channels : index
+  %channel_offset1 = index.constant 128 : index
+  %channel1 = index.add %lane, %channel_offset1 : index
+  %valid_channel1 = index.cmp ult, %channel1, %channels : index
+  %channel_offset2 = index.constant 256 : index
+  %channel2 = index.add %lane, %channel_offset2 : index
+  %valid_channel2 = index.cmp ult, %channel2, %channels : index
+  %channel_offset3 = index.constant 384 : index
+  %channel3 = index.add %lane, %channel_offset3 : index
+  %valid_channel3 = index.cmp ult, %channel3, %channels : index
+
+  %final_max, %final_sum, %result0, %result1, %result2, %result3 = scf.for %tile = [%zero to %tokens step %threads](%current_max = %negative_infinity : f32, %current_sum = %zero_f32 : f32, %acc0 = %zero_f32 : f32, %acc1 = %zero_f32 : f32, %acc2 = %zero_f32 : f32, %acc3 = %zero_f32 : f32) -> (f32, f32, f32, f32, f32, f32) {
+    %key = index.add %tile, %lane : index
+    %valid_key = index.cmp ult, %key, %tokens : index
+    %score = scf.if %valid_key -> (f32) {
+      %dot = scf.for %channel = [%zero to %channels step %one](%sum = %zero_f32 : f32) -> (f32) {
+        %q = view.load %qkv_view[%zero, %channel, %query] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %k = view.load %qkv_view[%one, %channel, %key] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %next = scalar.fmaf %q, %k, %sum : f32
+        scf.yield %next : f32
+      }
+      %scaled = scalar.mulf %dot, %scale : f32
+      scf.yield %scaled : f32
+    } else {
+      scf.yield %negative_infinity : f32
+    }
+    %tile_max = kernel.workgroup.reduce<maxnumf> %score : f32
+    %next_max = scalar.maxnumf %current_max, %tile_max : f32
+    %old_delta = scalar.subf %current_max, %next_max : f32
+    %old_scale = scalar.expf<afn> %old_delta : f32
+    %delta = scalar.subf %score, %next_max : f32
+    %weight = scalar.expf<afn> %delta : f32
+    view.store %weight, %probability_view[%lane] : f32, view<128xf32>
+    %tile_sum = kernel.workgroup.reduce<addf> %weight : f32
+    %scaled_sum = scalar.mulf %current_sum, %old_scale : f32
+    %next_sum = scalar.addf %scaled_sum, %tile_sum : f32
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %scaled0 = scalar.mulf %acc0, %old_scale : f32
+    %scaled1 = scalar.mulf %acc1, %old_scale : f32
+    %scaled2 = scalar.mulf %acc2, %old_scale : f32
+    %scaled3 = scalar.mulf %acc3, %old_scale : f32
+    %remaining = index.sub %tokens, %tile : index
+    %count = index.min %remaining, %threads : index
+    %next0, %next1, %next2, %next3 = scf.for %column = [%zero to %count step %one](%value0 = %scaled0 : f32, %value1 = %scaled1 : f32, %value2 = %scaled2 : f32, %value3 = %scaled3 : f32) -> (f32, f32, f32, f32) {
+      %token = index.add %tile, %column : index
+      %p = view.load %probability_view[%column] : view<128xf32> -> f32
+      %updated0 = scf.if %valid_channel0 -> (f32) {
+        %v = view.load %qkv_view[%two, %channel0, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %sum = scalar.fmaf %p, %v, %value0 : f32
+        scf.yield %sum : f32
+      } else {
+        scf.yield %value0 : f32
+      }
+      %updated1 = scf.if %valid_channel1 -> (f32) {
+        %v = view.load %qkv_view[%two, %channel1, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %sum = scalar.fmaf %p, %v, %value1 : f32
+        scf.yield %sum : f32
+      } else {
+        scf.yield %value1 : f32
+      }
+      %updated2 = scf.if %valid_channel2 -> (f32) {
+        %v = view.load %qkv_view[%two, %channel2, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %sum = scalar.fmaf %p, %v, %value2 : f32
+        scf.yield %sum : f32
+      } else {
+        scf.yield %value2 : f32
+      }
+      %updated3 = scf.if %valid_channel3 -> (f32) {
+        %v = view.load %qkv_view[%two, %channel3, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %sum = scalar.fmaf %p, %v, %value3 : f32
+        scf.yield %sum : f32
+      } else {
+        scf.yield %value3 : f32
+      }
+      scf.yield %updated0, %updated1, %updated2, %updated3 : f32, f32, f32, f32
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next_max, %next_sum, %next0, %next1, %next2, %next3 : f32, f32, f32, f32, f32, f32
+  }
+  scf.if %valid_channel0 {
+    %normalized = scalar.divf %result0, %final_sum : f32
+    view.store %normalized, %output_view[%channel0, %query] : f32, view<[%channels]x[%tokens]xf32>
+  }
+  scf.if %valid_channel1 {
+    %normalized = scalar.divf %result1, %final_sum : f32
+    view.store %normalized, %output_view[%channel1, %query] : f32, view<[%channels]x[%tokens]xf32>
+  }
+  scf.if %valid_channel2 {
+    %normalized = scalar.divf %result2, %final_sum : f32
+    view.store %normalized, %output_view[%channel2, %query] : f32, view<[%channels]x[%tokens]xf32>
+  }
+  scf.if %valid_channel3 {
+    %normalized = scalar.divf %result3, %final_sum : f32
+    view.store %normalized, %output_view[%channel3, %query] : f32, view<[%channels]x[%tokens]xf32>
+  }
+  template.return
+}

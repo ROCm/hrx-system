@@ -4,13 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-template.decl @image.channel_norm_silu_f32(%pixels: index, %channels: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)
 
 // Channel-first L2 normalization scaled by sqrt(channels) and learned gamma,
-// followed by SiLU without an intermediate tensor.
+// optionally followed by SiLU without an intermediate tensor. Attention uses
+// the affine result directly; residual blocks specialize the SiLU epilogue.
 // Epsilon clamps the norm itself, not its square. Each lane owns one pixel;
 // it finishes the reduction before stores, so exact input/output aliasing is safe.
-template.def<@image.channel_norm_silu_f32> device @image_channel_norm_silu_f32(%pixels: index, %channels: index, %input: buffer, %weight: buffer, %output: buffer) {
+template.def<@image.channel_norm_f32> device @image_channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -42,10 +43,15 @@ template.def<@image.channel_norm_silu_f32> device @image_channel_norm_silu_f32(%
       %normalized = scalar.divf %value, %denominator : f32
       %scaled = scalar.mulf %normalized, %scale : f32
       %affine = scalar.mulf %scaled, %gamma : f32
-      %negative = scalar.negf %affine : f32
-      %exponential = scalar.expf<afn> %negative : f32
-      %divisor = scalar.addf %one_f32, %exponential : f32
-      %result = scalar.divf %affine, %divisor : f32
+      %result = scf.if %silu -> (f32) {
+        %negative = scalar.negf %affine : f32
+        %exponential = scalar.expf<afn> %negative : f32
+        %divisor = scalar.addf %one_f32, %exponential : f32
+        %activated = scalar.divf %affine, %divisor : f32
+        scf.yield %activated : f32
+      } else {
+        scf.yield %affine : f32
+      }
       view.store %result, %output_view[%channel, %pixel] : f32, view<[%channels]x[%pixels]xf32>
     }
   }

@@ -8,7 +8,7 @@ config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), 
 config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
 amdgpu.target<gfx11-generic> @vae_residual_wave32 {subgroup_size = 32}
 template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
-template.decl @image.channel_norm_silu_f32(%pixels: index, %channels: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)
 command.program.decl @vae_input() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
 
 kernel.def target(@vae_residual_wave32) @krea_vae_mid_norm() {
@@ -26,7 +26,8 @@ kernel.def target(@vae_residual_wave32) @krea_vae_mid_norm() {
   %width = config.get @krea2.latent_width : index
   %pixels = index.mul %height, %width : index
   %channels = index.constant 384 : index
-  template.apply<@image.channel_norm_silu_f32>(%pixels, %channels, %input, %weight, %output) : (index, index, buffer, buffer, buffer)
+  %silu = scalar.constant true : i1
+  template.apply<@image.channel_norm_f32>(%pixels, %channels, %silu, %input, %weight, %output) : (index, index, i1, buffer, buffer, buffer)
   kernel.return
 }
 
