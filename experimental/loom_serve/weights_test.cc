@@ -9,12 +9,9 @@
 #include <filesystem>
 #include <fstream>
 
+#include "experimental/loom_serve/device.h"
 #include "experimental/loom_serve/execution.h"
-#include "iree/async/frontier_tracker.h"
-#include "iree/async/util/proactor_pool.h"
-#include "iree/base/threading/numa.h"
 #include "iree/base/tooling/flags.h"
-#include "iree/hal/drivers/init.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
@@ -26,32 +23,12 @@ namespace {
 class WeightsTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_hal_driver_registry_t* registry = nullptr;
-    IREE_ASSERT_OK(iree_hal_driver_registry_allocate(allocator_, &registry));
-    auto status = iree_hal_register_all_available_drivers(registry);
-    if (iree_status_is_ok(status)) {
-      status = iree_async_proactor_pool_create(
-          iree_numa_node_count(), nullptr,
-          iree_async_proactor_pool_options_default(), allocator_, &pool_);
-    }
-    if (iree_status_is_ok(status)) {
-      auto params = iree_hal_device_create_params_default();
-      params.proactor_pool = pool_;
-      status = iree_hal_create_device(registry, IREE_SV("amdgpu"), &params,
-                                      allocator_, &device_);
-    }
-    iree_hal_driver_registry_free(registry);
-    IREE_ASSERT_OK(status);
-    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
-        iree_async_frontier_tracker_options_default(), allocator_, &tracker_));
-    IREE_ASSERT_OK(iree_hal_device_group_create_from_device(
-        device_, tracker_, allocator_, &group_));
-    dispatch_ = Queue(IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH);
-    transfer_ = Queue(IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
-    ASSERT_NE(dispatch_, nullptr);
-    ASSERT_NE(transfer_, nullptr);
-    IREE_ASSERT_OK(loom_serve_execution_create(dispatch_, transfer_, allocator_,
-                                               &execution_));
+    IREE_ASSERT_OK(loom_serve_device_create(IREE_SV("amdgpu"), allocator_,
+                                            &device_owner_));
+    device_ = loom_serve_device_handle(device_owner_);
+    dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
+    transfer_ = loom_serve_device_transfer_queue(device_owner_);
+    execution_ = loom_serve_device_execution(device_owner_);
     directory_ =
         std::filesystem::path(FLAG_weight_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
@@ -105,27 +82,10 @@ class WeightsTest : public ::testing::Test {
     }
     iree_hal_buffer_release(output_buffer_);
     loom_serve_jit_destroy(jit_);
-    loom_serve_execution_release(execution_);
-    iree_hal_device_group_release(group_);
-    iree_hal_device_release(device_);
-    iree_async_frontier_tracker_release(tracker_);
-    iree_async_proactor_pool_release(pool_);
+    loom_serve_device_destroy(device_owner_);
     if (path_.Exists()) {
       EXPECT_TRUE(path_.Remove());
     }
-  }
-
-  iree_hal_queue_t* Queue(iree_hal_queue_family_role_flags_t role) {
-    const auto* queues =
-        iree_hal_device_spec_queues(iree_hal_device_spec(device_));
-    for (iree_host_size_t i = 0; i < queues->family_count; ++i) {
-      const auto& family = queues->families[i];
-      if (family.provisioned_queue_count &&
-          iree_all_bits_set(family.role_flags, role)) {
-        return iree_hal_device_queue(device_, i, 0);
-      }
-    }
-    return nullptr;
   }
 
   iree_status_t Compile(iree_host_size_t index, const char* root) {
@@ -174,19 +134,15 @@ class WeightsTest : public ::testing::Test {
 
   // Allocation policy for the real runtime and compiler.
   iree_allocator_t allocator_ = iree_allocator_system();
-  // Async services outlive device teardown.
-  iree_async_proactor_pool_t* pool_ = nullptr;
-  // Completion registry for the device domain.
-  iree_async_frontier_tracker_t* tracker_ = nullptr;
-  // Owned live GPU used by compilation and execution.
+  // Production runtime owner outliving every weight and accepted operation.
+  loom_serve_device_t* device_owner_ = nullptr;
+  // Borrowed live GPU used by compilation and execution.
   iree_hal_device_t* device_ = nullptr;
-  // Owned device group establishing the semaphore domain.
-  iree_hal_device_group_t* group_ = nullptr;
   // Exact dispatch queue borrowed from device.
   iree_hal_queue_t* dispatch_ = nullptr;
   // Exact transfer queue borrowed from device.
   iree_hal_queue_t* transfer_ = nullptr;
-  // Production timelines used by the consuming commands.
+  // Timelines borrowed from device_owner_ and used by consuming commands.
   loom_serve_execution_t* execution_ = nullptr;
   // Source catalog compiler shared across all stages and preparers.
   loom_serve_jit_t* jit_ = nullptr;

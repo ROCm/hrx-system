@@ -17,6 +17,7 @@ not make those model-independent.
 
 | Component | Receives and owns | Does not infer |
 | --- | --- | --- |
+| [`device`](../device.h) | HAL device URI, async I/O services, device/group, exact queues and execution timelines | Compiler target support, model resources or request lifetimes |
 | [`jit`](../jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
 | [`command`](../command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
 | [`execution`](../execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
@@ -35,11 +36,17 @@ directly, rather than reconstructed in host code.
 
 ## Cold residency
 
-`qwen_initialize` creates the live device and JIT, loads the tokenizer, compiles
+`qwen_initialize` creates a shared device owner and JIT, loads the tokenizer, compiles
 isolated and packed stages, checks their layout agreement, loads shared weights,
 records commands, creates the VM program/native capabilities, and allocates retained
 rows and MTP state. Each stage can have different kernel choices while binding
 the same model storage. No session gets another copy of the weights or code.
+
+`loom_serve_device_create` establishes one runtime domain from a HAL device
+URI. Model components borrow its device, group, exact queues and execution
+object; the helper does not contain a tokenizer, stage catalog or model policy.
+The current JIT still selects AMDGPU explicitly. A different device URI alone
+does not provide a compiler backend or model kernels for that device.
 
 The model catalog includes `config.loom` for fixed specialization bounds.
 Native startup supplies run-dependent overrides to the same public compiler
@@ -178,7 +185,11 @@ A synchronous enqueue rejection advances neither frontier. An accepted failure
 is propagated through completion/drain. Host upload and download storage stays
 alive until accepted work retires, including teardown after an error. Final
 model destruction joins both branches before releasing retained resources.
-The small control tests exercise these contracts with actual queues.
+It ends profiling before releasing command metadata, then releases VM, commands,
+buffers and JIT before destroying the device owner. The owner releases its
+execution/group/device before its async services. Destroying the owner is not
+an implicit drain; it cannot determine which host payloads the model borrowed.
+The JIT and weight integration tests use this same owner with actual queues.
 
 ## Extension boundaries
 
