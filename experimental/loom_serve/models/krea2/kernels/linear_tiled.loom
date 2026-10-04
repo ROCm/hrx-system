@@ -4,12 +4,63 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_tiled_coordinates(%rows: index, %outputs: index, %group_size: index) -> (index, index)
+
+// Biject the ceil(rows/64) x (outputs/64) grid onto groups of row
+// tiles. Nearby workgroups traverse output columns within a bounded input
+// panel, allowing cache reuse without changing operand layout or ownership.
+// The positive group size is a specialization fact. The final group contains
+// exactly ceil(rows/64) mod group_size row tiles when nonzero.
+template.def<@projection.linear_tiled_coordinates> device @linear_tiled_coordinates(%rows: index, %outputs: index, %group_size: index) -> (index, index) {
+  %zero = index.constant 0 : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %physical_row = kernel.workgroup.id<x> : index
+  %physical_output = kernel.workgroup.id<y> : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %output_tiles = index.div %outputs, %tile : index
+  %flat = index.madd %physical_output, %row_tiles, %physical_row : index
+  %group_width = index.mul %group_size, %output_tiles : index
+  %group = index.div %flat, %group_width : index
+  %group_row = index.mul %group, %group_size : index
+  %within_group = index.rem %flat, %group_width : index
+  %tail_rows = index.rem %row_tiles, %group_size : index
+  %has_tail = index.cmp ne, %tail_rows, %zero : index
+  // Specialization owns both exact divisors. A partial group uses its actual
+  // width; zero never reaches a division or remainder operation.
+  %within_row, %output_unbounded = scf.if %has_tail -> (index, index) {
+    %full_rows = index.sub %row_tiles, %tail_rows : index
+    %is_tail = index.cmp uge, %group_row, %full_rows : index
+    %within, %column = scf.if %is_tail -> (index, index) {
+      %within = index.rem %within_group, %tail_rows : index
+      %column = index.div %within_group, %tail_rows : index
+      scf.yield %within, %column : index, index
+    } else {
+      %within = index.rem %within_group, %group_size : index
+      %column = index.div %within_group, %group_size : index
+      scf.yield %within, %column : index, index
+    }
+    scf.yield %within, %column : index, index
+  } else {
+    %within = index.rem %within_group, %group_size : index
+    %column = index.div %within_group, %group_size : index
+    scf.yield %within, %column : index, index
+  }
+  %row_unbounded = index.add %group_row, %within_row : index
+  %row = index.assume %row_unbounded [ge(%row_unbounded, 0), lt(%row_unbounded, %row_tiles)] : index
+  %output = index.assume %output_unbounded [ge(%output_unbounded, 0), lt(%output_unbounded, %output_tiles)] : index
+  template.return %row, %output : index, index
+}
+
+template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %input: buffer, %weight: buffer, %output: buffer)
 
 // Dense BF16 X W^T, with row-major X/output and [output,input] weights.
 // Launch ceil(rows/64) x (outputs/64) workgroups of 256 threads, wave32.
 // Rows are a positive multiple of 16, inputs of 256, and outputs of 64.
 // Dimensions are specialization facts; this helper has no model configuration.
+// The positive row-tile group size is a caller-selected traversal policy.
+// A group spanning all row tiles retains the original physical coordinates.
 // Input, weight and output storage do not overlap.
 //
 // Eight waves own a 4x2 grid of 16x32 outputs. Cooperative K64 acquisition
@@ -21,7 +72,7 @@ template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outpu
 // Four K16 accumulator chains are combined in pairs every K256 before adding
 // to the running total. This preserves the single-wave helper's F32 operation
 // order and final BF16 rounding, without global partials or weight preparation.
-template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer) {
+template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %input: buffer, %weight: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -35,8 +86,18 @@ template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: ind
   %block_size = index.constant 256 : index
   %threads = index.constant 256 : index
   %stage_bytes = index.constant 9216 : offset
-  %row_group = kernel.workgroup.id<x> : index
-  %output_group = kernel.workgroup.id<y> : index
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %workgroup_tile : index
+  %whole_rows = index.cmp uge, %row_tile_group_size, %row_tiles : index
+  %row_group, %output_group = scf.if %whole_rows -> (index, index) {
+    %row = kernel.workgroup.id<x> : index
+    %output = kernel.workgroup.id<y> : index
+    scf.yield %row, %output : index, index
+  } else {
+    %row, %output = template.apply<@projection.linear_tiled_coordinates>(%rows, %outputs, %row_tile_group_size) : (index, index, index) -> (index, index)
+    scf.yield %row, %output : index, index
+  }
   %workitem = kernel.workitem.id<x> : index
   %subgroup = kernel.subgroup.id : index
   %lane = kernel.subgroup.lane.id : index

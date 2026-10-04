@@ -712,6 +712,31 @@ of the observed behavior. The earliest clearly winning tested row count per
 contraction supplies a bounded piecewise policy; unmeasured crossovers remain
 an interpolation, not an exhaustive tuning result.
 
+The selected caller policy groups at 2,048 rows for FFN up, 1,088 for FFN
+down, and 2,560 for square/narrow projections. Below each threshold, it retains
+ordinary traversal. All twenty reviewed production specializations have exactly
+the native instructions and resources of their selected experimental controls;
+the selection itself disappears during JIT compilation. One hundred linked
+helper comparisons cover both policies and every grouped tail exactly.
+
+The same fixed-seed 1024-square, eight-step image then produced identical PNG
+bytes with unchanged weight/workspace residency and 4,308 dispatches:
+
+| Diagnostic measurement | Ordinary traversal | Selected traversal |
+| --- | ---: | ---: |
+| HTTP image completion | 157.949 s | 94.243 s |
+| Dense DiT kernel interval sum | 105.042 s | 39.600 s |
+| DiT attention interval sum | 34.214 s | 35.536 s |
+| VAE interval sum | 15.742 s | 15.873 s |
+
+These are separately captured, instrumented first-image observations, not
+interleaved whole-image medians. They establish that the isolated improvement
+survives the real consumer and locate the remaining work; they do not establish
+an advantage over another runtime. The selected capture has no lost events and
+only 9.937 ms outside recorded device dispatches. Dense projections, attention,
+and VAE decode still dominate; host dispatch gaps do not explain the remaining
+latency.
+
 ## Changes worth testing in this model
 
 The current Qwen sources provide concrete examples, not universal winners:

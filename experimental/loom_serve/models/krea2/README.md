@@ -529,11 +529,32 @@ The supported row count therefore remains any positive multiple of 16.
 Model configuration and launch geometry stay in the concrete wrappers;
 dimensions enter the motif as SSA operands, not dispatch parameters.
 
+The motif takes a positive row-tile group size as an explicit SSA operand.
+The workgroup-coordinate bijection groups that many 64-row tiles before
+advancing the input panel. Adjacent physical workgroups can reuse that bounded
+panel across output columns, without changing storage, the physical grid, or issued
+operand bytes. The final group uses its actual row-tile count; it introduces
+no padded workgroups or duplicate stores. This is a cache-locality policy, not
+a guarantee of physical workgroup execution order. Tile traversal and tile
+geometry are independent tuning dimensions.
+
+The model wrappers select eight-row-tile groups at 2,048 rows for FFN up,
+1,088 for FFN down, and 2,560 for square/narrow projections. Below those
+crossovers they pass the whole row-tile count, which specializes to the original
+physical coordinates. These are the earliest clearly winning tested row counts
+in the [traversal experiment](../../docs/PERFORMANCE.md#workgroup-traversal-is-an-independent-tuning-dimension),
+not a universal cache-size rule or an optimality claim for every intervening
+shape. Selection happens during JIT specialization; it adds no device decision,
+weight residency, workspace, or command dispatch.
+
 [`tests/linear_tiled.loom`](tests/linear_tiled.loom) compares this motif bitwise
 against the original single-wave motif at all four widths, covering
-16/32/48/64/80/1088/4608 rows. It links the real helper sources instead of
-copying their implementations. The checkpoint comparisons below independently
-exercise the actual command wrappers and numerical error envelope.
+16/32/48/64/80/512/528/544/560/640/704/768/832/896/960/1088/2048/2560/3072/4608
+rows. Group-eight cases cover each traversal-group remainder and each 16-row
+matrix tail; both policies run at the five largest row counts, for 100 cases.
+They link the real helper sources instead of copying their implementations.
+The checkpoint comparisons below independently exercise the actual command
+wrappers and numerical error envelope.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \

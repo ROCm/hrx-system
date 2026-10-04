@@ -7,7 +7,27 @@
 config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 
 amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
-template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
+
+// Traversal selection belongs to the model's concrete contraction shapes.
+// Whole-height traversal retains input reuse at small row counts; bounded
+// groups reduce the revisited input panel for larger contractions. Both the
+// selection and its coordinate arithmetic specialize before device execution.
+template.def<@krea2.projection_row_group_size> device @block_projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index) {
+  %use_grouped = index.cmp uge, %rows, %minimum_grouped_rows : index
+  %group_size = scf.if %use_grouped -> (index) {
+    %group = index.constant 8 : index
+    scf.yield %group : index
+  } else {
+    %rounding = index.constant 63 : index
+    %tile = index.constant 64 : index
+    %padded_rows = index.add %rows, %rounding : index
+    %row_tiles = index.div %padded_rows, %tile : index
+    scf.yield %row_tiles : index
+  }
+  template.return %group_size : index
+}
 
 kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
   %rows = config.get @krea2.block_tokens : index
@@ -22,7 +42,9 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %width = index.constant 6144 : index
-  template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  %minimum_grouped_rows = index.constant 2560 : index
+  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+  template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -40,7 +62,9 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_1536() {
   %rows = config.get @krea2.block_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 1536 : index
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  %minimum_grouped_rows = index.constant 2560 : index
+  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -58,7 +82,9 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
   %rows = config.get @krea2.block_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 16384 : index
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  %minimum_grouped_rows = index.constant 2048 : index
+  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -76,7 +102,9 @@ kernel.def target(@block_projection_wave32) @block_linear_16384_6144() {
   %rows = config.get @krea2.block_tokens : index
   %inputs = index.constant 16384 : index
   %outputs = index.constant 6144 : index
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  %minimum_grouped_rows = index.constant 1088 : index
+  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
