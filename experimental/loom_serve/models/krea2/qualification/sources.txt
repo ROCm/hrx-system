@@ -29,6 +29,7 @@
 ../vae_upsample.loom
 ../vae_decoder.loom
 ../sample.loom
+../text_projection.loom
 config.loom
 components.loom
 image.loom
@@ -36,3 +37,4 @@ head.loom
 time.loom
 denoise.loom
 vae.loom
+text.loom
