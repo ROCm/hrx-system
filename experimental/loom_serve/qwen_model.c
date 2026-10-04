@@ -247,14 +247,25 @@ static iree_status_t qwen_allocate_buffer(loom_serve_qwen_model_t* runner,
 static iree_status_t qwen_load_weights(loom_serve_qwen_model_t* model,
                                        iree_string_view_t weights_path,
                                        iree_string_view_t source_directory) {
-  loom_serve_weight_stage_t* stages = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      model->allocator, model->stage_count, sizeof(*stages), (void**)&stages));
+  iree_host_size_t root_count = 0;
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    stages[i] = (loom_serve_weight_stage_t){
-        .program = &model->stages[i].program,
-        .buffers = model->stages[i].fixed_buffers,
-    };
+    root_count += model->stages[i].program.parameter_roots.count;
+  }
+  loom_serve_weight_root_t* roots = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      model->allocator, root_count, sizeof(*roots), (void**)&roots));
+  iree_host_size_t root_index = 0;
+  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
+    const loom_cmd_program_t* program = &model->stages[i].program;
+    for (uint32_t r = 0; r < program->parameter_roots.count; ++r) {
+      const loom_cmd_program_parameter_root_t root =
+          loom_cmd_program_parameter_root_at(program, r);
+      roots[root_index++] = (loom_serve_weight_root_t){
+          .program = program,
+          .root = root,
+          .buffer = &model->stages[i].fixed_buffers[root.fixed_buffer_index],
+      };
+    }
   }
   char* policy_path = NULL;
   iree_status_t status =
@@ -263,11 +274,11 @@ static iree_status_t qwen_load_weights(loom_serve_qwen_model_t* model,
   if (iree_status_is_ok(status)) {
     status = loom_serve_weights_load(
         model->device, model->transfer, model->dispatch, model->jit,
-        model->command_mode, model->shape_count + 2, model->stage_count, stages,
+        model->command_mode, model->shape_count + 2, root_count, roots,
         weights_path, iree_make_cstring_view(policy_path), model->allocator);
   }
   iree_allocator_free(model->allocator, policy_path);
-  iree_allocator_free(model->allocator, stages);
+  iree_allocator_free(model->allocator, roots);
   return status;
 }
 
