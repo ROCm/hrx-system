@@ -1,0 +1,99 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
+template.decl @projection.adapter_add_bf16(%elements: index, %delta: buffer, %strength: buffer, %output: buffer)
+
+// Complete 16x16 tiles, row-major activations and [output,input] checkpoint
+// weights. F32 file values are rounded to BF16 before contraction, matching
+// a BF16 model load without reinterpreting the source bytes. Accumulation is
+// F32; the caller selects an epilogue before rounding the result to BF16.
+// Dimensions are explicit operands, without model configuration dependencies.
+template.def<@projection.linear_f32_as_bf16> device @linear_f32_weights_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %lane_row = index.rem %lane, %tile : index
+  %row_origin = index.mul %row_tile, %tile : index
+  %output_origin = index.mul %output_tile, %tile : index
+  %weight_row = index.add %output_origin, %lane_row : index
+  %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
+  %input_view = buffer.view %input_noalias[%origin] : buffer -> view<[%rows]x[%inputs]xbf16>
+  %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xf32>
+  %zeros = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
+  %result = scf.for %column = [%zero to %inputs step %tile](%acc = %initial : vector<8xf32>) -> (vector<8xf32>) {
+    %lhs = vector.fragment.load<lhs> %input_view[%row_origin, %column] shape [%tile, %tile] : view<[%rows]x[%inputs]xbf16> -> vector<16xbf16>
+    %weights = vector.load %weight_view[%weight_row, %column] : view<[%outputs]x[%inputs]xf32> -> vector<16xf32>
+    %rounded = vector.fptrunc %weights : vector<16xf32> to vector<16xbf16>
+    %rhs = vector.fragment<rhs> %rounded shape [%tile, %tile] : vector<16xbf16>
+    %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    scf.yield %next : vector<8xf32>
+  }
+  template.return %result : vector<8xf32>
+}
+
+template.def<@projection.store_bf16> device @store_projection_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %tile : index
+  %output_origin = index.mul %output_tile, %tile : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16>
+  vector.fragment.store<result> %result, %output_view[%row_origin, %output_origin] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16>
+  template.return
+}
+
+template.def<@projection.bias_f32_as_bf16> device @bias_projection_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %output_origin = index.mul %output_tile, %tile : index
+  // GFX11 wave32 WMMA assigns each lane eight rows of one output column.
+  %lane = kernel.workitem.id<x> : index
+  %column = index.rem %lane, %tile : index
+  %output_column = index.add %output_origin, %column : index
+  %bias_view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xf32>
+  %stored = view.load %bias_view[%output_column] : view<[%outputs]xf32> -> f32
+  %rounded = scalar.fptrunc %stored : f32 to bf16
+  %value = scalar.extf %rounded : bf16 to f32
+  %values = vector.splat %value : vector<8xf32>
+  %biased = vector.addf %result, %values : vector<8xf32>
+  template.return %biased : vector<8xf32>
+}
+
+// The low-rank result has already rounded to BF16. Scaling rounds at the
+// same boundary as the reference's BF16 multiply, before adding to the base.
+// A zero strength leaves every finite base element unchanged.
+template.def<@projection.adapter_add_bf16> device @adapter_add_bf16(%elements: index, %delta: buffer, %strength: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %delta_view = buffer.view %delta[%origin] : buffer -> view<[%elements]xbf16>
+  %strength_view = buffer.view %strength[%origin] : buffer -> view<1xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %update = view.load %delta_view[%element] : view<[%elements]xbf16> -> bf16
+  %scale = view.load %strength_view[%zero] : view<1xf32> -> f32
+  %base = view.load %output_view[%element] : view<[%elements]xbf16> -> bf16
+  %update_f32 = scalar.extf %update : bf16 to f32
+  %scaled_f32 = scalar.mulf %update_f32, %scale : f32
+  %scaled_bf16 = scalar.fptrunc %scaled_f32 : f32 to bf16
+  %scaled = scalar.extf %scaled_bf16 : bf16 to f32
+  %base_f32 = scalar.extf %base : bf16 to f32
+  %result_f32 = scalar.addf %base_f32, %scaled : f32
+  %result = scalar.fptrunc %result_f32 : f32 to bf16
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  template.return
+}
