@@ -1166,5 +1166,73 @@ these aggregate observations are separate from primitive acceptance.
 | Workspace bytes | 8,912,896 | 8,945,664 |
 
 One overwritten working fixture bounds disk use; final per-shape projected
-features feed the image-composition qualification above. The text encoder and
-layerwise/sequence fusion still need native implementations.
+features feed the image-composition qualification above. Native text encoding
+and complete layerwise/sequence fusion remain outside that command.
+
+### Native text-fusion blocks
+
+[`text_fusion_blocks.loom`](text_fusion_blocks.loom) composes the two kinds of
+2,560-wide transformer used between Qwen3-VL's twelve hidden-state taps and
+the text projection. Layerwise blocks attend across twelve encoder layers
+independently for every token; refiner blocks attend across tokens with the
+captured key-padding mask. Neither applies rotary embedding or time modulation.
+Both retain zero-centered RMSNorm, twenty 128-channel heads, a sigmoid attention
+gate, ungated residuals and a 6,912-wide SwiGLU. All eight projections support
+the official rank-32 LoRA with immutable base and adapter parameter roots.
+
+Dense layerwise work flattens `[token,12,2560]` without padding the layer axis.
+The [short-attention motif](kernels/segmented_attention.loom) gives one wave32
+one query/head, retaining four channels per lane and accumulating twelve keys
+with F32 online softmax. Every query stays inside its own twelve-row segment;
+there is no global score matrix or LDS tile. The refiner reuses the masked
+long-attention motif. Concrete [kernel leaves](text_fusion_kernels.loom) own
+configuration lookup; shared arithmetic receives explicit dimensions.
+
+Input features and checkpoint storage stay immutable. Command-owned scratch
+allows Q/K normalization and the SwiGLU product to advance in place, and
+independent projections have explicit concurrent scopes. Separate B outputs,
+ungated attention and SiLU exist only in the qualification catalog, not in
+the deployment catalog.
+
+The canonical reference extraction loads only the fusion module, not the
+entire DiT. It requires its base/zero/LoRA outputs to reproduce the original
+full-model captures byte-for-byte before accepting its intermediate files:
+
+```sh
+krea_fusion_reference=/path/to/new-fusion-reference
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/reference_text_fusion.py \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_reference" --output="$krea_fusion_reference"
+python -B experimental/loom_serve/models/krea2/check_text_fusion_blocks.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_reference" --fusion_reference="$krea_fusion_reference" \
+  --output=/path/to/new-fusion-block-results
+```
+
+Both commands use the pinned reference environment and exclusive GPU execution.
+Extraction retains 135 MiB of canonical stage tensors. Native qualification
+uses CPU-only F64 primitives on real inputs for both layer indices and axes,
+at 16 and 512 tokens. Every device command executes twice; composed blocks
+must match the separately qualified native stages bit-for-bit, including
+zero-strength identity. Whole-block F64 and external-model errors are reported
+separately from primitive acceptance. One overwritten fixture plus final
+block outputs bounds the native result directory below 1 GiB.
+
+The 16 qualified block cases produced 1,008 complete-array comparisons over
+5,306,695,680 elements, with no nonfinite values or elements outside the
+unchanged primitive envelope. Complete native composition and zero-strength
+identity were bitwise on both executions. At 512 tokens, reflected scratch is:
+
+| Block axis | Base | Rank-32 adapter |
+| --- | ---: | ---: |
+| Twelve layers per token (6,144 rows) | 231 MiB | 232.5 MiB |
+| Token sequence (512 rows) | 19.25 MiB | 19.375 MiB |
+
+Each base block binds twelve tensors and uses eight unique kernels; adapted
+blocks bind 28 tensors and use twelve kernels. These ASAN-checker results
+establish numerical and composition correctness, not throughput.
+
+These block commands do not yet implement the learned twelve-to-one layer
+projection, complete text fusion, native text encoding, or an image endpoint.

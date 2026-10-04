@@ -1,0 +1,566 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// These roots expose actual fusion operations without changing deployment ABI.
+config.decl @qualify.fusion_layer : %value: index where [range(%value, 0, 1)]
+command.program.decl @krea2.fusion_layerwise_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_query_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_key_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_query(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_2560_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_32_2560() launch(%input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_key(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_value(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_attention_output(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_feed_forward_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_32_6912() launch(%input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_feed_forward_up(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_feed_forward_down(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_6912_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_query_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_key_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_query(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_2560_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_32_2560() launch(%input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_key(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_value(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_attention_output(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_feed_forward_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_32_6912() launch(%input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_feed_forward_up(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_feed_forward_down(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_6912_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+
+command.program.def public @qualify.fusion_layerwise_norm1() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_layerwise_norm1[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_norm2() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_layerwise_norm2[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_query_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_layerwise_query_norm[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_key_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_layerwise_key_norm[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_query() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_query[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_query_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_query[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_query_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_q.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_layerwise_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_query_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_q.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_key() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_key[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_key_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_key[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_key_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_k.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_layerwise_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_key_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_k.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_value() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_value[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_value_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_value[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_value_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_v.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_layerwise_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_value_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_v.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_gate[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_gate[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_gate.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_layerwise_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_gate.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_attention_output() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_attention_output[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_attention_output_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_attention_output[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_attention_output_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_out.0.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_layerwise_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_attention_output_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_out.0.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_feed_forward_gate[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_feed_forward_gate[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.gate.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_layerwise_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.gate.lora_B.weight"[%layer] : view<6912x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_6912(%input, %weight, %output) : (buffer, view<6912x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_up() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_feed_forward_up[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_up_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_feed_forward_up[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_up_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.up.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_layerwise_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_up_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.up.lora_B.weight"[%layer] : view<6912x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_6912(%input, %weight, %output) : (buffer, view<6912x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_feed_forward_down[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_down_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_feed_forward_down[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_down_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.down.lora_A.weight"[%layer] : view<32x6912xf32>
+  kernel.launch @fusion_layerwise_linear_6912_32(%input, %weight, %output) : (buffer, view<32x6912xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_feed_forward_down_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.down.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_layerwise_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_block() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_layerwise_block[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_layerwise_block_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_layerwise_block[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_norm1() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_refiner_norm1[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_norm2() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_refiner_norm2[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_query_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_refiner_query_norm[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_key_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  command.program.launch @krea2.fusion_refiner_key_norm[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_query() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_query[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_query_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_query[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_query_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_q.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_refiner_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_query_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_q.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_refiner_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_key() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_key[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_key_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_key[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_key_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_k.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_refiner_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_key_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_k.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_refiner_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_value() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_value[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_value_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_value[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_value_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_v.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_refiner_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_value_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_v.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_refiner_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_gate[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_gate[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_gate.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_refiner_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_gate.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_refiner_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_attention_output() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_attention_output[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_attention_output_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_attention_output[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_attention_output_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_out.0.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_refiner_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_attention_output_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_out.0.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_refiner_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_feed_forward_gate[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_feed_forward_gate[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.gate.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_refiner_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.gate.lora_B.weight"[%layer] : view<6912x32xf32>
+  kernel.launch @fusion_refiner_linear_32_6912(%input, %weight, %output) : (buffer, view<6912x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_up() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_feed_forward_up[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_up_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_feed_forward_up[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_up_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.up.lora_A.weight"[%layer] : view<32x2560xf32>
+  kernel.launch @fusion_refiner_linear_2560_32(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_up_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.up.lora_B.weight"[%layer] : view<6912x32xf32>
+  kernel.launch @fusion_refiner_linear_32_6912(%input, %weight, %output) : (buffer, view<6912x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_feed_forward_down[%layer, %adapted](%parameters, %parameters, %input, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_down_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_feed_forward_down[%layer, %adapted](%parameters, %adapter, %input, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_down_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.down.lora_A.weight"[%layer] : view<32x6912xf32>
+  kernel.launch @fusion_refiner_linear_6912_32(%input, %weight, %output) : (buffer, view<32x6912xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_feed_forward_down_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %weight = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.down.lora_B.weight"[%layer] : view<2560x32xf32>
+  kernel.launch @fusion_refiner_linear_32_2560(%input, %weight, %output) : (buffer, view<2560x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_block() launch(%parameters: buffer, %input: buffer, %mask: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_refiner_block[%layer, %adapted](%parameters, %parameters, %input, %mask, %input, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_refiner_block_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @qualify.fusion_layer : index
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_refiner_block[%layer, %adapted](%parameters, %adapter, %input, %mask, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

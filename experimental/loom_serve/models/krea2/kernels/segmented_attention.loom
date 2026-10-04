@@ -1,0 +1,66 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @attention.segmented_128_bf16(%rows: index, %length: index, %heads: index, %row: index, %head: index, %query: buffer, %key: buffer, %value: buffer) -> (vector<4xbf16>)
+
+// One wave32 owns one query/head in a packed sequence of independent short
+// segments. Each lane retains four consecutive channels. Every segment has
+// length live rows; the caller supplies a complete in-bounds query row.
+// Key centering cancels in softmax and avoids large common logit terms.
+// F32 online normalization needs no score tensor, LDS, or segment padding.
+template.def<@attention.segmented_128_bf16> device @segmented_128_bf16(%rows: index, %length: index, %heads: index, %row: index, %head: index, %query: buffer, %key: buffer, %value: buffer) -> (vector<4xbf16>) {
+  %origin = index.constant 0 : offset
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %head_width = index.constant 128 : index
+  %lane = kernel.subgroup.lane.id : index
+  %channel = index.mul %lane, %four : index
+  %column = index.madd %head, %head_width, %channel : index
+  %width = index.mul %heads, %head_width : index
+  %segment = index.div %row, %length : index
+  %begin = index.mul %segment, %length : index
+  %end = index.add %begin, %length : index
+  %query_view = buffer.view %query[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %key_view = buffer.view %key[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %value_view = buffer.view %value[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %query_bf16 = vector.load %query_view[%row, %column] : view<[%rows]x[%width]xbf16> -> vector<4xbf16>
+  %anchor_bf16 = vector.load %key_view[%begin, %column] : view<[%rows]x[%width]xbf16> -> vector<4xbf16>
+  %queries = vector.extf %query_bf16 : vector<4xbf16> to vector<4xf32>
+  %anchor = vector.extf %anchor_bf16 : vector<4xbf16> to vector<4xf32>
+  %zero = scalar.constant 0.0 : f32
+  %lowest = scalar.constant -1e30 : f32
+  %scale = scalar.constant 0.08838834764831845 : f32
+  %zeros = vector.constant 0.0 : vector<4xf32>
+  %final_maximum, %final_sum, %final_values = scf.for %key_row = [%begin to %end step %one](%maximum = %lowest : f32, %sum = %zero : f32, %accumulator = %zeros : vector<4xf32>) -> (f32, f32, vector<4xf32>) {
+    %key_bf16 = vector.load %key_view[%key_row, %column] : view<[%rows]x[%width]xbf16> -> vector<4xbf16>
+    %keys = vector.extf %key_bf16 : vector<4xbf16> to vector<4xf32>
+    %centered = vector.subf %keys, %anchor : vector<4xf32>
+    %products = vector.mulf %queries, %centered : vector<4xf32>
+    %partial = vector.reduce<addf> %products, %zero : vector<4xf32>, f32
+    %score = kernel.subgroup.reduce<addf> %partial : f32
+    %next_maximum = scalar.maxnumf %maximum, %score : f32
+    %old_delta = scalar.subf %maximum, %next_maximum : f32
+    %old_scaled = scalar.mulf %old_delta, %scale : f32
+    %old_scale = scalar.expf<afn> %old_scaled : f32
+    %delta = scalar.subf %score, %next_maximum : f32
+    %scaled = scalar.mulf %delta, %scale : f32
+    %probability = scalar.expf<afn> %scaled : f32
+    %scaled_sum = scalar.mulf %sum, %old_scale : f32
+    %next_sum = scalar.addf %scaled_sum, %probability : f32
+    %value_bf16 = vector.load %value_view[%key_row, %column] : view<[%rows]x[%width]xbf16> -> vector<4xbf16>
+    %values = vector.extf %value_bf16 : vector<4xbf16> to vector<4xf32>
+    %old_scales = vector.splat %old_scale : vector<4xf32>
+    %probabilities = vector.splat %probability : vector<4xf32>
+    %previous = vector.mulf %accumulator, %old_scales : vector<4xf32>
+    %weighted = vector.mulf %values, %probabilities : vector<4xf32>
+    %next_values = vector.addf %previous, %weighted : vector<4xf32>
+    scf.yield %next_maximum, %next_sum, %next_values : f32, f32, vector<4xf32>
+  }
+  %denominators = vector.splat %final_sum : vector<4xf32>
+  %normalized = vector.divf<arcp> %final_values, %denominators : vector<4xf32>
+  %result = vector.fptrunc %normalized : vector<4xf32> to vector<4xbf16>
+  template.return %result : vector<4xbf16>
+}

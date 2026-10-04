@@ -1,0 +1,571 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+kernel.decl @fusion_layerwise_norm() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_head_norm() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_2560_2560() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_2560_6912() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_6912_2560() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_2560_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_linear_6912_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_adapter_add_32_2560() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_adapter_add_32_6912() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_residual() launch(%input: buffer, %update: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_product() launch(%input: buffer, %up: buffer, %output: buffer)
+kernel.decl @fusion_refiner_norm() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_head_norm() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_2560_2560() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_2560_6912() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_6912_2560() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_2560_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_linear_6912_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @fusion_refiner_adapter_add_32_2560() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+kernel.decl @fusion_refiner_adapter_add_32_6912() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+kernel.decl @fusion_refiner_residual() launch(%input: buffer, %update: buffer, %output: buffer)
+kernel.decl @fusion_refiner_product() launch(%input: buffer, %up: buffer, %output: buffer)
+kernel.decl @fusion_layerwise_attention_gated() launch(%query: buffer, %key: buffer, %value: buffer, %gate: buffer, %output: buffer)
+kernel.decl @fusion_refiner_attention_gated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
+
+command.program.def public @krea2.fusion_layerwise_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.prenorm.scale"[%layer] : view<2560xf32>
+  kernel.launch @fusion_layerwise_norm(%input, %weight, %output) : (buffer, view<2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.postnorm.scale"[%layer] : view<2560xf32>
+  kernel.launch @fusion_layerwise_norm(%input, %weight, %output) : (buffer, view<2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_query_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.attn.qknorm.qnorm.scale"[%layer] : view<128xf32>
+  kernel.launch @fusion_layerwise_head_norm(%input, %weight, %output) : (buffer, view<128xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_key_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.attn.qknorm.knorm.scale"[%layer] : view<128xf32>
+  kernel.launch @fusion_layerwise_head_norm(%input, %weight, %output) : (buffer, view<128xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_query(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.attn.wq.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_q.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_q.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_key(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.attn.wk.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_k.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_k.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_value(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.attn.wv.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_v.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_v.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.attn.gate.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_gate.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_gate.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_attention_output(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.attn.wo.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_out.0.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.attn.to_out.0.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_feed_forward_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.mlp.gate.weight"[%layer] : view<6912x2560xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.gate.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.gate.lora_B.weight"[%layer] : view<6912x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_6912(%low, %up, %strength, %output, %output) : (buffer, view<6912x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_feed_forward_up(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.mlp.up.weight"[%layer] : view<6912x2560xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.up.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.up.lora_B.weight"[%layer] : view<6912x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_6912(%low, %up, %strength, %output, %output) : (buffer, view<6912x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_feed_forward_down(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.layerwise_blocks.{}.mlp.down.weight"[%layer] : view<2560x6912xbf16>
+  scf.if %adapted {
+    %texts = config.get @krea2.text_tokens : index
+    %layers = index.constant 12 : index
+    %rows = index.mul %texts, %layers : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.down.lora_A.weight"[%layer] : view<32x6912xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.layerwise_blocks.{}.ff.down.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_layerwise_linear_6912_2560(%input, %weight, %output) : (buffer, view<2560x6912xbf16>, buffer)
+      kernel.launch @fusion_layerwise_linear_6912_32(%input, %down, %low) : (buffer, view<32x6912xf32>, buffer)
+    }
+    kernel.launch @fusion_layerwise_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_layerwise_linear_6912_2560(%input, %weight, %output) : (buffer, view<2560x6912xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %gate: buffer, %output: buffer) {
+  kernel.launch @fusion_layerwise_attention_gated(%query, %key, %value, %gate, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_residual() launch(%input: buffer, %update: buffer, %output: buffer) {
+  kernel.launch @fusion_layerwise_residual(%input, %update, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_layerwise_product() launch(%input: buffer, %up: buffer, %output: buffer) {
+  kernel.launch @fusion_layerwise_product(%input, %up, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+// Source-owned query/key and feed-forward gate storage advance in place.
+// The final residual may replace input: its last read precedes the FFN.
+// Parameter domains remain immutable, including when the adapter is active.
+command.program.def public @krea2.fusion_layerwise_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %layers = index.constant 12 : index
+  %rows = index.mul %texts, %layers : index
+  %hidden_stride = index.constant 5120 : offset
+  %feed_forward_stride = index.constant 13824 : offset
+  %hidden_bytes = index.scale %rows, %hidden_stride : index, offset -> offset
+  %feed_forward_bytes = index.scale %rows, %feed_forward_stride : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_layerwise_norm1[%layer](%parameters, %input, %normalized) : [index](buffer, buffer, buffer)
+  %query = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %key = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %value = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %gate = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.concurrent {
+    command.program.launch @krea2.fusion_layerwise_query[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %query) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_layerwise_key[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %key) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_layerwise_value[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %value) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_layerwise_gate[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %gate) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  }
+  command.concurrent {
+    command.program.launch @krea2.fusion_layerwise_query_norm[%layer](%parameters, %query, %query) : [index](buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_layerwise_key_norm[%layer](%parameters, %key, %key) : [index](buffer, buffer, buffer)
+  }
+  %context = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_layerwise_attention_context(%query, %key, %value, %gate, %context) : (buffer, buffer, buffer, buffer, buffer)
+  %attention_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_layerwise_attention_output[%layer, %adapted](%parameters, %adapter, %context, %strength, %attention_output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_layerwise_residual(%input, %attention_output, %residual) : (buffer, buffer, buffer)
+  %feed_forward_input = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_layerwise_norm2[%layer](%parameters, %residual, %feed_forward_input) : [index](buffer, buffer, buffer)
+  %feed_forward_gate = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
+  %feed_forward_up = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
+  command.concurrent {
+    command.program.launch @krea2.fusion_layerwise_feed_forward_gate[%layer, %adapted](%parameters, %adapter, %feed_forward_input, %strength, %feed_forward_gate) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_layerwise_feed_forward_up[%layer, %adapted](%parameters, %adapter, %feed_forward_input, %strength, %feed_forward_up) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  }
+  command.program.launch @krea2.fusion_layerwise_product(%feed_forward_gate, %feed_forward_up, %feed_forward_gate) : (buffer, buffer, buffer)
+  %feed_forward_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_layerwise_feed_forward_down[%layer, %adapted](%parameters, %adapter, %feed_forward_gate, %strength, %feed_forward_output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.fusion_layerwise_residual(%residual, %feed_forward_output, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.prenorm.scale"[%layer] : view<2560xf32>
+  kernel.launch @fusion_refiner_norm(%input, %weight, %output) : (buffer, view<2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.postnorm.scale"[%layer] : view<2560xf32>
+  kernel.launch @fusion_refiner_norm(%input, %weight, %output) : (buffer, view<2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_query_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.attn.qknorm.qnorm.scale"[%layer] : view<128xf32>
+  kernel.launch @fusion_refiner_head_norm(%input, %weight, %output) : (buffer, view<128xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_key_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.attn.qknorm.knorm.scale"[%layer] : view<128xf32>
+  kernel.launch @fusion_refiner_head_norm(%input, %weight, %output) : (buffer, view<128xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_query(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.attn.wq.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_q.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_q.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_key(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.attn.wk.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_k.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_k.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_value(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.attn.wv.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_v.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_v.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.attn.gate.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_gate.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_gate.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_attention_output(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.attn.wo.weight"[%layer] : view<2560x2560xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_out.0.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.attn.to_out.0.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_2560_2560(%input, %weight, %output) : (buffer, view<2560x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_feed_forward_gate(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.mlp.gate.weight"[%layer] : view<6912x2560xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.gate.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.gate.lora_B.weight"[%layer] : view<6912x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_6912(%low, %up, %strength, %output, %output) : (buffer, view<6912x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_feed_forward_up(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.mlp.up.weight"[%layer] : view<6912x2560xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.up.lora_A.weight"[%layer] : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.up.lora_B.weight"[%layer] : view<6912x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_2560_32(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_6912(%low, %up, %strength, %output, %output) : (buffer, view<6912x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_2560_6912(%input, %weight, %output) : (buffer, view<6912x2560xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_feed_forward_down(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.refiner_blocks.{}.mlp.down.weight"[%layer] : view<2560x6912xbf16>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_stride = index.constant 64 : offset
+    %rank_bytes = index.scale %rows, %rank_stride : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %rank_bytes : buffer
+    %down = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.down.lora_A.weight"[%layer] : view<32x6912xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.refiner_blocks.{}.ff.down.lora_B.weight"[%layer] : view<2560x32xf32>
+    command.concurrent {
+      kernel.launch @fusion_refiner_linear_6912_2560(%input, %weight, %output) : (buffer, view<2560x6912xbf16>, buffer)
+      kernel.launch @fusion_refiner_linear_6912_32(%input, %down, %low) : (buffer, view<32x6912xf32>, buffer)
+    }
+    kernel.launch @fusion_refiner_adapter_add_32_2560(%low, %up, %strength, %output, %output) : (buffer, view<2560x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_refiner_linear_6912_2560(%input, %weight, %output) : (buffer, view<2560x6912xbf16>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
+  kernel.launch @fusion_refiner_attention_gated(%query, %key, %value, %mask, %gate, %output) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_residual() launch(%input: buffer, %update: buffer, %output: buffer) {
+  kernel.launch @fusion_refiner_residual(%input, %update, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.fusion_refiner_product() launch(%input: buffer, %up: buffer, %output: buffer) {
+  kernel.launch @fusion_refiner_product(%input, %up, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+// Source-owned query/key and feed-forward gate storage advance in place.
+// The final residual may replace input: its last read precedes the FFN.
+// Parameter domains remain immutable, including when the adapter is active.
+command.program.def public @krea2.fusion_refiner_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %hidden_stride = index.constant 5120 : offset
+  %feed_forward_stride = index.constant 13824 : offset
+  %hidden_bytes = index.scale %rows, %hidden_stride : index, offset -> offset
+  %feed_forward_bytes = index.scale %rows, %feed_forward_stride : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_refiner_norm1[%layer](%parameters, %input, %normalized) : [index](buffer, buffer, buffer)
+  %query = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %key = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %value = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  %gate = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.concurrent {
+    command.program.launch @krea2.fusion_refiner_query[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %query) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_refiner_key[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %key) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_refiner_value[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %value) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_refiner_gate[%layer, %adapted](%parameters, %adapter, %normalized, %strength, %gate) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  }
+  command.concurrent {
+    command.program.launch @krea2.fusion_refiner_query_norm[%layer](%parameters, %query, %query) : [index](buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_refiner_key_norm[%layer](%parameters, %key, %key) : [index](buffer, buffer, buffer)
+  }
+  %context = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_refiner_attention_context(%query, %key, %value, %mask, %gate, %context) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  %attention_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_refiner_attention_output[%layer, %adapted](%parameters, %adapter, %context, %strength, %attention_output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_refiner_residual(%input, %attention_output, %residual) : (buffer, buffer, buffer)
+  %feed_forward_input = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_refiner_norm2[%layer](%parameters, %residual, %feed_forward_input) : [index](buffer, buffer, buffer)
+  %feed_forward_gate = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
+  %feed_forward_up = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
+  command.concurrent {
+    command.program.launch @krea2.fusion_refiner_feed_forward_gate[%layer, %adapted](%parameters, %adapter, %feed_forward_input, %strength, %feed_forward_gate) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+    command.program.launch @krea2.fusion_refiner_feed_forward_up[%layer, %adapted](%parameters, %adapter, %feed_forward_input, %strength, %feed_forward_up) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  }
+  command.program.launch @krea2.fusion_refiner_product(%feed_forward_gate, %feed_forward_up, %feed_forward_gate) : (buffer, buffer, buffer)
+  %feed_forward_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.fusion_refiner_feed_forward_down[%layer, %adapted](%parameters, %adapter, %feed_forward_gate, %strength, %feed_forward_output) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.fusion_refiner_residual(%residual, %feed_forward_output, %output) : (buffer, buffer, buffer)
+  command.return
+}
