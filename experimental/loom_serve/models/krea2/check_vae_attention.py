@@ -39,6 +39,25 @@ def convolve(value, layer):
     return F.conv2d(value.double(), layer.weight.double(), layer.bias.double()).float()
 
 
+def pack_qkv(qkv):
+    """Encode channel-first Q/K and token-first V in three equal-size planes."""
+    channels = qkv.shape[1] // 3
+    query, key, value = qkv.reshape(3, channels, -1)
+    return torch.cat(
+        (query.flatten(), key.flatten(), value.T.contiguous().flatten())
+    ).reshape_as(qkv)
+
+
+def unpack_qkv(packed):
+    """Recover logical channel-first values from the production physical layout."""
+    channels = packed.shape[1] // 3
+    tokens = packed.numel() // (3 * channels)
+    planes = packed.reshape(3, channels, tokens)
+    logical = planes.clone()
+    logical[2] = planes[2].reshape(tokens, channels).T
+    return logical.reshape_as(packed)
+
+
 def attend(qkv):
     channels = qkv.shape[1] // 3
     query, key, value = qkv.reshape(3, channels, -1).double()
@@ -156,7 +175,7 @@ def main():
             _, reflection = run(
                 f"family-{channels}x{tokens}",
                 "qualify.image_attention",
-                (qkv,),
+                (pack_qkv(qkv),),
                 attend(qkv),
                 {
                     "qualify.attention_channels": channels,
@@ -188,19 +207,19 @@ def main():
                 configuration,
                 weights=True,
             )
-            qkv, _ = run(
+            packed_qkv, _ = run(
                 prefix + "-qkv",
                 "krea2.vae_attention_qkv",
                 (normalized,),
-                convolve(normalized, block.to_qkv),
+                pack_qkv(convolve(normalized, block.to_qkv)),
                 configuration,
                 weights=True,
             )
             attended, _ = run(
                 prefix + "-core",
                 "krea2.vae_attention_core",
-                (qkv,),
-                attend(qkv),
+                (packed_qkv,),
+                attend(unpack_qkv(packed_qkv)),
                 configuration,
             )
             projected, _ = run(

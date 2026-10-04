@@ -9,6 +9,7 @@ config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), m
 amdgpu.target<gfx11-generic> @vae_attention_wave32 {subgroup_size = 32}
 template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+template.decl @image.convolution_nchw_element_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %channel: index, %pixel: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32)
 template.decl @attention.single_head_nchw_f32(%tokens: index, %channels: index, %qkv: buffer, %output: buffer)
 command.program.decl @vae_input_residual() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
 
@@ -50,8 +51,33 @@ kernel.def target(@vae_attention_wave32) @krea_vae_attention_qkv() {
   %inputs = index.constant 384 : index
   %outputs = index.constant 1152 : index
   %one = index.constant 1 : index
-  %add_residual = scalar.constant false : i1
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %one, %one, %one, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  %two = index.constant 2 : index
+  %threads = index.constant 128 : index
+  %origin = index.constant 0 : offset
+  %group = kernel.workgroup.id<x> : index
+  %channel = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %pixel = index.madd %group, %threads, %lane : index
+  %pixels = index.mul %height, %width : index
+  %live = index.cmp ult, %pixel, %pixels : index
+  scf.if %live {
+    %value = template.apply<@image.convolution_nchw_element_f32>(%height, %width, %inputs, %outputs, %one, %one, %one, %channel, %pixel, %input, %weight, %bias) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
+    // Q/K preserve their coalesced token lanes. V is written token-first for
+    // channel-owned attention accumulation, directly in its existing plane.
+    %query_key_channels = index.mul %two, %inputs : index
+    %is_value = index.cmp uge, %channel, %query_key_channels : index
+    scf.if %is_value {
+      %value_channel = index.sub %channel, %query_key_channels : index
+      %value_start = index.mul %query_key_channels, %pixels : index
+      %element_bytes = index.constant 4 : offset
+      %value_base = index.scale %value_start, %element_bytes : index, offset -> offset
+      %value_view = buffer.view %output[%value_base] : buffer -> view<[%pixels]x[%inputs]xf32>
+      view.store %value, %value_view[%pixel, %value_channel] : f32, view<[%pixels]x[%inputs]xf32>
+    } else {
+      %query_key_view = buffer.view %output[%origin] : buffer -> view<[%query_key_channels]x[%pixels]xf32>
+      view.store %value, %query_key_view[%channel, %pixel] : f32, view<[%query_key_channels]x[%pixels]xf32>
+    }
+  }
   kernel.return
 }
 
@@ -121,6 +147,7 @@ command.program.def public @krea2.vae_attention_norm() launch(%parameters: buffe
   command.return
 }
 
+// Packed Q/K are channel-first; the third equally sized V plane is token-first.
 command.program.def public @krea2.vae_attention_qkv() launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %weight = command.parameter %parameters, "decoder.mid_block.attentions.0.to_qkv.weight" : view<1152x384x1x1xf32>
   %bias = command.parameter %parameters, "decoder.mid_block.attentions.0.to_qkv.bias" : view<1152xf32>

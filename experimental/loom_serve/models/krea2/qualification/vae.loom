@@ -51,6 +51,7 @@ command.program.def public @qualify.image_convolution() launch(%input: buffer, %
   command.return
 }
 
+// Input matches the production packed Q/K channel-first, V token-first layout.
 kernel.def target(@image_qualification_wave32) @qualify_image_attention() {
   %tokens = config.get @qualify.attention_tokens : index
   %threads = index.constant 128 : index

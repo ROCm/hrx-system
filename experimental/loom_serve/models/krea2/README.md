@@ -1165,6 +1165,13 @@ Nearest-neighbor upsampling can be folded into its input indexing without an
 expanded image buffer. Concrete kernel leaves resolve geometry before applying
 the helper, so no shape scalars enter the device ABI.
 
+The element motif computes one valid output in ascending input-channel/tap
+order with F32 FMA, followed by a separately rounded bias addition. Work
+distribution and the store epilogue belong to its caller. The ordinary wrapper
+stores NCHW and optionally adds a residual; the attention QKV leaf uses the
+same computation with a consumer-specific layout. Neither needs a second
+convolution implementation or a layout flag in the arithmetic motif.
+
 ```sh
 HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_input.py \
   --checker bazel-bin/experimental/loom_serve/component_check \
@@ -1235,6 +1242,14 @@ handles 1–512 channels with 128-key tiles. Each workgroup retains one query's
 output accumulators and a 512-byte probability tile, plus reduction storage.
 It does not materialize the 20.25 MiB score matrix for a 48x48 latent grid.
 
+The QKV allocation contains three equal-size F32 planes: Q and K are
+`[channels, tokens]`, while V is `[tokens, channels]`. Q/K reads are contiguous
+when neighboring lanes score different keys; V reads are contiguous when
+neighboring lanes accumulate different output channels. The projection writes
+this layout directly into the existing allocation. There is no transpose
+dispatch, additional tensor, or host synchronization. Attention output stays
+NCHW, so its projection and residual consumers retain their original layout.
+
 The standalone command uses 13.5 MiB of global scratch at 48x48: QKV plus one
 feature plane reused between normalization and attended output. Allocation
 points express those lifetimes. The final projection may write the original
@@ -1256,6 +1271,8 @@ comparisons pass over 34,655,004 values with unchanged 2e-5 primitive absolute
 and relative tolerances and no nonfinite pairs. Primitive attention uses an
 independent F64 softmax/contraction; fused addition, command composition, and
 the full in-place prefix match staged native results bit-for-bit.
+The oracle operates on logical Q/K/V tensors independently of the physical
+packing; the QKV producer is checked before its packed output feeds attention.
 
 At 48x48, attention-block relative L2 against the independent F64 chain is
 3.58e-7 base and 3.72e-7 LoRA. The complete prefix uses ten unique kernels,

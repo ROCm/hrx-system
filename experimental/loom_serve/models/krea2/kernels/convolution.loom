@@ -5,20 +5,66 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+template.decl @image.convolution_nchw_element_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %channel: index, %pixel: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32)
 
-// One lane owns a spatial output and one workgroup row owns an output channel.
-// Original OI(T)HW weights stay F32; a fresh causal frame uses only the final
-// temporal plane. Nearest upsampling is an input-index transform, not a copy.
-// Concrete callers supply odd spatial extent, positive geometry and scale.
-// The optional residual addition follows the rounded bias addition; output
-// may alias residual, but not the spatial convolution input.
-template.def<@image.convolution_nchw_f32> device @image_convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+// Computes one valid spatial output with input-channel and tap order preserved.
+// The caller supplies positive geometry, odd extent, valid output channel/pixel,
+// and original OI(T)HW F32 weights. A fresh causal frame reads the final temporal
+// plane. Bias addition rounds separately after the ascending F32 FMA reduction;
+// work distribution, residual addition and output storage belong to the caller.
+template.def<@image.convolution_nchw_element_f32> device @image_convolution_nchw_element_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %channel: index, %pixel: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
-  %threads = index.constant 128 : index
   %origin = index.constant 0 : offset
   %zero_f32 = scalar.constant 0.0 : f32
+  %output_height = index.mul %height, %upsample : index
+  %output_width = index.mul %width, %upsample : index
+  %padding = index.div %extent, %two : index
+  %plane = index.sub %planes, %one : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%inputs]x[%height]x[%width]xf32>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]x[%planes]x[%extent]x[%extent]xf32>
+  %bias_view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xf32>
+  %y = index.div %pixel, %output_width : index
+  %x = index.rem %pixel, %output_width : index
+  %sum = scf.for %input_channel = [%zero to %inputs step %one](%acc = %zero_f32 : f32) -> (f32) {
+    %rows = scf.for %ky = [%zero to %extent step %one](%row_acc = %acc : f32) -> (f32) unroll {
+      %dy = index.add %y, %ky : index
+      %source_y = index.sub %dy, %padding : index
+      %valid_y = index.cmp ult, %source_y, %output_height : index
+      %columns = scf.for %kx = [%zero to %extent step %one](%column_acc = %row_acc : f32) -> (f32) unroll {
+        %dx = index.add %x, %kx : index
+        %source_x = index.sub %dx, %padding : index
+        %valid_x = index.cmp ult, %source_x, %output_width : index
+        %valid = scalar.andi %valid_y, %valid_x : i1
+        %next = scf.if %valid -> (f32) {
+          %iy = index.div %source_y, %upsample : index
+          %ix = index.div %source_x, %upsample : index
+          %value = view.load %input_view[%input_channel, %iy, %ix] : view<[%inputs]x[%height]x[%width]xf32> -> f32
+          %coefficient = view.load %weight_view[%channel, %input_channel, %plane, %ky, %kx] : view<[%outputs]x[%inputs]x[%planes]x[%extent]x[%extent]xf32> -> f32
+          %updated = scalar.fmaf %value, %coefficient, %column_acc : f32
+          scf.yield %updated : f32
+        } else {
+          scf.yield %column_acc : f32
+        }
+        scf.yield %next : f32
+      }
+      scf.yield %columns : f32
+    }
+    scf.yield %rows : f32
+  }
+  %offset = view.load %bias_view[%channel] : view<[%outputs]xf32> -> f32
+  %biased = scalar.addf %sum, %offset : f32
+  template.return %biased : f32
+}
+
+// One lane owns a spatial output and one workgroup row owns an output channel.
+// Nearest upsampling is an input-index transform, not a copy. The residual
+// addition follows the rounded bias addition; output may alias residual but
+// not the spatial convolution input.
+template.def<@image.convolution_nchw_f32> device @image_convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %threads = index.constant 128 : index
+  %origin = index.constant 0 : offset
   %group = kernel.workgroup.id<x> : index
   %channel = kernel.workgroup.id<y> : index
   %lane = kernel.workitem.id<x> : index
@@ -26,44 +72,10 @@ template.def<@image.convolution_nchw_f32> device @image_convolution_nchw_f32(%he
   %output_height = index.mul %height, %upsample : index
   %output_width = index.mul %width, %upsample : index
   %pixels = index.mul %output_height, %output_width : index
-  %padding = index.div %extent, %two : index
-  %plane = index.sub %planes, %one : index
-  %input_view = buffer.view %input[%origin] : buffer -> view<[%inputs]x[%height]x[%width]xf32>
-  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]x[%planes]x[%extent]x[%extent]xf32>
-  %bias_view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xf32>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
   %live = index.cmp ult, %pixel, %pixels : index
   scf.if %live {
-    %y = index.div %pixel, %output_width : index
-    %x = index.rem %pixel, %output_width : index
-    %sum = scf.for %input_channel = [%zero to %inputs step %one](%acc = %zero_f32 : f32) -> (f32) {
-      %rows = scf.for %ky = [%zero to %extent step %one](%row_acc = %acc : f32) -> (f32) unroll {
-        %dy = index.add %y, %ky : index
-        %source_y = index.sub %dy, %padding : index
-        %valid_y = index.cmp ult, %source_y, %output_height : index
-        %columns = scf.for %kx = [%zero to %extent step %one](%column_acc = %row_acc : f32) -> (f32) unroll {
-          %dx = index.add %x, %kx : index
-          %source_x = index.sub %dx, %padding : index
-          %valid_x = index.cmp ult, %source_x, %output_width : index
-          %valid = scalar.andi %valid_y, %valid_x : i1
-          %next = scf.if %valid -> (f32) {
-            %iy = index.div %source_y, %upsample : index
-            %ix = index.div %source_x, %upsample : index
-            %value = view.load %input_view[%input_channel, %iy, %ix] : view<[%inputs]x[%height]x[%width]xf32> -> f32
-            %coefficient = view.load %weight_view[%channel, %input_channel, %plane, %ky, %kx] : view<[%outputs]x[%inputs]x[%planes]x[%extent]x[%extent]xf32> -> f32
-            %updated = scalar.fmaf %value, %coefficient, %column_acc : f32
-            scf.yield %updated : f32
-          } else {
-            scf.yield %column_acc : f32
-          }
-          scf.yield %next : f32
-        }
-        scf.yield %columns : f32
-      }
-      scf.yield %rows : f32
-    }
-    %offset = view.load %bias_view[%channel] : view<[%outputs]xf32> -> f32
-    %biased = scalar.addf %sum, %offset : f32
+    %biased = template.apply<@image.convolution_nchw_element_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %channel, %pixel, %input, %weight, %bias) : (index, index, index, index, index, index, index, index, index, buffer, buffer, buffer) -> (f32)
     %result = scf.if %add_residual -> (f32) {
       %residual_view = buffer.view %residual[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
       %skip = view.load %residual_view[%channel, %pixel] : view<[%outputs]x[%pixels]xf32> -> f32

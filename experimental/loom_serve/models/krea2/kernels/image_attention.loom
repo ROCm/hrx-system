@@ -8,8 +8,9 @@ template.decl @attention.single_head_nchw_f32(%tokens: index, %channels: index, 
 
 // One query per 128-thread workgroup; each lane evaluates one key per tile,
 // then accumulates up to four output channels. The caller supplies 1..512
-// channels and positive token count. QKV is three contiguous channel-first
-// planes. Only one probability tile lives in LDS, independent of token count.
+// channels and positive token count. Packed Q/K are channel-first; V is
+// token-first in the equally sized third plane. Output remains channel-first.
+// Only one probability tile lives in LDS, independent of token count.
 template.def<@attention.single_head_nchw_f32> device @single_head_nchw_f32(%tokens: index, %channels: index, %qkv: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
@@ -25,7 +26,12 @@ template.def<@attention.single_head_nchw_f32> device @single_head_nchw_f32(%toke
   %channels_f32 = scalar.uitofp %channels_i32 : i32 to f32
   %root_channels = scalar.sqrtf %channels_f32 : f32
   %scale = scalar.divf %one_f32, %root_channels : f32
-  %qkv_view = buffer.view %qkv[%origin] : buffer -> view<3x[%channels]x[%tokens]xf32>
+  %query_key_view = buffer.view %qkv[%origin] : buffer -> view<2x[%channels]x[%tokens]xf32>
+  %plane_elements = index.mul %channels, %tokens : index
+  %value_start = index.mul %two, %plane_elements : index
+  %element_bytes = index.constant 4 : offset
+  %value_base = index.scale %value_start, %element_bytes : index, offset -> offset
+  %value_view = buffer.view %qkv[%value_base] : buffer -> view<[%tokens]x[%channels]xf32>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%channels]x[%tokens]xf32>
   %probability_bytes = index.constant 512 : offset
   %probability = buffer.alloca<workgroup> align(16) %probability_bytes : buffer
@@ -48,8 +54,8 @@ template.def<@attention.single_head_nchw_f32> device @single_head_nchw_f32(%toke
     %valid_key = index.cmp ult, %key, %tokens : index
     %score = scf.if %valid_key -> (f32) {
       %dot = scf.for %channel = [%zero to %channels step %one](%sum = %zero_f32 : f32) -> (f32) {
-        %q = view.load %qkv_view[%zero, %channel, %query] : view<3x[%channels]x[%tokens]xf32> -> f32
-        %k = view.load %qkv_view[%one, %channel, %key] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %q = view.load %query_key_view[%zero, %channel, %query] : view<2x[%channels]x[%tokens]xf32> -> f32
+        %k = view.load %query_key_view[%one, %channel, %key] : view<2x[%channels]x[%tokens]xf32> -> f32
         %next = scalar.fmaf %q, %k, %sum : f32
         scf.yield %next : f32
       }
@@ -79,28 +85,28 @@ template.def<@attention.single_head_nchw_f32> device @single_head_nchw_f32(%toke
       %token = index.add %tile, %column : index
       %p = view.load %probability_view[%column] : view<128xf32> -> f32
       %updated0 = scf.if %valid_channel0 -> (f32) {
-        %v = view.load %qkv_view[%two, %channel0, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %v = view.load %value_view[%token, %channel0] : view<[%tokens]x[%channels]xf32> -> f32
         %sum = scalar.fmaf %p, %v, %value0 : f32
         scf.yield %sum : f32
       } else {
         scf.yield %value0 : f32
       }
       %updated1 = scf.if %valid_channel1 -> (f32) {
-        %v = view.load %qkv_view[%two, %channel1, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %v = view.load %value_view[%token, %channel1] : view<[%tokens]x[%channels]xf32> -> f32
         %sum = scalar.fmaf %p, %v, %value1 : f32
         scf.yield %sum : f32
       } else {
         scf.yield %value1 : f32
       }
       %updated2 = scf.if %valid_channel2 -> (f32) {
-        %v = view.load %qkv_view[%two, %channel2, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %v = view.load %value_view[%token, %channel2] : view<[%tokens]x[%channels]xf32> -> f32
         %sum = scalar.fmaf %p, %v, %value2 : f32
         scf.yield %sum : f32
       } else {
         scf.yield %value2 : f32
       }
       %updated3 = scf.if %valid_channel3 -> (f32) {
-        %v = view.load %qkv_view[%two, %channel3, %token] : view<3x[%channels]x[%tokens]xf32> -> f32
+        %v = view.load %value_view[%token, %channel3] : view<[%tokens]x[%channels]xf32> -> f32
         %sum = scalar.fmaf %p, %v, %value3 : f32
         scf.yield %sum : f32
       } else {
