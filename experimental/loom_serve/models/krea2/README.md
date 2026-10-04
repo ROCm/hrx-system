@@ -1,14 +1,14 @@
 # Krea 2 Turbo component port
 
-This is a **native model component port, not an image-serving endpoint**.
+This is a **native token-IDs-to-RGB port, not an image-serving endpoint**.
 The `sample_image` and `sample_image_adapted` roots run through Loom's live
 source JIT, queued safetensors loading, command programs and shared device
-ownership. Their caller supplies twelve Qwen3-VL hidden-state taps per text
-token, initial packed noise, timesteps, rotary tables, a key mask, Euler deltas
-and the VAE affine table. The separate `text_encoder` command computes those
-taps from validated token IDs, a causal key mask and encoder rotary tables.
-Prompt tokenization and request-data construction are still external; this
-is not yet a native prompt-to-image path.
+ownership. Their caller supplies validated token IDs, initial packed noise,
+timesteps, encoder/DiT rotary tables, the encoder key mask, Euler deltas and
+the VAE affine table. The command computes its own Qwen3-VL taps and derives
+the combined text/image key mask on-device. Prompt tokenization and
+request-data construction are still external; this is not yet a native
+prompt-to-image path.
 
 The command fuses the encoder taps into 2,560-wide text features and projects
 them into the DiT's 6,144-wide prefix once. It batches time conditioning, then
@@ -19,8 +19,8 @@ conditioning and latents stay on device. Explicit phase lifetimes let one
 planned workspace serve the whole command.
 
 The official softwatercolor adapter covers fusion, text projection and DiT
-projections. Turbo, adapter and VAE weights remain separate immutable domains;
-fusion and denoising share the same Turbo and adapter images. Lower-level
+projections. Encoder, Turbo, adapter and VAE weights remain separate immutable
+domains; fusion and denoising share the same Turbo and adapter images. Lower-level
 command roots expose each stage independently for numerical qualification.
 The checks below distinguish independent primitive arithmetic, exact native
 composition, and accumulated image differences.
@@ -1052,10 +1052,11 @@ shapes, and a failed check retains its exact inputs, command and expected
 output. Native text encoding and the image-serving adapter are separate
 remaining integration boundaries.
 
-### One native encoder-taps-to-RGB command
+### Encoder-taps-to-RGB composition boundary
 
-[`sample.loom`](sample.loom) exposes `sample_image` and `sample_image_adapted`.
-Both consume initial packed noise, BF16 encoder taps of shape
+[`sample.loom`](sample.loom) owns the reusable `krea2.sample_image` template.
+Its qualification wrappers, `qualify.sample_from_taps` and
+`qualify.sample_from_taps_adapted`, consume initial packed noise and BF16 taps of shape
 `[text_tokens, 12, 2560]`, timesteps, rotary tables, mask, Euler deltas and the
 VAE affine table. The adapted root also consumes a scalar LoRA strength.
 Fusion and text projection run once; the 6,144-wide projected output stays on
@@ -1097,12 +1098,12 @@ This is an exact native-composition oracle. The preceding stage checks supply
 the independent numerical evidence; matching their output does not replace
 those checks or establish performance. Differences from the earlier
 external-text trajectory are reported separately: changed conditioning makes
-those different computations, not an exact-composition oracle. Text encoding
-is still external, so the command is not a complete native prompt-to-image
-implementation.
+those different computations, not an exact-composition oracle. This observation
+boundary supplies taps externally; the production image entry owns native
+encoding as described below. Neither boundary constructs a prompt request yet.
 
 Base, zero-strength LoRA and active LoRA pass twice, with zero differing bits
-over 2,654,208 F32 values. Both roots reject all three invalid geometry cases,
+over 2,654,208 F32 values. Both wrappers reject all three invalid geometry cases,
 six rejections in total. Twelve additional staged comparisons report numerical
 differences from the earlier external-text inputs; those are not exact gates.
 
@@ -1487,3 +1488,78 @@ rounding observations, not primitive tolerance passes or image-quality claims.
 The separately executed block observations are finite-only diagnostics; their
 whole-block envelope misses are intentionally visible rather than counted as
 successful independent primitive checks.
+
+### Source-owned encoding through final RGB
+
+The production `sample_image` and `sample_image_adapted` roots in
+[`sample.loom`](sample.loom) invoke `text_encoder` and own the tap buffer until
+fusion finishes. A small input-preparation kernel derives the combined key
+mask: it strips the encoder's 34 prefix positions, retains the text visibility
+bits and marks all image positions live. Callers cannot provide inconsistent
+text masks to encoding and denoising. Mask preparation overlaps encoding;
+fusion waits for both. Subsequent stages reuse the retired encoder workspace.
+
+Checkpoint roots are ordered encoder/Turbo/VAE for base and
+encoder/Turbo/LoRA/VAE for the adapted root. The encoder is not adapted.
+The rebindable input order, before the distinct output and reflected workspace,
+is:
+
+| Input | Element type and shape |
+| --- | --- |
+| Initial packed noise | BF16 `[image_tokens,64]` |
+| Validated token IDs | I32 `[text_tokens+34]` |
+| Encoder cosine, then sine | Each BF16 `[text_tokens+48,128]` |
+| Encoder key mask | Byte `[text_tokens+48]`, fourteen trailing zeros |
+| Timesteps | BF16 `[time_count]` |
+| DiT cosine, then sine | Each F32 `[block_tokens,128]` |
+| Euler deltas | F32 `[time_count]` |
+| LoRA strength, adapted root only | One F32 |
+| VAE affine | F32 `[2,16]`: inverse standard deviation, then mean |
+
+Output remains F32 `[3,latent_height*8,latent_width*8]` RGB in `[-1,1]`.
+Only that completed output returns to the host. Request tokenization, initial
+noise and the small mathematical tables still come from the caller; removing
+captured hidden states does not yet make this a native prompt-serving endpoint.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_encoded_sample.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --encoder_results=/path/to/new-text-encoder-results \
+  --denoise_results=/path/to/denoise-results \
+  --stack_reference=/path/to/stack-reference/1088 \
+  --input_results=/path/to/vae-input-results \
+  --sample_results=/path/to/new-sample-results \
+  --reference="$krea_reference" \
+  --output=/path/to/new-encoded-sample-results
+```
+
+This check first replays the prior raw-tap base/zero/style images exactly.
+It then feeds qualified native taps into the observation wrapper and requires
+the production token-input command to reproduce those final RGB values bitwise
+twice, including zero-strength identity. It also checks early geometry
+rejection, shared checkpoint residency and phase workspace reuse. The wrapper's
+comparison against earlier images is finite-only: native versus external
+encoder conditioning represents different arithmetic. Pixel differences and
+final PNGs support visual inspection separately from exact composition.
+The driver uses NumPy and Pillow, not an external inference framework, and
+retains less than 96 MiB without copying checkpoints.
+
+The integrated base, zero-strength and active-adapter commands each passed
+twice: six exact comparisons over 2,654,208 F32 values, with zero differing
+bits. The preceding raw-tap regressions cover another six exact comparisons
+over the same number of values. All six invalid geometry cases fail before
+weight residency. The two staged image paths also execute twice; their
+comparisons against external-encoder images remain finite-only observations.
+
+| Complete image root | Unique kernels | Parameter tensors | Weight bytes | Workspace bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Base | 85 | 920 | 34,412,459,020 | 333,235,456 |
+| Adapted | 109 | 1,448 | 34,881,682,188 | 333,235,456 |
+
+Both inspected 384×384 images preserve the canonical deer/forest composition.
+On 8-bit RGB, base/active-adapter pixel RMSE is 12.9284/8.6123 against the
+canonical images and 9.6886/9.5391 against the previous native images using
+external encoder taps. These are observations for one prompt, not a general
+image-quality or performance claim. Retained output occupies 45 MiB.

@@ -54,3 +54,4 @@ text_fusion_kernels.loom
 text_fusion_projector.loom
 encoder_normalization.loom
 encoder_block.loom
+sample.loom
