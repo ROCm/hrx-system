@@ -529,8 +529,10 @@ config.def @model36.unused = 1 : index
 
   config_module.reset();
   std::string text = SerializeModuleToText(module.get());
-  EXPECT_NE(text.find("config.def @model36.model.hidden_size = 4096 : index"),
-            std::string::npos);
+  EXPECT_NE(
+      text.find("config.def @model36.model.hidden_size = 4096 : %value: index "
+                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+      std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
 }
@@ -570,8 +572,10 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
   ASSERT_NE(text_artifact, nullptr);
   EXPECT_EQ(ToString(text_artifact->identifier), "jit_kernel.loom");
   std::string text = ToString(text_artifact->contents);
-  EXPECT_NE(text.find("config.def @model36.model.hidden_size = 4096 : index"),
-            std::string::npos);
+  EXPECT_NE(
+      text.find("config.def @model36.model.hidden_size = 4096 : %value: index "
+                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+      std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
 
@@ -692,8 +696,10 @@ config.def @model36.model.hidden_size = 4096 : index
       loomc_product_artifact_at(product_ptr.get(), 0);
   ASSERT_NE(artifact, nullptr);
   const std::string text = ToString(artifact->contents);
-  EXPECT_NE(text.find("config.def @model36.model.hidden_size = 4096 : index"),
-            std::string::npos);
+  EXPECT_NE(
+      text.find("config.def @model36.model.hidden_size = 4096 : %value: index "
+                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+      std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
 }

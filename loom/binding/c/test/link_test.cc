@@ -1299,9 +1299,10 @@ func.def public @entry() -> (index) {
   ASSERT_TRUE(loomc_result_succeeded(first_result.get()));
   ASSERT_NE(first_module.get(), nullptr);
   std::string first_text = SerializeModuleToText(first_module.get());
-  EXPECT_NE(
-      first_text.find("config.def @model36.model.hidden_size = 4096 : index"),
-      std::string::npos);
+  EXPECT_NE(first_text.find(
+                "config.def @model36.model.hidden_size = 4096 : %value: index "
+                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+            std::string::npos);
   EXPECT_EQ(first_text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
   EXPECT_EQ(first_text.find("2048"), std::string::npos);
@@ -1324,9 +1325,10 @@ func.def public @entry() -> (index) {
   ASSERT_TRUE(loomc_result_succeeded(second_result.get()));
   ASSERT_NE(second_module.get(), nullptr);
   std::string second_text = SerializeModuleToText(second_module.get());
-  EXPECT_NE(
-      second_text.find("config.def @model36.model.hidden_size = 1024 : index"),
-      std::string::npos);
+  EXPECT_NE(second_text.find(
+                "config.def @model36.model.hidden_size = 1024 : %value: index "
+                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+            std::string::npos);
   EXPECT_EQ(second_text.find("4096"), std::string::npos);
 }
 
@@ -2053,8 +2055,9 @@ func.def public @from_bytecode() -> (index) {
   ASSERT_TRUE(loomc_result_succeeded(result.get()));
   ASSERT_NE(module.get(), nullptr);
   std::string text = SerializeModuleToText(module.get());
-  EXPECT_NE(text.find("config.def @model36.model.hidden_size = 4096 : index"),
-            std::string::npos);
+  EXPECT_NE(
+      text.find("config.def @model36.model.hidden_size = 4096 : %value: index"),
+      std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
 }

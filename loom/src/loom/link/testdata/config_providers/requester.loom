@@ -1,0 +1,16 @@
+// Configuration declarations carry the constraints used by this consumer.
+config.decl @count : %value: index where [range(%value, 1, 16), mul(%value, 4)]
+
+config.decl @enabled : i1
+
+config.decl @scale : f32
+
+config.decl @layout : encoding<layout>
+
+func.def public @entry() -> (index, i1, f32, encoding<layout>) {
+  %count = config.get @count : index
+  %enabled = config.get @enabled : i1
+  %scale = config.get @scale : f32
+  %layout = config.get @layout : encoding<layout>
+  func.return %count, %enabled, %scale, %layout : index, i1, f32, encoding<layout>
+}

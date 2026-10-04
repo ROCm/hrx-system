@@ -126,3 +126,20 @@ config.decl @lanes : i8
 // ----
 status: OUT_OF_RANGE
 config.decl @lanes : i8
+
+// ====
+
+// RUN: emit config-materialize lanes=64
+
+// Previously resolved values retain their domain through later overrides.
+config.def @lanes = 32 : %value: index where [range(%value, 16, 128), multiple_of(%value, 16)]
+
+// ----
+
+// ====
+
+// RUN: emit config-materialize lanes=65
+
+config.def @lanes = 32 : %value: index where [range(%value, 16, 128), multiple_of(%value, 16)]
+
+// ----

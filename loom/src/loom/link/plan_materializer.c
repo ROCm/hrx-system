@@ -142,7 +142,8 @@ static void loom_link_plan_materialization_scatter_target_symbols(
     *identity_target = target_symbol;
     if (target_source_definitions &&
         iree_any_bit_set(source_symbol->flags,
-                         LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION)) {
+                         LOOM_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION) &&
+        !iree_any_bit_set(source_symbol->flags, LOOM_LINK_SYMBOL_FLAG_CONFIG)) {
       iree_host_size_t* target_source_definition =
           &target_source_definitions[target_symbol.symbol_id];
       IREE_ASSERT(*target_source_definition ==

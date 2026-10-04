@@ -83,6 +83,7 @@ iree_status_t loom_config_remap_type_and_value(
     loom_attribute_t* out_target_value);
 
 // Replaces |old_op| with an exact config.def after checking its contract.
+// Both declarations and definitions retain their constraints after replacement.
 iree_status_t loom_config_apply_exact_value(loom_module_t* module,
                                             iree_string_view_t key,
                                             loom_op_t* old_op, loom_type_t type,
@@ -97,6 +98,8 @@ iree_status_t loom_config_apply_exact_value(loom_module_t* module,
 // program operations are rejected. Definitions without matching config symbols
 // in the target module are ignored so one reusable config module can serve
 // several related programs.
+// Only initializer values are overlaid; the target requirements are retained
+// rather than replaced or extended by the config module's own constraints.
 iree_status_t loom_config_overlay_module(
     loom_module_t* module, const loom_module_t* config_module,
     loom_config_applied_value_sink_t applied_value_sink,

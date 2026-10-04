@@ -1,0 +1,9 @@
+config.def @count = 8 : index
+
+config.def @enabled = true : i1
+
+config.def @scale = 0.5 : f32
+
+config.def @layout = #encoding.layout.dense : encoding<layout>
+
+config.def @unused = 99 : index

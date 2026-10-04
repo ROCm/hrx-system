@@ -729,7 +729,8 @@ func.def public @entry() -> (index) {
   ASSERT_NE(output_request, nullptr);
   const std::string text = SerializeRequestToText(output_request.get());
   EXPECT_THAT(text, ::testing::HasSubstr(
-                        "config.def @model.hidden_size = 4096 : index"));
+                        "config.def @model.hidden_size = 4096 : %value: index "
+                        "where [range(%value, 0, 8192)]"));
   EXPECT_THAT(text, ::testing::Not(::testing::HasSubstr("config.decl @model")));
 }
 

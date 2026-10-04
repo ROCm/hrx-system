@@ -241,9 +241,9 @@ void Configs::build(loom_builder_t* builder) {
           diagnostics_.reject(unit_, binding.owner, text);
         }
       }
-      check(loom_config_def_build(builder, binding.reference, *binding.value,
-                                  binding.type, locations_.get(binding.owner),
-                                  &op));
+      check(loom_config_def_build(builder, 0, binding.reference, *binding.value,
+                                  binding.type, nullptr, 0, nullptr, 0,
+                                  locations_.get(binding.owner), &op));
     } else {
       auto predicates = binding.predicates;
       loom_config_decl_build_flags_t flags = 0;

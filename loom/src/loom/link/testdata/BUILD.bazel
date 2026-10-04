@@ -24,6 +24,16 @@ exports_files(
 )
 
 iree_c_embed_data(
+    name = "config_providers",
+    testonly = True,
+    srcs = glob(["config_providers/*.loom"]),
+    c_file_output = "config_providers_testdata.c",
+    flatten = True,
+    h_file_output = "config_providers_testdata.h",
+    identifier = "loom_link_config_providers_testdata",
+)
+
+iree_c_embed_data(
     name = "provider_roots",
     testonly = True,
     srcs = glob(["provider_roots/*.loom"]),

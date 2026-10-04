@@ -35,6 +35,15 @@ config.def @model36.kv_cache.layout = #encoding.layout.dense : encoding<layout>
 
 // ====
 
+// Resolved definitions retain their declared domain across later overrides.
+config.def @context_capacity = 4096 : %value: index where [range(%value, 64, 8192), mul(%value, 64)]
+
+config.def @enabled = true : %value: i1 where [eq(%value, 1)]
+
+config.def @signed_count = -8 : %value: i8 where [range(%value, -16, 16)]
+
+// ====
+
 // Reads from scalar configs.
 config.def @hidden_size = 2048 : index
 

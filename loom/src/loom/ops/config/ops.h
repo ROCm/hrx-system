@@ -50,17 +50,27 @@ iree_status_t loom_config_decl_verify(
     const loom_module_t* module, const loom_op_t* op,
     iree_diagnostic_emitter_t emitter);
 
-// LOOM_OP_CONFIG_DEF: Define a compile/link-time configuration value. The initializer is required and must match the declared result type. Scalar and encoding values seed typed facts so config.get can fold through canonicalization.
+// LOOM_OP_CONFIG_DEF: Define a compile/link-time configuration value. The initializer is required and must match the declared result type. Scalar and encoding values seed typed facts so config.get can fold through canonicalization. Predicates constrain both the initializer and later overrides and retain requirements merged from configuration declarations.
 // config.def @model36.model.hidden_size = 2048 : index
 LOOM_DEFINE_ISA(loom_config_def_isa, LOOM_OP_CONFIG_DEF)
 LOOM_DEFINE_RESULT(loom_config_def_type, 0)
 LOOM_DEFINE_ATTR_SYMBOL(loom_config_def_symbol, 0)
 LOOM_DEFINE_ATTR_ANY(loom_config_def_value, 1)
+LOOM_DEFINE_ATTR_PREDICATE_LIST(loom_config_def_predicates, 2)
+enum loom_config_def_build_flag_bits_e {
+  LOOM_CONFIG_DEF_BUILD_FLAG_HAS_PREDICATES = 1u << 0,
+};
+typedef uint32_t loom_config_def_build_flags_t;
 iree_status_t loom_config_def_build(
     loom_builder_t* builder,
+    loom_config_def_build_flags_t build_flags,
     loom_symbol_ref_t symbol,
     loom_attribute_t value,
     loom_type_t result_type,
+    const loom_tied_result_t* tied_results,
+    iree_host_size_t tied_result_count,
+    loom_optional const loom_predicate_t* predicates,
+    iree_host_size_t predicates_count,
     loom_location_id_t location,
     loom_op_t** out_op);
 iree_status_t loom_config_def_facts(

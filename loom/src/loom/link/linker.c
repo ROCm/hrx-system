@@ -1090,9 +1090,9 @@ static iree_status_t loom_link_merge_value_contract(
       loom_attr_predicate_list(remapped_predicates, source_predicates.count);
 
   if (target_value && !loom_attr_is_absent(*target_value)) {
-    return loom_symbol_value_constraints_check_exact(
+    IREE_RETURN_IF_ERROR(loom_symbol_value_constraints_check_exact(
         loom_link_target_symbol_name(linker->target_module, target_ref),
-        target_type, target_value_id, *target_value, predicate_attr);
+        target_type, target_value_id, *target_value, predicate_attr));
   }
   return loom_link_append_value_contract_predicates(
       linker, target_ref, target_op, target_definition, predicate_attr);
@@ -1400,6 +1400,9 @@ static iree_status_t loom_linker_clone_or_merge_symbol_op(
       linker, target_op, source->module, source_op, source->arena, target_ref,
       &merge_duplicate_value_definition));
   if (merge_duplicate_value_definition) {
+    IREE_RETURN_IF_ERROR(loom_link_merge_symbol_contract(
+        linker, source, source->module, source_op, source->arena, target_ref,
+        target_op, output == LOOM_LINKER_SYMBOL_OUTPUT_AUTHORED));
     return loom_linker_commit_symbol_output(source, root_module, root_op,
                                             target_ref, target_op, output);
   }
