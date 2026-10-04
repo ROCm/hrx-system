@@ -5,12 +5,13 @@ is a model program, not a container for each chat session. One host owner
 multiplexes rows through shared code, weights, and workspace. Transport and
 heartbeat progress are independent of the model owner's GPU wait.
 
-The current bytecode `control.loom` selects isolated prefill/decode. Packed
-target, MTP proposal, verification, and catch-up are still sequenced by the
-native model adapter, which invokes cached native stage exports in that same
-VM process. Moving those model decisions into source-authored VM control is a
-separate ownership change, not something the generic submission module already
-provides automatically.
+The shared `control.loom` has isolated and packed entry points. Source owns
+prefill/decode selection and the proposal, target/verify, feedback, and catch-up
+sequence. The native model adapter publishes validated descriptors, invokes
+that program once per epoch, joins both timelines, and commits host progress.
+Cold stage configuration, state geometry, and descriptor construction still
+live in the model adapter; moving the submission chain does not make those
+model-independent.
 
 ## Boundaries and the information each owns
 
@@ -19,7 +20,7 @@ provides automatically.
 | [`jit`](../jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
 | [`command`](../command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
 | [`execution`](../execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
-| [`module`](../module.h) | Named prepared stages; typed VM imports accepting buffers and returning a submission value | Per-session VM state or a general HAL instruction set |
+| [`module`](../module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
 | [`program`](../program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
 | [`qwen_model`](../qwen_model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
 | [`weights`](../weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
@@ -36,7 +37,7 @@ directly, rather than reconstructed in host code.
 
 `qwen_initialize` creates the live device and JIT, loads the tokenizer, compiles
 isolated and packed stages, checks their layout agreement, loads shared weights,
-records commands, creates the VM program/native exports, and allocates retained
+records commands, creates the VM program/native capabilities, and allocates retained
 rows and MTP state. Each stage can have different kernel choices while binding
 the same model storage. No session gets another copy of the weights or code.
 
@@ -115,7 +116,7 @@ model state until a subsequent invocation consumes it.
 
 `loom_serve_qwen_model_epoch` validates the whole external span request before
 submission, builds the immutable device descriptors, uploads input/control,
-submits the prepared stage, and obtains completed output records. Dense
+calls the source VM sequence, and obtains completed output records. Dense
 projections share a flat token matrix; attention and recurrent kernels use
 span boundaries and row origins to preserve independent histories. The output
 head works on requested output rows rather than every prompt token.
@@ -144,10 +145,22 @@ state without proposal; omitting `--mtp` measures target-only residency.
 
 ## Queues, failure, and reclaim
 
-The native import enqueues a prepared command and returns an accepted submission
-value. It does not wait for GPU completion or yield the VM on every dispatch.
+`runner.execute_N(i32 stage, N hal.buffer)` selects one retained command by its
+residency-local index and checks its exact binding count. The complete arity
+family through the configured capacity is available even when an optional
+source branch has no loaded stages. The native call enqueues and returns an
+accepted submission value; it does not wait for GPU completion or yield the VM.
 That value belongs to one execution object and named timeline, not a global
 event namespace.
+
+`runner.feedback(i32 slot, hal.buffer source, i64 offset, i64 length)` downloads
+into host storage registered during model creation. The module copies the span
+descriptors, not their payload. Their owner retains the backing until accepted
+feedback retires, including failure cleanup. A VM-local buffer or a pointer
+encoded in a byte buffer is not a valid substitute for that lifetime contract.
+Host destination bounds and source-controlled indices are checked at the native
+boundary; HAL validates device ranges. Source places this call between target
+and catch-up, so the latter does not depend on the host download.
 
 The execution object serializes commands/input transfers with explicit semaphore
 edges so workspace reuse is safe even on non-FIFO queues. Feedback branches
@@ -168,7 +181,7 @@ The small control tests exercise these contracts with actual queues.
 | Desired behavior | Concrete boundary that changes |
 | --- | --- |
 | More rows or wider epochs | Host fixed arrays, descriptor capacities, authored views, scratch sizing, shape selection, and full-sized correctness/performance qualification |
-| Online shape insertion | Stage publication and immutable native export lifetime; cached code and in-flight bindings must remain valid |
+| Online shape insertion | Stage publication and immutable command-table lifetime; cached code and in-flight bindings must remain valid |
 | Overcommitted pooled sessions | Replace full-completion admission guarantees with explicit held/offloaded residency and a policy for restoring older sessions; kernels still consume only resident pages |
 | Shared prefix cache | Add shared ownership, partial-tail copy-on-write, recurrent snapshots, and retirement to the private-page lifecycle |
 | Device-owned continuation | Admission/completion rings with credit and cancellation; row progress and token routing leave the host epoch wait without recycling in-flight buffers |

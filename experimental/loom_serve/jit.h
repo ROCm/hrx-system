@@ -56,10 +56,12 @@ iree_status_t loom_serve_jit_stage_record(
     iree_hal_buffer_t* const* fixed_buffers,
     iree_hal_command_buffer_t** out_command);
 
-// Compiles the model's portable VM control source. On success, the caller owns
+// Compiles named roots from the model's portable VM source into one image.
+// root_count is nonzero. On success, the caller owns
 // the image with host_allocator and can transfer it to the VM bytecode module.
 iree_status_t loom_serve_jit_compile_vm(iree_string_view_t source_path,
-                                        iree_string_view_t root,
+                                        iree_host_size_t root_count,
+                                        const iree_string_view_t* roots,
                                         iree_allocator_t host_allocator,
                                         iree_const_byte_span_t* out_image);
 

@@ -641,10 +641,15 @@ iree_status_t loom_serve_jit_stage_record(
 }
 
 iree_status_t loom_serve_jit_compile_vm(iree_string_view_t source_path,
-                                        iree_string_view_t root,
+                                        iree_host_size_t root_count,
+                                        const iree_string_view_t* roots,
                                         iree_allocator_t host_allocator,
                                         iree_const_byte_span_t* out_image) {
   *out_image = iree_const_byte_span_empty();
+  if (!root_count) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "VM program requires at least one source root");
+  }
   jit_compiler_t compiler = {0};
   const loomc_allocator_t ca = loomc_allocator_from_iree(host_allocator);
   iree_status_t status = iree_status_from_loomc(
@@ -661,15 +666,24 @@ iree_status_t loom_serve_jit_compile_vm(iree_string_view_t source_path,
   if (iree_status_is_ok(status)) {
     status = jit_read_source(source_path, host_allocator, &source);
   }
+  loomc_target_specialization_t* specializations = NULL;
   if (iree_status_is_ok(status)) {
-    const loomc_target_specialization_t specialization = {
-        .function_symbol = loomc_string_view_from_iree(root),
-        .target_profile = compiler.profile,
-    };
-    status =
-        jit_emit(&compiler, compiler.workspace, source, 1, &specialization,
-                 IREE_SV(LOOMC_ARTIFACT_FORMAT_VM), host_allocator, out_image);
+    status = iree_allocator_malloc_array(host_allocator, root_count,
+                                         sizeof(*specializations),
+                                         (void**)&specializations);
   }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < root_count; ++i) {
+      specializations[i] = (loomc_target_specialization_t){
+          .function_symbol = loomc_string_view_from_iree(roots[i]),
+          .target_profile = compiler.profile,
+      };
+    }
+    status = jit_emit(&compiler, compiler.workspace, source, root_count,
+                      specializations, IREE_SV(LOOMC_ARTIFACT_FORMAT_VM),
+                      host_allocator, out_image);
+  }
+  iree_allocator_free(host_allocator, specializations);
   loomc_source_release(source);
   jit_compiler_deinitialize(&compiler);
   return status;

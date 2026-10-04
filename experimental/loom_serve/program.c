@@ -39,7 +39,8 @@ void loom_serve_program_destroy(loom_serve_program_t* program) {
 
 iree_status_t loom_serve_program_create(iree_vm_environment_t* environment,
                                         iree_string_view_t source_path,
-                                        iree_string_view_t root,
+                                        iree_host_size_t root_count,
+                                        const iree_string_view_t* roots,
                                         iree_vm_module_span_t libraries,
                                         iree_allocator_t host_allocator,
                                         loom_serve_program_t** out_program) {
@@ -49,8 +50,8 @@ iree_status_t loom_serve_program_create(iree_vm_environment_t* environment,
                                              (void**)&program));
   program->allocator = host_allocator;
   iree_const_byte_span_t image = iree_const_byte_span_empty();
-  iree_status_t status =
-      loom_serve_jit_compile_vm(source_path, root, host_allocator, &image);
+  iree_status_t status = loom_serve_jit_compile_vm(
+      source_path, root_count, roots, host_allocator, &image);
   if (iree_status_is_ok(status)) {
     status = iree_vm_bytecode_module_create_trusted(
         environment, IREE_SV("model"),
