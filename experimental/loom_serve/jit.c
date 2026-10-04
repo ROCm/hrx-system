@@ -505,18 +505,48 @@ void loom_serve_jit_stage_destroy(loom_serve_jit_stage_t* stage) {
   iree_allocator_free(stage->allocator, stage);
 }
 
+// A catalog is a library universe, so a named entry must have exactly one
+// exported definition. The index's name lookup enumerates declarations too;
+// it does not perform definition selection for exact-ordinal product requests.
+static iree_status_t jit_lookup_root(loom_serve_jit_t* jit,
+                                     iree_string_view_t root,
+                                     loomc_host_size_t* out_ordinal) {
+  loomc_link_index_symbol_t symbol;
+  bool found = false;
+  bool has_symbol = loomc_link_index_lookup_global(
+      jit->index, loomc_string_view_from_iree(root), &symbol);
+  while (has_symbol) {
+    if (iree_all_bits_set(symbol.flags,
+                          LOOMC_LINK_SYMBOL_FLAG_CONCRETE_DEFINITION |
+                              LOOMC_LINK_SYMBOL_FLAG_EXPORT)) {
+      if (found) {
+        return iree_make_status(IREE_STATUS_ALREADY_EXISTS,
+                                "command root @%.*s has multiple exported "
+                                "definitions",
+                                (int)root.size, root.data);
+      }
+      *out_ordinal = symbol.ordinal;
+      found = true;
+    }
+    has_symbol =
+        loomc_link_index_next_global_duplicate(jit->index, &symbol, &symbol);
+  }
+  if (!found) {
+    return iree_make_status(IREE_STATUS_NOT_FOUND,
+                            "command root @%.*s has no exported definition",
+                            (int)root.size, root.data);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
                                      iree_string_view_t root,
                                      const loomc_config_options_t* config,
                                      loom_serve_jit_stage_t** out_stage) {
   *out_stage = NULL;
   const iree_time_t start = iree_time_now();
-  loomc_link_index_symbol_t symbol;
-  if (!loomc_link_index_lookup_global(
-          jit->index, loomc_string_view_from_iree(root), &symbol)) {
-    return iree_make_status(IREE_STATUS_NOT_FOUND, "command root @%.*s",
-                            (int)root.size, root.data);
-  }
+  loomc_host_size_t root_ordinal = 0;
+  IREE_RETURN_IF_ERROR(jit_lookup_root(jit, root, &root_ordinal));
   loom_serve_jit_stage_t* stage = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(jit->allocator, sizeof(*stage), (void**)&stage));
@@ -524,7 +554,7 @@ iree_status_t loom_serve_jit_compile(loom_serve_jit_t* jit,
   jit_requests_t requests = {.allocator = jit->allocator};
   const loomc_cmd_program_product_options_t options = {
       .link_index = jit->index,
-      .root_symbol_ordinals = &symbol.ordinal,
+      .root_symbol_ordinals = &root_ordinal,
       .root_symbol_count = 1,
       .config = *config,
       .request_sink = {.publish = jit_publish, .user_data = &requests},

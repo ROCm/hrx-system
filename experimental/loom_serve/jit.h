@@ -34,8 +34,11 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
                                     loom_serve_jit_t** out_jit);
 void loom_serve_jit_destroy(loom_serve_jit_t* jit);
 
-// Specializes a command root and all reachable kernels. The returned stage owns
-// portable command bytes and loaded executables independently of the compiler.
+// Specializes the unique exported definition of a command root and all
+// reachable kernels. Declarations may precede its definition in the source
+// catalog. Missing definitions and duplicate exports fail before compilation.
+// The returned stage owns portable command bytes and loaded executables
+// independently of the compiler.
 // config is non-null; an empty binding list represents a fully specified root.
 // No compiler subprocess, artifact directory, or disk cache is involved.
 // All accepted tasks finish before this call returns, including on failure.

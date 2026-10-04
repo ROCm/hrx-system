@@ -167,3 +167,7 @@ command.program.def public @invalid_native() launch(%storage: buffer) {
 command.program.def public @idle() launch() {
   command.return
 }
+
+command.program.def public @ambiguous() launch() {
+  command.return
+}

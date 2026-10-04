@@ -217,6 +217,19 @@ TEST_F(JitTest, InvalidConfigurationLeavesCompilerReusable) {
   IREE_ASSERT_OK(Compile("3", 0));
 }
 
+TEST_F(JitTest, InvalidRootLeavesCompilerReusable) {
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        Compile("3", 0, IREE_SV("absent")));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        Compile("3", 0, IREE_SV("missing")));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,
+                        Compile("3", 0, IREE_SV("ambiguous")));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Compile("3", 0, IREE_SV("not_command")));
+  ASSERT_EQ(commands_[0], nullptr);
+  IREE_ASSERT_OK(Compile("3", 0));
+}
+
 TEST_F(JitTest, CommandWithoutNativeRequests) {
   IREE_ASSERT_OK(Compile("3", 0, IREE_SV("idle")));
 }
