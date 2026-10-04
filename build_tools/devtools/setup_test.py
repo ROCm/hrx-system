@@ -70,18 +70,18 @@ class SetupPlanTest(unittest.TestCase):
             tool_env,
         )
 
-    def test_setup_rejects_populated_environment_with_wrong_python(self):
+    def test_setup_rejects_populated_environment_without_usable_python(self):
         with tempfile.TemporaryDirectory() as temporary_directory:
             venv_root = Path(temporary_directory) / "venv"
             venv_root.mkdir()
-            (venv_root / "pyvenv.cfg").write_text("version = 3.14\n")
+            (venv_root / "pyvenv.cfg").write_text("broken\n")
             tool_env = ToolEnvironment(ToolMode.VENV, venv_root)
             with (
                 mock.patch(
                     "build_tools.devtools.setup.interpreter_version",
-                    return_value="3.14",
+                    return_value=None,
                 ),
-                self.assertRaisesRegex(ValueError, "requires Python 3.12; found 3.14"),
+                self.assertRaisesRegex(ValueError, "has no usable interpreter"),
             ):
                 setup_python_command(tool_env)
 

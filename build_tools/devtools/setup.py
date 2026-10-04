@@ -39,11 +39,9 @@ def setup_python_command(tool_env: ToolEnvironment) -> tuple[str, ...] | None:
             )
         if any(tool_env.root.iterdir()):
             actual_version = interpreter_version((tool_env.python,))
-            if actual_version != MANAGED_PYTHON_VERSION:
+            if not actual_version:
                 raise ValueError(
-                    f"managed tool environment {tool_env.root} requires Python "
-                    f"{MANAGED_PYTHON_VERSION}; found "
-                    f"{actual_version or 'no usable interpreter'}. "
+                    f"managed tool environment {tool_env.root} has no usable interpreter. "
                     "Move it aside or choose a new --tool-root before setup."
                 )
             return None
