@@ -7,6 +7,7 @@
 #include "experimental/loom_serve/qwen_chat.h"
 
 #include <string>
+#include <utility>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -197,6 +198,25 @@ TEST(QwenChatValidationTest, ToolHistoryRequiresOneCompleteArgumentsObject) {
                         loom_serve_qwen_chat_initialize(
                             iree_make_string_view(body.data(), body.size()),
                             128, iree_allocator_system(), &chat));
+}
+
+TEST_F(QwenChatTest, InvalidGeneratedSyntaxHasABoundedPrintableDiagnostic) {
+  IREE_ASSERT_OK(Initialize(Request(R"([{"role":"user","content":"Read."}])",
+                                    std::string(",\"tools\":") + kTools)));
+  for (const auto& [suffix, preview] :
+       {std::pair<std::string, std::string>{"", ""},
+        {"{\"name\":\"read\"}", "{\"name\":\"read\"}"},
+        {"<function name=\"read\">", "<function name=\"read\">"},
+        {"x\x1B[31m\ny", "x.[31m.y"},
+        {std::string(100, 'x'), std::string(32, 'x') + "..."}}) {
+    SCOPED_TRACE(preview);
+    iree::Status status(Complete("<tool_call>" + suffix));
+    EXPECT_EQ(status.code(), iree::StatusCode::kInvalidArgument);
+    EXPECT_NE(
+        status.ToString().find("expected '<function='; got '" + preview + "'"),
+        std::string::npos);
+    EXPECT_EQ(call_count_, 0u);
+  }
 }
 
 TEST(QwenChatValidationTest, StrictSamplingIsNotPretended) {

@@ -593,9 +593,19 @@ static iree_status_t chat_xml_consume(iree_string_view_t* cursor,
                                       iree_string_view_t literal) {
   *cursor = iree_string_view_trim(*cursor);
   if (!iree_string_view_consume_prefix(cursor, literal)) {
+    // Bound model-generated diagnostics and keep terminal control bytes out of
+    // server logs. The request still fails without publishing a partial call.
+    char preview[33];
+    const iree_host_size_t length = iree_min(cursor->size, sizeof(preview) - 1);
+    for (iree_host_size_t i = 0; i < length; ++i) {
+      const unsigned char c = (unsigned char)cursor->data[i];
+      preview[i] = c >= 0x20 && c <= 0x7E ? (char)c : '.';
+    }
+    preview[length] = 0;
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "generated tool call expected '%.*s'",
-                            (int)literal.size, literal.data);
+                            "generated tool call expected '%.*s'; got '%s%s'",
+                            (int)literal.size, literal.data, preview,
+                            cursor->size > length ? "..." : "");
   }
   return iree_ok_status();
 }
