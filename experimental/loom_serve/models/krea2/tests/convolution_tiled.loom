@@ -1,0 +1,112 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link the actual scalar and cooperative convolution helpers with --library.
+// check_convolution_tiled.py binds the tensor sample and kernel specialization.
+// Full 96-channel reductions use original OI(T)HW weights with three distinct
+// temporal planes. One-pixel, one-row and odd spatial shapes exercise borders,
+// inactive lanes and tiles that cross row boundaries. Separate initial output
+// values expose missing stores; the final launch actually aliases skip/output.
+
+config.decl @convolution_test.height : %value: index where [range(%value, 1, 1024)]
+config.decl @convolution_test.width : %value: index where [range(%value, 1, 1024)]
+config.decl @convolution_test.add_residual : %value: index where [range(%value, 0, 1)]
+
+amdgpu.target<gfx11-generic> @convolution_test_wave32 {subgroup_size = 32}
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+template.decl @image.convolution_3x3_tiled_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %pipeline_depth: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+
+kernel.def target(@convolution_test_wave32) @convolution_f32_reference() {
+  %height = config.get @convolution_test.height : index
+  %width = config.get @convolution_test.width : index
+  %pixels = index.mul %height, %width : index
+  %rounding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %padded = index.add %pixels, %rounding : index
+  %groups = index.div %padded, %threads : index
+  %outputs = index.constant 96 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %height = config.get @convolution_test.height : index
+  %width = config.get @convolution_test.width : index
+  %residual_mode = config.get @convolution_test.add_residual : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %channels = index.constant 96 : index
+  %add_residual = index.cmp ne, %residual_mode, %zero : index
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %channels, %channels, %three, %three, %one, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@convolution_test_wave32) @convolution_f32_tiled() {
+  %height = config.get @convolution_test.height : index
+  %width = config.get @convolution_test.width : index
+  %pixels = index.mul %height, %width : index
+  %rounding = index.constant 31 : index
+  %tile = index.constant 32 : index
+  %threads = index.constant 128 : index
+  %padded = index.add %pixels, %rounding : index
+  %groups = index.div %padded, %tile : index
+  %channels = index.constant 96 : index
+  %channel_groups = index.div %channels, %tile : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %height = config.get @convolution_test.height : index
+  %width = config.get @convolution_test.width : index
+  %residual_mode = config.get @convolution_test.add_residual : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %channels = index.constant 96 : index
+  %add_residual = index.cmp ne, %residual_mode, %zero : index
+  template.apply<@image.convolution_3x3_tiled_f32>(%height, %width, %channels, %channels, %three, %one, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+check.case public @convolution_f32_single_row {
+  %width = check.param.choice values([1, 2, 33]) name("width") : index
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %bias_seed = check.literal value(91731) : i64
+  %residual_seed = check.literal value(83213) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<96x1x[%width]xf32>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<96x96x3x3x3xf32>
+  %bias = check.generate.random.uniform seed(%bias_seed) range(-1.0 to 1.0) : tensor<96xf32>
+  %residual = check.generate.random.uniform seed(%residual_seed) range(-1.0 to 1.0) : tensor<96x1x[%width]xf32>
+  %aliased = check.generate.random.uniform seed(%residual_seed) range(-1.0 to 1.0) : tensor<96x1x[%width]xf32>
+  %expected = check.generate.fill value(23.0) : tensor<96x1x[%width]xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<96x1x[%width]xf32>
+  kernel.launch @convolution_f32_reference(%input, %weight, %bias, %residual, %expected) : (tensor<96x1x[%width]xf32>, tensor<96x96x3x3x3xf32>, tensor<96xf32>, tensor<96x1x[%width]xf32>, tensor<96x1x[%width]xf32>)
+  kernel.launch @convolution_f32_tiled(%input, %weight, %bias, %residual, %actual) : (tensor<96x1x[%width]xf32>, tensor<96x96x3x3x3xf32>, tensor<96xf32>, tensor<96x1x[%width]xf32>, tensor<96x1x[%width]xf32>)
+  kernel.launch @convolution_f32_tiled(%input, %weight, %bias, %aliased, %aliased) : (tensor<96x1x[%width]xf32>, tensor<96x96x3x3x3xf32>, tensor<96xf32>, tensor<96x1x[%width]xf32>, tensor<96x1x[%width]xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<96x1x[%width]xf32>
+  check.expect.bitwise actual(%aliased) expected(%expected) : tensor<96x1x[%width]xf32>
+  check.return
+}
+
+check.case public @convolution_f32_spatial {
+  %width = check.param.choice values([19]) name("width") : index
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %bias_seed = check.literal value(91731) : i64
+  %residual_seed = check.literal value(83213) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<96x17x[%width]xf32>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<96x96x3x3x3xf32>
+  %bias = check.generate.random.uniform seed(%bias_seed) range(-1.0 to 1.0) : tensor<96xf32>
+  %residual = check.generate.random.uniform seed(%residual_seed) range(-1.0 to 1.0) : tensor<96x17x[%width]xf32>
+  %aliased = check.generate.random.uniform seed(%residual_seed) range(-1.0 to 1.0) : tensor<96x17x[%width]xf32>
+  %expected = check.generate.fill value(23.0) : tensor<96x17x[%width]xf32>
+  %actual = check.generate.fill value(-17.0) : tensor<96x17x[%width]xf32>
+  kernel.launch @convolution_f32_reference(%input, %weight, %bias, %residual, %expected) : (tensor<96x17x[%width]xf32>, tensor<96x96x3x3x3xf32>, tensor<96xf32>, tensor<96x17x[%width]xf32>, tensor<96x17x[%width]xf32>)
+  kernel.launch @convolution_f32_tiled(%input, %weight, %bias, %residual, %actual) : (tensor<96x17x[%width]xf32>, tensor<96x96x3x3x3xf32>, tensor<96xf32>, tensor<96x17x[%width]xf32>, tensor<96x17x[%width]xf32>)
+  kernel.launch @convolution_f32_tiled(%input, %weight, %bias, %aliased, %aliased) : (tensor<96x17x[%width]xf32>, tensor<96x96x3x3x3xf32>, tensor<96xf32>, tensor<96x17x[%width]xf32>, tensor<96x17x[%width]xf32>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<96x17x[%width]xf32>
+  check.expect.bitwise actual(%aliased) expected(%expected) : tensor<96x17x[%width]xf32>
+  check.return
+}

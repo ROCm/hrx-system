@@ -1,0 +1,150 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @image.convolution_3x3_tiled_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %pipeline_depth: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+
+// Positive height/width/planes; inputs and outputs are positive multiples of 32.
+// Input/output are NCHW; original OI(T)HW weights retain all temporal planes.
+// Fresh-frame convolution reads only the last plane. Output may alias residual,
+// never input. Launch ceil(pixels/32) x (outputs/32), with 128 threads per group.
+// One lane owns one spatial output and eight consecutive output channels.
+// The 32x32 operand tiles share 8,320 bytes of LDS; publication and retirement
+// barriers include inactive spatial lanes. Pipeline depth is a caller-owned
+// specialization fact. Bias and residual round separately after ordered FMA.
+template.def<@image.convolution_3x3_tiled_f32> device @image_convolution_3x3_tiled_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %pipeline_depth: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %eight = index.constant 8 : index
+  %nine = index.constant 9 : index
+  %tile = index.constant 32 : index
+  %threads = index.constant 128 : index
+  %input_stage_bytes = index.constant 4096 : offset
+  %weight_stage_bytes = index.constant 4224 : offset
+  %zero_f32 = scalar.constant 0.0 : f32
+  %initial = vector.constant 0.0 : vector<8xf32>
+  %spatial_group = kernel.workgroup.id<x> : index
+  %channel_group = kernel.workgroup.id<y> : index
+  %workitem = kernel.workitem.id<x> : index
+  %local_pixel = index.rem %workitem, %tile : index
+  %wave = index.div %workitem, %tile : index
+  %local_channel = index.mul %wave, %eight : index
+  %pixel_origin = index.mul %spatial_group, %tile : index
+  %channel_origin = index.mul %channel_group, %tile : index
+  %pixel = index.add %pixel_origin, %local_pixel : index
+  %channel = index.add %channel_origin, %local_channel : index
+  %pixels = index.mul %height, %width : index
+  %live = index.cmp ult, %pixel, %pixels : index
+  %y = index.div %pixel, %width : index
+  %x = index.rem %pixel, %width : index
+  %plane = index.sub %planes, %one : index
+  %reduction_count = index.mul %inputs, %nine : index
+  %tile_count = index.div %reduction_count, %tile : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%inputs]x[%height]x[%width]xf32>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]x[%planes]x3x3xf32>
+  %bias_view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
+  %input_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+  %weight_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<32x32xf32>
+  %weight_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<32x33xf32>
+
+  %sum = scf.for %block = [%zero to %tile_count step %one](%total = %initial : vector<8xf32>) -> (vector<8xf32>) pipeline(%pipeline_depth) {
+    %reduction_origin = index.mul %block, %tile : index
+    // The input mapping coalesces NCHW pixels. The weight mapping coalesces
+    // original reduction coordinates, then transposes within padded LDS only.
+    scf.for %round = [%zero to %eight step %one] unroll schedule(linear) {
+      %element = index.madd %round, %threads, %workitem : index
+      %input_local_pixel = index.rem %element, %tile : index
+      %input_local_reduction = index.div %element, %tile : index
+      %input_pixel = index.add %pixel_origin, %input_local_pixel : index
+      %input_reduction = index.add %reduction_origin, %input_local_reduction : index
+      %input_channel = index.div %input_reduction, %nine : index
+      %input_tap = index.rem %input_reduction, %nine : index
+      %input_ky = index.div %input_tap, %three : index
+      %input_kx = index.rem %input_tap, %three : index
+      %input_y = index.div %input_pixel, %width : index
+      %input_x = index.rem %input_pixel, %width : index
+      %source_y_offset = index.add %input_y, %input_ky : index
+      %source_x_offset = index.add %input_x, %input_kx : index
+      %source_y = index.sub %source_y_offset, %one : index
+      %source_x = index.sub %source_x_offset, %one : index
+      %valid_y = index.cmp ult, %source_y, %height : index
+      %valid_x = index.cmp ult, %source_x, %width : index
+      %valid_pixel = index.cmp ult, %input_pixel, %pixels : index
+      %valid_tap = scalar.andi %valid_y, %valid_x : i1
+      %valid_input = scalar.andi %valid_tap, %valid_pixel : i1
+      %input_value = scf.if %valid_input -> (f32) {
+        %value = view.load %input_view[%input_channel, %source_y, %source_x] : view<[%inputs]x[%height]x[%width]xf32> -> f32
+        scf.yield %value : f32
+      } else {
+        scf.yield %zero_f32 : f32
+      }
+
+      %weight_local_channel = index.div %element, %tile : index
+      %weight_local_reduction = index.rem %element, %tile : index
+      %weight_channel = index.add %channel_origin, %weight_local_channel : index
+      %weight_reduction = index.add %reduction_origin, %weight_local_reduction : index
+      %weight_input_channel = index.div %weight_reduction, %nine : index
+      %weight_tap = index.rem %weight_reduction, %nine : index
+      %weight_ky = index.div %weight_tap, %three : index
+      %weight_kx = index.rem %weight_tap, %three : index
+      %weight_value = view.load %weight_view[%weight_channel, %weight_input_channel, %plane, %weight_ky, %weight_kx] : view<[%outputs]x[%inputs]x[%planes]x3x3xf32> -> f32
+      view.store %input_value, %input_stage_view[%input_local_reduction, %input_local_pixel] : f32, view<32x32xf32>
+      view.store %weight_value, %weight_stage_view[%weight_local_reduction, %weight_local_channel] : f32, view<32x33xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+
+    // Flattening channel/ky/kx as channel*9+ky*3+kx preserves every FMA's
+    // predecessor. Invalid taps skip the FMA, not merely its input load.
+    %partial = scf.for %reduction_offset = [%zero to %tile step %one](%acc = %total : vector<8xf32>) -> (vector<8xf32>) {
+      %reduction = index.add %reduction_origin, %reduction_offset : index
+      %tap = index.rem %reduction, %nine : index
+      %ky = index.div %tap, %three : index
+      %kx = index.rem %tap, %three : index
+      %source_y_offset = index.add %y, %ky : index
+      %source_x_offset = index.add %x, %kx : index
+      %source_y = index.sub %source_y_offset, %one : index
+      %source_x = index.sub %source_x_offset, %one : index
+      %valid_y = index.cmp ult, %source_y, %height : index
+      %valid_x = index.cmp ult, %source_x, %width : index
+      %valid_tap = scalar.andi %valid_y, %valid_x : i1
+      %valid = scalar.andi %valid_tap, %live : i1
+      %next = scf.if %valid -> (vector<8xf32>) {
+        %value = view.load %input_stage_view[%reduction_offset, %local_pixel] : view<32x32xf32> -> f32
+        %values = vector.splat %value : vector<8xf32>
+        %coefficients = vector.load %weight_stage_view[%reduction_offset, %local_channel] : view<32x33xf32> -> vector<8xf32>
+        %updated = vector.fmaf %values, %coefficients, %acc : vector<8xf32>
+        scf.yield %updated : vector<8xf32>
+      } else {
+        scf.yield %acc : vector<8xf32>
+      }
+      scf.yield %next : vector<8xf32>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %partial : vector<8xf32>
+  }
+
+  scf.if %live {
+    %bias_values = vector.load %bias_view[%channel] : view<[%outputs]xf32> -> vector<8xf32>
+    %biased = vector.addf %sum, %bias_values : vector<8xf32>
+    scf.for %component = [%zero to %eight step %one] unroll {
+      %output_channel = index.add %channel, %component : index
+      %value = vector.extract %biased[%component] : vector<8xf32> -> f32
+      %result = scf.if %add_residual -> (f32) {
+        %residual_view = buffer.view %residual[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
+        %skip = view.load %residual_view[%output_channel, %pixel] : view<[%outputs]x[%pixels]xf32> -> f32
+        %combined = scalar.addf %value, %skip : f32
+        scf.yield %combined : f32
+      } else {
+        scf.yield %value : f32
+      }
+      view.store %result, %output_view[%output_channel, %pixel] : f32, view<[%outputs]x[%pixels]xf32>
+    }
+  }
+  template.return
+}

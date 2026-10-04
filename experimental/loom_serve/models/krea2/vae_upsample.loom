@@ -9,6 +9,7 @@ config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), m
 amdgpu.target<gfx11-generic> @vae_upsample_wave32 {subgroup_size = 32}
 template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+template.decl @image.convolution_3x3_tiled_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %pipeline_depth: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
 kernel.def target(@vae_upsample_wave32) @krea_vae_up0_norm() {
   %latent_height = config.get @krea2.latent_height : index
@@ -395,26 +396,26 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up3_convolution() {
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
   %pixels = index.mul %height, %width : index
-  %padding = index.constant 127 : index
+  %padding = index.constant 31 : index
+  %tile = index.constant 32 : index
   %threads = index.constant 128 : index
   %rounded = index.add %pixels, %padding : index
-  %groups = index.div %rounded, %threads : index
-  %outputs = index.constant 96 : index
+  %groups = index.div %rounded, %tile : index
+  %channels = index.constant 96 : index
+  %channel_groups = index.div %channels, %tile : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
   %latent_height = config.get @krea2.latent_height : index
   %latent_width = config.get @krea2.latent_width : index
   %scale = index.constant 8 : index
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
-  %inputs = index.constant 96 : index
-  %outputs = index.constant 96 : index
-  %extent = index.constant 3 : index
+  %channels = index.constant 96 : index
   %planes = index.constant 3 : index
-  %upsample = index.constant 1 : index
+  %depth = index.constant 1 : index
   %add_residual = scalar.constant false : i1
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_tiled_f32>(%height, %width, %channels, %channels, %planes, %depth, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -425,26 +426,26 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up3_convolution_add() {
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
   %pixels = index.mul %height, %width : index
-  %padding = index.constant 127 : index
+  %padding = index.constant 31 : index
+  %tile = index.constant 32 : index
   %threads = index.constant 128 : index
   %rounded = index.add %pixels, %padding : index
-  %groups = index.div %rounded, %threads : index
-  %outputs = index.constant 96 : index
+  %groups = index.div %rounded, %tile : index
+  %channels = index.constant 96 : index
+  %channel_groups = index.div %channels, %tile : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
   %latent_height = config.get @krea2.latent_height : index
   %latent_width = config.get @krea2.latent_width : index
   %scale = index.constant 8 : index
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
-  %inputs = index.constant 96 : index
-  %outputs = index.constant 96 : index
-  %extent = index.constant 3 : index
+  %channels = index.constant 96 : index
   %planes = index.constant 3 : index
-  %upsample = index.constant 1 : index
+  %depth = index.constant 1 : index
   %add_residual = scalar.constant true : i1
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_tiled_f32>(%height, %width, %channels, %channels, %planes, %depth, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 

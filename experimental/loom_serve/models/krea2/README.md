@@ -1320,6 +1320,42 @@ later convolutions add into that destination. Equal-width blocks advance
 source-owned features in place. Spatial nearest-neighbor expansion is part of
 convolution indexing and never materializes an enlarged input image.
 
+The final 96-channel stage uses the config-free
+[`convolution_3x3_tiled_f32`](kernels/convolution_tiled.loom) helper for its
+plain and residual convolutions. A workgroup owns 32 spatial positions by
+32 output channels, staging 32 reduction coordinates in 8,320 bytes of padded
+LDS. Each lane keeps eight independent F32 output accumulators. Cooperative
+acquisition shares inputs across output channels and coefficients across
+pixels, without a global im2col buffer, expanded weights, or additional
+dispatch. Other stages retain their original convolution leaves.
+
+The helper flattens input-channel/row-tap/column-tap traversal without changing
+the FMA order of any output. Invalid border taps skip the FMA; inactive spatial
+lanes still participate in both tile barriers. Bias rounds separately, followed
+by the optional residual addition. The convolution input remains distinct from
+the output, while the residual may be that same output buffer. The up3 leaves
+select pipeline depth one and retain original three-plane temporal weight
+addressing. Geometry and scheduling enter as SSA specialization operands;
+the helper contains no model configuration or runtime scalar ABI.
+
+[`tests/convolution_tiled.loom`](tests/convolution_tiled.loom) links the actual
+scalar and cooperative helpers at the full 96-channel reduction depth. Four
+small spatial shapes (1x1, 1x2, 1x33 and 17x19) cover borders, row crossings
+and partial spatial tiles. Each runs with and without the residual epilogue,
+comparing distinct-output and genuinely aliased skip/output launches bitwise.
+The driver binds tensor samples and JIT geometry together:
+
+```sh
+build_tools/bin/iree-bazel-build --config=asan \
+  //loom/src/loom/tools/iree-test-loom:iree-test-loom
+python -B experimental/loom_serve/models/krea2/tests/check_convolution_tiled.py \
+  --checker=bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom
+```
+
+Run on the qualified execution host under its exclusive device lease. These
+small exact helper checks complement the real-checkpoint decoder comparisons
+below; they are not a full-image accuracy or performance measurement.
+
 The fresh-frame contract excludes video history. The original temporal weight
 planes remain in immutable storage, but only the last causal plane is read.
 The two temporal-upsampling convolutions are absent from the command and its
