@@ -241,6 +241,38 @@ not its asynchronous network drain. A client-side complete-response timer is
 the end-to-end latency boundary. Optimized builds and an isolated execution
 host are required for performance comparisons.
 
+`image_heartbeat` is emitted every second, including during a device wait and
+shutdown drain. It reports active request/age, worker phase, queue depth and
+completed images; `--heartbeat_ms=0` disables it. `generating` means that the
+native call has not returned, not that any particular dispatch has completed.
+Immediate `image_preparing`, `image_prepared` and `image_submitted` events
+identify the last reached host boundary before that wait.
+
+The existing system observer adds independently sampled temperatures, power,
+clocks, memory, process CPU and device utilization to the same JSONL stream.
+From the source-tree root, inside the execution host's benchmark lease:
+
+```sh
+python -B -m experimental.loom_serve.observe --log=/path/to/run.jsonl -- \
+  bazel-bin/experimental/loom_serve/krea2_server \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --height=1024 --width=1024
+```
+
+The observer records sensor identity and units once. Unsupported, suspended or
+failed sources remain explicitly unavailable, not zero. It is optional external
+telemetry, not part of native model execution or a Python inference dependency.
+
+Both native callers honor the existing HAL profiling flags. Add
+`--device_profiling_mode=dispatch-events,executable-metadata`
+and `--device_profiling_output=/path/to/image.ireeprof` to retain dispatch
+timings and names. `--device_profiling_flush_interval_ms=1000` periodically
+flushes available profiling records. The session ends after accepted model
+work drains, including error cleanup. Inspect the resulting bundle with
+`iree-profile dispatch --format=jsonl /path/to/image.ireeprof`.
+Instrumentation is for attribution; unprofiled optimized runs establish
+end-to-end performance.
+
 Multiple weighted adapters and reference-image conditioning are not accepted
 by this schema. Discovery explicitly reports `reference_images:false`; passing
 such a field fails instead of silently ignoring it. Krea's community edit

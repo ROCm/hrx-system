@@ -165,6 +165,20 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_test(
+  NAME
+    image_service_test
+  SRCS
+    "image_service_test.cc"
+  DEPS
+    ::http_server
+    ::image_service
+    iree::async
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 loom_cc_library(
   NAME
     command
@@ -581,6 +595,7 @@ loom_cc_library(
     iree::io::file_handle
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
+    iree::tooling::device_util
     loom::binding::c::loomc
     loom::target::arch::cmd::program
   PUBLIC
