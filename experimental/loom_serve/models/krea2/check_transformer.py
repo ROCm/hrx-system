@@ -15,13 +15,13 @@ external implementation. This is a numerical harness, not a benchmark.
 
 import argparse
 import json
-import math
 import pathlib
 import subprocess
 from contextlib import nullcontext
 
 import numpy as np
 import torch
+from block_reference import evaluate_block
 from safetensors import safe_open
 
 parser = argparse.ArgumentParser()
@@ -101,28 +101,6 @@ with (
         else nullcontext()
     ) as adapter,
 ):
-    coefficients = (
-        modulation
-        + weights.get_tensor(f"blocks.{args.layer}.mod.lin").reshape(6, 6144).bfloat16()
-    )
-
-    def normalize(value, key):
-        scale = (
-            weights.get_tensor(f"blocks.{args.layer}." + key).bfloat16().add(1).double()
-        )
-        precise = value.double()
-        inverse = (precise.square().mean(-1, keepdim=True) + 1e-5).rsqrt()
-        return (precise * inverse * scale).bfloat16()
-
-    def linear(value, key):
-        matrix = weights.get_tensor(
-            f"blocks.{args.layer}." + key + ".weight"
-        ).bfloat16()
-        return (value.double() @ matrix.double().T).bfloat16()
-
-    def affine(value, row):
-        return value * (coefficients[row] + 1) + coefficients[row + 1]
-
     for count in (16, rows):
         start = rows - count
         selected_cosine, selected_sine = cosine[start:], sine[start:]
@@ -148,27 +126,6 @@ with (
                 else tensor.numpy().astype(dtype).tobytes()
             )
             paths[name] = path
-
-        def rotate(value):
-            pairs = value.float().reshape(count, -1, 64, 2)
-            rotated = torch.stack((-pairs[..., 1], pairs[..., 0]), dim=-1).flatten(-2)
-            return (
-                value.float() * selected_cosine[:, None, :]
-                + rotated * selected_sine[:, None, :]
-            ).bfloat16()
-
-        def attention(query, key, value):
-            value = value.reshape(count, 12, 128)
-            result = torch.empty(count, 48, 128, dtype=torch.bfloat16)
-            for head in range(48):
-                scores = (
-                    query[:, head].double() @ key[:, head // 4].double().T
-                ) / math.sqrt(128)
-                scores[:, ~selected_mask] = -torch.inf
-                result[:, head] = (
-                    scores.softmax(-1) @ value[:, head // 4].double()
-                ).bfloat16()
-            return result.reshape(count, 6144)
 
         def execute(component, expected, arguments, *, exact=False, checkpoints=None):
             # Retain native operands, not a duplicate oracle file for every stage.
@@ -201,172 +158,42 @@ with (
             paths[component] = actual_path
             return actual
 
-        def evaluate(*, native):
-            def compute(name, expected, arguments, *, exact=False, checkpoints=None):
-                print(
-                    json.dumps(dict(rows=count, component=name, native=native)),
-                    flush=True,
-                )
-                return (
-                    execute(
-                        name,
-                        expected,
-                        arguments,
-                        exact=exact,
-                        checkpoints=checkpoints,
-                    )
-                    if native
-                    else expected
-                )
+        def observe(
+            name,
+            expected,
+            arguments,
+            *,
+            exact=False,
+            parameters=("base",),
+            result_name=None,
+        ):
+            print(json.dumps(dict(rows=count, component=name, native=True)), flush=True)
+            checkpoint_paths = {"base": args.checkpoint, "adapter": args.adapter}
+            actual = execute(
+                name,
+                expected,
+                arguments,
+                exact=exact,
+                checkpoints=[checkpoint_paths[key] for key in parameters],
+            )
+            if result_name is not None:
+                paths[result_name] = paths[name]
+            return actual
 
-            def project(name, key, adapter_key, value, argument):
-                base = compute(name, linear(value, key), [argument])
-                if adapter is None:
-                    return base
-                factor = (
-                    f"transformer.transformer_blocks.{args.layer}."
-                    + adapter_key
-                    + ".lora_"
-                )
-                down = adapter.get_tensor(factor + "A.weight").bfloat16().double()
-                up = adapter.get_tensor(factor + "B.weight").bfloat16().double()
-                low = compute(
-                    name + "_adapter_down",
-                    (value.double() @ down.T).bfloat16(),
-                    [argument],
-                    checkpoints=[args.adapter],
-                )
-                delta = compute(
-                    name + "_adapter_up",
-                    (low.double() @ up.T).bfloat16(),
-                    [name + "_adapter_down"],
-                    checkpoints=[args.adapter],
-                )
-                combined = compute(
-                    name + "_adapted",
-                    base if args.strength == 0 else base + delta * args.strength,
-                    [argument, "strength"],
-                    exact=True,
-                    checkpoints=[args.checkpoint, args.adapter],
-                )
-                if native:
-                    paths[name] = paths[name + "_adapted"]
-                return combined
-
-            source = initial[start:]
-            normalized = compute("norm1", normalize(source, "prenorm.scale"), ["input"])
-            attention_input = compute(
-                "attention_input",
-                affine(normalized, 0),
-                ["input", "modulation"],
-                exact=True,
-            )
-            projections = {}
-            for name, key, adapter_key in (
-                ("query", "wq", "to_q"),
-                ("key", "wk", "to_k"),
-                ("value", "wv", "to_v"),
-                ("gate", "gate", "to_gate"),
-            ):
-                projections[name] = project(
-                    name,
-                    "attn." + key,
-                    "attn." + adapter_key,
-                    attention_input,
-                    "attention_input",
-                )
-            for name, heads, key in (("query", 48, "qnorm"), ("key", 12, "knorm")):
-                normalized = compute(
-                    name + "_norm",
-                    normalize(
-                        projections[name].reshape(count, heads, 128),
-                        "attn.qknorm." + key + ".scale",
-                    ),
-                    [name],
-                )
-                projections[name] = compute(
-                    name + "_rotary",
-                    rotate(normalized),
-                    [name, "cosine", "sine"],
-                    exact=True,
-                )
-            context = compute(
-                "attention_ungated",
-                attention(
-                    projections["query"], projections["key"], projections["value"]
-                ),
-                ["query_rotary", "key_rotary", "value", "mask"],
-            )
-            context = compute(
-                "attention_context",
-                context * torch.sigmoid(projections["gate"].double()).bfloat16(),
-                ["query_rotary", "key_rotary", "value", "mask", "gate"],
-                exact=True,
-            )
-            update = project(
-                "attention_output",
-                "attn.wo",
-                "attn.to_out.0",
-                context,
-                "attention_context",
-            )
-            residual = compute(
-                "attention_residual",
-                source + coefficients[2] * update,
-                ["input", "attention_output", "modulation"],
-                exact=True,
-            )
-            normalized = compute(
-                "norm2", normalize(residual, "postnorm.scale"), ["attention_residual"]
-            )
-            feed_forward_input = compute(
-                "feed_forward_input",
-                affine(normalized, 3),
-                ["attention_residual", "modulation"],
-                exact=True,
-            )
-            gate = project(
-                "feed_forward_gate",
-                "mlp.gate",
-                "ff.gate",
-                feed_forward_input,
-                "feed_forward_input",
-            )
-            up = project(
-                "feed_forward_up",
-                "mlp.up",
-                "ff.up",
-                feed_forward_input,
-                "feed_forward_input",
-            )
-            activated = compute(
-                "feed_forward_silu",
-                torch.nn.functional.silu(gate.double()).bfloat16(),
-                ["feed_forward_gate"],
-            )
-            product = compute(
-                "feed_forward_product",
-                activated * up,
-                ["feed_forward_gate", "feed_forward_up"],
-                exact=True,
-            )
-            update = project(
-                "feed_forward_down",
-                "mlp.down",
-                "ff.down",
-                product,
-                "feed_forward_product",
-            )
-            return compute(
-                "feed_forward_residual",
-                residual + coefficients[5] * update,
-                ["attention_residual", "feed_forward_down", "modulation"],
-                exact=True,
-            )
-
-        oracle = evaluate(native=False)
+        operands = (
+            initial[start:],
+            modulation,
+            selected_cosine,
+            selected_sine,
+            selected_mask,
+            weights,
+            adapter,
+            args.layer,
+            args.strength,
+        )
+        oracle = evaluate_block(*operands)
         prefix.with_suffix(".oracle.bf16").write_bytes(encode(oracle))
-        serial = evaluate(native=True)
+        serial = evaluate_block(*operands, observe=observe)
         inputs = ["input", "modulation", "cosine", "sine", "mask"]
         combined = execute(
             "forward" if adapter is None else "forward_adapted",
