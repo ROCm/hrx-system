@@ -35,6 +35,7 @@ parser.add_argument("--checkpoint", type=pathlib.Path, required=True)
 parser.add_argument("--adapter", type=pathlib.Path, required=True)
 parser.add_argument("--output", type=pathlib.Path, required=True)
 parser.add_argument("--size", type=int, default=384)
+parser.add_argument("--block-details", action="store_true")
 args = parser.parse_args()
 args.output.mkdir(parents=True, exist_ok=False)
 torch.set_num_threads(4)
@@ -184,6 +185,52 @@ def tap(name):
     return hook
 
 
+def block_tensor(name, value):
+    if not capture["enabled"]:
+        return
+    assert torch.isfinite(value).all(), name
+    value = value.detach().cpu().contiguous()
+    if value.dtype == torch.bfloat16:
+        data = value.view(torch.uint16).numpy().astype("<u2").tobytes()
+        suffix = "bf16"
+    elif value.dtype == torch.float32:
+        data = value.numpy().astype("<f4").tobytes()
+        suffix = "f32"
+    elif value.dtype == torch.bool:
+        data = value.numpy().astype("u1").tobytes()
+        suffix = "u8"
+    else:
+        raise ValueError(f"unsupported component capture dtype {value.dtype}")
+    path = args.output / f"{capture['phase']}-block0-{name}.{suffix}"
+    path.write_bytes(data)
+    event(
+        "block_tensor", path=path.name, shape=list(value.shape), dtype=str(value.dtype)
+    )
+
+
+def block_inputs(module, arguments):
+    hidden, modulation, rotary, mask = arguments
+    block_tensor("input", hidden)
+    block_tensor("modulation", modulation)
+    block_tensor("cosine", rotary[0])
+    block_tensor("sine", rotary[1])
+    block_tensor("mask", mask)
+
+
+def block_input(name):
+    def hook(module, arguments):
+        block_tensor(name, arguments[0])
+
+    return hook
+
+
+def block_output(name):
+    def hook(module, arguments, output):
+        block_tensor(name, output)
+
+    return hook
+
+
 def step(pipeline, index, timestep, values):
     latents = values["latents"]
     assert torch.isfinite(latents).all(), "nonfinite step output"
@@ -231,6 +278,32 @@ for phase in ("base", "zero", "style"):
             ("block0", transformer.transformer_blocks[0]),
         )
     ]
+    if args.block_details:
+        block = transformer.transformer_blocks[0]
+        handles.append(block.register_forward_pre_hook(block_inputs))
+        for name, module in (
+            ("attention_input", block.attn),
+            ("feed_forward_input", block.ff),
+            ("attention_context", block.attn.to_out[0]),
+            ("attention_residual", block.norm2),
+        ):
+            handles.append(module.register_forward_pre_hook(block_input(name)))
+        for name, module in (
+            ("norm1", block.norm1),
+            ("norm2", block.norm2),
+            ("query", block.attn.to_q),
+            ("key", block.attn.to_k),
+            ("value", block.attn.to_v),
+            ("gate", block.attn.to_gate),
+            ("query_norm", block.attn.norm_q),
+            ("key_norm", block.attn.norm_k),
+            ("attention", block.attn),
+            ("feed_forward_gate", block.ff.gate),
+            ("feed_forward_up", block.ff.up),
+            ("feed_forward", block.ff),
+            ("output", block),
+        ):
+            handles.append(module.register_forward_hook(block_output(name)))
     event("generate", phase=phase, size=args.size, steps=8)
     latents = pipeline(
         prompt_embeds=features,
