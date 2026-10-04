@@ -271,16 +271,20 @@ and accumulated image differences. A separate source command now runs the full
 still-image VAE from packed BF16 latent to F32 RGB, with folded spatial
 upsampling and in-place residuals. Its final pixels agree with the independent
 CPU decoder to at most one 8-bit level on the qualified base/LoRA images.
-The [image root](../models/krea2/sample.loom) projects fused text features once,
-retains the resulting prefix for denoising, and decodes without intermediate
-host readbacks. Exact RGB composition checks cover base, zero-strength and
-active LoRA. Earlier phases retire scratch before the VAE uses it, keeping
-the whole command near 170.7 MiB at 384x384 with 512 text rows. Its retained
-projected prefix is 6 MiB and its intermediate latent is 72 KiB. Qwen3-VL
-text encoding and layerwise/sequence fusion remain external. The existing
-HTTP service and packed scheduler remain concrete Qwen consumers; changing their
-model directory does not turn them into an image or audio endpoint. No complete
-image or audio model is qualified by this packet.
+The [image root](../models/krea2/sample.loom) fuses twelve encoder taps per token,
+projects the resulting features once, retains that prefix for denoising, and
+decodes without intermediate host readbacks. Fusion and the DiT share one
+immutable Turbo checkpoint domain and one optional adapter domain. The
+layerwise blocks advance one owned buffer in place; a register-resident learned
+reduction avoids a transpose and full rank tensor. Fusion reads the text prefix
+of the combined key mask without a copy. Exact RGB composition checks cover
+base, zero-strength and active LoRA. At 384x384 with 512 text rows, phase
+lifetimes keep the workspace at 263.5 MiB base or 265 MiB adapted, exactly
+2.5 MiB above standalone fusion. The retained projected prefix is 6 MiB and
+intermediate latent is 72 KiB. Qwen3-VL text encoding remains external.
+The existing HTTP service and packed scheduler remain concrete Qwen consumers;
+changing their model directory does not turn them into an image or audio
+endpoint. No complete image or audio model is qualified by this packet.
 
 A first tensor-in/tensor-out adapter has this ownership flow:
 
