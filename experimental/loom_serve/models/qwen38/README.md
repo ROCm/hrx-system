@@ -6,9 +6,10 @@ their artifacts are independent of the host scheduler. Parameter placement must
 match across roots so all stages share one resident weight slab.
 
 The runner consumes this directory directly with `--model`. Its
-`sources.txt` catalog indexes all command/kernel providers once; `control.loom`
-contains isolated and packed inference VM entries, and `weights.loom` owns cold tensor preparation
-policy. `--prefill_capacity` bounds the automatic packed token
+`sources.txt` catalog indexes configuration, command and kernel providers once;
+`config.loom` owns fixed specialization bounds, while `control.loom` contains
+isolated and packed inference VM entries, and `weights.loom` owns cold tensor
+preparation policy. `--prefill_capacity` bounds the automatic packed token
 catalog; `--rows` bounds its independent span axis. Repeated
 `--epoch=tokens:spans` replace that catalog with explicit JIT specializations.
 `--context_capacity` sets the logical attention ceiling. Native code is

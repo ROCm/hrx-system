@@ -1,0 +1,17 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Fixed specialization bounds for this model's command and kernel leaves.
+// Run-dependent token, span and cache bounds are supplied at materialization.
+// Shared motifs receive explicit operands from those leaves.
+config.def @ggml.linear_q4k_q8_1_x4.output_capacity = 48 : index
+config.def @ggml.linear_q5k_q8_1_x4.output_capacity = 17408 : index
+config.def @ggml.linear_q6k_f32_decode.output_capacity = 5120 : index
+config.def @ggml.linear_q6k_q8_1_x4.output_capacity = 248320 : index
+config.def @qwen38.attention.decode_split_count = 10 : index
+config.def @qwen38.ffn.input_size = 5120 : index
+config.def @qwen38.ffn.output_size = 17408 : index
+config.def @qwen38.greedy_argmax.output_capacity = 248320 : index

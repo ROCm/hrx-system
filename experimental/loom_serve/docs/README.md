@@ -151,23 +151,25 @@ build_tools/bin/iree-bazel-test --config=asan \
 ```
 
 Success means all GPU targets pass, not skip: three JIT cases, five weight-loader
-cases, and eight control cases. The CPU program test exercises Qwen's actual
+cases, and fourteen control cases. The CPU program test exercises Qwen's actual
 source weight policy without loading the model. The loader tests use a small
 safetensors file, distinct source-selected preparers, shared roots prepared
 exactly once, unchanged tensors, and failing policy/file inputs.
 Test output is under `bazel-testlogs/experimental/loom_serve/`; adding
 `--test_output=all` shows individual cases. The `JitTest` source-to-VM case checks
 that two independently specialized eight-kernel stages change shared device
-values from 100 to 110, 112, ..., 124. It also verifies successful reuse after
-a native compilation failure, and the separate cases cover invalid
-configuration and a command with no native requests. A compiler that merely
-accepts the source does not satisfy this gate.
+values from 100 to 112, 114, ..., 126 using source default 5 and explicit
+override 7. It also verifies successful reuse after a native compilation
+failure, and the separate cases cover invalid configuration and a command with
+no native requests. A compiler that merely accepts the source does not satisfy
+this gate.
 
 [`jit_test.cc`](../jit_test.cc) is the smallest complete embedding example:
-source catalog, two configurations, actual device-profile specialization, native
-code loading, JIT VM invocation, and shared GPU state. It destroys compiler
-storage before executing the prepared commands. [`control_test.cc`](../control_test.cc)
-adds retained rows, explicit timeline edges, feedback branching, and
+source catalog, source defaults and binding overrides, actual device-profile
+specialization, native code loading, JIT VM invocation, and shared GPU state.
+It destroys compiler storage before executing the prepared commands.
+[`control_test.cc`](../control_test.cc) adds retained rows, explicit timeline
+edges, feedback branching, and
 device-produced indirect counts. Neither test needs model downloads.
 
 ## Reproduce full Qwen and retained HTTP output

@@ -49,7 +49,7 @@ deployment path.
 
 | Evidence | What to recover from it |
 | --- | --- |
-| [`testdata/jit/stage.loom`](../testdata/jit/stage.loom), [`control.loom`](../testdata/jit/control.loom), [`jit_test.cc`](../jit_test.cc) | One complete source/configuration/VM/GPU call and its cleanup, including compiler storage dying before command execution |
+| [`testdata/jit/config.loom`](../testdata/jit/config.loom), [`stage.loom`](../testdata/jit/stage.loom), [`control.loom`](../testdata/jit/control.loom), [`jit_test.cc`](../jit_test.cc) | Source defaults and explicit overrides through one complete VM/GPU call, including compiler storage dying before command execution |
 | [`jit.h`](../jit.h), [`jit.c`](../jit.c) | Public `loomc` embedding, source indexing, live device facts, native request ownership, reusable command recording |
 | [`command.h`](../command.h), [`execution.h`](../execution.h), [`module.h`](../module.h), [`control_test.cc`](../control_test.cc) | Buffer borrowing/retention, exact queues and timelines, accepted work, feedback lifetime, drain after failure |
 | [`program.h`](../program.h), model [`control.loom`](../models/qwen38/control.loom) | One shared source-JIT process with isolated and packed entries; indexed command selection, proposal/verify/catch-up routing, and bounded feedback without intermediate host waits |
@@ -107,7 +107,7 @@ downloaded weights remain separate from source history.
 | Setup/configuration fails | Python 3.12, managed tool diagnostics, [BUILDING.md](../../../BUILDING.md); build-service failures belong to that service's repair path |
 | Target is incompatible or tests skip | Enabled AMDGPU/VM compiler, HAL substrate and runtime driver, plus the actual test runner's GPU capability |
 | `hsa_init`, loader, or device creation fails | ROCr dependency loading, device enumeration/permissions and available resources on the **execution** machine; model source has not run yet |
-| JIT cannot resolve a symbol or configuration | Catalog entry, named root, `config.decl` constraints and supplied bindings; stderr identifies the failing stage |
+| JIT cannot resolve a symbol or configuration | Catalog entry, named root, source `config.def`, `config.decl` constraints and supplied overrides; stderr identifies the failing stage |
 | Target contract rejects the GPU | Authored target declaration versus live device profile; full Qwen contains gfx1151-specific entries |
 | Tensor missing, wrong size, or bad output at the first layer | Exact checkpoint hash, tensor name/shape/orientation/encoding, tokenizer IDs and reference intermediate values |
 | Single row works; retained or packed work fails | Absolute row origins/byte offsets, cache publication, inactive-row masking, input/output lifetime and explicit semaphore edges |

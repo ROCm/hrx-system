@@ -221,6 +221,7 @@ loom_cc_test(
   SRCS
     "jit_test.cc"
   DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/config.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/sources.txt"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/jit/stage.loom"

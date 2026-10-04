@@ -97,13 +97,19 @@ class JitTest : public ::testing::Test {
     return nullptr;
   }
 
+  // Null uses the source provider; text overlays its value for this request.
   iree_status_t Compile(const char* delta, size_t index,
                         iree_string_view_t root = IREE_SV("advance")) {
-    const loomc_config_binding_t binding = {
-        loomc_make_cstring_view("increment.delta"),
-        loomc_make_cstring_view(delta)};
+    loomc_config_binding_t binding = {};
+    if (delta) {
+      binding = {loomc_make_cstring_view("increment.delta"),
+                 loomc_make_cstring_view(delta)};
+    }
     const loomc_config_options_t config = {
-        &binding, 1, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
+        delta ? &binding : nullptr,
+        delta ? 1u : 0u,
+        {},
+        LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
     loom_serve_jit_stage_t* stage = nullptr;
     auto status = loom_serve_jit_compile(jit_, root, &config, &stage);
     if (iree_status_is_ok(status)) {
@@ -201,12 +207,12 @@ class JitTest : public ::testing::Test {
   iree_vm_function_t step_ = {};
 };
 
-TEST_F(JitTest, SourceToVmToGpuWithSharedVariantState) {
+TEST_F(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
   // A failed native task must join its accepted siblings before compiler reuse.
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Compile("3", 0, IREE_SV("invalid_native")));
   ASSERT_EQ(commands_[0], nullptr);
-  IREE_ASSERT_OK(Compile("3", 0));
+  IREE_ASSERT_OK(Compile(nullptr, 0));
   IREE_ASSERT_OK(Compile("7", 1));
   IREE_ASSERT_OK(PrepareVm());
   // Prepared commands must outlive all compiler/source storage.
@@ -246,7 +252,7 @@ TEST_F(JitTest, SourceToVmToGpuWithSharedVariantState) {
       loom_serve_execution_feedback(execution_, 1, &download, &completion));
   IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
   for (size_t i = 0; i < output_.size(); ++i) {
-    EXPECT_EQ(output_[i], 110 + 2 * i) << "specialized element " << i;
+    EXPECT_EQ(output_[i], 112 + 2 * i) << "specialized element " << i;
   }
 }
 

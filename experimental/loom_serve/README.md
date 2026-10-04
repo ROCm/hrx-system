@@ -58,11 +58,11 @@ From the worktree root:
 build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve:control_test
 ```
 
-The separate `jit_test` uses the serving compiler path itself: source catalog,
-two configuration variants, live GPU profile, native command loading, VM JIT,
-and shared retained device state. It destroys compiler/source storage before
-executing the prepared commands and verifies the device result. It also checks
-that rejected configuration leaves the compiler reusable.
+The separate `jit_test` uses the serving compiler path itself: a source-defined
+configuration default and explicit override, live GPU profile, native command
+loading, VM JIT, and shared retained device state. It destroys compiler/source
+storage before executing the prepared commands and verifies the device result.
+It also checks that rejected configuration leaves the compiler reusable.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve:jit_test
@@ -146,8 +146,9 @@ recorded commands have independent ownership. VM control is also compiled at
 startup and transferred directly into the VM's trusted in-process loading path.
 A compile error terminates preparation with its source diagnostics.
 
-The model adapter supplies dimensions and configuration. Command products supply
-parameter placement, launch counts, buffer requirements, and entry mapping.
+The model's `config.loom` supplies fixed specialization defaults; the adapter
+supplies run-dependent bounds. Command products supply parameter placement,
+launch counts, buffer requirements, and entry mapping.
 All target stages must place the shared weights identically; model preparation
 checks this before allocating the one weight slab. MTP references existing
 target weight views and allocates only its additional parameter groups.

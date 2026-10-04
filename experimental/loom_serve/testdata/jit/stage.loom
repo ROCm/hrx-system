@@ -8,8 +8,7 @@ config.decl @increment.delta : %value: index where [range(%value, 1, 8)]
 
 amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
 
-func.def @increment_element(%element: index, %storage: buffer) {
-  %delta = config.get @increment.delta : index
+func.def @increment_element(%element: index, %delta: index, %storage: buffer) {
   %c0_offset = index.constant 0 : offset
   %data = buffer.view %storage[%c0_offset] : buffer -> view<8xi32>
   %value = view.load %data[%element] : view<8xi32> -> i32
@@ -29,7 +28,8 @@ kernel.def target(@wave32) @increment_0() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 0 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
@@ -41,7 +41,8 @@ kernel.def target(@wave32) @increment_1() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 1 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
@@ -53,7 +54,8 @@ kernel.def target(@wave32) @increment_2() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 2 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
@@ -65,7 +67,8 @@ kernel.def target(@wave32) @increment_3() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 3 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
@@ -77,7 +80,8 @@ kernel.def target(@wave32) @increment_4() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 4 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
@@ -89,7 +93,8 @@ kernel.def target(@wave32) @increment_5() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 5 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
@@ -101,7 +106,8 @@ kernel.def target(@wave32) @increment_6() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 6 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
@@ -113,7 +119,8 @@ kernel.def target(@wave32) @increment_7() {
   kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c1, %c1, %c1) : index
 } launch(%storage: buffer) {
   %element = index.constant 7 : index
-  func.call @increment_element(%element, %storage) : (index, buffer)
+  %delta = config.get @increment.delta : index
+  func.call @increment_element(%element, %delta, %storage) : (index, index, buffer)
   kernel.return
 }
 
