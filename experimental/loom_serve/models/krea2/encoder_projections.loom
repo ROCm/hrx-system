@@ -1,0 +1,157 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @encoder_projection_wave32 {subgroup_size = 32}
+template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+
+kernel.def target(@encoder_projection_wave32) @encoder_linear_2560_4096() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 256 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 4096 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_projection_wave32) @encoder_linear_2560_1024() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 64 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 1024 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_projection_wave32) @encoder_linear_4096_2560() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 160 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %inputs = index.constant 4096 : index
+  %outputs = index.constant 2560 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_projection_wave32) @encoder_linear_2560_9728() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 608 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 9728 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_projection_wave32) @encoder_linear_9728_2560() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 160 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %inputs = index.constant 9728 : index
+  %outputs = index.constant 2560 : index
+  %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.encoder_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.q_proj.weight"[%layer] : view<4096x2560xbf16>
+  kernel.launch @encoder_linear_2560_4096(%input, %weight, %output) : (buffer, view<4096x2560xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.k_proj.weight"[%layer] : view<1024x2560xbf16>
+  kernel.launch @encoder_linear_2560_1024(%input, %weight, %output) : (buffer, view<1024x2560xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_value(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.v_proj.weight"[%layer] : view<1024x2560xbf16>
+  kernel.launch @encoder_linear_2560_1024(%input, %weight, %output) : (buffer, view<1024x2560xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_attention_output(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.o_proj.weight"[%layer] : view<2560x4096xbf16>
+  kernel.launch @encoder_linear_4096_2560(%input, %weight, %output) : (buffer, view<2560x4096xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_feed_forward_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.mlp.gate_proj.weight"[%layer] : view<9728x2560xbf16>
+  kernel.launch @encoder_linear_2560_9728(%input, %weight, %output) : (buffer, view<9728x2560xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_feed_forward_up(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.mlp.up_proj.weight"[%layer] : view<9728x2560xbf16>
+  kernel.launch @encoder_linear_2560_9728(%input, %weight, %output) : (buffer, view<9728x2560xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_feed_forward_down(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.mlp.down_proj.weight"[%layer] : view<2560x9728xbf16>
+  kernel.launch @encoder_linear_9728_2560(%input, %weight, %output) : (buffer, view<2560x9728xbf16>, buffer)
+  command.return
+}

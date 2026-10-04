@@ -1,0 +1,110 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @qualify.encoder_layer : %value: index where [range(%value, 0, 34)]
+amdgpu.target<gfx11-generic> @encoder_silu_wave32 {subgroup_size = 32}
+template.decl @activation.silu_bf16(%value: bf16) -> (bf16)
+command.program.decl @krea2.encoder_block(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer)
+command.program.decl @krea2.encoder_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_value(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_attention_output(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_feed_forward_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_feed_forward_up(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_feed_forward_down(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+
+command.program.def public @qualify.encoder_query() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_query[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_key() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_key[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_value() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_value[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_attention_output() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_attention_output[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_feed_forward_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_feed_forward_gate[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_feed_forward_up() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_feed_forward_up[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_feed_forward_down[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_block() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_block[%layer](%parameters, %input, %cosine, %sine, %mask, %output) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// The first block initializes the destination; the next advances it in place.
+// This is the same read/write alias relationship used between decoder layers.
+command.program.def public @qualify.encoder_pair() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  command.program.launch @krea2.encoder_block[%zero](%parameters, %input, %cosine, %sine, %mask, %output) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.encoder_block[%one](%parameters, %output, %cosine, %sine, %mask, %output) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// Standalone SiLU exposes the fused product's intermediate rounding boundary.
+kernel.def target(@encoder_silu_wave32) @encoder_silu() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %groups_per_row = index.constant 38 : index
+  %groups = index.mul %rows, %groups_per_row : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %width = index.constant 9728 : index
+  %elements = index.mul %rows, %width : index
+  %origin = index.constant 0 : offset
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%elements]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %input_value = view.load %input_view[%element] : view<[%elements]xbf16> -> bf16
+  %result = template.apply<@activation.silu_bf16>(%input_value) : (bf16) -> (bf16)
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+command.program.def public @qualify.encoder_silu() launch(%input: buffer, %output: buffer) {
+  kernel.launch @encoder_silu(%input, %output) : (buffer, buffer)
+  command.return
+}

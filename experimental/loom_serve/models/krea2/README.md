@@ -1394,3 +1394,40 @@ arithmetic and isolation checks, not an encoder throughput measurement.
 The shared-motif extension also reproduces the retained noncausal DiT results
 bit-for-bit at 16, 80 and 1088 rows, base and active adapter, both ungated and
 gated. The complete 512-row adapted text-refiner block remains bitwise exact.
+
+### Native encoder decoder blocks
+
+[`encoder_block.loom`](encoder_block.loom) composes scaled RMS, Q/K/V dense
+projections, fused Q/K rotation, causal attention, output projection, residual
+addition and SwiGLU. [`encoder_projections.loom`](encoder_projections.loom)
+specializes the shared BF16 WMMA motif at five input/output shapes; layer
+indices select checkpoint names without recompiling a kernel for every layer.
+Independent Q/K/V paths overlap. Q/K transforms and the feed-forward product
+advance source-owned buffers in place, and the residual destination may
+coincide with the input after its original consumers finish. Normalization
+always writes separate scratch. All ordering is in command programs.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_encoder_block.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --reference=/path/to/new-encoder-reference \
+  --output=/path/to/new-encoder-block-results
+```
+
+The driver qualifies every primitive on real first/late decoder inputs at
+64 and 560 physical rows, then requires exact whole-command composition. It
+also feeds native layer 0 into layer 1 and compares their combined, in-place
+execution against separate native stages. All commands execute twice.
+The matrix passed 180 independent primitive comparisons over 224,280,576 values
+with no nonfinite or out-of-envelope result, and 52 exact comparisons over
+68,370,432 values with no differing bits. Complete-block accumulated F64 and
+canonical-model differences are reported separately, not used as primitive
+tolerance passes.
+
+A block uses 11 kernels and 11 BF16 parameter tensors occupying 201,861,632
+bytes. The adjacent pair reuses those 11 kernels and doubles only the weights.
+Both use 2,883,584 bytes of workspace at 64 rows and 25,231,360 bytes at 560
+rows. Retained qualification output is below 128 MiB; checkpoints are reused.
+This establishes decoder arithmetic and its in-place lifecycle, not the
+complete embedding-to-taps encoder or native request construction.

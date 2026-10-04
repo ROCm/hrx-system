@@ -1,0 +1,150 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @encoder_pointwise_wave32 {subgroup_size = 32}
+template.decl @activation.silu_bf16(%value: bf16) -> (bf16)
+command.program.decl @krea2.encoder_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_value(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_query_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+command.program.decl @krea2.encoder_key_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+command.program.decl @krea2.encoder_attention() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer)
+command.program.decl @krea2.encoder_attention_output(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_feed_forward_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_feed_forward_up(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_feed_forward_down(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+
+kernel.def target(@encoder_pointwise_wave32) @encoder_residual() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %groups_per_row = index.constant 10 : index
+  %groups = index.mul %rows, %groups_per_row : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %update: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %width = index.constant 2560 : index
+  %elements = index.mul %rows, %width : index
+  %origin = index.constant 0 : offset
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%elements]xbf16>
+  %update_view = buffer.view %update[%origin] : buffer -> view<[%elements]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %value = view.load %input_view[%element] : view<[%elements]xbf16> -> bf16
+  %update_value = view.load %update_view[%element] : view<[%elements]xbf16> -> bf16
+  %value_f32 = scalar.extf %value : bf16 to f32
+  %update_f32 = scalar.extf %update_value : bf16 to f32
+  %sum = scalar.addf %value_f32, %update_f32 : f32
+  %result = scalar.fptrunc %sum : f32 to bf16
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+kernel.def target(@encoder_pointwise_wave32) @encoder_product() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %groups_per_row = index.constant 38 : index
+  %groups = index.mul %rows, %groups_per_row : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%gate: buffer, %up: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %width = index.constant 9728 : index
+  %elements = index.mul %rows, %width : index
+  %origin = index.constant 0 : offset
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %gate_view = buffer.view %gate[%origin] : buffer -> view<[%elements]xbf16>
+  %up_view = buffer.view %up[%origin] : buffer -> view<[%elements]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %gate_value = view.load %gate_view[%element] : view<[%elements]xbf16> -> bf16
+  %up_value = view.load %up_view[%element] : view<[%elements]xbf16> -> bf16
+  %activated = template.apply<@activation.silu_bf16>(%gate_value) : (bf16) -> (bf16)
+  %activated_f32 = scalar.extf %activated : bf16 to f32
+  %up_f32 = scalar.extf %up_value : bf16 to f32
+  %product = scalar.mulf %activated_f32, %up_f32 : f32
+  %result = scalar.fptrunc %product : f32 to bf16
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+command.program.def public @krea2.encoder_residual() launch(%input: buffer, %update: buffer, %output: buffer) {
+  kernel.launch @encoder_residual(%input, %update, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_product() launch(%gate: buffer, %up: buffer, %output: buffer) {
+  kernel.launch @encoder_product(%gate, %up, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+// Q/K transforms and the FFN product advance their source-owned buffers in
+// place. The first residual completes all original input reads, so destination
+// may coincide with input; subsequent normalization always uses separate storage.
+// Lifetimes begin immediately before each producer and end at the last use.
+command.program.def public @krea2.encoder_block(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %hidden_stride = index.constant 5120 : offset
+  %query_stride = index.constant 8192 : offset
+  %key_value_stride = index.constant 2048 : offset
+  %feed_forward_stride = index.constant 19456 : offset
+  %hidden_bytes = index.scale %rows, %hidden_stride : index, offset -> offset
+  %query_bytes = index.scale %rows, %query_stride : index, offset -> offset
+  %key_value_bytes = index.scale %rows, %key_value_stride : index, offset -> offset
+  %feed_forward_bytes = index.scale %rows, %feed_forward_stride : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.encoder_norm1[%layer](%parameters, %input, %normalized) : [index](buffer, buffer, buffer)
+  %query = buffer.alloca<global> align(256) %query_bytes : buffer
+  %key = buffer.alloca<global> align(256) %key_value_bytes : buffer
+  %value = buffer.alloca<global> align(256) %key_value_bytes : buffer
+  command.concurrent {
+    command.serial {
+      command.program.launch @krea2.encoder_query[%layer](%parameters, %normalized, %query) : [index](buffer, buffer, buffer)
+      command.program.launch @krea2.encoder_query_rotary[%layer](%parameters, %query, %cosine, %sine, %query) : [index](buffer, buffer, buffer, buffer, buffer)
+    }
+    command.serial {
+      command.program.launch @krea2.encoder_key[%layer](%parameters, %normalized, %key) : [index](buffer, buffer, buffer)
+      command.program.launch @krea2.encoder_key_rotary[%layer](%parameters, %key, %cosine, %sine, %key) : [index](buffer, buffer, buffer, buffer, buffer)
+    }
+    command.program.launch @krea2.encoder_value[%layer](%parameters, %normalized, %value) : [index](buffer, buffer, buffer)
+  }
+  %context = buffer.alloca<global> align(256) %query_bytes : buffer
+  command.program.launch @krea2.encoder_attention(%query, %key, %value, %mask, %context) : (buffer, buffer, buffer, buffer, buffer)
+  %attention_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.encoder_attention_output[%layer](%parameters, %context, %attention_output) : [index](buffer, buffer, buffer)
+  command.program.launch @krea2.encoder_residual(%input, %attention_output, %output) : (buffer, buffer, buffer)
+  %feed_forward_input = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.encoder_norm2[%layer](%parameters, %output, %feed_forward_input) : [index](buffer, buffer, buffer)
+  %feed_forward_gate = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
+  %feed_forward_up = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
+  command.concurrent {
+    command.program.launch @krea2.encoder_feed_forward_gate[%layer](%parameters, %feed_forward_input, %feed_forward_gate) : [index](buffer, buffer, buffer)
+    command.program.launch @krea2.encoder_feed_forward_up[%layer](%parameters, %feed_forward_input, %feed_forward_up) : [index](buffer, buffer, buffer)
+  }
+  command.program.launch @krea2.encoder_product(%feed_forward_gate, %feed_forward_up, %feed_forward_gate) : (buffer, buffer, buffer)
+  %feed_forward_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.encoder_feed_forward_down[%layer](%parameters, %feed_forward_gate, %feed_forward_output) : [index](buffer, buffer, buffer)
+  command.program.launch @krea2.encoder_residual(%output, %feed_forward_output, %output) : (buffer, buffer, buffer)
+  command.return
+}
