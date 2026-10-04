@@ -418,6 +418,29 @@ endif()
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_binary(
   NAME
+    component_check
+  SRCS
+    "component_check.c"
+  DEPS
+    ::device
+    ::execution
+    ::jit
+    ::weights
+    iree::base
+    iree::base::internal
+    iree::base::internal::path
+    iree::base::tooling::flags
+    iree::hal
+    iree::io::file_handle
+    loom::binding::c::loomc
+    loom::target::arch::cmd::program
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
     krea_projection_check
   SRCS
     "krea_projection_check.c"

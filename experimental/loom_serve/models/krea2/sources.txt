@@ -1,3 +1,5 @@
 config.loom
 projection.loom
 kernels/linear.loom
+block.loom
+kernels/normalization.loom

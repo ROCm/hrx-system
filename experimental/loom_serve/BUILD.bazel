@@ -518,6 +518,30 @@ loom_cc_library(
 )
 
 loom_cc_binary(
+    name = "component_check",
+    testonly = True,
+    srcs = ["component_check.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":device",
+        ":execution",
+        ":jit",
+        ":weights",
+        "//loom/binding/c:loomc",
+        "//loom/src/loom/target/arch/cmd:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_binary(
     name = "krea_projection_check",
     testonly = True,
     srcs = ["krea_projection_check.c"],

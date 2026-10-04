@@ -3,7 +3,8 @@
 This is a **component port, not an image-serving implementation**. The image
 input projection and its official softwatercolor LoRA run through Loom's live
 source JIT, queued safetensors loading, command programs, and shared device
-ownership. Text conditioning, the remaining DiT layers, denoising, and VAE
+ownership. The first transformer block's normalization and fused time
+modulation are also qualified. Full text conditioning, DiT layers, denoising, and VAE
 decoding are not yet implemented here.
 
 The independent [reference script](reference.py) runs the complete model using
@@ -165,3 +166,64 @@ The next numerical gate is a real transformer block and its conditioning,
 followed by the entire source-JIT denoising and VAE path to a comparable image.
 This component does not yet establish a generic model bootstrap, image request
 scheduler, full-model weight-preparation strategy, or throughput result.
+
+## Transformer-block component comparisons
+
+Adding `--block-details` to the reference invocation captures raw tensors at
+the first denoising step's block-zero boundaries, for both base and adapter
+runs. `events.jsonl` records every file's shape and dtype. These intermediate
+files are regenerable qualification inputs, not deployment assets; retain
+them in temporary storage. The detailed 384x384 capture occupies about 592 MiB
+in total.
+
+At 384x384 the block processes 1088 rows: 512 text positions and 576 image
+positions. The mask excludes padded text keys; it is not a causal mask.
+`block0_norm1` exposes zero-centered RMSNorm. `block0_attention_input` fuses
+that normalization with shared time modulation and the block's learned table.
+The fused kernel retains the reference's BF16 rounding boundaries between
+pointwise operations, while the normalization reduction accumulates in F32.
+
+The model-independent, test-only `component_check` executes one command twice
+and compares its entire BF16 output. Repeated `--input` arguments supply raw
+buffers in command binding order; the output and optional reflected workspace
+follow them. All fixed roots come from the specified checkpoint. A model with
+several checkpoint domains uses separate component invocations here, not a
+flattened tensor namespace. This tool is not the image server.
+
+```sh
+build_tools/bin/iree-bazel-build --config=asan \
+  //experimental/loom_serve:component_check
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_block.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights/turbo.safetensors" \
+  --reference="$krea_reference" --output=/path/to/new-component-results
+```
+
+This script uses the reference Python environment and requires exclusive use
+of the GPU for its native subprocesses. It qualifies normalization against the
+external oracle, then compares fusion **bitwise** against an independent CPU
+pointwise calculation using that qualified normalization. It also proves the
+pointwise calculation matches the external model using the external model's
+normalization. Both ordinary and adapter-conditioned inputs are checked.
+
+This separation matters: different valid F32 reductions can change one BF16
+normalization step, and a subsequent subtractive shift can magnify relative
+error near zero. The first 1088-row base run differed at 17 normalization
+values and nine modulated values, with fused relative L2 error 5.54e-6.
+Every modulation difference was explained by normalization, not the fusion.
+The adapter-conditioned run differs at 27 normalization values and 15 modulated
+values, with fused relative L2 error 8.18e-6; exact fusion equivalence passes
+there too. A 16-row JIT specialization matches normalization bit-for-bit, and
+the checker rejects a missing modulation input before weight loading.
+A full-block/image comparison is still required; component equivalence is not
+an end-to-end accuracy claim. The component result directory retains about
+77 MiB of reproducible tensors.
+
+For direct checker calls, `--root=block0_norm1` takes one input and
+`base-block0-norm1.bf16` as its reference. `--config=key=value` supplies explicit
+JIT specialization; no executable rebuild is involved. Tolerance defaults
+match the projection check; `--atol=0 --rtol=0` requires exact numerical
+equality. Every output must be finite at any tolerance. `--actual=path` writes
+the first completed output before comparison, including on numerical failure,
+so a mismatch can be investigated without rerunning the model oracle.

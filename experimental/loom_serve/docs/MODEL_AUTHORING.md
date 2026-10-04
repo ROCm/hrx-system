@@ -233,16 +233,23 @@ joining accepted work before the host recycles payloads. The
 The reusable embedding accepts command programs and buffer bindings, not text
 tokens. [`jit_test.cc`](../jit_test.cc) exercises it without a tokenizer, chat
 request, KV cache, or Qwen adapter. That is the smaller starting point for an
-image or audio port. The existing HTTP service and packed scheduler are concrete
-Qwen consumers; changing their model directory does not turn them into an image
-or audio endpoint. No image or audio model is qualified by this packet.
+image or audio port. The [Krea component port](../models/krea2/README.md) adds
+real checkpoint and adapter evidence: its image-input projection matches the
+independent reference bit-for-bit at three source-JIT shapes, including
+zero-strength and retained-base identity. Its reproduction guide separates
+Loom component output from full-model reference images. The existing HTTP
+service and packed scheduler remain concrete Qwen consumers; changing their
+model directory does not turn them into an image or audio endpoint. No complete
+image or audio model is qualified by this packet.
 
 A first tensor-in/tensor-out adapter has this ownership flow:
 
-1. Its device group owns the device and selected queues. It creates a source
-   catalog with `loom_serve_jit_create` and specializes named command roots with
-   `loom_serve_jit_compile`. Its source owns tensor names, shapes, arithmetic,
-   and fixed configuration; the caller supplies run-dependent specialization.
+1. It creates a [`loom_serve_device_t`](../device.h), which owns the device,
+   asynchronous services, exact queues, and execution timelines. Borrowed
+   device/queue handles create a source catalog with `loom_serve_jit_create`
+   and specialize named roots with `loom_serve_jit_compile`. Source owns tensor
+   names, shapes, arithmetic, and fixed configuration; the caller supplies
+   run-dependent specialization.
 2. It passes the stages' reflected parameter roots to
    `loom_serve_weights_load`, with its own source weight policy. The adapter
    establishes identical parameter placement for the shared-stage prefix;
@@ -252,8 +259,8 @@ A first tensor-in/tensor-out adapter has this ownership flow:
    transient requirements supply workspace size and alignment. It records the
    stages with `loom_serve_jit_stage_record`; recorded commands retain their
    executables and fixed buffers after compiler storage is destroyed.
-4. It creates one `loom_serve_execution_t`, registers the immutable stage table
-   and any host feedback spans with `loom_serve_module_create`, then links its
+4. Using the device owner's execution context, it registers the immutable stage
+   table and any host feedback spans with `loom_serve_module_create`, then links its
    source VM control through `loom_serve_program_create`. The HAL type provider
    and borrowed feedback storage outlive all accepted work. Requests carry
    bindings into this shared process, not their own VM instances.
@@ -263,6 +270,9 @@ A first tensor-in/tensor-out adapter has this ownership flow:
    submission value, not a completed tensor. An error after an earlier accepted
    submission still requires draining both execution timelines before reuse or
    teardown. [`control_test.cc`](../control_test.cc) exercises that failure path.
+   The device owner is destroyed only after model commands, buffers, VM state,
+   and accepted host payloads have retired; destroying it is not an implicit
+   completion wait.
 
 The model's storage contract determines the pipeline shape. A denoising model
 can retain latent and conditioning buffers across repeated command invocations;
