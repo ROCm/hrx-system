@@ -260,7 +260,7 @@ joining accepted work before the host recycles payloads. The
 The reusable embedding accepts command programs and buffer bindings, not text
 tokens. [`jit_test.cc`](../jit_test.cc) exercises it without a tokenizer, chat
 request, KV cache, or Qwen adapter. That is the smaller starting point for an
-image or audio port. The [Krea component port](../models/krea2/README.md) adds
+image or audio port. The [Krea image port](../models/krea2/README.md) adds
 real checkpoint and adapter evidence: one source-JIT command now composes
 batched time conditioning, image projection, all 28 transformer layers, the
 velocity head, and eight Euler updates. Base, zero-strength, and active LoRA
@@ -271,7 +271,8 @@ and accumulated image differences. A separate source command now runs the full
 still-image VAE from packed BF16 latent to F32 RGB, with folded spatial
 upsampling and in-place residuals. Its final pixels agree with the independent
 CPU decoder to at most one 8-bit level on the qualified base/LoRA images.
-The [image root](../models/krea2/sample.loom) fuses twelve encoder taps per token,
+The [image root](../models/krea2/sample.loom) runs the native text-only encoder,
+collects and fuses twelve taps per token,
 projects the resulting features once, retains that prefix for denoising, and
 decodes without intermediate host readbacks. Fusion and the DiT share one
 immutable Turbo checkpoint domain and one optional adapter domain. The
@@ -279,12 +280,23 @@ layerwise blocks advance one owned buffer in place; a register-resident learned
 reduction avoids a transpose and full rank tensor. Fusion reads the text prefix
 of the combined key mask without a copy. Exact RGB composition checks cover
 base, zero-strength and active LoRA. At 384x384 with 512 text rows, phase
-lifetimes keep the workspace at 263.5 MiB base or 265 MiB adapted, exactly
-2.5 MiB above standalone fusion. The retained projected prefix is 6 MiB and
-intermediate latent is 72 KiB. Qwen3-VL text encoding remains external.
+lifetimes keep the complete encoder-to-RGB workspace at 317.8 MiB for both
+roots. Base weights occupy 32.05 GiB; the adapter adds 447.5 MiB. The source
+advances one encoder hidden buffer in place and omits unused decoder/vision
+weights. It derives the downstream key mask from encoder visibility, so the
+caller cannot accidentally give two stages different text masks.
+
+The [native image CLI](../models/krea2/generate.c) is the complete caller:
+IREE prompt tokenization and cold request tables, source JIT, immutable weight
+loading, queued request upload, command execution, final RGB download and PPM
+output. It requires no external encoder or captured tensors. Its
+[request leaf](../models/krea2/request.h) contains model-specific template and
+numeric setup, separate from shared serving code. That cold C boundary retains
+canonical F64 rotary math that the current VM's F32 transcendental lowering
+cannot express unchanged. Model stage control already lives in `.loom`.
 The existing HTTP service and packed scheduler remain concrete Qwen consumers;
 changing their model directory does not turn them into an image or audio
-endpoint. No complete image or audio model is qualified by this packet.
+endpoint. No audio model or concurrent image service is claimed by this packet.
 
 A first tensor-in/tensor-out adapter has this ownership flow:
 
@@ -306,13 +318,15 @@ A first tensor-in/tensor-out adapter has this ownership flow:
    transient requirements supply workspace size and alignment. It records the
    stages with `loom_serve_jit_stage_record`; recorded commands retain their
    executables and fixed buffers after compiler storage is destroyed.
-4. Using the device owner's execution context, it registers the immutable stage
+4. For a finite transform contained in one source command, it can directly use
+   `loom_serve_execution_execute`, as the Krea CLI does. A model needing host
+   source control instead registers the immutable stage
    table and any host feedback spans with `loom_serve_module_create`, then links its
    source VM control through `loom_serve_program_create`. The HAL type provider
    and borrowed feedback storage outlive all accepted work. Requests carry
    bindings into this shared process, not their own VM instances.
 5. It uploads request data through `loom_serve_execution_transfer`, invokes its
-   VM entry using the retained invocation, and joins the relevant completion
+   command or shared VM entry, and joins the relevant completion
    frontiers before publishing output. `runner.execute_N` returns an accepted
    submission value, not a completed tensor. An error after an earlier accepted
    submission still requires draining both execution timelines before reuse or
