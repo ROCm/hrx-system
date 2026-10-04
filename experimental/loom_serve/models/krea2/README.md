@@ -14,10 +14,11 @@ embedding. A combined stack-to-head command produces velocities without an
 intermediate host readback. Native time conditioning batches all requested
 timesteps, including LoRA, into device-resident embedding/modulation tables.
 A native denoising command composes time conditioning, image projection,
-the full stack, the velocity head, and Euler updates. Text conditioning and
-VAE decoding remain external; this is not yet a native prompt-to-image path.
-The native VAE prefix now reaches its first spatial attention block; the
-remaining decoder stages and final RGB output are still being qualified.
+the full stack, the velocity head, and Euler updates. The complete native
+still-image VAE decodes those packed latents to clamped F32 RGB, including
+spatial attention, all residual blocks, and folded spatial upsampling.
+Text conditioning remains external; this is not yet an image-serving endpoint
+or a native prompt-to-image path.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -984,3 +985,63 @@ The preceding residual's 56-comparison regression retains identical output
 bits for every stage. These are correctness and memory results, not throughput
 measurements. Attention fixtures occupy less than 256 MiB; remaining residual
 and upsampling stages must still produce the final native RGB consumer.
+
+### Complete native still-image decoder
+
+[`vae_decoder.loom`](vae_decoder.loom) exposes `vae_decode`, from packed BF16
+latent and the affine table to NCHW F32 RGB in `[-1, 1]`. Its single command
+composes the qualified prefix, second middle residual, all four upsampling
+stages, output normalization/convolution, and clamping. An image is eight
+times the latent height and width. The caller supplies immutable VAE weights,
+latent and affine buffers, plus a distinct output buffer.
+
+The [upsampling leaves](vae_upsample.loom) specialize the shared config-free
+convolution and normalization motifs at each spatial/channel shape. Three
+residuals share kernels within each stage. At the 192-to-384 transition, the
+learned shortcut writes the destination concurrently with input normalization;
+later convolutions add into that destination. Equal-width blocks advance
+source-owned features in place. Spatial nearest-neighbor expansion is part of
+convolution indexing and never materializes an enlarged input image.
+
+The fresh-frame contract excludes video history. The original temporal weight
+planes remain in immutable storage, but only the last causal plane is read.
+The two temporal-upsampling convolutions are absent from the command and its
+parameter residency; the pinned reference skips them for the first frame.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_decoder.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --input_results=/path/to/vae-input-results \
+  --attention_results=/path/to/vae-attention-results \
+  --output=/path/to/new-vae-decoder-results
+```
+
+Qualification runs base and active-LoRA latents at 2x6 and 48x48. Primitive
+resize, output normalization and convolution use F64 oracles with 2e-5
+absolute/relative bounds. Entire residual chains use a fixed 2e-5 relative-L2
+bound. Clamping and both composed decoder commands must equal separately
+executed native stages bit-for-bit on both executions. The complete RGB result
+also has a fixed 2e-5 relative-L2 bound against the pinned CPU/F32 VAE on the
+same latent. All 168 repeated comparisons pass over 469,573,632 values, with
+no element-envelope violations or nonfinite pairs.
+
+| 384x384 decoder result | Base | Softwatercolor latent |
+| --- | ---: | ---: |
+| F32 relative L2 versus CPU VAE | 1.80376e-6 | 3.81027e-6 |
+| Different 8-bit channel values, out of 442,368 | 19 | 47 |
+| Maximum 8-bit difference | 1 | 1 |
+| Pixel RMSE | 0.00655368 | 0.01030759 |
+
+The complete command has 30 unique kernels and 104 parameters occupying
+286,100,492 bytes. Transient workspace is 219,709,440 bytes (209.53 MiB) at
+384x384. These are correctness and memory observations, not performance data.
+The images use the earlier native eight-step latents and external text
+conditioning. The decoder does not apply LoRA itself; it receives the latent
+produced by the adapted DiT.
+
+The driver overwrites one active primitive fixture and retains final native
+and reference RGB/PNGs. Its temporary storage stays below 256 MiB at these
+shapes, and a failed check retains its exact inputs, command and expected
+output. Native text encoding and the image-serving adapter are separate
+remaining integration boundaries.

@@ -1,0 +1,124 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+command.program.decl @vae_input_attention() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
+command.program.decl @krea2.vae_mid_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up0_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up0_resize() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up1_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up1_resize() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up2_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up2_resize() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up3_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_output_norm() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_output_convolution() launch(%parameters: buffer, %input: buffer, %output: buffer)
+amdgpu.target<gfx11-generic> @vae_decoder_wave32 {subgroup_size = 32}
+
+kernel.def target(@vae_decoder_wave32) @krea_vae_clamp() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %scale_channels = index.constant 192 : index
+  %elements = index.mul %pixels, %scale_channels : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %elements, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %scale_channels = index.constant 192 : index
+  %elements = index.mul %pixels, %scale_channels : index
+  %threads = index.constant 128 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %live = index.cmp ult, %element, %elements : index
+  %origin = index.constant 0 : offset
+  %minimum = scalar.constant -1.0 : f32
+  %maximum = scalar.constant 1.0 : f32
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%elements]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xf32>
+  scf.if %live {
+    %value = view.load %input_view[%element] : view<[%elements]xf32> -> f32
+    %bounded_low = scalar.maxnumf %value, %minimum : f32
+    %bounded = scalar.minnumf %bounded_low, %maximum : f32
+    view.store %bounded, %output_view[%element] : f32, view<[%elements]xf32>
+  }
+  kernel.return
+}
+
+command.program.def public @krea2.vae_clamp() launch(%input: buffer, %output: buffer) {
+  kernel.launch @krea_vae_clamp(%input, %output) : (buffer, buffer)
+  command.return
+}
+
+// Single fresh frame: temporal resampling has no preceding history. The three
+// resize commands fold nearest-neighbor spatial expansion into convolution.
+// Original input is immutable; only source-owned feature storage advances
+// in place. Output is NCHW RGB F32 clamped to [-1, 1], at eight times each
+// latent spatial dimension.
+command.program.def public @vae_decoder_body() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %state0_pixel_bytes = index.constant 1536 : offset
+  %state0_bytes = index.scale %pixels, %state0_pixel_bytes : index, offset -> offset
+  %state0 = buffer.alloca<global> align(256) %state0_bytes : buffer
+  command.program.launch @krea2.vae_mid_residual[%one](%parameters, %input, %state0) : [index](buffer, buffer, buffer)
+  scf.for %block = [%zero to %three step %one] unroll {
+    command.program.launch @krea2.vae_up0_residual[%block](%parameters, %state0, %state0) : [index](buffer, buffer, buffer)
+  }
+  %resized0_pixel_bytes = index.constant 3072 : offset
+  %resized0_bytes = index.scale %pixels, %resized0_pixel_bytes : index, offset -> offset
+  %resized0 = buffer.alloca<global> align(256) %resized0_bytes : buffer
+  command.program.launch @krea2.vae_up0_resize(%parameters, %state0, %resized0) : (buffer, buffer, buffer)
+  %state1_pixel_bytes = index.constant 6144 : offset
+  %state1_bytes = index.scale %pixels, %state1_pixel_bytes : index, offset -> offset
+  %state1 = buffer.alloca<global> align(256) %state1_bytes : buffer
+  command.program.launch @krea2.vae_up1_residual[%zero](%parameters, %resized0, %state1) : [index](buffer, buffer, buffer)
+  scf.for %block = [%one to %three step %one] unroll {
+    command.program.launch @krea2.vae_up1_residual[%block](%parameters, %state1, %state1) : [index](buffer, buffer, buffer)
+  }
+  %state2_pixel_bytes = index.constant 12288 : offset
+  %state2_bytes = index.scale %pixels, %state2_pixel_bytes : index, offset -> offset
+  %state2 = buffer.alloca<global> align(256) %state2_bytes : buffer
+  command.program.launch @krea2.vae_up1_resize(%parameters, %state1, %state2) : (buffer, buffer, buffer)
+  scf.for %block = [%zero to %three step %one] unroll {
+    command.program.launch @krea2.vae_up2_residual[%block](%parameters, %state2, %state2) : [index](buffer, buffer, buffer)
+  }
+  %state3_pixel_bytes = index.constant 24576 : offset
+  %state3_bytes = index.scale %pixels, %state3_pixel_bytes : index, offset -> offset
+  %state3 = buffer.alloca<global> align(256) %state3_bytes : buffer
+  command.program.launch @krea2.vae_up2_resize(%parameters, %state2, %state3) : (buffer, buffer, buffer)
+  scf.for %block = [%zero to %three step %one] unroll {
+    command.program.launch @krea2.vae_up3_residual[%block](%parameters, %state3, %state3) : [index](buffer, buffer, buffer)
+  }
+  command.program.launch @krea2.vae_output_norm(%parameters, %state3, %state3) : (buffer, buffer, buffer)
+  command.program.launch @krea2.vae_output_convolution(%parameters, %state3, %output) : (buffer, buffer, buffer)
+  command.program.launch @krea2.vae_clamp(%output, %output) : (buffer, buffer)
+  command.return
+}
+
+command.program.def public @vae_decode() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %pixel_bytes = index.constant 1536 : offset
+  %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
+  %features = buffer.alloca<global> align(256) %bytes : buffer
+  command.program.launch @vae_input_attention(%parameters, %input, %affine, %features) : (buffer, buffer, buffer, buffer)
+  command.program.launch @vae_decoder_body(%parameters, %features, %output) : (buffer, buffer, buffer)
+  command.return
+}

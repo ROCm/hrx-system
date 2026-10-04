@@ -1,0 +1,735 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+amdgpu.target<gfx11-generic> @vae_upsample_wave32 {subgroup_size = 32}
+template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up0_norm() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 1 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 384 : index
+  %silu = scalar.constant true : i1
+  template.apply<@image.channel_norm_f32>(%pixels, %channels, %silu, %input, %weight, %output) : (index, index, i1, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up0_convolution() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 384 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up0_convolution_add() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 384 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant true : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up0_resize() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 192 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 192 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 1 : index
+  %upsample = index.constant 2 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up1_norm() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 1 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 384 : index
+  %silu = scalar.constant true : i1
+  template.apply<@image.channel_norm_f32>(%pixels, %channels, %silu, %input, %weight, %output) : (index, index, i1, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up1_convolution() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 384 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up1_convolution_add() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 384 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant true : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up1_resize() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 192 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 384 : index
+  %outputs = index.constant 192 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 1 : index
+  %upsample = index.constant 2 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up2_norm() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 1 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 192 : index
+  %silu = scalar.constant true : i1
+  template.apply<@image.channel_norm_f32>(%pixels, %channels, %silu, %input, %weight, %output) : (index, index, i1, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up2_convolution() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 192 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 192 : index
+  %outputs = index.constant 192 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up2_convolution_add() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 192 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 192 : index
+  %outputs = index.constant 192 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant true : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up2_resize() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 96 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 192 : index
+  %outputs = index.constant 96 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 1 : index
+  %upsample = index.constant 2 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up3_norm() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 1 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 96 : index
+  %silu = scalar.constant true : i1
+  template.apply<@image.channel_norm_f32>(%pixels, %channels, %silu, %input, %weight, %output) : (index, index, i1, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up3_convolution() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 96 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 96 : index
+  %outputs = index.constant 96 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_up3_convolution_add() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 96 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 96 : index
+  %outputs = index.constant 96 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant true : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_expand_norm() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 1 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 192 : index
+  %silu = scalar.constant true : i1
+  template.apply<@image.channel_norm_f32>(%pixels, %channels, %silu, %input, %weight, %output) : (index, index, i1, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_expand_convolution() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 192 : index
+  %outputs = index.constant 384 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_expand_shortcut() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 192 : index
+  %outputs = index.constant 384 : index
+  %extent = index.constant 1 : index
+  %planes = index.constant 1 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+// Stage 0 keeps 384 output channels. The final convolution can update
+// its skip storage in place after both normalizations have consumed the input.
+command.program.def public @krea2.vae_up0_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 1 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %pixel_bytes = index.constant 1536 : offset
+  %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %bytes : buffer
+  %norm1 = command.parameter %parameters, "decoder.up_blocks.0.resnets.{}.norm1.gamma"[%block] : view<384x1x1x1xf32>
+  %weight1 = command.parameter %parameters, "decoder.up_blocks.0.resnets.{}.conv1.weight"[%block] : view<384x384x3x3x3xf32>
+  %bias1 = command.parameter %parameters, "decoder.up_blocks.0.resnets.{}.conv1.bias"[%block] : view<384xf32>
+  kernel.launch @krea_vae_up0_norm(%input, %norm1, %normalized) : (buffer, view<384x1x1x1xf32>, buffer)
+  %convolved = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @krea_vae_up0_convolution(%normalized, %weight1, %bias1, %convolved) : (buffer, view<384x384x3x3x3xf32>, view<384xf32>, buffer)
+  %norm2 = command.parameter %parameters, "decoder.up_blocks.0.resnets.{}.norm2.gamma"[%block] : view<384x1x1x1xf32>
+  %weight2 = command.parameter %parameters, "decoder.up_blocks.0.resnets.{}.conv2.weight"[%block] : view<384x384x3x3x3xf32>
+  %bias2 = command.parameter %parameters, "decoder.up_blocks.0.resnets.{}.conv2.bias"[%block] : view<384xf32>
+  kernel.launch @krea_vae_up0_norm(%convolved, %norm2, %convolved) : (buffer, view<384x1x1x1xf32>, buffer)
+  kernel.launch @krea_vae_up0_convolution_add(%convolved, %weight2, %bias2, %input, %output) : (buffer, view<384x384x3x3x3xf32>, view<384xf32>, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_up0_resize() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.up_blocks.0.upsamplers.0.resample.1.weight" : view<192x384x3x3xf32>
+  %bias = command.parameter %parameters, "decoder.up_blocks.0.upsamplers.0.resample.1.bias" : view<192xf32>
+  kernel.launch @krea_vae_up0_resize(%input, %weight, %bias, %output) : (buffer, view<192x384x3x3xf32>, view<192xf32>, buffer)
+  command.return
+}
+
+// Stage 1 expands 192 input channels in block zero. That block requires
+// distinct input/output storage: the shortcut writes output concurrently with
+// input normalization. Later 384-channel blocks can advance their skip in place.
+command.program.def public @krea2.vae_up1_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 2 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %pixel_bytes = index.constant 1536 : offset
+  %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
+  %zero = index.constant 0 : index
+  %expand = index.cmp eq, %block, %zero : index
+  %normalization_bytes = scf.if %expand -> (offset) {
+    %input_pixel_bytes = index.constant 768 : offset
+    %half = index.scale %pixels, %input_pixel_bytes : index, offset -> offset
+    scf.yield %half : offset
+  } else {
+    scf.yield %bytes : offset
+  }
+  %normalized = buffer.alloca<global> align(256) %normalization_bytes : buffer
+  %convolved = scf.if %expand -> (buffer) {
+    %norm = command.parameter %parameters, "decoder.up_blocks.1.resnets.0.norm1.gamma" : view<192x1x1x1xf32>
+    %skip_weight = command.parameter %parameters, "decoder.up_blocks.1.resnets.0.conv_shortcut.weight" : view<384x192x1x1x1xf32>
+    %skip_bias = command.parameter %parameters, "decoder.up_blocks.1.resnets.0.conv_shortcut.bias" : view<384xf32>
+    command.concurrent {
+      kernel.launch @krea_vae_expand_norm(%input, %norm, %normalized) : (buffer, view<192x1x1x1xf32>, buffer)
+      kernel.launch @krea_vae_expand_shortcut(%input, %skip_weight, %skip_bias, %output) : (buffer, view<384x192x1x1x1xf32>, view<384xf32>, buffer)
+    }
+    %weight = command.parameter %parameters, "decoder.up_blocks.1.resnets.0.conv1.weight" : view<384x192x3x3x3xf32>
+    %bias = command.parameter %parameters, "decoder.up_blocks.1.resnets.0.conv1.bias" : view<384xf32>
+    %result = buffer.alloca<global> align(256) %bytes : buffer
+    kernel.launch @krea_vae_expand_convolution(%normalized, %weight, %bias, %result) : (buffer, view<384x192x3x3x3xf32>, view<384xf32>, buffer)
+    scf.yield %result : buffer
+  } else {
+    %norm = command.parameter %parameters, "decoder.up_blocks.1.resnets.{}.norm1.gamma"[%block] : view<384x1x1x1xf32>
+    %weight = command.parameter %parameters, "decoder.up_blocks.1.resnets.{}.conv1.weight"[%block] : view<384x384x3x3x3xf32>
+    %bias = command.parameter %parameters, "decoder.up_blocks.1.resnets.{}.conv1.bias"[%block] : view<384xf32>
+    kernel.launch @krea_vae_up1_norm(%input, %norm, %normalized) : (buffer, view<384x1x1x1xf32>, buffer)
+    %result = buffer.alloca<global> align(256) %bytes : buffer
+    kernel.launch @krea_vae_up1_convolution(%normalized, %weight, %bias, %result) : (buffer, view<384x384x3x3x3xf32>, view<384xf32>, buffer)
+    scf.yield %result : buffer
+  }
+  %skip = scf.if %expand -> (buffer) {
+    scf.yield %output : buffer
+  } else {
+    scf.yield %input : buffer
+  }
+  %norm2 = command.parameter %parameters, "decoder.up_blocks.1.resnets.{}.norm2.gamma"[%block] : view<384x1x1x1xf32>
+  %weight2 = command.parameter %parameters, "decoder.up_blocks.1.resnets.{}.conv2.weight"[%block] : view<384x384x3x3x3xf32>
+  %bias2 = command.parameter %parameters, "decoder.up_blocks.1.resnets.{}.conv2.bias"[%block] : view<384xf32>
+  kernel.launch @krea_vae_up1_norm(%convolved, %norm2, %convolved) : (buffer, view<384x1x1x1xf32>, buffer)
+  kernel.launch @krea_vae_up1_convolution_add(%convolved, %weight2, %bias2, %skip, %output) : (buffer, view<384x384x3x3x3xf32>, view<384xf32>, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_up1_resize() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.up_blocks.1.upsamplers.0.resample.1.weight" : view<192x384x3x3xf32>
+  %bias = command.parameter %parameters, "decoder.up_blocks.1.upsamplers.0.resample.1.bias" : view<192xf32>
+  kernel.launch @krea_vae_up1_resize(%input, %weight, %bias, %output) : (buffer, view<192x384x3x3xf32>, view<192xf32>, buffer)
+  command.return
+}
+
+// Stage 2 keeps 192 output channels. The final convolution can update
+// its skip storage in place after both normalizations have consumed the input.
+command.program.def public @krea2.vae_up2_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 4 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %pixel_bytes = index.constant 768 : offset
+  %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %bytes : buffer
+  %norm1 = command.parameter %parameters, "decoder.up_blocks.2.resnets.{}.norm1.gamma"[%block] : view<192x1x1x1xf32>
+  %weight1 = command.parameter %parameters, "decoder.up_blocks.2.resnets.{}.conv1.weight"[%block] : view<192x192x3x3x3xf32>
+  %bias1 = command.parameter %parameters, "decoder.up_blocks.2.resnets.{}.conv1.bias"[%block] : view<192xf32>
+  kernel.launch @krea_vae_up2_norm(%input, %norm1, %normalized) : (buffer, view<192x1x1x1xf32>, buffer)
+  %convolved = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @krea_vae_up2_convolution(%normalized, %weight1, %bias1, %convolved) : (buffer, view<192x192x3x3x3xf32>, view<192xf32>, buffer)
+  %norm2 = command.parameter %parameters, "decoder.up_blocks.2.resnets.{}.norm2.gamma"[%block] : view<192x1x1x1xf32>
+  %weight2 = command.parameter %parameters, "decoder.up_blocks.2.resnets.{}.conv2.weight"[%block] : view<192x192x3x3x3xf32>
+  %bias2 = command.parameter %parameters, "decoder.up_blocks.2.resnets.{}.conv2.bias"[%block] : view<192xf32>
+  kernel.launch @krea_vae_up2_norm(%convolved, %norm2, %convolved) : (buffer, view<192x1x1x1xf32>, buffer)
+  kernel.launch @krea_vae_up2_convolution_add(%convolved, %weight2, %bias2, %input, %output) : (buffer, view<192x192x3x3x3xf32>, view<192xf32>, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_up2_resize() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.up_blocks.2.upsamplers.0.resample.1.weight" : view<96x192x3x3xf32>
+  %bias = command.parameter %parameters, "decoder.up_blocks.2.upsamplers.0.resample.1.bias" : view<96xf32>
+  kernel.launch @krea_vae_up2_resize(%input, %weight, %bias, %output) : (buffer, view<96x192x3x3xf32>, view<96xf32>, buffer)
+  command.return
+}
+
+// Stage 3 keeps 96 output channels. The final convolution can update
+// its skip storage in place after both normalizations have consumed the input.
+command.program.def public @krea2.vae_up3_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %pixel_bytes = index.constant 384 : offset
+  %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %bytes : buffer
+  %norm1 = command.parameter %parameters, "decoder.up_blocks.3.resnets.{}.norm1.gamma"[%block] : view<96x1x1x1xf32>
+  %weight1 = command.parameter %parameters, "decoder.up_blocks.3.resnets.{}.conv1.weight"[%block] : view<96x96x3x3x3xf32>
+  %bias1 = command.parameter %parameters, "decoder.up_blocks.3.resnets.{}.conv1.bias"[%block] : view<96xf32>
+  kernel.launch @krea_vae_up3_norm(%input, %norm1, %normalized) : (buffer, view<96x1x1x1xf32>, buffer)
+  %convolved = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @krea_vae_up3_convolution(%normalized, %weight1, %bias1, %convolved) : (buffer, view<96x96x3x3x3xf32>, view<96xf32>, buffer)
+  %norm2 = command.parameter %parameters, "decoder.up_blocks.3.resnets.{}.norm2.gamma"[%block] : view<96x1x1x1xf32>
+  %weight2 = command.parameter %parameters, "decoder.up_blocks.3.resnets.{}.conv2.weight"[%block] : view<96x96x3x3x3xf32>
+  %bias2 = command.parameter %parameters, "decoder.up_blocks.3.resnets.{}.conv2.bias"[%block] : view<96xf32>
+  kernel.launch @krea_vae_up3_norm(%convolved, %norm2, %convolved) : (buffer, view<96x1x1x1xf32>, buffer)
+  kernel.launch @krea_vae_up3_convolution_add(%convolved, %weight2, %bias2, %input, %output) : (buffer, view<96x96x3x3x3xf32>, view<96xf32>, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@vae_upsample_wave32) @krea_vae_rgb_convolution() {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %outputs = index.constant 3 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %latent_height = config.get @krea2.latent_height : index
+  %latent_width = config.get @krea2.latent_width : index
+  %scale = index.constant 8 : index
+  %height = index.mul %latent_height, %scale : index
+  %width = index.mul %latent_width, %scale : index
+  %inputs = index.constant 96 : index
+  %outputs = index.constant 3 : index
+  %extent = index.constant 3 : index
+  %planes = index.constant 3 : index
+  %upsample = index.constant 1 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.vae_output_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.norm_out.gamma" : view<96x1x1x1xf32>
+  kernel.launch @krea_vae_up3_norm(%input, %weight, %output) : (buffer, view<96x1x1x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_output_convolution() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.conv_out.weight" : view<3x96x3x3x3xf32>
+  %bias = command.parameter %parameters, "decoder.conv_out.bias" : view<3xf32>
+  kernel.launch @krea_vae_rgb_convolution(%input, %weight, %bias, %output) : (buffer, view<3x96x3x3x3xf32>, view<3xf32>, buffer)
+  command.return
+}

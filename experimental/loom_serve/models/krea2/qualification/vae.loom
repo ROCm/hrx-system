@@ -100,3 +100,60 @@ command.program.def public @qualify.vae_mid_residual() launch(%parameters: buffe
   command.program.launch @krea2.vae_mid_residual[%block](%parameters, %input, %output) : [index](buffer, buffer, buffer)
   command.return
 }
+
+config.decl @qualify.vae_stage : %value: index where [range(%value, 0, 3)]
+config.decl @qualify.vae_resize_stage : %value: index where [range(%value, 0, 2)]
+config.decl @qualify.vae_up_block : %value: index where [range(%value, 0, 2)]
+command.program.decl @krea2.vae_up0_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up0_resize() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up1_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up1_resize() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up2_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up2_resize() launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.vae_up3_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+
+command.program.def public @qualify.vae_up_residual() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %stage = config.get @qualify.vae_stage : index
+  %block = config.get @qualify.vae_up_block : index
+  %stage0 = index.constant 0 : index
+  %is0 = index.cmp eq, %stage, %stage0 : index
+  scf.if %is0 {
+    command.program.launch @krea2.vae_up0_residual[%block](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  }
+  %stage1 = index.constant 1 : index
+  %is1 = index.cmp eq, %stage, %stage1 : index
+  scf.if %is1 {
+    command.program.launch @krea2.vae_up1_residual[%block](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  }
+  %stage2 = index.constant 2 : index
+  %is2 = index.cmp eq, %stage, %stage2 : index
+  scf.if %is2 {
+    command.program.launch @krea2.vae_up2_residual[%block](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  }
+  %stage3 = index.constant 3 : index
+  %is3 = index.cmp eq, %stage, %stage3 : index
+  scf.if %is3 {
+    command.program.launch @krea2.vae_up3_residual[%block](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  }
+  command.return
+}
+
+command.program.def public @qualify.vae_up_resize() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %stage = config.get @qualify.vae_resize_stage : index
+  %stage0 = index.constant 0 : index
+  %is0 = index.cmp eq, %stage, %stage0 : index
+  scf.if %is0 {
+    command.program.launch @krea2.vae_up0_resize(%parameters, %input, %output) : (buffer, buffer, buffer)
+  }
+  %stage1 = index.constant 1 : index
+  %is1 = index.cmp eq, %stage, %stage1 : index
+  scf.if %is1 {
+    command.program.launch @krea2.vae_up1_resize(%parameters, %input, %output) : (buffer, buffer, buffer)
+  }
+  %stage2 = index.constant 2 : index
+  %is2 = index.cmp eq, %stage, %stage2 : index
+  scf.if %is2 {
+    command.program.launch @krea2.vae_up2_resize(%parameters, %input, %output) : (buffer, buffer, buffer)
+  }
+  command.return
+}
