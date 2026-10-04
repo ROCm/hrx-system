@@ -33,6 +33,9 @@ IREE_FLAG(float, rtol, 0.0078125f, "Relative error tolerance.");
 IREE_FLAG(float, relative_l2_tolerance, 0.0f,
           "Positive aggregate relative-L2 bound instead of the elementwise "
           "gate; zero retains the elementwise gate. Nonfinite values fail.");
+IREE_FLAG(bool, report_only, false,
+          "Report finite output differences without enforcing an error bound. "
+          "Nonfinite values and execution failures still fail.");
 
 typedef struct component_check_t {
   // Shared device/queues outliving all accepted work and borrowed payloads.
@@ -247,7 +250,7 @@ static iree_status_t component_compare(component_check_t* check,
     }
     const double error = fabs((double)actual_value - expected_value);
     if (error > FLAG_atol + FLAG_rtol * fabsf(expected_value)) {
-      if (outside < 4 && FLAG_relative_l2_tolerance == 0) {
+      if (outside < 4 && FLAG_relative_l2_tolerance == 0 && !FLAG_report_only) {
         fprintf(stderr, "Mismatch[%zu]: actual=%g expected=%g\n", i,
                 actual_value, expected_value);
       }
@@ -271,11 +274,16 @@ static iree_status_t component_compare(component_check_t* check,
     // A nonzero error against an all-zero reference has no finite ratio.
     fputs("null", stdout);
   }
-  printf(",\"comparison\":\"%s\"}\n",
-         FLAG_relative_l2_tolerance > 0 ? "relative_l2" : "elementwise");
+  printf(",\"comparison\":\"%s\"}\n", FLAG_report_only ? "report"
+                                      : FLAG_relative_l2_tolerance > 0
+                                          ? "relative_l2"
+                                          : "elementwise");
   if (nonfinite) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "%zu nonfinite component pairs", nonfinite);
+  }
+  if (FLAG_report_only) {
+    return iree_ok_status();
   }
   if (FLAG_relative_l2_tolerance > 0) {
     if (relative_l2 > FLAG_relative_l2_tolerance) {
