@@ -7,6 +7,10 @@
 template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32)
 template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
 template.decl @attention.normalize_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+template.decl @normalization.scaled_bf16(%value: bf16, %weight: bf16, %inverse: f32) -> (bf16)
+template.decl @attention.half_pair_bf16(%left: bf16, %right: bf16, %left_cosine: bf16, %right_cosine: bf16, %left_sine: bf16, %right_sine: bf16) -> (vector<2xbf16>)
+template.decl @attention.normalize_half_rotary_bf16(%tokens: index, %heads: index, %width: index, %epsilon: f32, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+template.decl @attention.half_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
 
 // One workgroup owns a head row, with one thread per interleaved channel pair.
 // The normalized value rounds to BF16 before F32 rotary arithmetic, preserving
@@ -52,5 +56,98 @@ template.def<@attention.normalize_rotary_bf16> device @normalize_rotary_bf16(%to
   %odd_output = scalar.fptrunc %odd_rotated : f32 to bf16
   view.store %even_output, %output_view[%row, %even] : bf16, view<[%rows]x[%width]xbf16>
   view.store %odd_output, %output_view[%row, %odd] : bf16, view<[%rows]x[%width]xbf16>
+  template.return
+}
+
+// Each product and the final sum retain their BF16 tensor boundary. A pair
+// joins corresponding channels from the two halves, not adjacent channels.
+template.def<@attention.half_pair_bf16> device @rotary_half_pair_bf16(%left: bf16, %right: bf16, %left_cosine: bf16, %right_cosine: bf16, %left_sine: bf16, %right_sine: bf16) -> (vector<2xbf16>) {
+  %left_f32 = scalar.extf %left : bf16 to f32
+  %right_f32 = scalar.extf %right : bf16 to f32
+  %negative_right = scalar.negf %right_f32 : f32
+  %left_c = scalar.extf %left_cosine : bf16 to f32
+  %right_c = scalar.extf %right_cosine : bf16 to f32
+  %left_s = scalar.extf %left_sine : bf16 to f32
+  %right_s = scalar.extf %right_sine : bf16 to f32
+  %left_product = scalar.mulf %left_f32, %left_c : f32
+  %right_product = scalar.mulf %right_f32, %right_c : f32
+  %left_cross = scalar.mulf %negative_right, %left_s : f32
+  %right_cross = scalar.mulf %left_f32, %right_s : f32
+  %left_product_bf16 = scalar.fptrunc %left_product : f32 to bf16
+  %right_product_bf16 = scalar.fptrunc %right_product : f32 to bf16
+  %left_cross_bf16 = scalar.fptrunc %left_cross : f32 to bf16
+  %right_cross_bf16 = scalar.fptrunc %right_cross : f32 to bf16
+  %left_product_rounded = scalar.extf %left_product_bf16 : bf16 to f32
+  %right_product_rounded = scalar.extf %right_product_bf16 : bf16 to f32
+  %left_cross_rounded = scalar.extf %left_cross_bf16 : bf16 to f32
+  %right_cross_rounded = scalar.extf %right_cross_bf16 : bf16 to f32
+  %left_sum = scalar.addf %left_product_rounded, %left_cross_rounded : f32
+  %right_sum = scalar.addf %right_product_rounded, %right_cross_rounded : f32
+  %left_result = scalar.fptrunc %left_sum : f32 to bf16
+  %right_result = scalar.fptrunc %right_sum : f32 to bf16
+  %result = vector.from_elements %left_result, %right_result : vector<2xbf16>
+  template.return %result : vector<2xbf16>
+}
+
+// One workgroup owns a head, one thread both channels of a half-split pair.
+// Capturing both pair values before either store permits in-place advancement.
+// Normalization rounds before scaling; all rotary operands/results use BF16.
+template.def<@attention.normalize_half_rotary_bf16> device @normalize_half_rotary_bf16(%tokens: index, %heads: index, %width: index, %epsilon: f32, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %two = index.constant 2 : index
+  %rows = index.mul %tokens, %heads : index
+  %threads = index.div %width, %two : index
+  %row = kernel.workgroup.id<x> : index
+  %left = kernel.workitem.id<x> : index
+  %right = index.add %left, %threads : index
+  %token = index.div %row, %heads : index
+  %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%width]xbf16>
+  %cosine_view = buffer.view %cosine[%origin] : buffer -> view<[%tokens]x[%width]xbf16>
+  %sine_view = buffer.view %sine[%origin] : buffer -> view<[%tokens]x[%width]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %left_input = view.load %input_view[%row, %left] : view<[%rows]x[%width]xbf16> -> bf16
+  %right_input = view.load %input_view[%row, %right] : view<[%rows]x[%width]xbf16> -> bf16
+  %left_weight = view.load %weight_view[%left] : view<[%width]xbf16> -> bf16
+  %right_weight = view.load %weight_view[%right] : view<[%width]xbf16> -> bf16
+  %left_norm = template.apply<@normalization.scaled_bf16>(%left_input, %left_weight, %inverse) : (bf16, bf16, f32) -> (bf16)
+  %right_norm = template.apply<@normalization.scaled_bf16>(%right_input, %right_weight, %inverse) : (bf16, bf16, f32) -> (bf16)
+  %left_cosine = view.load %cosine_view[%token, %left] : view<[%tokens]x[%width]xbf16> -> bf16
+  %right_cosine = view.load %cosine_view[%token, %right] : view<[%tokens]x[%width]xbf16> -> bf16
+  %left_sine = view.load %sine_view[%token, %left] : view<[%tokens]x[%width]xbf16> -> bf16
+  %right_sine = view.load %sine_view[%token, %right] : view<[%tokens]x[%width]xbf16> -> bf16
+  %pair = template.apply<@attention.half_pair_bf16>(%left_norm, %right_norm, %left_cosine, %right_cosine, %left_sine, %right_sine) : (bf16, bf16, bf16, bf16, bf16, bf16) -> (vector<2xbf16>)
+  %left_output = vector.extract %pair[0] : vector<2xbf16> -> bf16
+  %right_output = vector.extract %pair[1] : vector<2xbf16> -> bf16
+  view.store %left_output, %output_view[%row, %left] : bf16, view<[%rows]x[%width]xbf16>
+  view.store %right_output, %output_view[%row, %right] : bf16, view<[%rows]x[%width]xbf16>
+  template.return
+}
+
+template.def<@attention.half_rotary_bf16> device @half_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %two = index.constant 2 : index
+  %rows = index.mul %tokens, %heads : index
+  %half = index.div %width, %two : index
+  %row = kernel.workgroup.id<x> : index
+  %left = kernel.workitem.id<x> : index
+  %right = index.add %left, %half : index
+  %token = index.div %row, %heads : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %cosine_view = buffer.view %cosine[%origin] : buffer -> view<[%tokens]x[%width]xbf16>
+  %sine_view = buffer.view %sine[%origin] : buffer -> view<[%tokens]x[%width]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %left_input = view.load %input_view[%row, %left] : view<[%rows]x[%width]xbf16> -> bf16
+  %right_input = view.load %input_view[%row, %right] : view<[%rows]x[%width]xbf16> -> bf16
+  %left_cosine = view.load %cosine_view[%token, %left] : view<[%tokens]x[%width]xbf16> -> bf16
+  %right_cosine = view.load %cosine_view[%token, %right] : view<[%tokens]x[%width]xbf16> -> bf16
+  %left_sine = view.load %sine_view[%token, %left] : view<[%tokens]x[%width]xbf16> -> bf16
+  %right_sine = view.load %sine_view[%token, %right] : view<[%tokens]x[%width]xbf16> -> bf16
+  %pair = template.apply<@attention.half_pair_bf16>(%left_input, %right_input, %left_cosine, %right_cosine, %left_sine, %right_sine) : (bf16, bf16, bf16, bf16, bf16, bf16) -> (vector<2xbf16>)
+  %left_output = vector.extract %pair[0] : vector<2xbf16> -> bf16
+  %right_output = vector.extract %pair[1] : vector<2xbf16> -> bf16
+  view.store %left_output, %output_view[%row, %left] : bf16, view<[%rows]x[%width]xbf16>
+  view.store %right_output, %output_view[%row, %right] : bf16, view<[%rows]x[%width]xbf16>
   template.return
 }

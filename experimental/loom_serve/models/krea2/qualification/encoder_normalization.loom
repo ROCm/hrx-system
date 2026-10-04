@@ -1,0 +1,147 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @qualify.encoder_layer : %value: index where [range(%value, 0, 34)]
+amdgpu.target<gfx11-generic> @encoder_observation_wave32 {subgroup_size = 32}
+template.decl @normalization.scaled_rows_bf16(%rows: index, %width: index, %threads: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @attention.half_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+command.program.decl @krea2.encoder_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.encoder_query_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+command.program.decl @krea2.encoder_key_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+
+command.program.def public @qualify.encoder_norm1() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_norm1[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_norm2() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_norm2[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+// The unfused boundaries exist only for numerical observation.
+kernel.def target(@encoder_observation_wave32) @encoder_query_norm() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 32 : index
+  %rows = index.mul %tokens, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 32 : index
+  %rows = index.mul %tokens, %heads : index
+  %width = index.constant 128 : index
+  %threads = index.constant 64 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  template.apply<@normalization.scaled_rows_bf16>(%rows, %width, %threads, %epsilon, %input, %weight, %output) : (index, index, index, f32, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_observation_wave32) @encoder_query_rotate() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 32 : index
+  %rows = index.mul %tokens, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 32 : index
+  %width = index.constant 128 : index
+  template.apply<@attention.half_rotary_bf16>(%tokens, %heads, %width, %input, %cosine, %sine, %output) : (index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @qualify.encoder_query_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.q_norm.weight"[%layer] : view<128xbf16>
+  kernel.launch @encoder_query_norm(%input, %weight, %output) : (buffer, view<128xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_query_rotate() launch(%input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  kernel.launch @encoder_query_rotate(%input, %cosine, %sine, %output) : (buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_query_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_query_rotary[%layer](%parameters, %input, %cosine, %sine, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// The unfused boundaries exist only for numerical observation.
+kernel.def target(@encoder_observation_wave32) @encoder_key_norm() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 8 : index
+  %rows = index.mul %tokens, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 8 : index
+  %rows = index.mul %tokens, %heads : index
+  %width = index.constant 128 : index
+  %threads = index.constant 64 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  template.apply<@normalization.scaled_rows_bf16>(%rows, %width, %threads, %epsilon, %input, %weight, %output) : (index, index, index, f32, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_observation_wave32) @encoder_key_rotate() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 8 : index
+  %rows = index.mul %tokens, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 8 : index
+  %width = index.constant 128 : index
+  template.apply<@attention.half_rotary_bf16>(%tokens, %heads, %width, %input, %cosine, %sine, %output) : (index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @qualify.encoder_key_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.k_norm.weight"[%layer] : view<128xbf16>
+  kernel.launch @encoder_key_norm(%input, %weight, %output) : (buffer, view<128xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_key_rotate() launch(%input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  kernel.launch @encoder_key_rotate(%input, %cosine, %sine, %output) : (buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.encoder_key_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %layer = config.get @qualify.encoder_layer : index
+  command.program.launch @krea2.encoder_key_rotary[%layer](%parameters, %input, %cosine, %sine, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

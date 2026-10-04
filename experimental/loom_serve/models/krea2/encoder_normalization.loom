@@ -1,0 +1,94 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @encoder_normalization_wave32 {subgroup_size = 32}
+template.decl @normalization.scaled_rows_bf16(%rows: index, %width: index, %threads: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @attention.normalize_half_rotary_bf16(%tokens: index, %heads: index, %width: index, %epsilon: f32, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+
+// Text features exclude 34 prefix positions. Rounding the full encoder extent
+// to 16-row tiles adds another fourteen masked, discarded trailing positions.
+kernel.def target(@encoder_normalization_wave32) @encoder_hidden_norm() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%tokens, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %width = index.constant 2560 : index
+  %threads = index.constant 256 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  template.apply<@normalization.scaled_rows_bf16>(%tokens, %width, %threads, %epsilon, %input, %weight, %output) : (index, index, index, f32, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_normalization_wave32) @encoder_query_rotary() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 32 : index
+  %rows = index.mul %tokens, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 32 : index
+  %width = index.constant 128 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  template.apply<@attention.normalize_half_rotary_bf16>(%tokens, %heads, %width, %epsilon, %input, %weight, %cosine, %sine, %output) : (index, index, index, f32, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@encoder_normalization_wave32) @encoder_key_rotary() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 8 : index
+  %rows = index.mul %tokens, %heads : index
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %heads = index.constant 8 : index
+  %width = index.constant 128 : index
+  %epsilon = scalar.constant 0.000001 : f32
+  template.apply<@attention.normalize_half_rotary_bf16>(%tokens, %heads, %width, %epsilon, %input, %weight, %cosine, %sine, %output) : (index, index, index, f32, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.encoder_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.input_layernorm.weight"[%layer] : view<2560xbf16>
+  kernel.launch @encoder_hidden_norm(%input, %weight, %output) : (buffer, view<2560xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.post_attention_layernorm.weight"[%layer] : view<2560xbf16>
+  kernel.launch @encoder_hidden_norm(%input, %weight, %output) : (buffer, view<2560xbf16>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_query_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.q_norm.weight"[%layer] : view<128xbf16>
+  kernel.launch @encoder_query_rotary(%input, %weight, %cosine, %sine, %output) : (buffer, view<128xbf16>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.encoder_key_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.layers.{}.self_attn.k_norm.weight"[%layer] : view<128xbf16>
+  kernel.launch @encoder_key_rotary(%input, %weight, %cosine, %sine, %output) : (buffer, view<128xbf16>, buffer, buffer, buffer)
+  command.return
+}

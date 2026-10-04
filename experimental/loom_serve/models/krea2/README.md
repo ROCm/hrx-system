@@ -1328,3 +1328,36 @@ The selected text-only dependency set contains 386 tensors occupying
 dependency boundary, not a native encoder or serving result. The capture
 retains 139,501,362 bytes of primitive/request fixtures plus a small manifest;
 the full tap result and checkpoints are reused, not duplicated on disk.
+
+### Native encoder normalization and rotary
+
+[`encoder_normalization.loom`](encoder_normalization.loom) provides the two
+hidden-state norms and fused Q/K head normalization plus half-split rotation.
+Its shared motifs receive shapes, epsilon and buffers as SSA operands; only
+the concrete leaves know model configuration and checkpoint names. The
+normalized value rounds to BF16 before scale multiplication, and each rotary
+product and sum retains its BF16 boundary. A thread owns both channels of a
+half-split pair. Each leaf uses one dispatch and no global workspace.
+
+The physical encoder extent is derived as `text_tokens + 48`: 34 prefix rows
+plus 14 trailing rows for the dense kernels' 16-row tile. Those extra keys are
+masked and discarded; the model's middle padding and live suffix stay intact.
+There is no independent encoder-length setting.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_encoder_normalization.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --reference=/path/to/new-encoder-reference \
+  --output=/path/to/new-encoder-normalization-results
+```
+
+Qualification uses real layer-0 and layer-34 tensors at 64 and 560 physical
+rows. Independent F64 primitives passed 48 comparisons over 38,338,560 values;
+24 differed in BF16 bits, with no value outside the unchanged elementwise
+envelope and no nonfinite result. Fused execution matched separately staged
+native normalization and rotation exactly in 16 comparisons over 12,779,520
+values. Both executions of every case are checked. This establishes the
+arithmetic leaves, not causal attention, a complete encoder or prompt serving.
+The driver retains one overwritten fixture plus final Q/K results, below
+96 MiB, without duplicating checkpoints.

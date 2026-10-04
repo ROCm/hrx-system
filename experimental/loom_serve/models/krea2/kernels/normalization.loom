@@ -7,6 +7,8 @@
 template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32)
 template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
 template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @normalization.scaled_bf16(%value: bf16, %weight: bf16, %inverse: f32) -> (bf16)
+template.decl @normalization.scaled_rows_bf16(%rows: index, %width: index, %threads: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @modulation.affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16)
 template.decl @modulation.combine_bf16(%value: bf16, %table: f32) -> (bf16)
 
@@ -64,6 +66,38 @@ template.def<@normalization.zero_centered_rows_bf16> device @normalization_zero_
     %value = view.load %input_view[%row, %column] : view<[%rows]x[%width]xbf16> -> bf16
     %scale = view.load %weight_view[%column] : view<[%width]xf32> -> f32
     %result = template.apply<@normalization.zero_centered_bf16>(%value, %scale, %inverse) : (bf16, f32, f32) -> (bf16)
+    view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x[%width]xbf16>
+  }
+  template.return
+}
+
+// Scaled RMS rounds the normalized value before multiplying the BF16 weight.
+// There is no zero-centered scale offset.
+template.def<@normalization.scaled_bf16> device @normalization_scaled_bf16(%value: bf16, %weight: bf16, %inverse: f32) -> (bf16) {
+  %input = scalar.extf %value : bf16 to f32
+  %normalized_f32 = scalar.mulf %input, %inverse : f32
+  %normalized = scalar.fptrunc %normalized_f32 : f32 to bf16
+  %rounded = scalar.extf %normalized : bf16 to f32
+  %scale = scalar.extf %weight : bf16 to f32
+  %scaled = scalar.mulf %rounded, %scale : f32
+  %result = scalar.fptrunc %scaled : f32 to bf16
+  template.return %result : bf16
+}
+
+// One workgroup owns one complete row. The row reduction finishes before
+// any output write, allowing source-owned input/output storage to coincide.
+template.def<@normalization.scaled_rows_bf16> device @normalization_scaled_rows_bf16(%rows: index, %width: index, %threads: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%width]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  scf.for %column = [%lane to %width step %threads] {
+    %value = view.load %input_view[%row, %column] : view<[%rows]x[%width]xbf16> -> bf16
+    %scale = view.load %weight_view[%column] : view<[%width]xbf16> -> bf16
+    %result = template.apply<@normalization.scaled_bf16>(%value, %scale, %inverse) : (bf16, bf16, f32) -> (bf16)
     view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x[%width]xbf16>
   }
   template.return

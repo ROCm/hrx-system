@@ -9,3 +9,4 @@ config.def @krea2.step_index = 0 : index
 config.def @qualify.vae_block = 0 : index
 config.def @qualify.vae_ordinal = 1 : index
 config.def @qualify.fusion_layer = 0 : index
+config.def @qualify.encoder_layer = 0 : index
