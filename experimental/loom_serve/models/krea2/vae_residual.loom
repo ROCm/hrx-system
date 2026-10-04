@@ -1,0 +1,124 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+amdgpu.target<gfx11-generic> @vae_residual_wave32 {subgroup_size = 32}
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+template.decl @image.channel_norm_silu_f32(%pixels: index, %channels: index, %input: buffer, %weight: buffer, %output: buffer)
+command.program.decl @vae_input() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
+
+kernel.def target(@vae_residual_wave32) @krea_vae_mid_norm() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %channels = index.constant 384 : index
+  template.apply<@image.channel_norm_silu_f32>(%pixels, %channels, %input, %weight, %output) : (index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_residual_wave32) @krea_vae_mid_convolution() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %channels = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %channels, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %channels = index.constant 384 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %channels, %channels, %three, %three, %one, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_residual_wave32) @krea_vae_mid_convolution_add() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %channels = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %channels, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %channels = index.constant 384 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %add_residual = scalar.constant true : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %channels, %channels, %three, %three, %one, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.vae_mid_norm(%block: index, %ordinal: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.mid_block.resnets.{}.norm{}.gamma"[%block, %ordinal] : view<384x1x1x1xf32>
+  kernel.launch @krea_vae_mid_norm(%input, %weight, %output) : (buffer, view<384x1x1x1xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_mid_convolution(%block: index, %ordinal: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.mid_block.resnets.{}.conv{}.weight"[%block, %ordinal] : view<384x384x3x3x3xf32>
+  %bias = command.parameter %parameters, "decoder.mid_block.resnets.{}.conv{}.bias"[%block, %ordinal] : view<384xf32>
+  kernel.launch @krea_vae_mid_convolution(%input, %weight, %bias, %output) : (buffer, view<384x384x3x3x3xf32>, view<384xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_mid_convolution_add(%block: index) launch(%parameters: buffer, %input: buffer, %residual: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.mid_block.resnets.{}.conv2.weight"[%block] : view<384x384x3x3x3xf32>
+  %bias = command.parameter %parameters, "decoder.mid_block.resnets.{}.conv2.bias"[%block] : view<384xf32>
+  kernel.launch @krea_vae_mid_convolution_add(%input, %weight, %bias, %residual, %output) : (buffer, view<384x384x3x3x3xf32>, view<384xf32>, buffer, buffer)
+  command.return
+}
+
+// The last convolution fuses the skip addition and may write back into input.
+// Its spatial input is the separate second-normalization buffer, so original
+// input reads have completed before the only original-state writer executes.
+command.program.def public @krea2.vae_mid_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %pixel_bytes = index.constant 1536 : offset
+  %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %bytes : buffer
+  %convolved = buffer.alloca<global> align(256) %bytes : buffer
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  command.program.launch @krea2.vae_mid_norm[%block, %one](%parameters, %input, %normalized) : [index, index](buffer, buffer, buffer)
+  command.program.launch @krea2.vae_mid_convolution[%block, %one](%parameters, %normalized, %convolved) : [index, index](buffer, buffer, buffer)
+  command.program.launch @krea2.vae_mid_norm[%block, %two](%parameters, %convolved, %convolved) : [index, index](buffer, buffer, buffer)
+  command.program.launch @krea2.vae_mid_convolution_add[%block](%parameters, %convolved, %input, %output) : [index](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+// The first full residual consumes the native input path directly and reuses
+// the caller's feature storage. Its input producers precede its in-place write.
+command.program.def public @vae_input_residual() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer) {
+  %block = index.constant 0 : index
+  command.program.launch @vae_input(%parameters, %input, %affine, %output) : (buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.vae_mid_residual[%block](%parameters, %output, %output) : [index](buffer, buffer, buffer)
+  command.return
+}

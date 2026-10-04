@@ -4,13 +4,15 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
 // One lane owns a spatial output and one workgroup row owns an output channel.
 // Original OI(T)HW weights stay F32; a fresh causal frame uses only the final
 // temporal plane. Nearest upsampling is an input-index transform, not a copy.
 // Concrete callers supply odd spatial extent, positive geometry and scale.
-template.def<@image.convolution_nchw_f32> device @image_convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+// The optional residual addition follows the rounded bias addition; output
+// may alias residual, but not the spatial convolution input.
+template.def<@image.convolution_nchw_f32> device @image_convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %two = index.constant 2 : index
@@ -61,7 +63,15 @@ template.def<@image.convolution_nchw_f32> device @image_convolution_nchw_f32(%he
       scf.yield %rows : f32
     }
     %offset = view.load %bias_view[%channel] : view<[%outputs]xf32> -> f32
-    %result = scalar.addf %sum, %offset : f32
+    %biased = scalar.addf %sum, %offset : f32
+    %result = scf.if %add_residual -> (f32) {
+      %residual_view = buffer.view %residual[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
+      %skip = view.load %residual_view[%channel, %pixel] : view<[%outputs]x[%pixels]xf32> -> f32
+      %combined = scalar.addf %biased, %skip : f32
+      scf.yield %combined : f32
+    } else {
+      scf.yield %biased : f32
+    }
     view.store %result, %output_view[%channel, %pixel] : f32, view<[%outputs]x[%pixels]xf32>
   }
   template.return

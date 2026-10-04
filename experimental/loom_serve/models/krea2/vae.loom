@@ -8,7 +8,7 @@ config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), 
 config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
 amdgpu.target<gfx11-generic> @vae_wave32 {subgroup_size = 32}
 template.decl @image.unpack_affine_bf16_f32(%height: index, %width: index, %channels: index, %input: buffer, %affine: buffer, %output: buffer)
-template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
 kernel.def target(@vae_wave32) @krea_vae_unpack() {
   %height = config.get @krea2.latent_height : index
@@ -50,7 +50,8 @@ kernel.def target(@vae_wave32) @krea_vae_post_quant() {
   %width = config.get @krea2.latent_width : index
   %channels = index.constant 16 : index
   %one = index.constant 1 : index
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %channels, %channels, %one, %one, %one, %input, %weight, %bias, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %channels, %channels, %one, %one, %one, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -72,7 +73,8 @@ kernel.def target(@vae_wave32) @krea_vae_conv_in() {
   %outputs = index.constant 384 : index
   %one = index.constant 1 : index
   %three = index.constant 3 : index
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %three, %three, %one, %input, %weight, %bias, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  %add_residual = scalar.constant false : i1
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %three, %three, %one, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 

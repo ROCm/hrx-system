@@ -6,3 +6,5 @@
 
 config.def @krea2.block_index = 0 : index
 config.def @krea2.step_index = 0 : index
+config.def @qualify.vae_block = 0 : index
+config.def @qualify.vae_ordinal = 1 : index

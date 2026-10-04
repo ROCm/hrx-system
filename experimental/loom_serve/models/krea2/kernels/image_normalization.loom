@@ -1,0 +1,53 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @image.channel_norm_silu_f32(%pixels: index, %channels: index, %input: buffer, %weight: buffer, %output: buffer)
+
+// Channel-first L2 normalization scaled by sqrt(channels) and learned gamma,
+// followed by SiLU without an intermediate tensor.
+// Epsilon clamps the norm itself, not its square. Each lane owns one pixel;
+// it finishes the reduction before stores, so exact input/output aliasing is safe.
+template.def<@image.channel_norm_silu_f32> device @image_channel_norm_silu_f32(%pixels: index, %channels: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %pixel = index.madd %group, %threads, %lane : index
+  %zero_f32 = scalar.constant 0.0 : f32
+  %one_f32 = scalar.constant 1.0 : f32
+  %epsilon = scalar.constant 0.000000000001 : f32
+  %channels_i32 = index.cast %channels : index to i32
+  %channels_f32 = scalar.uitofp %channels_i32 : i32 to f32
+  %scale = scalar.sqrtf %channels_f32 : f32
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%channels]x[%pixels]xf32>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%channels]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%channels]x[%pixels]xf32>
+  %live = index.cmp ult, %pixel, %pixels : index
+  scf.if %live {
+    %squared = scf.for %channel = [%zero to %channels step %one](%acc = %zero_f32 : f32) -> (f32) {
+      %value = view.load %input_view[%channel, %pixel] : view<[%channels]x[%pixels]xf32> -> f32
+      %next = scalar.fmaf %value, %value, %acc : f32
+      scf.yield %next : f32
+    }
+    %length = scalar.sqrtf %squared : f32
+    %denominator = scalar.maxnumf %length, %epsilon : f32
+    scf.for %channel = [%zero to %channels step %one] {
+      %value = view.load %input_view[%channel, %pixel] : view<[%channels]x[%pixels]xf32> -> f32
+      %gamma = view.load %weight_view[%channel] : view<[%channels]xf32> -> f32
+      %normalized = scalar.divf %value, %denominator : f32
+      %scaled = scalar.mulf %normalized, %scale : f32
+      %affine = scalar.mulf %scaled, %gamma : f32
+      %negative = scalar.negf %affine : f32
+      %exponential = scalar.expf<afn> %negative : f32
+      %divisor = scalar.addf %one_f32, %exponential : f32
+      %result = scalar.divf %affine, %divisor : f32
+      view.store %result, %output_view[%channel, %pixel] : f32, view<[%channels]x[%pixels]xf32>
+    }
+  }
+  template.return
+}

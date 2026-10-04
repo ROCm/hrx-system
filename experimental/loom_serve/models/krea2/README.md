@@ -905,3 +905,41 @@ the pinned CPU/F32 prefix is 2.16e-7 for base and 2.14e-7 for LoRA; maximum
 absolute error is 8.35e-7 for both. This establishes the native decoder input
 boundary, not residual blocks, spatial attention, upsampling stages, or RGB
 output. Regenerable qualification tensors occupy less than 64 MiB.
+
+### Fused VAE residual and in-place prefix
+
+[`vae_residual.loom`](vae_residual.loom) adds the first middle residual block.
+Channel normalization clamps the L2 norm at `1e-12`, multiplies by
+`sqrt(channels)` and learned gamma, and fuses SiLU without a normalized
+intermediate tensor. This is distinct from the DiT's zero-centered RMSNorm.
+The last convolution retains the F32 bias rounding before adding the skip.
+
+The residual uses two feature-sized temporaries. Its second normalization is
+in-place, and its final write may alias the original residual because every
+earlier original-state reader has completed. `vae_input_residual` exercises
+that ownership by running the native input path and advancing the caller's
+feature buffer in place, in one command.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_residual.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --input_results=/path/to/vae-input-results \
+  --output=/path/to/new-vae-residual-results
+```
+
+At 2x6 and 48x48, both base/LoRA feature inputs pass all 56 repeated
+comparisons over 24,901,632 values. Primitive normalization/convolution checks
+use independent F64 arithmetic; fused skip addition, the residual command, and
+the entire in-place prefix match staged native output bit-for-bit. The full
+prefix has six unique kernels, ten parameters occupying 32,523,008 bytes, and
+7,372,800 bytes of transient workspace. The residual itself needs 6.75 MiB.
+
+For the 48x48 first residual, relative L2 against the independent F64 chain
+is 8.57e-7 base and 8.75e-7 LoRA, below the fixed 2e-5 accumulated bound.
+The corresponding CPU/F32 reference is closer to F64; native accuracy here
+is sufficient for the bounded block gate, not a claim of superior precision.
+The input-path regression retains all 64 passing comparisons and unchanged
+feature bits. Spatial attention, the remaining residual/upsampling stages,
+and final RGB remain outside this prefix. Residual fixtures occupy less than
+192 MiB and can be regenerated from the retained input results.
