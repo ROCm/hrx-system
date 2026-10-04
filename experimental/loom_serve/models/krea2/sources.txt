@@ -36,3 +36,4 @@ kernels/segmented_attention.loom
 text_fusion.loom
 kernels/layer_mix.loom
 encoder_normalization.loom
+encoder_attention.loom

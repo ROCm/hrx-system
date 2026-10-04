@@ -1361,3 +1361,36 @@ values. Both executions of every case are checked. This establishes the
 arithmetic leaves, not causal attention, a complete encoder or prompt serving.
 The driver retains one overwritten fixture plus final Q/K results, below
 96 MiB, without duplicating checkpoints.
+
+### Native causal encoder attention
+
+[`encoder_attention.loom`](encoder_attention.loom) specializes the shared
+128-channel GQA motif for 32 query heads and eight KV heads. A compile-time
+causal operand selects sequence-order masking and bounds key work by the
+query tile; it adds no device ABI argument. Physical buffer bounds and causal
+visibility are separate predicates. The encoder centers logits against its
+valid prefix key, while noncausal callers retain their original final-key
+centering. Online softmax needs neither a global score matrix nor replicated
+KV heads. The command uses one kernel and zero global workspace.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_encoder_attention.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --reference=/path/to/new-encoder-reference \
+  --normalization_results=/path/to/new-encoder-normalization-results \
+  --output=/path/to/new-encoder-attention-results
+```
+
+Real layer-0/layer-34 Q/K/V at 64 and 560 rows passed 16 independent F64
+comparisons over 20,447,232 values, with no nonfinite or out-of-envelope
+result. Replacing masked K/V with nonzero values leaves all outputs bitwise
+exact: eight comparisons over 10,223,616 values. Perturbing future K/V inside
+a key tile leaves the earlier prefix exact in four captured comparisons over
+344,064 values, while changing later outputs. The full case retains the
+canonical middle padding, live suffix and partial final key tile. These are
+arithmetic and isolation checks, not an encoder throughput measurement.
+
+The shared-motif extension also reproduces the retained noncausal DiT results
+bit-for-bit at 16, 80 and 1088 rows, base and active adapter, both ungated and
+gated. The complete 512-row adapted text-refiner block remains bitwise exact.

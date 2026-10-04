@@ -1,0 +1,40 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @encoder_attention_wave64 {subgroup_size = 64}
+template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
+template.decl @attention.store_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %output: buffer)
+
+kernel.def target(@encoder_attention_wave64) @encoder_attention() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %tile = index.constant 16 : index
+  %groups = index.div %tokens, %tile : index
+  %heads = index.constant 32 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %heads, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %tokens = index.add %texts, %padding : index
+  %query_heads = index.constant 32 : index
+  %key_value_heads = index.constant 8 : index
+  %causal = scalar.constant true : i1
+  %result = template.apply<@attention.masked_gqa_128_bf16>(%tokens, %query_heads, %key_value_heads, %causal, %query, %key, %value, %mask) : (index, index, index, i1, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
+  template.apply<@attention.store_128_bf16>(%tokens, %query_heads, %result, %output) : (index, index, vector<8xbf16>, buffer)
+  kernel.return
+}
+
+// Inputs are token-major Q32/KV8 with 128 channels per head. The mask has one
+// byte per physical row, including trailing tile padding. Prefix row zero is
+// valid; each query can read only valid keys at or before its sequence index.
+command.program.def public @krea2.encoder_attention() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
+  kernel.launch @encoder_attention(%query, %key, %value, %mask, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

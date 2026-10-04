@@ -14,7 +14,7 @@ template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vec
 template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 template.decl @activation.silu_bf16(%value: bf16) -> (bf16)
 template.decl @attention.segmented_128_bf16(%rows: index, %length: index, %heads: index, %row: index, %head: index, %query: buffer, %key: buffer, %value: buffer) -> (vector<4xbf16>)
-template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
+template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
 template.decl @attention.store_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %output: buffer)
 template.decl @attention.gate_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %gate: buffer) -> (vector<8xbf16>)
 
@@ -543,7 +543,8 @@ kernel.def target(@fusion_wave64) @fusion_refiner_attention_gated() {
 } launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
   %rows = config.get @krea2.text_tokens : index
   %heads = index.constant 20 : index
-  %result = template.apply<@attention.masked_gqa_128_bf16>(%rows, %heads, %heads, %query, %key, %value, %mask) : (index, index, index, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
+  %causal = scalar.constant false : i1
+  %result = template.apply<@attention.masked_gqa_128_bf16>(%rows, %heads, %heads, %causal, %query, %key, %value, %mask) : (index, index, index, i1, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
   %gated = template.apply<@attention.gate_128_bf16>(%rows, %heads, %result, %gate) : (index, index, vector<8xbf16>, buffer) -> (vector<8xbf16>)
   template.apply<@attention.store_128_bf16>(%rows, %heads, %gated, %output) : (index, index, vector<8xbf16>, buffer)
   kernel.return
