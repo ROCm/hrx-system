@@ -50,7 +50,8 @@ typedef struct loom_link_plan_materialization_t {
   // Dense concrete source-definition ordinals indexed by target module symbol
   // ID at the end of linking. A target assembled from a declaration and
   // definition names the definition selected by the plan. Declarations
-  // without an indexed provider and synthetic symbols contain
+  // without an indexed provider, synthetic symbols, and config values merged
+  // from potentially multiple identical definitions contain
   // LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL. Downstream transforms may append
   // symbols while preserving this stable linked prefix. Storage belongs to the
   // caller's arena.

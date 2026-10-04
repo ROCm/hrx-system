@@ -107,3 +107,30 @@ config.decl @constant_only_predicate : %value: index where [eq(4, 4)]
 // ====
 
 config.decl @valid_predicate_domain : %value: i8 where [range(%value, -128, 127)]
+
+// ====
+
+// Definitions carry the same self-value domain as declarations.
+// ERROR@+1: STRUCTURE/032 {op_name="config.def", field_name="predicates[0].arg[0]", required_origin="the declared config value"}
+config.def @constant_only_predicate = 4 : %value: index where [eq(4, 4)]
+
+// ====
+
+// ERROR@+1: TYPE/003 "predicates[0].arg[0]" "f32" "integer, index, or offset scalar"
+config.def @bad_float_predicate = 1.0 : %value: f32 where [range(%value, 0, 4)]
+
+// ====
+
+// ERROR@+1: STRUCTURE/014 "value" "99" "violates constraint 'range'"
+config.def @bad_default = 99 : %value: index where [range(%value, 1, 8)]
+
+// ====
+
+// ERROR@+1: STRUCTURE/014 "value" "7" "violates constraint 'mul'"
+config.def @bad_multiple = 7 : %value: i32 where [mul(%value, 4)]
+
+// ====
+
+config.def @valid_signed = -8 : %value: i8 where [range(%value, -16, 16)]
+
+config.def @valid_flag = true : %value: i1 where [eq(%value, 1)]

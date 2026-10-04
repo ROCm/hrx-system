@@ -987,8 +987,9 @@ config.decl @model36.model.hidden_size : %value: index where [range(%value, 1, 8
   Verify(linked);
 
   std::string text = Print(linked);
-  EXPECT_NE(text.find("config.def @model36.model.hidden_size = 4096 : index"),
+  EXPECT_NE(text.find("config.def @model36.model.hidden_size = 4096 :"),
             std::string::npos);
+  EXPECT_NE(text.find("where [range("), std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
 }

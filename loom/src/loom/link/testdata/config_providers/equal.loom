@@ -1,0 +1,1 @@
+config.def @count = 8 : %value: index where [pow2(%value)]

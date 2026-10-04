@@ -153,7 +153,8 @@ iree_status_t loom_tooling_config_set_append_json_file(
 
 // Replaces matching config.decl/config.def symbol ops with config.def ops whose
 // initializer attributes are parsed from |options->config_set|. Bindings
-// without matching config symbols are ignored.
+// without matching config symbols are ignored. Both declarations and resolved
+// definitions retain their constraints across successful replacements.
 //
 // This is intentionally a direct module operation rather than a pass. Tooling
 // should call it immediately after loading and, when requested, initially
@@ -174,6 +175,8 @@ iree_status_t loom_tooling_config_materialize_module(
 // operations are rejected. Definitions without matching config symbols in the
 // target module are ignored so one reusable config module can serve several
 // related programs.
+// Only initializer values are overlaid; the target's requirements are retained
+// rather than replaced or extended by the config module's own constraints.
 iree_status_t loom_tooling_config_overlay_module(
     loom_module_t* module, const loom_module_t* config_module,
     loom_tooling_config_binding_sink_t binding_sink,

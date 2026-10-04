@@ -4,7 +4,7 @@
 // while retaining config-specific symbol interfaces after materialization.
 config.decl @model36.model.max_context : %value: index where [range(%value, 1, 131072)]
 
-config.def @model36.model.hidden_size = 2048 : index
+config.def @model36.model.hidden_size = 2048 : %value: index where [range(%value, 256, 8192), mul(%value, 256)]
 
 config.def @model36.quant.dense_schema = #encoding.i8<payload_elements=32> : encoding<schema>
 

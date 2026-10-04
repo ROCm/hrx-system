@@ -1243,6 +1243,32 @@ static iree_status_t loom_link_plan_expand_facet(
   if (work_item.expansion_mode == LOOM_LINK_PLAN_FACET_EXPANSION_NONE) {
     return iree_ok_status();
   }
+  if (iree_all_bits_set(symbol->flags, LOOM_LINK_SYMBOL_FLAG_CONFIG |
+                                           LOOM_LINK_SYMBOL_FLAG_DECLARATION)) {
+    // Config providers have global identity without export syntax. Preserve
+    // every matching definition so the value-contract merger can check
+    // equality, type compatibility, and the declaration's predicates.
+    const loom_link_plan_live_cause_t cause = {
+        .reason = LOOM_LINK_PLAN_LIVE_DEPENDENCY,
+        .symbol_plan_ordinal = facet.symbol_plan_ordinal,
+        .facet_plan_ordinal = facet_plan_ordinal,
+        .root_name = iree_string_view_empty(),
+    };
+    const loom_link_module_index_symbol_t* candidate =
+        loom_link_module_index_lookup_name(plan->index, symbol->name);
+    iree_status_t status = iree_ok_status();
+    while (candidate && iree_status_is_ok(status)) {
+      if (loom_link_plan_symbol_satisfies_declaration_interface(symbol,
+                                                                candidate) &&
+          !loom_link_plan_symbol_is_stripped(options, plan, candidate)) {
+        status = loom_link_plan_select_required_symbol(
+            plan, options, candidate, cause,
+            /*out_new_symbol_plan_ordinal=*/NULL);
+      }
+      candidate = loom_link_module_index_next_same_name(plan->index, candidate);
+    }
+    IREE_RETURN_IF_ERROR(status);
+  }
   if (work_item.expansion_mode == LOOM_LINK_PLAN_FACET_EXPANSION_COMPLETE) {
     const iree_host_size_t primary_facet_ordinal =
         plan->symbols.values[facet.symbol_plan_ordinal]

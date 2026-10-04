@@ -23,6 +23,8 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/link/module_index.h"
+#include "loom/link/testdata/config_providers_testdata.h"
+#include "loom/ops/config/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/ops/op_registry.h"
 #include "loom/ops/test/ops.h"
@@ -44,6 +46,17 @@ enum class ProviderForm {
   kText,
   kBytecode,
 };
+
+static iree_string_view_t ConfigFixture(iree_string_view_t name) {
+  const auto* files = loom_link_config_providers_testdata_create();
+  for (size_t i = 0; i < loom_link_config_providers_testdata_size(); ++i) {
+    if (iree_string_view_equal(iree_make_cstring_view(files[i].name), name)) {
+      return iree_make_string_view(files[i].data, files[i].size);
+    }
+  }
+  ADD_FAILURE() << "config fixture not embedded";
+  return iree_string_view_empty();
+}
 
 class LinkIndexMaterializerTest : public ::testing::Test {
  protected:
@@ -1568,6 +1581,118 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     }
 
     loom_link_index_materialization_deinitialize(&materialization);
+  }
+}
+
+TEST_F(LinkIndexMaterializerTest, ConfigProvidersPreserveValuesAndConstraints) {
+  const auto requester_source = ConfigFixture(IREE_SV("requester.loom"));
+  const auto defaults_source = ConfigFixture(IREE_SV("defaults.loom"));
+  const auto equal_source = ConfigFixture(IREE_SV("equal.loom"));
+  auto* requester = Parse(requester_source, IREE_SV("requester.loom"));
+  auto* defaults = Parse(defaults_source, IREE_SV("defaults.loom"));
+  auto* equal = Parse(equal_source, IREE_SV("equal.loom"));
+  const auto requester_bytecode = WriteModule(requester);
+  const auto defaults_bytecode = WriteModule(defaults);
+  const auto equal_bytecode = WriteModule(equal);
+  for (auto requester_form : {ProviderForm::kMaterialized, ProviderForm::kText,
+                              ProviderForm::kBytecode}) {
+    for (auto provider_form : {ProviderForm::kMaterialized, ProviderForm::kText,
+                               ProviderForm::kBytecode}) {
+      for (bool overlay_request : {false, true}) {
+        IndexPtr library = CreateIndex();
+        if (!overlay_request) {
+          AddProvider(library.get(), requester_form, requester_source,
+                      requester, requester_bytecode, IREE_SV("requester"),
+                      LOOM_LINK_PROVIDER_ROLE_INPUT);
+        }
+        AddProvider(library.get(), provider_form, defaults_source, defaults,
+                    defaults_bytecode, IREE_SV("defaults"),
+                    LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+        AddProvider(library.get(), provider_form, equal_source, equal,
+                    equal_bytecode, IREE_SV("equal"),
+                    LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+        IndexPtr overlay;
+        if (overlay_request) {
+          loom_link_module_index_t* index = nullptr;
+          IREE_ASSERT_OK(loom_link_module_index_allocate_overlay(
+              library.get(), &block_pool_, iree_allocator_system(), &index));
+          overlay.reset(index);
+          AddProvider(overlay.get(), requester_form, requester_source,
+                      requester, requester_bytecode, IREE_SV("requester"),
+                      LOOM_LINK_PROVIDER_ROLE_INPUT);
+        }
+        const auto* index = overlay ? overlay.get() : library.get();
+        auto linked = Materialize(index, IREE_SV("entry"));
+        auto* module = linked.product.module;
+        Verify(module);
+        const auto* count = FindSymbol(module, IREE_SV("count"));
+        ASSERT_NE(count, nullptr);
+        ASSERT_TRUE(loom_config_def_isa(count->defining_op));
+        EXPECT_EQ(loom_attr_as_i64(loom_config_def_value(count->defining_op)),
+                  8);
+        const auto predicates = loom_config_def_predicates(count->defining_op);
+        EXPECT_EQ(predicates.count, 3);
+        for (uint16_t i = 0; i < predicates.count; ++i) {
+          EXPECT_EQ(predicates.predicate_list[i].args[0],
+                    loom_config_def_type(count->defining_op));
+        }
+        EXPECT_EQ(linked.product.target_source_definitions
+                      .values[count - module->symbols.entries],
+                  LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+        for (auto name :
+             {IREE_SV("enabled"), IREE_SV("scale"), IREE_SV("layout")}) {
+          const auto* symbol = FindSymbol(module, name);
+          ASSERT_NE(symbol, nullptr);
+          EXPECT_TRUE(loom_config_def_isa(symbol->defining_op));
+        }
+        EXPECT_EQ(FindSymbol(module, IREE_SV("unused")), nullptr);
+        loom_link_index_materialization_deinitialize(&linked);
+
+        // Relocatable merge still ignores library-provided definitions.
+        loom_link_index_materialization_t merged = {};
+        IREE_ASSERT_OK(TryMerge(index, &merged));
+        EXPECT_TRUE(loom_config_decl_isa(
+            FindSymbol(merged.product.module, IREE_SV("count"))->defining_op));
+        loom_link_index_materialization_deinitialize(&merged);
+      }
+    }
+  }
+}
+
+TEST_F(LinkIndexMaterializerTest, ConfigProvidersRejectIncompatibleContracts) {
+  const auto requester_source = ConfigFixture(IREE_SV("requester.loom"));
+  const auto defaults_source = ConfigFixture(IREE_SV("defaults.loom"));
+  auto* requester = Parse(requester_source, IREE_SV("requester.loom"));
+  auto* defaults = Parse(defaults_source, IREE_SV("defaults.loom"));
+  const auto requester_bytecode = WriteModule(requester);
+  const auto defaults_bytecode = WriteModule(defaults);
+  for (auto name : {IREE_SV("conflict.loom"), IREE_SV("invalid.loom"),
+                    IREE_SV("wrong_type.loom")}) {
+    const auto source = ConfigFixture(name);
+    auto* provider = Parse(source, name);
+    const auto bytecode = WriteModule(provider);
+    for (auto form : {ProviderForm::kMaterialized, ProviderForm::kText,
+                      ProviderForm::kBytecode}) {
+      IndexPtr index = CreateIndex();
+      AddProvider(index.get(), form, requester_source, requester,
+                  requester_bytecode, IREE_SV("requester"),
+                  LOOM_LINK_PROVIDER_ROLE_INPUT);
+      if (iree_string_view_equal(name, IREE_SV("conflict.loom"))) {
+        AddProvider(index.get(), form, defaults_source, defaults,
+                    defaults_bytecode, IREE_SV("defaults"),
+                    LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+      }
+      AddProvider(index.get(), form, source, provider, bytecode, name,
+                  LOOM_LINK_PROVIDER_ROLE_LIBRARY);
+      loom_link_index_materialization_t linked = {};
+      IREE_EXPECT_STATUS_IS(
+          iree_string_view_equal(name, IREE_SV("conflict.loom"))
+              ? IREE_STATUS_ALREADY_EXISTS
+              : IREE_STATUS_INVALID_ARGUMENT,
+          TryMaterialize(index.get(), IREE_SV("entry"), LOOM_LINK_PLAN_LINK,
+                         LOOM_LINK_PLAN_UNRESOLVED_ERROR, &linked));
+      loom_link_index_materialization_deinitialize(&linked);
+    }
   }
 }
 

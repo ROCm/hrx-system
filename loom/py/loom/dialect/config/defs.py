@@ -68,6 +68,7 @@ _CONFIG_DEF_SYMBOL_DEF = SymbolDefinition(
     value_contract=SymbolValueContract(
         result="type",
         value="value",
+        predicates="predicates",
     ),
 )
 
@@ -126,13 +127,16 @@ config_def = Op(
     doc=(
         "Define a compile/link-time configuration value. The initializer is "
         "required and must match the declared result type. Scalar and encoding "
-        "values seed typed facts so config.get can fold through canonicalization."
+        "values seed typed facts so config.get can fold through canonicalization. "
+        "Predicates constrain both the initializer and later overrides and "
+        "retain requirements merged from configuration declarations."
     ),
     traits=[SYMBOL_DEFINE, PURE],
     symbol_def=_CONFIG_DEF_SYMBOL_DEF,
     attrs=[
         AttrDef("symbol", "symbol"),
         AttrDef("value", "any"),
+        AttrDef("predicates", "predicate_list", optional=True),
     ],
     results=[Result("type", ANY)],
     verify="loom_config_def_verify",
@@ -142,7 +146,15 @@ config_def = Op(
         EQUALS,
         Attr("value"),
         COLON,
-        Scope([ResultType("type")]),
+        Scope(
+            [
+                ResultTypeList("type", parens=False),
+                OptionalGroup(
+                    [kw("where"), PredicateList("predicates")],
+                    anchor="predicates",
+                ),
+            ]
+        ),
     ],
     examples=[
         "config.def @model36.model.hidden_size = 2048 : index",

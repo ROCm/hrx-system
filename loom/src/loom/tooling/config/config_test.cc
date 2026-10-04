@@ -305,11 +305,26 @@ func.def @read_config() -> (index) {
   EXPECT_EQ(result.ignored_count, 0u);
 
   std::string printed = Print(module.get());
-  EXPECT_NE(
-      printed.find("config.def @model36.model.hidden_size = 4096 : index"),
-      std::string::npos);
+  EXPECT_NE(printed.find(
+                "config.def @model36.model.hidden_size = 4096 : %value: index "
+                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+            std::string::npos);
   EXPECT_EQ(printed.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
+
+  // Resolving a declaration must not erase its domain for later overlays.
+  for (const char* invalid : {"8193", "4103"}) {
+    binding.value = iree_make_cstring_view(invalid);
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          Materialize(module.get(), &binding, 1, nullptr));
+  }
+  binding.value = IREE_SV("8192");
+  IREE_ASSERT_OK(Materialize(module.get(), &binding, 1, &result));
+  EXPECT_NE(PrintSchema(module.get()).find("\"kind\":\"mul\""),
+            std::string::npos);
+  binding.value = IREE_SV("4103");
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Materialize(module.get(), &binding, 1, nullptr));
 }
 
 TEST_F(ConfigMaterializeTest, RejectsConstraintViolation) {
@@ -380,9 +395,10 @@ config.def @model36.unused = true : i1
   config_module.reset();
 
   std::string printed = Print(module.get());
-  EXPECT_NE(
-      printed.find("config.def @model36.model.hidden_size = 4096 : index"),
-      std::string::npos);
+  EXPECT_NE(printed.find(
+                "config.def @model36.model.hidden_size = 4096 : %value: index "
+                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+            std::string::npos);
   EXPECT_NE(
       printed.find("config.def @model36.layout = #encoding.layout.dense : "
                    "encoding<layout>"),

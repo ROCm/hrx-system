@@ -9,6 +9,23 @@
 
 iree_add_all_subdirs()
 
+file(GLOB _GLOB_CONFIG_PROVIDERS_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS config_providers/*.loom)
+iree_c_embed_data(
+  NAME
+    config_providers
+  SRCS
+    "${_GLOB_CONFIG_PROVIDERS_X_LOOM}"
+  C_FILE_OUTPUT
+    "config_providers_testdata.c"
+  H_FILE_OUTPUT
+    "config_providers_testdata.h"
+  IDENTIFIER
+    "loom_link_config_providers_testdata"
+  TESTONLY
+  FLATTEN
+  PUBLIC
+)
+
 file(GLOB _GLOB_PROVIDER_ROOTS_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS provider_roots/*.loom)
 iree_c_embed_data(
   NAME

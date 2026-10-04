@@ -782,8 +782,8 @@ static iree_status_t loom_tooling_config_format_schema_entry_json(
   }
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&object, IREE_SV("constraints")));
-  loom_attribute_t predicates =
-      is_decl ? loom_config_decl_predicates(op) : loom_attr_absent();
+  loom_attribute_t predicates = is_decl ? loom_config_decl_predicates(op)
+                                        : loom_config_def_predicates(op);
   IREE_RETURN_IF_ERROR(
       loom_tooling_config_format_predicates_json(predicates, stream));
   return loom_json_object_end(&object);

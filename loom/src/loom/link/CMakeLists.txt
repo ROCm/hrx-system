@@ -466,6 +466,8 @@ loom_cc_test(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
+    loom::link::testdata::config_providers
+    loom::ops::config
     loom::ops::op_defs
     loom::ops::op_registry
     loom::ops::test

@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include "loom/analysis/symbol_value_constraints.h"
 #include "loom/error/emitter.h"
 #include "loom/error/error_catalog.h"
 #include "loom/ir/context.h"
@@ -124,11 +125,10 @@ static iree_status_t loom_config_emit_predicate_origin(
                           IREE_ARRAYSIZE(params));
 }
 
-static iree_status_t loom_config_verify_decl_predicates(
+static iree_status_t loom_config_verify_predicates(
     const loom_module_t* module, const loom_op_t* op,
-    iree_diagnostic_emitter_t emitter) {
-  const loom_attribute_t predicates = loom_config_decl_predicates(op);
-  const loom_value_id_t config_value = loom_config_decl_type(op);
+    iree_diagnostic_emitter_t emitter, loom_attribute_t predicates,
+    loom_value_id_t config_value) {
   for (uint16_t predicate_index = 0; predicate_index < predicates.count;
        ++predicate_index) {
     const loom_predicate_t* predicate =
@@ -211,14 +211,41 @@ iree_status_t loom_config_decl_verify(const loom_module_t* module,
                                       iree_diagnostic_emitter_t emitter) {
   IREE_RETURN_IF_ERROR(
       loom_config_verify_type(module, op, emitter, loom_config_decl_type(op)));
-  return loom_config_verify_decl_predicates(module, op, emitter);
+  return loom_config_verify_predicates(module, op, emitter,
+                                       loom_config_decl_predicates(op),
+                                       loom_config_decl_type(op));
 }
 
 iree_status_t loom_config_def_verify(const loom_module_t* module,
                                      const loom_op_t* op,
                                      iree_diagnostic_emitter_t emitter) {
-  return loom_config_verify_value(module, op, emitter, loom_config_def_type(op),
-                                  loom_config_def_value(op));
+  const loom_value_id_t config_value = loom_config_def_type(op);
+  const loom_attribute_t value = loom_config_def_value(op);
+  const loom_attribute_t predicates = loom_config_def_predicates(op);
+  IREE_RETURN_IF_ERROR(
+      loom_config_verify_value(module, op, emitter, config_value, value));
+  IREE_RETURN_IF_ERROR(loom_config_verify_predicates(module, op, emitter,
+                                                     predicates, config_value));
+  const loom_symbol_ref_t symbol = loom_config_def_symbol(op);
+  const iree_string_view_t name = loom_string_table_get(
+      &module->strings, module->symbols.entries[symbol.symbol_id].name_id);
+  iree_status_t status = loom_symbol_value_constraints_check_exact(
+      name, loom_module_value_type(module, config_value), config_value, value,
+      predicates);
+  if (iree_status_is_ok(status)) {
+    return status;
+  }
+  // Translate the value-contract diagnostic at the owning source operation.
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(IREE_SV("value")),
+      loom_param_i64(value.kind == LOOM_ATTR_BOOL ? loom_attr_as_bool(value)
+                                                  : loom_attr_as_i64(value)),
+      loom_param_string(iree_status_message(status)),
+  };
+  iree_status_t diagnostic_status = loom_config_emit(
+      emitter, op, LOOM_ERR_STRUCTURE_014, params, IREE_ARRAYSIZE(params));
+  iree_status_free(status);
+  return diagnostic_status;
 }
 
 iree_status_t loom_config_get_verify(const loom_module_t* module,

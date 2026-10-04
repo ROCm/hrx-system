@@ -132,9 +132,9 @@ void Configs::build(loom_builder_t* builder) {
     binding.reference.module_id = 0;
     loom_op_t* op;
     if (binding.value) {
-      check(loom_config_def_build(builder, binding.reference, *binding.value,
-                                  binding.type, locations_.get(binding.owner),
-                                  &op));
+      check(loom_config_def_build(builder, 0, binding.reference, *binding.value,
+                                  binding.type, nullptr, 0, nullptr, 0,
+                                  locations_.get(binding.owner), &op));
     } else {
       check(loom_config_decl_build(builder, 0, binding.reference, binding.type,
                                    nullptr, 0, nullptr, 0,

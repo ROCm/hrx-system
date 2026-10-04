@@ -79,6 +79,9 @@ static iree_status_t loom_tooling_config_replace_with_def(
   const loom_location_id_t location = old_op->location;
   const loom_value_id_t old_result =
       loom_tooling_config_symbol_result_value(old_op);
+  const loom_attribute_t predicates = loom_config_decl_isa(old_op)
+                                          ? loom_config_decl_predicates(old_op)
+                                          : loom_config_def_predicates(old_op);
 
   IREE_RETURN_IF_ERROR(loom_op_erase(module, old_op));
 
@@ -87,11 +90,25 @@ static iree_status_t loom_tooling_config_replace_with_def(
   builder.ip.parent_op = parent_op;
   builder.ip.before_op = before_op;
   loom_op_t* new_op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_config_def_build(&builder, symbol, value, type, location, &new_op));
+  IREE_RETURN_IF_ERROR(loom_config_def_build(
+      &builder, 0, symbol, value, type, NULL, 0, NULL, 0, location, &new_op));
   if (old_result != LOOM_VALUE_ID_INVALID) {
     IREE_RETURN_IF_ERROR(loom_module_copy_value_name(
         module, old_result, loom_config_def_type(new_op)));
+  }
+  if (predicates.count) {
+    loom_ir_remap_t remap = {0};
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_initialize(module, module, &module->arena, NULL, &remap));
+    IREE_RETURN_IF_ERROR(loom_ir_remap_map_value(&remap, old_result,
+                                                 loom_config_def_type(new_op)));
+    loom_predicate_t* remapped_predicates = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_ir_remap_predicate_list(&remap, predicates.predicate_list,
+                                     predicates.count, &remapped_predicates));
+    IREE_RETURN_IF_ERROR(loom_config_def_set_predicates(
+        module, new_op,
+        loom_attr_predicate_list(remapped_predicates, predicates.count)));
   }
   return iree_ok_status();
 }
@@ -101,11 +118,12 @@ iree_status_t loom_tooling_config_apply_exact_value(loom_module_t* module,
                                                     loom_op_t* old_op,
                                                     loom_type_t type,
                                                     loom_attribute_t value) {
-  if (loom_config_decl_isa(old_op)) {
-    IREE_RETURN_IF_ERROR(loom_symbol_value_constraints_check_exact(
-        key, type, loom_config_decl_type(old_op), value,
-        loom_config_decl_predicates(old_op)));
-  }
+  const loom_attribute_t predicates = loom_config_decl_isa(old_op)
+                                          ? loom_config_decl_predicates(old_op)
+                                          : loom_config_def_predicates(old_op);
+  IREE_RETURN_IF_ERROR(loom_symbol_value_constraints_check_exact(
+      key, type, loom_tooling_config_symbol_result_value(old_op), value,
+      predicates));
   const loom_symbol_ref_t symbol = loom_config_decl_isa(old_op)
                                        ? loom_config_decl_symbol(old_op)
                                        : loom_config_def_symbol(old_op);
