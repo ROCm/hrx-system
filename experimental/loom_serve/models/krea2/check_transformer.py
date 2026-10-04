@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Qualify an entire base transformer block and its command composition.
+"""Qualify an entire base or LoRA transformer block and command composition.
 
 Each separately executed native component is checked against independent CPU
 arithmetic. Reductions use F64; fusion checks retain the qualified native
@@ -18,6 +18,7 @@ import json
 import math
 import pathlib
 import subprocess
+from contextlib import nullcontext
 
 import numpy as np
 import torch
@@ -27,9 +28,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--checker", nargs="+", required=True)
 parser.add_argument("--model", type=pathlib.Path, required=True)
 parser.add_argument("--checkpoint", type=pathlib.Path, required=True)
+parser.add_argument("--adapter", type=pathlib.Path)
+parser.add_argument("--phase", choices=("base", "style"), default="base")
+parser.add_argument("--strength", type=float, default=0.0)
 parser.add_argument("--reference", type=pathlib.Path, required=True)
 parser.add_argument("--output", type=pathlib.Path, required=True)
 args = parser.parse_args()
+if (args.phase, args.strength) not in (("base", 0.0), ("style", 1.0)):
+    parser.error("whole-block captures require base/strength=0 or style/strength=1")
+if args.phase == "style" and args.adapter is None:
+    parser.error("the style capture requires --adapter")
 args.output.mkdir(parents=True, exist_ok=False)
 torch.set_num_threads(4)
 torch.set_grad_enabled(False)
@@ -51,6 +59,8 @@ def report(rows, name, actual, expected):
         raise ValueError("nonfinite block comparison")
     error = actual - expected
     result = dict(
+        phase=args.phase,
+        strength=args.strength,
         rows=rows,
         check=name,
         elements=actual.numel(),
@@ -65,22 +75,30 @@ def report(rows, name, actual, expected):
     return result
 
 
+capture = args.phase + "-block0-"
 mask = torch.from_numpy(
-    np.fromfile(args.reference / "base-block0-mask.u8", dtype="u1")
+    np.fromfile(args.reference / (capture + "mask.u8"), dtype="u1")
 ).bool()
 rows = mask.numel()
 if rows < 16 or rows % 16 or not mask[-16:].all():
     raise ValueError("block capture must end with at least 16 valid image tokens")
-initial = load_bf16(args.reference / "base-block0-input.bf16").reshape(rows, 6144)
-modulation = load_bf16(args.reference / "base-block0-modulation.bf16").reshape(6, 6144)
+initial = load_bf16(args.reference / (capture + "input.bf16")).reshape(rows, 6144)
+modulation = load_bf16(args.reference / (capture + "modulation.bf16")).reshape(6, 6144)
 cosine = torch.from_numpy(
-    np.fromfile(args.reference / "base-block0-cosine.f32", dtype="<f4")
+    np.fromfile(args.reference / (capture + "cosine.f32"), dtype="<f4")
 ).reshape(rows, 128)
 sine = torch.from_numpy(
-    np.fromfile(args.reference / "base-block0-sine.f32", dtype="<f4")
+    np.fromfile(args.reference / (capture + "sine.f32"), dtype="<f4")
 ).reshape(rows, 128)
 
-with safe_open(str(args.checkpoint), framework="pt") as weights:
+with (
+    safe_open(str(args.checkpoint), framework="pt") as weights,
+    (
+        safe_open(str(args.adapter), framework="pt")
+        if args.adapter is not None
+        else nullcontext()
+    ) as adapter,
+):
     coefficients = (
         modulation + weights.get_tensor("blocks.0.mod.lin").reshape(6, 6144).bfloat16()
     )
@@ -104,6 +122,11 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
         selected_mask = mask[start:]
         prefix = args.output / str(count)
         paths = {}
+        if adapter is not None:
+            paths["strength"] = args.output / "strength.f32"
+            paths["strength"].write_bytes(
+                np.array([args.strength], dtype="<f4").tobytes()
+            )
         for name, tensor, dtype in (
             ("input", initial[start:], None),
             ("modulation", modulation, None),
@@ -140,14 +163,20 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
                 ).bfloat16()
             return result.reshape(count, 6144)
 
-        def execute(component, expected, arguments, *, exact=False):
-            expected_path = prefix.with_suffix(f".{component}.expected.bf16")
+        def execute(component, expected, arguments, *, exact=False, checkpoints=None):
+            # Retain native operands, not a duplicate oracle file for every stage.
+            expected_path = args.output / "expected.bf16"
             actual_path = prefix.with_suffix(f".{component}.actual.bf16")
             expected_path.write_bytes(encode(expected))
             command = [
                 *args.checker,
                 "--model=" + str(args.model),
-                "--weights=" + str(args.checkpoint),
+                *[
+                    "--weights=" + str(path)
+                    for path in (
+                        [args.checkpoint] if checkpoints is None else checkpoints
+                    )
+                ],
                 "--root=block0_" + component,
                 f"--config=krea2.block_tokens={count}",
                 *["--input=" + str(paths[name]) for name in arguments],
@@ -164,16 +193,52 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
             return actual
 
         def evaluate(*, native):
-            def compute(name, expected, arguments, *, exact=False):
+            def compute(name, expected, arguments, *, exact=False, checkpoints=None):
                 print(
                     json.dumps(dict(rows=count, component=name, native=native)),
                     flush=True,
                 )
                 return (
-                    execute(name, expected, arguments, exact=exact)
+                    execute(
+                        name,
+                        expected,
+                        arguments,
+                        exact=exact,
+                        checkpoints=checkpoints,
+                    )
                     if native
                     else expected
                 )
+
+            def project(name, key, adapter_key, value, argument):
+                base = compute(name, linear(value, key), [argument])
+                if adapter is None:
+                    return base
+                factor = "transformer.transformer_blocks.0." + adapter_key + ".lora_"
+                down = adapter.get_tensor(factor + "A.weight").bfloat16().double()
+                up = adapter.get_tensor(factor + "B.weight").bfloat16().double()
+                low = compute(
+                    name + "_adapter_down",
+                    (value.double() @ down.T).bfloat16(),
+                    [argument],
+                    checkpoints=[args.adapter],
+                )
+                delta = compute(
+                    name + "_adapter_up",
+                    (low.double() @ up.T).bfloat16(),
+                    [name + "_adapter_down"],
+                    checkpoints=[args.adapter],
+                )
+                combined = compute(
+                    name + "_adapted",
+                    base if args.strength == 0 else base + delta * args.strength,
+                    [argument, "strength"],
+                    exact=True,
+                    checkpoints=[args.checkpoint, args.adapter],
+                )
+                if native:
+                    paths[name] = paths[name + "_adapted"]
+                return combined
 
             source = initial[start:]
             normalized = compute("norm1", normalize(source, "prenorm.scale"), ["input"])
@@ -184,14 +249,18 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
                 exact=True,
             )
             projections = {}
-            for name, key in (
-                ("query", "wq"),
-                ("key", "wk"),
-                ("value", "wv"),
-                ("gate", "gate"),
+            for name, key, adapter_key in (
+                ("query", "wq", "to_q"),
+                ("key", "wk", "to_k"),
+                ("value", "wv", "to_v"),
+                ("gate", "gate", "to_gate"),
             ):
-                projections[name] = compute(
-                    name, linear(attention_input, "attn." + key), ["attention_input"]
+                projections[name] = project(
+                    name,
+                    "attn." + key,
+                    "attn." + adapter_key,
+                    attention_input,
+                    "attention_input",
                 )
             for name, heads, key in (("query", 48, "qnorm"), ("key", 12, "knorm")):
                 normalized = compute(
@@ -221,8 +290,12 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
                 ["query_rotary", "key_rotary", "value", "mask", "gate"],
                 exact=True,
             )
-            update = compute(
-                "attention_output", linear(context, "attn.wo"), ["attention_context"]
+            update = project(
+                "attention_output",
+                "attn.wo",
+                "attn.to_out.0",
+                context,
+                "attention_context",
             )
             residual = compute(
                 "attention_residual",
@@ -239,15 +312,19 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
                 ["attention_residual", "modulation"],
                 exact=True,
             )
-            gate = compute(
+            gate = project(
                 "feed_forward_gate",
-                linear(feed_forward_input, "mlp.gate"),
-                ["feed_forward_input"],
+                "mlp.gate",
+                "ff.gate",
+                feed_forward_input,
+                "feed_forward_input",
             )
-            up = compute(
+            up = project(
                 "feed_forward_up",
-                linear(feed_forward_input, "mlp.up"),
-                ["feed_forward_input"],
+                "mlp.up",
+                "ff.up",
+                feed_forward_input,
+                "feed_forward_input",
             )
             activated = compute(
                 "feed_forward_silu",
@@ -260,10 +337,12 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
                 ["feed_forward_gate", "feed_forward_up"],
                 exact=True,
             )
-            update = compute(
+            update = project(
                 "feed_forward_down",
-                linear(product, "mlp.down"),
-                ["feed_forward_product"],
+                "mlp.down",
+                "ff.down",
+                product,
+                "feed_forward_product",
             )
             return compute(
                 "feed_forward_residual",
@@ -275,15 +354,23 @@ with safe_open(str(args.checkpoint), framework="pt") as weights:
         oracle = evaluate(native=False)
         prefix.with_suffix(".oracle.bf16").write_bytes(encode(oracle))
         serial = evaluate(native=True)
+        inputs = ["input", "modulation", "cosine", "sine", "mask"]
         combined = execute(
-            "forward",
+            "forward" if adapter is None else "forward_adapted",
             serial,
-            ["input", "modulation", "cosine", "sine", "mask"],
+            inputs if adapter is None else [*inputs, "strength"],
+            checkpoints=(
+                [args.checkpoint]
+                if adapter is None
+                else [args.checkpoint, args.adapter]
+            ),
             exact=True,
         )
+        if adapter is not None and args.strength == 0:
+            execute("forward", combined, inputs, exact=True)
         native_error = report(count, "whole_command_vs_f64", combined, oracle)
         if count == rows:
-            external = load_bf16(args.reference / "base-block0-output.bf16").reshape_as(
+            external = load_bf16(args.reference / (capture + "output.bf16")).reshape_as(
                 oracle
             )
             external_error = report(count, "external_vs_f64", external, oracle)

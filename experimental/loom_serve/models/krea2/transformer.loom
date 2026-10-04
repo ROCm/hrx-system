@@ -23,11 +23,22 @@ command.program.decl @block0_feed_forward_product() launch(%gate: buffer, %up: b
 command.program.decl @block0_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @block0_feed_forward_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
 
+command.program.decl @block0_query_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @block0_key_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @block0_value_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @block0_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @block0_attention_output_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @block0_feed_forward_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @block0_feed_forward_up_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @block0_feed_forward_down_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+
+template.decl @krea2.block0_forward(%tokens: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+
 // The caller supplies shared time modulation, rotary coordinates and key mask.
 // All intermediate storage is reflected as one reusable slab. Independent
 // projection branches may overlap; command dependencies order their consumers.
-command.program.def public @block0_forward() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
-  %tokens = config.get @krea2.block_tokens : index
+// Adapter presence is a source specialization; strength remains device data.
+template.def<@krea2.block0_forward> @krea2_block0_forward(%tokens: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
   %hidden_stride = index.constant 12288 : offset
   %key_value_stride = index.constant 3072 : offset
   %feed_forward_stride = index.constant 32768 : offset
@@ -42,10 +53,34 @@ command.program.def public @block0_forward() launch(%parameters: buffer, %input:
   %value = buffer.alloca<global> align(256) %key_value_bytes : buffer
   %gate = buffer.alloca<global> align(256) %hidden_bytes : buffer
   command.concurrent {
-    command.program.launch @block0_query(%parameters, %attention_input, %query) : (buffer, buffer, buffer)
-    command.program.launch @block0_key(%parameters, %attention_input, %key) : (buffer, buffer, buffer)
-    command.program.launch @block0_value(%parameters, %attention_input, %value) : (buffer, buffer, buffer)
-    command.program.launch @block0_gate(%parameters, %attention_input, %gate) : (buffer, buffer, buffer)
+    scf.if %adapted {
+      command.program.launch @block0_query_adapted(%parameters, %adapter, %attention_input, %strength, %query) : (buffer, buffer, buffer, buffer, buffer)
+      scf.yield
+    } else {
+      command.program.launch @block0_query(%parameters, %attention_input, %query) : (buffer, buffer, buffer)
+      scf.yield
+    }
+    scf.if %adapted {
+      command.program.launch @block0_key_adapted(%parameters, %adapter, %attention_input, %strength, %key) : (buffer, buffer, buffer, buffer, buffer)
+      scf.yield
+    } else {
+      command.program.launch @block0_key(%parameters, %attention_input, %key) : (buffer, buffer, buffer)
+      scf.yield
+    }
+    scf.if %adapted {
+      command.program.launch @block0_value_adapted(%parameters, %adapter, %attention_input, %strength, %value) : (buffer, buffer, buffer, buffer, buffer)
+      scf.yield
+    } else {
+      command.program.launch @block0_value(%parameters, %attention_input, %value) : (buffer, buffer, buffer)
+      scf.yield
+    }
+    scf.if %adapted {
+      command.program.launch @block0_gate_adapted(%parameters, %adapter, %attention_input, %strength, %gate) : (buffer, buffer, buffer, buffer, buffer)
+      scf.yield
+    } else {
+      command.program.launch @block0_gate(%parameters, %attention_input, %gate) : (buffer, buffer, buffer)
+      scf.yield
+    }
   }
   %rotated_query = buffer.alloca<global> align(256) %hidden_bytes : buffer
   %rotated_key = buffer.alloca<global> align(256) %key_value_bytes : buffer
@@ -56,7 +91,13 @@ command.program.def public @block0_forward() launch(%parameters: buffer, %input:
   %context = buffer.alloca<global> align(256) %hidden_bytes : buffer
   command.program.launch @block0_attention_context(%rotated_query, %rotated_key, %value, %mask, %gate, %context) : (buffer, buffer, buffer, buffer, buffer, buffer)
   %attention_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  command.program.launch @block0_attention_output(%parameters, %context, %attention_output) : (buffer, buffer, buffer)
+  scf.if %adapted {
+    command.program.launch @block0_attention_output_adapted(%parameters, %adapter, %context, %strength, %attention_output) : (buffer, buffer, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    command.program.launch @block0_attention_output(%parameters, %context, %attention_output) : (buffer, buffer, buffer)
+    scf.yield
+  }
   %residual = buffer.alloca<global> align(256) %hidden_bytes : buffer
   command.program.launch @block0_attention_residual(%parameters, %input, %attention_output, %modulation, %residual) : (buffer, buffer, buffer, buffer, buffer)
 
@@ -65,13 +106,46 @@ command.program.def public @block0_forward() launch(%parameters: buffer, %input:
   %feed_forward_gate = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
   %feed_forward_up = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
   command.concurrent {
-    command.program.launch @block0_feed_forward_gate(%parameters, %feed_forward_input, %feed_forward_gate) : (buffer, buffer, buffer)
-    command.program.launch @block0_feed_forward_up(%parameters, %feed_forward_input, %feed_forward_up) : (buffer, buffer, buffer)
+    scf.if %adapted {
+      command.program.launch @block0_feed_forward_gate_adapted(%parameters, %adapter, %feed_forward_input, %strength, %feed_forward_gate) : (buffer, buffer, buffer, buffer, buffer)
+      scf.yield
+    } else {
+      command.program.launch @block0_feed_forward_gate(%parameters, %feed_forward_input, %feed_forward_gate) : (buffer, buffer, buffer)
+      scf.yield
+    }
+    scf.if %adapted {
+      command.program.launch @block0_feed_forward_up_adapted(%parameters, %adapter, %feed_forward_input, %strength, %feed_forward_up) : (buffer, buffer, buffer, buffer, buffer)
+      scf.yield
+    } else {
+      command.program.launch @block0_feed_forward_up(%parameters, %feed_forward_input, %feed_forward_up) : (buffer, buffer, buffer)
+      scf.yield
+    }
   }
   %product = buffer.alloca<global> align(256) %feed_forward_bytes : buffer
   command.program.launch @block0_feed_forward_product(%feed_forward_gate, %feed_forward_up, %product) : (buffer, buffer, buffer)
   %feed_forward_output = buffer.alloca<global> align(256) %hidden_bytes : buffer
-  command.program.launch @block0_feed_forward_down(%parameters, %product, %feed_forward_output) : (buffer, buffer, buffer)
+  scf.if %adapted {
+    command.program.launch @block0_feed_forward_down_adapted(%parameters, %adapter, %product, %strength, %feed_forward_output) : (buffer, buffer, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    command.program.launch @block0_feed_forward_down(%parameters, %product, %feed_forward_output) : (buffer, buffer, buffer)
+    scf.yield
+  }
   command.program.launch @block0_feed_forward_residual(%parameters, %residual, %feed_forward_output, %modulation, %output) : (buffer, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public @block0_forward() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %adapted = scalar.constant false : i1
+  // The false specialization removes all uses of adapter and strength operands.
+  template.apply<@krea2.block0_forward>(%tokens, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %input, %output) : (index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @block0_forward_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.block0_forward>(%tokens, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

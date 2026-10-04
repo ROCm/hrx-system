@@ -6,10 +6,10 @@ source JIT, queued safetensors loading, command programs, and shared device
 ownership. The first transformer block's normalization and fused time
 modulation, dense projections, fused Q/K normalization/rotation, masked
 attention, gated residuals, and SwiGLU have independent component comparisons.
-One complete base transformer block also runs as a single queued command and
-matches its separately qualified native stages bit-for-bit. Full text
+One complete transformer block, with or without LoRA, also runs as a single
+queued command. Full text
 conditioning, all DiT layers, denoising, and VAE decoding are not yet
-implemented here; block-level LoRA is not yet connected.
+implemented here.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -166,7 +166,7 @@ The native checker queues work through the existing execution domain and waits
 only for its complete-array observations. Cleanup drains accepted work while
 borrowed host payloads remain alive.
 
-The remaining numerical gates include block-level LoRA, model conditioning,
+The remaining numerical gates include model conditioning,
 and the entire source-JIT denoising and VAE path to a comparable image.
 This component does not yet establish a generic model bootstrap, image request
 scheduler, full-model weight-preparation strategy, or throughput result.
@@ -457,6 +457,47 @@ traffic and eight dispatches across the block's projections. Each adapted
 projection needs only a 68 KiB rank-32 intermediate beyond its ordinary base
 output. Those are storage/traffic counts, not measured performance gains.
 The component path still reads the adapter's F32 file factors and rounds them
-to BF16 in the contraction. Compact startup-prepared adapter storage and a
-complete LoRA-enabled block are separate qualification boundaries; this does
-not yet establish full-model LoRA image generation.
+to BF16 in the contraction. Compact startup-prepared adapter storage requires
+separate qualification before making full-model residency or performance
+claims. These projection checks do not establish full-model LoRA image
+generation.
+
+### Complete transformer block with LoRA
+
+`block0_forward_adapted` adds a second immutable parameter root and an F32
+strength input to the complete block. A shared command template receives
+explicit shape and adapter-presence operands; concrete entry points own
+configuration lookup. Source specialization removes the adapter path from
+`block0_forward`, retaining its original bindings and ten kernels. The adapted
+variant uses 15 distinct kernels and 32 dispatches. Strength remains device
+data, so changing it does not require recompilation or base-weight mutation.
+
+The whole-block driver accepts the same adapter as the projection checker:
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_transformer.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights/turbo.safetensors" \
+  --adapter="$krea_adapter/softwatercolor.safetensors" \
+  --phase=style --strength=1 \
+  --reference="$krea_reference" --output=/path/to/new-adapted-block-results
+```
+
+For the zero-strength identity case, use `--phase=base --strength=0` and a
+different output directory. The driver checks each base/A/B contraction
+against CPU/F64 arithmetic, requires every fused projection to reproduce
+composition of qualified operands exactly, and compares the complete queued
+block with that native chain bit-for-bit. Zero strength also must reproduce
+the original base command exactly. Each phase runs at 16 and 1088 tokens,
+twice per native command, retaining approximately 900 MiB of regenerable
+tensors. Full-size accumulated error is measured against a separate CPU/F64
+block and must be no worse than the corresponding external block.
+
+Both phases pass all component and exact-composition gates. Zero strength
+preserves the base block bit-for-bit at both shapes. For the 1088-token active
+adapter case, relative L2 error against the independent block calculation is
+0.00046856, versus 0.00246784 for the external model. Maximum absolute BF16
+error is 4 versus 8; the single-operation envelope counts are 61,419 versus
+661,300 and remain visible as accumulated block error. This qualifies one
+LoRA-enabled block, not the full 28-block denoiser or an image.
