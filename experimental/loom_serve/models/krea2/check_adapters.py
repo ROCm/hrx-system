@@ -132,9 +132,10 @@ with (
                     )
                     command = [
                         *args.checker,
-                        "--model=" + str(args.model),
+                        "--model=" + str(args.model / "qualification"),
+                        "--weight_policy=" + str(args.model / "weights.loom"),
                         *["--weights=" + str(path) for path in checkpoints],
-                        "--root=block0_"
+                        "--root=qualify.block_"
                         + component
                         + ("" if name == "base" else "_" + name),
                         f"--config=krea2.block_tokens={count}",

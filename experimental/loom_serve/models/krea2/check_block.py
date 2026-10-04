@@ -64,7 +64,8 @@ for phase in ("base", "style"):
     rows = normalized.shape[0]
     common = [
         *args.checker,
-        "--model=" + str(args.model),
+        "--model=" + str(args.model / "qualification"),
+        "--weight_policy=" + str(args.model / "weights.loom"),
         "--weights=" + str(args.checkpoint),
         f"--config=krea2.block_tokens={rows}",
         "--input=" + str(source),
@@ -73,7 +74,7 @@ for phase in ("base", "style"):
     subprocess.run(
         common
         + [
-            "--root=block0_norm1",
+            "--root=qualify.block_norm1",
             "--expected=" + str(expected_norm),
             "--actual=" + str(actual_norm),
         ],
@@ -104,7 +105,7 @@ for phase in ("base", "style"):
     subprocess.run(
         common
         + [
-            "--root=block0_attention_input",
+            "--root=qualify.block_attention_input",
             "--input=" + str(modulation),
             "--expected=" + str(composed_path),
             "--actual=" + str(actual_path),
@@ -165,10 +166,11 @@ for phase in ("base", "style"):
         subprocess.run(
             [
                 *args.checker,
-                "--model=" + str(args.model),
+                "--model=" + str(args.model / "qualification"),
+                "--weight_policy=" + str(args.model / "weights.loom"),
                 "--weights=" + str(args.checkpoint),
                 f"--config=krea2.block_tokens={rows}",
-                f"--root=block0_{name}_norm",
+                f"--root=qualify.block_{name}_norm",
                 "--input=" + str(source_path),
                 "--expected=" + str(expected_norm_path),
                 "--actual=" + str(actual_norm_path),
@@ -223,10 +225,11 @@ for phase in ("base", "style"):
             subprocess.run(
                 [
                     *args.checker,
-                    "--model=" + str(args.model),
+                    "--model=" + str(args.model / "qualification"),
+                    "--weight_policy=" + str(args.model / "weights.loom"),
                     "--weights=" + str(args.checkpoint),
                     f"--config=krea2.block_tokens={count}",
-                    f"--root=block0_{name}_rotary",
+                    f"--root=qualify.block_{name}_rotary",
                     "--input=" + str(input_path),
                     "--input=" + str(cosine_input),
                     "--input=" + str(sine_input),

@@ -118,9 +118,10 @@ for component, source, expected, weight_name, inputs, outputs in (
         subprocess.run(
             [
                 *args.checker,
-                "--model=" + str(args.model),
+                "--model=" + str(args.model / "qualification"),
+                "--weight_policy=" + str(args.model / "weights.loom"),
                 "--weights=" + str(args.checkpoint),
-                "--root=block0_" + component,
+                "--root=qualify.block_" + component,
                 f"--config=krea2.block_tokens={count}",
                 "--input=" + str(input_path),
                 "--expected=" + str(reference_path),

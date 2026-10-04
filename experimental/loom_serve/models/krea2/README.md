@@ -182,8 +182,9 @@ in total.
 
 At 384x384 the block processes 1088 rows: 512 text positions and 576 image
 positions. The mask excludes padded text keys; it is not a causal mask.
-`block0_norm1` exposes zero-centered RMSNorm. `block0_attention_input` fuses
-that normalization with shared time modulation and the block's learned table.
+`qualify.block_norm1` exposes zero-centered RMSNorm.
+`qualify.block_attention_input` fuses that normalization with shared time
+modulation and the block's learned table.
 The fused kernel retains the reference's BF16 rounding boundaries between
 pointwise operations, while the normalization reduction accumulates in F32.
 
@@ -194,6 +195,18 @@ follow them. Repeated `--weights` paths supply checkpoints in reflected
 parameter-root order. Each root is loaded from its own checkpoint domain;
 equal tensor names in different domains remain independent. Parameter-free
 commands need no checkpoint. This tool is not the image server.
+
+Component entry points live in the separate [`qualification/`](qualification/)
+source catalog. The Python drivers select that catalog automatically; direct
+`component_check` calls use `--model=experimental/loom_serve/models/krea2/qualification`.
+Commands loading checkpoints also specify
+`--weight_policy=experimental/loom_serve/models/krea2/weights.loom`, independently
+of the source catalog, so qualification uses the deployment's actual preparation
+policy rather than a copied or inferred policy.
+Its `krea2.block_index` specialization defaults to zero. The model commands
+receive an explicit compile-time layer index and format checkpoint keys from
+it; native kernels are independent of layer identity. Qualification wrappers
+are not part of the deployment catalog.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
@@ -226,7 +239,7 @@ A full-block/image comparison is still required; component equivalence is not
 an end-to-end accuracy claim. Including head normalization and rotary checks,
 the component result directory retains about 206 MiB of reproducible tensors.
 
-For direct checker calls, `--root=block0_norm1` takes one input and
+For direct checker calls, `--root=qualify.block_norm1` takes one input and
 `base-block0-norm1.bf16` as its reference. `--config=key=value` supplies explicit
 JIT specialization; no executable rebuild is involved. Tolerance defaults
 match the projection check; `--atol=0 --rtol=0` requires exact numerical
@@ -389,8 +402,9 @@ would implement different arithmetic. The test result directory contains about
 ### Complete base transformer block
 
 [`transformer.loom`](transformer.loom) composes the qualified operations into
-`block0_forward`. Its caller supplies hidden states, shared time modulation,
-F32 rotary tables, and the key mask. One immutable parameter root supplies the
+the layer-parameterized `krea2.block_forward` template, exposed for qualification
+as `qualify.block_forward`. Its caller supplies hidden states, shared time
+modulation, F32 rotary tables, and the key mask. One immutable parameter root supplies the
 block's weights. Command reflection plans one reusable transient slab; the
 command contains 16 dispatches using ten distinct JITed kernels. Independent
 Q/K/V/gate and feed-forward branches have explicit concurrent scopes. There
@@ -413,6 +427,28 @@ against composition of independently qualified operands. Finally the single
 queued command must match the native chain bit-for-bit on both executions.
 The result directory retains about 700 MiB of regenerable tensors.
 
+`--layer=0..27` selects a layer and its matching `base-blockN-*` or
+`style-blockN-*` reference files. The default reference capture records layer
+zero; another layer requires actual boundary tensors from that layer, not a
+renamed layer-zero fixture.
+
+[`reference_stack.py`](reference_stack.py) advances the captured first-step
+inputs through the pinned external transformer's 28 layers and captures the
+last layer. It loads neither the text encoder nor VAE and retains about 80 MiB
+of temporary tensors at 384x384:
+
+```sh
+krea_stack_reference=/path/to/new-stack-reference
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/reference_stack.py \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_reference" --output="$krea_stack_reference"
+```
+
+Use `--layer=27 --reference="$krea_stack_reference/1088"` with the whole-block
+driver for that actual final-layer input distribution. The separate `16/`
+capture is a shape check that advances 16 image rows through all layers; it
+does not represent an entire prompt/image request.
+
 That exact command-composition check passes at both 16 image rows and all
 1088 captured rows. Against the independent complete-block calculation,
 full-size relative L2 error is 0.00039353; the pinned external model's error
@@ -427,8 +463,8 @@ not a full-model image or performance result.
 ### Block LoRA projections
 
 [`block_adapters.loom`](block_adapters.loom) applies the official adapter to
-all eight block-zero projections. Each adapted command binds separate base
-and adapter parameter roots. The base contraction and rank-32 A contraction
+all eight projections of a selected block. Each adapted command binds separate
+base and adapter parameter roots. The base contraction and rank-32 A contraction
 have an explicit concurrent scope; the B contraction fuses BF16 rounding,
 strength multiplication, and addition into the base output. Its same-tile
 read/write permits in-place addition without a full-width delta buffer.
@@ -464,12 +500,12 @@ generation.
 
 ### Complete transformer block with LoRA
 
-`block0_forward_adapted` adds a second immutable parameter root and an F32
+`qualify.block_forward_adapted` adds a second immutable parameter root and an F32
 strength input to the complete block. A shared command template receives
 explicit shape and adapter-presence operands; concrete entry points own
 configuration lookup. Source specialization removes the adapter path from
-`block0_forward`, retaining its original bindings and ten kernels. The adapted
-variant uses 15 distinct kernels and 32 dispatches. Strength remains device
+`qualify.block_forward`, retaining its original bindings and ten kernels. The
+adapted variant uses 15 distinct kernels and 32 dispatches. Strength remains device
 data, so changing it does not require recompilation or base-weight mutation.
 
 The whole-block driver accepts the same adapter as the projection checker:
@@ -501,3 +537,13 @@ adapter case, relative L2 error against the independent block calculation is
 error is 4 versus 8; the single-operation envelope counts are 61,419 versus
 661,300 and remain visible as accumulated block error. This qualifies one
 LoRA-enabled block, not the full 28-block denoiser or an image.
+
+The same source also passes at layer 27 using actual final-layer inputs,
+including every component, exact queued composition, and zero-strength
+identity at 16 and 1088 rows. Full-size relative L2 error is 0.00030801 for
+base and 0.00049999 for the active adapter; the external block's respective
+errors are 0.00099433 and 0.00117133. Layer-zero retained outputs remain
+bit-for-bit unchanged. Layer selection changes parameter keys, not numerical
+kernels: the base and adapted commands still use ten and fifteen kernels.
+This establishes parameterized block execution, not yet native composition
+of the entire stack.

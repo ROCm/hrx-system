@@ -1,0 +1,404 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Component entry points are qualification-only. The deployment graph calls
+// the parameterized model commands directly.
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.block_index : %value: index where [range(%value, 0, 27)]
+
+command.program.decl @krea2.block_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_input(%layer: index) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_norm2(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_input(%layer: index) launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_value(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_output(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_up(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_down(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_query_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_key_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_query_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+command.program.decl @krea2.block_key_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_silu() launch(%input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_product() launch(%gate: buffer, %up: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_ungated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
+command.program.decl @krea2.block_query_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_query_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_query_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_query_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.block_key_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_key_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_key_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_key_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.block_value_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_value_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_value_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_value_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.block_gate_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_gate_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_gate_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_gate_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_output_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_output_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_output_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_attention_output_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_gate_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_gate_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_gate_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_gate_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_up_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_up_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_up_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_up_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_down_adapter_down(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_down_adapter_up(%layer: index) launch(%adapter: buffer, %input: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_down_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.block_feed_forward_down_adapted(%layer: index) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+
+template.decl @krea2.block_forward(%tokens: index, %layer: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+
+command.program.def public @qualify.block_norm1() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_norm1[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_input() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_attention_input[%layer](%parameters, %input, %modulation, %output) : [index](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_norm2() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_norm2[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_input() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_input[%layer](%parameters, %input, %modulation, %output) : [index](buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_query() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_query[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_key() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_key[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_value() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_value[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_gate[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_output() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_attention_output[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_gate[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_up() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_up[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_down[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_query_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_query_norm[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_key_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_key_norm[%layer](%parameters, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_query_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_query_rotary[%layer](%parameters, %input, %cosine, %sine, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_key_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_key_rotary[%layer](%parameters, %input, %cosine, %sine, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_attention_residual[%layer](%parameters, %residual, %update, %modulation, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_residual[%layer](%parameters, %residual, %update, %modulation, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_silu() launch(%input: buffer, %output: buffer) {
+  command.program.launch @krea2.block_feed_forward_silu(%input, %output) : (buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_product() launch(%gate: buffer, %up: buffer, %output: buffer) {
+  command.program.launch @krea2.block_feed_forward_product(%gate, %up, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_ungated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
+  command.program.launch @krea2.block_attention_ungated(%query, %key, %value, %mask, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
+  command.program.launch @krea2.block_attention_context(%query, %key, %value, %mask, %gate, %output) : (buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_query_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_query_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_query_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_query_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_query_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_query_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_query_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_query_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_key_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_key_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_key_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_key_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_key_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_key_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_key_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_key_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_value_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_value_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_value_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_value_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_value_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_value_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_value_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_value_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_gate_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_gate_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_gate_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_gate_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_gate_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_output_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_attention_output_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_output_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_attention_output_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_output_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_attention_output_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_attention_output_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_attention_output_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_gate_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_gate_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_gate_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_gate_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_gate_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_gate_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_gate_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_gate_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_up_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_up_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_up_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_up_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_up_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_up_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_up_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_up_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_down_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_down_adapter_down[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_down_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_down_adapter_up[%layer](%adapter, %input, %output) : [index](buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_down_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_down_adapter_add[%layer](%adapter, %input, %strength, %base, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_feed_forward_down_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %layer = config.get @krea2.block_index : index
+  command.program.launch @krea2.block_feed_forward_down_adapted[%layer](%parameters, %adapter, %input, %strength, %output) : [index](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_forward() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %layer = config.get @krea2.block_index : index
+  %adapted = scalar.constant false : i1
+  // The false specialization removes all uses of adapter and strength operands.
+  template.apply<@krea2.block_forward>(%tokens, %layer, %adapted, %parameters, %parameters, %input, %modulation, %cosine, %sine, %mask, %input, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.block_forward_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %modulation: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %layer = config.get @krea2.block_index : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.block_forward>(%tokens, %layer, %adapted, %parameters, %adapter, %input, %modulation, %cosine, %sine, %mask, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

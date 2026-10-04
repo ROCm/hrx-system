@@ -96,35 +96,35 @@ kernel.def target(@block_pointwise_wave32) @block_feed_forward_product() {
   kernel.return
 }
 
-command.program.def public @block0_attention_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
+command.program.def public @krea2.block_attention_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %residual_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x6144xbf16>
   %update_view = buffer.view %update[%origin] : buffer -> view<[%tokens]x6144xbf16>
   %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
-  %table = command.parameter %parameters, "blocks.0.mod.lin" : view<6x6144xf32>
+  %table = command.parameter %parameters, "blocks.{}.mod.lin"[%layer] : view<6x6144xf32>
   %coefficients = view.subview %modulation_view[2, 0] : view<6x6144xbf16> -> view<1x6144xbf16>
   %coefficient_table = view.subview %table[2, 0] : view<6x6144xf32> -> view<1x6144xf32>
   kernel.launch @block_residual(%residual_view, %update_view, %coefficients, %coefficient_table, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x6144xbf16>, view<1x6144xbf16>, view<1x6144xf32>, view<[%tokens]x6144xbf16>)
   command.return
 }
 
-command.program.def public @block0_feed_forward_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
+command.program.def public @krea2.block_feed_forward_residual(%layer: index) launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %residual_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x6144xbf16>
   %update_view = buffer.view %update[%origin] : buffer -> view<[%tokens]x6144xbf16>
   %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
-  %table = command.parameter %parameters, "blocks.0.mod.lin" : view<6x6144xf32>
+  %table = command.parameter %parameters, "blocks.{}.mod.lin"[%layer] : view<6x6144xf32>
   %coefficients = view.subview %modulation_view[5, 0] : view<6x6144xbf16> -> view<1x6144xbf16>
   %coefficient_table = view.subview %table[5, 0] : view<6x6144xf32> -> view<1x6144xf32>
   kernel.launch @block_residual(%residual_view, %update_view, %coefficients, %coefficient_table, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x6144xbf16>, view<1x6144xbf16>, view<1x6144xf32>, view<[%tokens]x6144xbf16>)
   command.return
 }
 
-command.program.def public @block0_feed_forward_silu() launch(%input: buffer, %output: buffer) {
+command.program.def public @krea2.block_feed_forward_silu() launch(%input: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x16384xbf16>
@@ -133,7 +133,7 @@ command.program.def public @block0_feed_forward_silu() launch(%input: buffer, %o
   command.return
 }
 
-command.program.def public @block0_feed_forward_product() launch(%gate: buffer, %up: buffer, %output: buffer) {
+command.program.def public @krea2.block_feed_forward_product() launch(%gate: buffer, %up: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %gate_view = buffer.view %gate[%origin] : buffer -> view<[%tokens]x16384xbf16>

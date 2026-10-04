@@ -77,82 +77,82 @@ kernel.def target(@block_projection_wave32) @block_linear_16384_6144() {
   kernel.return
 }
 
-command.program.def public @block0_query() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.wq.weight" : view<6144x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.attn.wq.weight"[%layer] : view<6144x6144xbf16>
   kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
   command.return
 }
 
-command.program.def public @block0_key() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x1536xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.wk.weight" : view<1536x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.attn.wk.weight"[%layer] : view<1536x6144xbf16>
   kernel.launch @block_linear_6144_1536(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<[%rows]x1536xbf16>)
   command.return
 }
 
-command.program.def public @block0_value() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_value(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x1536xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.wv.weight" : view<1536x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.attn.wv.weight"[%layer] : view<1536x6144xbf16>
   kernel.launch @block_linear_6144_1536(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<[%rows]x1536xbf16>)
   command.return
 }
 
-command.program.def public @block0_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.gate.weight" : view<6144x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.attn.gate.weight"[%layer] : view<6144x6144xbf16>
   kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
   command.return
 }
 
-command.program.def public @block0_attention_output() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_attention_output(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.wo.weight" : view<6144x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.attn.wo.weight"[%layer] : view<6144x6144xbf16>
   kernel.launch @block_linear_6144_6144(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144x6144xbf16>, view<[%rows]x6144xbf16>)
   command.return
 }
 
-command.program.def public @block0_feed_forward_gate() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_feed_forward_gate(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x16384xbf16>
-  %weight = command.parameter %parameters, "blocks.0.mlp.gate.weight" : view<16384x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.mlp.gate.weight"[%layer] : view<16384x6144xbf16>
   kernel.launch @block_linear_6144_16384(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<16384x6144xbf16>, view<[%rows]x16384xbf16>)
   command.return
 }
 
-command.program.def public @block0_feed_forward_up() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_feed_forward_up(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x16384xbf16>
-  %weight = command.parameter %parameters, "blocks.0.mlp.up.weight" : view<16384x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.mlp.up.weight"[%layer] : view<16384x6144xbf16>
   kernel.launch @block_linear_6144_16384(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<16384x6144xbf16>, view<[%rows]x16384xbf16>)
   command.return
 }
 
-command.program.def public @block0_feed_forward_down() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_feed_forward_down(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x16384xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
-  %weight = command.parameter %parameters, "blocks.0.mlp.down.weight" : view<6144x16384xbf16>
+  %weight = command.parameter %parameters, "blocks.{}.mlp.down.weight"[%layer] : view<6144x16384xbf16>
   kernel.launch @block_linear_16384_6144(%input_view, %weight, %output_view) : (view<[%rows]x16384xbf16>, view<6144x16384xbf16>, view<[%rows]x6144xbf16>)
   command.return
 }

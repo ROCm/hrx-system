@@ -45,7 +45,7 @@ kernel.def target(@block_attention_wave64) @block_attention_gated() {
   kernel.return
 }
 
-command.program.def public @block0_attention_ungated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
+command.program.def public @krea2.block_attention_ungated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %query_view = buffer.view %query[%origin] : buffer -> view<[%tokens]x6144xbf16>
@@ -57,7 +57,7 @@ command.program.def public @block0_attention_ungated() launch(%query: buffer, %k
   command.return
 }
 
-command.program.def public @block0_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
+command.program.def public @krea2.block_attention_context() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %query_view = buffer.view %query[%origin] : buffer -> view<[%tokens]x6144xbf16>

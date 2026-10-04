@@ -135,7 +135,7 @@ for phase in ("base", "style"):
         actual_path = prefix.with_suffix(".actual.bf16")
         command = [
             *args.checker,
-            "--model=" + str(args.model),
+            "--model=" + str(args.model / "qualification"),
             f"--config=krea2.block_tokens={count}",
             *["--input=" + str(path) for path in input_paths],
         ]
@@ -146,7 +146,7 @@ for phase in ("base", "style"):
         subprocess.run(
             command
             + [
-                "--root=block0_attention_ungated",
+                "--root=qualify.block_attention_ungated",
                 "--expected=" + str(expected_path),
                 "--actual=" + str(actual_path),
             ],
@@ -166,7 +166,7 @@ for phase in ("base", "style"):
         subprocess.run(
             command
             + [
-                "--root=block0_attention_context",
+                "--root=qualify.block_attention_context",
                 "--input=" + str(gate_path),
                 "--expected=" + str(expected_gated_path),
                 "--actual=" + str(actual_gated_path),

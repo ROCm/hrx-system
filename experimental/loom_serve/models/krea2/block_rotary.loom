@@ -27,12 +27,12 @@ kernel.def target(@block_rotary_wave32) @block_query_normalize() {
   kernel.return
 }
 
-command.program.def public @block0_query_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_query_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x48x128xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x48x128xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.qnorm.scale" : view<128xf32>
+  %weight = command.parameter %parameters, "blocks.{}.attn.qknorm.qnorm.scale"[%layer] : view<128xf32>
   kernel.launch @block_query_normalize(%input_view, %weight, %output_view) : (view<[%tokens]x48x128xbf16>, view<128xf32>, view<[%tokens]x48x128xbf16>)
   command.return
 }
@@ -54,12 +54,12 @@ kernel.def target(@block_rotary_wave32) @block_key_normalize() {
   kernel.return
 }
 
-command.program.def public @block0_key_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+command.program.def public @krea2.block_key_norm(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x12x128xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x12x128xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.knorm.scale" : view<128xf32>
+  %weight = command.parameter %parameters, "blocks.{}.attn.qknorm.knorm.scale"[%layer] : view<128xf32>
   kernel.launch @block_key_normalize(%input_view, %weight, %output_view) : (view<[%tokens]x12x128xbf16>, view<128xf32>, view<[%tokens]x12x128xbf16>)
   command.return
 }
@@ -79,14 +79,14 @@ kernel.def target(@block_rotary_wave32) @block_query_rotary() {
   kernel.return
 }
 
-command.program.def public @block0_query_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+command.program.def public @krea2.block_query_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x48x128xbf16>
   %cosine_view = buffer.view %cosine[%origin] : buffer -> view<[%tokens]x128xf32>
   %sine_view = buffer.view %sine[%origin] : buffer -> view<[%tokens]x128xf32>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x48x128xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.qnorm.scale" : view<128xf32>
+  %weight = command.parameter %parameters, "blocks.{}.attn.qknorm.qnorm.scale"[%layer] : view<128xf32>
   kernel.launch @block_query_rotary(%input_view, %weight, %cosine_view, %sine_view, %output_view) : (view<[%tokens]x48x128xbf16>, view<128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x48x128xbf16>)
   command.return
 }
@@ -106,14 +106,14 @@ kernel.def target(@block_rotary_wave32) @block_key_rotary() {
   kernel.return
 }
 
-command.program.def public @block0_key_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+command.program.def public @krea2.block_key_rotary(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x12x128xbf16>
   %cosine_view = buffer.view %cosine[%origin] : buffer -> view<[%tokens]x128xf32>
   %sine_view = buffer.view %sine[%origin] : buffer -> view<[%tokens]x128xf32>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x12x128xbf16>
-  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.knorm.scale" : view<128xf32>
+  %weight = command.parameter %parameters, "blocks.{}.attn.qknorm.knorm.scale"[%layer] : view<128xf32>
   kernel.launch @block_key_rotary(%input_view, %weight, %cosine_view, %sine_view, %output_view) : (view<[%tokens]x12x128xbf16>, view<128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x12x128xbf16>)
   command.return
 }
