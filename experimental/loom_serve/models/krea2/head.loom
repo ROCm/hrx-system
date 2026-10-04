@@ -13,6 +13,7 @@ template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outp
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
 template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+template.decl @krea2.velocity_head(%rows: index, %first_row: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
 
 // The same time embedding conditions both learned modulation rows. It stays
 // a single vector; no expanded scale/shift tensor is materialized.
@@ -103,10 +104,14 @@ kernel.def target(@head_wave32) @krea_head_adapter_add() {
   kernel.return
 }
 
-command.program.def public @krea2.head_input() launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer) {
+command.program.def public @krea2.head_input(%first_row: index) launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer) {
+  %rows = config.get @krea2.image_tokens : index
+  %row_bytes = index.constant 12288 : offset
+  %byte_offset = index.scale %first_row, %row_bytes : index, offset -> offset
+  %input_view = buffer.view %input[%byte_offset] : buffer -> view<[%rows]x6144xbf16>
   %weight = command.parameter %parameters, "last.norm.scale" : view<6144xf32>
   %table = command.parameter %parameters, "last.modulation.lin" : view<2x6144xf32>
-  kernel.launch @krea_head_input(%input, %weight, %embedding, %table, %output) : (buffer, view<6144xf32>, buffer, view<2x6144xf32>, buffer)
+  kernel.launch @krea_head_input(%input_view, %weight, %embedding, %table, %output) : (view<[%rows]x6144xbf16>, view<6144xf32>, buffer, view<2x6144xf32>, buffer)
   command.return
 }
 
@@ -129,31 +134,44 @@ command.program.def public @krea2.head_adapter_add() launch(%adapter: buffer, %i
   command.return
 }
 
-command.program.def public @velocity_head() launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer) {
-  %rows = config.get @krea2.image_tokens : index
+// The caller selects an image span in its storage. Only the first dispatch
+// needs that offset; all head intermediates have an image-only row domain.
+// Base and A read the same normalized activations. B consumes only the rank
+// intermediate and its own output tile, so its addition can update in place.
+template.def<@krea2.velocity_head> @krea2_velocity_head(%rows: index, %first_row: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer) {
   %row_bytes = index.constant 12288 : offset
   %bytes = index.scale %rows, %row_bytes : index, offset -> offset
   %normalized = buffer.alloca<global> align(256) %bytes : buffer
-  command.program.launch @krea2.head_input(%parameters, %input, %embedding, %normalized) : (buffer, buffer, buffer, buffer)
-  command.program.launch @krea2.head_projection(%parameters, %normalized, %output) : (buffer, buffer, buffer)
+  command.program.launch @krea2.head_input[%first_row](%parameters, %input, %embedding, %normalized) : [index](buffer, buffer, buffer, buffer)
+  scf.if %adapted {
+    %rank_bytes = index.constant 64 : offset
+    %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %low_bytes : buffer
+    command.concurrent {
+      command.program.launch @krea2.head_projection(%parameters, %normalized, %output) : (buffer, buffer, buffer)
+      command.program.launch @krea2.head_adapter_down(%adapter, %normalized, %low) : (buffer, buffer, buffer)
+    }
+    command.program.launch @krea2.head_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    command.program.launch @krea2.head_projection(%parameters, %normalized, %output) : (buffer, buffer, buffer)
+    scf.yield
+  }
+  template.return
+}
+
+command.program.def public @velocity_head() launch(%parameters: buffer, %input: buffer, %embedding: buffer, %output: buffer) {
+  %rows = config.get @krea2.image_tokens : index
+  %first_row = index.constant 0 : index
+  %adapted = scalar.constant false : i1
+  template.apply<@krea2.velocity_head>(%rows, %first_row, %adapted, %parameters, %parameters, %input, %embedding, %input, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-// Base and A read the same normalized activations. B consumes only the rank
-// intermediate and its own output tile, so its addition can update in place.
 command.program.def public @velocity_head_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer) {
   %rows = config.get @krea2.image_tokens : index
-  %row_bytes = index.constant 12288 : offset
-  %rank_bytes = index.constant 64 : offset
-  %bytes = index.scale %rows, %row_bytes : index, offset -> offset
-  %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
-  %normalized = buffer.alloca<global> align(256) %bytes : buffer
-  %low = buffer.alloca<global> align(256) %low_bytes : buffer
-  command.program.launch @krea2.head_input(%parameters, %input, %embedding, %normalized) : (buffer, buffer, buffer, buffer)
-  command.concurrent {
-    command.program.launch @krea2.head_projection(%parameters, %normalized, %output) : (buffer, buffer, buffer)
-    command.program.launch @krea2.head_adapter_down(%adapter, %normalized, %low) : (buffer, buffer, buffer)
-  }
-  command.program.launch @krea2.head_adapter_add(%adapter, %low, %strength, %output, %output) : (buffer, buffer, buffer, buffer, buffer)
+  %first_row = index.constant 0 : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.velocity_head>(%rows, %first_row, %adapted, %parameters, %adapter, %input, %embedding, %strength, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

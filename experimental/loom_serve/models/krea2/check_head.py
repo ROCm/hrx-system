@@ -252,7 +252,7 @@ with (
                 )
                 conditioned, _ = execute(
                     "conditioned",
-                    "krea2.head_input",
+                    "qualify.head_input",
                     affine(normalized),
                     ["input", "embedding"],
                     [base_checkpoint],

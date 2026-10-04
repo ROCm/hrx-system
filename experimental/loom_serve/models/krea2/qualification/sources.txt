@@ -14,6 +14,7 @@
 ../stack.loom
 ../block_adapters.loom
 ../head.loom
+../velocity.loom
 config.loom
 components.loom
 head.loom

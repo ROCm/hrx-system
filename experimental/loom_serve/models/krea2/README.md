@@ -10,8 +10,9 @@ All 28 transformer blocks, with or without LoRA, run as one queued command
 with shared kernels and reusable single-block workspace. The caller still
 supplies combined hidden states, time modulation, rotary tables, and a mask.
 The final velocity head also runs natively, consuming image rows and a time
-embedding. Native text conditioning, time conditioning, denoising updates,
-and VAE decoding are the remaining prompt-to-image path.
+embedding. A combined stack-to-head command produces velocities without an
+intermediate host readback. Native text conditioning, time conditioning,
+denoising updates, and VAE decoding are the remaining prompt-to-image path.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -683,3 +684,36 @@ the corresponding external results are 0.60111% and 0.88059%. Hidden-state
 error rankings therefore do not imply the same velocity ranking. These are
 first-step numerical observations, not image-quality or throughput claims.
 The driver retains less than 128 MiB of regenerable head tensors.
+
+### Queued stack-to-head composition
+
+[`velocity.loom`](velocity.loom) exposes `transformer_velocity` and
+`transformer_velocity_adapted`. Their inputs are the stack inputs followed by
+the time embedding, optional adapter strength, and caller-owned velocity
+output. The combined token count must be at least the image token count.
+The combined hidden state is transient storage; a typed view at the image
+suffix binds directly into the head's first kernel. No suffix copy, text-row
+projection, or intermediate host synchronization is needed.
+
+[`check_velocity.py`](check_velocity.py) compares this single command with the
+already-qualified native outputs from `check_head.py`, not with a newly chosen
+numerical tolerance:
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_velocity.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_stack_reference/1088" \
+  --head_results=/path/to/head-results --image_rows=576 \
+  --output=/path/to/new-velocity-results
+```
+
+Base, zero strength, and active LoRA all match byte-for-byte on both native
+executions at 1088 combined rows and 576 image rows. Standalone head
+qualification retains all 144 passing comparisons after the composition
+refactor. The base command shares 12 kernels and 368 unique parameters;
+LoRA shares 19 kernels and 818 unique parameters. Peak transient storage is
+162.5625 MiB base and 162.828125 MiB adapted: exactly single-block scratch
+plus the combined hidden state. Head temporaries reuse expired block storage.
+The driver retains only three final velocity tensors, less than 1 MiB.
