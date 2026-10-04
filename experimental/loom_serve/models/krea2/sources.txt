@@ -10,3 +10,4 @@ block_attention.loom
 kernels/attention.loom
 block_pointwise.loom
 kernels/pointwise.loom
+transformer.loom

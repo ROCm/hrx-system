@@ -6,8 +6,10 @@ source JIT, queued safetensors loading, command programs, and shared device
 ownership. The first transformer block's normalization and fused time
 modulation, dense projections, fused Q/K normalization/rotation, masked
 attention, gated residuals, and SwiGLU have independent component comparisons.
-Full text conditioning, DiT layers, denoising, and VAE decoding are not yet
-implemented here.
+One complete base transformer block also runs as a single queued command and
+matches its separately qualified native stages bit-for-bit. Full text
+conditioning, all DiT layers, denoising, and VAE decoding are not yet
+implemented here; block-level LoRA is not yet connected.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -164,8 +166,8 @@ The native checker queues work through the existing execution domain and waits
 only for its complete-array observations. Cleanup drains accepted work while
 borrowed host payloads remain alive.
 
-The next numerical gate is a real transformer block and its conditioning,
-followed by the entire source-JIT denoising and VAE path to a comparable image.
+The remaining numerical gates include block-level LoRA, model conditioning,
+and the entire source-JIT denoising and VAE path to a comparable image.
 This component does not yet establish a generic model bootstrap, image request
 scheduler, full-model weight-preparation strategy, or throughput result.
 
@@ -381,4 +383,42 @@ Full-size SiLU differs from rounded F64 at eight base values and three style
 values out of 17,825,792 each, all inside the unchanged BF16 envelope. The
 fused product preserves its intermediate BF16 rounding; removing that rounding
 would implement different arithmetic. The test result directory contains about
-500 MiB of reproducible tensors. Full-block composition is the next gate.
+500 MiB of reproducible tensors.
+
+### Complete base transformer block
+
+[`transformer.loom`](transformer.loom) composes the qualified operations into
+`block0_forward`. Its caller supplies hidden states, shared time modulation,
+F32 rotary tables, and the key mask. One immutable parameter root supplies the
+block's weights. Command reflection plans one reusable transient slab; the
+command contains 16 dispatches using ten distinct JITed kernels. Independent
+Q/K/V/gate and feed-forward branches have explicit concurrent scopes. There
+are no host waits, intermediate readbacks, or per-dispatch allocations inside
+the block.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_transformer.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights/turbo.safetensors" \
+  --reference="$krea_reference" --output=/path/to/new-transformer-results
+```
+
+This driver requires the reference environment, detailed block capture, and
+exclusive GPU execution. It runs an independent CPU/F64 block calculation
+with the model's BF16 tensor boundaries and F32 rotary arithmetic. A separate
+native chain checks each reduction against that arithmetic and each fusion
+against composition of independently qualified operands. Finally the single
+queued command must match the native chain bit-for-bit on both executions.
+The result directory retains about 700 MiB of regenerable tensors.
+
+That exact command-composition check passes at both 16 image rows and all
+1088 captured rows. Against the independent complete-block calculation,
+full-size relative L2 error is 0.00039353; the pinned external model's error
+is 0.00107261. The complete block has 38,790 values outside the single-operation
+BF16 envelope, versus 371,847 for the external block; those counts remain
+visible because accumulated rounding is not a single-operation error bound.
+The acceptance gate requires exact native composition and complete-block
+relative L2 no worse than the external baseline. It does not loosen the
+individual component tolerances. These are block-zero accuracy observations,
+not a full-model image or performance result.
