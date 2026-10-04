@@ -201,8 +201,9 @@ static iree_status_t weight_prepare_spans(
   iree_vm_environment_t* environment = NULL;
   IREE_RETURN_IF_ERROR(iree_vm_environment_allocate(allocator, &environment));
   loom_serve_program_t* program = NULL;
+  const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
   iree_status_t status = loom_serve_program_create(
-      environment, policy_path, IREE_SV("prepare_weight"),
+      environment, policy_path, IREE_ARRAYSIZE(roots), roots,
       iree_vm_module_span_empty(), allocator, &program);
   iree_vm_ref_types_t types = {0};
   if (iree_status_is_ok(status)) {

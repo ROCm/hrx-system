@@ -48,9 +48,10 @@ TEST_F(ProgramTest, SourcePolicyQueriesBorrowedKeysAndOwnsResults) {
   IREE_ASSERT_OK(iree_vm_ref_types_resolve(
       iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
       &types));
+  const iree_string_view_t roots[] = {IREE_SVL("prepare_weight")};
   IREE_ASSERT_OK(loom_serve_program_create(
       environment, iree_make_cstring_view(FLAG_policy_source),
-      IREE_SV("prepare_weight"), iree_vm_module_span_empty(), allocator,
+      IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(), allocator,
       &program));
   iree_vm_function_t function = {};
   IREE_ASSERT_OK(iree_vm_process_lookup_function(

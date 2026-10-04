@@ -18,11 +18,13 @@ count consumers require command-processing visibility, and later producers
 wait for those reads before reusing count storage. Direct-only waves retain
 dispatch/transfer scopes; replay adds no host planning or allocation.
 
-`module.c` publishes prepared stages as ordinary fixed-signature VM imports:
-`(hal.buffer, ... slots ...) -> i64`. Model code selects the stage and buffers;
+`module.c` exposes typed `execute_N(i32 stage, N hal.buffer) -> i64` imports
+over one retained command table. Model source selects the stage and buffers;
 the native call submits and returns without waiting. HAL captures bindings and
 retains their buffers independently of the VM invocation. One process can serve
 many rows; its preallocated native binding scratch is reused between calls.
+The `feedback` import targets bounded host spans registered at startup. Source
+can fork feedback between commands without borrowing a VM temporary's memory.
 
 `execution.c` is the shared execution capability used by the model and host
 I/O. Commands and input transfers advance one timeline that serializes shared
@@ -106,8 +108,8 @@ including non-power-of-two configurations. Repeated `--epoch=tokens:spans`
 options replace this catalog for controlled experiments. Startup specializes
 and caches these shapes from the same source and live device profile. Cached
 commands share the same weights, retained rows, residual storage, maximum-sized
-workspace, and VM process. Each is a native runner export resolved once at load
-time; selecting another shape allocates no device backing and copies no retained
+workspace, and VM process. Each occupies one immutable command-table slot;
+selecting another shape allocates no device backing and copies no retained
 state. The scheduler evaluates ready spans against each shape and chooses the
 most input tokens, then the most participating spans, then smaller capacities. This
 occupancy policy is intentionally distinct from measured cost-based selection.
@@ -158,7 +160,7 @@ differential checks. The current source and host storage envelope is 512 input
 tokens and sixteen resident rows. JIT removes offline preparation as a
 prerequisite; larger envelopes still require changing the authored bounds and backing
 together, then qualifying the resulting kernels. Shapes are prepared at startup,
-not inserted into the fixed native-module export table during a running session.
+not inserted into the fixed command table during a running session.
 These are explicit properties of this adapter, not restrictions of the JIT.
 
 The seven rebindable slots are:

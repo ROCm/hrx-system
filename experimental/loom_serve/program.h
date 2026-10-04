@@ -20,13 +20,15 @@ extern "C" {
 // program.
 typedef struct loom_serve_program_t loom_serve_program_t;
 
-// Compiles root from source_path, links it as module "model" with libraries,
-// and creates one process. The environment's provider scopes must outlive the
-// program and any returned references. Libraries are retained by the program.
+// Compiles the nonempty roots list from source_path into one module "model",
+// links it with libraries, and creates one process. The environment's provider
+// scopes must outlive the program and any returned references. Libraries are
+// retained by the program.
 // No compiler storage or source-file mapping survives this call.
 iree_status_t loom_serve_program_create(iree_vm_environment_t* environment,
                                         iree_string_view_t source_path,
-                                        iree_string_view_t root,
+                                        iree_host_size_t root_count,
+                                        const iree_string_view_t* roots,
                                         iree_vm_module_span_t libraries,
                                         iree_allocator_t host_allocator,
                                         loom_serve_program_t** out_program);

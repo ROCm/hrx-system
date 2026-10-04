@@ -121,14 +121,18 @@ class JitTest : public ::testing::Test {
     const iree_vm_ref_type_table_t* table = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_module_register_types(environment_, &table));
     IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(table, &types_));
-    const loom_serve_stage_t stage = {IREE_SV("advance"), commands_[0], 1};
-    IREE_RETURN_IF_ERROR(loom_serve_module_create(
-        &types_, execution_, 1, &stage, allocator_, &native_));
+    const loom_serve_stage_t stage = {commands_[0], 1};
+    loom_serve_module_options_t options = {};
+    options.binding_capacity = 1;
+    options.stages = {1, &stage};
+    IREE_RETURN_IF_ERROR(loom_serve_module_create(&types_, execution_, options,
+                                                  allocator_, &native_));
     const std::string path = directory_ + "/control.loom";
     iree_const_byte_span_t image;
-    IREE_RETURN_IF_ERROR(
-        loom_serve_jit_compile_vm(iree_make_cstring_view(path.c_str()),
-                                  IREE_SV("step"), allocator_, &image));
+    const iree_string_view_t roots[] = {IREE_SVL("step")};
+    IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
+        iree_make_cstring_view(path.c_str()), IREE_ARRAYSIZE(roots), roots,
+        allocator_, &image));
     auto status = iree_vm_bytecode_module_create_trusted(
         environment_, IREE_SV("model"), {image, allocator_}, allocator_,
         &bytecode_);

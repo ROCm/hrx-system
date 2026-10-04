@@ -7,7 +7,7 @@ match across roots so all stages share one resident weight slab.
 
 The runner consumes this directory directly with `--model`. Its
 `sources.txt` catalog indexes all command/kernel providers once; `control.loom`
-is the inference VM entry, and `weights.loom` owns cold tensor preparation
+contains isolated and packed inference VM entries, and `weights.loom` owns cold tensor preparation
 policy. `--prefill_capacity` bounds the automatic packed token
 catalog; `--rows` bounds its independent span axis. Repeated
 `--epoch=tokens:spans` replace that catalog with explicit JIT specializations.
@@ -183,6 +183,13 @@ done
 The serving path uses `loomc` in process for command products, native kernels,
 and VM bytecode. Kernel experiments use `iree-test-loom`,
 `iree-benchmark-loom`, and native compile reports independently of serving.
+
+`control.loom` owns the packed submission sequence: optional proposal,
+target/verification, a feedback fork, then MTP cache catch-up. The host supplies
+validated descriptors, the selected catalog index, and retained buffers to one
+VM invocation. Native imports submit indexed commands or bounded downloads;
+they contain no Qwen routing. The host joins accepted work and feedback even
+when a later native call fails, then publishes row frontiers only on success.
 
 The model's optional MTP bundle warms its private cache after committed target
 epochs. `loom_serve_qwen_model_verify` packs four-input verifiers with ordinary

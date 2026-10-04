@@ -4,20 +4,78 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-func.decl import("runner") @prefill(%residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64)
-
-func.decl import("runner") @decode(%residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64)
+func.decl import("runner") @execute_6(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer) -> (i64)
+func.decl import("runner") @execute_7(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer, %b6: hal.buffer) -> (i64)
+func.decl import("runner") @execute_8(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer, %b6: hal.buffer, %b7: hal.buffer) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 // The program is shared; all request state arrives as buffer bindings.
 func.def public @step(%initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
   %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
   %is_prefill = scalar.cmpi ne, %initialize, %zero : i32
   %completion = scf.if %is_prefill -> (i64) {
-    %prefill = func.call @prefill(%residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %prefill = func.call @execute_7(%zero, %residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield %prefill : i64
   } else {
-    %decode = func.call @decode(%residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %decode = func.call @execute_7(%one, %residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield %decode : i64
+  }
+  func.return %completion : i64
+}
+
+// Catalog order is isolated prefill/decode, target shapes, then optional
+// proposal, catch-up shapes and verifier shapes. All sessions share these
+// commands and one process; descriptors and buffers carry their live state.
+// Feedback slots zero/one hold ordinary tokens/verification records. Neither
+// branch waits: the owner joins both timelines before advancing host frontiers.
+func.def public @epoch(%shape: i32, %shape_count: i32, %mtp_first: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %zero_offset = scalar.constant 0 : i64
+  %propose = scalar.cmpi ne, %proposes, %zero : i32
+  %verify = scalar.cmpi ne, %verifies, %zero : i32
+  scf.if %propose {
+    %proposal = func.call @execute_6(%mtp_first, %metadata, %tokens, %draft_origins, %draft_cache, %carry, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield
+  }
+  %warm_first = scalar.addi %mtp_first, %one : i32
+  %warm_stage = scalar.addi %warm_first, %shape : i32
+  %target = scf.if %verify -> (i64) {
+    %verify_stage = scalar.addi %warm_stage, %shape_count : i32
+    %completion = func.call @execute_8(%verify_stage, %residual, %metadata, %origins, %state, %tokens, %committed, %results, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %count = scalar.extui %span_count : i32 to i64
+    %record_bytes = scalar.constant 24 : i64
+    %length = scalar.muli %count, %record_bytes : i64
+    %feedback = func.call @feedback(%one, %results, %zero_offset, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+    scf.yield %completion : i64
+  } else {
+    %target_stage = scalar.addi %shape, %two : i32
+    %completion = func.call @execute_7(%target_stage, %residual, %metadata, %origins, %state, %tokens, %outputs, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %has_output = scalar.cmpi ne, %output_count, %zero : i32
+    scf.if %has_output {
+      %count = scalar.extui %output_count : i32 to i64
+      %token_bytes = scalar.constant 4 : i64
+      %length = scalar.muli %count, %token_bytes : i64
+      %feedback = func.call @feedback(%zero, %outputs, %zero_offset, %length) : (i32, hal.buffer, i64, i64) -> (i64)
+      scf.yield
+    }
+    scf.yield %completion : i64
+  }
+  // Catch-up only mutates the private draft cache and committed carry. Target
+  // feedback stays immutable and can transfer concurrently with this command.
+  %mtp_enabled = scalar.cmpi ne, %mtp_first, %zero : i32
+  %completion = scf.if %mtp_enabled -> (i64) {
+    %accepted = scf.if %verify -> (hal.buffer) {
+      scf.yield %committed : hal.buffer
+    } else {
+      scf.yield %metadata : hal.buffer
+    }
+    %warm = func.call @execute_7(%warm_stage, %residual, %accepted, %draft_origins, %draft_cache, %carry, %tokens, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield %warm : i64
+  } else {
+    scf.yield %target : i64
   }
   func.return %completion : i64
 }

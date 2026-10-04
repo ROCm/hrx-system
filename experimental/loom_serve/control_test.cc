@@ -6,6 +6,7 @@
 
 #include <array>
 #include <filesystem>
+#include <string>
 
 #include "experimental/loom_serve/execution.h"
 #include "experimental/loom_serve/jit.h"
@@ -178,17 +179,24 @@ class ControlTest
     IREE_RETURN_IF_ERROR(iree_hal_module_register_types(environment_, &table));
     IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(table, &types_));
     const loom_serve_stage_t stages[] = {
-        {IREE_SVL("prefill_to_decode"), commands_[0], 3},
-        {IREE_SVL("decode_transition"), commands_[1], 3},
+        {commands_[0], 3},
+        {commands_[1], 3},
     };
-    IREE_RETURN_IF_ERROR(
-        loom_serve_module_create(&types_, execution_, IREE_ARRAYSIZE(stages),
-                                 stages, allocator_, &native_module_));
+    const iree_byte_span_t feedback[] = {
+        iree_make_byte_span(outputs_[0].tokens.data(), kLengths[1]),
+    };
+    loom_serve_module_options_t options = {};
+    options.binding_capacity = 12;
+    options.stages = {IREE_ARRAYSIZE(stages), stages};
+    options.feedback = {IREE_ARRAYSIZE(feedback), feedback};
+    IREE_RETURN_IF_ERROR(loom_serve_module_create(&types_, execution_, options,
+                                                  allocator_, &native_module_));
     const std::string path = directory_ + "/control.loom";
     iree_const_byte_span_t image;
-    IREE_RETURN_IF_ERROR(
-        loom_serve_jit_compile_vm(iree_make_cstring_view(path.c_str()),
-                                  IREE_SV("step"), allocator_, &image));
+    const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("fork")};
+    IREE_RETURN_IF_ERROR(loom_serve_jit_compile_vm(
+        iree_make_cstring_view(path.c_str()), IREE_ARRAYSIZE(roots), roots,
+        allocator_, &image));
     iree_status_t status = iree_vm_bytecode_module_create_trusted(
         environment_, IREE_SV("model"), {image, allocator_}, allocator_,
         &bytecode_module_);
@@ -211,20 +219,14 @@ class ControlTest
                                            IREE_SV("step"), &step_);
   }
 
-  iree_status_t Invoke(int initialize,
-                       const std::array<iree_hal_buffer_t*, 3>& buffers,
-                       uint64_t* out_value) {
-    iree_vm_variant_t arguments[] = {
-        iree_vm_variant_from_i32(initialize),
-        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[0]),
-        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[1]),
-        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[2]),
-    };
+  iree_status_t InvokeFunction(iree_vm_function_t function,
+                               iree_vm_variant_span_t arguments,
+                               uint64_t* out_value) {
     iree_vm_variant_t results[1] = {};
-    iree_status_t status = iree_vm_invoke(
-        invocation_, step_, iree_vm_variant_span_from_array(arguments),
-        iree_vm_variant_span_from_array(results));
-    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    iree_status_t status =
+        iree_vm_invoke(invocation_, function, arguments,
+                       iree_vm_variant_span_from_array(results));
+    iree_vm_variant_span_reset(arguments);
     int64_t value = 0;
     if (iree_status_is_ok(status)) {
       status = iree_vm_i64_from_variant(results[0], &value);
@@ -234,6 +236,35 @@ class ControlTest
       *out_value = static_cast<uint64_t>(value);
     }
     return status;
+  }
+
+  iree_status_t Invoke(int initialize,
+                       const std::array<iree_hal_buffer_t*, 3>& buffers,
+                       uint64_t* out_value) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(initialize),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[0]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[1]),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers[2]),
+    };
+    return InvokeFunction(step_, iree_vm_variant_span_from_array(arguments),
+                          out_value);
+  }
+
+  iree_status_t InvokeFork(int next_stage, uint64_t* out_value) {
+    iree_vm_function_t function = {};
+    IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
+        process_, IREE_SV("model"), IREE_SV("fork"), &function));
+    iree_vm_variant_t arguments[7] = {};
+    arguments[0] = iree_vm_variant_from_i32(next_stage);
+    for (size_t row = 0; row < 2; ++row) {
+      for (size_t i = 0; i < 3; ++i) {
+        arguments[1 + row * 3 + i] = iree_hal_buffer_variant_from_ptr_borrowed(
+            &types_, buffers_[row][i]);
+      }
+    }
+    return InvokeFunction(function, iree_vm_variant_span_from_array(arguments),
+                          out_value);
   }
 
   iree_status_t Upload(size_t row, size_t first, size_t count,
@@ -438,6 +469,132 @@ TEST_P(ControlTest, FeedbackForkDoesNotAdvanceWork) {
   EXPECT_EQ(outputs_[1].control[0], 105);
   EXPECT_EQ(outputs_[1].control[1], 2);
   EXPECT_EQ(outputs_[1].tokens[2], 11);
+}
+
+TEST_P(ControlTest, IndexedArityFamilyRejectsBeforeSubmission) {
+  for (int count = 0; count <= 12; ++count) {
+    SCOPED_TRACE(count);
+    const std::string name = "execute_" + std::to_string(count);
+    iree_vm_function_t function = {};
+    IREE_ASSERT_OK(iree_vm_process_lookup_function(
+        process_, IREE_SV("runner"), iree_make_cstring_view(name.c_str()),
+        &function));
+    iree_vm_variant_t arguments[13] = {};
+    arguments[0] = iree_vm_variant_from_i32(count == 3 ? -1 : 0);
+    for (int i = 0; i < count; ++i) {
+      arguments[i + 1] = iree_hal_buffer_variant_from_ptr_borrowed(
+          &types_, buffers_[0][i % 3]);
+    }
+    uint64_t completion = 777;
+    IREE_EXPECT_STATUS_IS(
+        count == 3 ? IREE_STATUS_OUT_OF_RANGE : IREE_STATUS_INVALID_ARGUMENT,
+        InvokeFunction(function,
+                       iree_vm_variant_span_from_ptr(arguments, count + 1),
+                       &completion));
+    EXPECT_EQ(completion, 777u);
+  }
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  EXPECT_EQ(completion, 1u);
+  IREE_ASSERT_OK(Invoke(1, buffers_[0], &completion));
+  EXPECT_EQ(completion, 2u);
+}
+
+TEST_P(ControlTest, FeedbackChecksBothExtentsAndAllowsSubranges) {
+  iree_vm_function_t function = {};
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("runner"), IREE_SV("feedback"), &function));
+  struct Range {
+    // Host feedback slot supplied by source.
+    int32_t slot;
+    // Byte range in the device source.
+    int64_t offset;
+    // Requested byte count in both source and destination.
+    int64_t length;
+  };
+  const Range invalid[] = {
+      {1, 0, 4}, {0, 0, 520}, {0, 516, 4}, {0, -1, 4}, {0, 0, -1}};
+  for (auto range : invalid) {
+    iree_vm_variant_t arguments[] = {
+        iree_vm_variant_from_i32(range.slot),
+        iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+        iree_vm_variant_from_i64(range.offset),
+        iree_vm_variant_from_i64(range.length),
+    };
+    uint64_t completion = 777;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_OUT_OF_RANGE,
+        InvokeFunction(function, iree_vm_variant_span_from_array(arguments),
+                       &completion));
+    EXPECT_EQ(completion, 777u);
+  }
+  iree_vm_variant_t null_arguments[] = {
+      iree_vm_variant_from_i32(0),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, nullptr),
+      iree_vm_variant_from_i64(0),
+      iree_vm_variant_from_i64(4),
+  };
+  uint64_t completion = 777;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      InvokeFunction(function, iree_vm_variant_span_from_array(null_arguments),
+                     &completion));
+  EXPECT_EQ(completion, 777u);
+  inputs_[0].tokens[1] = 41;
+  outputs_[0].tokens.fill(-12345);
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  iree_vm_variant_t arguments[] = {
+      iree_vm_variant_from_i32(0),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffers_[0][1]),
+      iree_vm_variant_from_i64(4),
+      iree_vm_variant_from_i64(4),
+  };
+  IREE_ASSERT_OK(InvokeFunction(
+      function, iree_vm_variant_span_from_array(arguments), &completion));
+  EXPECT_EQ(completion, 1u);
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[0].tokens[0], 41);
+  for (size_t i = 1; i < outputs_[0].tokens.size(); ++i) {
+    EXPECT_EQ(outputs_[0].tokens[i], -12345);
+  }
+}
+
+TEST_P(ControlTest, SourceForkAndPartialFailureRetireBorrowedStorage) {
+  inputs_[0].control = {3, 17, 99};
+  inputs_[0].tokens[0] = 7;
+  inputs_[1].control = {4, 100, 31};
+  inputs_[1].tokens[0] = 11;
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  IREE_ASSERT_OK(Upload(1, 0, 3, &completion));
+  IREE_ASSERT_OK(InvokeFork(0, &completion));
+  // Two uploads, then producer and independent continuation; the source's
+  // feedback call did not advance the work frontier.
+  EXPECT_EQ(completion, 4u);
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  EXPECT_EQ(outputs_[0].tokens[2], 7);
+  IREE_ASSERT_OK(Download(1, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[1].control[0], 105);
+  EXPECT_EQ(outputs_[1].tokens[2], 11);
+
+  // Reset the producer, then reject the final call after producer and feedback
+  // have both been accepted. Storage stays alive through the explicit join.
+  inputs_[0].tokens[0] = 19;
+  IREE_ASSERT_OK(Upload(0, 0, 3, &completion));
+  completion = 777;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, InvokeFork(99, &completion));
+  EXPECT_EQ(completion, 777u);
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  EXPECT_EQ(outputs_[0].tokens[2], 19);
+  IREE_ASSERT_OK(Invoke(0, buffers_[0], &completion));
+  EXPECT_EQ(completion, 7u);
+  IREE_ASSERT_OK(Download(0, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(outputs_[0].control[0], 22);
+  EXPECT_EQ(outputs_[0].tokens[3], 19);
 }
 
 TEST_P(ControlTest, DeviceProducedCountsGateConcurrentContinuation) {

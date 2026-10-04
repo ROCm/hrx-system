@@ -208,6 +208,16 @@ before inference begins. Common native pipelines can consume model-owned query
 results while additional control moves into VM source; modality-specific state
 and scheduling contracts still need an actual caller before being generalized.
 
+The inference program exposes both `step` and `epoch` from one source-JIT image.
+[`control.loom`](../models/qwen38/control.loom) is a concrete example of typed
+command selection, optional proposal, verification, and cache catch-up. Its
+`runner.execute_N` calls select cached commands by residency-local index;
+`runner.feedback` forks a download into a cold-registered host slot. The source
+contains the command order and buffer routing, while native execution owns
+timeline assignment and lifetime. A later source/native failure still requires
+joining accepted work before the host recycles payloads. The
+[runner guide](RUNNER.md#queues-failure-and-reclaim) describes that boundary.
+
 ## Correctness that survives optimization
 
 [`gdn_convolution.loom`](../models/qwen38/tests/gdn_convolution.loom) is a small
@@ -242,7 +252,8 @@ multi-turn responses. These checks protect different boundaries.
 
 JIT makes specialization cheap to request; it does not remove authored storage
 bounds. The current adapter generates token and span classes independently at
-startup, shares a maximum workspace, and resolves immutable native exports once.
+startup, shares a maximum workspace, and publishes an immutable command table.
+The shared VM selects entries by index; model entry points resolve once.
 Its sixteen-row bound comes from four-input verification fitting a 64-entry
 selected-output table, not from assigning sixteen full contexts. The private
 KV pool separates shared physical capacity from per-row logical context.
