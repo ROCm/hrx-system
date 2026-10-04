@@ -656,6 +656,62 @@ Address-register reuse or added pressure can force early waits or spills.
 Depth one is the serial control; matched arithmetic and launch geometry keep
 the experiment interpretable.
 
+## Workgroup traversal is an independent tuning dimension
+
+The [agent authoring workflow](../../../loom/docs/src/workflows/agent-driven-kernel-development.md#workgroup-traversal-is-a-schedule)
+separates lane coalescing, workgroup-local reuse, and reuse between workgroups.
+An experiment around Krea's [dense projection motif](../models/krea2/kernels/linear_tiled.loom)
+compared ordinary traversal with a bijection grouping eight 64-row tiles
+while keeping the 64x64 output tile, eight wave32s, K64 read-ahead, four-chain
+F32 accumulation, BF16 storage, and 18 KiB LDS unchanged.
+
+A controlled gfx1151 experiment on 2026-10-04 at 4,608 rows compared the ordinary
+grid from `4cb132f3a6` with that grouped mapping. Optimized, dispatch-complete
+ABABA used eleven samples
+per window, one warmup, and identical hot-input reuse under an exclusive lease.
+
+| BF16 projection | Control window medians | Grouped window medians |
+| --- | --- | --- |
+| 6144 -> 16384 | 96.889 / 97.082 / 97.009 ms | 40.490 / 40.048 ms |
+| 16384 -> 6144 | 97.026 / 97.090 / 97.123 ms | 44.520 / 44.345 ms |
+
+Both grouped windows beat their neighboring controls. Issued operand bytes,
+matrix instructions, barriers, and modeled residency remained unchanged;
+VGPRs increased from 160 to 168, with no spills. The arithmetic-preserving
+candidate passed 68 exact width/tail comparisons. This is isolated kernel
+evidence, not a whole-image speedup or measured DRAM-traffic reduction.
+
+The cache explanation is a source-level hypothesis: grouping bounds the
+revisited A panel at 6/16 MiB for the two K sizes instead of traversing the
+full 54/144 MiB input matrix per output-column tile. Hardware scheduling and
+other resident data determine actual reuse. A tile-size or pipeline-depth
+search alone would have missed this independent dimension; group eight is a
+measured candidate, not a universal default for other motifs.
+
+The smaller shape supplies the counterexample. At 1,088 rows, the same
+6144-to-16384 projection regressed from 9.358 to 10.134 ms, or 8.29%, with
+no overlap between control and candidate samples. Its input panel is only
+12.75 MiB. At that same row count, 16384-to-6144 improved from 14.900 to
+11.047 ms; its panel is 34 MiB. These observations reject a uniform group-eight
+policy. They motivate shape-specific selection and a measured crossover,
+not a cache-capacity threshold inferred solely from nominal hardware size.
+
+The same fixed experiment at intermediate row counts gave these control/grouped
+latency ratios; values above one favor grouping:
+
+| Rows | FFN up | FFN down | Square | Narrow |
+| --- | ---: | ---: | ---: | ---: |
+| 2,048 | 1.073 | 2.098 | 1.016 | 0.982 |
+| 2,560 | 1.166 | 2.053 | 1.140 | 1.053 |
+| 3,072 | 1.841 | 2.187 | 1.826 | 1.708 |
+
+At 2,048, square is near parity and narrow's sample ranges overlap despite
+slower grouped medians. At 2,560 and 3,072 every grouped window beats adjacent
+controls for all widths. A single input-byte threshold therefore misses part
+of the observed behavior. The earliest clearly winning tested row count per
+contraction supplies a bounded piecewise policy; unmeasured crossovers remain
+an interpolation, not an exhaustive tuning result.
+
 ## Changes worth testing in this model
 
 The current Qwen sources provide concrete examples, not universal winners:

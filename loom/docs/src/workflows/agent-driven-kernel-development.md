@@ -191,6 +191,54 @@ names the complete bundle required to enter the intended regime and uses
 selected partial variants or ablations to expose interactions. “One variable”
 means one causal hypothesis, not necessarily one textual edit.
 
+## Workgroup traversal is a schedule
+
+Memory locality has three distinct scales:
+
+| Scale | Authoring choice | Evidence |
+| --- | --- | --- |
+| Within a subgroup | Lane-to-address mapping and packet width | Coalescing, unique bytes, gaps, and native requests |
+| Within a workgroup | Tile shape, shared staging, and fragment ownership | Operand reuse, LDS, registers, barriers, and overlap |
+| Between workgroups | Mapping physical workgroup IDs to logical tiles | Repeated operand footprints, cache behavior, and measured traversal variants |
+
+A kernel can be coalesced, spill-free, and well pipelined while repeatedly
+evicting the data another workgroup needs next. Changing traversal can improve
+cache reuse without reducing FLOPs, issued load bytes, or workgroup count.
+Aggregate instruction and memory counts therefore cannot rule out a traversal
+win. Higher register use from coordinate arithmetic can also be worthwhile.
+
+For independent `BM x BN` output tiles of `C[M,N] = A[M,K] B[N,K]^T`, a group
+of `G` row tiles can sweep output columns while revisiting an input panel of
+roughly `min(G * BM, M) * K * sizeof(A)` bytes. The opposite orientation favors
+reuse of B. These panel sizes generate hypotheses; other operands, concurrent
+work, cache associativity, and actual hardware dispatch order still affect
+residency. Mapping nearby physical IDs to nearby logical tiles does not
+guarantee their execution order and provides no synchronization contract.
+
+A bounded experiment compares traversal orientations or group sizes while
+holding tile geometry, arithmetic, bindings, and launch count fixed. The
+mapping remains a bijection, including a final incomplete group and partial
+matrix tiles; padded workgroups and duplicate stores would change the
+experiment. Exact output comparisons suit an arithmetic-preserving mapping.
+Numerical changes retain their separate oracle/error-envelope decision.
+
+Native evidence checks the coordinate transform, tails, register pressure,
+spills, and unchanged inner work. Controlled interleaved timing establishes
+the benefit at each production shape; the complete consumer then establishes
+whether it survives real cache competition. A winning group size on one shape
+does not select it for every shape or target. The [benchmark reuse policy](benchmark.md#control-data-reuse)
+distinguishes hot-input experiments from streaming and integrated workloads.
+
+Current subgroup-access reports describe lane geometry, not inter-workgroup
+reuse distance or physical cache misses. A traversal experiment can therefore
+be warranted even when `loom-compile-report suggest` reports no finding and
+issued-byte counts are unchanged.
+
+The [Triton matrix-multiplication tutorial](https://triton-lang.org/main/getting-started/tutorials/03-matrix-multiplication.html#l2-cache-optimizations)
+demonstrates grouped program ordering, and [CUTLASS's efficient GEMM guide](https://github.com/NVIDIA/cutlass/blob/main/media/docs/cpp/efficient_gemm.md)
+discusses threadblock rasterization. They supply algorithmic candidates; their
+chosen parameters and cache-level assumptions are not portable tuning results.
+
 ## Search laterally across dispatch boundaries
 
 Fusion is one of Loom's highest-leverage searches because the semantic cut is
@@ -500,6 +548,7 @@ Several recurring observations suggest experiments but cannot select a winner:
 | The reference uses wave64. | Wave ownership, lane cohorts, physical workgroup shape, collectives, fragment layout, LDS exchange, and independent work still need derivation. |
 | The candidate uses fewer registers or has higher modeled occupancy. | Occupancy is a constraint and cliff detector; latency hiding and useful independent work may have fallen with pressure. |
 | The native listing is shorter. | Dynamic requests, waits, dependencies, and cache behavior determine whether removed instructions were limiting. |
+| Tile geometry and issued bytes are unchanged. | A different workgroup traversal can change cross-workgroup cache reuse and physical memory traffic. |
 | One lane issues wider packets. | Neighboring lanes may now touch distant addresses and destroy wave-level coalescing. |
 | The source resembles the oracle's loop. | Address forms, clauses, allocation, waits, and the runtime-selected dispatch can still differ. |
 | A profiler reports precise timestamps. | Precision does not establish replay identity or low perturbation. |
