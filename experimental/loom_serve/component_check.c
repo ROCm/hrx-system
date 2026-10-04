@@ -13,7 +13,6 @@
 #include "experimental/loom_serve/device.h"
 #include "experimental/loom_serve/weights.h"
 #include "iree/base/internal/math.h"
-#include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
@@ -21,6 +20,8 @@ IREE_FLAG(string, model, "", "Source catalog directory.");
 IREE_FLAG(string, root, "", "Command root to qualify.");
 IREE_FLAG_LIST(string, weights,
                "Checkpoint path; repeat in reflected parameter-root order.");
+IREE_FLAG(string, weight_policy, "",
+          "Weight preparation source; required with --weights.");
 IREE_FLAG_LIST(string, input, "Raw input file; repeat in binding order.");
 IREE_FLAG_LIST(string, config, "JIT specialization key=value; repeat per key.");
 IREE_FLAG(string, expected, "", "Raw little-endian BF16 output reference.");
@@ -94,6 +95,10 @@ static iree_status_t component_initialize(component_check_t* check,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "tolerances must be finite and nonnegative");
   }
+  if (FLAG_weights_list().count && !FLAG_weight_policy[0]) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "--weights requires --weight_policy");
+  }
   const iree_flag_string_list_t inputs = FLAG_input_list();
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(allocator, inputs.count + 1,
                                                    sizeof(*check->files),
@@ -150,10 +155,6 @@ static iree_status_t component_initialize(component_check_t* check,
         allocator, program->requirements.fixed_buffer_count,
         sizeof(*check->weights), (void**)&check->weights));
     check->weight_count = program->requirements.fixed_buffer_count;
-    char* policy = NULL;
-    IREE_RETURN_IF_ERROR(iree_file_path_join(iree_make_cstring_view(FLAG_model),
-                                             IREE_SV("weights.loom"), allocator,
-                                             &policy));
     for (uint32_t r = 0;
          r < program->parameter_roots.count && iree_status_is_ok(status); ++r) {
       const loom_cmd_program_parameter_root_t parameter_root =
@@ -164,9 +165,9 @@ static iree_status_t component_initialize(component_check_t* check,
       status = loom_serve_weights_load(
           device, loom_serve_device_transfer_queue(check->owner), dispatch,
           check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
-          checkpoints.values[r], iree_make_cstring_view(policy), allocator);
+          checkpoints.values[r], iree_make_cstring_view(FLAG_weight_policy),
+          allocator);
     }
-    iree_allocator_free(allocator, policy);
     IREE_RETURN_IF_ERROR(status);
   }
   IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(

@@ -29,6 +29,7 @@ parser.add_argument("--checker", nargs="+", required=True)
 parser.add_argument("--model", type=pathlib.Path, required=True)
 parser.add_argument("--checkpoint", type=pathlib.Path, required=True)
 parser.add_argument("--adapter", type=pathlib.Path)
+parser.add_argument("--layer", type=int, choices=range(28), default=0)
 parser.add_argument("--phase", choices=("base", "style"), default="base")
 parser.add_argument("--strength", type=float, default=0.0)
 parser.add_argument("--reference", type=pathlib.Path, required=True)
@@ -60,6 +61,7 @@ def report(rows, name, actual, expected):
     error = actual - expected
     result = dict(
         phase=args.phase,
+        layer=args.layer,
         strength=args.strength,
         rows=rows,
         check=name,
@@ -75,7 +77,7 @@ def report(rows, name, actual, expected):
     return result
 
 
-capture = args.phase + "-block0-"
+capture = f"{args.phase}-block{args.layer}-"
 mask = torch.from_numpy(
     np.fromfile(args.reference / (capture + "mask.u8"), dtype="u1")
 ).bool()
@@ -100,17 +102,22 @@ with (
     ) as adapter,
 ):
     coefficients = (
-        modulation + weights.get_tensor("blocks.0.mod.lin").reshape(6, 6144).bfloat16()
+        modulation
+        + weights.get_tensor(f"blocks.{args.layer}.mod.lin").reshape(6, 6144).bfloat16()
     )
 
     def normalize(value, key):
-        scale = weights.get_tensor("blocks.0." + key).bfloat16().add(1).double()
+        scale = (
+            weights.get_tensor(f"blocks.{args.layer}." + key).bfloat16().add(1).double()
+        )
         precise = value.double()
         inverse = (precise.square().mean(-1, keepdim=True) + 1e-5).rsqrt()
         return (precise * inverse * scale).bfloat16()
 
     def linear(value, key):
-        matrix = weights.get_tensor("blocks.0." + key + ".weight").bfloat16()
+        matrix = weights.get_tensor(
+            f"blocks.{args.layer}." + key + ".weight"
+        ).bfloat16()
         return (value.double() @ matrix.double().T).bfloat16()
 
     def affine(value, row):
@@ -170,15 +177,17 @@ with (
             expected_path.write_bytes(encode(expected))
             command = [
                 *args.checker,
-                "--model=" + str(args.model),
+                "--model=" + str(args.model / "qualification"),
+                "--weight_policy=" + str(args.model / "weights.loom"),
                 *[
                     "--weights=" + str(path)
                     for path in (
                         [args.checkpoint] if checkpoints is None else checkpoints
                     )
                 ],
-                "--root=block0_" + component,
+                "--root=qualify.block_" + component,
                 f"--config=krea2.block_tokens={count}",
+                f"--config=krea2.block_index={args.layer}",
                 *["--input=" + str(paths[name]) for name in arguments],
                 "--expected=" + str(expected_path),
                 "--actual=" + str(actual_path),
@@ -214,7 +223,11 @@ with (
                 base = compute(name, linear(value, key), [argument])
                 if adapter is None:
                     return base
-                factor = "transformer.transformer_blocks.0." + adapter_key + ".lora_"
+                factor = (
+                    f"transformer.transformer_blocks.{args.layer}."
+                    + adapter_key
+                    + ".lora_"
+                )
                 down = adapter.get_tensor(factor + "A.weight").bfloat16().double()
                 up = adapter.get_tensor(factor + "B.weight").bfloat16().double()
                 low = compute(

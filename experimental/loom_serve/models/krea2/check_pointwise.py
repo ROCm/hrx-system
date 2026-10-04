@@ -73,9 +73,10 @@ for phase in ("base", "style"):
             )
             command = [
                 *args.checker,
-                "--model=" + str(args.model),
+                "--model=" + str(args.model / "qualification"),
+                "--weight_policy=" + str(args.model / "weights.loom"),
                 "--weights=" + str(args.checkpoint),
-                "--root=block0_" + component,
+                "--root=qualify.block_" + component,
                 f"--config=krea2.block_tokens={count}",
                 *["--input=" + str(path) for path in inputs],
                 "--expected=" + str(expected_path),
