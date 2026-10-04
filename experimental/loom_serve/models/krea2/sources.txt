@@ -39,3 +39,5 @@ encoder_normalization.loom
 encoder_attention.loom
 encoder_projections.loom
 encoder_block.loom
+kernels/embedding.loom
+text_encoder.loom
