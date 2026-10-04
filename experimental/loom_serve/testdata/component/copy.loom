@@ -1,0 +1,39 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @copy.byte_count : %value: index where [range(%value, 1, 4096)]
+amdgpu.target<gfx11-generic> @copy_wave32 {subgroup_size = 32}
+
+// Preserve every representation bit across the real queued readback boundary.
+kernel.def target(@copy_wave32) @copy_bytes() {
+  %count = config.get @copy.byte_count : index
+  %threads = index.constant 256 : index
+  %padding = index.constant 255 : index
+  %rounded = index.add %count, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %count = config.get @copy.byte_count : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %origin = index.constant 0 : offset
+  %source = buffer.view %input[%origin] : buffer -> view<[%count]xi8>
+  %target = buffer.view %output[%origin] : buffer -> view<[%count]xi8>
+  %live = index.cmp ult, %element, %count : index
+  scf.if %live {
+    %value = view.load %source[%element] : view<[%count]xi8> -> i8
+    view.store %value, %target[%element] : i8, view<[%count]xi8>
+  }
+  kernel.return
+}
+
+command.program.def public @copy() launch(%input: buffer, %output: buffer) {
+  kernel.launch @copy_bytes(%input, %output) : (buffer, buffer)
+  command.return
+}
