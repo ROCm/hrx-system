@@ -1,0 +1,144 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @block_pointwise_wave32 {subgroup_size = 32}
+template.decl @modulation.combine_bf16(%value: bf16, %table: f32) -> (bf16)
+template.decl @activation.silu_bf16(%value: bf16) -> (bf16)
+template.decl @residual.gated_bf16(%value: bf16, %update: bf16, %gate: bf16) -> (bf16)
+
+kernel.def target(@block_pointwise_wave32) @block_residual() {
+  %tokens = config.get @krea2.block_tokens : index
+  %groups_per_token = index.constant 24 : index
+  %groups = index.mul %tokens, %groups_per_token : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%residual: buffer, %update: buffer, %modulation: buffer, %table: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %width = index.constant 6144 : index
+  %elements = index.mul %tokens, %width : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %column = index.rem %element, %width : index
+  %origin = index.constant 0 : offset
+  %residual_view = buffer.view %residual[%origin] : buffer -> view<[%elements]xbf16>
+  %update_view = buffer.view %update[%origin] : buffer -> view<[%elements]xbf16>
+  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6144xbf16>
+  %table_view = buffer.view %table[%origin] : buffer -> view<6144xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %value = view.load %residual_view[%element] : view<[%elements]xbf16> -> bf16
+  %delta = view.load %update_view[%element] : view<[%elements]xbf16> -> bf16
+  %modulation_value = view.load %modulation_view[%column] : view<6144xbf16> -> bf16
+  %table_value = view.load %table_view[%column] : view<6144xf32> -> f32
+  %gate = template.apply<@modulation.combine_bf16>(%modulation_value, %table_value) : (bf16, f32) -> (bf16)
+  %result = template.apply<@residual.gated_bf16>(%value, %delta, %gate) : (bf16, bf16, bf16) -> (bf16)
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+kernel.def target(@block_pointwise_wave32) @block_feed_forward_silu() {
+  %tokens = config.get @krea2.block_tokens : index
+  %groups_per_token = index.constant 64 : index
+  %groups = index.mul %tokens, %groups_per_token : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %width = index.constant 16384 : index
+  %elements = index.mul %tokens, %width : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%elements]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %value = view.load %input_view[%element] : view<[%elements]xbf16> -> bf16
+  %result = template.apply<@activation.silu_bf16>(%value) : (bf16) -> (bf16)
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+kernel.def target(@block_pointwise_wave32) @block_feed_forward_product() {
+  %tokens = config.get @krea2.block_tokens : index
+  %groups_per_token = index.constant 64 : index
+  %groups = index.mul %tokens, %groups_per_token : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%gate: buffer, %up: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %width = index.constant 16384 : index
+  %elements = index.mul %tokens, %width : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %origin = index.constant 0 : offset
+  %gate_view = buffer.view %gate[%origin] : buffer -> view<[%elements]xbf16>
+  %up_view = buffer.view %up[%origin] : buffer -> view<[%elements]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %gate_value = view.load %gate_view[%element] : view<[%elements]xbf16> -> bf16
+  %up_value = view.load %up_view[%element] : view<[%elements]xbf16> -> bf16
+  %activated = template.apply<@activation.silu_bf16>(%gate_value) : (bf16) -> (bf16)
+  %activated_f32 = scalar.extf %activated : bf16 to f32
+  %up_f32 = scalar.extf %up_value : bf16 to f32
+  %product = scalar.mulf %activated_f32, %up_f32 : f32
+  %result = scalar.fptrunc %product : f32 to bf16
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+command.program.def public @block0_attention_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %residual_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %update_view = buffer.view %update[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %table = command.parameter %parameters, "blocks.0.mod.lin" : view<6x6144xf32>
+  %coefficients = view.subview %modulation_view[2, 0] : view<6x6144xbf16> -> view<1x6144xbf16>
+  %coefficient_table = view.subview %table[2, 0] : view<6x6144xf32> -> view<1x6144xf32>
+  kernel.launch @block_residual(%residual_view, %update_view, %coefficients, %coefficient_table, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x6144xbf16>, view<1x6144xbf16>, view<1x6144xf32>, view<[%tokens]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_residual() launch(%parameters: buffer, %residual: buffer, %update: buffer, %modulation: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %residual_view = buffer.view %residual[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %update_view = buffer.view %update[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
+  %table = command.parameter %parameters, "blocks.0.mod.lin" : view<6x6144xf32>
+  %coefficients = view.subview %modulation_view[5, 0] : view<6x6144xbf16> -> view<1x6144xbf16>
+  %coefficient_table = view.subview %table[5, 0] : view<6x6144xf32> -> view<1x6144xf32>
+  kernel.launch @block_residual(%residual_view, %update_view, %coefficients, %coefficient_table, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x6144xbf16>, view<1x6144xbf16>, view<1x6144xf32>, view<[%tokens]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_silu() launch(%input: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x16384xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x16384xbf16>
+  kernel.launch @block_feed_forward_silu(%input_view, %output_view) : (view<[%tokens]x16384xbf16>, view<[%tokens]x16384xbf16>)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_product() launch(%gate: buffer, %up: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %gate_view = buffer.view %gate[%origin] : buffer -> view<[%tokens]x16384xbf16>
+  %up_view = buffer.view %up[%origin] : buffer -> view<[%tokens]x16384xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x16384xbf16>
+  kernel.launch @block_feed_forward_product(%gate_view, %up_view, %output_view) : (view<[%tokens]x16384xbf16>, view<[%tokens]x16384xbf16>, view<[%tokens]x16384xbf16>)
+  command.return
+}

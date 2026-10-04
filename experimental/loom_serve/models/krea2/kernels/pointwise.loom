@@ -1,0 +1,33 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @activation.silu_bf16(%value: bf16) -> (bf16)
+template.decl @residual.gated_bf16(%value: bf16, %update: bf16, %gate: bf16) -> (bf16)
+
+// SiLU evaluates in F32 and rounds before any subsequent BF16 product.
+template.def<@activation.silu_bf16> device @silu_bf16(%value: bf16) -> (bf16) {
+  %input = scalar.extf %value : bf16 to f32
+  %negative = scalar.negf %input : f32
+  %exponential = scalar.expf<afn> %negative : f32
+  %unit = scalar.constant 1.0 : f32
+  %denominator = scalar.addf %unit, %exponential : f32
+  %activated = scalar.divf<arcp> %input, %denominator : f32
+  %result = scalar.fptrunc %activated : f32 to bf16
+  template.return %result : bf16
+}
+
+// Both the gated update and the residual addition have BF16 tensor boundaries.
+template.def<@residual.gated_bf16> device @gated_residual_bf16(%value: bf16, %update: bf16, %gate: bf16) -> (bf16) {
+  %update_f32 = scalar.extf %update : bf16 to f32
+  %gate_f32 = scalar.extf %gate : bf16 to f32
+  %product = scalar.mulf %update_f32, %gate_f32 : f32
+  %product_bf16 = scalar.fptrunc %product : f32 to bf16
+  %rounded = scalar.extf %product_bf16 : bf16 to f32
+  %value_f32 = scalar.extf %value : bf16 to f32
+  %sum = scalar.addf %value_f32, %rounded : f32
+  %result = scalar.fptrunc %sum : f32 to bf16
+  template.return %result : bf16
+}

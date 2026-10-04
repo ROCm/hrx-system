@@ -37,23 +37,23 @@ kernel.def target(@block_wave32) @block_normalize_modulate() {
   %row = kernel.workgroup.id<x> : index
   %lane = kernel.workitem.id<x> : index
   %origin = index.constant 0 : offset
-  %zero = index.constant 0 : index
-  %one = index.constant 1 : index
+  %scale_row = index.constant 0 : index
+  %shift_row = index.constant 1 : index
   %epsilon = scalar.constant 0.00001 : f32
   %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
   %weight_view = buffer.view %weight[%origin] : buffer -> view<6144xf32>
-  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6x6144xbf16>
-  %table_view = buffer.view %table[%origin] : buffer -> view<6x6144xf32>
+  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<2x6144xbf16>
+  %table_view = buffer.view %table[%origin] : buffer -> view<2x6144xf32>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
   scf.for %column = [%lane to %width step %threads] {
     %value = view.load %input_view[%row, %column] : view<[%rows]x6144xbf16> -> bf16
     %weight_value = view.load %weight_view[%column] : view<6144xf32> -> f32
     %normalized = template.apply<@normalization.zero_centered_bf16>(%value, %weight_value, %inverse) : (bf16, f32, f32) -> (bf16)
-    %scale = view.load %modulation_view[%zero, %column] : view<6x6144xbf16> -> bf16
-    %shift = view.load %modulation_view[%one, %column] : view<6x6144xbf16> -> bf16
-    %scale_table = view.load %table_view[%zero, %column] : view<6x6144xf32> -> f32
-    %shift_table = view.load %table_view[%one, %column] : view<6x6144xf32> -> f32
+    %scale = view.load %modulation_view[%scale_row, %column] : view<2x6144xbf16> -> bf16
+    %shift = view.load %modulation_view[%shift_row, %column] : view<2x6144xbf16> -> bf16
+    %scale_table = view.load %table_view[%scale_row, %column] : view<2x6144xf32> -> f32
+    %shift_table = view.load %table_view[%shift_row, %column] : view<2x6144xf32> -> f32
     %result = template.apply<@modulation.affine_bf16>(%normalized, %scale, %scale_table, %shift, %shift_table) : (bf16, bf16, f32, bf16, f32) -> (bf16)
     view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x6144xbf16>
   }
@@ -74,10 +74,35 @@ command.program.def public @block0_attention_input() launch(%parameters: buffer,
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
-  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6x6144xbf16>
+  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<2x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
   %weight = command.parameter %parameters, "blocks.0.prenorm.scale" : view<6144xf32>
   %table = command.parameter %parameters, "blocks.0.mod.lin" : view<6x6144xf32>
-  kernel.launch @block_normalize_modulate(%input_view, %weight, %modulation_view, %table, %output_view) : (view<[%rows]x6144xbf16>, view<6144xf32>, view<6x6144xbf16>, view<6x6144xf32>, view<[%rows]x6144xbf16>)
+  %coefficient_table = view.subview %table[0, 0] : view<6x6144xf32> -> view<2x6144xf32>
+  kernel.launch @block_normalize_modulate(%input_view, %weight, %modulation_view, %coefficient_table, %output_view) : (view<[%rows]x6144xbf16>, view<6144xf32>, view<2x6144xbf16>, view<2x6144xf32>, view<[%rows]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @block0_norm2() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.0.postnorm.scale" : view<6144xf32>
+  kernel.launch @block_normalize(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<6144xf32>, view<[%rows]x6144xbf16>)
+  command.return
+}
+
+command.program.def public @block0_feed_forward_input() launch(%parameters: buffer, %input: buffer, %modulation: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %modulation_view = buffer.view %modulation[%origin] : buffer -> view<6x6144xbf16>
+  %coefficients = view.subview %modulation_view[3, 0] : view<6x6144xbf16> -> view<2x6144xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
+  %weight = command.parameter %parameters, "blocks.0.postnorm.scale" : view<6144xf32>
+  %table = command.parameter %parameters, "blocks.0.mod.lin" : view<6x6144xf32>
+  %coefficient_table = view.subview %table[3, 0] : view<6x6144xf32> -> view<2x6144xf32>
+  kernel.launch @block_normalize_modulate(%input_view, %weight, %coefficients, %coefficient_table, %output_view) : (view<[%rows]x6144xbf16>, view<6144xf32>, view<2x6144xbf16>, view<2x6144xf32>, view<[%rows]x6144xbf16>)
   command.return
 }

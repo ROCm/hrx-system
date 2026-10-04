@@ -4,9 +4,10 @@ This is a **component port, not an image-serving implementation**. The image
 input projection and its official softwatercolor LoRA run through Loom's live
 source JIT, queued safetensors loading, command programs, and shared device
 ownership. The first transformer block's normalization and fused time
-modulation, dense projections, fused Q/K normalization/rotation, and masked
-attention have independent component comparisons. Full text conditioning,
-DiT layers, denoising, and VAE decoding are not yet implemented here.
+modulation, dense projections, fused Q/K normalization/rotation, masked
+attention, gated residuals, and SwiGLU have independent component comparisons.
+Full text conditioning, DiT layers, denoising, and VAE decoding are not yet
+implemented here.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -349,3 +350,35 @@ the additional BF16 rounding; exact gate equivalence accounts for the fusion.
 The external model's corresponding relative L2 values are 1.13e-3 and 1.45e-3.
 These numbers describe this component boundary, not full-model image quality
 or execution performance.
+
+### Residuals and feed-forward pointwise fusion
+
+[`block_pointwise.loom`](block_pointwise.loom) supplies the two gated residual
+updates and SiLU/up-product fusion. [`block.loom`](block.loom) shares one
+normalization/modulation kernel between the pre-attention and pre-feed-forward
+paths. Command-program subviews select the appropriate coefficient rows from
+the shared modulation and learned parameter table. Selection requires neither
+a copy nor a specialized kernel for each coefficient row.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_pointwise.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights/turbo.safetensors" \
+  --reference="$krea_reference" --output=/path/to/new-pointwise-results
+```
+
+The driver uses the reference Python environment. It independently qualifies
+post-attention normalization and SiLU against F64, then requires the fused
+affine and SwiGLU operations to match CPU composition of those qualified
+outputs bit-for-bit. Both residual commands must match the CPU calculation
+and the captured external model exactly. Base and adapter-conditioned inputs
+run at 16 and 1088 tokens, twice each: 253,231,104 output-element comparisons
+pass. This qualifies arithmetic on adapter-conditioned tensors, not the full
+block's LoRA projections.
+
+Full-size SiLU differs from rounded F64 at eight base values and three style
+values out of 17,825,792 each, all inside the unchanged BF16 envelope. The
+fused product preserves its intermediate BF16 rounding; removing that rounding
+would implement different arithmetic. The test result directory contains about
+500 MiB of reproducible tensors. Full-block composition is the next gate.

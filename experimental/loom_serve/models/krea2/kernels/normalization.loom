@@ -8,6 +8,7 @@ template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: 
 template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
 template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @modulation.affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16)
+template.decl @modulation.combine_bf16(%value: bf16, %table: f32) -> (bf16)
 
 // One workgroup reduces one row. Input width is divisible by the supplied
 // workgroup size; concrete wrappers establish shape and launch facts.
@@ -71,16 +72,8 @@ template.def<@normalization.zero_centered_rows_bf16> device @normalization_zero_
 // Fuses pointwise modulation without removing tensor-rounding boundaries:
 // tables are loaded as BF16, each addition and multiply produces BF16.
 template.def<@modulation.affine_bf16> device @modulation_affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16) {
-  %scale_table_bf16 = scalar.fptrunc %scale_table : f32 to bf16
-  %shift_table_bf16 = scalar.fptrunc %shift_table : f32 to bf16
-  %scale_table_f32 = scalar.extf %scale_table_bf16 : bf16 to f32
-  %shift_table_f32 = scalar.extf %shift_table_bf16 : bf16 to f32
-  %scale_f32 = scalar.extf %scale : bf16 to f32
-  %shift_f32 = scalar.extf %shift : bf16 to f32
-  %scale_sum = scalar.addf %scale_f32, %scale_table_f32 : f32
-  %shift_sum = scalar.addf %shift_f32, %shift_table_f32 : f32
-  %scale_sum_bf16 = scalar.fptrunc %scale_sum : f32 to bf16
-  %shift_sum_bf16 = scalar.fptrunc %shift_sum : f32 to bf16
+  %scale_sum_bf16 = template.apply<@modulation.combine_bf16>(%scale, %scale_table) : (bf16, f32) -> (bf16)
+  %shift_sum_bf16 = template.apply<@modulation.combine_bf16>(%shift, %shift_table) : (bf16, f32) -> (bf16)
   %scale_sum_f32 = scalar.extf %scale_sum_bf16 : bf16 to f32
   %shift_sum_f32 = scalar.extf %shift_sum_bf16 : bf16 to f32
   %one = scalar.constant 1.0 : f32
@@ -93,5 +86,16 @@ template.def<@modulation.affine_bf16> device @modulation_affine_bf16(%value: bf1
   %scaled_f32 = scalar.extf %scaled_bf16 : bf16 to f32
   %result_f32 = scalar.addf %scaled_f32, %shift_sum_f32 : f32
   %result = scalar.fptrunc %result_f32 : f32 to bf16
+  template.return %result : bf16
+}
+
+// Checkpoint tables round to BF16 on model load, and their sum with the shared
+// time modulation rounds to BF16 before any affine or residual arithmetic.
+template.def<@modulation.combine_bf16> device @modulation_combine_bf16(%value: bf16, %table: f32) -> (bf16) {
+  %table_bf16 = scalar.fptrunc %table : f32 to bf16
+  %table_f32 = scalar.extf %table_bf16 : bf16 to f32
+  %value_f32 = scalar.extf %value : bf16 to f32
+  %sum = scalar.addf %value_f32, %table_f32 : f32
+  %result = scalar.fptrunc %sum : f32 to bf16
   template.return %result : bf16
 }
