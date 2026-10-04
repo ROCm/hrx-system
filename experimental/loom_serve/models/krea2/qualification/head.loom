@@ -1,0 +1,55 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @head_qualification_wave32 {subgroup_size = 32}
+template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+
+// Expose the unfused primitives to qualify production modulation and adapter
+// epilogues without requiring independent reductions to be bit-identical.
+kernel.def target(@head_qualification_wave32) @qualify_head_normalize() {
+  %rows = config.get @krea2.image_tokens : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.image_tokens : index
+  %width = index.constant 6144 : index
+  %threads = index.constant 256 : index
+  template.apply<@normalization.zero_centered_rows_bf16>(%rows, %width, %threads, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@head_qualification_wave32) @qualify_head_adapter_up() {
+  %rows = config.get @krea2.image_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 4 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.image_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 64 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+command.program.def public @qualify.head_normalize() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "last.norm.scale" : view<6144xf32>
+  kernel.launch @qualify_head_normalize(%input, %weight, %output) : (buffer, view<6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.head_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.final_layer.linear.lora_B.weight" : view<64x32xf32>
+  kernel.launch @qualify_head_adapter_up(%input, %weight, %output) : (buffer, view<64x32xf32>, buffer)
+  command.return
+}

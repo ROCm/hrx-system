@@ -13,3 +13,4 @@ kernels/pointwise.loom
 transformer.loom
 stack.loom
 block_adapters.loom
+head.loom

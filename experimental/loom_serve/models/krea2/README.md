@@ -9,8 +9,9 @@ attention, gated residuals, and SwiGLU have independent component comparisons.
 All 28 transformer blocks, with or without LoRA, run as one queued command
 with shared kernels and reusable single-block workspace. The caller still
 supplies combined hidden states, time modulation, rotary tables, and a mask.
-Native text conditioning, time conditioning, the final velocity head,
-denoising updates, and VAE decoding are the remaining prompt-to-image path.
+The final velocity head also runs natively, consuming image rows and a time
+embedding. Native text conditioning, time conditioning, denoising updates,
+and VAE decoding are the remaining prompt-to-image path.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -629,3 +630,56 @@ observations use `--report_only`: both executions report their differences
 without an error bound, while nonfinite pairs and execution failures still
 fail. The driver applies the unchanged accumulated bound at the image-row
 consumer boundary.
+
+### Final velocity head
+
+[`head.loom`](head.loom) converts the final image-only hidden states into
+64-channel flow velocities. `velocity_head` accepts a base parameter root,
+image states, one 6144-value time embedding, and caller-owned output.
+`velocity_head_adapted` additionally accepts the adapter root and device
+strength. These commands consume the image suffix, not the discarded text
+prefix of the combined transformer sequence.
+
+The first kernel fuses zero-centered RMS normalization with learned affine
+modulation, retaining each BF16 rounding boundary. The same embedding feeds
+both scale and shift; no expanded modulation tensor is needed. The second
+kernel performs the biased 6144-to-64 projection. The adapted command overlaps
+the base and rank-32 A projections, then fuses B with scaling and in-place
+addition. All arithmetic comes from the same config-free normalization and
+projection helpers used by the transformer blocks. Base weights stay immutable.
+
+At 576 image rows, the base head needs 7,077,888 bytes of transient storage
+and two kernels. LoRA adds only 36,864 bytes and two kernels, with no
+full-width delta buffer. The source command planner owns those lifetimes.
+
+[`check_head.py`](check_head.py) consumes the external stack captures and both
+native stack-result directories. It reconstructs the first-step external time
+embedding and requires its modulation to match the retained capture exactly.
+That embedding is a supplied input, not native time conditioning. Separate
+qualification kernels expose normalization and the B projection; production
+keeps them fused with modulation and addition respectively.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_head.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_stack_reference/1088" \
+  --base_stack=/path/to/stack-results/base-1088 \
+  --style_stack=/path/to/stack-results/style-1088 \
+  --image_rows=576 --output=/path/to/new-head-results
+```
+
+Both external and native incoming states pass at 16 and 576 image rows,
+with base and active adapter conditioning. The 144 repeated comparisons cover
+60,166,144 values with zero primitive-envelope violations or nonfinite pairs.
+Fused modulation, adapter addition, whole-head composition, and zero strength
+are bitwise checks. Head-local relative L2 on full native inputs is 0.00384%
+base and 0.00389% LoRA against independent F64 arithmetic with BF16 boundaries.
+
+The complete native stack followed by this head has velocity errors of
+0.57460% base and 0.98863% LoRA against the independent full-chain oracle;
+the corresponding external results are 0.60111% and 0.88059%. Hidden-state
+error rankings therefore do not imply the same velocity ranking. These are
+first-step numerical observations, not image-quality or throughput claims.
+The driver retains less than 128 MiB of regenerable head tensors.
