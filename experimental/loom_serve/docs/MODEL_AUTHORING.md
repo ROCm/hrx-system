@@ -329,6 +329,26 @@ an explicit oracle function with the intended serial semantics. The
 [checks guide](../../../loom/docs/src/guide/checks-and-benchmarks.md) owns the
 syntax and observation contract.
 
+For real checkpoint tensors, [`component_check`](../component_check.c) loads
+named source commands and records two complete executions. `--output_type`
+selects raw little-endian `f16`, `bf16`, `f32`, or `f64` observation without
+converting device output; its default and default tolerances describe BF16.
+An F32 component supplies its own `--atol` and `--rtol`. JSON distinguishes raw
+bit differences, element-envelope violations, and relative L2; nonfinite pairs
+fail even in report-only mode. The small queued-copy contract test exercises
+all four representations, signed zero, fatal nonfinite values, invalid byte
+lengths, and finite F64 values whose squares overflow or underflow:
+
+```sh
+iree-bazel-build --config=asan //experimental/loom_serve:component_check
+python -B experimental/loom_serve/component_check_test.py \
+  --checker bazel-bin/experimental/loom_serve/component_check
+```
+
+The command runs on the selected AMDGPU runner. Model-specific drivers supply
+their independent numerical oracles; interpreting an F32 tensor as BF16 to
+fit a qualification tool would invalidate that comparison.
+
 `iree-test-loom --library` merges the libraries' embedded check records too.
 An explicit `--case=@name` selects the intended case and all its samples;
 an empty selection runs every loaded record. The FFN recipe iterates its
