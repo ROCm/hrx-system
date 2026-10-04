@@ -15,3 +15,5 @@ stack.loom
 block_adapters.loom
 head.loom
 velocity.loom
+time.loom
+kernels/time.loom
