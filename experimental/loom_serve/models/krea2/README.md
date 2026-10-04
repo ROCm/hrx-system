@@ -21,8 +21,9 @@ The `sample_image` and `sample_image_adapted` roots project 2,560-wide fused
 text features into the DiT's 6,144-wide prefix once, then join denoising and
 decoding without intermediate host readbacks. They retain separate immutable
 checkpoint domains and support both text-projection LoRA pairs.
-Qwen3-VL text encoding and layerwise/sequence fusion remain external; this is
-not yet an image-serving endpoint or a native prompt-to-image path.
+The separate `text_fusion` and `text_fusion_adapted` roots produce those fused
+features from the twelve encoder taps. Qwen3-VL text encoding remains external;
+this is not yet an image-serving endpoint or a native prompt-to-image path.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -180,7 +181,8 @@ The native checker queues work through the existing execution domain and waits
 only for its complete-array observations. Cleanup drains accepted work while
 borrowed host payloads remain alive.
 
-The remaining native producers are Qwen3-VL text encoding and text fusion.
+The remaining native producer is Qwen3-VL text encoding. Complete text fusion
+runs separately from the current image-command boundary.
 The denoising qualification below receives captured conditioning and uses an
 external VAE for its preview images; the later image-command qualification
 includes native text projection and VAE decoding.
@@ -1234,5 +1236,56 @@ Each base block binds twelve tensors and uses eight unique kernels; adapted
 blocks bind 28 tensors and use twelve kernels. These ASAN-checker results
 establish numerical and composition correctness, not throughput.
 
-These block commands do not yet implement the learned twelve-to-one layer
-projection, complete text fusion, native text encoding, or an image endpoint.
+### Complete native text fusion
+
+[`text_fusion.loom`](text_fusion.loom) joins two layerwise blocks, the learned
+twelve-to-one reduction, and two token refiners. The public `text_fusion` root
+receives the base parameters, immutable `[token,12,2560]` BF16 taps, a byte key
+mask and distinct `[token,2560]` BF16 output. `text_fusion_adapted` additionally
+receives the adapter root and device F32 strength. The original taps remain
+unchanged; one source-owned tap buffer advances through the layerwise blocks,
+and the refiners advance the reduced output in place. Explicit command edges
+order every transition without intermediate host readbacks.
+
+The [layer-mixing motif](kernels/layer_mix.loom) retains twelve layer values
+per lane and evaluates rank-32 A/B in registers. Adjacent
+lanes own adjacent channels, preserving coalesced input access without a
+transpose. A, B, scaling and base addition retain their BF16 rounding boundaries.
+The production projector has no global rank tensor or transient workspace.
+Its gfx1151 emitted resource report has 34 VGPRs, 24 SGPRs, zero spills,
+zero LDS/private storage and 2,984 code bytes. The reported sixteen resident
+waves per SIMD is a resource ceiling, not measured device utilization.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_text_fusion.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_reference" --fusion_reference="$krea_fusion_reference" \
+  --output=/path/to/new-text-fusion-results
+```
+
+This uses the same pinned reference environment and exclusive execution route.
+Forty primitive comparisons pass the unchanged F64/BF16 envelope over
+278,446,080 elements. Forty exact comparisons cover 27,033,600 elements,
+including independently staged A/B, strengths zero/half/one, full composition
+and zero-strength identity. Each command executes twice at 16/512 tokens with
+base/style inputs. Another 32 finite-only block observations report cumulative
+rounding differences; they are not counted as primitive tolerance passes.
+The sole overwritten fixture and final features retain less than 384 MiB;
+only qualification materializes the full-size 80 MiB rank tensor.
+
+At 512 tokens the complete source command reflects:
+
+| Resource | Base | Rank-32 adapter |
+| --- | ---: | ---: |
+| Unique kernels | 17 | 25 |
+| Parameter tensors | 49 | 115 |
+| Parameter storage bytes, including alignment | 686,903,552 | 714,561,536 |
+| Scratch | 261 MiB | 262.5 MiB |
+
+Full-feature relative L2 versus the independent F64 chain is 0.001684 base
+and 0.000589 adapted; versus the canonical BF16 implementation it is 0.003549
+and 0.001545. These aggregate diagnostics are separate from primitive acceptance
+and exact composition. Image-command integration, native encoding and the image
+request adapter remain distinct subsequent boundaries.

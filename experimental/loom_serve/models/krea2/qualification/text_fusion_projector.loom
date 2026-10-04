@@ -1,0 +1,98 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @fusion_projector_qualification_wave32 {subgroup_size = 32}
+template.decl @projection.gather_12_bf16(%rows: index, %width: index, %row: index, %channel: index, %input: buffer) -> (vector<12xf32>)
+template.decl @projection.dot_12_f32_as_bf16(%outputs: index, %row: index, %values: vector<12xf32>, %weight: buffer) -> (bf16)
+command.program.decl @krea2.fusion_projector(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+
+// Only qualification materializes the [token,channel,rank] tensor so A and B
+// can be checked independently before accepting their register-only fusion.
+kernel.def target(@fusion_projector_qualification_wave32) @fusion_projector_down() {
+  %rows = config.get @krea2.text_tokens : index
+  %columns = index.constant 10 : index
+  %rank = index.constant 32 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %columns, %rank) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %width = index.constant 2560 : index
+  %rank = index.constant 32 : index
+  %threads = index.constant 256 : index
+  %row = kernel.workgroup.id<x> : index
+  %group = kernel.workgroup.id<y> : index
+  %element = kernel.workgroup.id<z> : index
+  %lane = kernel.workitem.id<x> : index
+  %channel = index.madd %group, %threads, %lane : index
+  %values = template.apply<@projection.gather_12_bf16>(%rows, %width, %row, %channel, %input) : (index, index, index, index, buffer) -> (vector<12xf32>)
+  %result = template.apply<@projection.dot_12_f32_as_bf16>(%rank, %element, %values, %weight) : (index, index, vector<12xf32>, buffer) -> (bf16)
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]x32xbf16>
+  view.store %result, %output_view[%row, %channel, %element] : bf16, view<[%rows]x[%width]x32xbf16>
+  kernel.return
+}
+
+kernel.def target(@fusion_projector_qualification_wave32) @fusion_projector_up() {
+  %rows = config.get @krea2.text_tokens : index
+  %columns = index.constant 10 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %columns, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %width = index.constant 2560 : index
+  %rank = index.constant 32 : index
+  %threads = index.constant 256 : index
+  %row = kernel.workgroup.id<x> : index
+  %group = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %channel = index.madd %group, %threads, %lane : index
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %initial = scalar.constant 0.0 : f32
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]x32xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<32xf32>
+  %sum = scf.for %element = [%zero to %rank step %one](%accumulator = %initial : f32) -> (f32) {
+    %stored = view.load %input_view[%row, %channel, %element] : view<[%rows]x[%width]x32xbf16> -> bf16
+    %value = scalar.extf %stored : bf16 to f32
+    %coefficient_f32 = view.load %weight_view[%element] : view<32xf32> -> f32
+    %coefficient_bf16 = scalar.fptrunc %coefficient_f32 : f32 to bf16
+    %coefficient = scalar.extf %coefficient_bf16 : bf16 to f32
+    %next = scalar.fmaf %value, %coefficient, %accumulator : f32
+    scf.yield %next : f32
+  }
+  %result = scalar.fptrunc %sum : f32 to bf16
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  view.store %result, %output_view[%row, %channel] : bf16, view<[%rows]x[%width]xbf16>
+  kernel.return
+}
+
+command.program.def public @qualify.fusion_projector() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.fusion_projector[%adapted](%parameters, %parameters, %input, %input, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_projector_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.fusion_projector[%adapted](%parameters, %adapter, %input, %strength, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_projector_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.text_fusion.projector.lora_A.weight" : view<32x12xf32>
+  kernel.launch @fusion_projector_down(%input, %weight, %output) : (buffer, view<32x12xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.fusion_projector_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.text_fusion.projector.lora_B.weight" : view<1x32xf32>
+  kernel.launch @fusion_projector_up(%input, %weight, %output) : (buffer, view<1x32xf32>, buffer)
+  command.return
+}

@@ -1,0 +1,107 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @fusion_projector_wave32 {subgroup_size = 32}
+template.decl @projection.layer_mix_12_bf16(%rows: index, %width: index, %rank: index, %row: index, %channel: index, %adapted: i1, %input: buffer, %weight: buffer, %down: buffer, %up: buffer, %strength: buffer) -> (bf16)
+template.decl @krea2.text_fusion(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_layerwise_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.fusion_refiner_block(%layer: index, %adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+
+kernel.def target(@fusion_projector_wave32) @fusion_projector() {
+  %rows = config.get @krea2.text_tokens : index
+  %columns = index.constant 10 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %columns, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %width = index.constant 2560 : index
+  %rank = index.constant 32 : index
+  %threads = index.constant 256 : index
+  %row = kernel.workgroup.id<x> : index
+  %group = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %channel = index.madd %group, %threads, %lane : index
+  %adapted = scalar.constant false : i1
+  %result = template.apply<@projection.layer_mix_12_bf16>(%rows, %width, %rank, %row, %channel, %adapted, %input, %weight, %weight, %weight, %weight) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> (bf16)
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  view.store %result, %output_view[%row, %channel] : bf16, view<[%rows]x[%width]xbf16>
+  kernel.return
+}
+
+kernel.def target(@fusion_projector_wave32) @fusion_projector_adapted() {
+  %rows = config.get @krea2.text_tokens : index
+  %columns = index.constant 10 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %columns, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %down: buffer, %up: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %width = index.constant 2560 : index
+  %rank = index.constant 32 : index
+  %threads = index.constant 256 : index
+  %row = kernel.workgroup.id<x> : index
+  %group = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %channel = index.madd %group, %threads, %lane : index
+  %adapted = scalar.constant true : i1
+  %result = template.apply<@projection.layer_mix_12_bf16>(%rows, %width, %rank, %row, %channel, %adapted, %input, %weight, %down, %up, %strength) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer) -> (bf16)
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  view.store %result, %output_view[%row, %channel] : bf16, view<[%rows]x[%width]xbf16>
+  kernel.return
+}
+
+command.program.def public @krea2.fusion_projector(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtfusion.projector.weight" : view<1x12xf32>
+  scf.if %adapted {
+    %down = command.parameter %adapter, "transformer.text_fusion.projector.lora_A.weight" : view<32x12xf32>
+    %up = command.parameter %adapter, "transformer.text_fusion.projector.lora_B.weight" : view<1x32xf32>
+    kernel.launch @fusion_projector_adapted(%input, %weight, %down, %up, %strength, %output) : (buffer, view<1x12xf32>, view<32x12xf32>, view<1x32xf32>, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @fusion_projector(%input, %weight, %output) : (buffer, view<1x12xf32>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+// Only the first layerwise output needs retained tap-sized storage. Later
+// blocks advance source-owned features in place after all original reads.
+// The layer reduction changes layout and writes distinct output storage.
+template.def<@krea2.text_fusion> @krea2_text_fusion(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %tap_stride = index.constant 61440 : offset
+  %tap_bytes = index.scale %rows, %tap_stride : index, offset -> offset
+  %features = buffer.alloca<global> align(256) %tap_bytes : buffer
+  command.program.launch @krea2.fusion_layerwise_block[%zero, %adapted](%parameters, %adapter, %input, %strength, %features) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.fusion_layerwise_block[%one, %adapted](%parameters, %adapter, %features, %strength, %features) : [index, i1](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.fusion_projector[%adapted](%parameters, %adapter, %features, %strength, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  scf.for %layer = [%zero to %two step %one] unroll {
+    command.program.launch @krea2.fusion_refiner_block[%layer, %adapted](%parameters, %adapter, %output, %mask, %strength, %output) : [index, i1](buffer, buffer, buffer, buffer, buffer, buffer)
+  }
+  template.return
+}
+
+// Taps are [token,12,2560] BF16 and output features are [token,2560] BF16.
+// Mask contains one byte per token. Inputs and both weight domains are immutable.
+command.program.def public @text_fusion() launch(%parameters: buffer, %input: buffer, %mask: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %adapted = scalar.constant false : i1
+  template.apply<@krea2.text_fusion>(%rows, %adapted, %parameters, %parameters, %input, %mask, %input, %output) : (index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @text_fusion_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.text_fusion>(%rows, %adapted, %parameters, %adapter, %input, %mask, %strength, %output) : (index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
