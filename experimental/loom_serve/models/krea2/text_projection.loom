@@ -1,0 +1,229 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @text_projection_wave32 {subgroup_size = 32}
+template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @activation.gelu_bf16(%value: bf16) -> (bf16)
+template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+template.decl @krea2.text_projection(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+
+kernel.def target(@text_projection_wave32) @krea_text_norm() {
+  %rows = config.get @krea2.text_tokens : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%rows, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %width = index.constant 2560 : index
+  %threads = index.constant 256 : index
+  template.apply<@normalization.zero_centered_rows_bf16>(%rows, %width, %threads, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@text_projection_wave32) @krea_text_gelu() {
+  %rows = config.get @krea2.text_tokens : index
+  %groups_per_row = index.constant 24 : index
+  %groups = index.mul %rows, %groups_per_row : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %width = index.constant 6144 : index
+  %elements = index.mul %rows, %width : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%elements]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+  %value = view.load %input_view[%element] : view<[%elements]xbf16> -> bf16
+  %result = template.apply<@activation.gelu_bf16>(%value) : (bf16) -> (bf16)
+  view.store %result, %output_view[%element] : bf16, view<[%elements]xbf16>
+  kernel.return
+}
+
+// These leaves fix the two contraction shapes; arithmetic and adapter
+// rounding remain shared with the other model projections.
+kernel.def target(@text_projection_wave32) @krea_text_linear_first() {
+  %rows = config.get @krea2.text_tokens : index
+  %tile = index.constant 16 : index
+  %tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 6144 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %final = template.apply<@projection.bias_f32_as_bf16>(%outputs, %result, %bias) : (index, vector<8xf32>, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %final, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@text_projection_wave32) @krea_text_linear_second() {
+  %rows = config.get @krea2.text_tokens : index
+  %tile = index.constant 16 : index
+  %tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 6144 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %final = template.apply<@projection.bias_f32_as_bf16>(%outputs, %result, %bias) : (index, vector<8xf32>, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %final, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@text_projection_wave32) @krea_text_adapter_down_features() {
+  %rows = config.get @krea2.text_tokens : index
+  %tile = index.constant 16 : index
+  %tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 2 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %inputs = index.constant 2560 : index
+  %outputs = index.constant 32 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@text_projection_wave32) @krea_text_adapter_down_hidden() {
+  %rows = config.get @krea2.text_tokens : index
+  %tile = index.constant 16 : index
+  %tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 2 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 32 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+kernel.def target(@text_projection_wave32) @krea_text_adapter_add() {
+  %rows = config.get @krea2.text_tokens : index
+  %tile = index.constant 16 : index
+  %tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 6144 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %final = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %final, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.text_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtmlp.0.scale" : view<2560xf32>
+  kernel.launch @krea_text_norm(%input, %weight, %output) : (buffer, view<2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.text_gelu() launch(%input: buffer, %output: buffer) {
+  kernel.launch @krea_text_gelu(%input, %output) : (buffer, buffer)
+  command.return
+}
+
+command.program.def public @krea2.text_first(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtmlp.1.weight" : view<6144x2560xf32>
+  %bias = command.parameter %parameters, "txtmlp.1.bias" : view<6144xf32>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_bytes = index.constant 64 : offset
+    %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %low_bytes : buffer
+    %down = command.parameter %adapter, "transformer.txt_in.linear_1.lora_A.weight" : view<32x2560xf32>
+    %up = command.parameter %adapter, "transformer.txt_in.linear_1.lora_B.weight" : view<6144x32xf32>
+    command.concurrent {
+      kernel.launch @krea_text_linear_first(%input, %weight, %bias, %output) : (buffer, view<6144x2560xf32>, view<6144xf32>, buffer)
+      kernel.launch @krea_text_adapter_down_features(%input, %down, %low) : (buffer, view<32x2560xf32>, buffer)
+    }
+    kernel.launch @krea_text_adapter_add(%low, %up, %strength, %output, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @krea_text_linear_first(%input, %weight, %bias, %output) : (buffer, view<6144x2560xf32>, view<6144xf32>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+command.program.def public @krea2.text_second(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "txtmlp.3.weight" : view<6144x6144xf32>
+  %bias = command.parameter %parameters, "txtmlp.3.bias" : view<6144xf32>
+  scf.if %adapted {
+    %rows = config.get @krea2.text_tokens : index
+    %rank_bytes = index.constant 64 : offset
+    %low_bytes = index.scale %rows, %rank_bytes : index, offset -> offset
+    %low = buffer.alloca<global> align(256) %low_bytes : buffer
+    %down = command.parameter %adapter, "transformer.txt_in.linear_2.lora_A.weight" : view<32x6144xf32>
+    %up = command.parameter %adapter, "transformer.txt_in.linear_2.lora_B.weight" : view<6144x32xf32>
+    command.concurrent {
+      kernel.launch @krea_text_linear_second(%input, %weight, %bias, %output) : (buffer, view<6144x6144xf32>, view<6144xf32>, buffer)
+      kernel.launch @krea_text_adapter_down_hidden(%input, %down, %low) : (buffer, view<32x6144xf32>, buffer)
+    }
+    kernel.launch @krea_text_adapter_add(%low, %up, %strength, %output, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    kernel.launch @krea_text_linear_second(%input, %weight, %bias, %output) : (buffer, view<6144x6144xf32>, view<6144xf32>, buffer)
+    scf.yield
+  }
+  command.return
+}
+
+// Text projection is timestep-independent. Only source-owned hidden storage
+// advances in place; the fused text input and parameter domains are immutable.
+template.def<@krea2.text_projection> @krea2_text_projection(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %feature_row_bytes = index.constant 5120 : offset
+  %hidden_row_bytes = index.constant 12288 : offset
+  %feature_bytes = index.scale %rows, %feature_row_bytes : index, offset -> offset
+  %hidden_bytes = index.scale %rows, %hidden_row_bytes : index, offset -> offset
+  %normalized = buffer.alloca<global> align(256) %feature_bytes : buffer
+  command.program.launch @krea2.text_norm(%parameters, %input, %normalized) : (buffer, buffer, buffer)
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.text_first[%adapted](%parameters, %adapter, %normalized, %strength, %hidden) : [i1](buffer, buffer, buffer, buffer, buffer)
+  command.program.launch @krea2.text_gelu(%hidden, %hidden) : (buffer, buffer)
+  command.program.launch @krea2.text_second[%adapted](%parameters, %adapter, %hidden, %strength, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  template.return
+}
+
+command.program.def public @text_projection() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %adapted = scalar.constant false : i1
+  template.apply<@krea2.text_projection>(%rows, %adapted, %parameters, %parameters, %input, %input, %output) : (index, i1, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @text_projection_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.text_projection>(%rows, %adapted, %parameters, %adapter, %input, %strength, %output) : (index, i1, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

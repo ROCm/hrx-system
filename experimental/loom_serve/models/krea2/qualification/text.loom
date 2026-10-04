@@ -1,0 +1,92 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @text_qualification_wave32 {subgroup_size = 32}
+template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+kernel.decl @krea_text_adapter_down_features() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @krea_text_adapter_down_hidden() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @krea_text_adapter_add() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+command.program.decl @krea2.text_first(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+command.program.decl @krea2.text_second(%adapted: i1) launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
+
+kernel.def target(@text_qualification_wave32) @qualify_text_adapter_up() {
+  %rows = config.get @krea2.text_tokens : index
+  %tile = index.constant 16 : index
+  %tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 384 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.text_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 6144 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  kernel.return
+}
+
+command.program.def public @qualify.text_first() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.text_first[%adapted](%parameters, %parameters, %input, %input, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_first_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.text_first[%adapted](%parameters, %adapter, %input, %strength, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_first_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.txt_in.linear_1.lora_A.weight" : view<32x2560xf32>
+  kernel.launch @krea_text_adapter_down_features(%input, %weight, %output) : (buffer, view<32x2560xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_first_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.txt_in.linear_1.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @qualify_text_adapter_up(%input, %weight, %output) : (buffer, view<6144x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_first_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.txt_in.linear_1.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @krea_text_adapter_add(%input, %weight, %strength, %base, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_second() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %adapted = scalar.constant false : i1
+  command.program.launch @krea2.text_second[%adapted](%parameters, %parameters, %input, %input, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_second_adapted() launch(%parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer) {
+  %adapted = scalar.constant true : i1
+  command.program.launch @krea2.text_second[%adapted](%parameters, %adapter, %input, %strength, %output) : [i1](buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_second_adapter_down() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.txt_in.linear_2.lora_A.weight" : view<32x6144xf32>
+  kernel.launch @krea_text_adapter_down_hidden(%input, %weight, %output) : (buffer, view<32x6144xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_second_adapter_up() launch(%adapter: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.txt_in.linear_2.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @qualify_text_adapter_up(%input, %weight, %output) : (buffer, view<6144x32xf32>, buffer)
+  command.return
+}
+
+command.program.def public @qualify.text_second_adapter_add() launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %weight = command.parameter %adapter, "transformer.txt_in.linear_2.lora_B.weight" : view<6144x32xf32>
+  kernel.launch @krea_text_adapter_add(%input, %weight, %strength, %base, %output) : (buffer, view<6144x32xf32>, buffer, buffer, buffer)
+  command.return
+}

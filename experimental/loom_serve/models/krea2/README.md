@@ -19,6 +19,9 @@ still-image VAE decodes those packed latents to clamped F32 RGB, including
 spatial attention, all residual blocks, and folded spatial upsampling.
 The `sample_image` and `sample_image_adapted` roots join denoising and decoding
 without a host latent readback, retaining separate immutable checkpoint domains.
+Native text projection also maps captured 2,560-wide fused features into the
+DiT's 6,144-wide text prefix, with both projection LoRA pairs. It is qualified
+as a separate command, not yet part of the image root.
 Text conditioning remains external; this is not yet an image-serving endpoint
 or a native prompt-to-image path.
 
@@ -1098,3 +1101,50 @@ The complete pipeline needs only 72 KiB more workspace than denoising alone:
 the decoder reuses storage retired by the denoiser. This is also smaller than
 the standalone decoder's allocation because the greedy packer sees a different
 set of reusable holes, not because the combined program performs less math.
+
+### Native text projection
+
+[`text_projection.loom`](text_projection.loom) contains `text_projection` and
+`text_projection_adapted`. Their input is the external text-fusion result,
+not token IDs or Qwen hidden-state taps. The command applies zero-centered
+RMSNorm at width 2,560, a biased 2,560-to-6,144 projection, tanh GELU, and a
+biased 6,144-to-6,144 projection. Both dense layers support the official
+rank-32 LoRA factors. The arithmetic uses the existing config-free motifs;
+concrete leaves resolve `krea2.text_tokens` and fixed model widths.
+
+The input and weight domains stay immutable. Normalized features and hidden
+activations are source-owned scratch; GELU updates the latter in place.
+The stage is independent of denoising time and only needs to execute once
+for a new text-conditioning request.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_text_projection.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference=/path/to/reference-results \
+  --output=/path/to/new-text-projection-results
+```
+
+The driver uses CPU-only F64 reference arithmetic on the required checkpoint
+tensors, not a full external DiT instance. Captured base/LoRA inputs run at
+16, 80 and 512 rows. All 114 repeated comparisons pass over 118,370,304
+values, with no primitive-envelope violations or nonfinite pairs. Adapter
+addition, stage composition, whole-command composition and zero strength
+are bitwise exact against independently staged native operations.
+
+At 512 rows, the complete native chain's relative L2 against the independent
+F64 chain is 9.92026e-5 base and 1.52610e-4 LoRA. Relative L2 against the
+captured external projection is 3.47809e-4 and 3.81059e-4, respectively;
+these aggregate observations are separate from primitive acceptance.
+
+| Text projection at 512 rows | Base | LoRA |
+| --- | ---: | ---: |
+| Unique kernels | 4 | 7 |
+| Parameters | 5 | 9 |
+| Parameter bytes | 213,968,896 | 216,655,872 |
+| Workspace bytes | 8,912,896 | 8,945,664 |
+
+One overwritten working fixture bounds disk use; final per-shape projected
+features remain available for image integration. The text encoder and
+layerwise/sequence fusion still need native implementations.
