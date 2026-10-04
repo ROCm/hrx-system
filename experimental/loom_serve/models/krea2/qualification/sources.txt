@@ -35,6 +35,7 @@
 ../kernels/segmented_attention.loom
 ../text_fusion.loom
 ../kernels/layer_mix.loom
+../encoder_normalization.loom
 config.loom
 components.loom
 image.loom
@@ -46,3 +47,4 @@ text.loom
 text_fusion.loom
 text_fusion_kernels.loom
 text_fusion_projector.loom
+encoder_normalization.loom
