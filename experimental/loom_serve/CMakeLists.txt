@@ -462,9 +462,41 @@ loom_cc_binary(
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_binary(
   NAME
-    krea2_generate
+    krea2_model_check
   SRCS
-    "models/krea2/generate.c"
+    "models/krea2/model_check.c"
+  DEPS
+    ::krea2_model
+    iree::base
+    iree::base::internal::path
+    iree::base::tooling::flags
+    iree::io::file_handle
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    krea2_model_test
+  SRCS
+    "models/krea2/model_test.cc"
+  DEPS
+    ::krea2_model
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_library(
+  NAME
+    krea2_model
+  HDRS
+    "models/krea2/model.h"
+  SRCS
+    "models/krea2/model.c"
   DEPS
     ::device
     ::execution
@@ -472,16 +504,30 @@ loom_cc_binary(
     ::krea2_request
     ::weights
     iree::base
-    iree::base::internal
-    iree::base::internal::json
     iree::base::internal::path
-    iree::base::tooling::flags
     iree::hal
     iree::io::file_handle
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     loom::binding::c::loomc
     loom::target::arch::cmd::program
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    krea2_generate
+  SRCS
+    "models/krea2/generate.c"
+  DEPS
+    ::krea2_model
+    iree::base
+    iree::base::internal
+    iree::base::internal::json
+    iree::base::tooling::flags
+    iree::io::file_handle
 )
 endif()
 
