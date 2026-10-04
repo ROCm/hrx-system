@@ -30,3 +30,6 @@ vae_upsample.loom
 vae_decoder.loom
 sample.loom
 text_projection.loom
+text_fusion_kernels.loom
+text_fusion_blocks.loom
+kernels/segmented_attention.loom

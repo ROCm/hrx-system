@@ -30,6 +30,9 @@
 ../vae_decoder.loom
 ../sample.loom
 ../text_projection.loom
+../text_fusion_kernels.loom
+../text_fusion_blocks.loom
+../kernels/segmented_attention.loom
 config.loom
 components.loom
 image.loom
@@ -38,3 +41,5 @@ time.loom
 denoise.loom
 vae.loom
 text.loom
+text_fusion.loom
+text_fusion_kernels.loom
