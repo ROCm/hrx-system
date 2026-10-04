@@ -1,12 +1,14 @@
 # Krea 2 Turbo component port
 
-This is a **native encoder-taps-to-RGB port, not an image-serving endpoint**.
+This is a **native model component port, not an image-serving endpoint**.
 The `sample_image` and `sample_image_adapted` roots run through Loom's live
 source JIT, queued safetensors loading, command programs and shared device
 ownership. Their caller supplies twelve Qwen3-VL hidden-state taps per text
 token, initial packed noise, timesteps, rotary tables, a key mask, Euler deltas
-and the VAE affine table. Qwen3-VL text encoding is still external; this is not
-yet a native prompt-to-image path.
+and the VAE affine table. The separate `text_encoder` command computes those
+taps from validated token IDs, a causal key mask and encoder rotary tables.
+Prompt tokenization and request-data construction are still external; this
+is not yet a native prompt-to-image path.
 
 The command fuses the encoder taps into 2,560-wide text features and projects
 them into the DiT's 6,144-wide prefix once. It batches time conditioning, then
@@ -1431,3 +1433,57 @@ Both use 2,883,584 bytes of workspace at 64 rows and 25,231,360 bytes at 560
 rows. Retained qualification output is below 128 MiB; checkpoints are reused.
 This establishes decoder arithmetic and its in-place lifecycle, not the
 complete embedding-to-taps encoder or native request construction.
+
+### Native embedding-to-taps encoder
+
+[`text_encoder.loom`](text_encoder.loom) owns embedding lookup, the first
+35 decoder layers and collection of twelve taps. Its input IDs are validated
+I32 values in `[0,151936)`, covering `text_tokens + 34` logical positions.
+BF16 cosine/sine tables have shape `[text_tokens + 48,128]`; the byte key mask
+has that physical row count and fourteen trailing zeros. The embedding kernel
+initializes those trailing hidden rows to zero. Tokenization, suffix placement
+and cumulative rotary positions belong to request construction, not this
+low-level device command.
+
+One source-owned hidden buffer advances in place. After layers 1, 4, ... 34,
+one shared gather kernel strips the 34 prefix rows and writes into a strided
+`[text_tokens,12,2560]` BF16 tap tensor. Ordinary command bindings select each
+tap's byte offset; there is no per-layer kernel variant or scalar device ABI
+extension. Explicit command edges finish each gather before the next layer
+overwrites hidden state. The unused final decoder, final norm and vision
+parameters never enter the native residency.
+
+```sh
+python -B experimental/loom_serve/models/krea2/check_text_encoder.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --reference="$krea_reference" \
+  --encoder_reference=/path/to/new-encoder-reference \
+  --output=/path/to/new-text-encoder-results
+```
+
+The driver requires exact embedding lookup and bitwise equality between the
+whole source command and separately executed native decoder blocks, twice at
+16/512 retained features. The small case is a causal prefix of the canonical
+request, not a newly tokenized short prompt; the full case includes the real
+suffix after middle padding. Independent F64 local-block and full-chain
+differences, and differences from canonical taps, are reported separately.
+These accumulated observations do not replace the primitive arithmetic gates
+above. One overwritten fixture plus final taps and request data retains less
+than 160 MiB; checkpoints and intermediate layer histories are not copied.
+
+Both shapes passed: eight exact comparisons cover 35,635,200 BF16 values with
+zero differing bits, including embedding and whole-encoder composition.
+The full command uses 13 unique kernels and one immutable text-only domain of
+386 tensors occupying 7,843,069,440 bytes. Scratch is 3,211,264 bytes at 64
+physical rows and 28,098,560 bytes at 560 rows: one hidden buffer plus the
+single-block workspace, independent of the number of layers. Retained output
+occupies 94 MiB.
+
+At the full extent, tap relative L2 is 0.014249 against the independent F64
+chain and 0.014858 against the canonical encoder. Restricting to live text
+positions gives 0.012590 and 0.011924 respectively. These are accumulated
+rounding observations, not primitive tolerance passes or image-quality claims.
+The separately executed block observations are finite-only diagnostics; their
+whole-block envelope misses are intentionally visible rather than counted as
+successful independent primitive checks.

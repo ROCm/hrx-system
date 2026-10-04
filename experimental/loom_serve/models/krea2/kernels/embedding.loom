@@ -1,0 +1,20 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @embedding.lookup_bf16(%vocabulary: index, %width: index, %token_id: i32, %channel: index, %weight: buffer) -> (bf16)
+
+// The request boundary validates token IDs before publishing device work.
+// The embedding table is immutable, row-major BF16 with no conversion.
+template.def<@embedding.lookup_bf16> device @embedding_lookup_bf16(%vocabulary: index, %width: index, %token_id: i32, %channel: index, %weight: buffer) -> (bf16) {
+  %one = index.constant 1 : index
+  %maximum = index.sub %vocabulary, %one : index
+  %token0 = index.cast %token_id : i32 to index
+  %token = index.assume %token0 [range(%token0, 0, %maximum)] : index
+  %origin = index.constant 0 : offset
+  %weights = buffer.view %weight[%origin] : buffer -> view<[%vocabulary]x[%width]xbf16>
+  %value = view.load %weights[%token, %channel] : view<[%vocabulary]x[%width]xbf16> -> bf16
+  template.return %value : bf16
+}

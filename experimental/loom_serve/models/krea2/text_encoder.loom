@@ -1,0 +1,118 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+amdgpu.target<gfx11-generic> @encoder_gather_wave32 {subgroup_size = 32}
+template.decl @embedding.lookup_bf16(%vocabulary: index, %width: index, %token_id: i32, %channel: index, %weight: buffer) -> (bf16)
+command.program.decl @krea2.encoder_block(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer)
+
+kernel.def target(@encoder_gather_wave32) @encoder_embedding() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %columns = index.constant 10 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%rows, %columns, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%token_ids: buffer, %weight: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %prefix = index.constant 34 : index
+  %padding = index.constant 48 : index
+  %logical_rows = index.add %texts, %prefix : index
+  %rows = index.add %texts, %padding : index
+  %vocabulary = index.constant 151936 : index
+  %width = index.constant 2560 : index
+  %threads = index.constant 256 : index
+  %row = kernel.workgroup.id<x> : index
+  %group = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %channel = index.madd %group, %threads, %lane : index
+  %origin = index.constant 0 : offset
+  %ids = buffer.view %token_ids[%origin] : buffer -> view<[%logical_rows]xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %logical = index.cmp ult, %row, %logical_rows : index
+  scf.if %logical {
+    %id = view.load %ids[%row] : view<[%logical_rows]xi32> -> i32
+    %value = template.apply<@embedding.lookup_bf16>(%vocabulary, %width, %id, %channel, %weight) : (index, index, i32, index, buffer) -> (bf16)
+    view.store %value, %output_view[%row, %channel] : bf16, view<[%rows]x[%width]xbf16>
+    scf.yield
+  } else {
+    %zero = scalar.constant 0.0 : bf16
+    view.store %zero, %output_view[%row, %channel] : bf16, view<[%rows]x[%width]xbf16>
+    scf.yield
+  }
+  kernel.return
+}
+
+// The command binding selects a tap's column offset. A shared strided kernel
+// strips prefix rows without creating a kernel variant for every tap index.
+kernel.def target(@encoder_gather_wave32) @encoder_tap() {
+  %texts = config.get @krea2.text_tokens : index
+  %columns = index.constant 10 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%texts, %columns, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%hidden: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %prefix = index.constant 34 : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %width = index.constant 2560 : index
+  %threads = index.constant 256 : index
+  %row = kernel.workgroup.id<x> : index
+  %group = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %channel = index.madd %group, %threads, %lane : index
+  %input_row = index.add %row, %prefix : index
+  %origin = index.constant 0 : offset
+  %layout = encoding.layout.strided [30720, 1] : encoding<layout>
+  %input_view = buffer.view %hidden[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%texts]x[%width]xbf16, %layout>
+  %value = view.load %input_view[%input_row, %channel] : view<[%rows]x[%width]xbf16> -> bf16
+  view.store %value, %output_view[%row, %channel] : bf16, view<[%texts]x[%width]xbf16, %layout>
+  kernel.return
+}
+
+// IDs cover text_tokens+34 logical positions, all validated in [0,151936).
+// The fourteen trailing physical rows are initialized to zero, not token zero.
+command.program.def public @krea2.encoder_embedding() launch(%parameters: buffer, %token_ids: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "language_model.embed_tokens.weight" : view<151936x2560xbf16>
+  kernel.launch @encoder_embedding(%token_ids, %weight, %output) : (buffer, view<151936x2560xbf16>, buffer)
+  command.return
+}
+
+// Input IDs use the canonical prefix/prompt/middle-padding/suffix layout.
+// Cosine/sine are BF16[physical_rows,128], and the byte key mask includes
+// fourteen trailing zeros. The immutable inputs may not alias hidden/taps.
+// Output is BF16[text_tokens,12,2560]. Each tap completes before the next
+// decoder overwrites hidden state; no all-layer history or host readback exists.
+command.program.def public @text_encoder() launch(%parameters: buffer, %token_ids: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %taps: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %hidden_stride = index.constant 5120 : offset
+  %hidden_bytes = index.scale %rows, %hidden_stride : index, offset -> offset
+  %hidden = buffer.alloca<global> align(256) %hidden_bytes : buffer
+  command.program.launch @krea2.encoder_embedding(%parameters, %token_ids, %hidden) : (buffer, buffer, buffer)
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %layers = index.constant 35 : index
+  %layout = encoding.layout.strided [30720, 1] : encoding<layout>
+  scf.for %layer = [%zero to %layers step %one] unroll {
+    command.program.launch @krea2.encoder_block[%layer](%parameters, %hidden, %cosine, %sine, %mask, %hidden) : [index](buffer, buffer, buffer, buffer, buffer, buffer)
+    %remainder = index.rem %layer, %three : index
+    %selected = index.cmp eq, %remainder, %one : index
+    scf.if %selected {
+      %tap = index.div %layer, %three : index
+      %tap_offset = index.scale %tap, %hidden_stride : index, offset -> offset
+      %tap_view = buffer.view %taps[%tap_offset] : buffer -> view<[%texts]x2560xbf16, %layout>
+      kernel.launch @encoder_tap(%hidden, %tap_view) : (buffer, view<[%texts]x2560xbf16, %layout>)
+      scf.yield
+    }
+  }
+  command.return
+}
