@@ -19,3 +19,6 @@ time.loom
 kernels/time.loom
 denoise.loom
 kernels/diffusion.loom
+vae.loom
+kernels/image.loom
+kernels/convolution.loom

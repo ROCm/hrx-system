@@ -19,9 +19,13 @@
 ../kernels/time.loom
 ../denoise.loom
 ../kernels/diffusion.loom
+../vae.loom
+../kernels/image.loom
+../kernels/convolution.loom
 config.loom
 components.loom
 image.loom
 head.loom
 time.loom
 denoise.loom
+vae.loom
