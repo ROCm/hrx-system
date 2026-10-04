@@ -33,7 +33,7 @@ typedef struct loom_cmd_parameter_requirement_t {
   // Byte offset of the parameter relative to the fixed-buffer range.
   uint64_t byte_offset;
 
-  // Exact byte length of the parameter payload.
+  // Maximum byte extent requested by views of this parameter.
   uint64_t byte_length;
 
   // Minimum required alignment of the placed parameter payload.
@@ -66,7 +66,7 @@ typedef struct loom_cmd_parameter_requirement_table_t {
   // Number of entries in |roots|.
   iree_host_size_t root_count;
 
-  // Concrete parameters in source traversal order.
+  // Unique root/key parameters in first source occurrence order.
   loom_cmd_parameter_requirement_t* entries;
 
   // Number of entries in |entries|.
@@ -96,8 +96,10 @@ typedef struct loom_cmd_parameter_layout_t {
 // Each reachable command.parameter result must have an exact byte footprint
 // and substitutions evaluable to nonnegative indices. Parameter source roots
 // become fixed resources; all other launch bindings remain rebindable.
-// Parameters are packed independently within each source root in source
-// traversal order using a canonical 256-byte minimum alignment.
+// References to the same concrete key within one root share placement with
+// the maximum requested extent and alignment. Parameters are packed
+// independently within each source root in first source occurrence order
+// using a canonical 256-byte minimum alignment.
 //
 // Exact view results rooted in launch bindings or parameter results are
 // preserved in the same lower plan. Parameter-relative offsets compose with

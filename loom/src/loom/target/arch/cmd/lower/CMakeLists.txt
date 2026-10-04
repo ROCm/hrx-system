@@ -28,27 +28,6 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
-    program_composition
-  HDRS
-    "program_composition.h"
-  SRCS
-    "program_composition.c"
-  DEPS
-    iree::base
-    iree::base::internal::arena
-    loom::analysis::scc
-    loom::analysis::symbol_references
-    loom::error::emitter
-    loom::error::error_defs
-    loom::ir
-    loom::ops::op_defs
-    loom::rewrite::callable
-    loom::rewrite::rewriter
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
     dispatch_counts
   HDRS
     "dispatch_counts.h"
@@ -109,6 +88,7 @@ loom_cc_library(
     loom::ir::facts
     loom::ops::command
     loom::target::arch::cmd::abi_layout
+    loom::util::adaptive_sort
     loom::util::fact_table
     loom::util::walk
   PUBLIC
@@ -149,7 +129,6 @@ loom_cc_library(
     ::dispatch_counts
     ::lower
     ::parameters
-    ::program_composition
     ::schedule
     ::transients
     iree::base

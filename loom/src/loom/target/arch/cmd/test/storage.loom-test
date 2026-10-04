@@ -243,3 +243,116 @@ low.func.def public retain target<cmd.core> abi(command_program) abi_layout({ent
   cmd.dispatch.indirect.static<%4, %5>[%10]()
   return
 }
+
+// ====
+
+// Repeated calls to a parameterized helper share immutable content despite
+// distinct serial scopes. This models autoregressive proposal rounds.
+// RUN: emit command-program @rounds
+
+kernel.entry.decl @project(%weight: view<4xf32>, %state: buffer)
+
+command.program.def @projection() launch(%parameters: buffer, %state: buffer) {
+  %weight = command.parameter %parameters, "shared.weight" : view<4xf32>
+  %c1 = index.constant 1 : index
+  kernel.dispatch @project[%c1](%weight, %state) : [index](view<4xf32>, buffer)
+  command.return
+}
+
+command.program.def public @rounds() launch(%parameters: buffer, %state: buffer) {
+  %c0 = index.constant 0 : index
+  %c1 = index.constant 1 : index
+  %c3 = index.constant 3 : index
+  scf.for %round = [%c0 to %c3 step %c1] unroll {
+    command.program.launch @projection(%parameters, %state) : (buffer, buffer)
+  }
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 1, executable_count = 1, fixed_buffer_count = 1, rebindable_binding_count = 1}) @rounds() asm {
+  %15 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %16 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.binding>
+  %17 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %18 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %19 = cmd.constant.u64 0
+  %20 = cmd.constant.u64 -1
+  %21 = cmd.constant.u64 16
+  %22 = cmd.constant.u32 1
+  cmd.dispatch.direct<%17, %18>[%22, %22, %22](%15, %19, %21, %16, %19, %20)
+  cmd.dispatch.direct.barrier<%17, %18>[%22, %22, %22](%15, %19, %21, %16, %19, %20)
+  cmd.dispatch.direct.barrier<%17, %18>[%22, %22, %22](%15, %19, %21, %16, %19, %20)
+  return
+}
+
+// ====
+
+// Root/key identity survives different concrete patterns, typed footprints,
+// and nested subviews. The first view is small; the later larger footprint
+// determines placement of the following parameter without widening either
+// dispatch's view. The same key in another checkpoint root stays independent.
+// RUN: emit command-program @shared_views
+
+kernel.entry.decl @prefix(%weight: view<1xbf16>)
+
+kernel.entry.decl @tail(%weight: view<2xf32>)
+
+kernel.entry.decl @bytes(%weight: view<4xi8>)
+
+command.program.def public @shared_views() launch(%base: buffer, %adapter: buffer) {
+  %c1 = index.constant 1 : index
+  %layer = index.constant 3 : index
+  %anchor = command.parameter %base, "anchor" : view<4xi8>
+  kernel.dispatch @bytes[%c1](%anchor) : [index](view<4xi8>)
+  command.concurrent {
+    command.serial {
+      %small = command.parameter %base, "block.{}.weight"[%layer] : view<2xbf16>
+      %prefix = view.subview %small[1] : view<2xbf16> -> view<1xbf16>
+      kernel.dispatch @prefix[%c1](%prefix) : [index](view<1xbf16>)
+    }
+    command.serial {
+      %large = command.parameter %base, "block.3.weight" : view<80xf32>
+      %outer = view.subview %large[70] : view<80xf32> -> view<10xf32>
+      %tail = view.subview %outer[8] : view<10xf32> -> view<2xf32>
+      kernel.dispatch @tail[%c1](%tail) : [index](view<2xf32>)
+    }
+    command.serial {
+      %other = command.parameter %adapter, "block.3.weight" : view<4xi8>
+      kernel.dispatch @bytes[%c1](%other) : [index](view<4xi8>)
+    }
+  }
+  %after = command.parameter %base, "after" : view<4xi8>
+  kernel.dispatch @bytes[%c1](%after) : [index](view<4xi8>)
+  command.return
+}
+
+// ----
+low.func.def public retain target<cmd.core> abi(command_program) abi_layout({entry_count = 3, executable_count = 3, fixed_buffer_count = 2, rebindable_binding_count = 0}) @shared_views() asm {
+  %15 = resource<command_input> {index = 0, source_type = buffer} : reg<cmd.buffer>
+  %16 = resource<command_input> {index = 1, source_type = buffer} : reg<cmd.buffer>
+  %17 = resource<command_input> {index = 0, source_type = index} : reg<cmd.executable>
+  %18 = resource<command_input> {index = 1, source_type = index} : reg<cmd.executable>
+  %19 = resource<command_input> {index = 2, source_type = index} : reg<cmd.executable>
+  %20 = resource<command_input> {index = 0, source_type = index} : reg<cmd.entry>
+  %21 = resource<command_input> {index = 1, source_type = index} : reg<cmd.entry>
+  %22 = resource<command_input> {index = 2, source_type = index} : reg<cmd.entry>
+  %23 = cmd.constant.u64 0
+  %24 = cmd.constant.u64 -1
+  %25 = cmd.constant.u64 258
+  %26 = cmd.constant.u64 2
+  %27 = cmd.constant.u64 536
+  %28 = cmd.constant.u64 40
+  %29 = cmd.constant.u64 568
+  %30 = cmd.constant.u64 8
+  %31 = cmd.constant.u64 4
+  %32 = cmd.constant.u64 256
+  %33 = cmd.constant.u64 320
+  %34 = cmd.constant.u64 768
+  %35 = cmd.constant.u32 1
+  cmd.dispatch.direct<%17, %20>[%35, %35, %35](%15, %23, %31)
+  cmd.dispatch.direct.barrier<%18, %21>[%35, %35, %35](%15, %25, %26)
+  cmd.dispatch.direct<%19, %22>[%35, %35, %35](%15, %29, %30)
+  cmd.dispatch.direct<%17, %20>[%35, %35, %35](%16, %23, %31)
+  cmd.dispatch.direct.barrier<%17, %20>[%35, %35, %35](%15, %34, %31)
+  return
+}

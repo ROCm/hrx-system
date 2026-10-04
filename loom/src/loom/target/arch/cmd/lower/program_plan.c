@@ -22,7 +22,6 @@
 #include "loom/target/arch/cmd/lower/dispatch_counts.h"
 #include "loom/target/arch/cmd/lower/lower.h"
 #include "loom/target/arch/cmd/lower/parameters.h"
-#include "loom/target/arch/cmd/lower/program_composition.h"
 #include "loom/target/arch/cmd/lower/program_plan_requests.h"
 #include "loom/target/arch/cmd/lower/schedule.h"
 #include "loom/target/arch/cmd/lower/transients.h"
@@ -642,12 +641,6 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
   if (iree_status_is_ok(status)) {
     memset(root_builds, 0, program_count * sizeof(*root_builds));
   }
-  loom_func_like_t* root_programs = NULL;
-  if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(&scratch_arena, program_count,
-                                       sizeof(*root_programs),
-                                       (void**)&root_programs);
-  }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < program_count; ++i) {
       IREE_ASSERT(loom_symbol_ref_is_valid(program_refs[i]));
@@ -659,7 +652,6 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
       IREE_ASSERT(root->program_op != NULL);
       root->program = loom_func_like_cast(plan_module, root->program_op);
       IREE_ASSERT(loom_func_like_isa(root->program));
-      root_programs[i] = root->program;
     }
   }
 
@@ -680,11 +672,6 @@ iree_status_t loom_cmd_program_plan_build_from_materialization(
         plan_module, &references, configuration_functions,
         configuration_function_count, diagnostic_emitter, &scratch_arena,
         &kernel_entry_table, &valid);
-  }
-  if (valid && iree_status_is_ok(status)) {
-    status = loom_cmd_program_composition_flatten(
-        plan_module, &references, root_programs, program_count,
-        diagnostic_emitter, &scratch_arena, &valid);
   }
   if (valid && iree_status_is_ok(status)) {
     status = loom_cmd_program_plan_normalize_roots(

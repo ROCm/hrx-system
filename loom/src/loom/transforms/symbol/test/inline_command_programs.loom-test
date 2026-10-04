@@ -1,0 +1,71 @@
+// A linear wrapper whose dependency introduces CFG retains its function-level
+// region until the shared inliner splices both calls.
+// RUN: pass inline-callables
+
+kernel.entry.decl @step(%storage: buffer)
+
+command.program.def @forward() launch(%storage: buffer) {
+  cfg.br ^exit
+^exit:
+  %c1 = index.constant 1 : index
+  kernel.dispatch @step[%c1](%storage) : [index](buffer)
+  command.return
+}
+
+command.program.def @wrapper() launch(%storage: buffer) {
+  command.program.launch @forward(%storage) : (buffer)
+  command.program.launch @forward(%storage) : (buffer)
+  command.return
+}
+
+command.program.def public @entry() launch(%storage: buffer) {
+  command.program.launch @wrapper(%storage) : (buffer)
+  command.return
+}
+
+// ----
+kernel.entry.decl @step(%storage: buffer)
+
+command.program.def public @entry() launch(%storage: buffer) {
+  cfg.br ^_bb1
+^_bb1:
+  cfg.br ^_bb2
+^_bb2:
+  %c1$6 = index.constant 1 : index
+  kernel.dispatch @step[%c1$6](%storage) : [index](buffer)
+  cfg.br ^_bb3
+^_bb3:
+  cfg.br ^_bb4
+^_bb4:
+  cfg.br ^_bb5
+^_bb5:
+  %c1$2 = index.constant 1 : index
+  kernel.dispatch @step[%c1$2](%storage) : [index](buffer)
+  cfg.br ^_bb6
+^_bb6:
+  command.return
+}
+
+// ====
+
+// The same transitive CFG cannot cross a single-block concurrent scope.
+// RUN: pass inline-callables
+
+command.program.def @forward() launch() {
+  cfg.br ^exit
+^exit:
+  command.return
+}
+
+command.program.def @wrapper() launch() {
+  command.program.launch @forward() : ()
+  command.return
+}
+
+command.program.def public @entry() launch() {
+  command.concurrent {
+    // ERROR@+1: LOWERING/044 {op_name="command.program.launch", phase_name="inline-callables", callee_name="wrapper", failure_code="caller_region_not_cfg_capable"}
+    command.program.launch @wrapper() : ()
+  }
+  command.return
+}

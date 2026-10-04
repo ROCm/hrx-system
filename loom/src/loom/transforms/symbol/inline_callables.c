@@ -17,6 +17,7 @@
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/command/ops.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
@@ -454,7 +455,8 @@ static uint8_t loom_inline_effective_temperature(uint8_t callee_temperature,
 static void loom_inline_resolve_entry_policy(
     loom_inline_callables_plan_t* state, loom_inline_plan_entry_t* entry) {
   const loom_call_like_kind_t call_kind = loom_call_like_kind(entry->call);
-  if (call_kind == LOOM_CALL_LIKE_KIND_TEMPLATE) {
+  if (call_kind == LOOM_CALL_LIKE_KIND_TEMPLATE ||
+      call_kind == LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM) {
     entry->effective_policy = LOOM_INLINE_POLICY_INLINE;
     entry->action = LOOM_INLINE_PLAN_ACTION_REQUIRED;
     ++state->statistics.required_edges;
@@ -783,6 +785,7 @@ static loom_inline_blocker_t loom_inline_validate_call_kind(
   switch (loom_call_like_kind(entry->call)) {
     case LOOM_CALL_LIKE_KIND_SEMANTIC:
     case LOOM_CALL_LIKE_KIND_TEMPLATE:
+    case LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM:
       if (loom_func_like_isa(entry->callee)) {
         return LOOM_INLINE_BLOCKER_NONE;
       }
@@ -938,10 +941,12 @@ static iree_status_t loom_inline_emit_blockers(
     };
     loom_diagnostic_related_op_t related_op = {
         .label = IREE_SV("callee definition"),
+        .module = state->module,
         .op = entry->callee.op,
         .field_ref = loom_diagnostic_field_ref_none(),
     };
     loom_diagnostic_emission_t emission = {
+        .module = state->module,
         .op = entry->call_op,
         .error = LOOM_ERR_LOWERING_044,
         .params = params,
@@ -1126,19 +1131,69 @@ static iree_status_t loom_inline_execute_entry(
   }
 }
 
-// Makes Low scheduling contracts explicit before a body crosses a callable
-// boundary. Locked blocks receive a fence before and after each instruction;
-// phased functions receive one scope closed at every return. Clearing the
-// materialized mode makes normalization idempotent for retained helpers and
-// lets generic cloning and CFG splicing preserve the explicit contracts.
-static iree_status_t loom_inline_materialize_low_schedules(
+// Linear command bodies implicitly sequence their children. Preserve that
+// scope when a call expands inside a concurrent region, including when an
+// enclosing template or static branch is subsequently inlined. Predicted CFG
+// bodies retain their function-level region for transitive CFG splicing and
+// require CFG-capable callers during preflight.
+static iree_status_t loom_inline_materialize_command_schedule(
+    loom_inline_callables_plan_t* state, const loom_inline_plan_entry_t* entry,
+    loom_rewriter_t* rewriter) {
+  if (!state->symbols[entry->target_symbol_id].body_will_be_linear) {
+    return iree_ok_status();
+  }
+  loom_block_t* block =
+      loom_region_entry_block(loom_func_like_body(entry->callee));
+  loom_op_t* first_op = block->first_op;
+  loom_op_t* terminator = block->last_op;
+  if (first_op == terminator ||
+      (loom_command_serial_isa(first_op) && first_op->next_op == terminator)) {
+    return iree_ok_status();
+  }
+
+  loom_builder_t* builder = &rewriter->builder;
+  loom_builder_set_before(builder, first_op);
+  loom_op_t* serial_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_command_serial_build(builder, first_op->location, &serial_op));
+  const loom_builder_ip_t saved = loom_builder_enter_region(
+      builder, serial_op, loom_command_serial_body(serial_op));
+  loom_op_t* yield_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_command_yield_build(builder, terminator->location, &yield_op));
+  loom_builder_restore(builder, saved);
+  iree_status_t status = iree_ok_status();
+  for (loom_op_t* op = first_op;
+       op != terminator && iree_status_is_ok(status);) {
+    loom_op_t* next_op = op->next_op;
+    status = loom_rewriter_move_before(rewriter, op, yield_op);
+    op = next_op;
+  }
+  loom_pass_mark_changed(state->pass);
+  return status;
+}
+
+// Makes command and Low scheduling contracts explicit before a body crosses
+// a callable boundary. Commands retain their serial scope. Locked blocks
+// receive a fence before and after each instruction; phased functions receive
+// one scope closed at every return. Normalization is idempotent for retained
+// helpers so generic cloning and CFG splicing preserve the explicit contracts.
+static iree_status_t loom_inline_materialize_schedules(
     loom_inline_callables_plan_t* state, loom_rewriter_t* rewriter) {
   for (uint32_t entry_index = 0; entry_index < state->entry_count;
        ++entry_index) {
     const loom_inline_plan_entry_t* entry = &state->entries[entry_index];
-    if ((entry->action != LOOM_INLINE_PLAN_ACTION_CLONE &&
-         entry->action != LOOM_INLINE_PLAN_ACTION_TRANSFER) ||
-        loom_call_like_kind(entry->call) != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
+    if (entry->action != LOOM_INLINE_PLAN_ACTION_CLONE &&
+        entry->action != LOOM_INLINE_PLAN_ACTION_TRANSFER) {
+      continue;
+    }
+    const loom_call_like_kind_t kind = loom_call_like_kind(entry->call);
+    if (kind == LOOM_CALL_LIKE_KIND_COMMAND_PROGRAM) {
+      IREE_RETURN_IF_ERROR(
+          loom_inline_materialize_command_schedule(state, entry, rewriter));
+      continue;
+    }
+    if (kind != LOOM_CALL_LIKE_KIND_LOW_INTERNAL) {
       continue;
     }
     const loom_low_schedule_t schedule =
@@ -1298,8 +1353,7 @@ static iree_status_t loom_inline_execute_plan(
   loom_rewriter_t rewriter = {0};
   loom_rewriter_initialize(&rewriter, state->module, state->pass->arena);
 
-  iree_status_t status =
-      loom_inline_materialize_low_schedules(state, &rewriter);
+  iree_status_t status = loom_inline_materialize_schedules(state, &rewriter);
   const iree_host_size_t symbol_count = state->module->symbols.count;
   loom_inline_execution_symbol_t* execution_symbols = NULL;
   loom_inline_execution_entry_t* execution_entries = NULL;

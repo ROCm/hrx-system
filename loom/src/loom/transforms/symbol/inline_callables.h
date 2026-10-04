@@ -84,7 +84,8 @@ const loom_pass_info_t* loom_inline_callables_pass_info(void);
 iree_status_t loom_inline_callables_create(loom_pass_t* pass,
                                            iree_string_view_t options);
 
-// Runs module-level required callable inlining. Template calls stay intact;
+// Runs module-level required callable inlining. Command program calls expand
+// with their serial ordering intact. Template calls stay intact;
 // select-templates{rewrite=inline} owns their applicability and expansion.
 iree_status_t loom_inline_callables_run(loom_pass_t* pass,
                                         loom_module_t* module);

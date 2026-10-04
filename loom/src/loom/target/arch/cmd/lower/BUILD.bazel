@@ -32,24 +32,6 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "program_composition",
-    srcs = ["program_composition.c"],
-    hdrs = ["program_composition.h"],
-    deps = [
-        "//loom/src/loom/analysis:scc",
-        "//loom/src/loom/analysis:symbol_references",
-        "//loom/src/loom/error:emitter",
-        "//loom/src/loom/error:error_defs",
-        "//loom/src/loom/ir",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/rewrite:callable",
-        "//loom/src/loom/rewrite:rewriter",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:arena",
-    ],
-)
-
-loom_cc_library(
     name = "dispatch_counts",
     srcs = ["dispatch_counts.c"],
     hdrs = ["dispatch_counts.h"],
@@ -99,6 +81,7 @@ loom_cc_library(
         "//loom/src/loom/ir:facts",
         "//loom/src/loom/ops/command",
         "//loom/src/loom/target/arch/cmd:abi_layout",
+        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:fact_table",
         "//loom/src/loom/util:walk",
         "//runtime/src/iree/base",
@@ -141,7 +124,6 @@ loom_cc_library(
         ":dispatch_counts",
         ":lower",
         ":parameters",
-        ":program_composition",
         ":schedule",
         ":transients",
         "//loom/src/loom/analysis:symbol_references",

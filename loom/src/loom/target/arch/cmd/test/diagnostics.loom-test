@@ -1,7 +1,7 @@
 // RUN: emit command-program @entry
 
-// ERROR@+1: LOWERING/049 {program_name="recursive"}
 command.program.def @recursive() launch() {
+  // ERROR@+1: LOWERING/044 {op_name="command.program.launch", phase_name="inline-callables", callee_name="recursive", failure_code="required_cycle"}
   command.program.launch @recursive() : ()
   command.return
 }
