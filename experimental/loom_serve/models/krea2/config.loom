@@ -6,3 +6,4 @@
 
 config.def @krea2.image_tokens = 576 : index
 config.def @krea2.block_tokens = 1088 : index
+config.def @krea2.time_count = 8 : index

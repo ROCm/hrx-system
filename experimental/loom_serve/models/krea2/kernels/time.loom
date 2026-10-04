@@ -1,0 +1,49 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @time.sinusoidal_bf16(%count: index, %capacity: index, %input: buffer, %output: buffer)
+
+// Cosine precedes sine. Physical padding has a defined zero time and never
+// reads past the logical time vector; consumers select only logical rows.
+template.def<@time.sinusoidal_bf16> device @time_sinusoidal_bf16(%count: index, %capacity: index, %input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %column = kernel.workitem.id<x> : index
+  %half = index.constant 128 : index
+  %frequency_index = index.rem %column, %half : index
+  %frequency_i32 = index.cast %frequency_index : index to i32
+  %frequency_f32 = scalar.uitofp %frequency_i32 : i32 to f32
+  %negative_log = scalar.constant -9.210340371976184 : f32
+  %half_f32 = scalar.constant 128.0 : f32
+  %scaled_index = scalar.mulf %negative_log, %frequency_f32 : f32
+  %exponent = scalar.divf %scaled_index, %half_f32 : f32
+  %frequency = scalar.expf<afn> %exponent : f32
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%count]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%capacity]x256xbf16>
+  %valid = index.cmp ult, %row, %count : index
+  %time = scf.if %valid -> (f32) {
+    %stored = view.load %input_view[%row] : view<[%count]xbf16> -> bf16
+    %value = scalar.extf %stored : bf16 to f32
+    scf.yield %value : f32
+  } else {
+    %zero = scalar.constant 0.0 : f32
+    scf.yield %zero : f32
+  }
+  %thousand = scalar.constant 1000.0 : f32
+  %scaled_time = scalar.mulf %time, %thousand : f32
+  %angle = scalar.mulf %scaled_time, %frequency : f32
+  %cosine_half = index.cmp ult, %column, %half : index
+  %value = scf.if %cosine_half -> (f32) {
+    %cosine = scalar.cosf<afn> %angle : f32
+    scf.yield %cosine : f32
+  } else {
+    %sine = scalar.sinf<afn> %angle : f32
+    scf.yield %sine : f32
+  }
+  %rounded = scalar.fptrunc %value : f32 to bf16
+  view.store %rounded, %output_view[%row, %column] : bf16, view<[%capacity]x256xbf16>
+  template.return
+}

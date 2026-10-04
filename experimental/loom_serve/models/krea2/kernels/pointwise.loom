@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 template.decl @activation.silu_bf16(%value: bf16) -> (bf16)
+template.decl @activation.gelu_bf16(%value: bf16) -> (bf16)
 template.decl @residual.gated_bf16(%value: bf16, %update: bf16, %gate: bf16) -> (bf16)
 
 // SiLU evaluates in F32 and rounds before any subsequent BF16 product.
@@ -15,6 +16,14 @@ template.def<@activation.silu_bf16> device @silu_bf16(%value: bf16) -> (bf16) {
   %unit = scalar.constant 1.0 : f32
   %denominator = scalar.addf %unit, %exponential : f32
   %activated = scalar.divf<arcp> %input, %denominator : f32
+  %result = scalar.fptrunc %activated : f32 to bf16
+  template.return %result : bf16
+}
+
+// Tanh-polynomial GELU evaluates in F32 and retains its BF16 tensor boundary.
+template.def<@activation.gelu_bf16> device @gelu_bf16(%value: bf16) -> (bf16) {
+  %input = scalar.extf %value : bf16 to f32
+  %activated = scalar.geluf<tanh, afn> %input : f32
   %result = scalar.fptrunc %activated : f32 to bf16
   template.return %result : bf16
 }

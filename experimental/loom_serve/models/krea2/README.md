@@ -11,8 +11,10 @@ with shared kernels and reusable single-block workspace. The caller still
 supplies combined hidden states, time modulation, rotary tables, and a mask.
 The final velocity head also runs natively, consuming image rows and a time
 embedding. A combined stack-to-head command produces velocities without an
-intermediate host readback. Native text conditioning, time conditioning,
-denoising updates, and VAE decoding are the remaining prompt-to-image path.
+intermediate host readback. Native time conditioning batches all requested
+timesteps, including LoRA, into device-resident embedding/modulation tables.
+Native text conditioning, denoising updates, and VAE decoding are the
+remaining prompt-to-image path.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -717,3 +719,54 @@ LoRA shares 19 kernels and 818 unique parameters. Peak transient storage is
 162.5625 MiB base and 162.828125 MiB adapted: exactly single-block scratch
 plus the combined hidden state. Head temporaries reuse expired block storage.
 The driver retains only three final velocity tensors, less than 1 MiB.
+
+### Batched time conditioning
+
+[`time.loom`](time.loom) exposes `time_conditioning` and
+`time_conditioning_adapted`. The base root accepts a checkpoint root, a BF16
+time vector, and caller-owned output. The adapted root additionally accepts
+the adapter checkpoint and an F32 strength buffer. `krea2.time_count` is the
+logical vector length, from 1 through 256; the default is Turbo's eight steps.
+The values are the scheduler timesteps divided by its training-step count,
+rounded to BF16 as in the model pipeline.
+
+All known times are processed together. The command computes 256 sinusoidal
+features, the two-layer GELU time MLP, and the GELU/modulation projection.
+The three base matrices remain in their F32 checkpoint storage and round to
+BF16 in the shared contraction helper. LoRA covers all three projections;
+base/A contractions may overlap, and B/scaling/addition is fused in place.
+The model leaves bind exact shapes; mathematical helpers receive SSA operands
+and contain no model configuration dependencies.
+
+The physical row count is `ceil(time_count / 16) * 16`. Padding has a defined
+zero time and never reads beyond the logical input. Output contains the whole
+physical `rows × 6144` BF16 embedding table followed by the whole
+`rows × 36864` BF16 modulation table. A step consumer binds its row from each
+table; padding is storage, not an additional denoising step. No per-layer
+embedding replication is needed.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_time.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" --adapter="$krea_adapter" \
+  --reference="$krea_stack_reference/1088" \
+  --output=/path/to/new-time-results
+```
+
+This qualification uses the reference environment and exclusive GPU execution.
+It derives the eight actual Turbo scheduler times and exercises logical counts
+1, 8, 16, and 17, including the physical-tile boundary. Independent F64
+arithmetic checks sinusoidal features, GELU, and each base/A/B contraction.
+Fused adapter addition, complete native composition, and zero-strength identity
+are bitwise gates. The independent external first-step modulation must still
+match the retained stack capture exactly. Accumulated accuracy reports select
+logical rows; primitive and exact-composition checks include all physical
+padding. The driver retains about 75 MiB of regenerable tensors.
+
+All 216 repeated comparisons pass over 63,994,880 values, with no primitive
+envelope violations or nonfinite pairs. For eight times, the base command has
+five kernels, six unique parameters, and 392 KiB of transient workspace.
+LoRA uses nine kernels, twelve parameters across two roots, and 393 KiB of
+workspace. These are component ownership and correctness results; denoising
+still has to consume the native tables before this is a native image path.

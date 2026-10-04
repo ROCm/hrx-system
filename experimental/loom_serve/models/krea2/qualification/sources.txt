@@ -15,6 +15,9 @@
 ../block_adapters.loom
 ../head.loom
 ../velocity.loom
+../time.loom
+../kernels/time.loom
 config.loom
 components.loom
 head.loom
+time.loom
