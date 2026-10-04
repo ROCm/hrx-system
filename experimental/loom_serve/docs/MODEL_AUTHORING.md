@@ -258,8 +258,11 @@ velocity head, and eight Euler updates. Base, zero-strength, and active LoRA
 trajectories match their independently staged native components bit-for-bit;
 parameter roots stay immutable and one planned workspace serves every step.
 Its reproduction guide separates primitive numerical checks, exact composition,
-and accumulated image differences. Text conditioning and VAE decoding remain
-external, so its previews are mixed native/reference results. The existing HTTP
+and accumulated image differences. A separate source command now runs the full
+still-image VAE from packed BF16 latent to F32 RGB, with folded spatial
+upsampling and in-place residuals. Its final pixels agree with the independent
+CPU decoder to at most one 8-bit level on the qualified base/LoRA images.
+Text conditioning remains external. The existing HTTP
 service and packed scheduler remain concrete Qwen consumers; changing their
 model directory does not turn them into an image or audio endpoint. No complete
 image or audio model is qualified by this packet.
