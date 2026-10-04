@@ -865,3 +865,43 @@ retained seed-42 deer prompt, the native previews preserve the composition
 and the adapter's visibly different rendering, but are not pixel-identical.
 This single prompt is a numerical and ownership witness, not a distributional
 image-quality evaluation or a performance measurement.
+
+### F32 VAE input path
+
+[`vae.loom`](vae.loom) exposes `vae_input`, the first three operations of the
+still-image decoder: unpack/affine, post-quant 1x1 convolution, and the initial
+3x3 convolution. It receives an immutable VAE parameter root, packed BF16
+latent, a `2 × 16` F32 affine table, and caller-owned F32 output. The affine
+table contains inverse standard deviations followed by means from the pinned
+VAE configuration. `krea2.latent_height` and `krea2.latent_width` specialize
+even spatial dimensions; their defaults are 48 for a 384x384 image.
+
+The config-free [convolution helper](kernels/convolution.loom) consumes NCHW
+activations and original F32 OI(T)HW weights. A fresh causal frame selects the
+last temporal weight plane; this is not a video-history implementation.
+Nearest-neighbor upsampling can be folded into its input indexing without an
+expanded image buffer. Concrete kernel leaves resolve geometry before applying
+the helper, so no shape scalars enter the device ABI.
+
+```sh
+HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_input.py \
+  --checker bazel-bin/experimental/loom_serve/component_check \
+  --model=experimental/loom_serve/models/krea2 \
+  --checkpoint="$krea_weights" \
+  --denoise_results=/path/to/denoise-results \
+  --output=/path/to/new-vae-input-results
+```
+
+The driver checks 1x1/3x3 spatial kernels, one/three temporal planes, and
+1x/2x spatial scales at odd and one-row shapes. Actual base and LoRA latents
+exercise the original checkpoint at 2x6 and 48x48. Unpacking and native
+composition are bitwise gates; contractions compare with independent F64
+arithmetic rounded to F32. All 64 repeated comparisons pass over 7,476,200
+values, with no envelope violations or nonfinite pairs.
+
+The full input command has three kernels, four unique parameters occupying
+666,368 bytes, and 294,912 bytes of transient workspace. Relative L2 against
+the pinned CPU/F32 prefix is 2.16e-7 for base and 2.14e-7 for LoRA; maximum
+absolute error is 8.35e-7 for both. This establishes the native decoder input
+boundary, not residual blocks, spatial attention, upsampling stages, or RGB
+output. Regenerable qualification tensors occupy less than 64 MiB.

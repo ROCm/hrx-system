@@ -1,0 +1,47 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @qualify.height : %value: index where [range(%value, 1, 1024)]
+config.decl @qualify.width : %value: index where [range(%value, 1, 1024)]
+config.decl @qualify.inputs : %value: index where [range(%value, 1, 1152)]
+config.decl @qualify.outputs : %value: index where [range(%value, 1, 1152)]
+config.decl @qualify.extent : %value: index where [range(%value, 1, 3)]
+config.decl @qualify.planes : %value: index where [range(%value, 1, 3)]
+config.decl @qualify.upsample : %value: index where [range(%value, 1, 2)]
+
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+amdgpu.target<gfx11-generic> @image_qualification_wave32 {subgroup_size = 32}
+
+kernel.def target(@image_qualification_wave32) @qualify_image_convolution() {
+  %height = config.get @qualify.height : index
+  %width = config.get @qualify.width : index
+  %outputs = config.get @qualify.outputs : index
+  %upsample = config.get @qualify.upsample : index
+  %output_height = index.mul %height, %upsample : index
+  %output_width = index.mul %width, %upsample : index
+  %pixels = index.mul %output_height, %output_width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %height = config.get @qualify.height : index
+  %width = config.get @qualify.width : index
+  %inputs = config.get @qualify.inputs : index
+  %outputs = config.get @qualify.outputs : index
+  %extent = config.get @qualify.extent : index
+  %planes = config.get @qualify.planes : index
+  %upsample = config.get @qualify.upsample : index
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %input, %weight, %bias, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @qualify.image_convolution() launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  kernel.launch @qualify_image_convolution(%input, %weight, %bias, %output) : (buffer, buffer, buffer, buffer)
+  command.return
+}

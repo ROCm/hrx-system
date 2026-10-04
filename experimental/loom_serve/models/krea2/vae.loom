@@ -1,0 +1,107 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+amdgpu.target<gfx11-generic> @vae_wave32 {subgroup_size = 32}
+template.decl @image.unpack_affine_bf16_f32(%height: index, %width: index, %channels: index, %input: buffer, %affine: buffer, %output: buffer)
+template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %input: buffer, %weight: buffer, %bias: buffer, %output: buffer)
+
+kernel.def target(@vae_wave32) @krea_vae_unpack() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %channels = index.constant 16 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %channels, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %affine: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %channels = index.constant 16 : index
+  template.apply<@image.unpack_affine_bf16_f32>(%height, %width, %channels, %input, %affine, %output) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.vae_unpack() launch(%input: buffer, %affine: buffer, %output: buffer) {
+  kernel.launch @krea_vae_unpack(%input, %affine, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@vae_wave32) @krea_vae_post_quant() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %channels = index.constant 16 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %channels, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %channels = index.constant 16 : index
+  %one = index.constant 1 : index
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %channels, %channels, %one, %one, %one, %input, %weight, %bias, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@vae_wave32) @krea_vae_conv_in() {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %padding = index.constant 127 : index
+  %threads = index.constant 128 : index
+  %rounded = index.add %pixels, %padding : index
+  %groups = index.div %rounded, %threads : index
+  %channels = index.constant 384 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %channels, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %inputs = index.constant 16 : index
+  %outputs = index.constant 384 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %three, %three, %one, %input, %weight, %bias, %output) : (index, index, index, index, index, index, index, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @krea2.vae_post_quant() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "post_quant_conv.weight" : view<16x16x1x1x1xf32>
+  %bias = command.parameter %parameters, "post_quant_conv.bias" : view<16xf32>
+  kernel.launch @krea_vae_post_quant(%input, %weight, %bias, %output) : (buffer, view<16x16x1x1x1xf32>, view<16xf32>, buffer)
+  command.return
+}
+
+command.program.def public @krea2.vae_conv_in() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %weight = command.parameter %parameters, "decoder.conv_in.weight" : view<384x16x3x3x3xf32>
+  %bias = command.parameter %parameters, "decoder.conv_in.bias" : view<384xf32>
+  kernel.launch @krea_vae_conv_in(%input, %weight, %bias, %output) : (buffer, view<384x16x3x3x3xf32>, view<384xf32>, buffer)
+  command.return
+}
+
+// Source-owned prefix of the fresh still-image decoder. Both intermediate
+// latent planes are transient; F32 weights retain their original file layout.
+command.program.def public @vae_input() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer) {
+  %height = config.get @krea2.latent_height : index
+  %width = config.get @krea2.latent_width : index
+  %pixels = index.mul %height, %width : index
+  %pixel_bytes = index.constant 64 : offset
+  %bytes = index.scale %pixels, %pixel_bytes : index, offset -> offset
+  %unpacked = buffer.alloca<global> align(256) %bytes : buffer
+  %projected = buffer.alloca<global> align(256) %bytes : buffer
+  command.program.launch @krea2.vae_unpack(%input, %affine, %unpacked) : (buffer, buffer, buffer)
+  command.program.launch @krea2.vae_post_quant(%parameters, %unpacked, %projected) : (buffer, buffer, buffer)
+  command.program.launch @krea2.vae_conv_in(%parameters, %projected, %output) : (buffer, buffer, buffer)
+  command.return
+}

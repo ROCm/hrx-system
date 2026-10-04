@@ -1,0 +1,47 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @image.unpack_affine_bf16_f32(%height: index, %width: index, %channels: index, %input: buffer, %affine: buffer, %output: buffer)
+
+// Packed 2x2 patches become channel-first F32 pixels. The affine table contains
+// inverse standard deviations followed by means, retaining division/addition
+// rounding separately. Geometry is even; no padded input elements are read.
+template.def<@image.unpack_affine_bf16_f32> device @image_unpack_affine_bf16_f32(%height: index, %width: index, %channels: index, %input: buffer, %affine: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %threads = index.constant 128 : index
+  %group = kernel.workgroup.id<x> : index
+  %channel = kernel.workgroup.id<y> : index
+  %lane = kernel.workitem.id<x> : index
+  %pixel = index.madd %group, %threads, %lane : index
+  %pixels = index.mul %height, %width : index
+  %patch_height = index.div %height, %two : index
+  %patch_width = index.div %width, %two : index
+  %patches = index.mul %patch_height, %patch_width : index
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%patches]x[%channels]x2x2xbf16>
+  %affine_view = buffer.view %affine[%origin] : buffer -> view<2x[%channels]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%channels]x[%pixels]xf32>
+  %live = index.cmp ult, %pixel, %pixels : index
+  scf.if %live {
+    %y = index.div %pixel, %width : index
+    %x = index.rem %pixel, %width : index
+    %patch_y = index.div %y, %two : index
+    %patch_x = index.div %x, %two : index
+    %patch = index.madd %patch_y, %patch_width, %patch_x : index
+    %dy = index.rem %y, %two : index
+    %dx = index.rem %x, %two : index
+    %stored = view.load %input_view[%patch, %channel, %dy, %dx] : view<[%patches]x[%channels]x2x2xbf16> -> bf16
+    %inverse_std = view.load %affine_view[%zero, %channel] : view<2x[%channels]xf32> -> f32
+    %mean = view.load %affine_view[%one, %channel] : view<2x[%channels]xf32> -> f32
+    %value = scalar.extf %stored : bf16 to f32
+    %scaled = scalar.divf %value, %inverse_std : f32
+    %result = scalar.addf %scaled, %mean : f32
+    view.store %result, %output_view[%channel, %pixel] : f32, view<[%channels]x[%pixels]xf32>
+  }
+  template.return
+}
