@@ -1,29 +1,27 @@
 # Krea 2 Turbo component port
 
-This is a **component port, not an image-serving implementation**. The image
-input projection and its official softwatercolor LoRA run through Loom's live
-source JIT, queued safetensors loading, command programs, and shared device
-ownership. The first transformer block's normalization and fused time
-modulation, dense projections, fused Q/K normalization/rotation, masked
-attention, gated residuals, and SwiGLU have independent component comparisons.
-All 28 transformer blocks, with or without LoRA, run as one queued command
-with shared kernels and reusable single-block workspace. The caller still
-supplies combined hidden states, time modulation, rotary tables, and a mask.
-The final velocity head also runs natively, consuming image rows and a time
-embedding. A combined stack-to-head command produces velocities without an
-intermediate host readback. Native time conditioning batches all requested
-timesteps, including LoRA, into device-resident embedding/modulation tables.
-A native denoising command composes time conditioning, image projection,
-the full stack, the velocity head, and Euler updates. The complete native
-still-image VAE decodes those packed latents to clamped F32 RGB, including
-spatial attention, all residual blocks, and folded spatial upsampling.
-The `sample_image` and `sample_image_adapted` roots project 2,560-wide fused
-text features into the DiT's 6,144-wide prefix once, then join denoising and
-decoding without intermediate host readbacks. They retain separate immutable
-checkpoint domains and support both text-projection LoRA pairs.
-The separate `text_fusion` and `text_fusion_adapted` roots produce those fused
-features from the twelve encoder taps. Qwen3-VL text encoding remains external;
-this is not yet an image-serving endpoint or a native prompt-to-image path.
+This is a **native encoder-taps-to-RGB port, not an image-serving endpoint**.
+The `sample_image` and `sample_image_adapted` roots run through Loom's live
+source JIT, queued safetensors loading, command programs and shared device
+ownership. Their caller supplies twelve Qwen3-VL hidden-state taps per text
+token, initial packed noise, timesteps, rotary tables, a key mask, Euler deltas
+and the VAE affine table. Qwen3-VL text encoding is still external; this is not
+yet a native prompt-to-image path.
+
+The command fuses the encoder taps into 2,560-wide text features and projects
+them into the DiT's 6,144-wide prefix once. It batches time conditioning, then
+runs eight denoising steps through image projection, all 28 transformer layers,
+the velocity head and Euler updates. The complete native still-image VAE
+decodes the packed final latent into clamped F32 RGB. Intermediate features,
+conditioning and latents stay on device. Explicit phase lifetimes let one
+planned workspace serve the whole command.
+
+The official softwatercolor adapter covers fusion, text projection and DiT
+projections. Turbo, adapter and VAE weights remain separate immutable domains;
+fusion and denoising share the same Turbo and adapter images. Lower-level
+command roots expose each stage independently for numerical qualification.
+The checks below distinguish independent primitive arithmetic, exact native
+composition, and accumulated image differences.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -181,11 +179,10 @@ The native checker queues work through the existing execution domain and waits
 only for its complete-array observations. Cleanup drains accepted work while
 borrowed host payloads remain alive.
 
-The remaining native producer is Qwen3-VL text encoding. Complete text fusion
-runs separately from the current image-command boundary.
+The remaining native producer is Qwen3-VL text encoding.
 The denoising qualification below receives captured conditioning and uses an
 external VAE for its preview images; the later image-command qualification
-includes native text projection and VAE decoding.
+includes native text fusion, projection and VAE decoding.
 This component does not yet establish a generic model bootstrap, image request
 scheduler, full-model weight-preparation strategy, or throughput result.
 
@@ -1053,16 +1050,19 @@ shapes, and a failed check retains its exact inputs, command and expected
 output. Native text encoding and the image-serving adapter are separate
 remaining integration boundaries.
 
-### One native text-projection-to-RGB command
+### One native encoder-taps-to-RGB command
 
 [`sample.loom`](sample.loom) exposes `sample_image` and `sample_image_adapted`.
-Both consume initial packed noise, BF16 fused text features of shape
-`[text_tokens, 2560]`, timesteps, rotary tables, mask, Euler deltas and the VAE
-affine table. The adapted root also consumes a scalar LoRA strength. Text
-projection runs once; its 6,144-wide output stays on device for all denoising
-steps. They produce one distinct NCHW F32 RGB buffer; projected text and the
-packed final latent are source-owned intermediate storage and never return
-to the host. Checkpoint roots are ordered DiT/VAE or DiT/LoRA/VAE.
+Both consume initial packed noise, BF16 encoder taps of shape
+`[text_tokens, 12, 2560]`, timesteps, rotary tables, mask, Euler deltas and the
+VAE affine table. The adapted root also consumes a scalar LoRA strength.
+Fusion and text projection run once; the 6,144-wide projected output stays on
+device for all denoising steps. Fusion consumes the text prefix of the combined
+key mask directly, without a copy. Both roots produce one distinct NCHW F32
+RGB buffer. Fused features, projected text and the packed final latent are
+source-owned intermediates that never return to the host. Checkpoint roots
+are ordered Turbo/VAE or Turbo/LoRA/VAE; fusion shares the same Turbo and
+adapter images as the DiT.
 
 The model entry checks its geometry through template selection: image-token
 count must equal `(latent_height / 2) * (latent_width / 2)`, and combined token
@@ -1070,10 +1070,11 @@ count must cover the image suffix, and `text_tokens` must equal that remaining
 prefix length. Invalid relations reject compilation before weight loading.
 Neither a host graph walker nor a command-program ABI extension is involved.
 
-The exact composition check first executes the existing denoiser and decoder
-separately using the qualified native text projection. The combined command
-must reproduce that staged RGB exactly. The driver needs NumPy, Pillow and
-the native checker, but loads no external model framework:
+The exact composition check first projects the qualified native fusion results,
+then executes denoising and decoding separately. The combined command starts
+with raw encoder taps and must reproduce that staged RGB exactly. The driver
+also verifies that the combined mask's prefix equals the encoder mask. It needs
+NumPy, Pillow and the native checker, but loads no external model framework:
 
 ```sh
 python -B experimental/loom_serve/models/krea2/check_sample.py \
@@ -1085,6 +1086,7 @@ python -B experimental/loom_serve/models/krea2/check_sample.py \
   --input_results=/path/to/vae-input-results \
   --decoder_results=/path/to/vae-decoder-results \
   --text_results=/path/to/text-projection-results \
+  --fusion_results=/path/to/text-fusion-results \
   --reference=/path/to/reference-results \
   --output=/path/to/new-sample-results
 ```
@@ -1094,32 +1096,35 @@ the independent numerical evidence; matching their output does not replace
 those checks or establish performance. Differences from the earlier
 external-text trajectory are reported separately: changed conditioning makes
 those different computations, not an exact-composition oracle. Text encoding
-and fusion are still external, so the command is not a complete native
-prompt-to-image implementation.
+is still external, so the command is not a complete native prompt-to-image
+implementation.
 
 Base, zero-strength LoRA and active LoRA pass twice, with zero differing bits
 over 2,654,208 F32 values. Both roots reject all three invalid geometry cases,
-six rejections in total. Eight additional staged comparisons report numerical
+six rejections in total. Twelve additional staged comparisons report numerical
 differences from the earlier external-text inputs; those are not exact gates.
 
 | Complete 384x384 command | Base | LoRA |
 | --- | ---: | ---: |
-| Unique kernels | 54 | 70 |
+| Unique kernels | 71 | 95 |
 | Parameter roots | 2 | 3 |
-| Parameters | 485 | 947 |
-| Parameter bytes | 25,882,486,028 | 26,324,051,212 |
-| Workspace bytes | 178,978,816 | 179,011,584 |
+| Parameters | 534 | 1,062 |
+| Parameter bytes | 26,569,389,580 | 27,038,612,748 |
+| Workspace bytes | 276,299,776 | 277,872,640 |
 
-At 384x384 with 512 text rows, the retained projected prefix is 6 MiB and the
-packed latent is 72 KiB. The decoder reuses storage retired by the earlier
-stages; the combined high-water mark is about 170.7 MiB, rather than the sum
-of their independent workspaces. The greedy packer's allocation-hole history
-also affects this size; it is not a measure of reduced computation.
+At 384x384 with 512 text rows, fused features occupy 2.5 MiB, the retained
+projected prefix is 6 MiB and the packed latent is 72 KiB. These lifetimes do
+not all overlap. The whole command's high-water mark is 263.5 MiB base or
+265 MiB adapted, exactly 2.5 MiB above standalone fusion. Projection, denoising
+and decoding reuse retired fusion scratch instead of adding their independent
+workspaces. This measures planned storage reuse, not reduced computation.
+The driver retains less than 96 MiB of taps, conditioning, latent and RGB
+evidence, with no copied checkpoints.
 
-Small projection-rounding differences can grow through a denoising trajectory.
+Small conditioning-rounding differences can grow through a denoising trajectory.
 On the captured prompt, the new image's pixel RMSE versus the earlier native
-image with external text projection is 10.75 base and 9.20 LoRA; versus the
-complete external reference it is 11.22 and 9.31. Visual inspection preserves
+image with external text conditioning is 7.56 base and 11.16 LoRA; versus the
+complete external reference it is 9.30 and 9.75. Visual inspection preserves
 the deer/forest composition and watercolor style, with local detail changes.
 One prompt does not establish distribution-level image quality. These
 observations complement, rather than replace, the independent primitive checks.
@@ -1127,7 +1132,7 @@ observations complement, rather than replace, the independent primitive checks.
 ### Native text projection
 
 [`text_projection.loom`](text_projection.loom) contains `text_projection` and
-`text_projection_adapted`. Their input is the external text-fusion result,
+`text_projection_adapted`. Their input is a text-fusion result,
 not token IDs or Qwen hidden-state taps. The command applies zero-centered
 RMSNorm at width 2,560, a biased 2,560-to-6,144 projection, tanh GELU, and a
 biased 6,144-to-6,144 projection. Both dense layers support the official
@@ -1167,9 +1172,10 @@ these aggregate observations are separate from primitive acceptance.
 | Parameter bytes | 213,968,896 | 216,655,872 |
 | Workspace bytes | 8,912,896 | 8,945,664 |
 
-One overwritten working fixture bounds disk use; final per-shape projected
-features feed the image-composition qualification above. Native text encoding
-and complete layerwise/sequence fusion remain outside that command.
+One overwritten working fixture bounds disk use. Final per-shape projections
+from these captured inputs supply a numerical diagnostic for image qualification;
+its exact oracle projects the fully native fusion results instead. Native text
+encoding remains outside the image command.
 
 ### Native text-fusion blocks
 
@@ -1287,5 +1293,6 @@ At 512 tokens the complete source command reflects:
 Full-feature relative L2 versus the independent F64 chain is 0.001684 base
 and 0.000589 adapted; versus the canonical BF16 implementation it is 0.003549
 and 0.001545. These aggregate diagnostics are separate from primitive acceptance
-and exact composition. Image-command integration, native encoding and the image
-request adapter remain distinct subsequent boundaries.
+and exact composition. The image command composes this stage with projection,
+denoising and decoding; native encoding and the image request adapter remain
+distinct subsequent boundaries.

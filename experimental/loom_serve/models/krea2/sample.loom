@@ -13,14 +13,20 @@ command.program.decl @denoise() launch(%parameters: buffer, %sample: buffer, %te
 command.program.decl @denoise_adapted() launch(%parameters: buffer, %adapter: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %output: buffer)
 command.program.decl @vae_decode() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
 template.decl @krea2.text_projection(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
-template.decl @krea2.sample_image(%tokens: index, %images: index, %patches: index, %texts: index, %prefix: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %features: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer)
+template.decl @krea2.text_fusion(%rows: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %mask: buffer, %strength: buffer, %output: buffer)
+template.decl @krea2.sample_image(%tokens: index, %images: index, %patches: index, %texts: index, %prefix: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %taps: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer)
 
 // The source owns the final latent between denoising and decoding. Parameter
-// domains remain immutable and distinct. Fused text features are projected once
-// and retained on device for every denoising step.
+// domains remain immutable and distinct. Encoder taps are fused and projected
+// once, with the resulting prefix retained for every denoising step. Fusion
+// consumes the text prefix of the combined text/image key mask directly.
 // The geometry predicates are JIT selection requirements, not assumptions
 // about incoming configurations or runtime checks on trusted device work.
-template.def<@krea2.sample_image> @krea2_sample_image(%tokens: index, %images: index, %patches: index, %texts: index, %prefix: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %features: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer) where [eq(%images, %patches), ge(%tokens, %images), eq(%texts, %prefix)] {
+template.def<@krea2.sample_image> @krea2_sample_image(%tokens: index, %images: index, %patches: index, %texts: index, %prefix: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %taps: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer) where [eq(%images, %patches), ge(%tokens, %images), eq(%texts, %prefix)] {
+  %feature_stride = index.constant 5120 : offset
+  %feature_bytes = index.scale %texts, %feature_stride : index, offset -> offset
+  %features = buffer.alloca<global> align(256) %feature_bytes : buffer
+  template.apply<@krea2.text_fusion>(%texts, %adapted, %parameters, %adapter, %taps, %mask, %strength, %features) : (index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   %text_stride = index.constant 12288 : offset
   %text_bytes = index.scale %texts, %text_stride : index, offset -> offset
   %projected = buffer.alloca<global> align(256) %text_bytes : buffer
@@ -40,9 +46,9 @@ template.def<@krea2.sample_image> @krea2_sample_image(%tokens: index, %images: i
 }
 
 // The output is a distinct NCHW F32 RGB buffer, clamped to [-1, 1], at eight
-// times the latent height and width. Input noise and 2560-wide fused text
-// features remain unchanged; projected conditioning is source-owned.
-command.program.def public @sample_image() launch(%parameters: buffer, %vae_parameters: buffer, %sample: buffer, %features: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %affine: buffer, %output: buffer) {
+// times the latent height and width. Input noise and [token,12,2560] BF16 taps
+// remain unchanged; fused features and projected conditioning are source-owned.
+command.program.def public @sample_image() launch(%parameters: buffer, %vae_parameters: buffer, %sample: buffer, %taps: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %affine: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %images = config.get @krea2.image_tokens : index
   %texts = config.get @krea2.text_tokens : index
@@ -54,11 +60,11 @@ command.program.def public @sample_image() launch(%parameters: buffer, %vae_para
   %columns = index.div %width, %two : index
   %patches = index.mul %rows, %columns : index
   %adapted = scalar.constant false : i1
-  template.apply<@krea2.sample_image>(%tokens, %images, %patches, %texts, %prefix, %adapted, %parameters, %parameters, %vae_parameters, %sample, %features, %times, %cosine, %sine, %mask, %deltas, %sample, %affine, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.sample_image>(%tokens, %images, %patches, %texts, %prefix, %adapted, %parameters, %parameters, %vae_parameters, %sample, %taps, %times, %cosine, %sine, %mask, %deltas, %sample, %affine, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @sample_image_adapted() launch(%parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %features: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer) {
+command.program.def public @sample_image_adapted() launch(%parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %taps: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer) {
   %tokens = config.get @krea2.block_tokens : index
   %images = config.get @krea2.image_tokens : index
   %texts = config.get @krea2.text_tokens : index
@@ -70,6 +76,6 @@ command.program.def public @sample_image_adapted() launch(%parameters: buffer, %
   %columns = index.div %width, %two : index
   %patches = index.mul %rows, %columns : index
   %adapted = scalar.constant true : i1
-  template.apply<@krea2.sample_image>(%tokens, %images, %patches, %texts, %prefix, %adapted, %parameters, %adapter, %vae_parameters, %sample, %features, %times, %cosine, %sine, %mask, %deltas, %strength, %affine, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.sample_image>(%tokens, %images, %patches, %texts, %prefix, %adapted, %parameters, %adapter, %vae_parameters, %sample, %taps, %times, %cosine, %sine, %mask, %deltas, %strength, %affine, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
