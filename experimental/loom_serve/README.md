@@ -82,8 +82,12 @@ and the complete VAE to a PPM image, with optional softwatercolor LoRA.
 weight loader and execution timelines as Qwen. Its cold request leaf owns
 model-specific prompt layout and mathematical tables; the shared runner knows
 none of those semantics. All model loops and buffer lifetimes are authored in
-command programs. This is a one-image CLI, not an image HTTP service or a
-claim that the Qwen packed scheduler can schedule arbitrary modalities.
+command programs. The separate
+[`krea2_server`](models/krea2/README.md#serve-images-over-http) returns native
+PNG images over HTTP using one retained model and a bounded request queue.
+Its modality-level worker preserves input/output lifetimes while the shared TCP
+transport serves concurrent clients. It serializes images rather than batching
+them; it does not put image requests through Qwen's token scheduler.
 
 ## Shared Qwen execution
 

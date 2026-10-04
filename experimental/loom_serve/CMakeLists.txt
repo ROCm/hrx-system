@@ -59,6 +59,56 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    image_request
+  HDRS
+    "image_request.h"
+  SRCS
+    "image_request.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::unicode
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    image_request_test
+  SRCS
+    "image_request_test.cc"
+  DEPS
+    ::image_request
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
+    image_output
+  HDRS
+    "image_output.h"
+  SRCS
+    "image_output.c"
+  DEPS
+    iree::base
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    image_output_test
+  SRCS
+    "image_output_test.cc"
+  DEPS
+    ::image_output
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
+loom_cc_library(
+  NAME
     http_server
   HDRS
     "http_server.h"
@@ -92,6 +142,28 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 endif()
+
+loom_cc_library(
+  NAME
+    image_service
+  HDRS
+    "image_service.h"
+  SRCS
+    "image_service.c"
+  DEPS
+    ::http_request
+    ::http_server
+    ::image_output
+    ::image_request
+    iree::async
+    iree::base
+    iree::base::internal::base64
+    iree::base::threading
+    iree::base::threading::thread
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
 
 loom_cc_library(
   NAME
@@ -528,6 +600,23 @@ loom_cc_binary(
     iree::base::internal::json
     iree::base::tooling::flags
     iree::io::file_handle
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    krea2_server
+  SRCS
+    "models/krea2/server.c"
+  DEPS
+    ::http_server
+    ::image_request
+    ::image_service
+    ::krea2_model
+    iree::async
+    iree::base
+    iree::base::tooling::flags
 )
 endif()
 
