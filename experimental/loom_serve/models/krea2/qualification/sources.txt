@@ -1,6 +1,7 @@
 ../config.loom
 ../projection.loom
 ../kernels/linear.loom
+../kernels/linear_tiled.loom
 ../block.loom
 ../block_projections.loom
 ../kernels/normalization.loom
