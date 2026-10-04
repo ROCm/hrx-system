@@ -4,3 +4,5 @@ kernels/linear.loom
 block.loom
 block_projections.loom
 kernels/normalization.loom
+block_rotary.loom
+kernels/rotary.loom

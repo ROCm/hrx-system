@@ -1,0 +1,119 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+
+amdgpu.target<gfx11-generic> @block_rotary_wave32 {subgroup_size = 32}
+template.decl @attention.normalize_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.def target(@block_rotary_wave32) @block_query_normalize() {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 48 : index
+  %rows = index.mul %tokens, %heads : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 48 : index
+  %rows = index.mul %tokens, %heads : index
+  %width = index.constant 128 : index
+  %threads = index.constant 64 : index
+  template.apply<@normalization.zero_centered_rows_bf16>(%rows, %width, %threads, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @block0_query_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x48x128xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x48x128xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.qnorm.scale" : view<128xf32>
+  kernel.launch @block_query_normalize(%input_view, %weight, %output_view) : (view<[%tokens]x48x128xbf16>, view<128xf32>, view<[%tokens]x48x128xbf16>)
+  command.return
+}
+
+kernel.def target(@block_rotary_wave32) @block_key_normalize() {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 12 : index
+  %rows = index.mul %tokens, %heads : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 12 : index
+  %rows = index.mul %tokens, %heads : index
+  %width = index.constant 128 : index
+  %threads = index.constant 64 : index
+  template.apply<@normalization.zero_centered_rows_bf16>(%rows, %width, %threads, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @block0_key_norm() launch(%parameters: buffer, %input: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x12x128xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x12x128xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.knorm.scale" : view<128xf32>
+  kernel.launch @block_key_normalize(%input_view, %weight, %output_view) : (view<[%tokens]x12x128xbf16>, view<128xf32>, view<[%tokens]x12x128xbf16>)
+  command.return
+}
+
+kernel.def target(@block_rotary_wave32) @block_query_rotary() {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 48 : index
+  %rows = index.mul %tokens, %heads : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 48 : index
+  %width = index.constant 128 : index
+  template.apply<@attention.normalize_rotary_bf16>(%tokens, %heads, %width, %input, %weight, %cosine, %sine, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @block0_query_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x48x128xbf16>
+  %cosine_view = buffer.view %cosine[%origin] : buffer -> view<[%tokens]x128xf32>
+  %sine_view = buffer.view %sine[%origin] : buffer -> view<[%tokens]x128xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x48x128xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.qnorm.scale" : view<128xf32>
+  kernel.launch @block_query_rotary(%input_view, %weight, %cosine_view, %sine_view, %output_view) : (view<[%tokens]x48x128xbf16>, view<128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x48x128xbf16>)
+  command.return
+}
+
+kernel.def target(@block_rotary_wave32) @block_key_rotary() {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 12 : index
+  %rows = index.mul %tokens, %heads : index
+  %unit = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%rows, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %heads = index.constant 12 : index
+  %width = index.constant 128 : index
+  template.apply<@attention.normalize_rotary_bf16>(%tokens, %heads, %width, %input, %weight, %cosine, %sine, %output) : (index, index, index, buffer, buffer, buffer, buffer, buffer)
+  kernel.return
+}
+
+command.program.def public @block0_key_rotary() launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %tokens = config.get @krea2.block_tokens : index
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%tokens]x12x128xbf16>
+  %cosine_view = buffer.view %cosine[%origin] : buffer -> view<[%tokens]x128xf32>
+  %sine_view = buffer.view %sine[%origin] : buffer -> view<[%tokens]x128xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x12x128xbf16>
+  %weight = command.parameter %parameters, "blocks.0.attn.qknorm.knorm.scale" : view<128xf32>
+  kernel.launch @block_key_rotary(%input_view, %weight, %cosine_view, %sine_view, %output_view) : (view<[%tokens]x12x128xbf16>, view<128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x128xf32>, view<[%tokens]x12x128xbf16>)
+  command.return
+}

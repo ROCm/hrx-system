@@ -6,6 +6,7 @@
 
 template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32)
 template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
+template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @modulation.affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16)
 
 // One workgroup reduces one row. Input width is divisible by the supplied
@@ -45,6 +46,26 @@ template.def<@normalization.zero_centered_bf16> device @normalization_zero_cente
   %result_f32 = scalar.mulf %normalized, %scale : f32
   %result = scalar.fptrunc %result_f32 : f32 to bf16
   template.return %result : bf16
+}
+
+// Row-wise zero-centered RMS normalization. A row may be a complete token
+// or one attention head; the caller supplies its shape and workgroup width.
+template.def<@normalization.zero_centered_rows_bf16> device @normalization_zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %epsilon = scalar.constant 0.00001 : f32
+  %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%width]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  scf.for %column = [%lane to %width step %threads] {
+    %value = view.load %input_view[%row, %column] : view<[%rows]x[%width]xbf16> -> bf16
+    %scale = view.load %weight_view[%column] : view<[%width]xf32> -> f32
+    %result = template.apply<@normalization.zero_centered_bf16>(%value, %scale, %inverse) : (bf16, f32, f32) -> (bf16)
+    view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x[%width]xbf16>
+  }
+  template.return
 }
 
 // Fuses pointwise modulation without removing tensor-rounding boundaries:

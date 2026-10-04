@@ -4,9 +4,9 @@ This is a **component port, not an image-serving implementation**. The image
 input projection and its official softwatercolor LoRA run through Loom's live
 source JIT, queued safetensors loading, command programs, and shared device
 ownership. The first transformer block's normalization and fused time
-modulation are also qualified. Dense block projections have independent
-component comparisons. Full text conditioning, DiT layers, denoising, and VAE
-decoding are not yet implemented here.
+modulation, dense projections, and fused Q/K normalization/rotation have
+independent component comparisons. Full text conditioning, DiT layers,
+denoising, and VAE decoding are not yet implemented here.
 
 The independent [reference script](reference.py) runs the complete model using
 PyTorch and Diffusers. Its images are reference outputs, not Loom outputs. It
@@ -206,7 +206,8 @@ of the GPU for its native subprocesses. It qualifies normalization against the
 external oracle, then compares fusion **bitwise** against an independent CPU
 pointwise calculation using that qualified normalization. It also proves the
 pointwise calculation matches the external model using the external model's
-normalization. Both ordinary and adapter-conditioned inputs are checked.
+normalization. Both ordinary and adapter-conditioned inputs are checked. The
+same invocation qualifies the head normalization and rotary fusion below.
 
 This separation matters: different valid F32 reductions can change one BF16
 normalization step, and a subsequent subtractive shift can magnify relative
@@ -218,8 +219,8 @@ values, with fused relative L2 error 8.18e-6; exact fusion equivalence passes
 there too. A 16-row JIT specialization matches normalization bit-for-bit, and
 the checker rejects a missing modulation input before weight loading.
 A full-block/image comparison is still required; component equivalence is not
-an end-to-end accuracy claim. The component result directory retains about
-77 MiB of reproducible tensors.
+an end-to-end accuracy claim. Including head normalization and rotary checks,
+the component result directory retains about 206 MiB of reproducible tensors.
 
 For direct checker calls, `--root=block0_norm1` takes one input and
 `base-block0-norm1.bf16` as its reference. `--config=key=value` supplies explicit
@@ -270,3 +271,36 @@ The 1088-row and 16-row qualifications pass all eight projections twice:
 For the longest, 16384-term feed-forward contraction, full-size relative L2
 error against rounded F64 is 2.19e-5. These checks cover every output value,
 not a sampled subset or a small synthetic matrix.
+
+### Fused Q/K normalization and rotary embedding
+
+[`block_rotary.loom`](block_rotary.loom) exposes query/key normalization and
+fused normalization-plus-rotation commands. The reusable helpers take explicit
+shape operands: neither the normalization nor rotation helper reads model
+configuration. The same row-normalization body handles 6144-wide token rows
+and 128-wide attention heads.
+
+One 64-thread workgroup owns each 128-wide head. Normalization rounds to BF16
+before interleaved-pair rotation uses F32 cosine/sine tables and arithmetic;
+the output then rounds to BF16. Query and key retain 48 and 12 heads
+respectively. No KV-head replication or global normalized intermediate is
+needed by the fused command.
+
+`check_block.py` compares ordinary head normalization with independent F64
+arithmetic at the unchanged normalization tolerance. It then requires the
+fused result to match CPU rotation of that qualified normalization bit-for-bit,
+including at an independently JITed 16-token image slice. The slice retains
+its original position tables, so it exercises nonidentity rotations rather
+than the all-zero text coordinates. Both full-size base and adapter-conditioned
+inputs pass this exact fusion check.
+
+The script also reports final error against rotation of F64-normalized values.
+For full-size base queries, 53 values differ, six exceed the single-operation
+BF16 envelope, and relative L2 is 7.51e-5. Exact fusion establishes that these
+differences come from normalization rounding amplified by rotation, not from
+changing the pointwise arithmetic. Complete-block and image qualification must
+still establish the accumulated model-level error.
+
+At 1088 tokens the fused Q/K path avoids writing and rereading 8,355,840 BF16
+normalized elements: 31.875 MiB of intermediate traffic, plus two dispatches,
+per block. This is traffic accounting, not a measured throughput improvement.

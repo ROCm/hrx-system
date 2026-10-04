@@ -1,0 +1,56 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32)
+template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
+template.decl @attention.normalize_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer)
+
+// One workgroup owns a head row, with one thread per interleaved channel pair.
+// The normalized value rounds to BF16 before F32 rotary arithmetic, preserving
+// the unfused tensor boundary without storing the normalized tensor globally.
+// Tables are [token,channel] F32 and are shared by all heads of a token.
+template.def<@attention.normalize_rotary_bf16> device @normalize_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %unit = index.constant 1 : index
+  %pair_width = index.constant 2 : index
+  %rows = index.mul %tokens, %heads : index
+  %threads = index.div %width, %pair_width : index
+  %row = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %token = index.div %row, %heads : index
+  %even = index.mul %lane, %pair_width : index
+  %odd = index.add %even, %unit : index
+  %epsilon = scalar.constant 0.00001 : f32
+  %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%width]xf32>
+  %cosine_view = buffer.view %cosine[%origin] : buffer -> view<[%tokens]x[%width]xf32>
+  %sine_view = buffer.view %sine[%origin] : buffer -> view<[%tokens]x[%width]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%width]xbf16>
+  %even_input = view.load %input_view[%row, %even] : view<[%rows]x[%width]xbf16> -> bf16
+  %odd_input = view.load %input_view[%row, %odd] : view<[%rows]x[%width]xbf16> -> bf16
+  %even_weight = view.load %weight_view[%even] : view<[%width]xf32> -> f32
+  %odd_weight = view.load %weight_view[%odd] : view<[%width]xf32> -> f32
+  %even_norm = template.apply<@normalization.zero_centered_bf16>(%even_input, %even_weight, %inverse) : (bf16, f32, f32) -> (bf16)
+  %odd_norm = template.apply<@normalization.zero_centered_bf16>(%odd_input, %odd_weight, %inverse) : (bf16, f32, f32) -> (bf16)
+  %even_value = scalar.extf %even_norm : bf16 to f32
+  %odd_value = scalar.extf %odd_norm : bf16 to f32
+  %even_cosine = view.load %cosine_view[%token, %even] : view<[%tokens]x[%width]xf32> -> f32
+  %odd_cosine = view.load %cosine_view[%token, %odd] : view<[%tokens]x[%width]xf32> -> f32
+  %even_sine = view.load %sine_view[%token, %even] : view<[%tokens]x[%width]xf32> -> f32
+  %odd_sine = view.load %sine_view[%token, %odd] : view<[%tokens]x[%width]xf32> -> f32
+  %even_cosine_term = scalar.mulf %even_value, %even_cosine : f32
+  %odd_cosine_term = scalar.mulf %odd_value, %odd_cosine : f32
+  %even_sine_term = scalar.mulf %odd_value, %even_sine : f32
+  %odd_sine_term = scalar.mulf %even_value, %odd_sine : f32
+  %even_rotated = scalar.subf %even_cosine_term, %even_sine_term : f32
+  %odd_rotated = scalar.addf %odd_cosine_term, %odd_sine_term : f32
+  %even_output = scalar.fptrunc %even_rotated : f32 to bf16
+  %odd_output = scalar.fptrunc %odd_rotated : f32 to bf16
+  view.store %even_output, %output_view[%row, %even] : bf16, view<[%rows]x[%width]xbf16>
+  view.store %odd_output, %output_view[%row, %odd] : bf16, view<[%rows]x[%width]xbf16>
+  template.return
+}

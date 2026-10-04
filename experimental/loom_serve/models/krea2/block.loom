@@ -9,6 +9,7 @@ config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536),
 amdgpu.target<gfx11-generic> @block_wave32 {subgroup_size = 32}
 template.decl @normalization.row_inverse(%rows: index, %width: index, %threads: index, %row: index, %input: buffer, %epsilon: f32) -> (f32)
 template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inverse: f32) -> (bf16)
+template.decl @normalization.zero_centered_rows_bf16(%rows: index, %width: index, %threads: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @modulation.affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16)
 
 kernel.def target(@block_wave32) @block_normalize() {
@@ -20,20 +21,7 @@ kernel.def target(@block_wave32) @block_normalize() {
   %rows = config.get @krea2.block_tokens : index
   %width = index.constant 6144 : index
   %threads = index.constant 256 : index
-  %row = kernel.workgroup.id<x> : index
-  %lane = kernel.workitem.id<x> : index
-  %origin = index.constant 0 : offset
-  %epsilon = scalar.constant 0.00001 : f32
-  %inverse = template.apply<@normalization.row_inverse>(%rows, %width, %threads, %row, %input, %epsilon) : (index, index, index, index, buffer, f32) -> (f32)
-  %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
-  %weight_view = buffer.view %weight[%origin] : buffer -> view<6144xf32>
-  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x6144xbf16>
-  scf.for %column = [%lane to %width step %threads] {
-    %value = view.load %input_view[%row, %column] : view<[%rows]x6144xbf16> -> bf16
-    %scale = view.load %weight_view[%column] : view<6144xf32> -> f32
-    %result = template.apply<@normalization.zero_centered_bf16>(%value, %scale, %inverse) : (bf16, f32, f32) -> (bf16)
-    view.store %result, %output_view[%row, %column] : bf16, view<[%rows]x6144xbf16>
-  }
+  template.apply<@normalization.zero_centered_rows_bf16>(%rows, %width, %threads, %input, %weight, %output) : (index, index, index, buffer, buffer, buffer)
   kernel.return
 }
 
