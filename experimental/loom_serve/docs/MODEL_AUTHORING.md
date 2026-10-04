@@ -228,6 +228,66 @@ timeline assignment and lifetime. A later source/native failure still requires
 joining accepted work before the host recycles payloads. The
 [runner guide](RUNNER.md#queues-failure-and-reclaim) describes that boundary.
 
+## Image and audio entry points
+
+The reusable embedding accepts command programs and buffer bindings, not text
+tokens. [`jit_test.cc`](../jit_test.cc) exercises it without a tokenizer, chat
+request, KV cache, or Qwen adapter. That is the smaller starting point for an
+image or audio port. The existing HTTP service and packed scheduler are concrete
+Qwen consumers; changing their model directory does not turn them into an image
+or audio endpoint. No image or audio model is qualified by this packet.
+
+A first tensor-in/tensor-out adapter has this ownership flow:
+
+1. Its device group owns the device and selected queues. It creates a source
+   catalog with `loom_serve_jit_create` and specializes named command roots with
+   `loom_serve_jit_compile`. Its source owns tensor names, shapes, arithmetic,
+   and fixed configuration; the caller supplies run-dependent specialization.
+2. It passes the stages' reflected parameter roots to
+   `loom_serve_weights_load`, with its own source weight policy. The adapter
+   establishes identical parameter placement for the shared-stage prefix;
+   equal allocation sizes alone do not establish that contract. An unchanged
+   checkpoint layout uses the empty preparation root shown above.
+3. It allocates model input, output and persistent-state buffers. Reflected
+   transient requirements supply workspace size and alignment. It records the
+   stages with `loom_serve_jit_stage_record`; recorded commands retain their
+   executables and fixed buffers after compiler storage is destroyed.
+4. It creates one `loom_serve_execution_t`, registers the immutable stage table
+   and any host feedback spans with `loom_serve_module_create`, then links its
+   source VM control through `loom_serve_program_create`. The HAL type provider
+   and borrowed feedback storage outlive all accepted work. Requests carry
+   bindings into this shared process, not their own VM instances.
+5. It uploads request data through `loom_serve_execution_transfer`, invokes its
+   VM entry using the retained invocation, and joins the relevant completion
+   frontiers before publishing output. `runner.execute_N` returns an accepted
+   submission value, not a completed tensor. An error after an earlier accepted
+   submission still requires draining both execution timelines before reuse or
+   teardown. [`control_test.cc`](../control_test.cc) exercises that failure path.
+
+The model's storage contract determines the pipeline shape. A denoising model
+can retain latent and conditioning buffers across repeated command invocations;
+its device commands can update a step counter and consume a preloaded schedule.
+An audio encoder can have one finite input/output transform. A streaming audio
+model additionally needs an explicit carried-state boundary, sample position,
+and publication rule for each chunk. These are proposed port shapes, not
+implemented model adapters. Their first witness includes real checkpoint bytes
+and independently checked output through the complete ownership flow above.
+
+Iteration counts and command selection can live in ordinary source VM control.
+The current native imports expose coarse submission and feedback, not arbitrary
+HAL allocation, scalar kernel-argument mutation, or a full device API. A model
+that needs changing per-iteration values can carry them in its bound device
+state and consume them in kernels. That keeps the existing submission contract
+intact; an additional native capability needs a concrete caller and lifetime
+contract rather than a model-specific command-program ABI change.
+
+Image encoding, waveform framing, tokenization and request transport remain
+frontend concerns for the initial port. The first visible result is a checked
+image/tensor or audio chunk from the actual model, before generalizing network
+protocols or batching policy. Autoregressive audio may eventually share token
+scheduling mechanisms; that requires evidence about its state and output
+contracts, not merely that it generates discrete values.
+
 ## Correctness that survives optimization
 
 [`gdn_convolution.loom`](../models/qwen38/tests/gdn_convolution.loom) is a small

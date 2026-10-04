@@ -21,6 +21,12 @@ That is a new model implementation assignment. Changing Qwen's `--model` path
 alone cannot load SmolLM2. [FIRST_PORT.md](FIRST_PORT.md) pins the candidate and
 separates existing infrastructure from the model work still required.
 
+For image or audio work, the
+[tensor-in/tensor-out ownership flow](MODEL_AUTHORING.md#image-and-audio-entry-points)
+starts from the same small JIT caller without importing Qwen's chat, cache, or
+stage-layout assumptions. It identifies the adapter work required before any
+image or audio model can be claimed to run.
+
 ## Establish a baseline before editing
 
 The [README](README.md#fresh-machine-prerequisites) supplies bootstrap,
