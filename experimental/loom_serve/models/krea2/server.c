@@ -27,6 +27,8 @@ IREE_FLAG(int32_t, pending_requests, 32,
           "Maximum requests waiting for the model.");
 IREE_FLAG(int32_t, request_body_bytes, 65536,
           "Maximum JSON request body bytes.");
+IREE_FLAG(int32_t, heartbeat_ms, 1000,
+          "Periodic image-state report interval; zero disables heartbeats.");
 
 static iree_status_t krea2_generate(void* self,
                                     const loom_serve_image_request_t* request,
@@ -40,7 +42,7 @@ int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   if (!FLAG_checkpoint[0] || FLAG_port < 0 || FLAG_port > 65535 ||
       FLAG_connections < 1 || FLAG_pending_requests < 1 ||
-      FLAG_request_body_bytes < 1) {
+      FLAG_request_body_bytes < 1 || FLAG_heartbeat_ms < 0) {
     fprintf(stderr,
             "Provide --checkpoint, a valid port and positive capacities.\n");
     return EXIT_FAILURE;
@@ -77,6 +79,7 @@ int main(int argc, char** argv) {
         .height = (uint32_t)FLAG_height,
         .adapter_enabled = FLAG_adapter[0] != 0,
         .pending_capacity = (iree_host_size_t)FLAG_pending_requests,
+        .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
     };
     status =
         loom_serve_image_service_run(generator, server, &options, allocator);

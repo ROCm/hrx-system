@@ -104,6 +104,7 @@ def main():
         "--port=0",
         "--pending_requests=1",
         "--connections=16",
+        "--heartbeat_ms=10",
     ]
     (args.output / "command.json").write_text(json.dumps(command, indent=2) + "\n")
     process = subprocess.Popen(
@@ -196,6 +197,8 @@ def main():
         )
         first = send(deer, slow=True)
         journal.wait("image_started", request=1)
+        heartbeat = journal.wait("image_heartbeat", active_request=1)
+        assert heartbeat["active_ms"] >= 0 and heartbeat["completed"] == 0
         health = receive(send(path="/healthz"))
         assert health["active"] == 1 and health["completed"] == 0
         queued = send(robot)
@@ -237,6 +240,7 @@ def main():
         journal.wait("image_started", request=8)
         process.send_signal(signal.SIGTERM)
         journal.wait("image_shutdown", active=8)
+        journal.wait("image_heartbeat", active_request=8, stopping=True)
         journal.wait("image_generated", request=8)
         stopped = journal.wait("image_stopped")
         assert stopped["completed"] == 7

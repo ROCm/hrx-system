@@ -40,6 +40,8 @@ typedef struct loom_serve_image_service_options_t {
   bool adapter_enabled;
   // Positive bound on requests queued behind the single active image.
   iree_host_size_t pending_capacity;
+  // Periodic JSONL reporting interval in nanoseconds; zero disables it.
+  iree_duration_t heartbeat_interval;
 } loom_serve_image_service_options_t;
 
 // Runs bounded image admission over a borrowed local HTTP transport until

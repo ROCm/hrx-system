@@ -33,7 +33,8 @@ typedef struct image_pending_t {
 typedef enum image_worker_state_e {
   IMAGE_WORKER_IDLE = 0,
   IMAGE_WORKER_READY,
-  IMAGE_WORKER_RUNNING,
+  IMAGE_WORKER_GENERATING,
+  IMAGE_WORKER_ENCODING,
   IMAGE_WORKER_COMPLETE,
 } image_worker_state_t;
 
@@ -75,6 +76,10 @@ typedef struct image_service_t {
   loom_serve_http_connection_t* connection;
   // Active identity remains nonzero until completion, including after reset.
   uint64_t active;
+  // Admission time of the active image, including generation and encoding.
+  iree_time_t active_start;
+  // Next reporting deadline, or infinite when periodic reporting is disabled.
+  iree_time_t next_heartbeat;
   // Last assigned request identity.
   uint64_t sequence;
   // Successfully generated images, including results discarded after reset.
@@ -95,7 +100,7 @@ static int image_worker_main(void* argument) {
     const bool ready = worker->state == IMAGE_WORKER_READY;
     const bool stopping = worker->stopping;
     if (ready) {
-      worker->state = IMAGE_WORKER_RUNNING;
+      worker->state = IMAGE_WORKER_GENERATING;
     }
     iree_slim_mutex_unlock(&worker->mutex);
     if (ready) {
@@ -106,6 +111,9 @@ static int image_worker_main(void* argument) {
           service->generator.self, &worker->job.request, &rgb);
       const iree_time_t encode_begin = iree_time_now();
       if (iree_status_is_ok(status)) {
+        iree_slim_mutex_lock(&worker->mutex);
+        worker->state = IMAGE_WORKER_ENCODING;
+        iree_slim_mutex_unlock(&worker->mutex);
         status = loom_serve_image_encode_rgb_f32_png(
             service->options->width, service->options->height, rgb, &png,
             service->allocator);
@@ -206,6 +214,7 @@ static iree_status_t image_reject(image_service_t* service,
 
 static void image_start(image_service_t* service, image_pending_t pending) {
   service->active = pending.job.id;
+  service->active_start = iree_time_now();
   service->connection = pending.connection;
   iree_slim_mutex_lock(&service->worker.mutex);
   service->worker.job = pending.job;
@@ -437,6 +446,32 @@ static iree_status_t image_admit(image_service_t* service,
   return iree_ok_status();
 }
 
+// The application owner remains live while the model worker waits on the GPU.
+// These phases describe host ownership, not completed device dispatches.
+static void image_heartbeat(image_service_t* service) {
+  const iree_time_t now = iree_time_now();
+  if (now < service->next_heartbeat) {
+    return;
+  }
+  static const char* const phases[] = {"idle", "ready", "generating",
+                                       "encoding", "complete"};
+  iree_slim_mutex_lock(&service->worker.mutex);
+  const image_worker_state_t state = service->worker.state;
+  const bool stopping = service->worker.stopping;
+  iree_slim_mutex_unlock(&service->worker.mutex);
+  fprintf(stderr,
+          "{\"event\":\"image_heartbeat\",\"time_ns\":%" PRId64
+          ",\"active_request\":%" PRIu64
+          ",\"active_ms\":%.3f,"
+          "\"phase\":\"%s\",\"queued\":%zu,\"completed\":%" PRIu64
+          ",\"stopping\":%s}\n",
+          now, service->active,
+          service->active ? (now - service->active_start) / 1e6 : 0.0,
+          phases[state], service->pending_count, service->completed,
+          stopping ? "true" : "false");
+  service->next_heartbeat = now + service->options->heartbeat_interval;
+}
+
 static iree_status_t image_loop(image_service_t* service) {
   char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
   iree_string_view_t address;
@@ -454,6 +489,7 @@ static iree_status_t image_loop(image_service_t* service) {
   while (iree_status_is_ok(status)) {
     const iree_wait_token_t token =
         iree_notification_prepare_wait(notification);
+    image_heartbeat(service);
     bool progress = false;
     image_prune(service, &progress);
     status = image_collect(service, &progress);
@@ -486,7 +522,7 @@ static iree_status_t image_loop(image_service_t* service) {
       iree_notification_cancel_wait(notification);
     } else {
       iree_notification_commit_wait(notification, token, IREE_DURATION_ZERO,
-                                    IREE_TIME_INFINITE_FUTURE);
+                                    service->next_heartbeat);
     }
   }
   return status;
@@ -498,6 +534,7 @@ iree_status_t loom_serve_image_service_run(
     iree_allocator_t host_allocator) {
   if (!generator.generate || !options->width || !options->height ||
       !options->model.size || !options->pending_capacity ||
+      options->heartbeat_interval < 0 ||
       options->pending_capacity >
           IREE_HOST_SIZE_MAX / sizeof(image_pending_t)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -508,6 +545,8 @@ iree_status_t loom_serve_image_service_run(
                              .generator = generator,
                              .server = server,
                              .options = options};
+  service.next_heartbeat =
+      options->heartbeat_interval ? iree_time_now() : IREE_TIME_INFINITE_FUTURE;
   iree_slim_mutex_initialize(&service.worker.mutex);
   iree_notification_initialize(&service.worker.notification);
   iree_string_builder_initialize(host_allocator, &service.response);
@@ -529,6 +568,7 @@ iree_status_t loom_serve_image_service_run(
     image_cancel(pending->connection, pending->job.id, "shutdown");
     loom_serve_image_request_deinitialize(&pending->job.request);
   }
+  service.pending_count = 0;
   if (service.connection) {
     image_cancel(service.connection, service.active, "shutdown");
     service.connection = NULL;
@@ -537,6 +577,23 @@ iree_status_t loom_serve_image_service_run(
   service.worker.stopping = true;
   iree_slim_mutex_unlock(&service.worker.mutex);
   iree_notification_post(&service.worker.notification, 1);
+  // Keep reporting while accepted work retires, including shutdown during a
+  // long image. Completion publication, not a polling timeout, releases input.
+  while (service.active) {
+    iree_notification_t* notification =
+        loom_serve_http_server_notification(service.server);
+    const iree_wait_token_t token =
+        iree_notification_prepare_wait(notification);
+    image_heartbeat(&service);
+    bool progress = false;
+    status = iree_status_join(status, image_collect(&service, &progress));
+    if (progress) {
+      iree_notification_cancel_wait(notification);
+    } else {
+      iree_notification_commit_wait(notification, token, IREE_DURATION_ZERO,
+                                    service.next_heartbeat);
+    }
+  }
   iree_thread_release(service.worker.thread);
   bool progress = false;
   status = iree_status_join(status, image_collect(&service, &progress));

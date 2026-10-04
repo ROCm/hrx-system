@@ -15,6 +15,7 @@
 #include "iree/base/internal/path.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
+#include "iree/tooling/device_util.h"
 
 struct loom_serve_krea2_model_t {
   // Allocator owning this model and its host feedback storage.
@@ -29,6 +30,8 @@ struct loom_serve_krea2_model_t {
   iree_tokenizer_t* tokenizer;
   // Shared device/timeline ownership, outliving all accepted work.
   loom_serve_device_t* owner;
+  // Optional profiling session, ended after accepted work drains.
+  iree_hal_profiling_from_flags_t* profiling;
   // Cold live-source compiler and its task pool.
   loom_serve_jit_t* jit;
   // Compiled image root and reflection.
@@ -54,6 +57,8 @@ iree_status_t loom_serve_krea2_model_destroy(loom_serve_krea2_model_t* model) {
     status =
         loom_serve_execution_drain(loom_serve_device_execution(model->owner));
   }
+  status = iree_status_join(
+      status, iree_hal_end_profiling_from_flags(model->profiling));
   iree_hal_command_buffer_release(model->command);
   loom_serve_jit_stage_destroy(model->stage);
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->weights); ++i) {
@@ -95,6 +100,14 @@ static iree_status_t krea2_model_initialize(
     const iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT]) {
   const iree_allocator_t allocator = model->allocator;
   const bool adapted = options->adapter_path.size != 0;
+  bool retain_profile_metadata = false;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_profiling_from_flags_requires_retained_command_buffer_metadata(
+          &retain_profile_metadata));
+  const iree_hal_command_buffer_mode_t command_mode =
+      retain_profile_metadata
+          ? IREE_HAL_COMMAND_BUFFER_MODE_RETAIN_PROFILE_METADATA
+          : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
   IREE_RETURN_IF_ERROR(
       krea2_load_tokenizer(model, options->checkpoint_directory));
   model->output.data_length =
@@ -155,6 +168,8 @@ static iree_status_t krea2_model_initialize(
          parameter_bytes, program->requirements.transient.required_byte_length,
          program->requirements.executable_count);
   fflush(stdout);
+  IREE_RETURN_IF_ERROR(iree_hal_begin_device_group_profiling_from_flags(
+      loom_serve_device_group(model->owner), allocator, &model->profiling));
   char* policy = NULL;
   IREE_RETURN_IF_ERROR(iree_file_path_join(
       options->source_directory, IREE_SV("weights.loom"), allocator, &policy));
@@ -177,7 +192,7 @@ static iree_status_t krea2_model_initialize(
           program, reflected, &model->weights[reflected.fixed_buffer_index]};
       status = loom_serve_weights_load(
           device, loom_serve_device_transfer_queue(model->owner), dispatch,
-          model->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
+          model->jit, command_mode, 0, 1, &root,
           adapter_root ? options->adapter_path : iree_make_cstring_view(path),
           iree_make_cstring_view(policy), allocator);
     }
@@ -186,8 +201,8 @@ static iree_status_t krea2_model_initialize(
   iree_allocator_free(allocator, policy);
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(
-      model->stage, iree_hal_queue_family(dispatch),
-      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, model->weights, &model->command));
+      model->stage, iree_hal_queue_family(dispatch), command_mode,
+      model->weights, &model->command));
   for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
        ++i) {
     const bool workspace = i == model->input_count + 1;
@@ -246,10 +261,13 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
   const loom_serve_krea2_request_options_t options = {
       model->height, model->width, model->text_tokens, seed, strength};
   const iree_time_t prepare_begin = iree_time_now();
+  fprintf(stderr, "{\"event\":\"image_preparing\"}\n");
   loom_serve_krea2_request_t* request = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_krea2_request_create(
       model->tokenizer, options, prompt, model->allocator, &request));
   const iree_time_t prepare_end = iree_time_now();
+  fprintf(stderr, "{\"event\":\"image_prepared\",\"prepare_ns\":%" PRId64 "}\n",
+          prepare_end - prepare_begin);
   iree_hal_transfer_operation_t uploads[LOOM_SERVE_KREA2_INPUT_COUNT] = {0};
   for (iree_host_size_t i = 0; i < model->input_count; ++i) {
     const loom_serve_krea2_input_t kind =
@@ -286,6 +304,9 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
   }
   const iree_time_t submit_end = iree_time_now();
   if (iree_status_is_ok(status)) {
+    fprintf(stderr,
+            "{\"event\":\"image_submitted\",\"submit_ns\":%" PRId64 "}\n",
+            submit_end - prepare_end);
     status = loom_serve_execution_feedback_wait(execution, completion);
   }
   const iree_time_t completion_end = iree_time_now();
