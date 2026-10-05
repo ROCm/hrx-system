@@ -666,28 +666,35 @@ per block. This is traffic accounting, not a measured throughput improvement.
 
 [`block_attention.loom`](block_attention.loom) exposes ungated attention and
 attention with its sigmoid output gate. Both call the same config-free,
-128-channel attention template. Four wave64 subgroups process 16 query rows
-and successive 64-key tiles using LDS exchanges and F32 online-softmax state.
-Query-head grouping directly selects the original KV head; there is no
-KV-head replication or global attention-score matrix. A byte mask selects
+128-channel template in
+[`kernels/attention_shared.loom`](kernels/attention_shared.loom). Each
+128-thread workgroup owns four query heads sharing one KV head. Its four
+wave32 subgroups process the same 16 query positions while cooperatively
+loading successive 16-key tiles into LDS. This shares K/V reads across the
+four heads instead of launching a separate workgroup for each head. There is
+no KV-head replication or global attention-score matrix. A byte mask selects
 valid keys, independently of query position. Every request must have at least
 one valid key, which the model guarantees through its image tokens.
 
 Q and K retain row-major storage. DiT V is logically `[tokens, 1536]` with
 strides `[1, tokens]`; its projection and any in-place LoRA update write this
 layout directly into the existing V buffer. The generic attention motif takes
-the V encoding explicitly, while the text encoder and fusion callers continue
-to select row-major V. Qualification drivers serialize V in its physical order
-but retain the logical matrix for the independent F64 oracle.
+the V encoding explicitly; the shared-head motif fixes this transposed layout
+so that threads load contiguous keys. The text encoder and fusion callers
+continue to select row-major V. Component checks serialize V in its physical
+order but retain the logical matrix for the independent F64 oracle.
 
 DiT uses ordinary BF16 Q/K operands and one BF16 probability/value
 contraction. Dot products, the online maximum, the unrounded probability sum
-and the running output accumulate in F32. Each K64 tile rounds its unnormalized
+and the running output accumulate in F32. Each K16 tile rounds its unnormalized
 probabilities to BF16 before P*V; rounding a completed global softmax would be
 a different algorithm. The online maximum remains in raw dot-product units,
-so subtraction precedes scaling. The probability tile has a padded 18-element
-column stride in LDS. At 4608 rows the gfx1151 code uses 20,992 bytes of
-workgroup storage and 80 vector registers, with no spills.
+so subtraction precedes scaling. The denominator accumulates lane-local
+partials, with one reduction after the key loop. Half the query channels stay
+in registers and half in wave-owned LDS planes. Loop-carried K/V packets read
+ahead while the current tile is consumed; workgroup barriers publish and
+retire the shared tile. At 4608 rows the gfx1151 code uses 19,712 bytes of
+workgroup storage and 232 vector registers, with no spills.
 
 The explicit `attention.expanded_masked_gqa_128_bf16` variant retains
 centered two-term QK and three-term probabilities for the text encoder and
@@ -711,12 +718,12 @@ softmax, and value contractions from the captured normalized/rotated inputs.
 No checkpoint argument is needed: these commands contain no fixed parameters.
 The native tool runs on the leased GPU. The result directory retains less than
 256 MiB of regenerable tensors for the standard capture. The 16-row case uses
-image positions; the 80-row case starts with 64 masked keys and ends with a
-partial 16-key tile.
+image positions; the 80-row case starts with four entirely masked key tiles
+and ends with one valid tile.
 Both base and adapter-conditioned inputs also run at the full 1088 rows.
 
 Three additional 80-row analytic cases require exact BF16 answers: a single
-valid first key, a single valid last key, and 64 equal-score keys spanning two
+valid first key, a single valid last key, and 64 equal-score keys spanning four
 key tiles. Positive integer values vary by key, KV head and channel, exposing
 masking, grouping, storage and tail errors. Zero gate inputs require an exact
 one-half scale. Real captures require finite output, exact fresh replay and
@@ -725,18 +732,14 @@ of ungated attention with the unchanged native gate helper bit-for-bit.
 
 The script reports both independent F64 and ordinary-K64 CPU distances without
 making either an elementwise admission threshold for real attention captures.
-The CPU K64 calculation models the rounding boundaries, not native WMMA or
-approximate-exponential rounding. CPU sigmoid differences are likewise
-diagnostic; the native gate-composition check isolates fusion correctness.
-The final acceptance boundary is model output quality, with exact same-source
-composition and ownership checks retained separately.
-
-The ordinary path passes 80 repeated attention executions and 288 base/style
-block executions on these fixtures. Both 16-row and 1088-row whole commands
-equal their checked native chains exactly; zero-strength LoRA retains the
-base result. Full-size block-zero relative L2 distance from the independent
-F64 calculation is 0.00097133 for base inputs and 0.00234478 for active LoRA.
-These are component diagnostics, not image-quality or performance scores.
+The CPU K64 calculation retains the preceding per-head algorithm as a
+diagnostic baseline; it does not model the shared-head K16 rounding boundaries,
+native WMMA or approximate-exponential rounding. CPU sigmoid differences are
+likewise diagnostic; the native gate-composition check isolates fusion
+correctness. Kernel experiments are judged by measured speed, real-tensor error
+and image quality. Exact replay, masking and gate-composition checks isolate
+logic errors without requiring pixel identity between different floating-point
+algorithms.
 
 ### Residuals and feed-forward pointwise fusion
 
