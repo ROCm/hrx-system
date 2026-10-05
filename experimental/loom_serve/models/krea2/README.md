@@ -1398,10 +1398,20 @@ and final RGB remain outside this prefix. Residual fixtures occupy less than
 
 [`vae_attention.loom`](vae_attention.loom) composes channel normalization,
 QKV projection, single-head noncausal spatial attention, and a fused output
-projection/skip. Its F32 [online attention helper](kernels/image_attention.loom)
-handles 1–512 channels with 128-key tiles. Each workgroup retains one query's
-output accumulators and a 512-byte probability tile, plus reduction storage.
-It does not materialize the 20.25 MiB score matrix for a 48x48 latent grid.
+projection/skip. For 384 channels and token counts divisible by 16, the
+[matrix attention helper](kernels/image_attention_matrix.loom) processes 16
+queries per 128-thread workgroup. Four waves partition the full head into
+96-channel QK partial sums, combine those sums before softmax, then each own
+96 output channels. They are not separate attention heads. Q/K/V and each
+unnormalized probability tile round to BF16; accumulators, online rescaling,
+the unrounded probability denominator and output remain F32. Padded operand
+and partial-score planes use 55,552 bytes of LDS, with no global score tensor.
+
+Irregular token counts use the unchanged F32
+[online attention helper](kernels/image_attention.loom), which handles 1–512
+channels with 128-key tiles. Each workgroup retains one query's output
+accumulators and a 512-byte probability tile, plus reduction storage. Neither
+path materializes the 20.25 MiB score matrix for a 48x48 latent grid.
 
 The QKV allocation contains three equal-size F32 planes: Q and K are
 `[channels, tokens]`, while V is `[tokens, channels]`. Q/K reads are contiguous
@@ -1426,22 +1436,23 @@ HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_attent
   --output=/path/to/new-vae-attention-results
 ```
 
-The driver checks 45 shape combinations crossing key-tile and channel-tail
-boundaries, then real base/LoRA features at 2x6 and 48x48. All 146 repeated
-comparisons pass over 34,655,004 values with unchanged 2e-5 primitive absolute
-and relative tolerances and no nonfinite pairs. Primitive attention uses an
-independent F64 softmax/contraction; fused addition, command composition, and
-the full in-place prefix match staged native results bit-for-bit.
+The driver checks 45 scalar-helper shape combinations crossing key-tile and
+channel-tail boundaries, then real base/LoRA features at 2x6 and 48x48. The
+matrix oracle explicitly rounds Q/K/V and each online probability tile to
+BF16, with F64 contraction and softmax arithmetic. Its distance from the
+full-F32 computation is reported separately, not treated as a mapping failure.
+Fused addition, command composition, and the full in-place prefix still compare
+with staged native results bit-for-bit.
 The oracle operates on logical Q/K/V tensors independently of the physical
 packing; the QKV producer is checked before its packed output feeds attention.
 
-At 48x48, attention-block relative L2 against the independent F64 chain is
-3.58e-7 base and 3.72e-7 LoRA. The complete prefix uses ten unique kernels,
-15 parameters occupying 34,889,984 bytes, and 17,989,632 bytes of scratch.
-The preceding residual's 56-comparison regression retains identical output
-bits for every stage. These are correctness and memory results, not throughput
-measurements. Attention fixtures occupy less than 256 MiB; remaining residual
-and upsampling stages must still produce the final native RGB consumer.
+The focused [matrix attention scenario](tests/image_attention_matrix.loom)
+compares the real helper against an independent scalar VM oracle on signed,
+nonuniform data, with F64 contractions and an explicit F32 exponential. Two
+query/key tiles exercise channel ownership and online rescaling without model
+weights or baked output. The complete 48x48 prefix
+retains ten unique kernels, 15 parameters occupying 34,889,984 bytes, and
+17,989,632 bytes of global scratch. Attention fixtures occupy less than 256 MiB.
 
 ### Complete native still-image decoder
 

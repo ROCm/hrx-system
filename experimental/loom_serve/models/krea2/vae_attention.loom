@@ -11,6 +11,7 @@ template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i
 template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 template.decl @image.convolution_nchw_element_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %channel: index, %pixel: index, %input: buffer, %weight: buffer, %bias: buffer) -> (f32)
 template.decl @attention.single_head_nchw_f32(%tokens: index, %channels: index, %qkv: buffer, %output: buffer)
+template.decl @attention.single_head_384_matrix_nchw_f32(%tokens: index, %qkv: buffer, %output: buffer)
 command.program.decl @vae_input_residual() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
 
 kernel.def target(@vae_attention_wave32) @krea_vae_attention_norm() {
@@ -129,15 +130,31 @@ kernel.def target(@vae_attention_wave32) @krea_vae_attention_core() {
   %height = config.get @krea2.latent_height : index
   %width = config.get @krea2.latent_width : index
   %pixels = index.mul %height, %width : index
+  %zero = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %tail = index.rem %pixels, %tile : index
+  %matrix = index.cmp eq, %tail, %zero : index
+  %matrix_groups = index.div %pixels, %tile : index
+  %groups = scf.select %matrix, %matrix_groups, %pixels : index
   %threads = index.constant 128 : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%pixels, %one, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %output: buffer) {
   %height = config.get @krea2.latent_height : index
   %width = config.get @krea2.latent_width : index
   %pixels = index.mul %height, %width : index
   %channels = index.constant 384 : index
-  template.apply<@attention.single_head_nchw_f32>(%pixels, %channels, %input, %output) : (index, index, buffer, buffer)
+  %zero = index.constant 0 : index
+  %tile = index.constant 16 : index
+  %tail = index.rem %pixels, %tile : index
+  %matrix = index.cmp eq, %tail, %zero : index
+  scf.if %matrix {
+    template.apply<@attention.single_head_384_matrix_nchw_f32>(%pixels, %input, %output) : (index, buffer, buffer)
+    scf.yield
+  } else {
+    template.apply<@attention.single_head_nchw_f32>(%pixels, %channels, %input, %output) : (index, index, buffer, buffer)
+    scf.yield
+  }
   kernel.return
 }
 

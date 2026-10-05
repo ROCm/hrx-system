@@ -1,0 +1,126 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link kernels/image_attention_matrix.loom with --library. Two key tiles and
+// two query tiles exercise the shared full-head reduction and online rescale.
+// The independent scalar oracle uses logical indexing, rounds Q/K/V and each
+// unnormalized probability to BF16. Dot/value accumulation uses F64; the
+// exponential explicitly uses the VM's F32 approximate-math recipe. It never
+// reuses fragment ownership or physical staging from the production helper.
+amdgpu.target<gfx11-generic> @attention_test_wave32 {subgroup_size = 32}
+template.decl @attention.single_head_384_matrix_nchw_f32(%tokens: index, %qkv: buffer, %output: buffer)
+
+kernel.def target(@attention_test_wave32) @matrix_attention() {
+  %groups = index.constant 2 : index
+  %threads = index.constant 128 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %output: buffer) {
+  %tokens = index.constant 32 : index
+  template.apply<@attention.single_head_384_matrix_nchw_f32>(%tokens, %input, %output) : (index, buffer, buffer)
+  kernel.return
+}
+
+func.def @attention_bf16_f64_oracle(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %key_origin = index.constant 49152 : offset
+  %value_origin = index.constant 98304 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %tile = index.constant 16 : index
+  %tokens = index.constant 32 : index
+  %channels = index.constant 384 : index
+  %zero_f = scalar.constant 0.0 : f64
+  %negative = scalar.constant -1.0e30 : f64
+  %scale = scalar.constant 0.05103103630798288 : f64
+  %score_bytes = index.constant 128 : offset
+  %output_bytes = index.constant 3072 : offset
+  %score_storage = buffer.alloca<private> align(8) %score_bytes : buffer
+  %numerator_storage = buffer.alloca<private> align(8) %output_bytes : buffer
+  %score_view = buffer.view %score_storage[%origin] : buffer -> view<16xf64>
+  %numerator_view = buffer.view %numerator_storage[%origin] : buffer -> view<384xf64>
+  %query_view = buffer.view %input[%origin] : buffer -> view<384x32xf32>
+  %key_view = buffer.view %input[%key_origin] : buffer -> view<384x32xf32>
+  %value_view = buffer.view %input[%value_origin] : buffer -> view<32x384xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<384x32xf32>
+  scf.for %query = [%zero to %tokens step %one] {
+    scf.for %channel = [%zero to %channels step %one] {
+      view.store %zero_f, %numerator_view[%channel] : f64, view<384xf64>
+    }
+    %final_max, %final_sum = scf.for %key_start = [%zero to %tokens step %tile](%current_max = %negative : f64, %current_sum = %zero_f : f64) -> (f64, f64) {
+      %next_max = scf.for %key_offset = [%zero to %tile step %one](%running_max = %current_max : f64) -> (f64) {
+        %key = index.add %key_start, %key_offset : index
+        %score = scf.for %channel = [%zero to %channels step %one](%sum = %zero_f : f64) -> (f64) {
+          %q = view.load %query_view[%channel, %query] : view<384x32xf32> -> f32
+          %k = view.load %key_view[%channel, %key] : view<384x32xf32> -> f32
+          %matrix_q = scalar.fptrunc %q : f32 to bf16
+          %matrix_k = scalar.fptrunc %k : f32 to bf16
+          %wide_q = scalar.extf %matrix_q : bf16 to f64
+          %wide_k = scalar.extf %matrix_k : bf16 to f64
+          %next = scalar.fmaf %wide_q, %wide_k, %sum : f64
+          scf.yield %next : f64
+        }
+        view.store %score, %score_view[%key_offset] : f64, view<16xf64>
+        %maximum = scalar.maxnumf %running_max, %score : f64
+        scf.yield %maximum : f64
+      }
+      %old_delta = scalar.subf %current_max, %next_max : f64
+      %scaled_delta = scalar.mulf %old_delta, %scale : f64
+      %old_delta_f32 = scalar.fptrunc %scaled_delta : f64 to f32
+      %old_scale_f32 = scalar.expf<afn> %old_delta_f32 : f32
+      %old_scale = scalar.extf %old_scale_f32 : f32 to f64
+      %scaled_sum = scalar.mulf %current_sum, %old_scale : f64
+      %next_sum = scf.for %key_offset = [%zero to %tile step %one](%sum = %scaled_sum : f64) -> (f64) {
+        %score = view.load %score_view[%key_offset] : view<16xf64> -> f64
+        %delta = scalar.subf %score, %next_max : f64
+        %scaled = scalar.mulf %delta, %scale : f64
+        %scaled_f32 = scalar.fptrunc %scaled : f64 to f32
+        %probability_f32 = scalar.expf<afn> %scaled_f32 : f32
+        %probability = scalar.extf %probability_f32 : f32 to f64
+        %matrix_probability = scalar.fptrunc %probability : f64 to bf16
+        %wide_probability = scalar.extf %matrix_probability : bf16 to f64
+        view.store %wide_probability, %score_view[%key_offset] : f64, view<16xf64>
+        %next = scalar.addf %sum, %probability : f64
+        scf.yield %next : f64
+      }
+      scf.for %channel = [%zero to %channels step %one] {
+        %previous = view.load %numerator_view[%channel] : view<384xf64> -> f64
+        %scaled = scalar.mulf %previous, %old_scale : f64
+        %numerator = scf.for %key_offset = [%zero to %tile step %one](%sum = %scaled : f64) -> (f64) {
+          %key = index.add %key_start, %key_offset : index
+          %v = view.load %value_view[%key, %channel] : view<32x384xf32> -> f32
+          %matrix_v = scalar.fptrunc %v : f32 to bf16
+          %wide_v = scalar.extf %matrix_v : bf16 to f64
+          %probability = view.load %score_view[%key_offset] : view<16xf64> -> f64
+          %next = scalar.fmaf %probability, %wide_v, %sum : f64
+          scf.yield %next : f64
+        }
+        view.store %numerator, %numerator_view[%channel] : f64, view<384xf64>
+      }
+      scf.yield %next_max, %next_sum : f64, f64
+    }
+    scf.for %channel = [%zero to %channels step %one] {
+      %numerator = view.load %numerator_view[%channel] : view<384xf64> -> f64
+      %normalized = scalar.divf %numerator, %final_sum : f64
+      %rounded = scalar.fptrunc %normalized : f64 to f32
+      view.store %rounded, %output_view[%channel, %query] : f32, view<384x32xf32>
+    }
+  }
+  func.return
+}
+
+check.scenario public @attention_full_head {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %seed = check.literal value(74111) : i64
+    %input = check.generate.random.uniform seed(%seed) range(-0.5 to 0.5) : tensor<3x384x32xf32>
+    %output = check.generate.fill value(-17.0) : tensor<384x32xf32>
+    check.compare<@matrix_attention, @attention_bf16_f64_oracle>(%input, %output) : (tensor<3x384x32xf32>, tensor<384x32xf32>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.00002) rtol(0.0002) nan(different) : tensor<384x32xf32>
+      check.expect.bitwise actual(%input) expected(%input) : tensor<3x384x32xf32>
+    }
+  }
+  check.return
+}

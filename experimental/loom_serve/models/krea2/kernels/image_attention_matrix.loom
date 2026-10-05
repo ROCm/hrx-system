@@ -1,0 +1,231 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception AND MIT
+//
+// Online softmax adapted from the shared-four-head LDS algorithm in
+// zacharydenton/krea2-hrx,
+// commit 0a53bfb0a0f516973d0b620a4949126c89b48d43, under the following license:
+//
+// MIT License
+//
+// Copyright (c) 2026 Zach Denton
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// One 384-channel head, 16 queries per WG128; four waves partition the
+// contraction channels and then output channels, never the attention heads.
+// Packed global Q/K remain F32 [C,N], V F32 [N,C], output F32 [C,N].
+// Tokens are a positive multiple of 16; channels are 384.
+// Q/K/V and each unnormalized probability tile round to BF16; accumulators,
+// online rescaling, the unrounded probability sum and output remain F32.
+// Input and output storage do not overlap. Workgroup barriers publish the
+// operand/partial-score planes and retire readers before the next key tile.
+template.decl @attention.single_head_384_matrix_nchw_f32(%tokens: index, %qkv: buffer, %output: buffer)
+template.def<@attention.single_head_384_matrix_nchw_f32> device @single_head_384_matrix_nchw_f32(%tokens: index, %qkv: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %tile = index.constant 16 : index
+  %channels = index.constant 384 : index
+  %wave_channels = index.constant 96 : index
+  %threads = index.constant 128 : index
+  %workitem = kernel.workitem.id<x> : index
+  %wave = kernel.subgroup.id : index
+  %group = kernel.workgroup.id<x> : index
+  %query_origin = index.mul %group, %tile : index
+  %channel_origin = index.mul %wave, %wave_channels : index
+  %plane_bytes = index.constant 1536 : offset
+  %key_base = index.scale %tokens, %plane_bytes : index, offset -> offset
+  %value_base = index.add %key_base, %key_base : offset
+  %query_view = buffer.view %qkv[%origin] : buffer -> view<384x[%tokens]xf32>
+  %key_view = buffer.view %qkv[%key_base] : buffer -> view<384x[%tokens]xf32>
+  %value_view = buffer.view %qkv[%value_base] : buffer -> view<[%tokens]x384xf32>
+  %output_layout = encoding.layout.strided [%one, %tokens] : encoding<layout>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x384xf32, %output_layout>
+  %operand_bytes = index.constant 18432 : offset
+  %score_bytes = index.constant 6144 : offset
+  %value_bytes = index.constant 12544 : offset
+  %score_plane_bytes = index.constant 1536 : offset
+  %score_wave_base = index.scale %wave, %score_plane_bytes : index, offset -> offset
+  %query_shared = buffer.alloca<workgroup> align(16) %operand_bytes : buffer
+  %key_shared = buffer.alloca<workgroup> align(16) %operand_bytes : buffer
+  %score_shared = buffer.alloca<workgroup> align(16) %score_bytes : buffer
+  %value_shared = buffer.alloca<workgroup> align(16) %value_bytes : buffer
+  %query_packed = buffer.view %query_shared[%origin] : buffer -> view<384x24xbf16>
+  %query_layout = encoding.layout.strided [1, 24] : encoding<layout>
+  %query_stage = buffer.view %query_shared[%origin] : buffer -> view<16x384xbf16, %query_layout>
+  %key_stage = buffer.view %key_shared[%origin] : buffer -> view<384x24xbf16>
+  %value_stage = buffer.view %value_shared[%origin] : buffer -> view<16x392xbf16>
+  %score_stage = buffer.view %score_shared[%score_wave_base] : buffer -> view<16x24xf32>
+  scf.for %round = [%zero to %three step %one] unroll schedule(linear) {
+    %channel = index.madd %round, %threads, %workitem : index
+    %values = vector.load %query_view[%channel, %query_origin] : view<384x[%tokens]xf32> -> vector<16xf32>
+    %rounded = vector.fptrunc %values : vector<16xf32> to vector<16xbf16>
+    vector.store %rounded, %query_packed[%channel, %zero] : vector<16xbf16>, view<384x24xbf16>
+  }
+  %zeros = vector.constant 0.0 : vector<8xf32>
+  %lowest = vector.constant -1e30 : vector<8xf32>
+  %scale = vector.constant 0.05103103630798288 : vector<8xf32>
+  %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
+  %shuffle_width = scalar.constant 16 : i32
+  %final_max, %final_sum, %final0, %final1, %final2, %final3, %final4, %final5 = scf.for %key_origin = [%zero to %tokens step %tile](%current_max = %lowest : vector<8xf32>, %current_sum = %zeros : vector<8xf32>, %output0 = %initial : vector<8xf32>, %output1 = %initial : vector<8xf32>, %output2 = %initial : vector<8xf32>, %output3 = %initial : vector<8xf32>, %output4 = %initial : vector<8xf32>, %output5 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+    scf.for %round = [%zero to %three step %one] unroll schedule(linear) {
+      %channel = index.madd %round, %threads, %workitem : index
+      %values = vector.load %key_view[%channel, %key_origin] : view<384x[%tokens]xf32> -> vector<16xf32>
+      %rounded = vector.fptrunc %values : vector<16xf32> to vector<16xbf16>
+      vector.store %rounded, %key_stage[%channel, %zero] : vector<16xbf16>, view<384x24xbf16>
+      %packets_per_row = index.constant 24 : index
+      %value_row = index.div %channel, %packets_per_row : index
+      %value_packet = index.rem %channel, %packets_per_row : index
+      %value_column = index.mul %value_packet, %tile : index
+      %value_token = index.add %key_origin, %value_row : index
+      %value_values = vector.load %value_view[%value_token, %value_column] : view<[%tokens]x384xf32> -> vector<16xf32>
+      %value_rounded = vector.fptrunc %value_values : vector<16xf32> to vector<16xbf16>
+      vector.store %value_rounded, %value_stage[%value_row, %value_column] : vector<16xbf16>, view<16x392xbf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %partial = scf.for %relative_channel = [%zero to %wave_channels step %tile](%acc = %initial : vector<8xf32>) -> (vector<8xf32>) unroll schedule(recurrence) {
+      %channel = index.add %channel_origin, %relative_channel : index
+      %lhs = vector.fragment.load<lhs> %query_stage[%zero, %channel] shape [%tile, %tile] : view<16x384xbf16, %query_layout> -> vector<16xbf16>
+      %rhs = vector.fragment.load<rhs> %key_stage[%channel, %zero] shape [%tile, %tile] : view<384x24xbf16> -> vector<16xbf16>
+      %next = vector.mma %lhs, %rhs, %acc : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+      kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+      scf.yield %next : vector<8xf32>
+    }
+    vector.fragment.store<result> %partial, %score_stage[%zero, %zero] shape [%tile, %tile] : vector<8xf32>, view<16x24xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %raw_scores = scf.for %peer = [%zero to %four step %one](%sum = %zeros : vector<8xf32>) -> (vector<8xf32>) unroll schedule(linear) {
+      %base = index.scale %peer, %score_plane_bytes : index, offset -> offset
+      %peer_stage = buffer.view %score_shared[%base] : buffer -> view<16x24xf32>
+      %values = vector.fragment.load<result> %peer_stage[%zero, %zero] shape [%tile, %tile] : view<16x24xf32> -> vector<8xf32>
+      %next = vector.addf %sum, %values : vector<8xf32>
+      scf.yield %next : vector<8xf32>
+    }
+    %max_offset8 = scalar.constant 8 : i32
+    %max_peer8, %max_valid8 = kernel.subgroup.shuffle<xor> %raw_scores, %max_offset8, %shuffle_width : vector<8xf32>, i32, i32
+    %max_stage8 = vector.maxnumf %raw_scores, %max_peer8 : vector<8xf32>
+    %max_offset4 = scalar.constant 4 : i32
+    %max_peer4, %max_valid4 = kernel.subgroup.shuffle<xor> %max_stage8, %max_offset4, %shuffle_width : vector<8xf32>, i32, i32
+    %max_stage4 = vector.maxnumf %max_stage8, %max_peer4 : vector<8xf32>
+    %max_offset2 = scalar.constant 2 : i32
+    %max_peer2, %max_valid2 = kernel.subgroup.shuffle<xor> %max_stage4, %max_offset2, %shuffle_width : vector<8xf32>, i32, i32
+    %max_stage2 = vector.maxnumf %max_stage4, %max_peer2 : vector<8xf32>
+    %max_offset1 = scalar.constant 1 : i32
+    %max_peer1, %max_valid1 = kernel.subgroup.shuffle<xor> %max_stage2, %max_offset1, %shuffle_width : vector<8xf32>, i32, i32
+    %max_stage1 = vector.maxnumf %max_stage2, %max_peer1 : vector<8xf32>
+    %next_max = vector.maxnumf %current_max, %max_stage1 : vector<8xf32>
+    %raw_delta = vector.subf %raw_scores, %next_max : vector<8xf32>
+    %delta = vector.mulf %raw_delta, %scale : vector<8xf32>
+    %probability = vector.expf<afn> %delta : vector<8xf32>
+    %old_raw_delta = vector.subf %current_max, %next_max : vector<8xf32>
+    %old_delta = vector.mulf %old_raw_delta, %scale : vector<8xf32>
+    %old_scale = vector.expf<afn> %old_delta : vector<8xf32>
+    %scaled_sum = vector.mulf %current_sum, %old_scale : vector<8xf32>
+    %next_sum = vector.addf %scaled_sum, %probability : vector<8xf32>
+    %probability_fragment = vector.fragment<result> %probability shape [%tile, %tile] : vector<8xf32>
+    %probability_lhs = vector.fragment.repack<lhs> %probability_fragment shape [%tile, %tile] : vector<8xf32> -> vector<16xbf16>
+    %offset0 = index.constant 0 : index
+    %column0 = index.add %channel_origin, %offset0 : index
+    %rhs0 = vector.fragment.load<rhs> %value_stage[%zero, %column0] shape [%tile, %tile] : view<16x392xbf16> -> vector<16xbf16>
+    %scaled0 = vector.mulf %output0, %old_scale : vector<8xf32>
+    %next0 = vector.mma %probability_lhs, %rhs0, %scaled0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    %offset1 = index.constant 16 : index
+    %column1 = index.add %channel_origin, %offset1 : index
+    %rhs1 = vector.fragment.load<rhs> %value_stage[%zero, %column1] shape [%tile, %tile] : view<16x392xbf16> -> vector<16xbf16>
+    %scaled1 = vector.mulf %output1, %old_scale : vector<8xf32>
+    %next1 = vector.mma %probability_lhs, %rhs1, %scaled1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    %offset2 = index.constant 32 : index
+    %column2 = index.add %channel_origin, %offset2 : index
+    %rhs2 = vector.fragment.load<rhs> %value_stage[%zero, %column2] shape [%tile, %tile] : view<16x392xbf16> -> vector<16xbf16>
+    %scaled2 = vector.mulf %output2, %old_scale : vector<8xf32>
+    %next2 = vector.mma %probability_lhs, %rhs2, %scaled2 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    %offset3 = index.constant 48 : index
+    %column3 = index.add %channel_origin, %offset3 : index
+    %rhs3 = vector.fragment.load<rhs> %value_stage[%zero, %column3] shape [%tile, %tile] : view<16x392xbf16> -> vector<16xbf16>
+    %scaled3 = vector.mulf %output3, %old_scale : vector<8xf32>
+    %next3 = vector.mma %probability_lhs, %rhs3, %scaled3 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    %offset4 = index.constant 64 : index
+    %column4 = index.add %channel_origin, %offset4 : index
+    %rhs4 = vector.fragment.load<rhs> %value_stage[%zero, %column4] shape [%tile, %tile] : view<16x392xbf16> -> vector<16xbf16>
+    %scaled4 = vector.mulf %output4, %old_scale : vector<8xf32>
+    %next4 = vector.mma %probability_lhs, %rhs4, %scaled4 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    %offset5 = index.constant 80 : index
+    %column5 = index.add %channel_origin, %offset5 : index
+    %rhs5 = vector.fragment.load<rhs> %value_stage[%zero, %column5] shape [%tile, %tile] : view<16x392xbf16> -> vector<16xbf16>
+    %scaled5 = vector.mulf %output5, %old_scale : vector<8xf32>
+    %next5 = vector.mma %probability_lhs, %rhs5, %scaled5 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(subgroup) ordering(acq_rel)
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next_max, %next_sum, %next0, %next1, %next2, %next3, %next4, %next5 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %sum_offset8 = scalar.constant 8 : i32
+  %sum_peer8, %sum_valid8 = kernel.subgroup.shuffle<xor> %final_sum, %sum_offset8, %shuffle_width : vector<8xf32>, i32, i32
+  %sum_stage8 = vector.addf %final_sum, %sum_peer8 : vector<8xf32>
+  %sum_offset4 = scalar.constant 4 : i32
+  %sum_peer4, %sum_valid4 = kernel.subgroup.shuffle<xor> %sum_stage8, %sum_offset4, %shuffle_width : vector<8xf32>, i32, i32
+  %sum_stage4 = vector.addf %sum_stage8, %sum_peer4 : vector<8xf32>
+  %sum_offset2 = scalar.constant 2 : i32
+  %sum_peer2, %sum_valid2 = kernel.subgroup.shuffle<xor> %sum_stage4, %sum_offset2, %shuffle_width : vector<8xf32>, i32, i32
+  %sum_stage2 = vector.addf %sum_stage4, %sum_peer2 : vector<8xf32>
+  %sum_offset1 = scalar.constant 1 : i32
+  %sum_peer1, %sum_valid1 = kernel.subgroup.shuffle<xor> %sum_stage2, %sum_offset1, %shuffle_width : vector<8xf32>, i32, i32
+  %sum_stage1 = vector.addf %sum_stage2, %sum_peer1 : vector<8xf32>
+  %ones = vector.constant 1.0 : vector<8xf32>
+  %inverse = vector.divf<arcp> %ones, %sum_stage1 : vector<8xf32>
+  %offset0 = index.constant 0 : index
+  %column0 = index.add %channel_origin, %offset0 : index
+  %normalized0 = vector.mulf %final0, %inverse : vector<8xf32>
+  %fragment0 = vector.fragment<result> %normalized0 shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<result> %fragment0, %output_view[%query_origin, %column0] shape [%tile, %tile] : vector<8xf32>, view<[%tokens]x384xf32, %output_layout>
+  %offset1 = index.constant 16 : index
+  %column1 = index.add %channel_origin, %offset1 : index
+  %normalized1 = vector.mulf %final1, %inverse : vector<8xf32>
+  %fragment1 = vector.fragment<result> %normalized1 shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<result> %fragment1, %output_view[%query_origin, %column1] shape [%tile, %tile] : vector<8xf32>, view<[%tokens]x384xf32, %output_layout>
+  %offset2 = index.constant 32 : index
+  %column2 = index.add %channel_origin, %offset2 : index
+  %normalized2 = vector.mulf %final2, %inverse : vector<8xf32>
+  %fragment2 = vector.fragment<result> %normalized2 shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<result> %fragment2, %output_view[%query_origin, %column2] shape [%tile, %tile] : vector<8xf32>, view<[%tokens]x384xf32, %output_layout>
+  %offset3 = index.constant 48 : index
+  %column3 = index.add %channel_origin, %offset3 : index
+  %normalized3 = vector.mulf %final3, %inverse : vector<8xf32>
+  %fragment3 = vector.fragment<result> %normalized3 shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<result> %fragment3, %output_view[%query_origin, %column3] shape [%tile, %tile] : vector<8xf32>, view<[%tokens]x384xf32, %output_layout>
+  %offset4 = index.constant 64 : index
+  %column4 = index.add %channel_origin, %offset4 : index
+  %normalized4 = vector.mulf %final4, %inverse : vector<8xf32>
+  %fragment4 = vector.fragment<result> %normalized4 shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<result> %fragment4, %output_view[%query_origin, %column4] shape [%tile, %tile] : vector<8xf32>, view<[%tokens]x384xf32, %output_layout>
+  %offset5 = index.constant 80 : index
+  %column5 = index.add %channel_origin, %offset5 : index
+  %normalized5 = vector.mulf %final5, %inverse : vector<8xf32>
+  %fragment5 = vector.fragment<result> %normalized5 shape [%tile, %tile] : vector<8xf32>
+  vector.fragment.store<result> %fragment5, %output_view[%query_origin, %column5] shape [%tile, %tile] : vector<8xf32>, view<[%tokens]x384xf32, %output_layout>
+  template.return
+}
