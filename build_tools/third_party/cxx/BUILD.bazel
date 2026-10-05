@@ -19,6 +19,7 @@ exports_files([
     "compound_offsetof.patch",
     "condition_declarations.patch",
     "const_default_initialization.patch",
+    "constant_aggregate_loads.patch",
     "constant_arithmetic.patch",
     "constant_archive.patch",
     "constant_object_initialization.patch",

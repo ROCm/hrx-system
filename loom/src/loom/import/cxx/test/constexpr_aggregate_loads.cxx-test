@@ -1,0 +1,101 @@
+// RUN: verify
+// Named array members retain the array value until a subscript selects an element.
+template <typename T>
+struct Values { T lanes[4]; };
+template <typename T>
+static constexpr bool member() {
+  Values<T> value{{T(3), T(5), T(7), T(9)}};
+  value.lanes[1] = T(11);
+  return value.lanes[0] == T(3) && value.lanes[1] == T(11) &&
+         value.lanes[3] == T(9);
+}
+static_assert(member<char>());
+static_assert(member<signed char>());
+static_assert(member<unsigned char>());
+static_assert(member<char8_t>());
+static_assert(member<char16_t>());
+static_assert(member<char32_t>());
+static_assert(member<wchar_t>());
+static_assert(member<short>());
+static_assert(member<unsigned short>());
+static_assert(member<int>());
+static_assert(member<unsigned>());
+static_assert(member<long>());
+static_assert(member<unsigned long>());
+static_assert(member<long long>());
+static_assert(member<unsigned long long>());
+static_assert(member<_Float16>());
+static_assert(member<__bf16>());
+static_assert(member<float>());
+static_assert(member<double>());
+
+// ====
+// Pointer dereference and pointer subscript retain a complete array result.
+static constexpr int array_pointer() {
+  int values[4] = {3, 5, 7, 9};
+  int (*pointer)[4] = &values;
+  int (&reference)[4] = *pointer;
+  reference[1] = 11;
+  return (*pointer)[0] + pointer[0][1] + values[3];
+}
+static_assert(array_pointer() == 23);
+
+// ====
+// A reference to a member array selects its storage, not its first element.
+struct Table { unsigned entries[4]; };
+static constexpr unsigned update() {
+  Table table{{3, 5, 7, 9}};
+  unsigned (&entries)[4] = table.entries;
+  entries[2] = 13;
+  return table.entries[0] + table.entries[2];
+}
+static_assert(update() == 16);
+
+// ====
+// Nested arrays and record elements remain aggregate values at each level.
+struct Cell { unsigned value; };
+struct Table { Cell cells[2]; unsigned rows[2][2]; };
+constexpr Table table{{{3}, {5}}, {{7, 11}, {13, 17}}};
+static_assert(table.cells[1].value == 5);
+static_assert(table.rows[1][0] == 13);
+static constexpr unsigned update() {
+  Table local{{{3}, {5}}, {{7, 11}, {13, 17}}};
+  local.rows[1][0] = 19;
+  return local.rows[1][0] + local.cells[0].value;
+}
+static_assert(update() == 22);
+
+// ====
+// Native vectors also use aggregate storage, including behind a member pointer.
+using Int4 = int __attribute__((ext_vector_type(4)));
+using Float2 = float __attribute__((ext_vector_type(2)));
+using Half8 = _Float16 __attribute__((ext_vector_type(8)));
+struct Vectors { Int4 integers; Float2 scales; Half8 halves; };
+constexpr Vectors values{
+    {3, 5, 7, 9}, {1.5f, 2.5f},
+    {_Float16(1), _Float16(2), _Float16(3), _Float16(4),
+     _Float16(5), _Float16(6), _Float16(7), _Float16(8)}};
+static_assert(values.integers[2] == 7);
+static_assert(values.scales[1] == 2.5f);
+static_assert(values.halves[7] == 8);
+static constexpr int vector_pointer() {
+  Int4 values{3, 5, 7, 9};
+  Int4* pointer = &values;
+  Int4& reference = *pointer;
+  reference[1] = 11;
+  return (*pointer)[0] + pointer[0][1] + values[3];
+}
+static_assert(vector_pointer() == 23);
+
+// ====
+// Scalar and record dereferences still read their complete declared values.
+struct Value { unsigned first; unsigned second; };
+static constexpr unsigned read() {
+  unsigned scalar = 3;
+  Value value{5, 7};
+  unsigned* pointer = &scalar;
+  Value* record = &value;
+  *pointer = 11;
+  return *pointer + (*record).second;
+}
+static_assert(read() == 18);

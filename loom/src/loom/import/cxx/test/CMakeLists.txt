@@ -45,6 +45,8 @@ loom_check_test_suite(
     "const.cxx-test"
     "const_default_initialization.cxx-test"
     "constexpr.cxx-test"
+    "constexpr_aggregate_loads.cxx-test"
+    "constexpr_aggregate_loads_roundtrip.cxx-test"
     "constexpr_bitcast.cxx-test"
     "constexpr_bitcast_cleanup.cxx-test"
     "constexpr_bitcast_invalid.cxx-test"

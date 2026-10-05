@@ -1,0 +1,37 @@
+// RUN: roundtrip
+// A constant descriptor can use array and vector members to select a kernel shape.
+using UInt4 = unsigned __attribute__((ext_vector_type(4)));
+struct Tile {
+  unsigned dimensions[2];
+  UInt4 packing;
+};
+constexpr Tile tile{{32, 64}, {8, 4, 2, 1}};
+template <unsigned Columns, unsigned Pack>
+struct Shape { static constexpr unsigned registers = Columns / Pack; };
+unsigned registers() {
+  return Shape<tile.dimensions[1], tile.packing[0]>::registers;
+}
+
+// ----
+func.def public @registers() -> (i32) {
+  %1 = scalar.constant 8 : i32
+  func.return %1 : i32
+}
+
+// ====
+// Source-only edits through aggregate references become ordinary scalar constants.
+static constexpr unsigned specialize(unsigned elements) {
+  unsigned dimensions[2] = {32, 64};
+  unsigned (*pointer)[2] = &dimensions;
+  unsigned (&alias)[2] = *pointer;
+  alias[1] = elements;
+  return (*pointer)[0] + pointer[0][1];
+}
+constexpr unsigned elements = specialize(16);
+unsigned extent() { return elements; }
+
+// ----
+func.def public @extent() -> (i32) {
+  %elements = scalar.constant 48 : i32
+  func.return %elements : i32
+}

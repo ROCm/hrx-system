@@ -1,0 +1,217 @@
+diff --git a/src/parser/cxx/ast_interpreter.h b/src/parser/cxx/ast_interpreter.h
+--- a/src/parser/cxx/ast_interpreter.h
++++ b/src/parser/cxx/ast_interpreter.h
+@@ -385,11 +385,14 @@
+
+   [[nodiscard]] auto lvalue(ExpressionAST* ast) -> ConstValue*;
+
++  // Typed expression reads identify a whole array/vector at its base address;
++  // untyped structural reads select the addressed element of aggregate storage.
+   [[nodiscard]] auto loadAddress(const ConstAddress& address,
+                                  std::intmax_t extraIndex,
+                                  const Type* objectType = nullptr)
+       -> std::optional<ConstValue>;
+
++  // Uses the same whole-object versus element selection as loadAddress.
+   [[nodiscard]] auto addressSlot(const ConstAddress& address,
+                                  std::intmax_t extraIndex,
+                                  const Type* objectType = nullptr)
+diff --git a/src/parser/cxx/ast_interpreter_expressions.cc b/src/parser/cxx/ast_interpreter_expressions.cc
+--- a/src/parser/cxx/ast_interpreter_expressions.cc
++++ b/src/parser/cxx/ast_interpreter_expressions.cc
+@@ -927,7 +927,7 @@
+       if (!constant->constValue) return nullptr;
+       auto address =
+           std::get_if<std::shared_ptr<ConstAddress>>(constant->constValue);
+-      if (address && *address) return addressSlot(**address, 0);
++      if (address && *address) return addressSlot(**address, 0, constant->type);
+       ast = constant->expression;
+       continue;
+     }
+@@ -983,7 +983,8 @@
+       auto result =
+           address ? std::get_if<std::shared_ptr<ConstAddress>>(&*address)
+                   : nullptr;
+-      return result && *result ? addressSlot(**result, 0) : nullptr;
++      return result && *result ? addressSlot(**result, 0, member->type)
++                               : nullptr;
+     }
+     if (receiver.object) {
+       for (auto& subobject : receiver.object->mutableMembers())
+@@ -1025,7 +1026,7 @@
+       if (!idxVal.has_value()) return nullptr;
+       auto idx = toInt(*idxVal);
+       if (!idx.has_value()) return nullptr;
+-      return addressSlot(**addr, *idx);
++      return addressSlot(**addr, *idx, sub->type);
+     }
+
+     return nullptr;
+@@ -1037,7 +1038,7 @@
+     if (!ptrVal.has_value()) return nullptr;
+     auto addr = std::get_if<std::shared_ptr<ConstAddress>>(&*ptrVal);
+     if (!addr || !*addr) return nullptr;
+-    return addressSlot(**addr, 0);
++    return addressSlot(**addr, 0, unary->type);
+   }
+
+   if (auto cond = ast_cast<ConditionalExpressionAST>(ast)) {
+@@ -1853,7 +1854,8 @@
+
+   if (auto addr =
+           std::get_if<std::shared_ptr<ConstAddress>>(&*baseExpressionResult)) {
+-    return interp.loadAddress(**addr, static_cast<std::intmax_t>(*idx));
++    return interp.loadAddress(**addr, static_cast<std::intmax_t>(*idx),
++                              ast->type);
+   }
+
+   return std::nullopt;
+@@ -2003,7 +2005,7 @@
+       auto result =
+           address ? std::get_if<std::shared_ptr<ConstAddress>>(&*address)
+                   : nullptr;
+-      if (result && *result) return interp.loadAddress(**result, 0);
++      if (result && *result) return interp.loadAddress(**result, 0, ast->type);
+     } else if (receiver.object) {
+       for (const auto& subobject : receiver.object->members())
+         if (subobject.symbol == field) return subobject.value;
+@@ -2258,7 +2260,7 @@
+       }
+       if (auto addr =
+               std::get_if<std::shared_ptr<ConstAddress>>(&*expressionResult)) {
+-        return interp.loadAddress(**addr, 0);
++        return interp.loadAddress(**addr, 0, ast->type);
+       }
+       if (auto str = std::get_if<const StringLiteral*>(&*expressionResult)) {
+         const auto value = (*str)->stringValue();
+diff --git a/tests/unit_tests/sema/constant_aggregate_loads_01.cc b/tests/unit_tests/sema/constant_aggregate_loads_01.cc
+new file mode 100644
+--- /dev/null
++++ b/tests/unit_tests/sema/constant_aggregate_loads_01.cc
+@@ -0,0 +1,126 @@
++// RUN: %cxx -verify -fsyntax-only %s
++
++namespace member_arrays {
++// Named array members retain the array value until a subscript selects an
++// element.
++template <typename T>
++struct Values {
++  T lanes[4];
++};
++template <typename T>
++static constexpr bool member() {
++  Values<T> value{{T(3), T(5), T(7), T(9)}};
++  value.lanes[1] = T(11);
++  return value.lanes[0] == T(3) && value.lanes[1] == T(11) &&
++         value.lanes[3] == T(9);
++}
++static_assert(member<char>());
++static_assert(member<signed char>());
++static_assert(member<unsigned char>());
++static_assert(member<char8_t>());
++static_assert(member<char16_t>());
++static_assert(member<char32_t>());
++static_assert(member<wchar_t>());
++static_assert(member<short>());
++static_assert(member<unsigned short>());
++static_assert(member<int>());
++static_assert(member<unsigned>());
++static_assert(member<long>());
++static_assert(member<unsigned long>());
++static_assert(member<long long>());
++static_assert(member<unsigned long long>());
++static_assert(member<_Float16>());
++static_assert(member<__bf16>());
++static_assert(member<float>());
++static_assert(member<double>());
++}  // namespace member_arrays
++
++namespace array_pointers {
++// Pointer dereference and pointer subscript retain a complete array result.
++static constexpr int array_pointer() {
++  int values[4] = {3, 5, 7, 9};
++  int (*pointer)[4] = &values;
++  int (&reference)[4] = *pointer;
++  reference[1] = 11;
++  return (*pointer)[0] + pointer[0][1] + values[3];
++}
++static_assert(array_pointer() == 23);
++}  // namespace array_pointers
++
++namespace member_references {
++// A reference to a member array selects its storage, not its first element.
++struct Table {
++  unsigned entries[4];
++};
++static constexpr unsigned update() {
++  Table table{{3, 5, 7, 9}};
++  unsigned (&entries)[4] = table.entries;
++  entries[2] = 13;
++  return table.entries[0] + table.entries[2];
++}
++static_assert(update() == 16);
++}  // namespace member_references
++
++namespace nested_aggregates {
++// Nested arrays and record elements remain aggregate values at each level.
++struct Cell {
++  unsigned value;
++};
++struct Table {
++  Cell cells[2];
++  unsigned rows[2][2];
++};
++constexpr Table table{{{3}, {5}}, {{7, 11}, {13, 17}}};
++static_assert(table.cells[1].value == 5);
++static_assert(table.rows[1][0] == 13);
++static constexpr unsigned update() {
++  Table local{{{3}, {5}}, {{7, 11}, {13, 17}}};
++  local.rows[1][0] = 19;
++  return local.rows[1][0] + local.cells[0].value;
++}
++static_assert(update() == 22);
++}  // namespace nested_aggregates
++
++namespace vectors {
++// Native vectors also use aggregate storage, including behind a member pointer.
++using Int4 = int __attribute__((ext_vector_type(4)));
++using Float2 = float __attribute__((ext_vector_type(2)));
++using Half8 = _Float16 __attribute__((ext_vector_type(8)));
++struct Vectors {
++  Int4 integers;
++  Float2 scales;
++  Half8 halves;
++};
++constexpr Vectors values{{3, 5, 7, 9},
++                         {1.5f, 2.5f},
++                         {_Float16(1), _Float16(2), _Float16(3), _Float16(4),
++                          _Float16(5), _Float16(6), _Float16(7), _Float16(8)}};
++static_assert(values.integers[2] == 7);
++static_assert(values.scales[1] == 2.5f);
++static_assert(values.halves[7] == 8);
++static constexpr int vector_pointer() {
++  Int4 values{3, 5, 7, 9};
++  Int4* pointer = &values;
++  Int4& reference = *pointer;
++  reference[1] = 11;
++  return (*pointer)[0] + pointer[0][1] + values[3];
++}
++static_assert(vector_pointer() == 23);
++}  // namespace vectors
++
++namespace scalars_and_records {
++// Scalar and record dereferences still read their complete declared values.
++struct Value {
++  unsigned first;
++  unsigned second;
++};
++static constexpr unsigned read() {
++  unsigned scalar = 3;
++  Value value{5, 7};
++  unsigned* pointer = &scalar;
++  Value* record = &value;
++  *pointer = 11;
++  return *pointer + (*record).second;
++}
++static_assert(read() == 18);
++}  // namespace scalars_and_records
