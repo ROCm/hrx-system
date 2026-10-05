@@ -9,7 +9,6 @@ config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), m
 amdgpu.target<gfx11-generic> @vae_upsample_wave32 {subgroup_size = 32}
 template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @image.convolution_nchw_f32(%height: index, %width: index, %inputs: index, %outputs: index, %extent: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
-template.decl @image.convolution_3x3_tiled_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %pipeline_depth: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
 kernel.def target(@vae_upsample_wave32) @krea_vae_up0_norm() {
@@ -180,9 +179,8 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up1_convolution() {
   %width = index.mul %latent_width, %scale : index
   %channels = index.constant 384 : index
   %planes = index.constant 3 : index
-  %depth = index.constant 1 : index
   %add_residual = scalar.constant false : i1
-  template.apply<@image.convolution_3x3_tiled_f32>(%height, %width, %channels, %channels, %planes, %depth, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %channels, %channels, %planes, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -210,9 +208,8 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up1_convolution_add() {
   %width = index.mul %latent_width, %scale : index
   %channels = index.constant 384 : index
   %planes = index.constant 3 : index
-  %depth = index.constant 1 : index
   %add_residual = scalar.constant true : i1
-  template.apply<@image.convolution_3x3_tiled_f32>(%height, %width, %channels, %channels, %planes, %depth, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %channels, %channels, %planes, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -297,9 +294,8 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up2_convolution() {
   %width = index.mul %latent_width, %scale : index
   %channels = index.constant 192 : index
   %planes = index.constant 3 : index
-  %depth = index.constant 1 : index
   %add_residual = scalar.constant false : i1
-  template.apply<@image.convolution_3x3_tiled_f32>(%height, %width, %channels, %channels, %planes, %depth, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %channels, %channels, %planes, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -327,9 +323,8 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up2_convolution_add() {
   %width = index.mul %latent_width, %scale : index
   %channels = index.constant 192 : index
   %planes = index.constant 3 : index
-  %depth = index.constant 1 : index
   %add_residual = scalar.constant true : i1
-  template.apply<@image.convolution_3x3_tiled_f32>(%height, %width, %channels, %channels, %planes, %depth, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %channels, %channels, %planes, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 

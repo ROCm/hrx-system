@@ -1363,55 +1363,54 @@ later convolutions add into that destination. Equal-width blocks advance
 source-owned features in place. Spatial nearest-neighbor expansion is part of
 convolution indexing and never materializes an enlarged input image.
 
-The up1/up2 equal-width convolutions (384/192 channels) use the config-free
-[`convolution_3x3_tiled_f32`](kernels/convolution_tiled.loom) helper for
-plain and residual convolutions. A workgroup owns 32 spatial positions by
-32 output channels, staging 32 reduction coordinates in 8,320 bytes of padded
-LDS. Each lane keeps eight independent F32 output accumulators. Cooperative
-acquisition shares inputs across output channels and coefficients across
-pixels, without a global im2col buffer, expanded weights, or additional
-dispatch. Up0, channel expansion, resize and RGB convolutions retain their
-original leaves.
+The equal-width up1/up2/up3 convolutions (384/192/96 channels) use the
+config-free [`convolution_3x3_matrix_f32`](kernels/convolution_matrix.loom)
+helper for plain and residual convolutions. A workgroup owns 32 spatial
+positions by 32 output channels. Cooperative acquisition shares inputs across
+output channels and coefficients across pixels, while retaining original
+global F32 tensors and last-of-three temporal weight addressing. Up0, channel
+expansion, resize and RGB convolutions retain their original leaves.
 
-The helper flattens input-channel/row-tap/column-tap traversal without changing
-the FMA order of any output. Invalid border taps skip the FMA; inactive spatial
-lanes still participate in both tile barriers. Bias rounds separately, followed
-by the optional residual addition. The convolution input remains distinct from
-the output, while the residual may be that same output buffer. These leaves
-select pipeline depth one and retain original three-plane temporal weight
-addressing. Geometry and scheduling enter as SSA specialization operands;
-the helper contains no model configuration or runtime scalar ABI.
-
-The final up3 stage (96 channels) uses
-[`convolution_3x3_matrix_f32`](kernels/convolution_matrix.loom). It retains the
-same global F32 tensors and ownership, but splits each operand before LDS staging into
+The helper splits each operand before LDS staging into
 `h = f16(a)` and `l = f16((a - f32(h)) * 2048)`. Three FP16 matrix products
 reconstruct `HH + (HL + LH) / 2048` in F32 for each 32-element reduction tile;
 the low-low term is omitted. This changes the arithmetic, not the stored model
 precision. Finite operands must remain finite under the high FP16 conversion.
 Four wave32s share 9,472 bytes of padded LDS and store directly into NCHW output.
 No prepared weight bank, global im2col, extra dispatch or workspace is needed.
+Bias rounds separately, followed by the optional residual addition. The
+convolution input remains distinct from output, while the residual may be that
+same output buffer. Invalid border taps supply zero; inactive spatial lanes
+still participate in tile publication and retirement. Geometry enters as SSA
+specialization operands; the helper contains no model configuration or runtime
+scalar ABI.
 
 [`tests/convolution_matrix.loom`](tests/convolution_matrix.loom) compares the
 actual helper with an ordinary scalar F64 VM function rounded once to F32.
-The two scenarios cover 1x1 and 3x11 images at the full 96-channel reduction
-depth, each with plain output, distinct residual output and genuinely aliased
-residual/output storage. Independent entries in all three temporal planes,
-nonzero bias/skip, row-crossing tiles and output sentinels expose indexing and
-publication errors. Each selected scenario shares its shape config with the
-kernel and VM oracle:
+The two scenarios cover 1x1 and 3x11 images at full 96/192/384-channel
+reduction depths, each with plain output, distinct residual output and
+genuinely aliased residual/output storage. Independent entries in all three
+temporal planes, nonzero bias/skip, row-crossing tiles and output sentinels
+expose indexing and publication errors. Fixtures reserve flat capacity for
+384 channels; the kernel and VM oracle both view the compact prefix selected
+by the shared shape config, including compact channel strides in the weights.
+Comparisons include the unused output/state suffix at smaller channel counts:
 
 ```sh
-iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
-  --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
-  --device=amdgpu --target=amdgpu:gfx1151 \
-  --case=@convolution_single_pixel \
-  --config=matrix_test.height=1 --config=matrix_test.width=1
-iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
-  --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
-  --device=amdgpu --target=amdgpu:gfx1151 \
-  --case=@convolution_spatial_tail \
-  --config=matrix_test.height=3 --config=matrix_test.width=11
+for channels in 96 192 384; do
+  iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
+    --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
+    --device=amdgpu --target=amdgpu:gfx1151 \
+    --case=@convolution_single_pixel \
+    --config=matrix_test.height=1 --config=matrix_test.width=1 \
+    --config=matrix_test.channels="$channels"
+  iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
+    --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
+    --device=amdgpu --target=amdgpu:gfx1151 \
+    --case=@convolution_spatial_tail \
+    --config=matrix_test.height=3 --config=matrix_test.width=11 \
+    --config=matrix_test.channels="$channels"
+done
 ```
 
 These portable checks exercise mapping, borders and aliasing. Numerical
@@ -1460,18 +1459,18 @@ bound. Clamping and both composed decoder commands must equal separately
 executed native stages bit-for-bit on both executions. The complete RGB result
 also has a fixed 2e-5 relative-L2 bound against the pinned CPU/F32 VAE on the
 same latent. The ordered-FMA decoder qualified all 168 repeated comparisons
-over 469,573,632 values. The matrix up3 path separately qualifies complete
+over 469,573,632 values. The matrix up1/up2/up3 path separately qualifies complete
 base and active-LoRA 48x48 latents and a native 128x128 latent against the
 independent CPU/F32 decoder, preserving the 2e-5 relative-L2 criterion. Each
 native command executes twice; a fresh process repeats the candidate against
 its first output bit-for-bit. All outputs are finite.
 
-| Matrix up3 decoder result | Base 384x384 | Softwatercolor 384x384 | Base 1024x1024 |
+| Matrix up1/up2/up3 decoder result | Base 384x384 | Softwatercolor 384x384 | Base 1024x1024 |
 | --- | ---: | ---: | ---: |
-| F32 relative L2 versus CPU VAE | 1.80209e-6 | 3.78497e-6 | 4.07534e-6 |
-| Different 8-bit channel values | 21 / 442,368 | 49 / 442,368 | 326 / 3,145,728 |
+| F32 relative L2 versus CPU VAE | 1.51602e-6 | 2.96899e-6 | 3.84104e-6 |
+| Different 8-bit channel values | 22 / 442,368 | 40 / 442,368 | 311 / 3,145,728 |
 | Maximum 8-bit difference | 1 | 1 | 1 |
-| Pixel RMSE | 0.00688998 | 0.01052461 | 0.01018001 |
+| Pixel RMSE | 0.00705212 | 0.00950907 | 0.00994305 |
 
 These pixel counts are observations, not an exact-image contract. Relative
 L2 is slightly lower than the ordered-FMA path in each case; maximum absolute
