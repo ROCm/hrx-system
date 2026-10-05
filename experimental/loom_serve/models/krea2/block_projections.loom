@@ -8,7 +8,6 @@ config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536),
 
 amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
-template.decl @projection.linear_tiled_wide_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
 
@@ -33,30 +32,35 @@ template.def<@krea2.projection_row_group_size> device @block_projection_row_grou
 
 kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %short_text_rows = index.constant 4224 : index
+  %temporal = index.cmp eq, %rows, %short_text_rows : index
+  %temporal_row_tile = index.constant 128 : index
+  %baseline_row_tile = index.constant 64 : index
+  %tile = scf.select %temporal, %temporal_row_tile, %baseline_row_tile : index
+  %one = index.constant 1 : index
+  %rounding = index.sub %tile, %one : index
   %padded_rows = index.add %rows, %rounding : index
   %row_tiles = index.div %padded_rows, %tile : index
-  %short_text_rows = index.constant 4224 : index
-  %wide = index.cmp eq, %rows, %short_text_rows : index
-  %wide_output_tiles = index.constant 48 : index
-  %square_output_tiles = index.constant 96 : index
-  %output_tiles = scf.select %wide, %wide_output_tiles, %square_output_tiles : index
-  %one = index.constant 1 : index
-  %threads = index.constant 256 : index
+  %temporal_output_tiles = index.constant 64 : index
+  %baseline_output_tiles = index.constant 96 : index
+  %output_tiles = scf.select %temporal, %temporal_output_tiles, %baseline_output_tiles : index
+  %temporal_threads = index.constant 128 : index
+  %baseline_threads = index.constant 256 : index
+  %threads = scf.select %temporal, %temporal_threads, %baseline_threads : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %width = index.constant 6144 : index
-  %minimum_grouped_rows = index.constant 2560 : index
-  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
-  %output_layout = encoding.layout.dense : encoding<layout>
   %short_text_rows = index.constant 4224 : index
-  %wide = index.cmp eq, %rows, %short_text_rows : index
-  scf.if %wide {
-    template.apply<@projection.linear_tiled_wide_bf16>(%rows, %width, %width, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %temporal = index.cmp eq, %rows, %short_text_rows : index
+  scf.if %temporal {
+    %group_size = index.constant 4 : index
+    template.apply<@projection.linear_temporal_bf16>(%rows, %width, %width, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
     scf.yield
   } else {
+    %minimum_grouped_rows = index.constant 2560 : index
+    %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+    %output_layout = encoding.layout.dense : encoding<layout>
     template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
     scf.yield
   }

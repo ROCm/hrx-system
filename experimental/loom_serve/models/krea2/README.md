@@ -566,26 +566,26 @@ no padded workgroups or duplicate stores. This is a cache-locality policy, not
 a guarantee of physical workgroup execution order. Tile traversal and tile
 geometry are independent tuning dimensions.
 
-At 4,224 rows, the 6,144-wide query/gate/output projections use
-[`linear_tiled_wide_bf16`](kernels/linear_wide.loom). The same eight wave32s
-own a 64x128 output tile: each wave carries four ascending-K16 accumulator
+[`linear_tiled_wide_bf16`](kernels/linear_wide.loom) is an alternative full-K
+motif. The same eight wave32s own a 64x128 output tile: each wave carries
+four ascending-K16 accumulator
 chains, reusing each input fragment across twice as many output columns.
 Cooperative K64 loads use one padded 64x72 input stage and 128x72 weight stage
 (27 KiB total LDS). The publication/retirement barriers and two-deep pipeline
-overlap next-tile acquisition without double-buffering LDS. Other square
-shapes retain the chunked baseline. These are model-selected strategies,
-not constraints on the configuration-free motifs.
+overlap next-tile acquisition without double-buffering LDS. Tile selection
+belongs to model wrappers, not the configuration-free motifs.
 
-At 4,224 and 4,608 rows, FFN up/gate and down select
-[`linear_temporal_bf16`](kernels/linear_temporal.loom). Four wave32s own a
-128x96 output tile with twelve full-K result fragments per wave. Two temporal
+At 4,224 rows, the 6,144-wide query/gate/output projections select
+[`linear_temporal_bf16`](kernels/linear_temporal.loom), as do FFN up/gate
+and down at 4,224 and 4,608 rows. Four wave32s own a 128x96 output tile with
+twelve full-K result fragments per wave. Two temporal
 LDS banks occupy 65,024 bytes; an explicit packet queue overlaps global reads
 with current-tile WMMA. The steady loop only acquires valid future K64 tiles.
 A peeled penultimate tile publishes the final queued tile without acquiring
 an unused successor, followed by a final drain. This keeps a bounds-check
 zero merge from forcing future loads to finish before current-tile arithmetic.
-Four 128-row tiles form each traversal panel. Other FFN shapes retain the
-baseline motif.
+Four 128-row tiles form each traversal panel. Other projection shapes retain
+the baseline motif.
 
 A workgroup-uniform branch separates full output tiles from the final partial
 tile around the entire contraction. The interior path carries an explicit
