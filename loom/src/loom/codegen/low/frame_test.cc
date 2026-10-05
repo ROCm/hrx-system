@@ -1314,6 +1314,169 @@ low.func.def target<test.low.core> @forwarded_header(%condition: reg<test.i32>, 
   ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/3, {2});
 }
 
+TEST_F(LowEmissionFrameTest, BackedgeRetainsAllHeaderReaders) {
+  const auto expect_readers = [this](const char* source,
+                                     int32_t minimum_issue_separation_cycles,
+                                     loom_low_model_quality_t model_quality) {
+    ModulePtr module = ParseModule(source);
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+    ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/4, {2, 3});
+    ExpectDependencyTiming(frame, 2, 4, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE,
+                           minimum_issue_separation_cycles,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_SCHEDULE_CLASS,
+                           model_quality);
+    ExpectDependencyTiming(frame, 3, 4, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE,
+                           minimum_issue_separation_cycles,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_SCHEDULE_CLASS,
+                           model_quality);
+  };
+
+  expect_readers(R"(
+low.func.def target<test.low.core> @scalar_backedge(%condition: reg<test.i32>, %seed: reg<test.i32>, %rhs0: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%state: reg<test.i32>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %read0 = test.add.i32 %state, %rhs0
+  %read1 = test.mul.i32 %state, %rhs1
+  %next = test.add.i32 %state, %rhs1
+  low.br ^loop(%next: reg<test.i32>)
+^exit:
+  return %state
+}
+)",
+                 /*minimum_issue_separation_cycles=*/1,
+                 LOOM_LOW_MODEL_QUALITY_EXACT);
+  expect_readers(R"(
+low.func.def target<test.low.core> @vector_backedge(%condition: reg<test.i32>, %seed: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  low.br ^loop(%seed: reg<test.i32 x4>)
+^loop(%state: reg<test.i32 x4>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %read0 = test.add.v4i32 %state, %rhs0
+  %read1 = test.add.v4i32 %state, %rhs1
+  %next = test.add.v4i32 %state, %rhs1
+  low.br ^loop(%next: reg<test.i32 x4>)
+^exit:
+  return %state
+}
+)",
+                 /*minimum_issue_separation_cycles=*/2,
+                 LOOM_LOW_MODEL_QUALITY_ESTIMATED);
+}
+
+TEST_F(LowEmissionFrameTest, ComposedBackedgeRetainsHeaderReader) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @composed_backedge(%condition: reg<test.i32>, %seed: reg<test.i32 x4>, %rhs0: reg<test.i32 x4>, %rhs1: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  low.br ^loop(%seed: reg<test.i32 x4>)
+^loop(%state: reg<test.i32 x4>):
+  low.cond_br %condition, ^body, ^exit : reg<test.i32>
+^body:
+  %read = test.add.v4i32 %state, %rhs0
+  %next_low = test.add.v4i32 %rhs0, %rhs1
+  %next_high = test.add.v4i32 %rhs1, %rhs0
+  %wide = concat(%next_low, %next_high) : (reg<test.i32 x4>, reg<test.i32 x4>) -> reg<test.i32 x8>
+  %next_slice = slice %wide[0] : reg<test.i32 x8> -> reg<test.i32 x4>
+  %next = copy %next_slice : reg<test.i32 x4> -> reg<test.i32 x4>
+  low.br ^loop(%next: reg<test.i32 x4>)
+^exit:
+  return %state
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/3, {2});
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/5, {2});
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/6, {2});
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/7, {2});
+}
+
+TEST_F(LowEmissionFrameTest, TiedWritesRetainOverlappingReaders) {
+  const auto expect_reader =
+      [this](const char* source,
+             std::initializer_list<uint32_t> expected_producer_nodes) {
+        ModulePtr module = ParseModule(source);
+        loom_low_emission_frame_t frame = {};
+        IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+        ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/1,
+                                          expected_producer_nodes);
+      };
+
+  expect_reader(R"(
+low.func.def target<test.low.core> @low_read_high_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %read = test.read.low16.i32 %state
+  %next = test.write.high16.i32 %state, %ptr
+  return %read, %next
+}
+)",
+                {});
+  expect_reader(R"(
+low.func.def target<test.low.core> @high_read_high_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %read = test.read.high16.i32 %state
+  %next = test.write.high16.i32 %state, %ptr
+  return %read, %next
+}
+)",
+                {0});
+  expect_reader(R"(
+low.func.def target<test.low.core> @high_read_low_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %read = test.read.high16.i32 %state
+  %next = test.write.low16.tied.i32 %state, %ptr
+  return %read, %next
+}
+)",
+                {});
+  expect_reader(R"(
+low.func.def target<test.low.core> @low_read_low_write(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %read = test.read.low16.i32 %state
+  %next = test.write.low16.tied.i32 %state, %ptr
+  return %read, %next
+}
+)",
+                {0});
+  expect_reader(R"(
+low.func.def target<test.low.core> @full_read_high_write(%state: reg<test.i32>, %rhs: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %read = test.add.i32 %state, %rhs
+  %next = test.write.high16.i32 %state, %ptr
+  return %read, %next
+}
+)",
+                {0});
+  expect_reader(R"(
+low.func.def target<test.low.core> @low_read_full_write(%state: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %read = test.read.low16.i32 %state
+  %next = test.tied.any %state
+  return %read, %next
+}
+)",
+                {0});
+}
+
+TEST_F(LowEmissionFrameTest, WholeWriteRetainsEarlierDisjointReader) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @partial_then_whole(%state: reg<test.i32>, %ptr: reg<test.ptr>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %low_read = test.read.low16.i32 %state
+  %high_next = test.write.high16.i32 %state, %ptr
+  %full_next = test.tied.any %high_next
+  return %low_read, %full_next
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/1, {});
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/2, {0, 1});
+  ExpectDependencyTiming(frame, 0, 2, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE, 1,
+                         LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_SCHEDULE_CLASS,
+                         LOOM_LOW_MODEL_QUALITY_EXACT);
+  ExpectDependencyTiming(frame, 1, 2, LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE, 4,
+                         LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_SCHEDULE_CLASS,
+                         LOOM_LOW_MODEL_QUALITY_FALLBACK);
+}
+
 TEST_F(LowEmissionFrameTest, OrderedEffectUsesDirectionalTimingEndpoints) {
   ModulePtr module = ParseModule(R"(
 low.func.def target<test.low.core> @directional_effect(%address: reg<test.ptr>, %payload: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
