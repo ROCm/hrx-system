@@ -1468,12 +1468,12 @@ This preserves padding at the expanded border without allocating an expanded
 tensor or folding coefficients. The scale-1 specialization emits the same
 native code as the non-expanding helper.
 
-The helper splits each operand before LDS staging into
-`h = f16(a)` and `l = f16((a - f32(h)) * 2048)`. Three FP16 matrix products
-reconstruct `HH + (HL + LH) / 2048` in F32 for each 32-element reduction tile;
-the low-low term is omitted. This changes the arithmetic, not the stored model
-precision. Finite operands must remain finite under the high FP16 conversion.
-Four wave32s share 9,472 bytes of padded LDS and store directly into NCHW output.
+The helper rounds each operand to BF16 before LDS staging and uses ordinary
+BF16 matrix products with F32 accumulation. This changes the arithmetic, not
+the stored model precision; global tensors and bias/residual arithmetic remain
+F32. Operand conversion must remain finite. Four wave32s share 4,736 bytes of
+padded LDS and store directly into NCHW output. The arithmetic does not emulate
+an F32 product using extra low-part or cross-product matrix operations.
 No prepared weight bank, global im2col, extra dispatch or workspace is needed.
 Bias rounds separately, followed by the optional residual addition. The
 convolution input remains distinct from output, while the residual may be that
@@ -1483,7 +1483,8 @@ specialization operands; the helper contains no model configuration or runtime
 scalar ABI.
 
 [`tests/convolution_matrix.loom`](tests/convolution_matrix.loom) compares the
-actual helper with an ordinary scalar F64 VM function rounded once to F32.
+actual helper with an independent scalar VM function that rounds operands to
+BF16, accumulates in F64, and rounds the final result to F32.
 The two scenarios use physical 1x1 and 3x11 inputs at full 96/192/384-channel
 reduction depths. Five configurations cover the three equal-width, three-plane
 convolutions and both mixed-width, one-plane resize stages. Each runs plain
@@ -1521,10 +1522,10 @@ done <<'SHAPES'
 SHAPES
 ```
 
-These portable checks exercise mapping, borders and aliasing. Numerical
-admission additionally compares original checkpoint coefficients against an
-unrounded F64 primitive oracle and completes independent full-decoder checks;
-a rounded portable oracle is not a replacement for that model-level boundary.
+These portable checks exercise the actual operand arithmetic, mapping, borders
+and aliasing. Complete real-latent decoder comparisons separately report
+numerical distance and final RGB differences against the independent CPU/F32
+model. Preserving that model's exact arithmetic is not the image-quality goal.
 
 [`tests/convolution_tiled.loom`](tests/convolution_tiled.loom) links the actual
 scalar and cooperative helpers at full 96/192/384-channel reduction depths.
@@ -1559,30 +1560,33 @@ HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_decode
   --output=/path/to/new-vae-decoder-results
 ```
 
-The staged qualification driver runs base and active-LoRA latents at 2x6 and
-48x48. Primitive resize, output normalization and convolution use F64 oracles
-with 2e-5
-absolute/relative bounds. Entire residual chains use a fixed 2e-5 relative-L2
-bound. Clamping and both composed decoder commands must equal separately
-executed native stages bit-for-bit on both executions. The complete RGB result
-also has a fixed 2e-5 relative-L2 bound against the pinned CPU/F32 VAE on the
-same latent. The ordered-FMA decoder qualified all 168 repeated comparisons
-over 469,573,632 values. The matrix up1/up2/up3 path separately qualifies complete
-base and active-LoRA 48x48 latents and a native 128x128 latent against the
-independent CPU/F32 decoder, preserving the 2e-5 relative-L2 criterion. Each
-native command executes twice; a fresh process repeats the candidate against
-its first output bit-for-bit. All outputs are finite.
+The staged driver runs base and active-LoRA latents at 2x6 and 48x48. Its
+independent F64 primitive calculations round operands to BF16 exactly where
+the native up1/up2/up3 matrix leaves do; up0, channel expansion and RGB leaves
+retain F32 operands. Primitive comparisons retain 2e-5 absolute/relative bounds,
+and residual chains retain a 2e-5 relative-L2 bound against that matched
+arithmetic. Clamping and both composed decoder commands must equal separately
+executed native stages bit-for-bit. Nonfinite values always fail. The final
+CPU/F32 model comparison reports numerical and pixel differences instead of
+requiring the native model to reproduce F32 arithmetic.
 
-| Matrix up1/up2/up3 decoder result | Base 384x384 | Softwatercolor 384x384 | Base 1024x1024 |
+Three actual retained base/active-LoRA latents were decoded with ordinary BF16
+matrix operands and the original checkpoint, twice each. Relative-L2 and RGB8
+errors below compare against independent CPU/F32 decodes of those same latents;
+the 1024-square case is a full-size model output, not enlarged small data.
+All results were finite and the actual reference/native PNGs were inspected
+without visible degradation.
+
+| BF16-operand decoder result | Base 384x384 | Softwatercolor 384x384 | Base 1024x1024 |
 | --- | ---: | ---: | ---: |
-| F32 relative L2 versus CPU VAE | 1.51602e-6 | 2.96899e-6 | 3.84104e-6 |
-| Different 8-bit channel values | 22 / 442,368 | 40 / 442,368 | 311 / 3,145,728 |
-| Maximum 8-bit difference | 1 | 1 | 1 |
-| Pixel RMSE | 0.00705212 | 0.00950907 | 0.00994305 |
+| F32 relative L2 versus CPU VAE | 0.00209814 | 0.00431517 | 0.00264603 |
+| Maximum 8-bit difference | 7 | 10 | 13 |
+| Pixel RMSE, 8-bit codes | 0.25237 | 0.36303 | 0.29265 |
+| RGB PSNR | 60.09 dB | 56.93 dB | 58.80 dB |
 
-These pixel counts are observations, not an exact-image contract. Relative
-L2 is slightly lower than the ordered-FMA path in each case; maximum absolute
-error and quantized pixel counts are not uniformly lower.
+These distances are observations, not universal image-quality thresholds or an
+exact-pixel contract. They make the selected arithmetic's cost visible while
+the portable oracle checks its indexing and operations independently.
 
 The complete command has 30 unique kernels and 104 parameters occupying
 286,100,492 bytes. Transient workspace is 219,709,440 bytes (209.53 MiB) at

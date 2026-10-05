@@ -4,22 +4,17 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// F32 convolution with tile-local two-term FP16 operands and F32 accumulation.
+// F32 convolution storage with BF16 operands and F32 matrix accumulation.
+// Positive height/width/planes/upsample and channel counts divisible by 32.
+// Height/width describe physical input; output dimensions multiply by upsample.
+// Bounds precede nearest-input division, preserving expanded-domain padding.
+// Original NCHW/OI(T)HW globals remain F32; only the last temporal plane is read.
+// Operand conversion must remain finite. Bias and residual are separate F32 adds.
+// Output may alias residual, never input. Launch ceil(pixels/32) x (outputs/32)
+// workgroups of 128 threads. Four wave32s own one 32-channel/32-pixel output tile.
+// All lanes publish and retire 4736 bytes of LDS, including inactive pixels.
 template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
-// Positive height/width/planes/upsample and positive channel counts divisible by 32.
-// Height/width describe physical input. Output dimensions multiply by upsample;
-// tap bounds are checked in the output domain before nearest input division.
-// F32 NCHW inputs/outputs and original OI(T)HW weights remain in global storage;
-// fresh-frame convolution reads only the last temporal plane. Output may alias
-// residual, never input. Launch ceil(pixels/32) x (outputs/32), 128 threads/group.
-// The RDNA3 wave32 result mapping assigns channels to rows and pixels to columns.
-// All lanes participate in publication and retirement of 9,472 bytes of LDS.
-//
-// Each finite operand a is split as h=RN16(a), l=RN16((a-f32(h))*2048).
-// The high conversion must remain finite. HH+(HL+LH)/2048 reconstructs each
-// K32 partial in F32, omitting the low-low product; this is approximate F32
-// arithmetic, not ordered-FMA equivalence. Bias and residual round separately.
 template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
@@ -34,8 +29,6 @@ template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_ma
   %input_stage_bytes = index.constant 2176 : offset
   %weight_stage_bytes = index.constant 2560 : offset
   %zero_f32 = scalar.constant 0.0 : f32
-  %split_scale = scalar.constant 2048.0 : f32
-  %restore_scale = vector.constant 0.00048828125 : vector<8xf32>
   %zeros = vector.constant 0.0 : vector<8xf32>
   %initial = vector.fragment<init> %zeros shape [%matrix_tile, %matrix_tile] : vector<8xf32>
   %spatial_group = kernel.workgroup.id<x> : index
@@ -62,14 +55,10 @@ template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_ma
   %weight_view = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]x[%planes]x3x3xf32>
   %bias_view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xf32>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
-  %input_high_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
-  %input_low_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
-  %weight_high_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
-  %weight_low_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
-  %input_high_view = buffer.view %input_high_stage[%origin] : buffer -> view<32x34xf16>
-  %input_low_view = buffer.view %input_low_stage[%origin] : buffer -> view<32x34xf16>
-  %weight_high_view = buffer.view %weight_high_stage[%origin] : buffer -> view<32x40xf16>
-  %weight_low_view = buffer.view %weight_low_stage[%origin] : buffer -> view<32x40xf16>
+  %input_matrix_stage = buffer.alloca<workgroup> align(16) %input_stage_bytes : buffer
+  %weight_matrix_stage = buffer.alloca<workgroup> align(16) %weight_stage_bytes : buffer
+  %input_matrix_view = buffer.view %input_matrix_stage[%origin] : buffer -> view<32x34xbf16>
+  %weight_matrix_view = buffer.view %weight_matrix_stage[%origin] : buffer -> view<32x40xbf16>
 
   %sum = scf.for %block = [%zero to %tile_count step %one](%total = %initial : vector<8xf32>) -> (vector<8xf32>) pipeline(%one) {
     %reduction_origin = index.mul %block, %tile : index
@@ -106,13 +95,8 @@ template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_ma
       } else {
         scf.yield %zero_f32 : f32
       }
-      %input_high = scalar.fptrunc %input_value : f32 to f16
-      %input_high_f32 = scalar.extf %input_high : f16 to f32
-      %input_error = scalar.subf %input_value, %input_high_f32 : f32
-      %input_scaled_error = scalar.mulf %input_error, %split_scale : f32
-      %input_low = scalar.fptrunc %input_scaled_error : f32 to f16
-      view.store %input_high, %input_high_view[%input_local_pixel, %input_local_reduction] : f16, view<32x34xf16>
-      view.store %input_low, %input_low_view[%input_local_pixel, %input_local_reduction] : f16, view<32x34xf16>
+      %input_matrix = scalar.fptrunc %input_value : f32 to bf16
+      view.store %input_matrix, %input_matrix_view[%input_local_pixel, %input_local_reduction] : bf16, view<32x34xbf16>
 
       %weight_local_channel = index.div %element, %tile : index
       %weight_local_reduction = index.rem %element, %tile : index
@@ -123,41 +107,24 @@ template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_ma
       %weight_ky = index.div %weight_tap, %three : index
       %weight_kx = index.rem %weight_tap, %three : index
       %weight_value = view.load %weight_view[%weight_channel, %weight_input_channel, %plane, %weight_ky, %weight_kx] : view<[%outputs]x[%inputs]x[%planes]x3x3xf32> -> f32
-      %weight_high = scalar.fptrunc %weight_value : f32 to f16
-      %weight_high_f32 = scalar.extf %weight_high : f16 to f32
-      %weight_error = scalar.subf %weight_value, %weight_high_f32 : f32
-      %weight_scaled_error = scalar.mulf %weight_error, %split_scale : f32
-      %weight_low = scalar.fptrunc %weight_scaled_error : f32 to f16
-      view.store %weight_high, %weight_high_view[%weight_local_channel, %weight_local_reduction] : f16, view<32x40xf16>
-      view.store %weight_low, %weight_low_view[%weight_local_channel, %weight_local_reduction] : f16, view<32x40xf16>
+      %weight_matrix = scalar.fptrunc %weight_value : f32 to bf16
+      view.store %weight_matrix, %weight_matrix_view[%weight_local_channel, %weight_local_reduction] : bf16, view<32x40xbf16>
     }
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
 
     // C = W X: weights provide matrix rows, pixels provide columns. Lanes
     // separated by 16 read identical operand rows as required by RDNA3 WMMA.
-    %weight_high0 = vector.fragment.load<lhs> %weight_high_view[%wave_channel, %zero] shape [%matrix_tile, %matrix_tile] : view<32x40xf16> -> vector<16xf16>
-    %weight_low0 = vector.fragment.load<lhs> %weight_low_view[%wave_channel, %zero] shape [%matrix_tile, %matrix_tile] : view<32x40xf16> -> vector<16xf16>
-    %input_high_values0 = vector.load %input_high_view[%input_fragment_row, %zero] : view<32x34xf16> -> vector<16xf16>
-    %input_low_values0 = vector.load %input_low_view[%input_fragment_row, %zero] : view<32x34xf16> -> vector<16xf16>
-    %input_high0 = vector.fragment<rhs> %input_high_values0 shape [%matrix_tile, %matrix_tile] : vector<16xf16>
-    %input_low0 = vector.fragment<rhs> %input_low_values0 shape [%matrix_tile, %matrix_tile] : vector<16xf16>
-    %high0 = vector.mma %weight_high0, %input_high0, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
-    %cross00 = vector.mma %weight_high0, %input_low0, %initial : vector<16xf16>, vector<16xf16>, vector<8xf32>
-    %cross01 = vector.mma %weight_low0, %input_high0, %cross00 : vector<16xf16>, vector<16xf16>, vector<8xf32>
+    %weight_matrix0 = vector.fragment.load<lhs> %weight_matrix_view[%wave_channel, %zero] shape [%matrix_tile, %matrix_tile] : view<32x40xbf16> -> vector<16xbf16>
+    %input_matrix_values0 = vector.load %input_matrix_view[%input_fragment_row, %zero] : view<32x34xbf16> -> vector<16xbf16>
+    %input_matrix0 = vector.fragment<rhs> %input_matrix_values0 shape [%matrix_tile, %matrix_tile] : vector<16xbf16>
+    %accumulated0 = vector.mma %weight_matrix0, %input_matrix0, %total : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
 
-    %weight_high1 = vector.fragment.load<lhs> %weight_high_view[%wave_channel, %matrix_tile] shape [%matrix_tile, %matrix_tile] : view<32x40xf16> -> vector<16xf16>
-    %weight_low1 = vector.fragment.load<lhs> %weight_low_view[%wave_channel, %matrix_tile] shape [%matrix_tile, %matrix_tile] : view<32x40xf16> -> vector<16xf16>
-    %input_high_values1 = vector.load %input_high_view[%input_fragment_row, %matrix_tile] : view<32x34xf16> -> vector<16xf16>
-    %input_low_values1 = vector.load %input_low_view[%input_fragment_row, %matrix_tile] : view<32x34xf16> -> vector<16xf16>
-    %input_high1 = vector.fragment<rhs> %input_high_values1 shape [%matrix_tile, %matrix_tile] : vector<16xf16>
-    %input_low1 = vector.fragment<rhs> %input_low_values1 shape [%matrix_tile, %matrix_tile] : vector<16xf16>
-    %high1 = vector.mma %weight_high1, %input_high1, %high0 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-    %cross10 = vector.mma %weight_high1, %input_low1, %cross01 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-    %cross11 = vector.mma %weight_low1, %input_high1, %cross10 : vector<16xf16>, vector<16xf16>, vector<8xf32>
-    %partial = vector.fmaf %cross11, %restore_scale, %high1 : vector<8xf32>
-    %next = vector.addf %total, %partial : vector<8xf32>
+    %weight_matrix1 = vector.fragment.load<lhs> %weight_matrix_view[%wave_channel, %matrix_tile] shape [%matrix_tile, %matrix_tile] : view<32x40xbf16> -> vector<16xbf16>
+    %input_matrix_values1 = vector.load %input_matrix_view[%input_fragment_row, %matrix_tile] : view<32x34xbf16> -> vector<16xbf16>
+    %input_matrix1 = vector.fragment<rhs> %input_matrix_values1 shape [%matrix_tile, %matrix_tile] : vector<16xbf16>
+    %accumulated1 = vector.mma %weight_matrix1, %input_matrix1, %accumulated0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-    scf.yield %next : vector<8xf32>
+    scf.yield %accumulated1 : vector<8xf32>
   }
 
   // RDNA3 wave32 F32 result coordinate: row=2*component+lane/16,
