@@ -78,14 +78,23 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
           LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     loom_block_t* module_block = loom_module_block(module);
     IREE_ASSERT_EQ(module_block->op_count, 1);
+    return BuildFunctionFrame(module, loom_block_op(module_block, 0),
+                              structural_models, out_frame, schedule_strategy);
+  }
+
+  iree_status_t BuildFunctionFrame(
+      loom_module_t* module, loom_op_t* function,
+      loom_low_schedule_structural_model_list_t structural_models,
+      loom_low_emission_frame_t* out_frame,
+      loom_low_schedule_strategy_t schedule_strategy =
+          LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     loom_low_emission_frame_options_t options = {};
     options.descriptor_registry = &registry_.registry;
     options.schedule_structural_models = structural_models;
     options.schedule_strategy = schedule_strategy;
     bool accepted = false;
-    iree_status_t status =
-        loom_low_emission_frame_build(module, loom_block_op(module_block, 0),
-                                      &options, &arena_, out_frame, &accepted);
+    iree_status_t status = loom_low_emission_frame_build(
+        module, function, &options, &arena_, out_frame, &accepted);
     if (iree_status_is_ok(status)) {
       EXPECT_TRUE(accepted);
     }

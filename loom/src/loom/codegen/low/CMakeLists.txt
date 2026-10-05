@@ -984,6 +984,7 @@ loom_cc_test(
   NAME
     frame_test
   SRCS
+    "frame_state_test.cc"
     "frame_test.cc"
     "frame_test_fixture.h"
   DEPS

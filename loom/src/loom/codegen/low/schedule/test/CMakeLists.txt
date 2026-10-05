@@ -19,7 +19,6 @@ loom_check_test_suite(
     "schedule.loom-test"
     "schedule_locked.loom-test"
     "schedule_scopes.loom-test"
-    "state_updates.loom-test"
     "storage_lifetime.loom-test"
 )
 

@@ -918,6 +918,7 @@ loom_cc_library(
 loom_cc_test(
     name = "frame_test",
     srcs = [
+        "frame_state_test.cc",
         "frame_test.cc",
         "frame_test_fixture.h",
     ],
