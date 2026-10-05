@@ -1,0 +1,59 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link kernels/linear_tiled.loom and kernels/linear_temporal.loom with --library.
+// The 528x256x320 shape covers the shortest K recurrence, M128/N96 tails and
+// the partial final traversal group. Nonuniform BF16 operands compare against
+// the same ascending-K16 arithmetic in the full-K64 helper, not an integer
+// surrogate or the numerically distinct four-chain/K256 baseline.
+
+amdgpu.target<gfx11-generic> @temporal_check_wave32 {subgroup_size = 32}
+template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+
+kernel.def target(@temporal_check_wave32) @temporal_reference() {
+  %row_tiles = index.constant 9 : index
+  %output_tiles = index.constant 5 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.constant 528 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 320 : index
+  %group_size = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_full_k_bf16>(%rows, %inputs, %outputs, %group_size, %layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  kernel.return
+}
+
+kernel.def target(@temporal_check_wave32) @temporal_candidate() {
+  %row_tiles = index.constant 5 : index
+  %output_tiles = index.constant 4 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 128 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = index.constant 528 : index
+  %inputs = index.constant 256 : index
+  %outputs = index.constant 320 : index
+  %group_size = index.constant 3 : index
+  template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+check.case public @exact_temporal_tails {
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<528x256xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<320x256xbf16>
+  %expected = check.generate.fill value(23.0) : tensor<528x320xbf16>
+  %actual = check.generate.fill value(-17.0) : tensor<528x320xbf16>
+  kernel.launch @temporal_reference(%input, %weight, %expected) : (tensor<528x256xbf16>, tensor<320x256xbf16>, tensor<528x320xbf16>)
+  kernel.launch @temporal_candidate(%input, %weight, %actual) : (tensor<528x256xbf16>, tensor<320x256xbf16>, tensor<528x320xbf16>)
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<528x320xbf16>
+  check.return
+}

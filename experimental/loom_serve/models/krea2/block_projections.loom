@@ -10,6 +10,7 @@ amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_tiled_wide_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
 
 // Traversal selection belongs to the model's concrete contraction shapes.
@@ -152,22 +153,45 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
 
 kernel.def target(@block_projection_wave32) @block_linear_16384_6144() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %image_short_text = index.constant 4224 : index
+  %image_full_text = index.constant 4608 : index
+  %short_text = index.cmp eq, %rows, %image_short_text : index
+  %full_text = index.cmp eq, %rows, %image_full_text : index
+  %temporal = scalar.ori %short_text, %full_text : i1
+  %temporal_row_tile = index.constant 128 : index
+  %baseline_row_tile = index.constant 64 : index
+  %tile = scf.select %temporal, %temporal_row_tile, %baseline_row_tile : index
+  %one = index.constant 1 : index
+  %rounding = index.sub %tile, %one : index
   %padded_rows = index.add %rows, %rounding : index
   %row_tiles = index.div %padded_rows, %tile : index
-  %output_tiles = index.constant 96 : index
-  %one = index.constant 1 : index
-  %threads = index.constant 256 : index
+  %temporal_output_tiles = index.constant 64 : index
+  %baseline_output_tiles = index.constant 96 : index
+  %output_tiles = scf.select %temporal, %temporal_output_tiles, %baseline_output_tiles : index
+  %temporal_threads = index.constant 128 : index
+  %baseline_threads = index.constant 256 : index
+  %threads = scf.select %temporal, %temporal_threads, %baseline_threads : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %inputs = index.constant 16384 : index
   %outputs = index.constant 6144 : index
-  %minimum_grouped_rows = index.constant 1088 : index
-  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
-  %output_layout = encoding.layout.dense : encoding<layout>
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  %image_short_text = index.constant 4224 : index
+  %image_full_text = index.constant 4608 : index
+  %short_text = index.cmp eq, %rows, %image_short_text : index
+  %full_text = index.cmp eq, %rows, %image_full_text : index
+  %temporal = scalar.ori %short_text, %full_text : i1
+  scf.if %temporal {
+    %group_size = index.constant 4 : index
+    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    %minimum_grouped_rows = index.constant 1088 : index
+    %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+    %output_layout = encoding.layout.dense : encoding<layout>
+    template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+    scf.yield
+  }
   kernel.return
 }
 

@@ -1,0 +1,447 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Temporal-bank BF16 X W^T. No model configuration lives here.
+// M128 x N96, K64, four wave32s. Each wave owns two M16 tiles 64 rows apart
+// and six N16 tiles: twelve full-K result fragments, 96 F32 values per lane.
+// The caller provides positive M/N multiples of 16 and K >= 256, multiple 256.
+// X, [N,K] weights and dense [M,N] output do not overlap.
+//
+// Two temporal banks each contain W[96,72] followed by X[128,72] BF16.
+// Bank stride 32768 leaves a 512-byte gap; the complete allocation is 65024.
+// All workitems reach one transition barrier per consumed K64, including tails.
+// The fourteen explicit queued packets are not wrapped in scf.for pipeline.
+
+template.decl @projection.temporal_coordinates(%rows: index, %outputs: index, %group_size: index) -> (index, index)
+template.def<@projection.temporal_coordinates> device @temporal_coordinates(%rows: index, %outputs: index, %group_size: index) -> (index, index) {
+  %zero = index.constant 0 : index
+  %row_tile = index.constant 128 : index
+  %output_tile = index.constant 96 : index
+  %row_rounding = index.constant 127 : index
+  %output_rounding = index.constant 95 : index
+  %physical_row = kernel.workgroup.id<x> : index
+  %physical_output = kernel.workgroup.id<y> : index
+  %padded_rows = index.add %rows, %row_rounding : index
+  %padded_outputs = index.add %outputs, %output_rounding : index
+  %row_tiles = index.div %padded_rows, %row_tile : index
+  %output_tiles = index.div %padded_outputs, %output_tile : index
+  %whole_rows = index.cmp uge, %group_size, %row_tiles : index
+  %row, %column = scf.if %whole_rows -> (index, index) {
+    scf.yield %physical_row, %physical_output : index, index
+  } else {
+    %flat = index.madd %physical_output, %row_tiles, %physical_row : index
+    %group_width = index.mul %group_size, %output_tiles : index
+    %group = index.div %flat, %group_width : index
+    %group_row = index.mul %group, %group_size : index
+    %within_group = index.rem %flat, %group_width : index
+    %tail_rows = index.rem %row_tiles, %group_size : index
+    %has_tail = index.cmp ne, %tail_rows, %zero : index
+    %within_row, %output_unbounded = scf.if %has_tail -> (index, index) {
+      %full_rows = index.sub %row_tiles, %tail_rows : index
+      %is_tail = index.cmp uge, %group_row, %full_rows : index
+      %within, %output = scf.if %is_tail -> (index, index) {
+        %within = index.rem %within_group, %tail_rows : index
+        %output = index.div %within_group, %tail_rows : index
+        scf.yield %within, %output : index, index
+      } else {
+        %within = index.rem %within_group, %group_size : index
+        %output = index.div %within_group, %group_size : index
+        scf.yield %within, %output : index, index
+      }
+      scf.yield %within, %output : index, index
+    } else {
+      %within = index.rem %within_group, %group_size : index
+      %output = index.div %within_group, %group_size : index
+      scf.yield %within, %output : index, index
+    }
+    %row_unbounded = index.add %group_row, %within_row : index
+    %bounded_row = index.assume %row_unbounded [ge(%row_unbounded, 0), lt(%row_unbounded, %row_tiles)] : index
+    %bounded_output = index.assume %output_unbounded [ge(%output_unbounded, 0), lt(%output_unbounded, %output_tiles)] : index
+    scf.yield %bounded_row, %bounded_output : index, index
+  }
+  template.return %row, %column : index, index
+}
+
+// Row tails are guarded before any global access. The caller only requests
+// valid K packets; the penultimate tile publishes without acquiring a refill.
+template.decl @projection.temporal_packet(%rows: index, %inputs: index, %row: index, %column: index, %source: buffer) -> (vector<8xbf16>)
+template.def<@projection.temporal_packet> device @temporal_packet(%rows: index, %inputs: index, %row: index, %column: index, %source: buffer) -> (vector<8xbf16>) {
+  %origin = index.constant 0 : offset
+  %row_valid = index.cmp ult, %row, %rows : index
+  %values = scf.if %row_valid -> (vector<8xbf16>) {
+    %view = buffer.view %source[%origin] : buffer -> view<[%rows]x[%inputs]xbf16>
+    %loaded = vector.load %view[%row, %column] : view<[%rows]x[%inputs]xbf16> -> vector<8xbf16>
+    scf.yield %loaded : vector<8xbf16>
+  } else {
+    %padding = vector.constant 0.0 : vector<8xbf16>
+    scf.yield %padding : vector<8xbf16>
+  }
+  template.return %values : vector<8xbf16>
+}
+
+// Publish the old packet to the opposite temporal bank before acquiring its
+// replacement. The old SSA value has no consumer after this store.
+template.decl @projection.temporal_refill(%rows: index, %inputs: index, %row_origin: index, %stage_rows: index, %stage_row: index, %stage_column: index, %next_column: index, %source: buffer, %stage: buffer, %bank: offset, %operand_offset: offset, %queued: vector<8xbf16>) -> (vector<8xbf16>)
+template.def<@projection.temporal_refill> device @temporal_refill(%rows: index, %inputs: index, %row_origin: index, %stage_rows: index, %stage_row: index, %stage_column: index, %next_column: index, %source: buffer, %stage: buffer, %bank: offset, %operand_offset: offset, %queued: vector<8xbf16>) -> (vector<8xbf16>) {
+  %offset = index.add %bank, %operand_offset : offset
+  %view = buffer.view %stage[%offset] : buffer -> view<[%stage_rows]x72xbf16>
+  vector.store %queued, %view[%stage_row, %stage_column] : vector<8xbf16>, view<[%stage_rows]x72xbf16>
+  %row = index.add %row_origin, %stage_row : index
+  %column = index.add %next_column, %stage_column : index
+  %replacement = template.apply<@projection.temporal_packet>(%rows, %inputs, %row, %column, %source) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  template.return %replacement : vector<8xbf16>
+}
+
+// Current operands are acquired only after guarded packet publication/refill.
+// Two RHS fragments are acquired before four row updates; the next pair
+// cannot extend their lifetimes across this compile-time scheduling boundary.
+template.decl @projection.temporal_mma(%stage: buffer, %bank: offset, %wave_row: index, %column: index, %acc00: vector<8xf32>, %acc01: vector<8xf32>, %acc02: vector<8xf32>, %acc03: vector<8xf32>, %acc04: vector<8xf32>, %acc05: vector<8xf32>, %acc10: vector<8xf32>, %acc11: vector<8xf32>, %acc12: vector<8xf32>, %acc13: vector<8xf32>, %acc14: vector<8xf32>, %acc15: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+template.def<@projection.temporal_mma> device @temporal_mma(%stage: buffer, %bank: offset, %wave_row: index, %column: index, %acc00: vector<8xf32>, %acc01: vector<8xf32>, %acc02: vector<8xf32>, %acc03: vector<8xf32>, %acc04: vector<8xf32>, %acc05: vector<8xf32>, %acc10: vector<8xf32>, %acc11: vector<8xf32>, %acc12: vector<8xf32>, %acc13: vector<8xf32>, %acc14: vector<8xf32>, %acc15: vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
+  // A compiler ordering boundary, not a runtime wait or workgroup barrier.
+  scf.schedule.fence
+  %tile = index.constant 16 : index
+  %sixty_four = index.constant 64 : index
+  %input_offset = index.constant 13824 : offset
+  %input_bank = index.add %bank, %input_offset : offset
+  %input_view = buffer.view %stage[%input_bank] : buffer -> view<128x72xbf16>
+  %weight_view = buffer.view %stage[%bank] : buffer -> view<96x72xbf16>
+  %second_row = index.add %wave_row, %sixty_four : index
+  %lhs0 = vector.fragment.load<lhs> %input_view[%wave_row, %column] shape [%tile, %tile] : view<128x72xbf16> -> vector<16xbf16>
+  %lhs1 = vector.fragment.load<lhs> %input_view[%second_row, %column] shape [%tile, %tile] : view<128x72xbf16> -> vector<16xbf16>
+  %lane = kernel.subgroup.lane.id : index
+  %lane_row = index.rem %lane, %tile : index
+  %offset0 = index.constant 0 : index
+  %row0 = index.add %lane_row, %offset0 : index
+  %weight0 = vector.load %weight_view[%row0, %column] : view<96x72xbf16> -> vector<16xbf16>
+  %rhs0 = vector.fragment<rhs> %weight0 shape [%tile, %tile] : vector<16xbf16>
+  %offset1 = index.constant 16 : index
+  %row1 = index.add %lane_row, %offset1 : index
+  %weight1 = vector.load %weight_view[%row1, %column] : view<96x72xbf16> -> vector<16xbf16>
+  %rhs1 = vector.fragment<rhs> %weight1 shape [%tile, %tile] : vector<16xbf16>
+  %result00 = vector.mma %lhs0, %rhs0, %acc00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result10 = vector.mma %lhs1, %rhs0, %acc10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result01 = vector.mma %lhs0, %rhs1, %acc01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result11 = vector.mma %lhs1, %rhs1, %acc11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  scf.schedule.fence
+  %offset2 = index.constant 32 : index
+  %row2 = index.add %lane_row, %offset2 : index
+  %weight2 = vector.load %weight_view[%row2, %column] : view<96x72xbf16> -> vector<16xbf16>
+  %rhs2 = vector.fragment<rhs> %weight2 shape [%tile, %tile] : vector<16xbf16>
+  %offset3 = index.constant 48 : index
+  %row3 = index.add %lane_row, %offset3 : index
+  %weight3 = vector.load %weight_view[%row3, %column] : view<96x72xbf16> -> vector<16xbf16>
+  %rhs3 = vector.fragment<rhs> %weight3 shape [%tile, %tile] : vector<16xbf16>
+  %result02 = vector.mma %lhs0, %rhs2, %acc02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result12 = vector.mma %lhs1, %rhs2, %acc12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result03 = vector.mma %lhs0, %rhs3, %acc03 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result13 = vector.mma %lhs1, %rhs3, %acc13 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  scf.schedule.fence
+  %offset4 = index.constant 64 : index
+  %row4 = index.add %lane_row, %offset4 : index
+  %weight4 = vector.load %weight_view[%row4, %column] : view<96x72xbf16> -> vector<16xbf16>
+  %rhs4 = vector.fragment<rhs> %weight4 shape [%tile, %tile] : vector<16xbf16>
+  %offset5 = index.constant 80 : index
+  %row5 = index.add %lane_row, %offset5 : index
+  %weight5 = vector.load %weight_view[%row5, %column] : view<96x72xbf16> -> vector<16xbf16>
+  %rhs5 = vector.fragment<rhs> %weight5 shape [%tile, %tile] : vector<16xbf16>
+  %result04 = vector.mma %lhs0, %rhs4, %acc04 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result14 = vector.mma %lhs1, %rhs4, %acc14 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result05 = vector.mma %lhs0, %rhs5, %acc05 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  %result15 = vector.mma %lhs1, %rhs5, %acc15 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+  scf.schedule.fence
+  template.return %result00, %result01, %result02, %result03, %result04, %result05, %result10, %result11, %result12, %result13, %result14, %result15 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+}
+
+// M/N are multiples of sixteen: each result fragment is wholly valid or absent.
+template.decl @projection.temporal_store(%rows: index, %outputs: index, %row: index, %column: index, %output: buffer, %result: vector<8xf32>)
+template.def<@projection.temporal_store> device @temporal_store(%rows: index, %outputs: index, %row: index, %column: index, %output: buffer, %result: vector<8xf32>) {
+  %origin = index.constant 0 : offset
+  %tile = index.constant 16 : index
+  %last_row = index.sub %rows, %tile : index
+  %last_column = index.sub %outputs, %tile : index
+  %row_valid = index.cmp ule, %row, %last_row : index
+  scf.if %row_valid {
+    %column_valid = index.cmp ule, %column, %last_column : index
+    scf.if %column_valid {
+      %view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16>
+      vector.fragment.store<result> %result, %view[%row, %column] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16>
+      scf.yield
+    }
+    scf.yield
+  }
+  template.return
+}
+
+// BF16 X W^T with dense row-major input, [output,input] weights and output.
+// Launch ceil(rows/128) x ceil(outputs/96) workgroups of 128 threads, wave32.
+// Rows and outputs are positive multiples of 16, inputs of 256; the positive
+// group size selects the number of row tiles in a traversal panel. All are
+// specialization facts. Input, weight and output storage do not overlap.
+// Four waves share two temporal LDS banks and accumulate all K terms in F32.
+// Missing rows are zero-filled, and only complete valid 16-row fragments store.
+template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.def<@projection.linear_temporal_bf16> device @linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %six = index.constant 6 : index
+  %eight = index.constant 8 : index
+  %tile = index.constant 16 : index
+  %sixty_four = index.constant 64 : index
+  %ninety_six = index.constant 96 : index
+  %row_tile = index.constant 128 : index
+  %bank_stride = index.constant 32768 : offset
+  %input_offset = index.constant 13824 : offset
+  %stage_bytes = index.constant 65024 : offset
+  %row_group, %output_group = template.apply<@projection.temporal_coordinates>(%rows, %outputs, %group_size) : (index, index, index) -> (index, index)
+  %row_origin = index.mul %row_group, %row_tile : index
+  %output_origin = index.mul %output_group, %ninety_six : index
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %wave_row = index.mul %subgroup, %tile : index
+  %packet_row_base = index.div %workitem, %eight : index
+  %packet_column = index.rem %workitem, %eight : index
+  %stage_column = index.mul %packet_column, %eight : index
+  %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
+  %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %first_weights = buffer.view %stage[%origin] : buffer -> view<96x72xbf16>
+  %first_inputs = buffer.view %stage[%input_offset] : buffer -> view<128x72xbf16>
+
+  // Publish K64 tile zero, then keep tile one in the explicit packet record.
+  scf.for %round = [%zero to %six step %one] unroll schedule(linear) {
+    %stage_row = index.madd %round, %tile, %packet_row_base : index
+    %row = index.add %output_origin, %stage_row : index
+    %values = template.apply<@projection.temporal_packet>(%outputs, %inputs, %row, %stage_column, %weight_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+    vector.store %values, %first_weights[%stage_row, %stage_column] : vector<8xbf16>, view<96x72xbf16>
+  }
+  scf.for %round = [%zero to %eight step %one] unroll schedule(linear) {
+    %stage_row = index.madd %round, %tile, %packet_row_base : index
+    %row = index.add %row_origin, %stage_row : index
+    %values = template.apply<@projection.temporal_packet>(%rows, %inputs, %row, %stage_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+    vector.store %values, %first_inputs[%stage_row, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  }
+  %queued_column = index.add %sixty_four, %stage_column : index
+  %packet_offset0 = index.constant 0 : index
+  %stage_row0 = index.add %packet_row_base, %packet_offset0 : index
+  %packet_offset1 = index.constant 16 : index
+  %stage_row1 = index.add %packet_row_base, %packet_offset1 : index
+  %packet_offset2 = index.constant 32 : index
+  %stage_row2 = index.add %packet_row_base, %packet_offset2 : index
+  %packet_offset3 = index.constant 48 : index
+  %stage_row3 = index.add %packet_row_base, %packet_offset3 : index
+  %packet_offset4 = index.constant 64 : index
+  %stage_row4 = index.add %packet_row_base, %packet_offset4 : index
+  %packet_offset5 = index.constant 80 : index
+  %stage_row5 = index.add %packet_row_base, %packet_offset5 : index
+  %packet_offset6 = index.constant 96 : index
+  %stage_row6 = index.add %packet_row_base, %packet_offset6 : index
+  %packet_offset7 = index.constant 112 : index
+  %stage_row7 = index.add %packet_row_base, %packet_offset7 : index
+  %global_weight0_row = index.add %output_origin, %stage_row0 : index
+  %initial_weight0 = template.apply<@projection.temporal_packet>(%outputs, %inputs, %global_weight0_row, %queued_column, %weight_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_weight1_row = index.add %output_origin, %stage_row1 : index
+  %initial_weight1 = template.apply<@projection.temporal_packet>(%outputs, %inputs, %global_weight1_row, %queued_column, %weight_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_weight2_row = index.add %output_origin, %stage_row2 : index
+  %initial_weight2 = template.apply<@projection.temporal_packet>(%outputs, %inputs, %global_weight2_row, %queued_column, %weight_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_weight3_row = index.add %output_origin, %stage_row3 : index
+  %initial_weight3 = template.apply<@projection.temporal_packet>(%outputs, %inputs, %global_weight3_row, %queued_column, %weight_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_weight4_row = index.add %output_origin, %stage_row4 : index
+  %initial_weight4 = template.apply<@projection.temporal_packet>(%outputs, %inputs, %global_weight4_row, %queued_column, %weight_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_weight5_row = index.add %output_origin, %stage_row5 : index
+  %initial_weight5 = template.apply<@projection.temporal_packet>(%outputs, %inputs, %global_weight5_row, %queued_column, %weight_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input0_row = index.add %row_origin, %stage_row0 : index
+  %initial_input0 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input0_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input1_row = index.add %row_origin, %stage_row1 : index
+  %initial_input1 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input1_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input2_row = index.add %row_origin, %stage_row2 : index
+  %initial_input2 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input2_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input3_row = index.add %row_origin, %stage_row3 : index
+  %initial_input3 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input3_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input4_row = index.add %row_origin, %stage_row4 : index
+  %initial_input4 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input4_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input5_row = index.add %row_origin, %stage_row5 : index
+  %initial_input5 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input5_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input6_row = index.add %row_origin, %stage_row6 : index
+  %initial_input6 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input6_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %global_input7_row = index.add %row_origin, %stage_row7 : index
+  %initial_input7 = template.apply<@projection.temporal_packet>(%rows, %inputs, %global_input7_row, %queued_column, %input_noalias) : (index, index, index, index, buffer) -> (vector<8xbf16>)
+  %zeros = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
+  %last_column = index.sub %inputs, %sixty_four : index
+  %steady_limit = index.sub %inputs, %row_tile : index
+
+  // Each steady iteration publishes the next tile and acquires a valid tile
+  // after it. The last queued tile is published separately without a refill.
+  %steady00, %steady01, %steady02, %steady03, %steady04, %steady05, %steady10, %steady11, %steady12, %steady13, %steady14, %steady15, %final_weight0, %final_weight1, %final_weight2, %final_weight3, %final_weight4, %final_weight5, %final_input0, %final_input1, %final_input2, %final_input3, %final_input4, %final_input5, %final_input6, %final_input7 = scf.for %column = [%zero to %steady_limit step %sixty_four](%running00 = %initial : vector<8xf32>, %running01 = %initial : vector<8xf32>, %running02 = %initial : vector<8xf32>, %running03 = %initial : vector<8xf32>, %running04 = %initial : vector<8xf32>, %running05 = %initial : vector<8xf32>, %running10 = %initial : vector<8xf32>, %running11 = %initial : vector<8xf32>, %running12 = %initial : vector<8xf32>, %running13 = %initial : vector<8xf32>, %running14 = %initial : vector<8xf32>, %running15 = %initial : vector<8xf32>, %queued_weight0 = %initial_weight0 : vector<8xbf16>, %queued_weight1 = %initial_weight1 : vector<8xbf16>, %queued_weight2 = %initial_weight2 : vector<8xbf16>, %queued_weight3 = %initial_weight3 : vector<8xbf16>, %queued_weight4 = %initial_weight4 : vector<8xbf16>, %queued_weight5 = %initial_weight5 : vector<8xbf16>, %queued_input0 = %initial_input0 : vector<8xbf16>, %queued_input1 = %initial_input1 : vector<8xbf16>, %queued_input2 = %initial_input2 : vector<8xbf16>, %queued_input3 = %initial_input3 : vector<8xbf16>, %queued_input4 = %initial_input4 : vector<8xbf16>, %queued_input5 = %initial_input5 : vector<8xbf16>, %queued_input6 = %initial_input6 : vector<8xbf16>, %queued_input7 = %initial_input7 : vector<8xbf16>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>) {
+    %ordinal = index.div %column, %sixty_four : index
+    %parity = index.rem %ordinal, %two : index
+    %read_bank = index.scale %parity, %bank_stride : index, offset -> offset
+    %write_bank = index.sub %bank_stride, %read_bank : offset
+    %refill_column = index.add %column, %row_tile : index
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %updated00, %updated01, %updated02, %updated03, %updated04, %updated05, %updated10, %updated11, %updated12, %updated13, %updated14, %updated15, %updated_weight0, %updated_weight1, %updated_weight2, %updated_weight3, %updated_weight4, %updated_weight5, %updated_input0, %updated_input1, %updated_input2, %updated_input3, %updated_input4, %updated_input5, %updated_input6, %updated_input7 = scf.for %depth = [%zero to %four step %one](%acc00 = %running00 : vector<8xf32>, %acc01 = %running01 : vector<8xf32>, %acc02 = %running02 : vector<8xf32>, %acc03 = %running03 : vector<8xf32>, %acc04 = %running04 : vector<8xf32>, %acc05 = %running05 : vector<8xf32>, %acc10 = %running10 : vector<8xf32>, %acc11 = %running11 : vector<8xf32>, %acc12 = %running12 : vector<8xf32>, %acc13 = %running13 : vector<8xf32>, %acc14 = %running14 : vector<8xf32>, %acc15 = %running15 : vector<8xf32>, %packet_weight0 = %queued_weight0 : vector<8xbf16>, %packet_weight1 = %queued_weight1 : vector<8xbf16>, %packet_weight2 = %queued_weight2 : vector<8xbf16>, %packet_weight3 = %queued_weight3 : vector<8xbf16>, %packet_weight4 = %queued_weight4 : vector<8xbf16>, %packet_weight5 = %queued_weight5 : vector<8xbf16>, %packet_input0 = %queued_input0 : vector<8xbf16>, %packet_input1 = %queued_input1 : vector<8xbf16>, %packet_input2 = %queued_input2 : vector<8xbf16>, %packet_input3 = %queued_input3 : vector<8xbf16>, %packet_input4 = %queued_input4 : vector<8xbf16>, %packet_input5 = %queued_input5 : vector<8xbf16>, %packet_input6 = %queued_input6 : vector<8xbf16>, %packet_input7 = %queued_input7 : vector<8xbf16>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>) unroll schedule(linear) {
+      %fragment_column = index.mul %depth, %tile : index
+      %phase0 = index.cmp eq, %depth, %zero : index
+      %phase1 = index.cmp eq, %depth, %one : index
+      %phase2 = index.cmp eq, %depth, %two : index
+      %phase3 = index.cmp eq, %depth, %three : index
+      // Full linear unroll specializes these four phases. Packet publication
+      // follows a 1/1/1/11 split; each old value dies before its replacement.
+      %next_weight0 = scf.if %phase0 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%outputs, %inputs, %output_origin, %ninety_six, %stage_row0, %stage_column, %refill_column, %weight_noalias, %stage, %write_bank, %origin, %packet_weight0) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_weight0 : vector<8xbf16>
+      }
+      %next_weight1 = scf.if %phase1 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%outputs, %inputs, %output_origin, %ninety_six, %stage_row1, %stage_column, %refill_column, %weight_noalias, %stage, %write_bank, %origin, %packet_weight1) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_weight1 : vector<8xbf16>
+      }
+      %next_weight2 = scf.if %phase2 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%outputs, %inputs, %output_origin, %ninety_six, %stage_row2, %stage_column, %refill_column, %weight_noalias, %stage, %write_bank, %origin, %packet_weight2) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_weight2 : vector<8xbf16>
+      }
+      %next_weight3 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%outputs, %inputs, %output_origin, %ninety_six, %stage_row3, %stage_column, %refill_column, %weight_noalias, %stage, %write_bank, %origin, %packet_weight3) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_weight3 : vector<8xbf16>
+      }
+      %next_weight4 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%outputs, %inputs, %output_origin, %ninety_six, %stage_row4, %stage_column, %refill_column, %weight_noalias, %stage, %write_bank, %origin, %packet_weight4) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_weight4 : vector<8xbf16>
+      }
+      %next_weight5 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%outputs, %inputs, %output_origin, %ninety_six, %stage_row5, %stage_column, %refill_column, %weight_noalias, %stage, %write_bank, %origin, %packet_weight5) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_weight5 : vector<8xbf16>
+      }
+      %next_input0 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row0, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input0) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input0 : vector<8xbf16>
+      }
+      %next_input1 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row1, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input1) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input1 : vector<8xbf16>
+      }
+      %next_input2 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row2, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input2) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input2 : vector<8xbf16>
+      }
+      %next_input3 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row3, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input3) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input3 : vector<8xbf16>
+      }
+      %next_input4 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row4, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input4) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input4 : vector<8xbf16>
+      }
+      %next_input5 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row5, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input5) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input5 : vector<8xbf16>
+      }
+      %next_input6 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row6, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input6) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input6 : vector<8xbf16>
+      }
+      %next_input7 = scf.if %phase3 -> (vector<8xbf16>) {
+        %replacement = template.apply<@projection.temporal_refill>(%rows, %inputs, %row_origin, %row_tile, %stage_row7, %stage_column, %refill_column, %input_noalias, %stage, %write_bank, %input_offset, %packet_input7) : (index, index, index, index, index, index, index, buffer, buffer, offset, offset, vector<8xbf16>) -> (vector<8xbf16>)
+        scf.yield %replacement : vector<8xbf16>
+      } else {
+        scf.yield %packet_input7 : vector<8xbf16>
+      }
+      %next00, %next01, %next02, %next03, %next04, %next05, %next10, %next11, %next12, %next13, %next14, %next15 = template.apply<@projection.temporal_mma>(%stage, %read_bank, %wave_row, %fragment_column, %acc00, %acc01, %acc02, %acc03, %acc04, %acc05, %acc10, %acc11, %acc12, %acc13, %acc14, %acc15) : (buffer, offset, index, index, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+      scf.yield %next00, %next01, %next02, %next03, %next04, %next05, %next10, %next11, %next12, %next13, %next14, %next15, %next_weight0, %next_weight1, %next_weight2, %next_weight3, %next_weight4, %next_weight5, %next_input0, %next_input1, %next_input2, %next_input3, %next_input4, %next_input5, %next_input6, %next_input7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>
+    }
+    scf.yield %updated00, %updated01, %updated02, %updated03, %updated04, %updated05, %updated10, %updated11, %updated12, %updated13, %updated14, %updated15, %updated_weight0, %updated_weight1, %updated_weight2, %updated_weight3, %updated_weight4, %updated_weight5, %updated_input0, %updated_input1, %updated_input2, %updated_input3, %updated_input4, %updated_input5, %updated_input6, %updated_input7 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>, vector<8xbf16>
+  }
+
+  // Publish the final queued tile while consuming the penultimate tile.
+  // No further global packet is acquired or zero-merged on this transition.
+  %penultimate_ordinal = index.div %steady_limit, %sixty_four : index
+  %penultimate_parity = index.rem %penultimate_ordinal, %two : index
+  %penultimate_bank = index.scale %penultimate_parity, %bank_stride : index, offset -> offset
+  %last_ordinal = index.div %last_column, %sixty_four : index
+  %last_parity = index.rem %last_ordinal, %two : index
+  %last_bank = index.scale %last_parity, %bank_stride : index, offset -> offset
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %last_weights = buffer.view %stage[%last_bank] : buffer -> view<96x72xbf16>
+  %last_input_bank = index.add %last_bank, %input_offset : offset
+  %last_inputs = buffer.view %stage[%last_input_bank] : buffer -> view<128x72xbf16>
+  vector.store %final_weight0, %last_weights[%stage_row0, %stage_column] : vector<8xbf16>, view<96x72xbf16>
+  vector.store %final_weight1, %last_weights[%stage_row1, %stage_column] : vector<8xbf16>, view<96x72xbf16>
+  vector.store %final_weight2, %last_weights[%stage_row2, %stage_column] : vector<8xbf16>, view<96x72xbf16>
+  vector.store %final_weight3, %last_weights[%stage_row3, %stage_column] : vector<8xbf16>, view<96x72xbf16>
+  vector.store %final_weight4, %last_weights[%stage_row4, %stage_column] : vector<8xbf16>, view<96x72xbf16>
+  vector.store %final_weight5, %last_weights[%stage_row5, %stage_column] : vector<8xbf16>, view<96x72xbf16>
+  vector.store %final_input0, %last_inputs[%stage_row0, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  vector.store %final_input1, %last_inputs[%stage_row1, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  vector.store %final_input2, %last_inputs[%stage_row2, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  vector.store %final_input3, %last_inputs[%stage_row3, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  vector.store %final_input4, %last_inputs[%stage_row4, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  vector.store %final_input5, %last_inputs[%stage_row5, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  vector.store %final_input6, %last_inputs[%stage_row6, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  vector.store %final_input7, %last_inputs[%stage_row7, %stage_column] : vector<8xbf16>, view<128x72xbf16>
+  %penultimate00, %penultimate01, %penultimate02, %penultimate03, %penultimate04, %penultimate05, %penultimate10, %penultimate11, %penultimate12, %penultimate13, %penultimate14, %penultimate15 = scf.for %depth = [%zero to %four step %one](%acc00 = %steady00 : vector<8xf32>, %acc01 = %steady01 : vector<8xf32>, %acc02 = %steady02 : vector<8xf32>, %acc03 = %steady03 : vector<8xf32>, %acc04 = %steady04 : vector<8xf32>, %acc05 = %steady05 : vector<8xf32>, %acc10 = %steady10 : vector<8xf32>, %acc11 = %steady11 : vector<8xf32>, %acc12 = %steady12 : vector<8xf32>, %acc13 = %steady13 : vector<8xf32>, %acc14 = %steady14 : vector<8xf32>, %acc15 = %steady15 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(linear) {
+    %fragment_column = index.mul %depth, %tile : index
+    %next00, %next01, %next02, %next03, %next04, %next05, %next10, %next11, %next12, %next13, %next14, %next15 = template.apply<@projection.temporal_mma>(%stage, %penultimate_bank, %wave_row, %fragment_column, %acc00, %acc01, %acc02, %acc03, %acc04, %acc05, %acc10, %acc11, %acc12, %acc13, %acc14, %acc15) : (buffer, offset, index, index, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+    scf.yield %next00, %next01, %next02, %next03, %next04, %next05, %next10, %next11, %next12, %next13, %next14, %next15 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+
+  // The transition retires the other bank and publishes the final tile.
+  // There is no queued acquisition, bank write or barrier within this drain.
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  %result00, %result01, %result02, %result03, %result04, %result05, %result10, %result11, %result12, %result13, %result14, %result15 = scf.for %depth = [%zero to %four step %one](%acc00 = %penultimate00 : vector<8xf32>, %acc01 = %penultimate01 : vector<8xf32>, %acc02 = %penultimate02 : vector<8xf32>, %acc03 = %penultimate03 : vector<8xf32>, %acc04 = %penultimate04 : vector<8xf32>, %acc05 = %penultimate05 : vector<8xf32>, %acc10 = %penultimate10 : vector<8xf32>, %acc11 = %penultimate11 : vector<8xf32>, %acc12 = %penultimate12 : vector<8xf32>, %acc13 = %penultimate13 : vector<8xf32>, %acc14 = %penultimate14 : vector<8xf32>, %acc15 = %penultimate15 : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) unroll schedule(linear) {
+    %fragment_column = index.mul %depth, %tile : index
+    %next00, %next01, %next02, %next03, %next04, %next05, %next10, %next11, %next12, %next13, %next14, %next15 = template.apply<@projection.temporal_mma>(%stage, %last_bank, %wave_row, %fragment_column, %acc00, %acc01, %acc02, %acc03, %acc04, %acc05, %acc10, %acc11, %acc12, %acc13, %acc14, %acc15) : (buffer, offset, index, index, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>)
+    scf.yield %next00, %next01, %next02, %next03, %next04, %next05, %next10, %next11, %next12, %next13, %next14, %next15 : vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>
+  }
+  %result_row0 = index.add %row_origin, %wave_row : index
+  %result_row1 = index.add %result_row0, %sixty_four : index
+  %result_column0 = index.add %output_origin, %packet_offset0 : index
+  %result_column1 = index.add %output_origin, %packet_offset1 : index
+  %result_column2 = index.add %output_origin, %packet_offset2 : index
+  %result_column3 = index.add %output_origin, %packet_offset3 : index
+  %result_column4 = index.add %output_origin, %packet_offset4 : index
+  %result_column5 = index.add %output_origin, %packet_offset5 : index
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row0, %result_column0, %output, %result00) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row0, %result_column1, %output, %result01) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row0, %result_column2, %output, %result02) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row0, %result_column3, %output, %result03) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row0, %result_column4, %output, %result04) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row0, %result_column5, %output, %result05) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column0, %output, %result10) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column1, %output, %result11) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column2, %output, %result12) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column3, %output, %result13) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column4, %output, %result14) : (index, index, index, index, buffer, vector<8xf32>)
+  template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column5, %output, %result15) : (index, index, index, index, buffer, vector<8xf32>)
+  template.return
+}

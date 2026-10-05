@@ -577,7 +577,18 @@ the FFN up/gate strategy at 4,608 rows; other square/up shapes retain the
 chunked baseline. These are model-selected strategies, not constraints on
 the configuration-free motifs.
 
-The model wrappers select eight-row-tile groups at 2,048 rows for FFN up,
+At 4,224 and 4,608 rows, FFN down selects
+[`linear_temporal_bf16`](kernels/linear_temporal.loom). Four wave32s own a
+128x96 output tile with twelve full-K result fragments per wave. Two temporal
+LDS banks occupy 65,024 bytes; an explicit packet queue overlaps global reads
+with current-tile WMMA. The steady loop only acquires valid future K64 tiles.
+A peeled penultimate tile publishes the final queued tile without acquiring
+an unused successor, followed by a final drain. This keeps a bounds-check
+zero merge from forcing future loads to finish before current-tile arithmetic.
+Four 128-row tiles form each traversal panel. Other down shapes retain the
+baseline motif; the same temporal tile is not selected for FFN up.
+
+The remaining tiled model wrappers select eight-row-tile groups at 2,048 rows for FFN up,
 1,088 for FFN down, and 2,560 for square/narrow projections. Below those
 crossovers they pass the whole row-tile count, which specializes to the original
 physical coordinates. These are the earliest clearly winning tested row counts
@@ -601,6 +612,12 @@ wrappers and numerical error envelope.
 against the full-K64 helper with nonuniform BF16 inputs. Its `exact_short`
 case binds `wide_test.rows=16`, `wide_test.inputs=6144` and
 `wide_test.outputs=16384`; `exact_tail` binds 528, 6144 and 256 respectively.
+[`tests/linear_temporal.loom`](tests/linear_temporal.loom) compares the real
+temporal helper with full-K64 at 528x256x320. This exercises the shortest
+supported K, both matrix tails and a partial traversal group without external
+weights or stored expected tensors. The two full-K algorithms retain the same
+K16 accumulation order; this exact helper comparison does not require equality
+with the baseline's four-chain/K256 reduction.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
