@@ -985,6 +985,7 @@ loom_cc_test(
     frame_test
   SRCS
     "frame_test.cc"
+    "frame_test_fixture.h"
   DEPS
     ::frame
     ::guarded_motion
