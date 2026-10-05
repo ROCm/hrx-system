@@ -1320,7 +1320,7 @@ later convolutions add into that destination. Equal-width blocks advance
 source-owned features in place. Spatial nearest-neighbor expansion is part of
 convolution indexing and never materializes an enlarged input image.
 
-The up1/up2/up3 equal-width convolutions (384/192/96 channels) use the config-free
+The up1/up2 equal-width convolutions (384/192 channels) use the config-free
 [`convolution_3x3_tiled_f32`](kernels/convolution_tiled.loom) helper for
 plain and residual convolutions. A workgroup owns 32 spatial positions by
 32 output channels, staging 32 reduction coordinates in 8,320 bytes of padded
@@ -1338,6 +1338,43 @@ the output, while the residual may be that same output buffer. These leaves
 select pipeline depth one and retain original three-plane temporal weight
 addressing. Geometry and scheduling enter as SSA specialization operands;
 the helper contains no model configuration or runtime scalar ABI.
+
+The final up3 stage (96 channels) uses
+[`convolution_3x3_matrix_f32`](kernels/convolution_matrix.loom). It retains the
+same global F32 tensors and ownership, but splits each operand before LDS staging into
+`h = f16(a)` and `l = f16((a - f32(h)) * 2048)`. Three FP16 matrix products
+reconstruct `HH + (HL + LH) / 2048` in F32 for each 32-element reduction tile;
+the low-low term is omitted. This changes the arithmetic, not the stored model
+precision. Finite operands must remain finite under the high FP16 conversion.
+Four wave32s share 9,472 bytes of padded LDS and store directly into NCHW output.
+No prepared weight bank, global im2col, extra dispatch or workspace is needed.
+
+[`tests/convolution_matrix.loom`](tests/convolution_matrix.loom) compares the
+actual helper with an ordinary scalar F64 VM function rounded once to F32.
+The two scenarios cover 1x1 and 3x11 images at the full 96-channel reduction
+depth, each with plain output, distinct residual output and genuinely aliased
+residual/output storage. Independent entries in all three temporal planes,
+nonzero bias/skip, row-crossing tiles and output sentinels expose indexing and
+publication errors. Each selected scenario shares its shape config with the
+kernel and VM oracle:
+
+```sh
+iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
+  --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 \
+  --case=@convolution_single_pixel \
+  --config=matrix_test.height=1 --config=matrix_test.width=1
+iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
+  --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
+  --device=amdgpu --target=amdgpu:gfx1151 \
+  --case=@convolution_spatial_tail \
+  --config=matrix_test.height=3 --config=matrix_test.width=11
+```
+
+These portable checks exercise mapping, borders and aliasing. Numerical
+admission additionally compares original checkpoint coefficients against an
+unrounded F64 primitive oracle and completes independent full-decoder checks;
+a rounded portable oracle is not a replacement for that model-level boundary.
 
 [`tests/convolution_tiled.loom`](tests/convolution_tiled.loom) links the actual
 scalar and cooperative helpers at full 96/192/384-channel reduction depths.
@@ -1372,34 +1409,43 @@ HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_decode
   --output=/path/to/new-vae-decoder-results
 ```
 
-Qualification runs base and active-LoRA latents at 2x6 and 48x48. Primitive
-resize, output normalization and convolution use F64 oracles with 2e-5
+The staged qualification driver runs base and active-LoRA latents at 2x6 and
+48x48. Primitive resize, output normalization and convolution use F64 oracles
+with 2e-5
 absolute/relative bounds. Entire residual chains use a fixed 2e-5 relative-L2
 bound. Clamping and both composed decoder commands must equal separately
 executed native stages bit-for-bit on both executions. The complete RGB result
 also has a fixed 2e-5 relative-L2 bound against the pinned CPU/F32 VAE on the
-same latent. All 168 repeated comparisons pass over 469,573,632 values, with
-no element-envelope violations or nonfinite pairs.
+same latent. The ordered-FMA decoder qualified all 168 repeated comparisons
+over 469,573,632 values. The matrix up3 path separately qualifies complete
+base and active-LoRA 48x48 latents and a native 128x128 latent against the
+independent CPU/F32 decoder, preserving the 2e-5 relative-L2 criterion. Each
+native command executes twice; a fresh process repeats the candidate against
+its first output bit-for-bit. All outputs are finite.
 
-| 384x384 decoder result | Base | Softwatercolor latent |
-| --- | ---: | ---: |
-| F32 relative L2 versus CPU VAE | 1.80376e-6 | 3.81027e-6 |
-| Different 8-bit channel values, out of 442,368 | 19 | 47 |
-| Maximum 8-bit difference | 1 | 1 |
-| Pixel RMSE | 0.00655368 | 0.01030759 |
+| Matrix up3 decoder result | Base 384x384 | Softwatercolor 384x384 | Base 1024x1024 |
+| --- | ---: | ---: | ---: |
+| F32 relative L2 versus CPU VAE | 1.80209e-6 | 3.78497e-6 | 4.07534e-6 |
+| Different 8-bit channel values | 21 / 442,368 | 49 / 442,368 | 326 / 3,145,728 |
+| Maximum 8-bit difference | 1 | 1 | 1 |
+| Pixel RMSE | 0.00688998 | 0.01052461 | 0.01018001 |
+
+These pixel counts are observations, not an exact-image contract. Relative
+L2 is slightly lower than the ordered-FMA path in each case; maximum absolute
+error and quantized pixel counts are not uniformly lower.
 
 The complete command has 30 unique kernels and 104 parameters occupying
 286,100,492 bytes. Transient workspace is 219,709,440 bytes (209.53 MiB) at
 384x384. These are correctness and memory observations, not performance data.
-The images use the earlier native eight-step latents and external text
-conditioning. The decoder does not apply LoRA itself; it receives the latent
-produced by the adapted DiT.
+The 384x384 images use native eight-step latents with external text conditioning;
+the 1024x1024 latent also uses source-native text encoding. The decoder does
+not apply LoRA itself; it receives the latent produced by the adapted DiT.
 
 The driver overwrites one active primitive fixture and retains final native
 and reference RGB/PNGs. Its temporary storage stays below 256 MiB at these
 shapes, and a failed check retains its exact inputs, command and expected
-output. Native text encoding and the image-serving adapter are separate
-remaining integration boundaries.
+output. These decoder-only checks do not exercise native text encoding or the
+image-serving adapter; those paths have separate full-request qualification.
 
 ### Encoder-taps-to-RGB composition boundary
 

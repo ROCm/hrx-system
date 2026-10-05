@@ -24,6 +24,7 @@ vae.loom
 kernels/image.loom
 kernels/convolution.loom
 kernels/convolution_tiled.loom
+kernels/convolution_matrix.loom
 vae_residual.loom
 kernels/image_normalization.loom
 vae_attention.loom
