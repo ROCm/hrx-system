@@ -34,7 +34,7 @@ TEST(Krea2RequestTest, MeasuresProductionInputLayouts) {
   }
 }
 
-TEST(Krea2RequestTest, RejectsGeometryBeforeAllocationOrTokenization) {
+TEST(Krea2RequestTest, RejectsGeometryBeforeAllocationOrPromptAccess) {
   for (const loom_serve_krea2_request_options_t options : {
            loom_serve_krea2_request_options_t{0, 384, 512, 0, 1},
            {384, 383, 512, 0, 1},
@@ -44,24 +44,37 @@ TEST(Krea2RequestTest, RejectsGeometryBeforeAllocationOrTokenization) {
            {48, 48, 512, 0, 1},
            {4096, 4096, 512, 0, 1},
            {384, 384, 512, 0, std::numeric_limits<float>::infinity()},
+           {384, 384, 512, 0, std::numeric_limits<float>::quiet_NaN()},
        }) {
     loom_serve_krea2_request_t* request = nullptr;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
-        loom_serve_krea2_request_create(nullptr, options, IREE_SV("prompt"),
-                                        iree_allocator_null(), &request));
+        loom_serve_krea2_request_create(nullptr, options, &request,
+                                        iree_allocator_null()));
     EXPECT_EQ(request, nullptr);
   }
 }
 
-TEST(Krea2RequestTest, FailedAllocationReturnsNoOwnership) {
-  loom_serve_krea2_request_t* request = nullptr;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_krea2_request_create(
-                            nullptr, {384, 384, 512, 0, 1}, IREE_SV("prompt"),
-                            iree_allocator_null(), &request));
-  EXPECT_EQ(request, nullptr);
-  loom_serve_krea2_request_destroy(request);
+TEST(Krea2RequestTest, RejectsPromptExtentBeforeAllocationOrTokenization) {
+  for (const uint32_t text_tokens : {0u, 17u, 65537u}) {
+    loom_serve_krea2_prompt_t* prompt = nullptr;
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_krea2_prompt_create(nullptr, text_tokens, IREE_SV("prompt"),
+                                       &prompt, iree_allocator_null()));
+    EXPECT_EQ(prompt, nullptr);
+  }
+}
+
+TEST(Krea2RequestTest, FailedPromptAllocationReturnsNoOwnership) {
+  loom_serve_krea2_prompt_t* prompt = nullptr;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_krea2_prompt_create(nullptr, 512, IREE_SV("prompt"), &prompt,
+                                     iree_allocator_null()));
+  EXPECT_EQ(prompt, nullptr);
+  loom_serve_krea2_prompt_destroy(prompt);
+  loom_serve_krea2_request_destroy(nullptr);
 }
 
 }  // namespace

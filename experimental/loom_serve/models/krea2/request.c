@@ -13,6 +13,19 @@
 #include "iree/base/string_builder.h"
 #include "iree/tokenizer/vocab/vocab.h"
 
+struct loom_serve_krea2_prompt_t {
+  // Allocator owning this object and its trailing native token IDs.
+  iree_allocator_t allocator;
+  // Actual retained count of the combined framing prefix and prompt.
+  uint32_t token_count;
+  // Validated token filling the gap between retained IDs and the suffix.
+  int32_t padding;
+  // Validated live suffix IDs, placed at the end of the selected text extent.
+  int32_t suffix[5];
+  // Retained prefix+prompt IDs in native byte order, without padding or suffix.
+  int32_t token_ids[];
+};
+
 struct loom_serve_krea2_request_t {
   // Allocator owning this object and its trailing slab.
   iree_allocator_t allocator;
@@ -102,10 +115,11 @@ static iree_status_t krea2_encode_prefix(const iree_tokenizer_t* tokenizer,
   return status;
 }
 
-static iree_status_t krea2_encode(const iree_tokenizer_t* tokenizer,
-                                  iree_string_view_t prompt, uint32_t texts,
-                                  loom_serve_krea2_request_t* request) {
-  const iree_allocator_t allocator = request->allocator;
+static iree_status_t krea2_encode_prompt(const iree_tokenizer_t* tokenizer,
+                                         iree_string_view_t text,
+                                         uint32_t capacity,
+                                         loom_serve_krea2_prompt_t* prompt) {
+  const iree_allocator_t allocator = prompt->allocator;
   int32_t prefix[35], suffix[6];
   iree_host_size_t prefix_count = 0, suffix_count = 0;
   IREE_RETURN_IF_ERROR(krea2_encode_prefix(
@@ -124,39 +138,91 @@ static iree_status_t krea2_encode(const iree_tokenizer_t* tokenizer,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "tokenizer has no Krea padding token 151643");
   }
-  const uint32_t capacity = texts + 34 - 5;
-  int32_t* ids =
-      (int32_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_TOKEN_IDS].data;
-  uint8_t* mask =
-      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_MASK].data;
   iree_string_builder_t framed;
   iree_string_builder_initialize(allocator, &framed);
   iree_status_t status = iree_string_builder_append_cstring(&framed, kPrefix);
   if (iree_status_is_ok(status)) {
-    status = iree_string_builder_append_string(&framed, prompt);
+    status = iree_string_builder_append_string(&framed, text);
   }
   iree_host_size_t count = 0;
   if (iree_status_is_ok(status)) {
-    status = krea2_encode_prefix(tokenizer, iree_string_builder_view(&framed),
-                                 capacity, ids, &count, allocator);
+    status =
+        krea2_encode_prefix(tokenizer, iree_string_builder_view(&framed),
+                            capacity, prompt->token_ids, &count, allocator);
   }
   iree_string_builder_deinitialize(&framed);
   IREE_RETURN_IF_ERROR(status);
-  memset(mask, 1, count);
-  for (iree_host_size_t i = count; i < capacity; ++i) {
-    ids[i] = padding;
-  }
-  memcpy(ids + capacity, suffix, sizeof(int32_t) * 5);
-  memset(mask + capacity, 1, 5);
-  for (uint32_t i = 0; i < texts + 34; ++i) {
-    if (ids[i] < 0 || ids[i] >= 151936) {
+  for (iree_host_size_t i = 0; i < count + 5; ++i) {
+    const int32_t id = i < count ? prompt->token_ids[i] : suffix[i - count];
+    if (id < 0 || id >= 151936) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                              "token %u has no encoder embedding: %d", i,
-                              ids[i]);
+                              "prepared token %zu has no encoder embedding: %d",
+                              i, id);
     }
-    iree_unaligned_store_le_u32(ids + i, (uint32_t)ids[i]);
   }
+  prompt->token_count = (uint32_t)count;
+  prompt->padding = padding;
+  memcpy(prompt->suffix, suffix, sizeof(prompt->suffix));
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_krea2_prompt_create(
+    const iree_tokenizer_t* tokenizer, uint32_t maximum_text_tokens,
+    iree_string_view_t text, loom_serve_krea2_prompt_t** out_prompt,
+    iree_allocator_t host_allocator) {
+  *out_prompt = NULL;
+  if (!maximum_text_tokens || maximum_text_tokens > 65536 ||
+      maximum_text_tokens % 16) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "expected supported 16-aligned maximum text extent");
+  }
+  const uint32_t capacity = maximum_text_tokens + 29;
+  loom_serve_krea2_prompt_t* prompt = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+      host_allocator, sizeof(*prompt) + capacity * sizeof(prompt->token_ids[0]),
+      (void**)&prompt));
+  prompt->allocator = host_allocator;
+  iree_status_t status = krea2_encode_prompt(tokenizer, text, capacity, prompt);
+  if (iree_status_is_ok(status)) {
+    *out_prompt = prompt;
+  } else {
+    loom_serve_krea2_prompt_destroy(prompt);
+  }
+  return status;
+}
+
+uint32_t loom_serve_krea2_prompt_token_count(
+    const loom_serve_krea2_prompt_t* prompt) {
+  return prompt->token_count;
+}
+
+void loom_serve_krea2_prompt_destroy(loom_serve_krea2_prompt_t* prompt) {
+  if (prompt) {
+    iree_allocator_free(prompt->allocator, prompt);
+  }
+}
+
+static void krea2_materialize_prompt(const loom_serve_krea2_prompt_t* prompt,
+                                     uint32_t texts,
+                                     loom_serve_krea2_request_t* request) {
+  const uint32_t capacity = texts + 29;
+  uint8_t* ids =
+      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_TOKEN_IDS].data;
+  uint8_t* mask =
+      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_MASK].data;
+  for (uint32_t i = 0; i < prompt->token_count; ++i) {
+    iree_unaligned_store_le_u32(ids + i * 4, (uint32_t)prompt->token_ids[i]);
+  }
+  memset(mask, 1, prompt->token_count);
+  for (uint32_t i = prompt->token_count; i < capacity; ++i) {
+    iree_unaligned_store_le_u32(ids + i * 4, (uint32_t)prompt->padding);
+  }
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(prompt->suffix); ++i) {
+    iree_unaligned_store_le_u32(ids + (capacity + i) * 4,
+                                (uint32_t)prompt->suffix[i]);
+  }
+  memset(mask + capacity, 1, IREE_ARRAYSIZE(prompt->suffix));
 }
 
 // Philox4x32-10's counter is the packed four-element group index and its key
@@ -287,9 +353,9 @@ iree_status_t loom_serve_krea2_request_measure(
 }
 
 iree_status_t loom_serve_krea2_request_create(
-    const iree_tokenizer_t* tokenizer,
-    loom_serve_krea2_request_options_t options, iree_string_view_t prompt,
-    iree_allocator_t host_allocator, loom_serve_krea2_request_t** out_request) {
+    const loom_serve_krea2_prompt_t* prompt,
+    loom_serve_krea2_request_options_t options,
+    loom_serve_krea2_request_t** out_request, iree_allocator_t host_allocator) {
   *out_request = NULL;
   if (!isfinite(options.strength)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -298,6 +364,13 @@ iree_status_t loom_serve_krea2_request_create(
   iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT];
   IREE_RETURN_IF_ERROR(loom_serve_krea2_request_measure(
       options.height, options.width, options.text_tokens, sizes));
+  if (prompt->token_count > options.text_tokens + 29) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prepared prompt has %u tokens; text extent %u "
+                            "retains at most %u",
+                            prompt->token_count, options.text_tokens,
+                            options.text_tokens + 29);
+  }
   const uint32_t images = (options.height / 16) * (options.width / 16);
   const uint32_t texts = options.text_tokens;
   iree_host_size_t total =
@@ -315,41 +388,36 @@ iree_status_t loom_serve_krea2_request_create(
     request->inputs[i] = iree_make_const_byte_span(storage, sizes[i]);
     storage += iree_host_align(sizes[i], 16);
   }
-  iree_status_t status = krea2_encode(tokenizer, prompt, texts, request);
-  if (iree_status_is_ok(status)) {
-    krea2_noise(options.seed, images * 64,
-                (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_NOISE].data);
-    krea2_encoder_rotary(
-        texts, request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_MASK].data,
-        (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_COSINE].data,
-        (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_SINE].data);
-    krea2_rotary(texts, options.height / 16, options.width / 16,
-                 (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_COSINE].data,
-                 (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_SINE].data);
-    krea2_schedule(
-        (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_TIMES].data,
-        (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_DELTAS].data);
-    iree_unaligned_store_le_f32(
-        (void*)request->inputs[LOOM_SERVE_KREA2_INPUT_STRENGTH].data,
-        options.strength);
-    const float means[16] = {
-        -.7571f, -.7089f, -.9113f, .1075f,  -.1745f, .9653f,  -.1517f, 1.5508f,
-        .4134f,  -.0715f, .5517f,  -.3632f, -.1922f, -.9497f, .2503f,  -.2921f};
-    const float deviations[16] = {
-        2.8184f, 1.4541f, 2.3275f, 2.6558f, 1.2196f, 1.7708f, 2.6052f, 2.0743f,
-        3.2687f, 2.1526f, 2.8652f, 1.5579f, 1.6382f, 1.1253f, 2.8251f, 1.916f};
-    uint8_t* affine =
-        (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_AFFINE].data;
-    for (int channel = 0; channel < 16; ++channel) {
-      iree_unaligned_store_le_f32(affine + channel * 4,
-                                  1.0f / deviations[channel]);
-      iree_unaligned_store_le_f32(affine + (channel + 16) * 4, means[channel]);
-    }
-    *out_request = request;
-  } else {
-    loom_serve_krea2_request_destroy(request);
+  krea2_materialize_prompt(prompt, texts, request);
+  krea2_noise(options.seed, images * 64,
+              (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_NOISE].data);
+  krea2_encoder_rotary(
+      texts, request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_MASK].data,
+      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_COSINE].data,
+      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_SINE].data);
+  krea2_rotary(texts, options.height / 16, options.width / 16,
+               (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_COSINE].data,
+               (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_SINE].data);
+  krea2_schedule((uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_TIMES].data,
+                 (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_DELTAS].data);
+  iree_unaligned_store_le_f32(
+      (void*)request->inputs[LOOM_SERVE_KREA2_INPUT_STRENGTH].data,
+      options.strength);
+  const float means[16] = {-.7571f, -.7089f, -.9113f, .1075f,  -.1745f, .9653f,
+                           -.1517f, 1.5508f, .4134f,  -.0715f, .5517f,  -.3632f,
+                           -.1922f, -.9497f, .2503f,  -.2921f};
+  const float deviations[16] = {
+      2.8184f, 1.4541f, 2.3275f, 2.6558f, 1.2196f, 1.7708f, 2.6052f, 2.0743f,
+      3.2687f, 2.1526f, 2.8652f, 1.5579f, 1.6382f, 1.1253f, 2.8251f, 1.916f};
+  uint8_t* affine =
+      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_AFFINE].data;
+  for (int channel = 0; channel < 16; ++channel) {
+    iree_unaligned_store_le_f32(affine + channel * 4,
+                                1.0f / deviations[channel]);
+    iree_unaligned_store_le_f32(affine + (channel + 16) * 4, means[channel]);
   }
-  return status;
+  *out_request = request;
+  return iree_ok_status();
 }
 
 void loom_serve_krea2_request_destroy(loom_serve_krea2_request_t* request) {

@@ -48,7 +48,32 @@ enum loom_serve_krea2_input_e {
 };
 typedef enum loom_serve_krea2_input_e loom_serve_krea2_input_t;
 
+// Immutable bounded prefix+prompt IDs with the model's live suffix and padding
+// token. Preparation has no image geometry, checkpoint or device ownership.
+typedef struct loom_serve_krea2_prompt_t loom_serve_krea2_prompt_t;
+
 typedef struct loom_serve_krea2_request_t loom_serve_krea2_request_t;
+
+// Encodes the whole framing prefix plus text once, retaining at most
+// maximum_text_tokens+29 IDs. The maximum is a supported 16-aligned text
+// extent. Validates the template, padding token and retained IDs against the
+// embedding vocabulary. The tokenizer and text are borrowed only for this call.
+// On failure *out_prompt is NULL and partial ownership is released.
+iree_status_t loom_serve_krea2_prompt_create(
+    const iree_tokenizer_t* tokenizer, uint32_t maximum_text_tokens,
+    iree_string_view_t text, loom_serve_krea2_prompt_t** out_prompt,
+    iree_allocator_t host_allocator);
+
+// Actual retained combined prefix+prompt count, excluding padding and suffix.
+// Separately encoding the prefix does not establish a lower bound on this
+// count.
+uint32_t loom_serve_krea2_prompt_token_count(
+    const loom_serve_krea2_prompt_t* prompt);
+
+// Releases the prepared IDs. Materialized requests retain no references to this
+// object, so it may be destroyed before their uploads are submitted. NULL is
+// allowed.
+void loom_serve_krea2_prompt_destroy(loom_serve_krea2_prompt_t* prompt);
 
 // Validates external geometry and measures the exact input byte lengths. Model
 // residency and request allocation share this layout; no tokenizer or device
@@ -57,17 +82,17 @@ iree_status_t loom_serve_krea2_request_measure(
     uint32_t height, uint32_t width, uint32_t text_tokens,
     iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT]);
 
-// Validates geometry/strength and encodes prefix+prompt with right truncation,
-// middle padding and a live suffix using the model's immutable tokenizer.
-// Builds the encoder/DiT rotary, shifted Euler schedule, packed BF16 normal
-// noise and VAE affine in one owned slab. IDs are checked against the embedding
-// vocabulary. The tokenizer is borrowed only for this call. No checkpoint or
-// device access. On failure *out_request is NULL and partial ownership is
-// released.
+// Validates geometry/strength and materializes the prepared IDs with middle
+// padding and a live suffix at the selected text extent. The IDs must fit
+// within text_tokens+29; materialization never truncates them further. The
+// prepared prompt is borrowed only for this call. Builds the encoder/DiT
+// rotary, shifted Euler schedule, packed BF16 normal noise and VAE affine in
+// one owned slab. No tokenizer, checkpoint or device access. On failure
+// *out_request is NULL and partial ownership is released.
 iree_status_t loom_serve_krea2_request_create(
-    const iree_tokenizer_t* tokenizer,
-    loom_serve_krea2_request_options_t options, iree_string_view_t prompt,
-    iree_allocator_t host_allocator, loom_serve_krea2_request_t** out_request);
+    const loom_serve_krea2_prompt_t* prompt,
+    loom_serve_krea2_request_options_t options,
+    loom_serve_krea2_request_t** out_request, iree_allocator_t host_allocator);
 
 // Releases the slab. Any queued upload borrowing its spans must retire first,
 // including accepted work preceding a later submission failure. NULL is
