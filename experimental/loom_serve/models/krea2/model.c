@@ -7,6 +7,7 @@
 #include "experimental/loom_serve/models/krea2/model.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 
 #include "experimental/loom_serve/device.h"
@@ -254,6 +255,10 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
                                               iree_const_byte_span_t* out_rgb) {
   *out_rgb = iree_const_byte_span_empty();
   const bool adapted = model->input_count == LOOM_SERVE_KREA2_INPUT_COUNT;
+  if (!isfinite(strength)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "adapter strength must be finite");
+  }
   if (!adapted && strength != 1.0f) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "strength requires an adapter");
@@ -262,9 +267,17 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
       model->height, model->width, model->text_tokens, seed, strength};
   const iree_time_t prepare_begin = iree_time_now();
   fprintf(stderr, "{\"event\":\"image_preparing\"}\n");
+  loom_serve_krea2_prompt_t* prepared = NULL;
   loom_serve_krea2_request_t* request = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_krea2_request_create(
-      model->tokenizer, options, prompt, model->allocator, &request));
+  iree_status_t status =
+      loom_serve_krea2_prompt_create(model->tokenizer, model->text_tokens,
+                                     prompt, &prepared, model->allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_krea2_request_create(prepared, options, &request,
+                                             model->allocator);
+  }
+  loom_serve_krea2_prompt_destroy(prepared);
+  IREE_RETURN_IF_ERROR(status);
   const iree_time_t prepare_end = iree_time_now();
   fprintf(stderr, "{\"event\":\"image_prepared\",\"prepare_ns\":%" PRId64 "}\n",
           prepare_end - prepare_begin);
@@ -282,8 +295,8 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
   }
   loom_serve_execution_t* execution = loom_serve_device_execution(model->owner);
   uint64_t completion = 0;
-  iree_status_t status = loom_serve_execution_transfer(
-      execution, model->input_count, uploads, &completion);
+  status = loom_serve_execution_transfer(execution, model->input_count, uploads,
+                                         &completion);
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_execute(
         execution, model->command,
