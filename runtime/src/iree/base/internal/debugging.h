@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-#if defined(IREE_COMPILER_GCC_COMPAT)
+#if defined(IREE_COMPILER_GCC_COMPAT) || defined(IREE_COMPILER_CLANG)
 #define IREE_ATTRIBUTE_ALWAYS_INLINE __attribute__((always_inline))
 #elif defined(IREE_COMPILER_MSVC)
 #define IREE_ATTRIBUTE_ALWAYS_INLINE __forceinline

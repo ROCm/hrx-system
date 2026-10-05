@@ -393,10 +393,11 @@ if(ANDROID)
   )
 endif()
 
-if(NOT IREE_ARCH STREQUAL "wasm_32")
+if(NOT IREE_ARCH STREQUAL "wasm_32" AND NOT WIN32)
   iree_select_compiler_opts(IREE_DEFAULT_LINK_LIBRARIES
     CLANG_OR_GCC
-      # Required by all modern software, effectively:
+      # Required by all modern software, effectively. The Windows CRT already
+      # provides these entry points, and clang targeting MSVC has no m.lib.
       "m"
   )
 endif()
