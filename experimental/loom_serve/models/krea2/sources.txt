@@ -9,6 +9,7 @@ block_rotary.loom
 kernels/rotary.loom
 block_attention.loom
 kernels/attention.loom
+kernels/attention_shared.loom
 block_pointwise.loom
 kernels/pointwise.loom
 transformer.loom
