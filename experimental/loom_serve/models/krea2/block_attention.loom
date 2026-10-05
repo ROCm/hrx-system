@@ -7,6 +7,7 @@
 config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 amdgpu.target<gfx11-generic> @shared_four_head_wave32 {subgroup_size = 32}
 template.decl @attention.shared_four_head_bf16(%tokens: index, %key_value_heads: index, %gated: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
+template.decl @attention.shared_four_head_k32_bf16(%tokens: index, %key_value_heads: index, %gated: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
 
 kernel.def target(@shared_four_head_wave32) @shared_four_head() {
   %tokens = config.get @krea2.block_tokens : index
@@ -20,7 +21,15 @@ kernel.def target(@shared_four_head_wave32) @shared_four_head() {
   %tokens = config.get @krea2.block_tokens : index
   %key_value_heads = index.constant 12 : index
   %gated = scalar.constant false : i1
-  template.apply<@attention.shared_four_head_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %output, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  %key_tile = index.constant 32 : index
+  %zero = index.constant 0 : index
+  %remainder = index.rem %tokens, %key_tile : index
+  %paired_keys = index.cmp eq, %remainder, %zero : index
+  scf.if %paired_keys {
+    template.apply<@attention.shared_four_head_k32_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %output, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  } else {
+    template.apply<@attention.shared_four_head_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %output, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
   kernel.return
 }
 
@@ -36,7 +45,15 @@ kernel.def target(@shared_four_head_wave32) @shared_four_head_gated() {
   %tokens = config.get @krea2.block_tokens : index
   %key_value_heads = index.constant 12 : index
   %gated = scalar.constant true : i1
-  template.apply<@attention.shared_four_head_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %gate, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  %key_tile = index.constant 32 : index
+  %zero = index.constant 0 : index
+  %remainder = index.rem %tokens, %key_tile : index
+  %paired_keys = index.cmp eq, %remainder, %zero : index
+  scf.if %paired_keys {
+    template.apply<@attention.shared_four_head_k32_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %gate, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  } else {
+    template.apply<@attention.shared_four_head_bf16>(%tokens, %key_value_heads, %gated, %query, %key, %value, %mask, %gate, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
+  }
   kernel.return
 }
 

@@ -709,12 +709,13 @@ per block. This is traffic accounting, not a measured throughput improvement.
 ### Masked grouped-query attention
 
 [`block_attention.loom`](block_attention.loom) exposes ungated attention and
-attention with its sigmoid output gate. Both call the same config-free,
-128-channel template in
-[`kernels/attention_shared.loom`](kernels/attention_shared.loom). Each
+attention with its sigmoid output gate. Both select the config-free,
+128-channel [K32 template](kernels/attention_shared_k32.loom) when the token
+count is divisible by 32. Other positive multiples of 16 use the
+[K16 template](kernels/attention_shared.loom). Each
 128-thread workgroup owns four query heads sharing one KV head. Its four
 wave32 subgroups process the same 16 query positions while cooperatively
-loading successive 16-key tiles into LDS. This shares K/V reads across the
+loading successive key tiles into LDS. This shares K/V reads across the
 four heads instead of launching a separate workgroup for each head. There is
 no KV-head replication or global attention-score matrix. A byte mask selects
 valid keys, independently of query position. Every request must have at least
@@ -730,15 +731,23 @@ order but retain the logical matrix for the independent F64 oracle.
 
 DiT uses ordinary BF16 Q/K operands and one BF16 probability/value
 contraction. Dot products, the online maximum, the unrounded probability sum
-and the running output accumulate in F32. Each K16 tile rounds its unnormalized
+and the running output accumulate in F32. Each key tile rounds its unnormalized
 probabilities to BF16 before P*V; rounding a completed global softmax would be
 a different algorithm. The online maximum remains in raw dot-product units,
 so subtraction precedes scaling. The denominator accumulates lane-local
-partials, with one reduction after the key loop. Half the query channels stay
-in registers and half in wave-owned LDS planes. Loop-carried K/V packets read
-ahead while the current tile is consumed; workgroup barriers publish and
-retire the shared tile. At 4608 rows the gfx1151 code uses 19,712 bytes of
-workgroup storage and 232 vector registers, with no spills.
+partials, with one reduction after the key loop. K32 combines two score
+fragments before the maximum and rescales the running output only once for
+both. It halves online-softmax updates and workgroup barriers without
+duplicating QK or P*V contractions. The grouping changes probability rounding;
+it is not bit-identical to K16 on arbitrary inputs.
+
+K32 retains 32 query channels in registers and stages the remaining 96 in
+wave-owned LDS planes. K16 splits those channels evenly. Loop-carried K/V
+packets read ahead while the current tile is consumed; workgroup barriers
+publish and retire shared storage. Clamping the final prefetch to the last
+complete tile avoids padded reads and extra global storage. At 4608 rows the
+gfx1151 K32 code uses 32,256 bytes of workgroup storage and 248 vector
+registers, with no spills; K16 uses 19,712 bytes and 232 registers.
 
 The explicit `attention.expanded_masked_gqa_128_bf16` variant retains
 centered two-term QK and three-term probabilities for the text encoder and
@@ -777,13 +786,31 @@ of ungated attention with the unchanged native gate helper bit-for-bit.
 The script reports both independent F64 and ordinary-K64 CPU distances without
 making either an elementwise admission threshold for real attention captures.
 The CPU K64 calculation retains the preceding per-head algorithm as a
-diagnostic baseline; it does not model the shared-head K16 rounding boundaries,
-native WMMA or approximate-exponential rounding. CPU sigmoid differences are
-likewise diagnostic; the native gate-composition check isolates fusion
+diagnostic baseline; it does not model the selected shared-head rounding
+boundaries, native WMMA or approximate-exponential rounding. CPU sigmoid
+differences are likewise diagnostic; the native gate-composition check isolates fusion
 correctness. Kernel experiments are judged by measured speed, real-tensor error
 and image quality. Exact replay, masking and gate-composition checks isolate
 logic errors without requiring pixel identity between different floating-point
 algorithms.
+
+The focused [K32 scenarios](tests/attention_shared_k32.loom) call both
+production leaves at 64 tokens. An independent VM function computes the exact
+mean over masked, signed, nonuniform values and broadcasts each KV head to its
+four query heads; a zero sigmoid input gives one-half gating. An absolute
+1e-6 bound accommodates approximate-exponential cancellation residues at
+mathematical zero; inputs remain bitwise unchanged.
+This checks the shared layout, mask, output-rounding and gate boundaries
+without a copied device implementation or baked output tensor:
+
+```sh
+iree-test-loom experimental/loom_serve/models/krea2/tests/attention_shared_k32.loom \
+  --library=experimental/loom_serve/models/krea2/block_attention.loom \
+  --library=experimental/loom_serve/models/krea2/kernels/attention_shared.loom \
+  --library=experimental/loom_serve/models/krea2/kernels/attention_shared_k32.loom \
+  --config=krea2.block_tokens=64 \
+  --device=amdgpu --target=amdgpu:gfx1151
+```
 
 ### Residuals and feed-forward pointwise fusion
 

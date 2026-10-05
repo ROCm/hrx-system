@@ -1,0 +1,108 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link block_attention.loom and both attention_shared helpers with --library;
+// bind krea2.block_tokens=64. Zero keys give uniform scores over the 32 odd
+// positions. Nonuniform signed V distinguishes KV heads, channels and keys.
+// Values cycle through the integers -8..8. The 32 selected positions omit two
+// entries from two complete cycles, so every mean is a multiple of 1/32 in
+// [-0.5,0.5], exactly BF16-representable and away from rounding ties.
+// Approximate exponential rescaling can leave a small F32 cancellation
+// residue at a mathematical zero, so the output check has an absolute bound.
+// The scalar oracle computes each logical mean once and broadcasts it to the
+// four query heads. Zero gates give one-half after BF16 context
+// rounding. Both production leaves are exercised without test kernel wrappers.
+kernel.decl @shared_four_head() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer)
+kernel.decl @shared_four_head_gated() launch(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
+
+func.def @shared_head_mean(%value: buffer, %mask: buffer, %output: buffer, %gate_scale: f32) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %tokens = index.constant 64 : index
+  %head_width = index.constant 128 : index
+  %channels = index.constant 1536 : index
+  %query_head_width = index.constant 512 : index
+  %zero_f = scalar.constant 0.0 : f32
+  %inverse = scalar.constant 0.03125 : f32
+  %unset = scalar.constant 0 : i8
+  %value_view = buffer.view %value[%origin] : buffer -> view<1536x64xbf16>
+  %mask_view = buffer.view %mask[%origin] : buffer -> view<64xi8>
+  %output_view = buffer.view %output[%origin] : buffer -> view<64x6144xbf16>
+  scf.for %channel = [%zero to %channels step %one] {
+    %sum = scf.for %key = [%zero to %tokens step %one](%partial = %zero_f : f32) -> (f32) {
+      %element = view.load %value_view[%channel, %key] : view<1536x64xbf16> -> bf16
+      %wide = scalar.extf %element : bf16 to f32
+      %mask_byte = view.load %mask_view[%key] : view<64xi8> -> i8
+      %valid = scalar.cmpi ne, %mask_byte, %unset : i8
+      %selected = scf.select %valid, %wide, %zero_f : f32
+      %next = scalar.addf %partial, %selected : f32
+      scf.yield %next : f32
+    }
+    %mean = scalar.mulf %sum, %inverse : f32
+    %rounded = scalar.fptrunc %mean : f32 to bf16
+    %context = scalar.extf %rounded : bf16 to f32
+    %scaled = scalar.mulf %context, %gate_scale : f32
+    %result = scalar.fptrunc %scaled : f32 to bf16
+    %head = index.div %channel, %head_width : index
+    %local_channel = index.rem %channel, %head_width : index
+    %head_origin = index.madd %head, %query_head_width, %local_channel : index
+    scf.for %group = [%zero to %four step %one] {
+      %output_channel = index.madd %group, %head_width, %head_origin : index
+      scf.for %query = [%zero to %tokens step %one] {
+        view.store %result, %output_view[%query, %output_channel] : bf16, view<64x6144xbf16>
+      }
+    }
+  }
+  func.return
+}
+
+func.def @shared_head_mean_ungated(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %output: buffer) {
+  %scale = scalar.constant 1.0 : f32
+  func.call @shared_head_mean(%value, %mask, %output, %scale) : (buffer, buffer, buffer, f32)
+  func.return
+}
+
+func.def @shared_head_mean_gated(%query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer) {
+  %scale = scalar.constant 0.5 : f32
+  func.call @shared_head_mean(%value, %mask, %output, %scale) : (buffer, buffer, buffer, f32)
+  func.return
+}
+
+check.scenario public @shared_head_k32_mean_ungated {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %query = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<64x6144xbf16>
+    %key = check.generate.fill value(0.0) : tensor<64x1536xbf16>
+    %value = check.generate.iota offset(-8.0) step(1.0) period(17) : tensor<1536x64xbf16>
+    %mask = check.generate.iota offset(0) step(1) period(2) : tensor<64xi8>
+    %output = check.generate.fill value(-17.0) : tensor<64x6144xbf16>
+    check.compare<@shared_four_head, @shared_head_mean_ungated>(%query, %key, %value, %mask, %output) : (tensor<64x6144xbf16>, tensor<64x1536xbf16>, tensor<1536x64xbf16>, tensor<64xi8>, tensor<64x6144xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.000001) rtol(0.0) nan(different) : tensor<64x6144xbf16>
+      check.expect.bitwise actual(%value) expected(%value) : tensor<1536x64xbf16>
+      check.expect.bitwise actual(%mask) expected(%mask) : tensor<64xi8>
+    }
+  }
+  check.return
+}
+
+check.scenario public @shared_head_k32_mean_gated {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %query = check.generate.iota offset(-1.0) step(0.125) period(17) : tensor<64x6144xbf16>
+    %key = check.generate.fill value(0.0) : tensor<64x1536xbf16>
+    %value = check.generate.iota offset(-8.0) step(1.0) period(17) : tensor<1536x64xbf16>
+    %mask = check.generate.iota offset(0) step(1) period(2) : tensor<64xi8>
+    %gate = check.generate.fill value(0.0) : tensor<64x6144xbf16>
+    %output = check.generate.fill value(-17.0) : tensor<64x6144xbf16>
+    check.compare<@shared_four_head_gated, @shared_head_mean_gated>(%query, %key, %value, %mask, %gate, %output) : (tensor<64x6144xbf16>, tensor<64x1536xbf16>, tensor<1536x64xbf16>, tensor<64xi8>, tensor<64x6144xbf16>, tensor<64x6144xbf16>) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.000001) rtol(0.0) nan(different) : tensor<64x6144xbf16>
+      check.expect.bitwise actual(%query) expected(%query) : tensor<64x6144xbf16>
+      check.expect.bitwise actual(%key) expected(%key) : tensor<64x1536xbf16>
+      check.expect.bitwise actual(%gate) expected(%gate) : tensor<64x6144xbf16>
+    }
+  }
+  check.return
+}

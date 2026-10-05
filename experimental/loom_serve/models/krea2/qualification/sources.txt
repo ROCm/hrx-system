@@ -12,6 +12,7 @@
 ../block_attention.loom
 ../kernels/attention.loom
 ../kernels/attention_shared.loom
+../kernels/attention_shared_k32.loom
 ../block_pointwise.loom
 ../kernels/pointwise.loom
 ../transformer.loom
