@@ -5,9 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // F32 convolution with tile-local two-term FP16 operands and F32 accumulation.
-template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
-// Positive height/width/planes; inputs and outputs are positive multiples of 32.
+// Positive height/width/planes/upsample and positive channel counts divisible by 32.
+// Height/width describe physical input. Output dimensions multiply by upsample;
+// tap bounds are checked in the output domain before nearest input division.
 // F32 NCHW inputs/outputs and original OI(T)HW weights remain in global storage;
 // fresh-frame convolution reads only the last temporal plane. Output may alias
 // residual, never input. Launch ceil(pixels/32) x (outputs/32), 128 threads/group.
@@ -18,7 +20,7 @@ template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %
 // The high conversion must remain finite. HH+(HL+LH)/2048 reconstructs each
 // K32 partial in F32, omitting the low-low product; this is approximate F32
 // arithmetic, not ordered-FMA equivalence. Bias and residual round separately.
-template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
+template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -50,7 +52,9 @@ template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_ma
   %input_fragment_row = index.add %wave_pixel, %lane_column : index
   %pixel_origin = index.mul %spatial_group, %tile : index
   %channel_origin = index.mul %channel_group, %tile : index
-  %pixels = index.mul %height, %width : index
+  %output_height = index.mul %height, %upsample : index
+  %output_width = index.mul %width, %upsample : index
+  %pixels = index.mul %output_height, %output_width : index
   %plane = index.sub %planes, %one : index
   %reduction_count = index.mul %inputs, %nine : index
   %tile_count = index.div %reduction_count, %tile : index
@@ -69,7 +73,8 @@ template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_ma
 
   %sum = scf.for %block = [%zero to %tile_count step %one](%total = %initial : vector<8xf32>) -> (vector<8xf32>) pipeline(%one) {
     %reduction_origin = index.mul %block, %tile : index
-    // Input lanes gather contiguous NCHW pixels before the LDS-only transpose.
+    // Input lanes gather adjacent output pixels before the LDS-only transpose.
+    // Nearest expansion repeats physical input positions without materialization.
     // Weight lanes gather original consecutive reduction positions. Each pair
     // of adjacent weight lanes writes disjoint halves of one LDS word.
     scf.for %round = [%zero to %eight step %one] unroll schedule(linear) {
@@ -82,19 +87,21 @@ template.def<@image.convolution_3x3_matrix_f32> device @image_convolution_3x3_ma
       %input_tap = index.rem %input_reduction, %nine : index
       %input_ky = index.div %input_tap, %three : index
       %input_kx = index.rem %input_tap, %three : index
-      %input_y = index.div %input_pixel, %width : index
-      %input_x = index.rem %input_pixel, %width : index
+      %input_y = index.div %input_pixel, %output_width : index
+      %input_x = index.rem %input_pixel, %output_width : index
       %source_y_offset = index.add %input_y, %input_ky : index
       %source_x_offset = index.add %input_x, %input_kx : index
       %source_y = index.sub %source_y_offset, %one : index
       %source_x = index.sub %source_x_offset, %one : index
-      %valid_y = index.cmp ult, %source_y, %height : index
-      %valid_x = index.cmp ult, %source_x, %width : index
+      %valid_y = index.cmp ult, %source_y, %output_height : index
+      %valid_x = index.cmp ult, %source_x, %output_width : index
       %valid_pixel = index.cmp ult, %input_pixel, %pixels : index
       %valid_tap = scalar.andi %valid_y, %valid_x : i1
       %valid_input = scalar.andi %valid_tap, %valid_pixel : i1
       %input_value = scf.if %valid_input -> (f32) {
-        %value = view.load %input_view[%input_channel, %source_y, %source_x] : view<[%inputs]x[%height]x[%width]xf32> -> f32
+        %physical_y = index.div %source_y, %upsample : index
+        %physical_x = index.div %source_x, %upsample : index
+        %value = view.load %input_view[%input_channel, %physical_y, %physical_x] : view<[%inputs]x[%height]x[%width]xf32> -> f32
         scf.yield %value : f32
       } else {
         scf.yield %zero_f32 : f32

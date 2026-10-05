@@ -1365,11 +1365,21 @@ convolution indexing and never materializes an enlarged input image.
 
 The equal-width up1/up2/up3 convolutions (384/192/96 channels) use the
 config-free [`convolution_3x3_matrix_f32`](kernels/convolution_matrix.loom)
-helper for plain and residual convolutions. A workgroup owns 32 spatial
-positions by 32 output channels. Cooperative acquisition shares inputs across
-output channels and coefficients across pixels, while retaining original
-global F32 tensors and last-of-three temporal weight addressing. Up0, channel
-expansion, resize and RGB convolutions retain their original leaves.
+helper for plain and residual convolutions. The up1/up2 resize leaves use the
+same helper with nearest-neighbor expansion and 384-to-192 / 192-to-96 channel
+reduction. A workgroup owns 32 output spatial positions by 32 output channels.
+Cooperative acquisition shares inputs across output channels and coefficients
+across pixels, while retaining original global F32 tensors. Convolutions read
+the last of three temporal weight planes; resize coefficients have one plane.
+Up0, channel expansion and RGB convolutions retain their original leaves.
+
+Height and width describe physical input storage. A separate SSA upsample
+factor selects output geometry: 1 for the equal-width convolutions, 2 for the
+two large resize stages. Tap bounds are checked in the expanded output domain
+before division maps a valid tap back to its nearest physical input pixel.
+This preserves padding at the expanded border without allocating an expanded
+tensor or folding coefficients. The scale-1 specialization emits the same
+native code as the non-expanding helper.
 
 The helper splits each operand before LDS staging into
 `h = f16(a)` and `l = f16((a - f32(h)) * 2048)`. Three FP16 matrix products
@@ -1387,30 +1397,41 @@ scalar ABI.
 
 [`tests/convolution_matrix.loom`](tests/convolution_matrix.loom) compares the
 actual helper with an ordinary scalar F64 VM function rounded once to F32.
-The two scenarios cover 1x1 and 3x11 images at full 96/192/384-channel
-reduction depths, each with plain output, distinct residual output and
-genuinely aliased residual/output storage. Independent entries in all three
-temporal planes, nonzero bias/skip, row-crossing tiles and output sentinels
-expose indexing and publication errors. Fixtures reserve flat capacity for
-384 channels; the kernel and VM oracle both view the compact prefix selected
-by the shared shape config, including compact channel strides in the weights.
-Comparisons include the unused output/state suffix at smaller channel counts:
+The two scenarios use physical 1x1 and 3x11 inputs at full 96/192/384-channel
+reduction depths. Five configurations cover the three equal-width, three-plane
+convolutions and both mixed-width, one-plane resize stages. Each runs plain
+output, distinct residual output and genuinely aliased residual/output storage.
+Independent temporal entries, nonzero bias/skip, row-crossing tiles and output
+sentinels expose indexing and publication errors. Scale 2 expands those inputs
+to 2x2 and 6x22 outputs, exercising padding before nearest division and a
+four-pixel final tile. Fixtures reserve flat capacity for 384 channels and
+2x spatial expansion; both subjects view only the compact configured prefixes,
+including compact channel/plane strides in the weights. Comparisons include
+the unused output/state suffix:
 
-```sh
-for channels in 96 192 384; do
+```bash
+while read -r inputs outputs planes upsample; do
   iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
     --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
     --device=amdgpu --target=amdgpu:gfx1151 \
     --case=@convolution_single_pixel \
     --config=matrix_test.height=1 --config=matrix_test.width=1 \
-    --config=matrix_test.channels="$channels"
+    --config=matrix_test.inputs="$inputs" --config=matrix_test.outputs="$outputs" \
+    --config=matrix_test.planes="$planes" --config=matrix_test.upsample="$upsample"
   iree-test-loom experimental/loom_serve/models/krea2/tests/convolution_matrix.loom \
     --library=experimental/loom_serve/models/krea2/kernels/convolution_matrix.loom \
     --device=amdgpu --target=amdgpu:gfx1151 \
     --case=@convolution_spatial_tail \
     --config=matrix_test.height=3 --config=matrix_test.width=11 \
-    --config=matrix_test.channels="$channels"
-done
+    --config=matrix_test.inputs="$inputs" --config=matrix_test.outputs="$outputs" \
+    --config=matrix_test.planes="$planes" --config=matrix_test.upsample="$upsample"
+done <<'SHAPES'
+96 96 3 1
+192 192 3 1
+384 384 3 1
+384 192 1 2
+192 96 1 2
+SHAPES
 ```
 
 These portable checks exercise mapping, borders and aliasing. Numerical

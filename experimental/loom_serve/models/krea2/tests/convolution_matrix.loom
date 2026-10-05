@@ -8,37 +8,45 @@
 // indexing, borders and residual aliasing against an independent scalar F64
 // VM oracle, rounded once to the helper's F32 output boundary. This tests
 // mapping and arithmetic without model weights or baked reference outputs.
-// Fixtures reserve flat capacity for 384 channels. Each subject views the
-// compact prefix selected by matrix_test.channels, including compact weight
-// rows rather than a 384-channel row stride. Full output/state comparisons
-// also check that the unused suffix is preserved at smaller channel counts.
+// Fixtures reserve flat capacity for 384 channels and up to 2x expansion in
+// each spatial dimension. Each subject views compact configured prefixes,
+// including compact weight rows rather than maximum-capacity strides. Full
+// output/state comparisons also check preservation of the unused suffix.
 config.decl @matrix_test.height : %value: index where [range(%value, 1, 3)]
 config.decl @matrix_test.width : %value: index where [range(%value, 1, 11)]
-config.decl @matrix_test.channels : %value: index where [range(%value, 32, 384), mul(%value, 32)]
+config.decl @matrix_test.inputs : %value: index where [range(%value, 32, 384), mul(%value, 32)]
+config.decl @matrix_test.outputs : %value: index where [range(%value, 32, 384), mul(%value, 32)]
+config.decl @matrix_test.planes : %value: index where [range(%value, 1, 3)]
+config.decl @matrix_test.upsample : %value: index where [range(%value, 1, 2)]
 amdgpu.target<gfx11-generic> @matrix_test_wave32 {subgroup_size = 32}
-template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
+template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 
 kernel.def target(@matrix_test_wave32) @matrix_convolution() {
   %height = config.get @matrix_test.height : index
   %width = config.get @matrix_test.width : index
-  %pixels = index.mul %height, %width : index
+  %upsample = config.get @matrix_test.upsample : index
+  %output_height = index.mul %height, %upsample : index
+  %output_width = index.mul %width, %upsample : index
+  %pixels = index.mul %output_height, %output_width : index
   %rounding = index.constant 31 : index
   %tile = index.constant 32 : index
   %threads = index.constant 128 : index
   %padded = index.add %pixels, %rounding : index
   %groups = index.div %padded, %tile : index
-  %channels = config.get @matrix_test.channels : index
-  %channel_groups = index.div %channels, %tile : index
+  %outputs = config.get @matrix_test.outputs : index
+  %channel_groups = index.div %outputs, %tile : index
   %one = index.constant 1 : index
   kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer, %mode: index) {
   %height = config.get @matrix_test.height : index
   %width = config.get @matrix_test.width : index
-  %channels = config.get @matrix_test.channels : index
-  %planes = index.constant 3 : index
+  %inputs = config.get @matrix_test.inputs : index
+  %outputs = config.get @matrix_test.outputs : index
+  %planes = config.get @matrix_test.planes : index
+  %upsample = config.get @matrix_test.upsample : index
   %zero = index.constant 0 : index
   %add_residual = index.cmp ne, %mode, %zero : index
-  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %channels, %channels, %planes, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %inputs, %outputs, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -48,34 +56,41 @@ func.def @convolution_f64_rounded_oracle(%input: buffer, %weight: buffer, %bias:
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %last_plane = index.constant 2 : index
   %extent = index.constant 3 : index
-  %channels = config.get @matrix_test.channels : index
-  %pixels = index.mul %height, %width : index
+  %inputs = config.get @matrix_test.inputs : index
+  %outputs = config.get @matrix_test.outputs : index
+  %planes = config.get @matrix_test.planes : index
+  %upsample = config.get @matrix_test.upsample : index
+  %last_plane = index.sub %planes, %one : index
+  %output_height = index.mul %height, %upsample : index
+  %output_width = index.mul %width, %upsample : index
+  %pixels = index.mul %output_height, %output_width : index
   %initial = scalar.constant 0.0 : f64
   %add_residual = index.cmp ne, %mode, %zero : index
-  %input_view = buffer.view %input[%origin] : buffer -> view<[%channels]x[%height]x[%width]xf32>
-  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%channels]x[%channels]x3x3x3xf32>
-  %bias_view = buffer.view %bias[%origin] : buffer -> view<[%channels]xf32>
-  %residual_view = buffer.view %residual[%origin] : buffer -> view<[%channels]x[%pixels]xf32>
-  %output_view = buffer.view %output[%origin] : buffer -> view<[%channels]x[%pixels]xf32>
-  scf.for %channel = [%zero to %channels step %one] {
+  %input_view = buffer.view %input[%origin] : buffer -> view<[%inputs]x[%height]x[%width]xf32>
+  %weight_view = buffer.view %weight[%origin] : buffer -> view<[%outputs]x[%inputs]x[%planes]x3x3xf32>
+  %bias_view = buffer.view %bias[%origin] : buffer -> view<[%outputs]xf32>
+  %residual_view = buffer.view %residual[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%outputs]x[%pixels]xf32>
+  scf.for %channel = [%zero to %outputs step %one] {
     scf.for %pixel = [%zero to %pixels step %one] {
-      %y = index.div %pixel, %width : index
-      %x = index.rem %pixel, %width : index
-      %sum = scf.for %input_channel = [%zero to %channels step %one](%channel_sum = %initial : f64) -> (f64) {
+      %y = index.div %pixel, %output_width : index
+      %x = index.rem %pixel, %output_width : index
+      %sum = scf.for %input_channel = [%zero to %inputs step %one](%channel_sum = %initial : f64) -> (f64) {
         %rows = scf.for %ky = [%zero to %extent step %one](%row_sum = %channel_sum : f64) -> (f64) {
           %shifted_y = index.add %y, %ky : index
           %source_y = index.sub %shifted_y, %one : index
-          %valid_y = index.cmp ult, %source_y, %height : index
+          %valid_y = index.cmp ult, %source_y, %output_height : index
           %columns = scf.for %kx = [%zero to %extent step %one](%column_sum = %row_sum : f64) -> (f64) {
             %shifted_x = index.add %x, %kx : index
             %source_x = index.sub %shifted_x, %one : index
-            %valid_x = index.cmp ult, %source_x, %width : index
+            %valid_x = index.cmp ult, %source_x, %output_width : index
             %valid = scalar.andi %valid_y, %valid_x : i1
             %updated = scf.if %valid -> (f64) {
-              %input_value = view.load %input_view[%input_channel, %source_y, %source_x] : view<[%channels]x[%height]x[%width]xf32> -> f32
-              %weight_value = view.load %weight_view[%channel, %input_channel, %last_plane, %ky, %kx] : view<[%channels]x[%channels]x3x3x3xf32> -> f32
+              %physical_y = index.div %source_y, %upsample : index
+              %physical_x = index.div %source_x, %upsample : index
+              %input_value = view.load %input_view[%input_channel, %physical_y, %physical_x] : view<[%inputs]x[%height]x[%width]xf32> -> f32
+              %weight_value = view.load %weight_view[%channel, %input_channel, %last_plane, %ky, %kx] : view<[%outputs]x[%inputs]x[%planes]x3x3xf32> -> f32
               %wide_input = scalar.extf %input_value : f32 to f64
               %wide_weight = scalar.extf %weight_value : f32 to f64
               %next = scalar.fmaf %wide_input, %wide_weight, %column_sum : f64
@@ -89,11 +104,11 @@ func.def @convolution_f64_rounded_oracle(%input: buffer, %weight: buffer, %bias:
         }
         scf.yield %rows : f64
       }
-      %bias_value = view.load %bias_view[%channel] : view<[%channels]xf32> -> f32
+      %bias_value = view.load %bias_view[%channel] : view<[%outputs]xf32> -> f32
       %wide_bias = scalar.extf %bias_value : f32 to f64
       %biased = scalar.addf %sum, %wide_bias : f64
       %result = scf.if %add_residual -> (f64) {
-        %skip = view.load %residual_view[%channel, %pixel] : view<[%channels]x[%pixels]xf32> -> f32
+        %skip = view.load %residual_view[%channel, %pixel] : view<[%outputs]x[%pixels]xf32> -> f32
         %wide_skip = scalar.extf %skip : f32 to f64
         %combined = scalar.addf %biased, %wide_skip : f64
         scf.yield %combined : f64
@@ -101,14 +116,16 @@ func.def @convolution_f64_rounded_oracle(%input: buffer, %weight: buffer, %bias:
         scf.yield %biased : f64
       }
       %rounded = scalar.fptrunc %result : f64 to f32
-      view.store %rounded, %output_view[%channel, %pixel] : f32, view<[%channels]x[%pixels]xf32>
+      view.store %rounded, %output_view[%channel, %pixel] : f32, view<[%outputs]x[%pixels]xf32>
     }
   }
   func.return
 }
 
-// Select with height=1,width=1. The first trial domain runs plain then distinct
-// residual output. The second passes one allocation twice for true in-place add.
+// Select physical height=1,width=1, with output up to 2x2. Tap bounds precede
+// nearest division, so padded taps cannot alias the lone physical input pixel.
+// The first trial domain runs plain then distinct residual output. The second
+// passes one allocation twice for true in-place add.
 check.scenario public @convolution_single_pixel {
   check.trial[2](%mode: index, %entropy: check.entropy) {
     %input_seed = check.literal value(74111) : i64
@@ -118,11 +135,11 @@ check.scenario public @convolution_single_pixel {
     %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<384xf32>
     %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<3981312xf32>
     %bias = check.generate.random.uniform seed(%bias_seed) range(-0.125 to 0.125) : tensor<384xf32>
-    %residual = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<384xf32>
-    %output = check.generate.fill value(-17.0) : tensor<384xf32>
-    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %residual, %output, %mode) : (tensor<384xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<384xf32>, tensor<384xf32>, index) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.00002) rtol(0.00002) nan(different) : tensor<384xf32>
-      check.expect.bitwise actual(%residual) expected(%residual) : tensor<384xf32>
+    %residual = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<1536xf32>
+    %output = check.generate.fill value(-17.0) : tensor<1536xf32>
+    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %residual, %output, %mode) : (tensor<384xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<1536xf32>, tensor<1536xf32>, index) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.00002) rtol(0.00002) nan(different) : tensor<1536xf32>
+      check.expect.bitwise actual(%residual) expected(%residual) : tensor<1536xf32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
@@ -134,16 +151,17 @@ check.scenario public @convolution_single_pixel {
     %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<384xf32>
     %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<3981312xf32>
     %bias = check.generate.random.uniform seed(%bias_seed) range(-0.125 to 0.125) : tensor<384xf32>
-    %state = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<384xf32>
-    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %state, %state, %mode) : (tensor<384xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<384xf32>, tensor<384xf32>, index) -> () {
-      check.expect.close actual(%state) expected(%state) atol(0.00002) rtol(0.00002) nan(different) : tensor<384xf32>
+    %state = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<1536xf32>
+    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %state, %state, %mode) : (tensor<384xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<1536xf32>, tensor<1536xf32>, index) -> () {
+      check.expect.close actual(%state) expected(%state) atol(0.00002) rtol(0.00002) nan(different) : tensor<1536xf32>
     }
   }
   check.return
 }
 
-// Select with height=3,width=11. A full spatial tile crosses row boundaries;
-// the second tile has one live pixel. Center, edge and corner taps all occur.
+// Select physical height=3,width=11. Expanded widths 11 and 22 both cross tile
+// boundaries; the last spatial tile has one or four live pixels. Center, edge
+// and corner taps all occur, including odd physical input dimensions.
 check.scenario public @convolution_spatial_tail {
   check.trial[2](%mode: index, %entropy: check.entropy) {
     %input_seed = check.literal value(74111) : i64
@@ -153,11 +171,11 @@ check.scenario public @convolution_spatial_tail {
     %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<12672xf32>
     %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<3981312xf32>
     %bias = check.generate.random.uniform seed(%bias_seed) range(-0.125 to 0.125) : tensor<384xf32>
-    %residual = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<12672xf32>
-    %output = check.generate.fill value(-17.0) : tensor<12672xf32>
-    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %residual, %output, %mode) : (tensor<12672xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<12672xf32>, tensor<12672xf32>, index) -> () {
-      check.expect.close actual(%output) expected(%output) atol(0.00002) rtol(0.00002) nan(different) : tensor<12672xf32>
-      check.expect.bitwise actual(%residual) expected(%residual) : tensor<12672xf32>
+    %residual = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<50688xf32>
+    %output = check.generate.fill value(-17.0) : tensor<50688xf32>
+    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %residual, %output, %mode) : (tensor<12672xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<50688xf32>, tensor<50688xf32>, index) -> () {
+      check.expect.close actual(%output) expected(%output) atol(0.00002) rtol(0.00002) nan(different) : tensor<50688xf32>
+      check.expect.bitwise actual(%residual) expected(%residual) : tensor<50688xf32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
@@ -169,9 +187,9 @@ check.scenario public @convolution_spatial_tail {
     %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<12672xf32>
     %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<3981312xf32>
     %bias = check.generate.random.uniform seed(%bias_seed) range(-0.125 to 0.125) : tensor<384xf32>
-    %state = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<12672xf32>
-    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %state, %state, %mode) : (tensor<12672xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<12672xf32>, tensor<12672xf32>, index) -> () {
-      check.expect.close actual(%state) expected(%state) atol(0.00002) rtol(0.00002) nan(different) : tensor<12672xf32>
+    %state = check.generate.random.uniform seed(%residual_seed) range(-0.5 to 0.5) : tensor<50688xf32>
+    check.compare<@matrix_convolution, @convolution_f64_rounded_oracle>(%input, %weight, %bias, %state, %state, %mode) : (tensor<12672xf32>, tensor<3981312xf32>, tensor<384xf32>, tensor<50688xf32>, tensor<50688xf32>, index) -> () {
+      check.expect.close actual(%state) expected(%state) atol(0.00002) rtol(0.00002) nan(different) : tensor<50688xf32>
     }
   }
   check.return
