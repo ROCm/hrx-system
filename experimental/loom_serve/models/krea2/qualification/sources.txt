@@ -45,6 +45,7 @@
 ../text_encoder.loom
 config.loom
 components.loom
+attention.loom
 image.loom
 head.loom
 time.loom

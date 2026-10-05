@@ -680,21 +680,24 @@ the V encoding explicitly, while the text encoder and fusion callers continue
 to select row-major V. Qualification drivers serialize V in its physical order
 but retain the logical matrix for the independent F64 oracle.
 
-Some actual Krea heads have logits around 30,000 with much smaller differences
-between keys. Computing those logits directly in F32 loses meaningful bits
-before softmax subtraction. This implementation contracts `Q * (K - K_last)`;
-the shared per-query offset cancels mathematically in softmax. The online
-maximum remains in unscaled dot-product units; subtraction precedes scaling
-to preserve small logit differences. Centered keys use two BF16 terms, while
-softmax probabilities use three. The three probability/value contractions
-accumulate independently in F32, combining the two corrections before adding
-the high term. This preserves small contributions through cancellation without
-F64 device arithmetic or an expanded global tensor.
+DiT uses ordinary BF16 Q/K operands and one BF16 probability/value
+contraction. Dot products, the online maximum, the unrounded probability sum
+and the running output accumulate in F32. Each K64 tile rounds its unnormalized
+probabilities to BF16 before P*V; rounding a completed global softmax would be
+a different algorithm. The online maximum remains in raw dot-product units,
+so subtraction precedes scaling. The probability tile has a padded 18-element
+column stride in LDS. At 4608 rows the gfx1151 code uses 20,992 bytes of
+workgroup storage and 80 vector registers, with no spills.
 
-The probability tiles use a padded 18-element column stride in LDS. The
-gfx1151 compile report records 25,600 bytes of workgroup storage, 128 vector
-registers, 28 scalar registers, and no spills. This retains the original
-two-term kernel's modeled occupancy tier; it does not establish equal runtime.
+The explicit `attention.expanded_masked_gqa_128_bf16` variant retains
+centered two-term QK and three-term probabilities for the text encoder and
+refiner. Those callers' arithmetic is unchanged. This expansion can improve
+agreement with F64 when large common logits hide small key differences, but
+its two QK and three P*V contractions are not a DiT quality requirement.
+The ordinary DiT path executes one of each; its accepted full-image base and
+nonzero-LoRA outputs preserve coherent detail without requiring pixel identity
+with the expanded path. A single prompt/seed comparison is bounded evidence,
+not a distributional image-quality certification.
 
 ```sh
 python -B experimental/loom_serve/models/krea2/check_attention.py \
@@ -706,21 +709,34 @@ python -B experimental/loom_serve/models/krea2/check_attention.py \
 The reference Python environment supplies independent CPU/F64 scores,
 softmax, and value contractions from the captured normalized/rotated inputs.
 No checkpoint argument is needed: these commands contain no fixed parameters.
-The native tool runs on the leased GPU. The result directory retains about
-180 MiB of regenerable tensors. The 16-row case uses image positions; the
-80-row case starts with 64 masked keys and ends with a partial 16-key tile.
+The native tool runs on the leased GPU. The result directory retains less than
+256 MiB of regenerable tensors for the standard capture. The 16-row case uses
+image positions; the 80-row case starts with 64 masked keys and ends with a
+partial 16-key tile.
 Both base and adapter-conditioned inputs also run at the full 1088 rows.
 
-All 24 repeated comparisons pass, covering 58,195,968 output elements. Ungated
-attention uses the unchanged BF16 envelope against F64. Gate fusion is bitwise
-equivalent to CPU gating of that independently qualified attention output.
-The script separately records composed F64 error: full-size gated relative L2
-is 1.35e-5 for base inputs and 5.00e-5 for adapter-conditioned inputs. Two
-base values and no style values exceed a single-operation envelope after
-the additional BF16 rounding; exact gate equivalence accounts for the fusion.
-The external model's corresponding relative L2 values are 1.13e-3 and 1.45e-3.
-These numbers describe this component boundary, not full-model image quality
-or execution performance.
+Three additional 80-row analytic cases require exact BF16 answers: a single
+valid first key, a single valid last key, and 64 equal-score keys spanning two
+key tiles. Positive integer values vary by key, KV head and channel, exposing
+masking, grouping, storage and tail errors. Zero gate inputs require an exact
+one-half scale. Real captures require finite output, exact fresh replay and
+invariance under changes to masked K/V. Gated attention must equal composition
+of ungated attention with the unchanged native gate helper bit-for-bit.
+
+The script reports both independent F64 and ordinary-K64 CPU distances without
+making either an elementwise admission threshold for real attention captures.
+The CPU K64 calculation models the rounding boundaries, not native WMMA or
+approximate-exponential rounding. CPU sigmoid differences are likewise
+diagnostic; the native gate-composition check isolates fusion correctness.
+The final acceptance boundary is model output quality, with exact same-source
+composition and ownership checks retained separately.
+
+The ordinary path passes 80 repeated attention executions and 288 base/style
+block executions on these fixtures. Both 16-row and 1088-row whole commands
+equal their checked native chains exactly; zero-strength LoRA retains the
+base result. Full-size block-zero relative L2 distance from the independent
+F64 calculation is 0.00097133 for base inputs and 0.00234478 for active LoRA.
+These are component diagnostics, not image-quality or performance scores.
 
 ### Residuals and feed-forward pointwise fusion
 
@@ -777,9 +793,10 @@ python -B experimental/loom_serve/models/krea2/check_transformer.py \
 This driver requires the reference environment, detailed block capture, and
 exclusive GPU execution. It runs an independent CPU/F64 block calculation
 with the model's BF16 tensor boundaries and F32 rotary arithmetic. A separate
-native chain checks each reduction against that arithmetic and each fusion
-against composition of independently qualified operands. Finally the single
-queued command must match the native chain bit-for-bit on both executions.
+native chain checks non-attention reductions against that arithmetic and each
+fusion against native composition. Ordinary attention reports its independent
+arithmetic distance without imposing expanded-precision accuracy. Finally the
+single queued command must match the native chain bit-for-bit on both executions.
 The result directory retains about 700 MiB of regenerable tensors.
 
 `--layer=0..27` selects a layer and its matching `base-blockN-*` or
@@ -804,16 +821,17 @@ driver for that actual final-layer input distribution. The separate `16/`
 capture is a shape check that advances 16 image rows through all layers; it
 does not represent an entire prompt/image request.
 
-That exact command-composition check passes at both 16 image rows and all
-1088 captured rows. Against the independent complete-block calculation,
-full-size relative L2 error is 0.00038576; the pinned external model's error
-is 0.00107261. The complete block has 37,803 values outside the single-operation
-BF16 envelope, versus 371,847 for the external block; those counts remain
-visible because accumulated rounding is not a single-operation error bound.
+The historical expanded-attention command-composition check passed at both
+16 image rows and all 1088 captured rows. Against the independent complete-block
+calculation, full-size relative L2 error is 0.00038576; the pinned external
+model's error is 0.00107261. The complete block has 37,803 values outside the
+single-operation BF16 envelope, versus 371,847 for the external block; those
+counts remain visible because accumulated rounding is not a single-operation
+error bound.
 The acceptance gate requires independently qualified components and exact
 native composition. Complete-block relative L2 remains a diagnostic; the
-full-stack gate below measures accumulated error at its consumer boundary.
-These are block-zero accuracy observations,
+full-stack driver below reports accumulated error at its consumer boundary.
+These are historical expanded-attention block-zero accuracy observations,
 not a full-model image or performance result.
 
 ### Block LoRA projections
@@ -914,13 +932,14 @@ twice per native command, retaining approximately 900 MiB of regenerable
 tensors. Full-size accumulated error is measured against a separate CPU/F64
 block alongside the corresponding external block.
 
-Both phases pass all component and exact-composition gates. Zero strength
-preserves the base block bit-for-bit at both shapes. For the 1088-token active
-adapter case, relative L2 error against the independent block calculation is
-0.00047224, versus 0.00246784 for the external model. Maximum absolute BF16
-error is 4 versus 8; the single-operation envelope counts are 60,420 versus
-661,300 and remain visible as accumulated block error. This qualifies one
-LoRA-enabled block, not the full 28-block denoiser or an image.
+The expanded-attention baseline passed all component and exact-composition
+gates. Zero strength preserves the base block bit-for-bit at both shapes. For
+the 1088-token active adapter case, relative L2 error against the independent
+block calculation is 0.00047224, versus 0.00246784 for the external model.
+Maximum absolute BF16 error is 4 versus 8; the single-operation envelope
+counts are 60,420 versus 661,300 and remain visible as accumulated block
+error. This qualifies one LoRA-enabled block, not the full 28-block denoiser
+or an image.
 
 The layer-27 fixture exercises actual final-layer inputs, including every
 component, exact queued composition, and zero-strength identity at 16 and
@@ -947,12 +966,12 @@ intermediates. Layer identity changes parameter keys, not cached kernels.
 native block is observed against independent arithmetic on its actual incoming
 state, alongside the external block on that same state. These local rankings
 are diagnostics: valid BF16 rounding can make one block locally farther from
-F64 while the complete stack is closer. The native image rows consumed by the
-final head must be no farther from
-the independent F64 chain than the external image rows. All-row differences
-remain diagnostics: the model discards text rows before its head, and padded
-text rows are never valid attention keys. This accumulated gate supplements
-the individual component and exact-fusion checks above.
+F64 while the complete stack is closer. Accumulated image-row and all-row
+distances remain diagnostics as well; ranking two implementations by distance
+to F64 does not rank their generated images. Image rows are reported separately
+because the model discards text rows before its head, and padded text rows are
+never valid attention keys. Exact native composition, zero-strength identity,
+finite results and one-residency ownership remain hard gates.
 
 ```sh
 HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_stack.py \
@@ -978,9 +997,9 @@ overwriting its per-layer scratch tensors. Only this qualification process
 loads an independent external model alongside the native model. The native
 command uses one immutable copy of each required base and adapter tensor.
 
-Both shapes pass repeated exact composition and zero-strength identity. At
-1088 rows, the 576 image rows have these relative L2 errors against the
-independent F64 chain:
+The expanded-attention baseline passed repeated exact composition and
+zero-strength identity. At 1088 rows, the 576 image rows have these relative L2
+errors against the independent F64 chain:
 
 | Phase | Loom | External implementation | Transient workspace |
 | --- | ---: | ---: | ---: |
@@ -1001,8 +1020,8 @@ either mode. Exact composition uses zero absolute and relative elementwise
 tolerances, followed by a byte comparison in the Python driver. Local stack
 observations use `--report_only`: both executions report their differences
 without an error bound, while nonfinite pairs and execution failures still
-fail. The driver applies the unchanged accumulated bound at the image-row
-consumer boundary.
+fail. The image-row consumer boundary reports accumulated numerical distances;
+it does not require one implementation to reproduce another's error ranking.
 
 ### Final velocity head
 
@@ -1847,11 +1866,11 @@ The driver retains one overwritten fixture plus final Q/K results, below
 ### Native causal encoder attention
 
 [`encoder_attention.loom`](encoder_attention.loom) specializes the shared
-128-channel GQA motif for 32 query heads and eight KV heads. A compile-time
-causal operand selects sequence-order masking and bounds key work by the
-query tile; it adds no device ABI argument. Physical buffer bounds and causal
-visibility are separate predicates. The encoder centers logits against its
-valid prefix key, while noncausal callers retain their original final-key
+expanded 128-channel GQA motif for 32 query heads and eight KV heads. A
+compile-time causal operand selects sequence-order masking and bounds key work
+by the query tile; it adds no device ABI argument. Physical buffer bounds and
+causal visibility are separate predicates. The encoder centers logits against
+its valid prefix key, while the expanded noncausal refiner retains its final-key
 centering. Online softmax needs neither a global score matrix nor replicated
 KV heads. The command uses one kernel and zero global workspace.
 
@@ -1873,9 +1892,10 @@ a key tile leaves the earlier prefix exact in four captured comparisons over
 canonical middle padding, live suffix and partial final key tile. These are
 arithmetic and isolation checks, not an encoder throughput measurement.
 
-The shared-motif extension also reproduces the retained noncausal DiT results
-bit-for-bit at 16, 80 and 1088 rows, base and active adapter, both ungated and
-gated. The complete 512-row adapted text-refiner block remains bitwise exact.
+The original shared-motif extension reproduced the expanded noncausal DiT
+results bit-for-bit at 16, 80 and 1088 rows. DiT now selects ordinary arithmetic
+separately; encoder and text-refiner callers still select this unchanged
+expanded variant.
 
 ### Native encoder decoder blocks
 

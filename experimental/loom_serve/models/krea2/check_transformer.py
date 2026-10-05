@@ -6,11 +6,11 @@
 
 """Qualify an entire base or LoRA transformer block and command composition.
 
-Each separately executed native component is checked against independent CPU
-arithmetic. Reductions use F64; fusion checks retain the qualified native
-reduction output. The whole command must equal that native chain bit-for-bit.
-A second, wholly CPU chain measures accumulated error independently of the
-external implementation. This is a numerical harness, not a benchmark.
+Unchanged reductions retain their independent F64 primitive gates. Ordinary
+attention reports F64 distance and its gate must compose exactly with the
+native ungated output. The whole command must equal that native chain
+bit-for-bit. A second, wholly CPU chain measures accumulated error independently
+of the external implementation. This is a numerical harness, not a benchmark.
 """
 
 import argparse
@@ -65,6 +65,7 @@ def report(rows, name, actual, expected):
         strength=args.strength,
         rows=rows,
         check=name,
+        diagnostic=True,
         elements=actual.numel(),
         different=int((error != 0).sum()),
         outside_single_bf16_envelope=int(
@@ -127,7 +128,15 @@ with (
             )
             paths[name] = path
 
-        def execute(component, expected, arguments, *, exact=False, checkpoints=None):
+        def execute(
+            component,
+            expected,
+            arguments,
+            *,
+            exact=False,
+            diagnostic=False,
+            checkpoints=None,
+        ):
             # Retain native operands, not a duplicate oracle file for every stage.
             expected_path = args.output / "expected.bf16"
             actual_path = prefix.with_suffix(f".{component}.actual.bf16")
@@ -153,11 +162,28 @@ with (
             ]
             if exact:
                 command += ["--atol=0", "--rtol=0"]
-            subprocess.run(command, check=True)
+            elif diagnostic:
+                command.append("--report_only")
+            result = subprocess.run(command, stdout=subprocess.PIPE, text=True)
+            print(result.stdout, end="", flush=True)
+            result.check_returncode()
+            records = [
+                json.loads(line)
+                for line in result.stdout.splitlines()
+                if line.startswith("{")
+            ]
+            comparisons = [record for record in records if "iteration" in record]
+            if [record["iteration"] for record in comparisons] != [0, 1]:
+                raise AssertionError(f"{component}: missing checker executions")
+            if any(record["nonfinite"] for record in comparisons):
+                raise AssertionError(f"{component}: nonfinite output")
             actual = load_bf16(actual_path).reshape_as(stored_expected)
             if value_plane:
                 actual = actual.T
-            if exact and encode(actual) != encode(expected):
+            if exact and (
+                any(record["different"] for record in comparisons)
+                or encode(actual) != encode(expected)
+            ):
                 raise AssertionError(f"{component}: non-bitwise composition")
             # Native consumers receive the unchanged physical output file.
             paths[component] = actual_path
@@ -174,13 +200,28 @@ with (
         ):
             print(json.dumps(dict(rows=count, component=name, native=True)), flush=True)
             checkpoint_paths = {"base": args.checkpoint, "adapter": args.adapter}
+            if name == "attention_context":
+                # The CPU sigmoid remains a diagnostic; fusion must reproduce
+                # the actual gate on the rounded native attention output.
+                cpu_expected = expected
+                expected = execute(
+                    "attention_gate",
+                    cpu_expected,
+                    ["attention_ungated", "gate"],
+                    diagnostic=True,
+                    checkpoints=[],
+                )
+                report(count, "native_attention_gate_vs_cpu", expected, cpu_expected)
             actual = execute(
                 name,
                 expected,
                 arguments,
                 exact=exact,
+                diagnostic=name == "attention_ungated",
                 checkpoints=[checkpoint_paths[key] for key in parameters],
             )
+            if name == "attention_ungated":
+                report(count, "attention_vs_f64_diagnostic", actual, expected)
             if result_name is not None:
                 paths[result_name] = paths[name]
             return actual
@@ -221,6 +262,7 @@ with (
             report(count, "external_vs_f64", external, oracle)
 
 print(
-    "PASS: whole block equals the independently qualified native chain.",
+    "PASS: whole block equals the checked native chain; ordinary attention and "
+    "whole-chain F64 distances are diagnostic.",
     flush=True,
 )
