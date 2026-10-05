@@ -58,13 +58,35 @@ def unpack_qkv(packed):
     return logical.reshape_as(packed)
 
 
-def attend(qkv):
+def attend(qkv, *, matrix=False):
+    """Logical F64 oracle, with explicit operand boundaries for the matrix path."""
     channels = qkv.shape[1] // 3
     query, key, value = qkv.reshape(3, channels, -1).double()
+    if matrix:
+        query, key, value = (
+            operand.bfloat16().double() for operand in (query, key, value)
+        )
     output = torch.empty_like(query)
     for start in range(0, query.shape[1], 128):
-        scores = (query[:, start : start + 128].T @ key) / math.sqrt(channels)
-        output[:, start : start + 128] = (scores.softmax(-1) @ value.T).T
+        queries = query[:, start : start + 128].T
+        if not matrix:
+            scores = (queries @ key) / math.sqrt(channels)
+            output[:, start : start + 128] = (scores.softmax(-1) @ value.T).T
+            continue
+        maximum = torch.full((queries.shape[0], 1), -math.inf, dtype=torch.float64)
+        denominator = torch.zeros_like(maximum)
+        numerator = torch.zeros((queries.shape[0], channels), dtype=torch.float64)
+        for key_start in range(0, key.shape[1], 16):
+            scores = queries @ key[:, key_start : key_start + 16]
+            next_maximum = torch.maximum(maximum, scores.max(-1, keepdim=True).values)
+            rescale = ((maximum - next_maximum) / math.sqrt(channels)).exp()
+            probability = ((scores - next_maximum) / math.sqrt(channels)).exp()
+            denominator = denominator * rescale + probability.sum(-1, keepdim=True)
+            numerator = numerator * rescale + probability.bfloat16().double() @ (
+                value[:, key_start : key_start + 16].T
+            )
+            maximum = next_maximum
+        output[:, start : start + 128] = (numerator / denominator).T
     return output.float().reshape(1, channels, *qkv.shape[2:])
 
 
@@ -109,7 +131,17 @@ def main():
             }
         )
 
-    def run(name, root, inputs, expected, configuration, *, weights=False, exact=False):
+    def run(
+        name,
+        root,
+        inputs,
+        expected,
+        configuration,
+        *,
+        weights=False,
+        exact=False,
+        matrix=False,
+    ):
         directory = arguments.output / name
         directory.mkdir()
         input_paths = []
@@ -141,7 +173,9 @@ def main():
                 f"--expected={directory}/expected.f32",
                 f"--actual={directory}/actual.f32",
                 "--atol=0" if exact else "--atol=0.00002",
-                "--rtol=0" if exact else "--rtol=0.00002",
+                "--rtol=0"
+                if exact
+                else ("--rtol=0.0002" if matrix else "--rtol=0.00002"),
             ],
             capture_output=True,
             text=True,
@@ -188,6 +222,7 @@ def main():
     for phase in ("base", "style"):
         for height, width in ((2, 6), (48, 48)):
             prefix = f"{phase}-{height}x{width}"
+            matrix = (height * width) % 16 == 0
             fixture = arguments.input_results / (prefix + "-composed")
             state = torch.from_numpy(
                 np.fromfile(
@@ -219,8 +254,14 @@ def main():
                 prefix + "-core",
                 "krea2.vae_attention_core",
                 (packed_qkv,),
-                attend(unpack_qkv(packed_qkv)),
+                attend(unpack_qkv(packed_qkv), matrix=matrix),
                 configuration,
+                matrix=matrix,
+            )
+            report(
+                prefix + "-core-vs-full-f32",
+                attended,
+                attend(unpack_qkv(packed_qkv)),
             )
             projected, _ = run(
                 prefix + "-projection",
@@ -273,12 +314,14 @@ def main():
             ):
                 raise AssertionError(f"unexpected prefix reflection: {complete}")
             oracle_qkv = convolve(normalize(state, block.norm.gamma), block.to_qkv)
-            oracle = convolve(attend(oracle_qkv), block.proj) + state
-            relative_l2 = report(prefix + "-native-vs-f64", composed, oracle)
-            if relative_l2 > 0.00002:
+            oracle = convolve(attend(oracle_qkv, matrix=matrix), block.proj) + state
+            relative_l2 = report(prefix + "-native-vs-typed-f64", composed, oracle)
+            if relative_l2 > (0.0002 if matrix else 0.00002):
                 raise AssertionError(
                     f"{prefix}: accumulated attention error {relative_l2}"
                 )
+            full_f32 = convolve(attend(oracle_qkv), block.proj) + state
+            report(prefix + "-native-vs-full-f32", composed, full_f32)
             external = block(state.unsqueeze(2)).squeeze(2)
             report(prefix + "-external-vs-f64", external, oracle)
             report(prefix + "-native-vs-external", composed, external)
