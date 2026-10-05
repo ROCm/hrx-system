@@ -566,18 +566,17 @@ no padded workgroups or duplicate stores. This is a cache-locality policy, not
 a guarantee of physical workgroup execution order. Tile traversal and tile
 geometry are independent tuning dimensions.
 
-At 4,224 rows, FFN up/gate and the 6,144-wide query/gate/output projections use
+At 4,224 rows, the 6,144-wide query/gate/output projections use
 [`linear_tiled_wide_bf16`](kernels/linear_wide.loom). The same eight wave32s
 own a 64x128 output tile: each wave carries four ascending-K16 accumulator
 chains, reusing each input fragment across twice as many output columns.
 Cooperative K64 loads use one padded 64x72 input stage and 128x72 weight stage
 (27 KiB total LDS). The publication/retirement barriers and two-deep pipeline
-overlap next-tile acquisition without double-buffering LDS. Full-K64 remains
-the FFN up/gate strategy at 4,608 rows; other square/up shapes retain the
-chunked baseline. These are model-selected strategies, not constraints on
-the configuration-free motifs.
+overlap next-tile acquisition without double-buffering LDS. Other square
+shapes retain the chunked baseline. These are model-selected strategies,
+not constraints on the configuration-free motifs.
 
-At 4,224 and 4,608 rows, FFN down selects
+At 4,224 and 4,608 rows, FFN up/gate and down select
 [`linear_temporal_bf16`](kernels/linear_temporal.loom). Four wave32s own a
 128x96 output tile with twelve full-K result fragments per wave. Two temporal
 LDS banks occupy 65,024 bytes; an explicit packet queue overlaps global reads
@@ -585,8 +584,19 @@ with current-tile WMMA. The steady loop only acquires valid future K64 tiles.
 A peeled penultimate tile publishes the final queued tile without acquiring
 an unused successor, followed by a final drain. This keeps a bounds-check
 zero merge from forcing future loads to finish before current-tile arithmetic.
-Four 128-row tiles form each traversal panel. Other down shapes retain the
-baseline motif; the same temporal tile is not selected for FFN up.
+Four 128-row tiles form each traversal panel. Other FFN shapes retain the
+baseline motif.
+
+A workgroup-uniform branch separates full output tiles from the final partial
+tile around the entire contraction. The interior path carries an explicit
+origin bound into the packet loader, letting path-dependent facts eliminate
+its repeated bounds checks. Otherwise a zero merge can drain each future
+global load before current-tile arithmetic even in fully valid workgroups.
+The tail keeps guarded loads and stores, sharing the same physical LDS banks;
+there is no padded global allocation or additional dispatch. When the output
+width is divisible by 96, the branch specializes away. Shape selection alone
+is not enough: preserving bounds across the complete loop is what allows the
+prefetch queue to remain asynchronous.
 
 The remaining tiled model wrappers select eight-row-tile groups at 2,048 rows for FFN up,
 1,088 for FFN down, and 2,560 for square/narrow projections. Below those
@@ -614,10 +624,10 @@ case binds `wide_test.rows=16`, `wide_test.inputs=6144` and
 `wide_test.outputs=16384`; `exact_tail` binds 528, 6144 and 256 respectively.
 [`tests/linear_temporal.loom`](tests/linear_temporal.loom) compares the real
 temporal helper with full-K64 at 528x256x320. This exercises the shortest
-supported K, both matrix tails and a partial traversal group without external
-weights or stored expected tensors. The two full-K algorithms retain the same
-K16 accumulation order; this exact helper comparison does not require equality
-with the baseline's four-chain/K256 reduction.
+supported K, both matrix tails, the interior/tail split and a partial traversal
+group without external weights or stored expected tensors. The two full-K
+algorithms retain the same K16 accumulation order; this exact helper comparison
+does not require equality with the baseline's four-chain/K256 reduction.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \

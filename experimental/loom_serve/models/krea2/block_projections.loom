@@ -8,7 +8,6 @@ config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536),
 
 amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
-template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_tiled_wide_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
@@ -109,43 +108,43 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_1536_column_major
 
 kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
   %rows = config.get @krea2.block_tokens : index
-  %tile = index.constant 64 : index
-  %rounding = index.constant 63 : index
+  %image_short_text = index.constant 4224 : index
+  %image_full_text = index.constant 4608 : index
+  %short_text = index.cmp eq, %rows, %image_short_text : index
+  %full_text = index.cmp eq, %rows, %image_full_text : index
+  %temporal = scalar.ori %short_text, %full_text : i1
+  %temporal_row_tile = index.constant 128 : index
+  %baseline_row_tile = index.constant 64 : index
+  %tile = scf.select %temporal, %temporal_row_tile, %baseline_row_tile : index
+  %one = index.constant 1 : index
+  %rounding = index.sub %tile, %one : index
   %padded_rows = index.add %rows, %rounding : index
   %row_tiles = index.div %padded_rows, %tile : index
-  %short_text_rows = index.constant 4224 : index
-  %wide = index.cmp eq, %rows, %short_text_rows : index
-  %wide_output_tiles = index.constant 128 : index
-  %square_output_tiles = index.constant 256 : index
-  %output_tiles = scf.select %wide, %wide_output_tiles, %square_output_tiles : index
-  %one = index.constant 1 : index
-  %threads = index.constant 256 : index
+  %temporal_output_tiles = index.constant 171 : index
+  %baseline_output_tiles = index.constant 256 : index
+  %output_tiles = scf.select %temporal, %temporal_output_tiles, %baseline_output_tiles : index
+  %temporal_threads = index.constant 128 : index
+  %baseline_threads = index.constant 256 : index
+  %threads = scf.select %temporal, %temporal_threads, %baseline_threads : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 16384 : index
-  %minimum_grouped_rows = index.constant 2048 : index
-  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
-  %output_layout = encoding.layout.dense : encoding<layout>
-  // The short-text shape shares each input panel across twice as many output
-  // columns. Both image shapes retain full-K accumulation; other sequence
-  // lengths retain the chunked strategy.
   %image_short_text = index.constant 4224 : index
   %image_full_text = index.constant 4608 : index
   %short_text = index.cmp eq, %rows, %image_short_text : index
   %full_text = index.cmp eq, %rows, %image_full_text : index
-  scf.if %short_text {
-    template.apply<@projection.linear_tiled_wide_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %temporal = scalar.ori %short_text, %full_text : i1
+  scf.if %temporal {
+    %group_size = index.constant 4 : index
+    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
     scf.yield
   } else {
-    scf.if %full_text {
-      template.apply<@projection.linear_tiled_full_k_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
-      scf.yield
-    } else {
-      template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
-      scf.yield
-    }
+    %minimum_grouped_rows = index.constant 2048 : index
+    %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+    %output_layout = encoding.layout.dense : encoding<layout>
+    template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
     scf.yield
   }
   kernel.return

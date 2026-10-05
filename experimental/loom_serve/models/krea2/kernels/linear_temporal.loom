@@ -175,15 +175,11 @@ template.def<@projection.temporal_store> device @temporal_store(%rows: index, %o
   template.return
 }
 
-// BF16 X W^T with dense row-major input, [output,input] weights and output.
-// Launch ceil(rows/128) x ceil(outputs/96) workgroups of 128 threads, wave32.
-// Rows and outputs are positive multiples of 16, inputs of 256; the positive
-// group size selects the number of row tiles in a traversal panel. All are
-// specialization facts. Input, weight and output storage do not overlap.
-// Four waves share two temporal LDS banks and accumulate all K terms in F32.
-// Missing rows are zero-filled, and only complete valid 16-row fragments store.
-template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
-template.def<@projection.linear_temporal_bf16> device @linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+// Consume one temporal tile at the supplied workgroup-uniform origins.
+// The caller owns the shared 65,024-byte LDS allocation and supplies the same
+// dimensions and nonoverlapping storage required by the public motif.
+template.decl @projection.linear_temporal_at(%rows: index, %inputs: index, %outputs: index, %row_origin: index, %output_origin: index, %stage: buffer, %input: buffer, %weight: buffer, %output: buffer)
+template.def<@projection.linear_temporal_at> device @linear_temporal_at(%rows: index, %inputs: index, %outputs: index, %row_origin: index, %output_origin: index, %stage: buffer, %input: buffer, %weight: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -199,9 +195,6 @@ template.def<@projection.linear_temporal_bf16> device @linear_temporal_bf16(%row
   %bank_stride = index.constant 32768 : offset
   %input_offset = index.constant 13824 : offset
   %stage_bytes = index.constant 65024 : offset
-  %row_group, %output_group = template.apply<@projection.temporal_coordinates>(%rows, %outputs, %group_size) : (index, index, index) -> (index, index)
-  %row_origin = index.mul %row_group, %row_tile : index
-  %output_origin = index.mul %output_group, %ninety_six : index
   %workitem = kernel.workitem.id<x> : index
   %subgroup = kernel.subgroup.id : index
   %wave_row = index.mul %subgroup, %tile : index
@@ -209,7 +202,6 @@ template.def<@projection.linear_temporal_bf16> device @linear_temporal_bf16(%row
   %packet_column = index.rem %workitem, %eight : index
   %stage_column = index.mul %packet_column, %eight : index
   %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
-  %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
   %first_weights = buffer.view %stage[%origin] : buffer -> view<96x72xbf16>
   %first_inputs = buffer.view %stage[%input_offset] : buffer -> view<128x72xbf16>
 
@@ -443,5 +435,40 @@ template.def<@projection.linear_temporal_bf16> device @linear_temporal_bf16(%row
   template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column3, %output, %result13) : (index, index, index, index, buffer, vector<8xf32>)
   template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column4, %output, %result14) : (index, index, index, index, buffer, vector<8xf32>)
   template.apply<@projection.temporal_store>(%rows, %outputs, %result_row1, %result_column5, %output, %result15) : (index, index, index, index, buffer, vector<8xf32>)
+  template.return
+}
+
+// BF16 X W^T with dense row-major input, [output,input] weights and output.
+// Launch ceil(rows/128) x ceil(outputs/96) workgroups of 128 threads, wave32.
+// Rows and outputs are positive multiples of 16, inputs of 256; the positive
+// group size selects the number of row tiles in a traversal panel. All are
+// specialization facts. Input, weight and output storage do not overlap.
+// Four waves share two temporal LDS banks and accumulate all K terms in F32.
+// Missing rows are zero-filled, and only complete valid 16-row fragments store.
+//
+// A workgroup-uniform branch specializes the full contraction, not each packet.
+// The interior path establishes the affine bound consumed by existing packet
+// guards. The final partial tile retains its original zero-filled packet path.
+// Both paths share one physical LDS allocation.
+template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.def<@projection.linear_temporal_bf16> device @linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+  %row_tile = index.constant 128 : index
+  %output_tile = index.constant 96 : index
+  %stage_bytes = index.constant 65024 : offset
+  %stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %row_group, %output_group = template.apply<@projection.temporal_coordinates>(%rows, %outputs, %group_size) : (index, index, index) -> (index, index)
+  %row_origin = index.mul %row_group, %row_tile : index
+  %output_origin = index.mul %output_group, %output_tile : index
+  %full_output_tiles = index.div %outputs, %output_tile : index
+  %interior = index.cmp ult, %output_group, %full_output_tiles : index
+  scf.if %interior {
+    %last_full_origin = index.sub %outputs, %output_tile : index
+    %proven_output_origin = index.assume %output_origin [le(%output_origin, %last_full_origin)] : index
+    template.apply<@projection.linear_temporal_at>(%rows, %inputs, %outputs, %row_origin, %proven_output_origin, %stage, %input, %weight, %output) : (index, index, index, index, index, buffer, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    template.apply<@projection.linear_temporal_at>(%rows, %inputs, %outputs, %row_origin, %output_origin, %stage, %input, %weight, %output) : (index, index, index, index, index, buffer, buffer, buffer, buffer)
+    scf.yield
+  }
   template.return
 }

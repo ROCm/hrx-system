@@ -6,9 +6,10 @@
 
 // Link kernels/linear_tiled.loom and kernels/linear_temporal.loom with --library.
 // The 528x256x320 shape covers the shortest K recurrence, M128/N96 tails and
-// the partial final traversal group. Nonuniform BF16 operands compare against
-// the same ascending-K16 arithmetic in the full-K64 helper, not an integer
-// surrogate or the numerically distinct four-chain/K256 baseline.
+// the partial final traversal group. Both interior and partial-output paths run.
+// Nonuniform BF16 operands compare against the same ascending-K16 arithmetic
+// in the full-K64 helper, not an integer surrogate or the numerically distinct
+// four-chain/K256 baseline.
 
 amdgpu.target<gfx11-generic> @temporal_check_wave32 {subgroup_size = 32}
 template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
