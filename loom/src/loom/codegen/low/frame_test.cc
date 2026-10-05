@@ -132,6 +132,28 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
     EXPECT_EQ(actual_producer_nodes, sorted_expected_producer_nodes);
   }
 
+  void ExpectStorageLifetimePredecessors(
+      const loom_low_emission_frame_t& frame, uint32_t consumer_node,
+      std::initializer_list<uint32_t> expected_producer_nodes) {
+    std::vector<uint32_t> actual_producer_nodes;
+    for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+      const loom_low_schedule_dependency_t* dependency =
+          loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies,
+                                                i);
+      if (dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_STORAGE &&
+          dependency->consumer_node == consumer_node &&
+          dependency->minimum_issue_separation_cycles > 0) {
+        actual_producer_nodes.push_back(dependency->producer_node);
+      }
+    }
+    std::sort(actual_producer_nodes.begin(), actual_producer_nodes.end());
+    std::vector<uint32_t> sorted_expected_producer_nodes(
+        expected_producer_nodes);
+    std::sort(sorted_expected_producer_nodes.begin(),
+              sorted_expected_producer_nodes.end());
+    EXPECT_EQ(actual_producer_nodes, sorted_expected_producer_nodes);
+  }
+
   iree_arena_block_pool_t block_pool_ = {};
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t registry_ = {};
@@ -895,6 +917,101 @@ low.func.def target<test.low.core> @ordered_effect(%address: reg<test.ptr>, %val
   // ordered effect itself.
   ExpectEffectPredecessors(frame, /*consumer_node=*/4, {0, 1, 3});
   ExpectEffectPredecessors(frame, /*consumer_node=*/7, {3, 5, 6});
+}
+
+TEST_F(LowEmissionFrameTest, CopyExtendsLoopHeaderStorageLifetime) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @copied_header(%seed: reg<test.i32>, %rhs: reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%cursor: reg<test.i32>):
+  %view = copy %cursor : reg<test.i32> -> reg<test.i32>
+  %alias = copy %view : reg<test.i32> -> reg<test.i32>
+  %read = test.add.i32 %alias, %rhs
+  %next = test.mul.i32 %cursor, %rhs
+  test.event.memory.write.i32 %read
+  low.br ^loop(%next: reg<test.i32>)
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/4, {3});
+}
+
+TEST_F(LowEmissionFrameTest, DetachedAndPartialCopiesDoNotExtendHeader) {
+  ModulePtr detached_module = ParseModule(R"(
+low.func.def target<test.low.core> @detached_header(%seed: reg<test.i32>, %rhs: reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%cursor: reg<test.i32>):
+  %view = copy %cursor {detached = true} : reg<test.i32> -> reg<test.i32>
+  %alias = copy %view : reg<test.i32> -> reg<test.i32>
+  %read = test.add.i32 %alias, %rhs
+  %next = test.mul.i32 %cursor, %rhs
+  test.event.memory.write.i32 %read
+  low.br ^loop(%next: reg<test.i32>)
+}
+)");
+  loom_low_emission_frame_t detached_frame = {};
+  IREE_ASSERT_OK(BuildFrame(detached_module.get(), {}, &detached_frame));
+  ExpectStorageLifetimePredecessors(detached_frame, /*consumer_node=*/4, {});
+
+  ModulePtr partial_module = ParseModule(R"(
+low.func.def target<test.low.core> @partial_header(%seed: reg<test.i32 x4>, %rhs: reg<test.i32>, %rhs_vector: reg<test.i32 x4>) asm {
+  low.br ^loop(%seed: reg<test.i32 x4>)
+^loop(%cursor: reg<test.i32 x4>):
+  %lane = slice %cursor[0] : reg<test.i32 x4> -> reg<test.i32>
+  %view = copy %lane : reg<test.i32> -> reg<test.i32>
+  %read = test.add.i32 %view, %rhs
+  %next = test.add.v4i32 %cursor, %rhs_vector
+  test.event.memory.write.i32 %read
+  low.br ^loop(%next: reg<test.i32 x4>)
+}
+)");
+  loom_low_emission_frame_t partial_frame = {};
+  IREE_ASSERT_OK(BuildFrame(partial_module.get(), {}, &partial_frame));
+  ExpectStorageLifetimePredecessors(partial_frame, /*consumer_node=*/4, {});
+}
+
+TEST_F(LowEmissionFrameTest, TiedStorageRetainsAllReaders) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @tied_header(%seed: reg<test.i32>, %rhs: reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%cursor: reg<test.i32>):
+  %view = copy %cursor : reg<test.i32> -> reg<test.i32>
+  %before = test.add.i32 %view, %rhs
+  %advanced = test.tied.any %view
+  %read = test.add.i32 %advanced, %before
+  %next = test.mul.i32 %cursor, %rhs
+  test.event.memory.write.i32 %read
+  low.br ^loop(%next: reg<test.i32>)
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/3, {2});
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/5, {2, 3, 4});
+}
+
+TEST_F(LowEmissionFrameTest, BackedgeRetainsProducerBlockReaders) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @forwarded_header(%condition: reg<test.i32>, %seed: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^loop(%seed: reg<test.i32>)
+^loop(%cursor: reg<test.i32>):
+  %view = copy %cursor : reg<test.i32> -> reg<test.i32>
+  %read = test.add.i32 %view, %rhs
+  %next = test.mul.i32 %cursor, %rhs
+  low.cond_br %condition, ^forward, ^exit : reg<test.i32>
+^forward:
+  low.br ^loop(%next: reg<test.i32>)
+^exit:
+  return %read
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ExpectStorageLifetimePredecessors(frame, /*consumer_node=*/3, {2});
 }
 
 TEST_F(LowEmissionFrameTest, OrderedEffectUsesDirectionalTimingEndpoints) {
