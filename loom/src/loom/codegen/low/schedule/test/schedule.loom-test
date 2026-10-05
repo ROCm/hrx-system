@@ -458,7 +458,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_defers_non_acti
 }
 
 // ====
-// RUN: with-checks emit low-schedule-json @resource_stall_closes_unspillable_storage_before_reopening strategy=resource-stall
+// RUN: emit low-schedule @resource_stall_closes_unspillable_storage_before_reopening strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -466,21 +466,19 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_closes_unspilla
   // The first fixed-register setup cannot expose its consumer until the
   // multiply is scheduled.
   %prepared = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="low.copy", rejected_packet="low.copy"}
   %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
   // Completing the open unspillable value must beat a zero-stall setup that
   // would require a second physical register in a one-register class.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.fixed.select.i32", rejected_packet="low.copy"}
   %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
   %fixed1 = copy %prepared : reg<test.i32> -> reg<test.fixed.r0>
   %select1 = test.fixed.select.i32 %lhs, %rhs, %fixed1
   return %select0, %select1
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[0,1,2,3,4,5]*
-CHECK: *{"from":0,"to":1,"kind":"order",*
-
 // ====
-// RUN: with-checks emit low-schedule-json @resource_stall_advances_exact_two_consumer_handoff strategy=resource-stall
+// RUN: emit low-schedule @resource_stall_advances_exact_two_consumer_handoff strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -491,23 +489,24 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_advances_exact_
   // cannot nominate either one. The first select consumes one branch and
   // exposes the other as the exact remaining consumer of the full register.
   %unrelated = test.add.i32 %other_lhs, %other_rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.fixed.select.i32", rejected_packet="test.add.i32"}
   %handoff = test.fixed.select.i32 %lhs, %rhs, %fixed
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.fixed.select.i32", rejected_packet="test.add.i32"}
   %completed = test.fixed.select.i32 %handoff, %rhs, %fixed
   return %completed, %unrelated
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[0,1,3,4,2,5]*
-
 // ====
-// RUN: with-checks emit low-schedule-json @resource_stall_finishes_nested_unspillable_release strategy=resource-stall test.i32=12
+// RUN: emit low-schedule @resource_stall_finishes_nested_unspillable_release strategy=resource-stall test.i32=12 diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @resource_stall_finishes_nested_unspillable_release(%pad0: reg<test.explicit32>, %pad1: reg<test.explicit32>, %state_source: reg<test.i32>, %other_source: reg<test.i32>, %setup_lhs: reg<test.i32 x4>, %setup_rhs: reg<test.i32 x4>) -> (reg<test.explicit32>, reg<test.explicit32>, reg<test.i32 x4>, reg<test.i32 x2>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.copy", rejected_packet="low.copy"}
   %other = copy %other_source : reg<test.i32> -> reg<test.explicit32>
   // Consume the first fanout before the boundary so %other's retained sink is
   // complete while its final release remains inside %state's transaction.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.explicit.release.v4i32", rejected_packet="low.copy"}
   %first = test.explicit.release.v4i32 %other
   %state = copy %state_source : reg<test.i32> -> reg<test.explicit32>
   low.schedule.fence
@@ -515,6 +514,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_finishes_nested
   // four explicit registers are live. Finish %other's exact release before
   // opening the sibling setup needed by the same downstream update.
   %setup = test.add.v4i32 %setup_lhs, %setup_rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.explicit.release.v4i32", rejected_packet="test.add.v4i32"}
   %released = test.explicit.release.v4i32 %other
   %delta = test.add.v4i32 %released, %setup
   %updated = test.explicit.expand.i32 %state, %delta
@@ -522,31 +522,29 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_finishes_nested
   return %pad0, %pad1, %first, %result
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[*,3,5,4,*
-
 // ====
-// RUN: with-checks emit low-schedule-json @resource_stall_accounts_for_future_unspillable_activation strategy=resource-stall
+// RUN: emit low-schedule @resource_stall_accounts_for_future_unspillable_activation strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_future_unspillable_activation(%live0: reg<test.explicit32>, %live1: reg<test.explicit32>, %live2: reg<test.explicit32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.explicit32>, reg<test.explicit32>, reg<test.explicit32>, reg<test.i32>, reg<test.i32>) asm {
   // This branch eventually occupies the last explicit register. Keep the
   // virtual branch ahead until it completes instead of opening that pressure.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="low.copy"}
   %physical_path = test.add.i32 %lhs, %rhs
   %physical = copy %physical_path : reg<test.i32> -> reg<test.explicit32>
   %physical_result = copy %physical : reg<test.explicit32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="test.add.i32"}
   %virtual_path = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="low.copy", rejected_packet="low.copy"}
   %virtual0 = copy %virtual_path : reg<test.i32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="low.copy", rejected_packet="low.copy"}
   %virtual1 = copy %virtual0 : reg<test.i32> -> reg<test.i32>
   return %live0, %live1, %live2, %physical_result, %virtual1
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[3,0,*
-
 // ====
-// RUN: with-checks emit low-schedule-json @resource_stall_accounts_for_non_ssa_unlock_activation strategy=resource-stall
+// RUN: emit low-schedule @resource_stall_accounts_for_non_ssa_unlock_activation strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -554,19 +552,22 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_no
   // Memory ordering makes the store the last non-SSA predecessor of a load
   // chain that opens the final explicit register. Carry that activation to
   // the ready store and finish the virtual branch first.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.store.v4i32", rejected_packet="low.copy"}
   test.store.v4i32 %address, %value
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.load.v4i32", rejected_packet="low.copy"}
   %loaded = test.load.v4i32 %address
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.extract_lane.i32", rejected_packet="low.copy"}
   %lane = test.extract_lane.i32 %loaded, 0
   %physical = copy %lane : reg<test.i32> -> reg<test.explicit32>
   %physical_result = copy %physical : reg<test.explicit32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="test.store.v4i32"}
   %virtual_path = test.mul.i32 %lhs, %rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="low.copy", rejected_packet="low.copy"}
   %virtual0 = copy %virtual_path : reg<test.i32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="low.copy", rejected_packet="low.copy"}
   %virtual1 = copy %virtual0 : reg<test.i32> -> reg<test.i32>
   return %live0, %live1, %live2, %physical_result, %virtual1, %value, %lhs, %rhs
 }
-
-// ----
-CHECK: *"scheduled_node_indices":[5,0,*
 
 // ====
 // RUN: emit low-schedule @resource_stall_excludes_live_ins_from_unspillable_activation strategy=resource-stall diagnostics=candidates output=none
@@ -602,7 +603,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_excludes_prior_
 }
 
 // ====
-// RUN: with-checks emit low-schedule-json @resource_stall_excludes_loop_handoffs_from_unspillable_activation strategy=resource-stall
+// RUN: emit low-schedule @resource_stall_excludes_loop_handoffs_from_unspillable_activation strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -611,17 +612,19 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_excludes_loop_h
 ^loop(%state0: reg<test.explicit32>, %state1: reg<test.explicit32>, %state2: reg<test.explicit32>):
   // Each backedge value replaces an already-live loop argument. Keep the
   // first update moving instead of charging both replacements as new storage.
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="low.copy", rejected_packet="low.copy"}
   %value0 = copy %state0 : reg<test.explicit32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.add.i32", rejected_packet="low.copy"}
   %path0 = test.add.i32 %value0, %lhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="low.copy", rejected_packet="low.copy"}
   %next0 = copy %path0 : reg<test.i32> -> reg<test.explicit32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="low.copy", rejected_packet="low.copy"}
   %value1 = copy %state1 : reg<test.explicit32> -> reg<test.i32>
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.add.i32", rejected_packet="low.copy"}
   %path1 = test.add.i32 %value1, %rhs
   %next1 = copy %path1 : reg<test.i32> -> reg<test.explicit32>
   low.br ^loop(%next0: reg<test.explicit32>, %next1: reg<test.explicit32>, %state2: reg<test.explicit32>)
 }
-
-// ----
-CHECK: *"scheduled_node_indices":[0,1,2,*
 
 // ====
 // RUN: emit low-schedule @resource_stall_advances_smallest_active_unspillable_completion strategy=resource-stall diagnostics=candidates output=none
