@@ -6,6 +6,10 @@
 
 #include "loom/codegen/low/frame.h"
 
+#include <algorithm>
+#include <initializer_list>
+#include <vector>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -105,6 +109,27 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
       }
     }
     return nullptr;
+  }
+
+  void ExpectEffectPredecessors(
+      const loom_low_emission_frame_t& frame, uint32_t consumer_node,
+      std::initializer_list<uint32_t> expected_producer_nodes) {
+    std::vector<uint32_t> actual_producer_nodes;
+    for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+      const loom_low_schedule_dependency_t* dependency =
+          loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies,
+                                                i);
+      if (dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT &&
+          dependency->consumer_node == consumer_node) {
+        actual_producer_nodes.push_back(dependency->producer_node);
+      }
+    }
+    std::sort(actual_producer_nodes.begin(), actual_producer_nodes.end());
+    std::vector<uint32_t> sorted_expected_producer_nodes(
+        expected_producer_nodes);
+    std::sort(sorted_expected_producer_nodes.begin(),
+              sorted_expected_producer_nodes.end());
+    EXPECT_EQ(actual_producer_nodes, sorted_expected_producer_nodes);
   }
 
   iree_arena_block_pool_t block_pool_ = {};
@@ -798,6 +823,78 @@ low.func.def target<test.low.core> @guarded_tail(%base: reg<test.ptr>, %origin: 
   EXPECT_EQ(
       frame.schedule.source_suffix_issue_cycle_lower_bounds[source_suffix],
       source_extent);
+}
+
+TEST_F(LowEmissionFrameTest, RetainsEveryUnobservedWrite) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @unobserved_writes(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.v4i32 %address, %value
+  test.store.v4i32 %address, %value
+  test.store.v4i32 %address, %value
+  %loaded = test.load.v4i32 %address
+  return
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  // Write-after-write issue order does not establish completion, so the read
+  // must wait for every outstanding write.
+  ExpectEffectPredecessors(frame, /*consumer_node=*/3, {0, 1, 2});
+}
+
+TEST_F(LowEmissionFrameTest, RetiresCompletedMemoryFrontiers) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @batched_accesses(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  %loaded0 = test.load.v4i32 %address
+  %loaded1 = test.load.v4i32 %address
+  %loaded2 = test.load.v4i32 %address
+  test.store.v4i32 %address, %value
+  test.store.v4i32 %address, %value
+  %loaded5 = test.load.v4i32 %address
+  %loaded6 = test.load.v4i32 %address
+  test.store.v4i32 %address, %value
+  test.store.v4i32 %address, %value
+  %loaded9 = test.load.v4i32 %address
+  return
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  // Each opposite-kind burst observes the complete outstanding frontier. Once
+  // observed, that frontier retires and does not leak into the next burst.
+  ExpectEffectPredecessors(frame, /*consumer_node=*/3, {0, 1, 2});
+  ExpectEffectPredecessors(frame, /*consumer_node=*/4, {0, 1, 2, 3});
+  ExpectEffectPredecessors(frame, /*consumer_node=*/5, {3, 4});
+  ExpectEffectPredecessors(frame, /*consumer_node=*/6, {3, 4});
+  ExpectEffectPredecessors(frame, /*consumer_node=*/7, {3, 4, 5, 6});
+  ExpectEffectPredecessors(frame, /*consumer_node=*/8, {5, 6, 7});
+  ExpectEffectPredecessors(frame, /*consumer_node=*/9, {7, 8});
+}
+
+TEST_F(LowEmissionFrameTest, OrderedEffectPreservesMemoryFrontier) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @ordered_effect(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.v4i32 %address, %value
+  test.store.v4i32 %address, %value
+  %loaded2 = test.load.v4i32 %address
+  test.barrier
+  %loaded4 = test.load.v4i32 %address
+  test.store.v4i32 %address, %value
+  test.store.v4i32 %address, %value
+  %loaded7 = test.load.v4i32 %address
+  return
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  // The ordered effect joins the current frontier without replacing it. The
+  // next opposite-kind burst retires the older memory accesses but retains the
+  // ordered effect itself.
+  ExpectEffectPredecessors(frame, /*consumer_node=*/4, {0, 1, 3});
+  ExpectEffectPredecessors(frame, /*consumer_node=*/7, {3, 5, 6});
 }
 
 TEST_F(LowEmissionFrameTest, OrderedEffectUsesDirectionalTimingEndpoints) {
