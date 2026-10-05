@@ -13,7 +13,6 @@ loom_check_test_suite(
   NAME
     test
   SRCS
-    "memory_access_flags.loom-test"
     "memory_frontier.loom-test"
     "packing_completion.loom-test"
     "schedule.loom-test"

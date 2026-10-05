@@ -306,6 +306,66 @@ low.func.def target<test.low.core> @write_after_write(%first_value: reg<test.i32
   }
 }
 
+TEST_F(LowEmissionFrameTest, ObservableReadsRetainCompletionOrder) {
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @observable_reads(%first_address: reg<test.ptr>, %second_address: reg<test.ptr>) asm {
+  %first = test.load.v4i32<volatile> %first_address
+  %second = test.load.v4i32<volatile> %second_address
+  return
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ExpectEffectPredecessors(frame, /*consumer_node=*/1, {0});
+    EXPECT_GE(frame.schedule.nodes[1].issue_cycle,
+              frame.schedule.nodes[0].issue_cycle + 4u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @ordinary_reads(%first_address: reg<test.ptr>, %second_address: reg<test.ptr>) asm {
+  %first = test.load.v4i32 %first_address
+  %second = test.load.v4i32 %second_address
+  return
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ExpectEffectPredecessors(frame, /*consumer_node=*/1, {});
+  }
+}
+
+TEST_F(LowEmissionFrameTest, OrderedEffectsPreserveDirectMemoryCompletion) {
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @ordered_read(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  %loaded = test.load.v4i32<volatile> %address
+  test.barrier
+  test.store.v4i32 %address, %value
+  return
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame,
+                              LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+    ExpectEffectPredecessors(frame, /*consumer_node=*/2, {0, 1});
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @ordered_write(%address: reg<test.ptr>, %value: reg<test.i32 x4>) asm {
+  test.store.v4i32 %address, %value
+  test.barrier
+  %loaded = test.load.v4i32 %address
+  return
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame,
+                              LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY));
+    ExpectEffectPredecessors(frame, /*consumer_node=*/2, {0, 1});
+  }
+}
+
 TEST_F(LowEmissionFrameTest, SourceOrderBoundariesPreserveSegments) {
   {
     ModulePtr module = ParseModule(R"(
