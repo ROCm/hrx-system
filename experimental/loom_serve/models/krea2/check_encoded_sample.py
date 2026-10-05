@@ -187,7 +187,7 @@ def main():
             )
         footprint = next(record for record in records if "workspace_bytes" in record)
         expected_footprint = dict(
-            kernels=(95 if adapted else 71) + (14 if integrated else 0),
+            kernels=(97 if adapted else 72) + (14 if integrated else 0),
             parameters=(1062 if adapted else 534) + (386 if integrated else 0),
             parameter_roots=(3 if adapted else 2) + int(integrated),
             parameter_bytes=(27038612748 if adapted else 26569389580)

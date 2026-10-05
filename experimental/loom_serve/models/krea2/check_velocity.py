@@ -84,7 +84,7 @@ for phase, adapted in (("base", False), ("base", True), ("style", True)):
         raise AssertionError("non-bitwise stack-to-head composition")
     footprint = next(record for record in records if "workspace_bytes" in record)
     expected_footprint = dict(
-        kernels=19 if adapted else 12,
+        kernels=21 if adapted else 13,
         parameters=818 if adapted else 368,
         parameter_roots=2 if adapted else 1,
         parameter_bytes=24747553024 if adapted else 24317366528,

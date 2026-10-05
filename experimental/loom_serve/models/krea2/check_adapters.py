@@ -117,7 +117,13 @@ with (
                 def execute(name, expected, arguments, checkpoints, *, exact=False):
                     # Reuse one oracle file; retained operands have distinct paths.
                     expected_path = args.output / "expected.bf16"
-                    expected_path.write_bytes(encode(expected))
+                    value_plane = component == "value" and name in (
+                        "base",
+                        "adapter_add",
+                        "adapted",
+                    )
+                    stored_expected = expected.T if value_plane else expected
+                    expected_path.write_bytes(encode(stored_expected))
                     actual_path = directory / f"{name}.actual.bf16"
                     print(
                         json.dumps(
@@ -146,9 +152,13 @@ with (
                     if exact:
                         command += ["--atol=0", "--rtol=0"]
                     subprocess.run(command, check=True)
-                    actual = load(actual_path).reshape_as(expected)
+                    actual = load(actual_path).reshape_as(stored_expected)
+                    if value_plane:
+                        actual = actual.T
                     if exact and encode(actual) != encode(expected):
                         raise AssertionError(f"{component} {name}: non-bitwise fusion")
+                    # The file retains physical V layout for later native inputs;
+                    # the returned tensor is logical for independent arithmetic.
                     paths[name] = actual_path
                     return actual
 

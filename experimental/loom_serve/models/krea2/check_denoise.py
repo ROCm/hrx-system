@@ -364,7 +364,7 @@ for phase in ("base", "style"):
         "trajectory", "denoise_adapted" if adapted else "denoise", sample, inputs
     )
     expected_counts = dict(
-        kernels=33 if adapted else 20,
+        kernels=35 if adapted else 21,
         parameters=834 if adapted else 376,
         parameter_roots=2 if adapted else 1,
         parameter_bytes=25821294848 if adapted else 25382416640,

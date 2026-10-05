@@ -250,7 +250,7 @@ def main():
             raise AssertionError(f"{name}: output bytes differ from native stages")
         footprint = next(record for record in records if "workspace_bytes" in record)
         expected_counts = dict(
-            kernels=(33 if adapted else 20)
+            kernels=(35 if adapted else 21)
             + 30
             + (7 if adapted else 4)
             + (25 if adapted else 17),
