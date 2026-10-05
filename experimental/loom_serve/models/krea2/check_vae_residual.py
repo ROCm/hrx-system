@@ -41,7 +41,10 @@ def activate(value):
 
 def convolve(value, layer):
     return F.conv2d(
-        value.double(), layer.weight[:, :, -1].double(), layer.bias.double(), padding=1
+        value.to(torch.bfloat16).double(),
+        layer.weight[:, :, -1].to(torch.bfloat16).double(),
+        layer.bias.double(),
+        padding=1,
     ).float()
 
 

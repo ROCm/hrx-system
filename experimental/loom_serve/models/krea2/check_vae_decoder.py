@@ -58,18 +58,18 @@ def convolve(value, layer, *, matrix=False):
     ).float()
 
 
-def residual(value, block, *, matrix=False):
+def residual(value, block):
     skip = (
         convolve(value, block.conv_shortcut) if block.in_dim != block.out_dim else value
     )
     first = convolve(
         activate(normalize(value, block.norm1.gamma)),
         block.conv1,
-        matrix=matrix and block.in_dim == block.out_dim,
+        matrix=True,
     )
     return (
         convolve(
-            activate(normalize(first, block.norm2.gamma)), block.conv2, matrix=matrix
+            activate(normalize(first, block.norm2.gamma)), block.conv2, matrix=True
         )
         + skip
     )
@@ -193,7 +193,7 @@ def main():
                         prefix + f"-up{stage}-residual{block_index}",
                         "qualify.vae_up_residual",
                         (state,),
-                        residual(state, block, matrix=stage >= 1),
+                        residual(state, block),
                         {
                             **configuration,
                             "qualify.vae_stage": stage,
@@ -206,7 +206,7 @@ def main():
                         state, scale_factor=2, mode="nearest-exact"
                     )
                     expected = convolve(
-                        enlarged, up_block.upsamplers[0].resample[1], matrix=stage >= 1
+                        enlarged, up_block.upsamplers[0].resample[1], matrix=True
                     )
                     state, _ = run(
                         prefix + f"-up{stage}-resize",
