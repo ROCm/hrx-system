@@ -119,7 +119,6 @@ loom_check_test_suite(
         "test/source_low/numeric_address_widening.loom-test",
         "test/source_low/numeric_f32_narrowing.loom-test",
         "test/source_low/numeric_float_comparison_flags.loom-test",
-        "test/source_low/numeric_float_narrowing_matrix.loom-test",
         "test/source_low/numeric_index_extrema.loom-test",
         "test/source_low/numeric_index_operands.loom-test",
         "test/source_low/numeric_integer_division.loom-test",

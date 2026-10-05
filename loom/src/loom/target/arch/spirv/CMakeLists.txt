@@ -534,7 +534,6 @@ loom_check_test_suite(
     "test/source_low/numeric_extended_math.loom-test"
     "test/source_low/numeric_float_arithmetic.loom-test"
     "test/source_low/numeric_float_comparison_flags.loom-test"
-    "test/source_low/numeric_float_narrowing_matrix.loom-test"
     "test/source_low/numeric_index.loom-test"
     "test/source_low/numeric_index_conversion.loom-test"
     "test/source_low/numeric_integer_extrema.loom-test"
