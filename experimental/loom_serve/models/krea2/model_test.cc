@@ -36,12 +36,15 @@ TEST(Krea2ModelTest, MissingTokenizerReleasesPartialOwnership) {
   loom_serve_krea2_model_options_t options = {};
   options.checkpoint_directory = IREE_SV("missing-krea-model-directory");
   options.height = options.width = 384;
-  options.text_tokens = 512;
-  loom_serve_krea2_model_t* model = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_NOT_FOUND,
-      loom_serve_krea2_model_create(&options, &model, iree_allocator_system()));
-  EXPECT_EQ(model, nullptr);
+  // Cover sole small/non-64-aligned maxima and both retained-stage maxima.
+  for (const uint32_t maximum : {16u, 80u, 128u, 144u, 192u, 512u}) {
+    options.text_tokens = maximum;
+    loom_serve_krea2_model_t* model = nullptr;
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                          loom_serve_krea2_model_create(
+                              &options, &model, iree_allocator_system()));
+    EXPECT_EQ(model, nullptr);
+  }
 }
 
 }  // namespace

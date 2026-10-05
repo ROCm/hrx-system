@@ -99,7 +99,8 @@ count. The instrumented build is for correctness, not timing comparisons.
 Use the execution host's normal exclusive-run mechanism on a shared device.
 
 This caller creates one immutable set of encoder, Turbo, optional LoRA and VAE
-parameter domains, then one retained command and reflected scratch allocation.
+parameter domains, shared by its cold-compiled retained commands. They also
+share one input/output bank and the maximum reflected scratch allocation.
 Request inputs upload once. A single source command runs all model stages;
 only completed F32 RGB comes back. Both normal completion and failure drain
 accepted work before borrowed upload/readback storage is freed.
@@ -120,10 +121,16 @@ promised to yield identical random floating-point bits. Comparisons with other
 implementations consume the same initial noise.
 
 Pixel dimensions are multiples of 16, and their patch-grid area must be a
-multiple of 16. `--text_tokens` is a positive multiple of 16 and bounds
-retained text including the suffix. The native tokenizer truncates prompt text,
-right-pads before the live suffix, and masks the additional physical tile rows.
-These values specialize the live source, not a precompiled shape catalog.
+multiple of 16. `--text_tokens` is a positive multiple of 16 and bounds the
+maximum retained text including the suffix. A maximum greater than 128 and
+divisible by 64 retains both maximum and text128 commands; other maxima retain
+only the configured command. The native tokenizer encodes the whole framing
+prefix plus prompt once at the maximum capacity. Combined counts up to 98 use
+text128 when available, preserving the prompt/suffix live-key partitions;
+larger counts use the maximum. Materialization right-pads before the live
+suffix and masks additional physical tile rows without truncating again.
+These values specialize the live source at startup, not a precompiled shape
+catalog or a warm shape cache.
 The CLI runs one fresh image per invocation. The image server below accepts
 concurrent clients and serializes complete images through one residency; it
 does not batch images or use the Qwen token scheduler.
@@ -131,12 +138,20 @@ does not batch images or use the Qwen token scheduler.
 ### Retained model ownership
 
 [`model.h`](model.h)/[`model.c`](model.c) is the reusable native residency
-behind the CLI. Creation loads the tokenizer, specializes and records one
-source command, streams each parameter domain once, and allocates the reusable
-device input/output/workspace buffers. Serialized `model_generate` calls take
-only prompt, seed and adapter strength. They neither compile nor reload weights
-nor allocate device backing. The image and text shape are fixed when this
-residency is created.
+behind the CLI. Creation loads the tokenizer and specializes the bounded
+retained command set. All reflected parameter roots and tensor placements must
+match exactly before it streams each parameter domain once. Every command
+records the same immutable buffers, and allocation uses componentwise maximum
+input lengths plus maximum reflected workspace length and alignment.
+Serialized `model_generate` calls take only prompt, seed and adapter strength.
+They neither compile nor reload weights nor allocate device backing. Pixel
+shape and maximum text capacity are fixed when the residency is created.
+
+The `image_residency` event reports the one-bank parameter/input/output and
+workspace bytes, workspace alignment, each retained text extent and its kernel
+and entry counts. The aggregate counts include both cold compilations; shared
+weights do not imply deduplicated executable objects. Each `image_prepared`
+event reports the actual combined prefix+prompt count and selected extent.
 
 The returned F32 NCHW RGB is borrowed until the next generation or destruction.
 A consumer encodes or copies it before submitting another request. Host request
@@ -146,12 +161,13 @@ before submission leaves the model usable. A device execution failure is
 terminal for its owner. The application serializes calls; this leaf does not
 create an HTTP server, request queue, or implicit model worker.
 
-The full-checkpoint reuse witness alternates two prompts, applies LoRA, then
-repeats the original base image in one adapted residency. A nonfinite-strength
-request precedes every valid call. Its final pixels are compared exactly with
-isolated CLI outputs; repeated base F32 bytes must also match. An older qualified
-CLI can be supplied as `--generator` to test a residency refactor against its
-predecessor rather than against itself.
+The full-checkpoint reuse witness runs short→long→short in one residency,
+requiring measured combined counts 40→99→40 to select 128→512→128. With an
+adapter, it repeats that sequence at strengths zero and one; without an
+adapter, it runs the base sequence. A nonfinite-strength request precedes every
+valid call. Final pixels are compared exactly with isolated CLI outputs, and
+each repeated short image must have identical F32 bytes. An older qualified
+fixed-extent CLI can be supplied as `--generator` for the counterfactual.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
@@ -171,10 +187,11 @@ python -B experimental/loom_serve/models/krea2/check_model.py \
 
 This uses the reference environment's NumPy and Pillow only to compare output
 pixels. It retains less than 16 MiB of final images and logs and runs under the
-execution host's exclusive device lease.
+execution host's exclusive device lease. Omit `--adapter` to exercise the
+three-domain base residency separately.
 
-The first retained qualification passed all four exact pixel comparisons and
-the repeated F32 identity check, with one JIT, one residency and one load per
+The earlier fixed-extent qualification passed all four exact pixel comparisons
+and the repeated F32 identity check, with one JIT, one residency and one load per
 parameter domain. The extracted CLI also reproduced both previously qualified
 image/text shapes exactly; all 154 independent request-input comparisons still
 had zero differing bits. These are correctness checks, not throughput results.
@@ -182,10 +199,11 @@ had zero differing bits. These are correctness checks, not throughput results.
 ### Serve images over HTTP
 
 The server reuses the model leaf above and the runner's model-independent
-[`image_service`](../../image_service.h). It exposes one configured image/text
-shape and one optional adapter. Image execution runs on one worker; the
-application owner handles bounded admission, health, completed responses and
-peer cancellation while the existing `iree/net` TCP carrier owns network I/O.
+[`image_service`](../../image_service.h). It exposes one configured pixel shape,
+maximum text capacity and one optional adapter. Image execution runs on one
+worker; the application owner handles bounded admission, health, completed
+responses and peer cancellation while the existing `iree/net` TCP carrier owns
+network I/O.
 There is no inference subprocess or per-request JIT/model construction.
 
 ```sh
@@ -283,10 +301,13 @@ that arbitrary LoRA combinations are already prepared or cached.
 
 The real-checkpoint HTTP witness consumes the isolated PPMs from
 `check_model.py` above. It decodes responses with Pillow and requires exact
-pixels for two prompts, active LoRA, and base repetition. It also exercises
-health during generation, queue overflow, a deliberately slow reader, queued
-and active resets, and shutdown with an image in flight. Final logs require
-one JIT, one residency and exactly one load per parameter domain.
+pixels for the short fox prompt, the long repeated-word prompt, active LoRA,
+and base repetition. Their measured combined token counts 40 and 99 must
+select text extents 128 and 512 respectively, including after active peer
+reset and during joined shutdown. It also exercises health during generation,
+queue overflow, a deliberately slow reader, and queued cancellation. All seven
+generated images share one residency: logs require two cold JIT stages, shared
+maximum workspace backing, and exactly one load per parameter domain.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
@@ -310,8 +331,8 @@ and retains less than 16 MiB. Its lifecycle events provide readiness/completion
 synchronization; it does not approximate readiness with sleeps. Host-ASAN
 results establish ownership/correctness, not image-generation performance.
 
-The first full-device HTTP qualification generated seven images in one model
-residency. All five returned PNGs matched the isolated CLI pixels exactly;
+The earlier fixed-extent HTTP qualification generated seven images in one
+model residency. All five returned PNGs matched the isolated CLI pixels exactly;
 the two other completed images retired safely after active peer reset and
 shutdown. Health, bounded overflow, queued cancellation and slow-reader
 independence passed. The run observed one JIT and four parameter-domain loads

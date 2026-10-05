@@ -18,14 +18,14 @@
 IREE_FLAG(string, model, "experimental/loom_serve/models/krea2",
           "Source catalog.");
 IREE_FLAG(string, checkpoint, "", "Official checkpoint directory.");
-IREE_FLAG(string, adapter, "", "Official softwatercolor safetensors file.");
+IREE_FLAG(string, adapter, "", "Optional softwatercolor safetensors file.");
 IREE_FLAG(string, output, "",
           "Existing directory for completed F32 RGB files.");
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  if (!FLAG_adapter[0] || !FLAG_output[0] || !FLAG_checkpoint[0]) {
-    fprintf(stderr, "checkpoint, adapter and output are required.\n");
+  if (!FLAG_output[0] || !FLAG_checkpoint[0]) {
+    fprintf(stderr, "checkpoint and output are required.\n");
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
@@ -41,13 +41,18 @@ int main(int argc, char** argv) {
   iree_status_t status =
       loom_serve_krea2_model_create(&options, &model, allocator);
   const char* prompts[] = {
-      "A deer grazing in the forest, Art Deco watercolor style",
-      "A small brass robot tending red flowers in a sunlit greenhouse, "
-      "watercolor illustration",
+      "a red fox in the snow",
+      "red"
+      " red red red red red red red red red red red red red red red red"
+      " red red red red red red red red red red red red red red red red"
+      " red red red red red red red red red red red red red red red red"
+      " red red red red red red red red red red red red red red red red",
   };
-  const uint32_t cases[] = {0, 1, 0, 0};
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(cases) && iree_status_is_ok(status); ++i) {
+  const uint32_t cases[] = {0, 1, 0};
+  const iree_host_size_t case_count =
+      IREE_ARRAYSIZE(cases) * (FLAG_adapter[0] ? 2 : 1);
+  for (iree_host_size_t i = 0; i < case_count && iree_status_is_ok(status);
+       ++i) {
     iree_const_byte_span_t rgb = iree_const_byte_span_empty();
     iree_status_t rejected = loom_serve_krea2_model_generate(
         model, IREE_SV("rejected"), 0, NAN, &rgb);
@@ -61,9 +66,12 @@ int main(int argc, char** argv) {
       // Expected failure is observed at the qualification boundary.
       iree_status_fprint(stderr, rejected);
       iree_status_free(rejected);
+      const uint32_t prompt = cases[i % IREE_ARRAYSIZE(cases)];
+      const float strength =
+          FLAG_adapter[0] && i < IREE_ARRAYSIZE(cases) ? 0.0f : 1.0f;
       status = loom_serve_krea2_model_generate(
-          model, iree_make_cstring_view(prompts[cases[i]]), cases[i] ? 42 : 0,
-          i == 2 ? 1.0f : 0.0f, &rgb);
+          model, iree_make_cstring_view(prompts[prompt]), prompt ? 42 : 0,
+          strength, &rgb);
     }
     char name[32];
     snprintf(name, sizeof(name), "image-%zu.f32", i);
@@ -86,6 +94,8 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   printf(
-      "PASS: retained model produced four images after rejected requests.\n");
+      "PASS: retained model produced %zu short/long/short images after "
+      "rejected requests.\n",
+      case_count);
   return EXIT_SUCCESS;
 }

@@ -26,7 +26,8 @@ IREE_FLAG(string, prompt, "", "Image prompt; the model supplies its template.");
 IREE_FLAG(string, seed, "0", "Unsigned decimal 64-bit native noise seed.");
 IREE_FLAG(int32_t, height, 384, "Output pixel height, divisible by 16.");
 IREE_FLAG(int32_t, width, 384, "Output pixel width, divisible by 16.");
-IREE_FLAG(int32_t, text_tokens, 512, "Retained text extent, divisible by 16.");
+IREE_FLAG(int32_t, text_tokens, 512,
+          "Maximum retained text extent, divisible by 16.");
 IREE_FLAG(float, strength, 1.0f, "Adapter strength; zero is base identity.");
 IREE_FLAG(string, output, "", "Output PPM image path.");
 

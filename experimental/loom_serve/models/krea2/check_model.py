@@ -7,8 +7,8 @@
 """Compare retained native images with isolated prompt-to-image invocations.
 
 Uses the real checkpoint and source commands, never a fixture model. An older
-qualified CLI may be supplied as --generator for a controlled extraction
-comparison. Keep below 16 MiB of final images/logs; requires a device lease.
+qualified CLI may be supplied as --generator for a fixed-shape counterfactual.
+Keep below 16 MiB of final images/logs; requires a device lease.
 """
 
 import argparse
@@ -26,7 +26,7 @@ def main():
     parser.add_argument("--checker", nargs="+", required=True)
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--adapter", type=Path, required=True)
+    parser.add_argument("--adapter", type=Path)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
@@ -41,20 +41,22 @@ def main():
         result.check_returncode()
         return text
 
-    prompts = (
-        "A deer grazing in the forest, Art Deco watercolor style",
-        "A small brass robot tending red flowers in a sunlit greenhouse, watercolor illustration",
-    )
+    prompts = ("a red fox in the snow", " ".join(["red"] * 65))
     common = [f"--model={args.model}", f"--checkpoint={args.checkpoint}"]
-    for index in range(3):
+    isolated_cases = [
+        (prompt, adapted) for adapted in (False, True) for prompt in (0, 1)
+    ]
+    if not args.adapter:
+        isolated_cases = isolated_cases[:2]
+    for index, (prompt, adapted) in enumerate(isolated_cases):
         run(
             f"isolated-{index}",
             [
                 *args.generator,
                 *common,
-                f"--prompt={prompts[index == 1]}",
-                f"--seed={42 if index == 1 else 0}",
-                *([f"--adapter={args.adapter}", "--strength=1"] if index == 2 else []),
+                f"--prompt={prompts[prompt]}",
+                f"--seed={42 if prompt else 0}",
+                *([f"--adapter={args.adapter}", "--strength=1"] if adapted else []),
                 "--height=384",
                 "--width=384",
                 "--text_tokens=512",
@@ -66,18 +68,47 @@ def main():
         [
             *args.checker,
             *common,
-            f"--adapter={args.adapter}",
+            *([f"--adapter={args.adapter}"] if args.adapter else []),
             f"--output={args.output}",
         ],
     )
-    # Model construction happens once even across invalid, base and LoRA calls.
-    assert retained.count('"event":"jit_stage"') == 1
-    assert retained.count('"event":"image_residency"') == 1
-    assert retained.count("Streaming ") == 4
-    assert retained.count("adapter strength must be finite") == 4
-    first = (args.output / "image-0.f32").read_bytes()
-    assert first == (args.output / "image-3.f32").read_bytes()
-    for index, isolated in enumerate((0, 1, 2, 0)):
+    # Model construction is cold; both commands share the same parameter bank.
+    events = [
+        json.loads(line) for line in retained.splitlines() if line.startswith("{")
+    ]
+    residencies = [event for event in events if event.get("event") == "image_residency"]
+    prepared = [event for event in events if event.get("event") == "image_prepared"]
+    assert retained.count('"event":"jit_stage"') == 2
+    assert len(residencies) == 1
+    residency = residencies[0]
+    assert [stage["text_tokens"] for stage in residency["stages"]] == [512, 128]
+    assert residency["workspace_bytes"] == max(
+        stage["workspace_bytes"] for stage in residency["stages"]
+    )
+    assert residency["workspace_alignment"] == max(
+        stage["workspace_alignment"] for stage in residency["stages"]
+    )
+    assert residency["kernels"] == sum(
+        stage["kernels"] for stage in residency["stages"]
+    )
+    assert residency["entries"] == sum(
+        stage["entries"] for stage in residency["stages"]
+    )
+    assert retained.count("Streaming ") == (4 if args.adapter else 3)
+    rounds = 2 if args.adapter else 1
+    assert retained.count("adapter strength must be finite") == 3 * rounds
+    assert [event["prefix_prompt_tokens"] for event in prepared] == [
+        40,
+        99,
+        40,
+    ] * rounds
+    assert [event["text_tokens"] for event in prepared] == [128, 512, 128] * rounds
+    for first in range(0, 3 * rounds, 3):
+        assert (args.output / f"image-{first}.f32").read_bytes() == (
+            args.output / f"image-{first + 2}.f32"
+        ).read_bytes()
+    references = (0, 1, 0, 2, 3, 2) if args.adapter else (0, 1, 0)
+    for index, isolated in enumerate(references):
         rgb = np.fromfile(args.output / f"image-{index}.f32", dtype="<f4")
         assert np.isfinite(rgb).all() and (abs(rgb) <= 1).all()
         pixels = np.rint((rgb.reshape(3, 384, 384).transpose(1, 2, 0) / 2 + 0.5) * 255)
@@ -85,7 +116,8 @@ def main():
         assert np.array_equal(pixels.astype(np.uint8), expected), index
         print(json.dumps(dict(image=index, exact_pixels=True)), flush=True)
     print(
-        "PASS: retained base/novel/LoRA/base images equal isolated output; invalid requests preserve residency.",
+        "PASS: short/long/short images equal isolated output; "
+        "invalid requests preserve one shared residency.",
         flush=True,
     )
 
