@@ -1,4 +1,4 @@
-// RUN: emit low-schedule-json @register_packing_avoids_fragmentation strategy=resource-stall diagnostics=candidates test.packed.narrow=4 test.packed.wide=8 output=none
+// RUN: emit low-schedule @register_packing_avoids_fragmentation strategy=resource-stall diagnostics=candidates test.packed.narrow=4 test.packed.wide=8 output=none
 
 test.target<low_core> @test_target
 
@@ -25,7 +25,7 @@ low.func.def target<test.low.core>(@test_target) @register_packing_avoids_fragme
 
 // ====
 
-// RUN: emit low-schedule-json @register_packing_retains_active_completion_during_pressure_recovery strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @register_packing_retains_active_completion_during_pressure_recovery strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -55,7 +55,7 @@ low.func.def target<test.low.core>(@test_target) @register_packing_retains_activ
 
 // Keep a shared producer live while preparing the peer needed to retire each
 // expanded branch. Opening more branches cannot replace their shared source.
-// RUN: emit low-schedule-json @register_packing_fanout strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @register_packing_fanout strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
@@ -83,7 +83,7 @@ low.func.def target<test.low.core>(@target) @register_packing_fanout(%source: re
 
 // Non-final uses preserve the shared narrow source while each expansion is
 // retired. Repeated operands still complete their producer in one instruction.
-// RUN: emit low-schedule-json @register_packing_fanout_repeated_operand strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @register_packing_fanout_repeated_operand strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -103,7 +103,7 @@ low.func.def target<test.low.core>(@test_target) @register_packing_fanout_repeat
 
 // Values produced by an earlier source range are already live when the next
 // range opens and do not add another copy of their packed-resource footprint.
-// RUN: emit low-schedule-json @register_packing_excludes_prior_range_activation strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @register_packing_excludes_prior_range_activation strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -126,20 +126,19 @@ low.func.def target<test.low.core>(@test_target) @register_packing_excludes_prio
 // Live-ins can fill a packing resource without establishing a producer-owned
 // completion sink. Advance the config that exposes their continuation before
 // unrelated pressure relief.
-// RUN: with-checks emit low-schedule-json @register_packing_advances_live_in_continuations strategy=resource-stall
+// RUN: emit low-schedule @register_packing_advances_live_in_continuations strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @register_packing_advances_live_in_continuations(%live_narrow: reg<test.packed.narrow>, %live_wide: reg<test.packed.wide>, %address: reg<test.ptr>, %value: reg<test.i32 x4>, %config_lhs: reg<test.i32>, %config_rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.packed.wide>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.store.v4i32", rejected_packet="test.packing.configured.expand"}
   test.store.v4i32 %address, %value
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.mul.i32", rejected_packet="test.store.v4i32"}
   %config = test.mul.i32 %config_lhs, %config_rhs
   %wide0, %wide1 = test.packing.configured.expand %live_narrow, %config
   %result = test.packing.retire %wide0, %wide1
   return %result, %live_wide
 }
-
-// ----
-CHECK: *"scheduled_node_indices":[1,0,2,3,4]*
 
 // ====
 
@@ -148,40 +147,46 @@ CHECK: *"scheduled_node_indices":[1,0,2,3,4]*
 // producer would open a different transaction in the same full resource. One
 // live narrow and one live wide value fill the aggregate without filling
 // either underlying register class.
-// RUN: with-checks emit low-schedule-json @register_packing_tracks_operand_bearing_continuations strategy=resource-stall
+// RUN: emit low-schedule @register_packing_tracks_operand_bearing_continuations strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
 low.func.def target<test.low.core>(@test_target) @register_packing_tracks_operand_bearing_continuations(%seed_source: reg<test.i32>, %shared_source: reg<test.i32>, %other_lhs: reg<test.i32>, %other_rhs: reg<test.i32>, %active_lhs: reg<test.i32>, %active_rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.packed.wide x2>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
   %seed_narrow = test.packing.create %seed_source
   %seed_wide = test.packing.expand %seed_narrow
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.packing.create", rejected_packet="test.packing.expand"}
   %shared_narrow = test.packing.create %shared_source
   low.schedule.fence
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="5", chosen_packet="test.mul.i32", rejected_packet="test.packing.configured.expand"}
   %other_config = test.mul.i32 %other_lhs, %other_rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="4", chosen_packet="test.add.i32", rejected_packet="test.mul.i32"}
   %active_config = test.add.i32 %active_lhs, %active_rhs
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="6", chosen_packet="test.packing.configured.expand", rejected_packet="test.packing.configured.expand"}
   %active_wide0, %active_wide1 = test.packing.configured.expand %shared_narrow, %active_config
   %other_wide0, %other_wide1 = test.packing.configured.expand %shared_narrow, %other_config
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="7", chosen_packet="test.packing.retire", rejected_packet="test.packing.configured.expand"}
   %active_result = test.packing.retire %active_wide0, %active_wide1
   %other_result = test.packing.retire %other_wide0, %other_wide1
   return %active_result, %other_result, %seed_wide
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[0,2,1,3,5,4,6,8,7,9,10]*
-
 // ====
 
 // The peer remains owned by the successor, but each temporary really retires.
 // Finish the first temporary before opening the second packed transaction.
-// RUN: with-checks emit low-schedule-json @register_packing_forwarded_peer strategy=resource-stall
+// RUN: emit low-schedule @register_packing_forwarded_peer strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @register_packing_forwarded_peer(%carried_peer: reg<test.packed.wide x2>, %first_source: reg<test.i32>, %second_source: reg<test.i32>) -> (reg<test.packed.wide x2>, reg<test.i32>, reg<test.i32>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
   %first_narrow = test.packing.create %first_source
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.packing.expand", rejected_packet="test.packing.create"}
   %first_temporary = test.packing.expand %first_narrow
   %second_narrow = test.packing.create %second_source
   %second_temporary = test.packing.expand %second_narrow
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.packing.retire", rejected_packet="test.packing.create"}
   %first_result = test.packing.retire %first_temporary, %carried_peer
   %second_result = test.packing.retire %second_temporary, %carried_peer
   low.br ^exit(%carried_peer: reg<test.packed.wide x2>, %first_result: reg<test.i32>, %second_result: reg<test.i32>)
@@ -189,39 +194,37 @@ low.func.def target<test.low.core>(@target) @register_packing_forwarded_peer(%ca
   return %kept, %first, %second
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[0,1,4,2,3,5,6,7]*
-
 // ====
 
 // Retiring a derived value cannot release its forwarded source. The independent
 // transaction completes while that source stays live; the derived value then
 // retains its own genuine local completion.
-// RUN: with-checks emit low-schedule-json @register_packing_forwarded_source_derived_release strategy=resource-stall
+// RUN: emit low-schedule @register_packing_forwarded_source_derived_release strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @register_packing_forwarded_source_derived_release(%first_source: reg<test.i32>, %second_source: reg<test.i32>) -> (reg<test.packed.narrow>, reg<test.i32>, reg<test.i32>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
   %carried = test.packing.create %first_source
   %derived = test.packing.expand %carried
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.packing.create", rejected_packet="test.packing.expand"}
   %second_narrow = test.packing.create %second_source
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.packing.expand", rejected_packet="test.packing.expand"}
   %second_temporary = test.packing.expand %second_narrow
   %derived_result = test.packing.retire %derived, %derived
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.packing.retire", rejected_packet="test.packing.expand"}
   %second_result = test.packing.retire %second_temporary, %second_temporary
   low.br ^exit(%carried: reg<test.packed.narrow>, %derived_result: reg<test.i32>, %second_result: reg<test.i32>)
 ^exit(%kept: reg<test.packed.narrow>, %first: reg<test.i32>, %second: reg<test.i32>):
   return %kept, %first, %second
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[0,2,3,5,1,4,6,7]*
-
 // ====
 
 // Two narrow inputs fill the pair slots. Replacing one with a wide result
 // still fits: the dying input and ordinary result occupy different phases.
 // Repeated-operand consumers require no additional packed peers.
-// RUN: emit low-schedule-json @register_packing_replacement_phases strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @register_packing_replacement_phases strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
@@ -239,7 +242,7 @@ low.func.def target<test.low.core>(@target) @register_packing_replacement_phases
 
 // The source remains live after expansion, so the ordinary result really
 // grows the packed footprint. Release the independent input before expanding.
-// RUN: emit low-schedule-json @register_packing_persistent_growth strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @register_packing_persistent_growth strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
@@ -255,7 +258,7 @@ low.func.def target<test.low.core>(@target) @register_packing_persistent_growth(
 
 // An early-clobber result overlaps both inputs before either can retire.
 // Release the independent narrow input first to make room for that overlap.
-// RUN: emit low-schedule-json @register_packing_early_overlap strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @register_packing_early_overlap strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
@@ -271,15 +274,18 @@ low.func.def target<test.low.core>(@target) @register_packing_early_overlap(%sou
 
 // One producer publishes a temporary and a forwarded sibling in the same
 // packing resource. The temporary's completion is not the sibling's release.
-// RUN: with-checks emit low-schedule-json @register_packing_forwarded_sibling strategy=resource-stall
+// RUN: emit low-schedule @register_packing_forwarded_sibling strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @register_packing_forwarded_sibling(%first_source: reg<test.i32>, %configuration: reg<test.i32>, %second_source: reg<test.i32>) -> (reg<test.packed.wide x2>, reg<test.i32>, reg<test.i32>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
   %first_narrow = test.packing.create %first_source
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.packing.configured.expand", rejected_packet="test.packing.create"}
   %carried, %temporary = test.packing.configured.expand %first_narrow, %configuration
   %second_narrow = test.packing.create %second_source
   %second_temporary = test.packing.expand %second_narrow
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.packing.retire", rejected_packet="test.packing.create"}
   %first_result = test.packing.retire %temporary, %temporary
   %second_result = test.packing.retire %second_temporary, %second_temporary
   low.br ^exit(%carried: reg<test.packed.wide x2>, %first_result: reg<test.i32>, %second_result: reg<test.i32>)
@@ -287,28 +293,26 @@ low.func.def target<test.low.core>(@target) @register_packing_forwarded_sibling(
   return %kept, %first, %second
 }
 
-// ----
-CHECK: *"scheduled_node_indices":[0,1,4,2,3,5,6,7]*
-
 // ====
 
 // Repeated branch payloads establish one source ownership fact. They preserve
 // the same temporary-release order as a single forwarded occurrence.
-// RUN: with-checks emit low-schedule-json @register_packing_duplicate_forwarding strategy=resource-stall
+// RUN: emit low-schedule @register_packing_duplicate_forwarding strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @target
 
 low.func.def target<test.low.core>(@target) @register_packing_duplicate_forwarding(%first_source: reg<test.i32>, %second_source: reg<test.i32>) -> (reg<test.packed.narrow>, reg<test.packed.narrow>, reg<test.i32>, reg<test.i32>) asm {
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="0", chosen_packet="test.packing.create", rejected_packet="test.packing.create"}
   %carried = test.packing.create %first_source
   %derived = test.packing.expand %carried
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="1", chosen_packet="test.packing.create", rejected_packet="test.packing.expand"}
   %second_narrow = test.packing.create %second_source
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="2", chosen_packet="test.packing.expand", rejected_packet="test.packing.expand"}
   %second_temporary = test.packing.expand %second_narrow
   %derived_result = test.packing.retire %derived, %derived
+  // REMARK@+1: BACKEND/015 {scheduled_ordinal="3", chosen_packet="test.packing.retire", rejected_packet="test.packing.expand"}
   %second_result = test.packing.retire %second_temporary, %second_temporary
   low.br ^exit(%carried: reg<test.packed.narrow>, %carried: reg<test.packed.narrow>, %derived_result: reg<test.i32>, %second_result: reg<test.i32>)
 ^exit(%kept: reg<test.packed.narrow>, %also_kept: reg<test.packed.narrow>, %first: reg<test.i32>, %second: reg<test.i32>):
   return %kept, %also_kept, %first, %second
 }
-
-// ----
-CHECK: *"scheduled_node_indices":[0,2,3,5,1,4,6,7]*
