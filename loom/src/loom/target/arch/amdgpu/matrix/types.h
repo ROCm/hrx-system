@@ -428,6 +428,12 @@ typedef uint8_t loom_amdgpu_matrix_result_representation_id_t;
 // bitsets.
 #define LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_MAX_ID UINT8_C(63)
 
+// Exact participant/source-element ownership, independent of numeric width
+// and register packing. Active-element stride and inactive source elements
+// remain part of this identity. Zero denotes no reusable coordinate contract.
+typedef uint8_t loom_amdgpu_matrix_result_coordinate_id_t;
+#define LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE UINT8_C(0)
+
 typedef enum loom_amdgpu_matrix_result_representation_flag_bits_e {
   // The native fragment's M/N coordinates are exchanged at the source
   // contract boundary.
@@ -445,9 +451,20 @@ typedef struct loom_amdgpu_matrix_result_representation_t {
   uint8_t numeric_type;
   // Coordinate interpretation applied to the native fragment layout.
   loom_amdgpu_matrix_result_representation_flags_t flags;
+  // Numeric-independent source-element ownership realized by this typed row.
+  loom_amdgpu_matrix_result_coordinate_id_t coordinate_id;
 } loom_amdgpu_matrix_result_representation_t;
-static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 3,
+static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 4,
               "matrix result representations must stay compact");
+
+typedef struct loom_amdgpu_matrix_result_coordinates_t {
+  // Typed realization by native result numeric enum, or NONE when absent.
+  // UNKNOWN and the input-only XF32 slot have no result realization.
+  loom_amdgpu_matrix_result_representation_id_t
+      representation_ids[LOOM_AMDGPU_MATRIX_NUMERIC_I32 + 1];
+} loom_amdgpu_matrix_result_coordinates_t;
+static_assert(sizeof(loom_amdgpu_matrix_result_coordinates_t) == 7,
+              "matrix coordinate bindings must stay compact");
 
 // Sentinel used when no operand-exchanged native contract exists.
 #define LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE UINT16_MAX

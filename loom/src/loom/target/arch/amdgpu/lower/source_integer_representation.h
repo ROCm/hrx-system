@@ -32,17 +32,17 @@ typedef uint8_t loom_amdgpu_source_integer_representation_action_t;
 
 enum loom_amdgpu_source_integer_representation_action_e {
   // A narrow result can preserve low bits or normalize its carrier.
-  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT = 4,
+  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_FLEXIBLE_RESULT = 5,
   // A narrow result is emitted as a sign-extended carrier.
-  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_SIGN_EXTENDED_RESULT = 5,
+  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_SIGN_EXTENDED_RESULT = 6,
   // A narrow integer constant has value-dependent carrier guarantees.
-  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_CONSTANT_RESULT = 6,
+  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_CONSTANT_RESULT = 7,
   // A signed conversion consumes a narrow operand and may produce one.
-  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_SIGNED_CONVERSION = 7,
+  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_SIGNED_CONVERSION = 8,
   // An unsigned conversion consumes a narrow operand and may produce one.
-  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_UNSIGNED_CONVERSION = 8,
+  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_UNSIGNED_CONVERSION = 9,
   // First payload operand/result preserve the same native carrier bits.
-  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_TRANSPORT_PAYLOAD = 9,
+  LOOM_AMDGPU_SOURCE_INTEGER_REPRESENTATION_ACTION_TRANSPORT_PAYLOAD = 10,
 };
 
 // Returns whether |type| uses a target narrow integer carrier.

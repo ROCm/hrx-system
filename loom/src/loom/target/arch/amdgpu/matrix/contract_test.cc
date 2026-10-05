@@ -166,6 +166,33 @@ TEST(MatrixContractTest, Gfx11F16F32HasTransposedResultRealization) {
             LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_FLAG_TRANSPOSE_MN);
 }
 
+TEST(MatrixContractTest, CoordinateBindingsPreserveEveryTypedRealization) {
+  for (iree_host_size_t i = 0;
+       i < loom_amdgpu_matrix_contract_descriptor_count(); ++i) {
+    const auto* descriptor = loom_amdgpu_matrix_contract_descriptor_at(i);
+    const auto& choices = descriptor->realization;
+    for (auto representation_id :
+         {choices.canonical_result_representation_id,
+          choices.operand_exchanged_result_representation_id}) {
+      const auto* representation =
+          loom_amdgpu_matrix_result_representation_at(representation_id);
+      if (representation == nullptr) {
+        continue;
+      }
+      ASSERT_NE(representation->coordinate_id, 0);
+      EXPECT_EQ(loom_amdgpu_matrix_result_representation_for_coordinates(
+                    representation->coordinate_id,
+                    static_cast<loom_amdgpu_matrix_numeric_type_t>(
+                        representation->numeric_type)),
+                representation_id);
+      EXPECT_EQ(
+          loom_amdgpu_matrix_result_representation_for_coordinates(
+              representation->coordinate_id, LOOM_AMDGPU_MATRIX_NUMERIC_FP8),
+          LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE);
+    }
+  }
+}
+
 TEST(MatrixContractTest, FeatureInfoCoversKnownFeatureBits) {
   loom_amdgpu_matrix_feature_bits_t seen_bits = 0;
   const iree_host_size_t count = loom_amdgpu_matrix_feature_info_count();

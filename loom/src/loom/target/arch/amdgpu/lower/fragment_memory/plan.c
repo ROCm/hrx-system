@@ -1018,15 +1018,17 @@ static bool loom_amdgpu_fragment_memory_target_layout(
     loom_value_id_t blocks, loom_value_id_t rows, loom_value_id_t columns,
     const loom_value_fact_storage_schema_t* view_storage_schema,
     const loom_amdgpu_fragment_memory_view_numeric_t* view_numeric,
-    loom_amdgpu_matrix_result_representation_id_t required_representation,
+    loom_amdgpu_matrix_result_coordinate_id_t required_coordinates,
     const loom_amdgpu_matrix_fragment_layout_t** out_layout,
     loom_amdgpu_matrix_result_representation_flags_t* out_representation_flags,
+    loom_amdgpu_matrix_result_coordinate_id_t* out_coordinates,
     loom_amdgpu_fragment_memory_payload_form_t* out_payload_form,
     loom_amdgpu_fragment_memory_narrowed_result_sources_t*
         out_narrowed_result_sources,
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
   *out_layout = NULL;
   *out_representation_flags = 0;
+  *out_coordinates = LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE;
   *out_payload_form = LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   *out_narrowed_result_sources =
       (loom_amdgpu_fragment_memory_narrowed_result_sources_t){
@@ -1042,42 +1044,59 @@ static bool loom_amdgpu_fragment_memory_target_layout(
 
   loom_amdgpu_fragment_memory_layout_rejection_flags_t rejection_flags =
       LOOM_AMDGPU_FRAGMENT_MEMORY_LAYOUT_REJECTION_FLAG_NONE;
-  if (required_representation !=
-      LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE) {
-    const loom_amdgpu_matrix_result_representation_t* representation =
-        loom_amdgpu_matrix_result_representation_at(required_representation);
-    IREE_ASSERT(representation != NULL,
-                "selected matrix representation must name a generated row");
-    const loom_amdgpu_matrix_fragment_layout_t* layout =
-        loom_amdgpu_matrix_fragment_layout_for_kind(
-            (loom_amdgpu_matrix_fragment_layout_kind_t)
-                representation->fragment_layout_kind);
-    IREE_ASSERT(layout != NULL,
-                "selected matrix representation must name a fragment layout");
+  if (required_coordinates != LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE) {
     IREE_ASSERT_TRUE(loom_amdgpu_matrix_fragment_role_is_result_like(role));
-    loom_scalar_type_t expected_element_type = LOOM_SCALAR_TYPE_NONE;
-    const bool has_expected_element_type =
-        loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
-            (loom_amdgpu_matrix_numeric_type_t)representation->numeric_type,
-            &expected_element_type);
-    IREE_ASSERT_TRUE(has_expected_element_type);
-    loom_amdgpu_fragment_memory_payload_form_t payload_form =
-        LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
-    const loom_amdgpu_fragment_memory_layout_match_t match =
-        loom_amdgpu_fragment_memory_evaluate_layout(
-            environment, role, operation_kind, payload, payload_type, view_type,
-            blocks, rows, columns, view_storage_schema, view_numeric, layout,
-            (loom_amdgpu_matrix_numeric_type_t)representation->numeric_type,
-            expected_element_type, representation->flags, &payload_form,
-            &rejection_flags, out_narrowed_result_sources);
-    if (match == LOOM_AMDGPU_FRAGMENT_MEMORY_LAYOUT_MATCH_NONE) {
-      return loom_amdgpu_fragment_memory_reject_layout(
-          operation_kind, rejection_flags, diagnostic);
+    const loom_scalar_type_t view_element = loom_type_element_type(view_type);
+    const bool half_view =
+        loom_amdgpu_fragment_memory_scalar_type_is_16bit_float(view_element);
+    // Form preference is independent of physical coordinates: proven F32
+    // narrowing, exact native storage, then adapted load/extended store.
+    // Each form binds directly; no native contract is rediscovered here.
+    const loom_amdgpu_matrix_numeric_type_t numerics[] = {
+        operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE && half_view
+            ? LOOM_AMDGPU_MATRIX_NUMERIC_F32
+            : LOOM_AMDGPU_MATRIX_NUMERIC_UNKNOWN,
+        loom_amdgpu_matrix_result_numeric_type_from_scalar(view_element),
+        operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD && half_view
+            ? LOOM_AMDGPU_MATRIX_NUMERIC_F32
+        : operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE &&
+                view_element == LOOM_SCALAR_TYPE_F32
+            ? LOOM_AMDGPU_MATRIX_NUMERIC_F16
+            : LOOM_AMDGPU_MATRIX_NUMERIC_UNKNOWN,
+    };
+    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(numerics); ++i) {
+      const loom_amdgpu_matrix_result_representation_id_t representation_id =
+          loom_amdgpu_matrix_result_representation_for_coordinates(
+              required_coordinates, numerics[i]);
+      if (representation_id == LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE ||
+          (environment->contract_candidates->exact_result_representation_bits &
+           (UINT64_C(1) << representation_id)) == 0) {
+        continue;
+      }
+      const loom_amdgpu_matrix_result_representation_t* representation =
+          loom_amdgpu_matrix_result_representation_at(representation_id);
+      const loom_amdgpu_matrix_fragment_layout_t* layout =
+          loom_amdgpu_matrix_fragment_layout_for_kind(
+              representation->fragment_layout_kind);
+      loom_scalar_type_t expected_element = LOOM_SCALAR_TYPE_NONE;
+      loom_amdgpu_matrix_fragment_scalar_type_from_numeric(numerics[i],
+                                                           &expected_element);
+      if (loom_amdgpu_fragment_memory_evaluate_layout(
+              environment, role, operation_kind, payload, payload_type,
+              view_type, blocks, rows, columns, view_storage_schema,
+              view_numeric, layout, numerics[i], expected_element,
+              representation->flags, out_payload_form, &rejection_flags,
+              out_narrowed_result_sources) ==
+          LOOM_AMDGPU_FRAGMENT_MEMORY_LAYOUT_MATCH_NONE) {
+        continue;
+      }
+      *out_layout = layout;
+      *out_representation_flags = representation->flags;
+      *out_coordinates = required_coordinates;
+      return true;
     }
-    *out_layout = layout;
-    *out_representation_flags = representation->flags;
-    *out_payload_form = payload_form;
-    return true;
+    return loom_amdgpu_fragment_memory_reject_layout(
+        operation_kind, rejection_flags, diagnostic);
   }
 
   const loom_amdgpu_matrix_fragment_contract_candidates_t* candidates =
@@ -1128,6 +1147,12 @@ static bool loom_amdgpu_fragment_memory_target_layout(
     }
     best_layout = layout;
     best_payload_form = payload_form;
+    if (loom_amdgpu_matrix_fragment_role_is_result_like(role)) {
+      *out_coordinates =
+          loom_amdgpu_matrix_result_representation_at(
+              descriptor->realization.canonical_result_representation_id)
+              ->coordinate_id;
+    }
     *out_narrowed_result_sources = narrowed_result_sources;
     best_match = layout_match;
     if (layout_match ==
@@ -1450,9 +1475,10 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
     const loom_amdgpu_fragment_memory_source_t* source,
     loom_low_source_memory_operation_kind_t operation_kind,
     const loom_amdgpu_fragment_memory_prepared_t* prepared,
-    loom_amdgpu_matrix_result_representation_id_t required_representation,
+    loom_amdgpu_matrix_result_coordinate_id_t required_coordinates,
     loom_amdgpu_fragment_memory_plan_t* out_plan,
     loom_amdgpu_fragment_memory_publication_choice_t* out_publication_choice,
+    loom_amdgpu_matrix_result_coordinate_id_t* out_coordinates,
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
   if (out_plan != NULL) {
     *out_plan = (loom_amdgpu_fragment_memory_plan_t){0};
@@ -1466,16 +1492,20 @@ static bool loom_amdgpu_fragment_memory_evaluate_prepared(
   loom_amdgpu_fragment_memory_payload_form_t payload_form =
       LOOM_AMDGPU_FRAGMENT_MEMORY_PAYLOAD_FORM_NATIVE;
   loom_amdgpu_fragment_memory_narrowed_result_sources_t narrowed_result_sources;
+  loom_amdgpu_matrix_result_coordinate_id_t coordinates;
   if (!loom_amdgpu_fragment_memory_target_layout(
           environment, prepared->role, operation_kind, source->payload,
           prepared->payload_type, prepared->view_type, source->blocks,
           source->rows, source->columns,
           prepared->has_view_storage_schema ? &prepared->view_storage_schema
                                             : NULL,
-          &prepared->view_numeric, required_representation, &layout,
-          &representation_flags, &payload_form, &narrowed_result_sources,
-          diagnostic)) {
+          &prepared->view_numeric, required_coordinates, &layout,
+          &representation_flags, &coordinates, &payload_form,
+          &narrowed_result_sources, diagnostic)) {
     return false;
+  }
+  if (out_coordinates != NULL) {
+    *out_coordinates = coordinates;
   }
 
   const loom_matrix_fragment_role_layout_t* role_layout =
@@ -1668,7 +1698,7 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
     const loom_amdgpu_target_facts_t* target_facts,
     loom_func_like_t source_function, const loom_op_t* source_op,
     loom_low_source_memory_operation_kind_t operation_kind,
-    loom_amdgpu_matrix_result_representation_id_t required_representation,
+    loom_amdgpu_matrix_result_coordinate_id_t required_coordinates,
     loom_amdgpu_fragment_memory_plan_t* out_plan,
     loom_amdgpu_fragment_memory_diagnostic_t* diagnostic) {
   *out_plan = (loom_amdgpu_fragment_memory_plan_t){0};
@@ -1695,15 +1725,16 @@ static bool loom_amdgpu_analyze_vector_fragment_memory_plan_impl(
                                            &prepared, diagnostic) ||
       !loom_amdgpu_fragment_memory_evaluate_prepared(
           &environment, &source, operation_kind, &prepared,
-          required_representation, out_plan,
-          /*out_publication_choice=*/NULL, diagnostic)) {
+          required_coordinates, out_plan,
+          /*out_publication_choice=*/NULL, /*out_coordinates=*/NULL,
+          diagnostic)) {
     return false;
   }
   return loom_amdgpu_fragment_memory_select_fp8_load_decode_plan(
       fact_table, descriptor_set, source.payload, out_plan);
 }
 
-iree_status_t loom_amdgpu_query_accumulator_fragment_store_representations(
+iree_status_t loom_amdgpu_query_accumulator_fragment_memory_coordinates(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_representation_candidate_t* out_candidates,
     iree_host_size_t* out_candidate_count) {
@@ -1747,32 +1778,59 @@ iree_status_t loom_amdgpu_query_accumulator_fragment_store_representations(
       .source_function = loom_low_lower_context_source_function(context),
   };
   loom_amdgpu_fragment_memory_source_t source = {0};
-  loom_amdgpu_fragment_memory_source_from_op(
-      module, source_op, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE, &source);
+  const loom_low_source_memory_operation_kind_t operation_kind =
+      source_op->kind == LOOM_OP_VECTOR_FRAGMENT_LOAD
+          ? LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD
+          : LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
+  loom_amdgpu_fragment_memory_source_from_op(module, source_op, operation_kind,
+                                             &source);
   loom_amdgpu_fragment_memory_prepared_t prepared = {0};
   if (!loom_amdgpu_fragment_memory_prepare(&environment, &source, source_access,
                                            &prepared, /*diagnostic=*/NULL)) {
     return iree_ok_status();
   }
+  if (operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD) {
+    loom_amdgpu_matrix_result_coordinate_id_t coordinates = 0;
+    if (loom_amdgpu_fragment_memory_evaluate_prepared(
+            &environment, &source, operation_kind, &prepared,
+            LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE, /*out_plan=*/NULL,
+            /*out_publication_choice=*/NULL, &coordinates,
+            /*diagnostic=*/NULL)) {
+      out_candidates[0] = (loom_low_representation_candidate_t){
+          .representation = coordinates,
+      };
+      *out_candidate_count = 1;
+    }
+    return iree_ok_status();
+  }
   uint64_t representation_bits =
       contract_candidates->exact_result_representation_bits & ~UINT64_C(1);
+  uint64_t observed_coordinates = 0;
   while (representation_bits != 0) {
     const loom_amdgpu_matrix_result_representation_id_t representation_id =
         (loom_amdgpu_matrix_result_representation_id_t)
             iree_math_count_trailing_zeros_u64(representation_bits);
     representation_bits &= representation_bits - 1u;
+    const loom_amdgpu_matrix_result_coordinate_id_t coordinates =
+        loom_amdgpu_matrix_result_representation_at(representation_id)
+            ->coordinate_id;
+    const uint64_t coordinate_bit = UINT64_C(1) << coordinates;
+    if ((observed_coordinates & coordinate_bit) != 0) {
+      continue;
+    }
+    observed_coordinates |= coordinate_bit;
     loom_amdgpu_fragment_memory_publication_choice_t publication_choice;
     if (!loom_amdgpu_fragment_memory_evaluate_prepared(
             &environment, &source, LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE,
-            &prepared, representation_id, /*out_plan=*/NULL,
-            &publication_choice, /*diagnostic=*/NULL) ||
+            &prepared, coordinates, /*out_plan=*/NULL, &publication_choice,
+            /*out_coordinates=*/NULL, /*diagnostic=*/NULL) ||
         publication_choice.strategy ==
             LOOM_AMDGPU_FRAGMENT_MEMORY_EPILOGUE_STRATEGY_NONE) {
       continue;
     }
     out_candidates[(*out_candidate_count)++] =
         (loom_low_representation_candidate_t){
-            .representation = representation_id,
+            .representation = coordinates,
             .cost = publication_choice.cost,
         };
   }
@@ -1794,8 +1852,8 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
   const loom_amdgpu_source_alloca_layout_t* alloca_layout = NULL;
   IREE_RETURN_IF_ERROR(loom_amdgpu_source_alloca_layout_for_lower_context(
       context, &alloca_layout));
-  loom_amdgpu_matrix_result_representation_id_t required_representation =
-      LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE;
+  loom_amdgpu_matrix_result_coordinate_id_t required_coordinates =
+      LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE;
   loom_amdgpu_fragment_memory_source_t source = {0};
   loom_amdgpu_fragment_memory_source_from_op(module, source_op, operation_kind,
                                              &source);
@@ -1824,8 +1882,7 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
     *out_selected = false;
     return iree_ok_status();
   }
-  if (operation_kind == LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE &&
-      source.role == LOOM_CONTRACT_OPERAND_ROLE_RESULT) {
+  if (loom_amdgpu_matrix_fragment_role_is_result_like(source.role)) {
     loom_low_representation_id_t selected_representation =
         LOOM_LOW_REPRESENTATION_ID_NONE;
     loom_low_lower_representation_lookup(context, source.payload,
@@ -1833,11 +1890,10 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
     if (selected_representation != LOOM_LOW_REPRESENTATION_ID_NONE) {
       IREE_ASSERT_LE(selected_representation,
                      LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_MAX_ID);
-      required_representation = (loom_amdgpu_matrix_result_representation_id_t)
-          selected_representation;
+      required_coordinates =
+          (loom_amdgpu_matrix_result_coordinate_id_t)selected_representation;
     }
   }
-  loom_amdgpu_fragment_memory_diagnostic_t diagnostic = {0};
   loom_amdgpu_source_value_analysis_t* value_analysis = NULL;
   IREE_RETURN_IF_ERROR(
       loom_amdgpu_source_value_analysis_for_context(context, &value_analysis));
@@ -1849,16 +1905,7 @@ static iree_status_t loom_amdgpu_fragment_memory_select(
       loom_amdgpu_target_facts_cast(
           loom_low_lower_context_target_facts(context)),
       loom_low_lower_context_source_function(context), source_op,
-      operation_kind, required_representation, out_plan, &diagnostic);
-  if (!*out_selected && required_representation !=
-                            LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "selected matrix result representation %u cannot lower fragment "
-        "memory operation: %.*s",
-        required_representation, (int)diagnostic.constraint_key.size,
-        diagnostic.constraint_key.data);
-  }
+      operation_kind, required_coordinates, out_plan, /*diagnostic=*/NULL);
   return iree_ok_status();
 }
 
@@ -1966,8 +2013,9 @@ iree_status_t loom_amdgpu_low_legality_verify_fragment_memory(
                                           &prepared, &diagnostic) &&
       loom_amdgpu_fragment_memory_evaluate_prepared(
           &environment, &source, operation_kind, &prepared,
-          LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE, &plan,
-          /*out_publication_choice=*/NULL, &diagnostic)) {
+          LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE, &plan,
+          /*out_publication_choice=*/NULL, /*out_coordinates=*/NULL,
+          &diagnostic)) {
     if (loom_sanitizer_race_fragment_access_isa(op) &&
         plan.source.memory_space != LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP) {
       return loom_amdgpu_low_legality_reject(

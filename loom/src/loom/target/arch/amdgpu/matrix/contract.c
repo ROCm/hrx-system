@@ -252,6 +252,17 @@ loom_amdgpu_matrix_result_representation_at(
   return &kLoomAmdgpuMatrixResultRepresentations[representation_id];
 }
 
+loom_amdgpu_matrix_result_representation_id_t
+loom_amdgpu_matrix_result_representation_for_coordinates(
+    loom_amdgpu_matrix_result_coordinate_id_t coordinate_id,
+    loom_amdgpu_matrix_numeric_type_t numeric_type) {
+  if (numeric_type > LOOM_AMDGPU_MATRIX_NUMERIC_I32) {
+    return LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_NONE;
+  }
+  return kLoomAmdgpuMatrixResultCoordinates[coordinate_id]
+      .representation_ids[numeric_type];
+}
+
 const loom_amdgpu_matrix_contract_descriptor_t*
 loom_amdgpu_matrix_contract_wait_state_descriptor_for_low_descriptor_ref(
     loom_amdgpu_descriptor_ref_t low_descriptor_ref) {

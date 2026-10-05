@@ -149,6 +149,12 @@ bool loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
     loom_amdgpu_matrix_numeric_type_t numeric_type,
     loom_scalar_type_t* out_element_type);
 
+// Returns the native result numeric type for a scalar carrier, or UNKNOWN
+// for types without a native matrix result representation.
+loom_amdgpu_matrix_numeric_type_t
+loom_amdgpu_matrix_result_numeric_type_from_scalar(
+    loom_scalar_type_t element_type);
+
 // Returns matrix feature bits for the selected AMDGPU target facts.
 loom_amdgpu_matrix_feature_bits_t loom_amdgpu_matrix_fragment_feature_bits(
     const loom_amdgpu_target_facts_t* target_facts);

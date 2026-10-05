@@ -201,6 +201,25 @@ bool loom_amdgpu_matrix_fragment_scalar_type_from_numeric(
   }
 }
 
+loom_amdgpu_matrix_numeric_type_t
+loom_amdgpu_matrix_result_numeric_type_from_scalar(
+    loom_scalar_type_t element_type) {
+  switch (element_type) {
+    case LOOM_SCALAR_TYPE_F64:
+      return LOOM_AMDGPU_MATRIX_NUMERIC_F64;
+    case LOOM_SCALAR_TYPE_F32:
+      return LOOM_AMDGPU_MATRIX_NUMERIC_F32;
+    case LOOM_SCALAR_TYPE_F16:
+      return LOOM_AMDGPU_MATRIX_NUMERIC_F16;
+    case LOOM_SCALAR_TYPE_BF16:
+      return LOOM_AMDGPU_MATRIX_NUMERIC_BF16;
+    case LOOM_SCALAR_TYPE_I32:
+      return LOOM_AMDGPU_MATRIX_NUMERIC_I32;
+    default:
+      return LOOM_AMDGPU_MATRIX_NUMERIC_UNKNOWN;
+  }
+}
+
 static bool loom_amdgpu_fragment_memory_descriptor_payload(
     const loom_amdgpu_matrix_contract_descriptor_t* descriptor,
     loom_contract_operand_role_t role,
