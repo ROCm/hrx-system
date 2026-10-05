@@ -7,7 +7,7 @@
 config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 amdgpu.target<gfx11-generic> @encoder_projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 
 kernel.def target(@encoder_projection_wave32) @encoder_linear_2560_4096() {
   %texts = config.get @krea2.text_tokens : index
@@ -27,7 +27,12 @@ kernel.def target(@encoder_projection_wave32) @encoder_linear_2560_4096() {
   %outputs = index.constant 4096 : index
   %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
-  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
+  %projection_tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %projection_tile : index
+  %output_origin = index.mul %output_tile, %projection_tile : index
+  template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -49,7 +54,12 @@ kernel.def target(@encoder_projection_wave32) @encoder_linear_2560_1024() {
   %outputs = index.constant 1024 : index
   %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
-  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
+  %projection_tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %projection_tile : index
+  %output_origin = index.mul %output_tile, %projection_tile : index
+  template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -71,7 +81,12 @@ kernel.def target(@encoder_projection_wave32) @encoder_linear_4096_2560() {
   %outputs = index.constant 2560 : index
   %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
-  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
+  %projection_tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %projection_tile : index
+  %output_origin = index.mul %output_tile, %projection_tile : index
+  template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -93,7 +108,12 @@ kernel.def target(@encoder_projection_wave32) @encoder_linear_2560_9728() {
   %outputs = index.constant 9728 : index
   %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
-  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
+  %projection_tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %projection_tile : index
+  %output_origin = index.mul %output_tile, %projection_tile : index
+  template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -115,7 +135,12 @@ kernel.def target(@encoder_projection_wave32) @encoder_linear_9728_2560() {
   %outputs = index.constant 2560 : index
   %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
   %output_layout = encoding.layout.dense : encoding<layout>
-  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
+  %projection_tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %projection_tile : index
+  %output_origin = index.mul %output_tile, %projection_tile : index
+  template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 

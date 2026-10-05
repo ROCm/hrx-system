@@ -1,0 +1,54 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link block_adapters.loom and kernels/linear.loom with --library and bind
+// krea2.block_tokens=80. The production wide row-major writers visit output
+// tiles first. Five row tiles expose grid/origin swaps beyond one tile.
+// Rank-32 X=1/8, W=1/4 gives delta=1 exactly; the scalar oracle preserves
+// both the BF16 scaling boundary and the in-place base/output contract.
+
+kernel.decl @block_adapter_add_6144() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+kernel.decl @block_adapter_add_16384() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+
+check.case public @adapter_traversal_6144 {
+  %input = check.generate.fill value(0.125) : tensor<80x32xbf16>
+  %weight = check.generate.fill value(0.25) : tensor<6144x32xf32>
+  %half = check.generate.fill value(0.5) : tensor<1xf32>
+  %zero = check.generate.fill value(0.0) : tensor<1xf32>
+  %base = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<80x6144xbf16>
+  %aliased = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<80x6144xbf16>
+  %distinct = check.generate.fill value(-17.0) : tensor<80x6144xbf16>
+  %expected = check.generate.iota offset(-7.5) step(0.03125) period(512) : tensor<80x6144xbf16>
+  %negative_zero = check.generate.fill value(-0.0) : tensor<80x6144xbf16>
+  %expected_zero = check.generate.fill value(-0.0) : tensor<80x6144xbf16>
+  kernel.launch @block_adapter_add_6144(%input, %weight, %half, %base, %distinct) : (tensor<80x32xbf16>, tensor<6144x32xf32>, tensor<1xf32>, tensor<80x6144xbf16>, tensor<80x6144xbf16>)
+  kernel.launch @block_adapter_add_6144(%input, %weight, %half, %aliased, %aliased) : (tensor<80x32xbf16>, tensor<6144x32xf32>, tensor<1xf32>, tensor<80x6144xbf16>, tensor<80x6144xbf16>)
+  kernel.launch @block_adapter_add_6144(%input, %weight, %zero, %negative_zero, %negative_zero) : (tensor<80x32xbf16>, tensor<6144x32xf32>, tensor<1xf32>, tensor<80x6144xbf16>, tensor<80x6144xbf16>)
+  check.expect.bitwise actual(%distinct) expected(%expected) : tensor<80x6144xbf16>
+  check.expect.bitwise actual(%aliased) expected(%expected) : tensor<80x6144xbf16>
+  check.expect.bitwise actual(%negative_zero) expected(%expected_zero) : tensor<80x6144xbf16>
+  check.return
+}
+
+check.case public @adapter_traversal_16384 {
+  %input = check.generate.fill value(0.125) : tensor<80x32xbf16>
+  %weight = check.generate.fill value(0.25) : tensor<16384x32xf32>
+  %half = check.generate.fill value(0.5) : tensor<1xf32>
+  %zero = check.generate.fill value(0.0) : tensor<1xf32>
+  %base = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<80x16384xbf16>
+  %aliased = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<80x16384xbf16>
+  %distinct = check.generate.fill value(-17.0) : tensor<80x16384xbf16>
+  %expected = check.generate.iota offset(-7.5) step(0.03125) period(512) : tensor<80x16384xbf16>
+  %negative_zero = check.generate.fill value(-0.0) : tensor<80x16384xbf16>
+  %expected_zero = check.generate.fill value(-0.0) : tensor<80x16384xbf16>
+  kernel.launch @block_adapter_add_16384(%input, %weight, %half, %base, %distinct) : (tensor<80x32xbf16>, tensor<16384x32xf32>, tensor<1xf32>, tensor<80x16384xbf16>, tensor<80x16384xbf16>)
+  kernel.launch @block_adapter_add_16384(%input, %weight, %half, %aliased, %aliased) : (tensor<80x32xbf16>, tensor<16384x32xf32>, tensor<1xf32>, tensor<80x16384xbf16>, tensor<80x16384xbf16>)
+  kernel.launch @block_adapter_add_16384(%input, %weight, %zero, %negative_zero, %negative_zero) : (tensor<80x32xbf16>, tensor<16384x32xf32>, tensor<1xf32>, tensor<80x16384xbf16>, tensor<80x16384xbf16>)
+  check.expect.bitwise actual(%distinct) expected(%expected) : tensor<80x16384xbf16>
+  check.expect.bitwise actual(%aliased) expected(%expected) : tensor<80x16384xbf16>
+  check.expect.bitwise actual(%negative_zero) expected(%expected_zero) : tensor<80x16384xbf16>
+  check.return
+}

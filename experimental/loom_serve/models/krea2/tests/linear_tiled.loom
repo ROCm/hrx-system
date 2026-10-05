@@ -23,7 +23,7 @@ config.decl @projection_test.column_major : %value: index where [range(%value, 0
 
 amdgpu.target<gfx11-generic> @projection_test_wave32 {subgroup_size = 32}
 template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %row_origin: index, %output_origin: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.def target(@projection_test_wave32) @linear_bf16_reference() {
@@ -47,7 +47,12 @@ kernel.def target(@projection_test_wave32) @linear_bf16_reference() {
   %row_stride = scf.select %column_major, %one, %outputs : index
   %column_stride = scf.select %column_major, %rows, %one : index
   %output_layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
-  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
+  %projection_tile = index.constant 16 : index
+  %row_tile = kernel.workgroup.id<x> : index
+  %output_tile = kernel.workgroup.id<y> : index
+  %row_origin = index.mul %row_tile, %projection_tile : index
+  %output_origin = index.mul %output_tile, %projection_tile : index
+  template.apply<@projection.store_bf16>(%rows, %outputs, %row_origin, %output_origin, %output_layout, %result, %output) : (index, index, index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
