@@ -6,10 +6,11 @@
 
 """Qualify the real retained image HTTP service, including ownership failures.
 
-Requires the isolated-0/1/2.ppm images produced by check_model.py, the same
-checkpoint/source geometry, and an exclusive device lease. The production
-server performs every image operation natively. Pillow only independently
-decodes the returned PNGs for exact comparison with isolated CLI pixels.
+Requires the base short/long and adapted short isolated-0/1/2.ppm images
+produced by check_model.py, the same checkpoint/source geometry, and an
+exclusive device lease. The production server performs every image operation
+natively. Pillow independently decodes returned PNGs for exact comparison with
+isolated CLI pixels.
 Lifecycle events synchronize the client without sleeps or GPU wait deadlines.
 Final images and concise logs stay below 16 MiB; no checkpoint copies.
 """
@@ -181,8 +182,8 @@ def main():
         health = receive(send(path="/healthz"))
         assert (health["active"], health["queued"], health["completed"]) == (0, 0, 0)
 
-        deer = dict(
-            prompt="A deer grazing in the forest, Art Deco watercolor style",
+        short = dict(
+            prompt="a red fox in the snow",
             seed="0",
             strength=0,
             model="krea2-turbo",
@@ -190,45 +191,41 @@ def main():
             n=1,
             response_format="b64_json",
         )
-        robot = dict(
-            deer,
-            prompt="A small brass robot tending red flowers in a sunlit greenhouse, watercolor illustration",
-            seed=42,
-        )
-        first = send(deer, slow=True)
+        long = dict(short, prompt=" ".join(["red"] * 65), seed=42)
+        first = send(short, slow=True)
         journal.wait("image_started", request=1)
         heartbeat = journal.wait("image_heartbeat", active_request=1)
         assert heartbeat["active_ms"] >= 0 and heartbeat["completed"] == 0
         health = receive(send(path="/healthz"))
         assert health["active"] == 1 and health["completed"] == 0
-        queued = send(robot)
+        queued = send(long)
         journal.wait("image_accepted", request=2)
         health = receive(send(path="/healthz"))
         assert health["active"] == 1 and health["queued"] == 1
-        receive(send(deer), 503)
+        receive(send(short), 503)
         reset(queued)
         journal.wait("image_cancelled", request=2, phase="queued")
-        replacement = send(robot)
+        replacement = send(long)
         journal.wait("image_accepted", request=3)
         journal.wait("image_generated", request=1)
         journal.wait("image_generated", request=3)
         # Neither socket has consumed response bytes. In particular, the first
         # peer's deliberately small receive window cannot pin the model output.
-        pixels(replacement, "queued-robot", 1)
-        pixels(first, "slow-deer", 0)
+        pixels(replacement, "queued-long", 1)
+        pixels(first, "slow-short", 0)
 
-        style = send(dict(deer, strength=1))
+        style = send(dict(short, strength=1))
         journal.wait("image_generated", request=4)
         pixels(style, "style", 2)
-        repeated = send(deer)
+        repeated = send(short)
         journal.wait("image_generated", request=5)
         pixels(repeated, "base-after-style", 0)
 
-        abandoned = send(robot)
+        abandoned = send(long)
         journal.wait("image_started", request=6)
         reset(abandoned)
         journal.wait("image_cancelled", request=6, phase="active")
-        after_reset = send(deer)
+        after_reset = send(short)
         journal.wait("image_accepted", request=7)
         health = receive(send(path="/healthz"))
         assert health["active"] == 1 and health["queued"] == 1
@@ -236,7 +233,7 @@ def main():
         journal.wait("image_generated", request=7)
         pixels(after_reset, "base-after-reset", 0)
 
-        send(dict(deer, strength=1))
+        send(dict(short, strength=1))
         journal.wait("image_started", request=8)
         process.send_signal(signal.SIGTERM)
         journal.wait("image_shutdown", active=8)
@@ -247,10 +244,58 @@ def main():
         assert process.wait() == 0
         journal.thread.join()
         text = "".join(journal.lines)
-        assert text.count('"event":"jit_stage"') == 1
-        assert text.count('"event":"image_residency"') == 1
+        assert text.count('"event":"jit_stage"') == 2
+        residencies = [
+            event for event in journal.events if event.get("event") == "image_residency"
+        ]
+        assert len(residencies) == 1
+        residency = residencies[0]
+        assert [stage["text_tokens"] for stage in residency["stages"]] == [512, 128]
+        assert residency["workspace_bytes"] == max(
+            stage["workspace_bytes"] for stage in residency["stages"]
+        )
+        assert residency["workspace_alignment"] == max(
+            stage["workspace_alignment"] for stage in residency["stages"]
+        )
+        assert residency["kernels"] == sum(
+            stage["kernels"] for stage in residency["stages"]
+        )
+        assert residency["entries"] == sum(
+            stage["entries"] for stage in residency["stages"]
+        )
         assert text.count("Streaming ") == 4
+        prepared = [
+            event for event in journal.events if event.get("event") == "image_prepared"
+        ]
+        assert [event["prefix_prompt_tokens"] for event in prepared] == [
+            40,
+            99,
+            40,
+            40,
+            99,
+            40,
+            40,
+        ]
+        assert [event["text_tokens"] for event in prepared] == [
+            128,
+            512,
+            128,
+            128,
+            512,
+            128,
+            128,
+        ]
+        assert [
+            event["request"]
+            for event in journal.events
+            if event.get("event") == "image_generated"
+        ] == [1, 3, 4, 5, 6, 7, 8]
         events = [record["event"] for record in journal.events]
+        assert all(
+            index < events.index("image_ready")
+            for index, event in enumerate(events)
+            if event == "jit_stage"
+        )
         assert (
             events.index("image_shutdown")
             < len(events) - 1 - events[::-1].index("image_generated")
@@ -261,7 +306,8 @@ def main():
         )
         print(
             "PASS: exact native HTTP images, health during compute, bounded admission, "
-            "slow-reader independence, queued/active reset and joined shutdown; one model residency.",
+            "slow-reader independence, queued/active reset and joined shutdown; "
+            "two cold text shapes share one model residency.",
             flush=True,
         )
     finally:

@@ -28,13 +28,16 @@ typedef struct loom_serve_krea2_model_options_t {
   uint32_t height;
   // Output image width in pixels, fixed for this residency.
   uint32_t width;
-  // Retained text extent, fixed for this residency.
+  // Maximum retained text extent and prompt truncation capacity. A maximum
+  // above 128 and divisible by 64 also retains a text128 command for short
+  // prompts; other valid maxima retain only their configured command.
   uint32_t text_tokens;
 } loom_serve_krea2_model_options_t;
 
-// Loads one tokenizer and source-JIT command, streams each immutable parameter
-// domain once, and allocates all device input/output/workspace backing. Failure
-// releases partial ownership and leaves *out_model NULL.
+// Loads one tokenizer and cold-JITs the bounded retained command set. Exact
+// reflected parameter placement must agree before streaming each immutable
+// domain once. All commands share one maximum-sized input/output/workspace
+// bank. Failure releases partial ownership and leaves *out_model NULL.
 iree_status_t loom_serve_krea2_model_create(
     const loom_serve_krea2_model_options_t* options,
     loom_serve_krea2_model_t** out_model, iree_allocator_t host_allocator);
@@ -43,9 +46,11 @@ iree_status_t loom_serve_krea2_model_create(
 // No generate call or borrowed RGB view may remain active. NULL is accepted.
 iree_status_t loom_serve_krea2_model_destroy(loom_serve_krea2_model_t* model);
 
-// Prepares a fresh request, uploads once, executes the retained source command
-// and waits for final RGB. There is no warm JIT, weight load or device backing
-// allocation. Prompt is borrowed only during the call. Strength must be finite;
+// Tokenizes once at the configured maximum, selects text128 when available and
+// the retained combined prefix+prompt count is at most 98, then materializes
+// and uploads once. Executes the selected command and waits for final RGB.
+// There is no warm JIT, weight load or device backing allocation. Prompt is
+// borrowed only during the call. Strength must be finite;
 // a model without an adapter requires strength one. Request errors before
 // submission leave the model reusable; execution failure is terminal for its
 // owner. Every return retires accepted operations borrowing request storage.

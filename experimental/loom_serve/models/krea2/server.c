@@ -19,7 +19,8 @@ IREE_FLAG(string, checkpoint, "",
 IREE_FLAG(string, adapter, "", "Optional softwatercolor safetensors file.");
 IREE_FLAG(int32_t, height, 384, "Output pixel height, divisible by 16.");
 IREE_FLAG(int32_t, width, 384, "Output pixel width, divisible by 16.");
-IREE_FLAG(int32_t, text_tokens, 512, "Retained text extent, divisible by 16.");
+IREE_FLAG(int32_t, text_tokens, 512,
+          "Maximum retained text extent, divisible by 16.");
 IREE_FLAG(int32_t, port, 8080,
           "Loopback port; zero selects an ephemeral port.");
 IREE_FLAG(int32_t, connections, 64, "Maximum simultaneous TCP connections.");
