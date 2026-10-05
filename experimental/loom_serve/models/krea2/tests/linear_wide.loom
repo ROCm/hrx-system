@@ -1,0 +1,86 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link kernels/linear_tiled.loom and kernels/linear_wide.loom.
+// exact_short binds wide_test.{rows,inputs,outputs}=16,6144,16384;
+// exact_tail binds them to 528,6144,256. Both use nonuniform inputs and
+// distinct sentinels, comparing complete outputs to the full-K64 recurrence.
+// The second case crosses a group boundary and a partial 64-row tile.
+
+config.decl @wide_test.rows : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @wide_test.inputs : %value: index where [range(%value, 256, 65536), mul(%value, 256)]
+config.decl @wide_test.outputs : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
+amdgpu.target<gfx11-generic> @wide_wave32 {subgroup_size = 32}
+template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_tiled_wide_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+kernel.def target(@wide_wave32) @gemm_full_k_reference() {
+  %rows = config.get @wide_test.rows : index
+  %outputs = config.get @wide_test.outputs : index
+  %row_size = index.constant 64 : index
+  %output_size = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %row_size : index
+  %output_tiles = index.div %outputs, %output_size : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @wide_test.rows : index
+  %inputs = config.get @wide_test.inputs : index
+  %outputs = config.get @wide_test.outputs : index
+  %group = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_full_k_bf16>(%rows, %inputs, %outputs, %group, %layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  kernel.return
+}
+kernel.def target(@wide_wave32) @gemm_wide() {
+  %rows = config.get @wide_test.rows : index
+  %outputs = config.get @wide_test.outputs : index
+  %row_size = index.constant 64 : index
+  %output_size = index.constant 128 : index
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %row_size : index
+  %output_tiles = index.div %outputs, %output_size : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @wide_test.rows : index
+  %inputs = config.get @wide_test.inputs : index
+  %outputs = config.get @wide_test.outputs : index
+  %group = index.constant 8 : index
+  %layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_wide_bf16>(%rows, %inputs, %outputs, %group, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  kernel.return
+}
+
+check.case public @exact_short {
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<16x6144xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<16384x6144xbf16>
+  %output = check.generate.fill value(-17.0) : tensor<16x16384xbf16>
+  %expected = check.generate.fill value(23.0) : tensor<16x16384xbf16>
+  kernel.launch @gemm_full_k_reference(%input, %weight, %expected) : (tensor<16x6144xbf16>, tensor<16384x6144xbf16>, tensor<16x16384xbf16>)
+  kernel.launch @gemm_wide(%input, %weight, %output) : (tensor<16x6144xbf16>, tensor<16384x6144xbf16>, tensor<16x16384xbf16>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<16x16384xbf16>
+  check.return
+}
+
+check.case public @exact_tail {
+  %input_seed = check.literal value(74111) : i64
+  %weight_seed = check.literal value(31937) : i64
+  %input = check.generate.random.uniform seed(%input_seed) range(-1.0 to 1.0) : tensor<528x6144xbf16>
+  %weight = check.generate.random.uniform seed(%weight_seed) range(-0.0625 to 0.0625) : tensor<256x6144xbf16>
+  %output = check.generate.fill value(-17.0) : tensor<528x256xbf16>
+  %expected = check.generate.fill value(23.0) : tensor<528x256xbf16>
+  kernel.launch @gemm_full_k_reference(%input, %weight, %expected) : (tensor<528x6144xbf16>, tensor<256x6144xbf16>, tensor<528x256xbf16>)
+  kernel.launch @gemm_wide(%input, %weight, %output) : (tensor<528x6144xbf16>, tensor<256x6144xbf16>, tensor<528x256xbf16>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<528x256xbf16>
+  check.return
+}

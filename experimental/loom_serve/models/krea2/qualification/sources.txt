@@ -2,6 +2,7 @@
 ../projection.loom
 ../kernels/linear.loom
 ../kernels/linear_tiled.loom
+../kernels/linear_wide.loom
 ../block.loom
 ../block_projections.loom
 ../kernels/normalization.loom

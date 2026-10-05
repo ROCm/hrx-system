@@ -9,6 +9,7 @@ config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536),
 amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_tiled_wide_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
 
 // Traversal selection belongs to the model's concrete contraction shapes.
@@ -36,7 +37,11 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
   %rounding = index.constant 63 : index
   %padded_rows = index.add %rows, %rounding : index
   %row_tiles = index.div %padded_rows, %tile : index
-  %output_tiles = index.constant 96 : index
+  %short_text_rows = index.constant 4224 : index
+  %wide = index.cmp eq, %rows, %short_text_rows : index
+  %wide_output_tiles = index.constant 48 : index
+  %square_output_tiles = index.constant 96 : index
+  %output_tiles = scf.select %wide, %wide_output_tiles, %square_output_tiles : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
@@ -46,7 +51,15 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
   %minimum_grouped_rows = index.constant 2560 : index
   %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
   %output_layout = encoding.layout.dense : encoding<layout>
-  template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  %short_text_rows = index.constant 4224 : index
+  %wide = index.cmp eq, %rows, %short_text_rows : index
+  scf.if %wide {
+    template.apply<@projection.linear_tiled_wide_bf16>(%rows, %width, %width, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+    scf.yield
+  }
   kernel.return
 }
 
@@ -99,7 +112,11 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
   %rounding = index.constant 63 : index
   %padded_rows = index.add %rows, %rounding : index
   %row_tiles = index.div %padded_rows, %tile : index
-  %output_tiles = index.constant 256 : index
+  %short_text_rows = index.constant 4224 : index
+  %wide = index.cmp eq, %rows, %short_text_rows : index
+  %wide_output_tiles = index.constant 128 : index
+  %square_output_tiles = index.constant 256 : index
+  %output_tiles = scf.select %wide, %wide_output_tiles, %square_output_tiles : index
   %one = index.constant 1 : index
   %threads = index.constant 256 : index
   kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
@@ -110,18 +127,24 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
   %minimum_grouped_rows = index.constant 2048 : index
   %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
   %output_layout = encoding.layout.dense : encoding<layout>
-  // Full-K accumulation reduces live state for these up-projection shapes.
-  // Other sequence lengths retain the chunked accumulation strategy.
+  // The short-text shape shares each input panel across twice as many output
+  // columns. Both image shapes retain full-K accumulation; other sequence
+  // lengths retain the chunked strategy.
   %image_short_text = index.constant 4224 : index
   %image_full_text = index.constant 4608 : index
   %short_text = index.cmp eq, %rows, %image_short_text : index
   %full_text = index.cmp eq, %rows, %image_full_text : index
-  %use_full_k = scalar.ori %short_text, %full_text : i1
-  scf.if %use_full_k {
-    template.apply<@projection.linear_tiled_full_k_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  scf.if %short_text {
+    template.apply<@projection.linear_tiled_wide_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
     scf.yield
   } else {
-    template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+    scf.if %full_text {
+      template.apply<@projection.linear_tiled_full_k_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+      scf.yield
+    } else {
+      template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+      scf.yield
+    }
     scf.yield
   }
   kernel.return

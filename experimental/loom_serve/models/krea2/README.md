@@ -536,11 +536,12 @@ so a mismatch can be investigated without rerunning the model oracle.
 [`block_projections.loom`](block_projections.loom) maps the eight attention and
 feed-forward matrices to four concrete contraction shapes. Weights remain in
 their native BF16 checkpoint representation; accumulation is F32 and output is
-BF16. The reusable contraction combines four independent accumulator chains
-every 256 inputs to shorten cancellation-sensitive reductions. It does not
-allocate global partial sums or copy/expand the weight matrices.
+BF16. The default contraction combines four independent accumulator chains
+every 256 inputs to shorten cancellation-sensitive reductions; selected large
+shapes instead retain a full-K recurrence. Neither strategy allocates global
+partial sums or copies/expands the weight matrices.
 
-The four DiT shapes use the cooperative
+The baseline for the four DiT shapes is the cooperative
 [`linear_tiled_bf16`](kernels/linear_tiled.loom) motif. Eight wave32s share a
 64x64 output tile, acquiring K64 operand tiles into 18 KiB of padded LDS.
 The loop pipeline overlaps next-tile acquisition with current WMMA work while
@@ -565,6 +566,17 @@ no padded workgroups or duplicate stores. This is a cache-locality policy, not
 a guarantee of physical workgroup execution order. Tile traversal and tile
 geometry are independent tuning dimensions.
 
+At 4,224 rows, FFN up/gate and the 6,144-wide query/gate/output projections use
+[`linear_tiled_wide_bf16`](kernels/linear_wide.loom). The same eight wave32s
+own a 64x128 output tile: each wave carries four ascending-K16 accumulator
+chains, reusing each input fragment across twice as many output columns.
+Cooperative K64 loads use one padded 64x72 input stage and 128x72 weight stage
+(27 KiB total LDS). The publication/retirement barriers and two-deep pipeline
+overlap next-tile acquisition without double-buffering LDS. Full-K64 remains
+the FFN up/gate strategy at 4,608 rows; other square/up shapes retain the
+chunked baseline. These are model-selected strategies, not constraints on
+the configuration-free motifs.
+
 The model wrappers select eight-row-tile groups at 2,048 rows for FFN up,
 1,088 for FFN down, and 2,560 for square/narrow projections. Below those
 crossovers they pass the whole row-tile count, which specializes to the original
@@ -574,7 +586,7 @@ not a universal cache-size rule or an optimality claim for every intervening
 shape. Selection happens during JIT specialization; it adds no device decision,
 weight residency, workspace, or command dispatch.
 
-[`tests/linear_tiled.loom`](tests/linear_tiled.loom) compares this motif bitwise
+[`tests/linear_tiled.loom`](tests/linear_tiled.loom) compares the baseline motif bitwise
 against the original single-wave motif at all four widths, covering
 16/32/48/64/80/512/528/544/560/640/704/768/832/896/960/1088/2048/2560/3072/4608
 rows. Group-eight cases cover each traversal-group remainder and each 16-row
@@ -584,6 +596,11 @@ rows, comparing the complete physical byte streams. They link the real helper
 sources instead of copying their implementations.
 The checkpoint comparisons below independently exercise the actual command
 wrappers and numerical error envelope.
+
+[`tests/linear_wide.loom`](tests/linear_wide.loom) checks the real wide helper
+against the full-K64 helper with nonuniform BF16 inputs. Its `exact_short`
+case binds `wide_test.rows=16`, `wide_test.inputs=6144` and
+`wide_test.outputs=16384`; `exact_tail` binds 528, 6144 and 256 respectively.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
