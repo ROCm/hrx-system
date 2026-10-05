@@ -462,59 +462,6 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_advances_tighte
 }
 
 // ====
-// RUN: with-checks emit low-schedule-json @resource_stall_keeps_exclusive_setup_out_of_ready_window strategy=resource-stall
-
-test.target<low_core> @test_target
-
-low.func.def target<test.low.core>(@test_target) @resource_stall_keeps_exclusive_setup_out_of_ready_window(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
-  // Every destination is the same physical register. These copies stay outside
-  // the ready set until %prepared is available, so the bounded nominee window
-  // exposes the work that must precede their consumers.
-  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed2 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed3 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed4 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed5 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed6 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed7 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed8 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed9 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed10 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed11 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed12 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed13 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed14 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed15 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %constant = test.const.i32 1
-  // Preparation precedes all fixed setup, then each selection releases the
-  // register before the next copy occupies it.
-  %prepared = test.add.i32 %lhs, %constant
-  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
-  %select1 = test.fixed.select.i32 %prepared, %rhs, %fixed1
-  %select2 = test.fixed.select.i32 %prepared, %rhs, %fixed2
-  %select3 = test.fixed.select.i32 %prepared, %rhs, %fixed3
-  %select4 = test.fixed.select.i32 %prepared, %rhs, %fixed4
-  %select5 = test.fixed.select.i32 %prepared, %rhs, %fixed5
-  %select6 = test.fixed.select.i32 %prepared, %rhs, %fixed6
-  %select7 = test.fixed.select.i32 %prepared, %rhs, %fixed7
-  %select8 = test.fixed.select.i32 %prepared, %rhs, %fixed8
-  %select9 = test.fixed.select.i32 %prepared, %rhs, %fixed9
-  %select10 = test.fixed.select.i32 %prepared, %rhs, %fixed10
-  %select11 = test.fixed.select.i32 %prepared, %rhs, %fixed11
-  %select12 = test.fixed.select.i32 %prepared, %rhs, %fixed12
-  %select13 = test.fixed.select.i32 %prepared, %rhs, %fixed13
-  %select14 = test.fixed.select.i32 %prepared, %rhs, %fixed14
-  %select15 = test.fixed.select.i32 %prepared, %rhs, %fixed15
-  return %select15
-}
-
-// ----
-CHECK: *"scheduled_node_indices":[16,17,0,18,1,19,2,20,3,21,4,22,5,23,6,24,7,25,8,26,9,27,10,28,11,29,12,30,13,31,14,32,15,33,34]*
-CHECK: *{"from":17,"to":0,"kind":"order",*
-CHECK: *{"from":17,"to":15,"kind":"order",*
-
-// ====
 // RUN: emit low-schedule @resource_stall_preserves_unconstrained_leaf_order strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
@@ -547,29 +494,6 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_materializes_op
   %result = test.add.i32 %intermediate, %rhs
   return %loaded, %padding, %result
 }
-
-// ====
-// RUN: with-checks emit low-schedule-json @resource_stall_orders_exclusive_setup_after_prerequisites strategy=resource-stall
-
-test.target<low_core> @test_target
-
-low.func.def target<test.low.core>(@test_target) @resource_stall_orders_exclusive_setup_after_prerequisites(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
-  // Neither fixed-register setup can expose its consumer until %prepared is
-  // available. Materializing %constant first immediately exposes that work and
-  // avoids occupying the singleton register while the arithmetic chain runs.
-  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
-  %constant = test.const.i32 1
-  %prepared = test.add.i32 %lhs, %constant
-  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
-  %select1 = test.fixed.select.i32 %select0, %rhs, %fixed1
-  return %select1
-}
-
-// ----
-CHECK: *"scheduled_node_indices":[2,3,0,4,1,5,6]*
-CHECK: *{"from":3,"to":0,"kind":"order",*
-CHECK: *{"from":4,"to":1,"kind":"order",*
 
 // ====
 // RUN: emit low-schedule @resource_stall_fills_unconstrained_issue_gap strategy=resource-stall diagnostics=candidates output=none

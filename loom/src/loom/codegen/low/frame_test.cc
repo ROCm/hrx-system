@@ -589,6 +589,113 @@ low.func.def target<test.low.core> @bounded_pair(%address: reg<test.ptr>, %value
   EXPECT_EQ(frame.allocation.spill_count, 0u);
 }
 
+TEST_F(LowEmissionFrameTest, ExclusiveSetupsWaitForConsumerPrerequisites) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @ordered_setups(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %constant = test.const.i32 1
+  %prepared = test.add.i32 %lhs, %constant
+  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
+  %select1 = test.fixed.select.i32 %select0, %rhs, %fixed1
+  return %select1
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ExpectDependencyPredecessors(frame, LOOM_LOW_SCHEDULE_DEPENDENCY_ORDER,
+                               /*consumer_node=*/0, {3});
+  ExpectDependencyPredecessors(frame, LOOM_LOW_SCHEDULE_DEPENDENCY_ORDER,
+                               /*consumer_node=*/1, {4});
+  EXPECT_LT(frame.schedule.nodes[3].scheduled_ordinal,
+            frame.schedule.nodes[0].scheduled_ordinal);
+  EXPECT_LT(frame.schedule.nodes[0].scheduled_ordinal,
+            frame.schedule.nodes[4].scheduled_ordinal);
+  EXPECT_LT(frame.schedule.nodes[4].scheduled_ordinal,
+            frame.schedule.nodes[1].scheduled_ordinal);
+  EXPECT_LT(frame.schedule.nodes[1].scheduled_ordinal,
+            frame.schedule.nodes[5].scheduled_ordinal);
+}
+
+TEST_F(LowEmissionFrameTest, ExclusiveSetupsStayOutOfBoundedReadyWindow) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @bounded_setups(%condition: reg<test.i32>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %fixed0 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed1 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed2 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed3 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed4 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed5 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed6 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed7 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed8 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed9 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed10 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed11 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed12 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed13 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed14 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %fixed15 = copy %condition : reg<test.i32> -> reg<test.fixed.r0>
+  %constant = test.const.i32 1
+  %prepared = test.add.i32 %lhs, %constant
+  %select0 = test.fixed.select.i32 %prepared, %rhs, %fixed0
+  %select1 = test.fixed.select.i32 %prepared, %rhs, %fixed1
+  %select2 = test.fixed.select.i32 %prepared, %rhs, %fixed2
+  %select3 = test.fixed.select.i32 %prepared, %rhs, %fixed3
+  %select4 = test.fixed.select.i32 %prepared, %rhs, %fixed4
+  %select5 = test.fixed.select.i32 %prepared, %rhs, %fixed5
+  %select6 = test.fixed.select.i32 %prepared, %rhs, %fixed6
+  %select7 = test.fixed.select.i32 %prepared, %rhs, %fixed7
+  %select8 = test.fixed.select.i32 %prepared, %rhs, %fixed8
+  %select9 = test.fixed.select.i32 %prepared, %rhs, %fixed9
+  %select10 = test.fixed.select.i32 %prepared, %rhs, %fixed10
+  %select11 = test.fixed.select.i32 %prepared, %rhs, %fixed11
+  %select12 = test.fixed.select.i32 %prepared, %rhs, %fixed12
+  %select13 = test.fixed.select.i32 %prepared, %rhs, %fixed13
+  %select14 = test.fixed.select.i32 %prepared, %rhs, %fixed14
+  %select15 = test.fixed.select.i32 %prepared, %rhs, %fixed15
+  return %select15
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+  ASSERT_EQ(frame.schedule.node_count, 35u);
+
+  const auto has_order_edge = [&frame](uint32_t producer_node,
+                                       uint32_t consumer_node) {
+    for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+      const loom_low_schedule_dependency_t* dependency =
+          loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies,
+                                                i);
+      if (dependency->producer_node == producer_node &&
+          dependency->consumer_node == consumer_node &&
+          dependency->kind == LOOM_LOW_SCHEDULE_DEPENDENCY_ORDER) {
+        return true;
+      }
+    }
+    return false;
+  };
+  EXPECT_TRUE(has_order_edge(/*producer_node=*/17, /*consumer_node=*/0));
+  EXPECT_TRUE(has_order_edge(/*producer_node=*/17, /*consumer_node=*/15));
+  EXPECT_LT(frame.schedule.nodes[16].scheduled_ordinal,
+            frame.schedule.nodes[17].scheduled_ordinal);
+  for (uint32_t i = 0; i < 16; ++i) {
+    const uint32_t setup_node = i;
+    const uint32_t consumer_node = 18 + i;
+    EXPECT_TRUE(iree_any_bit_set(frame.schedule.nodes[setup_node].flags,
+                                 LOOM_LOW_SCHEDULE_NODE_FLAG_ORDERED_SETUP));
+    EXPECT_LT(frame.schedule.nodes[17].scheduled_ordinal,
+              frame.schedule.nodes[setup_node].scheduled_ordinal);
+    EXPECT_EQ(frame.schedule.nodes[consumer_node].scheduled_ordinal,
+              frame.schedule.nodes[setup_node].scheduled_ordinal + 1);
+    if (i + 1 < 16) {
+      EXPECT_LT(frame.schedule.nodes[consumer_node].scheduled_ordinal,
+                frame.schedule.nodes[setup_node + 1].scheduled_ordinal);
+    }
+  }
+}
+
 TEST_F(LowEmissionFrameTest, RetainsOnlyDecidedSpillsAfterAllocation) {
   ModulePtr module = ParseModule(R"(
 low.func.def target<test.low.core> @spills(%first: reg<test.i32>, %second: reg<test.i32>, %third: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
