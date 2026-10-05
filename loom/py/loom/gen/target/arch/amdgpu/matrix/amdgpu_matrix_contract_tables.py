@@ -976,6 +976,7 @@ def _matrix_result_representation_table_lines(
         "        .fragment_layout_kind = LOOM_AMDGPU_MATRIX_FRAGMENT_LAYOUT_UNKNOWN,",
         "        .numeric_type = LOOM_AMDGPU_MATRIX_NUMERIC_UNKNOWN,",
         "        .flags = 0,",
+        "        .coordinate_id = LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE,",
         "    },",
     ]
     for representation_id, representation in enumerate(catalog.result_representations, start=1):
@@ -986,6 +987,25 @@ def _matrix_result_representation_table_lines(
                 f"        .fragment_layout_kind = {representation.fragment_layout.c_kind},",
                 f"        .numeric_type = {_NUMERIC_TYPE_C_NAMES[representation.payload.numeric_type]},",
                 f"        .flags = {flags},",
+                f"        .coordinate_id = UINT8_C({catalog.coordinate_ids[representation_id]}),",
+                "    },",
+            ]
+        )
+    lines.append("};")
+    lines.extend(
+        [
+            "const loom_amdgpu_matrix_result_coordinates_t",
+            "    kLoomAmdgpuMatrixResultCoordinates[",
+            "        LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_COUNT] = {",
+            "    [LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_NONE] = {0},",
+        ]
+    )
+    for coordinate_id, coordinates in enumerate(catalog.result_coordinates, 1):
+        bindings = ", ".join(str(value) for value in coordinates.representation_ids)
+        lines.extend(
+            [
+                f"    [UINT8_C({coordinate_id})] = {{",
+                f"        .representation_ids = {{{bindings}}},",
                 "    },",
             ]
         )
@@ -1022,6 +1042,10 @@ def _emit_header() -> str:
         "extern const loom_amdgpu_matrix_result_representation_t",
         "    kLoomAmdgpuMatrixResultRepresentations[",
         "        LOOM_AMDGPU_MATRIX_RESULT_REPRESENTATION_COUNT];",
+        f"#define LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_COUNT {len(AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG.result_coordinates) + 1}",
+        "extern const loom_amdgpu_matrix_result_coordinates_t",
+        "    kLoomAmdgpuMatrixResultCoordinates[",
+        "        LOOM_AMDGPU_MATRIX_RESULT_COORDINATE_COUNT];",
         "extern const loom_amdgpu_matrix_feature_bits_t",
         "    kLoomAmdgpuMatrixFeatureBitsByProfile[",
         "        LOOM_AMDGPU_MATRIX_FEATURE_PROFILE_COUNT];",
@@ -1424,8 +1448,6 @@ def _emit_source(*, public_header: str) -> str:
             "const iree_host_size_t kLoomAmdgpuMatrixContractDescriptorCount =",
             "    IREE_ARRAYSIZE(kLoomAmdgpuMatrixContractDescriptors);",
             "",
-            "static_assert(sizeof(loom_amdgpu_matrix_result_representation_t) == 3,",
-            '              "matrix result representation row must remain compact");',
             "static_assert(sizeof(loom_amdgpu_matrix_contract_realization_choices_t) == 4,",
             '              "matrix contract realization row must remain compact");',
             "static_assert(sizeof(loom_amdgpu_matrix_contract_descriptor_t) <= 120,",
@@ -1439,7 +1461,10 @@ def _emit_source(*, public_header: str) -> str:
             *_matrix_result_representation_table_lines(realization_catalog),
             "",
             "static_assert(",
-            "    sizeof(kLoomAmdgpuMatrixResultRepresentations) < 2048,",
+            "    IREE_ARRAYSIZE(kLoomAmdgpuMatrixContractDescriptors) *",
+            "            sizeof(loom_amdgpu_matrix_contract_realization_choices_t) +",
+            "        sizeof(kLoomAmdgpuMatrixResultRepresentations) +",
+            "        sizeof(kLoomAmdgpuMatrixResultCoordinates) < 2048,",
             '    "matrix realization catalog must remain below 2 KiB");',
             "",
             "const uint16_t kLoomAmdgpuMatrixWaitStateContractOrdinalsByDescriptorRef[] = {",

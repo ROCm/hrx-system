@@ -44,6 +44,9 @@ from loom.target.native_contraction_layout import (
 
 MATRIX_RESULT_REPRESENTATION_NONE = 0
 MATRIX_CONTRACT_ORDINAL_NONE = 0xFFFF
+# Native result numerics, in the checked-in C numeric-enum order. XF32 is an
+# input-only slot; retaining it makes the generated binding directly indexable.
+MATRIX_RESULT_NUMERIC_TYPES = ("f64", "f32", "f16", "bf16", "xf32", "i32")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,11 +69,28 @@ class MatrixContractRealizationChoices:
 
 
 @dataclass(frozen=True, slots=True)
+class MatrixResultCoordinates:
+    """Exact logical ownership independent of numeric register packing.
+
+    The coordinate map numbers active elements. The count and stride retain
+    their embedding in the authored vector, including inactive half-accumulator
+    elements. Typed bindings preserve the numeric interpretation separately.
+    """
+
+    coordinate_map: ExactCoordinateMap
+    payload_element_count: int
+    coordinate_element_stride: int
+    representation_ids: tuple[int, ...]
+
+
+@dataclass(frozen=True, slots=True)
 class MatrixFragmentRealizationCatalog:
     """Generated realization choices and their deduplicated result placements."""
 
     contract_choices: tuple[MatrixContractRealizationChoices, ...]
     result_representations: tuple[MatrixResultRepresentation, ...]
+    result_coordinates: tuple[MatrixResultCoordinates, ...]
+    coordinate_ids: tuple[int, ...]
 
     def result_representation(
         self, representation_id: int
@@ -379,9 +399,47 @@ def matrix_fragment_realization_catalog(
         )
         for index, choices in enumerate(pending_choices)
     )
+    coordinate_keys: dict[tuple[ExactCoordinateMap, int, int], int] = {}
+    coordinate_bindings: list[list[int]] = []
+    coordinate_ids = [0]
+    for representation_id, representation in enumerate(result_representations, 1):
+        role = representation.fragment_layout.result
+        if representation.payload.element_count != role.payload_element_count:
+            raise ValueError("matrix result payload must retain its source elements")
+        key = (
+            representation.coordinate_map,
+            role.payload_element_count,
+            role.coordinate_element_stride,
+        )
+        coordinate_id = coordinate_keys.get(key)
+        if coordinate_id is None:
+            coordinate_bindings.append([0] * (len(MATRIX_RESULT_NUMERIC_TYPES) + 1))
+            coordinate_id = len(coordinate_bindings)
+            coordinate_keys[key] = coordinate_id
+        coordinate_ids.append(coordinate_id)
+        numeric_index = (
+            MATRIX_RESULT_NUMERIC_TYPES.index(representation.payload.numeric_type) + 1
+        )
+        bindings = coordinate_bindings[coordinate_id - 1]
+        if bindings[numeric_index] != 0:
+            raise ValueError(
+                "matrix coordinates have ambiguous native numeric bindings"
+            )
+        bindings[numeric_index] = representation_id
+    result_coordinates = tuple(
+        MatrixResultCoordinates(
+            coordinate_map=key[0],
+            payload_element_count=key[1],
+            coordinate_element_stride=key[2],
+            representation_ids=tuple(coordinate_bindings[coordinate_id - 1]),
+        )
+        for key, coordinate_id in coordinate_keys.items()
+    )
     return MatrixFragmentRealizationCatalog(
         contract_choices=contract_choices,
         result_representations=tuple(result_representations),
+        result_coordinates=result_coordinates,
+        coordinate_ids=tuple(coordinate_ids),
     )
 
 

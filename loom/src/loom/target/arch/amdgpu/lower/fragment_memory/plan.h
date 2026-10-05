@@ -17,10 +17,10 @@
 extern "C" {
 #endif
 
-// Enumerates exact target result representations with costed publication
-// choices for an accumulator RESULT store. The caller validates the operation
-// and supplies storage for the complete target representation catalog.
-iree_status_t loom_amdgpu_query_accumulator_fragment_store_representations(
+// Publishes the actual canonical coordinates of an accumulator load or costed
+// exact publication choices for a RESULT store. Packed numeric carriers retain
+// their logical coordinates independently of native register storage.
+iree_status_t loom_amdgpu_query_accumulator_fragment_memory_coordinates(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_representation_candidate_t* out_candidates,
     iree_host_size_t* out_candidate_count);

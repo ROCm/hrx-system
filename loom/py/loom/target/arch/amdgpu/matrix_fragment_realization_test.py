@@ -19,6 +19,7 @@ from loom.target.arch.amdgpu.matrix_fragment_layouts import (
 from loom.target.arch.amdgpu.matrix_fragment_realization import (
     AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG,
     MATRIX_CONTRACT_ORDINAL_NONE,
+    MATRIX_RESULT_NUMERIC_TYPES,
     MATRIX_RESULT_REPRESENTATION_NONE,
 )
 from loom.target.native_contraction_layout import (
@@ -169,6 +170,49 @@ def test_compact_runtime_catalog_fits_two_kibibytes() -> None:
     catalog = AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG
 
     contract_choice_bytes = len(catalog.contract_choices) * 4
-    result_representation_bytes = (len(catalog.result_representations) + 1) * 3
-    assert contract_choice_bytes + result_representation_bytes == 1096
-    assert contract_choice_bytes + result_representation_bytes < 2048
+    result_representation_bytes = (len(catalog.result_representations) + 1) * 4
+    coordinate_binding_bytes = (len(catalog.result_coordinates) + 1) * 7
+    total_bytes = (
+        contract_choice_bytes + result_representation_bytes + coordinate_binding_bytes
+    )
+    assert total_bytes == 1309
+    assert total_bytes < 2048
+
+
+def test_numeric_independent_coordinates_preserve_source_embedding() -> None:
+    catalog = AMDGPU_MATRIX_FRAGMENT_REALIZATION_CATALOG
+    assert len(catalog.result_coordinates) == 22
+    embedding_distinctions = 0
+    for left_id, left in enumerate(catalog.result_representations, 1):
+        left_role = left.fragment_layout.result
+        left_key = (
+            left.coordinate_map,
+            left_role.payload_element_count,
+            left_role.coordinate_element_stride,
+        )
+        coordinates = catalog.result_coordinates[catalog.coordinate_ids[left_id] - 1]
+        numeric_index = MATRIX_RESULT_NUMERIC_TYPES.index(left.payload.numeric_type) + 1
+        assert coordinates.representation_ids[numeric_index] == left_id
+        for right_id, right in enumerate(catalog.result_representations, 1):
+            right_role = right.fragment_layout.result
+            right_key = (
+                right.coordinate_map,
+                right_role.payload_element_count,
+                right_role.coordinate_element_stride,
+            )
+            assert (
+                catalog.coordinate_ids[left_id] == catalog.coordinate_ids[right_id]
+            ) == (left_key == right_key)
+            if left.coordinate_map == right.coordinate_map and left_key != right_key:
+                embedding_distinctions += 1
+    assert embedding_distinctions > 0
+    for choices in catalog.contract_choices:
+        if choices.operand_exchanged_result_representation_id:
+            assert (
+                catalog.coordinate_ids[choices.canonical_result_representation_id]
+                < (
+                    catalog.coordinate_ids[
+                        choices.operand_exchanged_result_representation_id
+                    ]
+                )
+            )

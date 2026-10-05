@@ -458,14 +458,18 @@ iree_status_t loom_amdgpu_descriptor_matrix_query(
         &canonical_descriptor->realization;
     uint16_t selected_contract_ordinal = canonical_contract_ordinal;
     if (selected_representation ==
-        choices->canonical_result_representation_id) {
+        loom_amdgpu_matrix_result_representation_at(
+            choices->canonical_result_representation_id)
+            ->coordinate_id) {
       // Keep the canonical contract.
     } else {
       IREE_ASSERT(
-          selected_representation ==
-                  choices->operand_exchanged_result_representation_id &&
-              choices->operand_exchanged_contract_ordinal !=
-                  LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE,
+          choices->operand_exchanged_contract_ordinal !=
+                  LOOM_AMDGPU_MATRIX_CONTRACT_ORDINAL_NONE &&
+              selected_representation ==
+                  loom_amdgpu_matrix_result_representation_at(
+                      choices->operand_exchanged_result_representation_id)
+                      ->coordinate_id,
           "selected matrix representation must realize its source contract");
       selected_contract_ordinal = choices->operand_exchanged_contract_ordinal;
       transform_flags =

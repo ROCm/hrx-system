@@ -4175,10 +4175,18 @@ low.kernel.def target<amdgpu.rdna4.gfx125x.core>(@target) abi_layout({constant_c
   %39 = v_bfe_u32_offset_0_width_inline_low16 %38
   %40 = v_lshlrev_b32_src0_inline %39, 16
   %41 = v_or_b32 %37, %40
-  %packed = concat(%23, %29, %35, %41) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
-  %43 = v_lshlrev_b32_src0_inline %14, 5
-  %44 = v_lshl_add_u32_shift_imm %16, %43, 4
-  global_store_b128_saddr %44, %packed, %out_view
+  global_store_short_saddr %17, %23, %out_view
+  %45 = v_lshrrev_b32_src0_inline %23, 16
+  global_store_short_saddr %17, %45, %out_view {offset = 32}
+  global_store_short_saddr %17, %29, %out_view {offset = 64}
+  %48 = v_lshrrev_b32_src0_inline %29, 16
+  global_store_short_saddr %17, %48, %out_view {offset = 96}
+  global_store_short_saddr %17, %35, %out_view {offset = 128}
+  %51 = v_lshrrev_b32_src0_inline %35, 16
+  global_store_short_saddr %17, %51, %out_view {offset = 160}
+  global_store_short_saddr %17, %41, %out_view {offset = 192}
+  %54 = v_lshrrev_b32_src0_inline %41, 16
+  global_store_short_saddr %17, %54, %out_view {offset = 224}
   return
 }
 

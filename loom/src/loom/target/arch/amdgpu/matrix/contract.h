@@ -82,6 +82,14 @@ const loom_amdgpu_matrix_result_representation_t*
 loom_amdgpu_matrix_result_representation_at(
     loom_amdgpu_matrix_result_representation_id_t representation_id);
 
+// Binds coordinates to a native numeric realization without contract search.
+// Coordinate IDs come from typed native rows or the selected compiler plan.
+// Returns NONE for numeric types or coordinate/type pairs with no native row.
+loom_amdgpu_matrix_result_representation_id_t
+loom_amdgpu_matrix_result_representation_for_coordinates(
+    loom_amdgpu_matrix_result_coordinate_id_t coordinate_id,
+    loom_amdgpu_matrix_numeric_type_t numeric_type);
+
 // Returns a built-in descriptor with the same wait-state behavior as
 // |low_descriptor_ref|, or NULL when the descriptor ref is not a matrix
 // contract.
