@@ -111,6 +111,31 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
     return nullptr;
   }
 
+  void ExpectDependencyTiming(
+      const loom_low_emission_frame_t& frame, uint32_t producer_node,
+      uint32_t consumer_node, loom_low_schedule_dependency_kind_t kind,
+      int32_t minimum_issue_separation_cycles,
+      loom_low_schedule_separation_source_t separation_source,
+      loom_low_model_quality_t model_quality) {
+    const loom_low_schedule_dependency_t* match = nullptr;
+    for (iree_host_size_t i = 0; i < frame.schedule.dependencies.count; ++i) {
+      const loom_low_schedule_dependency_t* dependency =
+          loom_low_schedule_dependency_graph_at(&frame.schedule.dependencies,
+                                                i);
+      if (dependency->producer_node == producer_node &&
+          dependency->consumer_node == consumer_node &&
+          dependency->kind == kind) {
+        EXPECT_EQ(match, nullptr);
+        match = dependency;
+      }
+    }
+    ASSERT_NE(match, nullptr);
+    EXPECT_EQ(match->minimum_issue_separation_cycles,
+              minimum_issue_separation_cycles);
+    EXPECT_EQ(match->separation_source, separation_source);
+    EXPECT_EQ(match->model_quality, model_quality);
+  }
+
   void ExpectEffectPredecessors(
       const loom_low_emission_frame_t& frame, uint32_t consumer_node,
       std::initializer_list<uint32_t> expected_producer_nodes) {
@@ -307,6 +332,142 @@ low.func.def target<test.low.core> @resource_capacity(%lhs: reg<test.i32>, %rhs:
     ASSERT_GE(frame.schedule.node_count, 2u);
     EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
     EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 4u);
+  }
+}
+
+TEST_F(LowEmissionFrameTest, DependencyTimingUsesMostSpecificModel) {
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @schedule_class_fallback(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.fast.i32 %lhs, %rhs
+  %consumer = test.add.i32 %producer, %rhs
+  return %consumer
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.dependencies.count, 2u);
+    ExpectDependencyTiming(frame, 0, 1, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 7,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_SCHEDULE_CLASS,
+                           LOOM_LOW_MODEL_QUALITY_EXACT);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 7u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @exact_zero(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.fast.i32 %lhs, %rhs
+  %consumer = test.event.consume.early.i32 %producer, %rhs
+  return %consumer
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.dependencies.count, 2u);
+    ExpectDependencyTiming(frame, 0, 1, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 0,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+                           LOOM_LOW_MODEL_QUALITY_EXACT);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 0u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @calibrated_positive(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.slow.i32 %lhs, %rhs
+  %consumer = test.event.consume.early.i32 %producer, %rhs
+  return %consumer
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.dependencies.count, 2u);
+    ExpectDependencyTiming(frame, 0, 1, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, 3,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+                           LOOM_LOW_MODEL_QUALITY_CALIBRATED);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 3u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @signed_negative(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.fast.i32 %lhs, %rhs
+  %consumer = test.event.consume.late.i32 %producer, %rhs
+  return %consumer
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.dependencies.count, 2u);
+    ExpectDependencyTiming(frame, 0, 1, LOOM_LOW_SCHEDULE_DEPENDENCY_SSA, -2,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+                           LOOM_LOW_MODEL_QUALITY_EXACT);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 0u);
+  }
+}
+
+TEST_F(LowEmissionFrameTest, SharedResourceCapacityShapesIssueCycles) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @shared_resource(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %first = test.event.fast.i32 %lhs, %rhs
+  %second = test.event.fast.i32 %lhs, %rhs
+  %third = test.event.fast.i32 %lhs, %rhs
+  return %first, %second, %third
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ASSERT_EQ(frame.schedule.node_count, 4u);
+  EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[2].issue_cycle, 2u);
+}
+
+TEST_F(LowEmissionFrameTest, EffectTimingDistinguishesReadWriteDirection) {
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @write_after_read(%read_value: reg<test.i32>, %write_value: reg<test.i32>) asm {
+  test.event.memory.read.i32 %read_value
+  test.event.memory.write.i32 %write_value
+  return
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.dependencies.count, 1u);
+    ExpectDependencyTiming(frame, 0, 1, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, 0,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+                           LOOM_LOW_MODEL_QUALITY_EXACT);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 0u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @read_after_write(%write_value: reg<test.i32>, %read_value: reg<test.i32>) asm {
+  test.event.memory.write.i32 %write_value
+  test.event.memory.read.i32 %read_value
+  return
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.dependencies.count, 1u);
+    ExpectDependencyTiming(frame, 0, 1, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, 2,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+                           LOOM_LOW_MODEL_QUALITY_EXACT);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 2u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @write_after_write(%first_value: reg<test.i32>, %second_value: reg<test.i32>) asm {
+  test.event.memory.write.i32 %first_value
+  test.event.memory.write.i32 %second_value
+  return
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.dependencies.count, 1u);
+    ExpectDependencyTiming(frame, 0, 1, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, 1,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+                           LOOM_LOW_MODEL_QUALITY_EXACT);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 1u);
   }
 }
 
