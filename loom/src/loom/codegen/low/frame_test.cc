@@ -471,6 +471,145 @@ low.func.def target<test.low.core> @write_after_write(%first_value: reg<test.i32
   }
 }
 
+TEST_F(LowEmissionFrameTest, SourceOrderBoundariesPreserveSegments) {
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @move_boundary(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %before = test.mul.i32 %lhs, %rhs
+  %moved = move %lhs : reg<test.i32> -> reg<test.i32>
+  %after = test.add.i32 %moved, %rhs
+  return %before, %after
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.node_count, 4u);
+    EXPECT_TRUE(
+        iree_any_bit_set(frame.schedule.nodes[1].flags,
+                         LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY));
+    EXPECT_EQ(frame.schedule.nodes[0].scheduled_ordinal, 0u);
+    EXPECT_EQ(frame.schedule.nodes[1].scheduled_ordinal, 1u);
+    EXPECT_EQ(frame.schedule.nodes[2].scheduled_ordinal, 2u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @schedule_fence(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %before = test.add.i32 %lhs, %rhs
+  low.schedule.fence
+  %after = test.mul.i32 %lhs, %rhs
+  return %before, %after
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.node_count, 4u);
+    EXPECT_TRUE(
+        iree_any_bit_set(frame.schedule.nodes[1].flags,
+                         LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY));
+    EXPECT_EQ(frame.schedule.nodes[0].scheduled_ordinal, 0u);
+    EXPECT_EQ(frame.schedule.nodes[1].scheduled_ordinal, 1u);
+    EXPECT_EQ(frame.schedule.nodes[2].scheduled_ordinal, 2u);
+    EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 1u);
+    EXPECT_EQ(frame.schedule.nodes[2].issue_cycle, 1u);
+  }
+  {
+    ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @barrier_segments(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.i32>) asm {
+  %before = test.add.i32 %lhs, %rhs
+  test.barrier
+  %middle = test.mul.i32 %lhs, %rhs
+  test.barrier
+  %after = test.add.i32 %lhs, %rhs
+  return %before, %middle, %after
+}
+)");
+    loom_low_emission_frame_t frame = {};
+    IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+    ASSERT_EQ(frame.schedule.node_count, 6u);
+    for (uint32_t i = 0; i < frame.schedule.node_count; ++i) {
+      EXPECT_EQ(frame.schedule.nodes[i].scheduled_ordinal, i);
+    }
+    EXPECT_TRUE(
+        iree_any_bit_set(frame.schedule.nodes[1].flags,
+                         LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY));
+    EXPECT_TRUE(
+        iree_any_bit_set(frame.schedule.nodes[3].flags,
+                         LOOM_LOW_SCHEDULE_NODE_FLAG_SOURCE_ORDER_BOUNDARY));
+    ExpectDependencyTiming(frame, 1, 3, LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT, 2,
+                           LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+                           LOOM_LOW_MODEL_QUALITY_EXACT);
+    EXPECT_EQ(frame.schedule.nodes[4].issue_cycle, 4u);
+  }
+}
+
+TEST_F(LowEmissionFrameTest, StructuralPreambleStaysBeforeInstructions) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @preamble(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %resource = resource<native_pointer> {index = 0, source_type = buffer} : reg<test.ptr>
+  %live0 = live_in<test.arg0> : reg<test.i32>
+  %live1 = live_in<test.arg0> : reg<test.i32>
+  %value = test.add.i32 %lhs, %rhs
+  return %value
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ASSERT_EQ(frame.schedule.node_count, 5u);
+  EXPECT_TRUE(loom_low_resource_isa(frame.schedule.nodes[0].op));
+  EXPECT_TRUE(loom_low_live_in_isa(frame.schedule.nodes[1].op));
+  EXPECT_TRUE(loom_low_live_in_isa(frame.schedule.nodes[2].op));
+  for (uint32_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(frame.schedule.nodes[i].scheduled_ordinal, i);
+    EXPECT_EQ(frame.schedule.nodes[i].issue_cycle, 0u);
+  }
+  EXPECT_EQ(frame.schedule.nodes[3].scheduled_ordinal, 3u);
+}
+
+TEST_F(LowEmissionFrameTest, EquivalentDescriptorsRetainSelectedModel) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @alternatives(%lhs0: reg<test.i32>, %rhs0: reg<test.i32>, %lhs1: reg<test.i32>, %rhs1: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %a = test.schedule.alternative.a.i32 %lhs0, %rhs0
+  %b = test.schedule.alternative.a.i32 %lhs1, %rhs1
+  return %a, %b
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_test_low_core_descriptor_set();
+  ASSERT_EQ(frame.schedule.node_count, 3u);
+  EXPECT_EQ(frame.schedule.nodes[1].source_descriptor_ordinal,
+            TEST_LOW_CORE_DESCRIPTOR_REF_TEST_SCHEDULE_ALTERNATIVE_A_I32);
+  EXPECT_EQ(frame.schedule.nodes[1].descriptor,
+            loom_low_descriptor_set_descriptor_at(
+                descriptor_set,
+                TEST_LOW_CORE_DESCRIPTOR_REF_TEST_SCHEDULE_ALTERNATIVE_B_I32));
+  EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 0u);
+}
+
+TEST_F(LowEmissionFrameTest, IssuedConstantFillsDependencyLatency) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @constant_latency(%lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>) asm {
+  %producer = test.event.slow.i32 %lhs, %rhs
+  %constant = test.const.issued.i32 1
+  %consumer = test.add.i32 %producer, %rhs
+  %result = test.add.i32 %consumer, %constant
+  return %result
+}
+)");
+  loom_low_emission_frame_t frame = {};
+  IREE_ASSERT_OK(BuildFrame(module.get(), {}, &frame));
+
+  ASSERT_EQ(frame.schedule.node_count, 5u);
+  EXPECT_EQ(frame.schedule.nodes[0].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[1].issue_cycle, 0u);
+  EXPECT_EQ(frame.schedule.nodes[2].issue_cycle, 1u);
+  EXPECT_EQ(frame.schedule.nodes[3].issue_cycle, 2u);
+}
+
 TEST_F(LowEmissionFrameTest, MaterializationPreservesReadyDescriptorPair) {
   constexpr loom_low_schedule_strategy_t kScheduleStrategies[] = {
       LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
