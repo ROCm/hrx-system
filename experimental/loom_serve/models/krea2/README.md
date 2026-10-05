@@ -1362,6 +1362,7 @@ output. Regenerable qualification tensors occupy less than 64 MiB.
 Channel normalization clamps the L2 norm at `1e-12`, multiplies by
 `sqrt(channels)` and learned gamma, and fuses SiLU without a normalized
 intermediate tensor. This is distinct from the DiT's zero-centered RMSNorm.
+The shared 3x3 matrix helper rounds operands to BF16 and accumulates in F32.
 The last convolution retains the F32 bias rounding before adding the skip.
 
 The residual uses two feature-sized temporaries. Its second normalization is
@@ -1378,21 +1379,19 @@ HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_residu
   --output=/path/to/new-vae-residual-results
 ```
 
-At 2x6 and 48x48, both base/LoRA feature inputs pass all 56 repeated
-comparisons over 24,901,632 values. Primitive normalization/convolution checks
-use independent F64 arithmetic; fused skip addition, the residual command, and
-the entire in-place prefix match staged native output bit-for-bit. The full
+The driver uses independent F64 arithmetic, with BF16 operand rounding for
+convolutions. Fused skip addition, the residual command, and the entire
+in-place prefix must match staged native output bit-for-bit. The full
 prefix has six unique kernels, ten parameters occupying 32,523,008 bytes, and
 7,372,800 bytes of transient workspace. The residual itself needs 6.75 MiB.
 
-For the 48x48 first residual, relative L2 against the independent F64 chain
-is 8.57e-7 base and 8.75e-7 LoRA, below the fixed 2e-5 accumulated bound.
-The corresponding CPU/F32 reference is closer to F64; native accuracy here
-is sufficient for the bounded block gate, not a claim of superior precision.
-The input-path regression retains all 64 passing comparisons and unchanged
-feature bits. Spatial attention, the remaining residual/upsampling stages,
-and final RGB remain outside this prefix. Residual fixtures occupy less than
-192 MiB and can be regenerated from the retained input results.
+The earlier scalar-convolution path passed 56 repeated comparisons over
+24,901,632 values at 2x6 and 48x48. Its first-residual relative L2 was
+8.57e-7 base and 8.75e-7 LoRA against the F64 chain. Those precision figures
+do not describe the selected BF16 matrix arithmetic; its real-latent decoded
+images are reported below. Spatial attention and RGB remain outside this
+prefix. Residual fixtures occupy less than 192 MiB and can be regenerated
+from the retained input results.
 
 ### Bounded-memory VAE spatial attention
 
@@ -1471,20 +1470,22 @@ later convolutions add into that destination. Equal-width blocks advance
 source-owned features in place. Spatial nearest-neighbor expansion is part of
 convolution indexing and never materializes an enlarged input image.
 
-The equal-width up1/up2/up3 convolutions (384/192/96 channels) use the
-config-free [`convolution_3x3_matrix_f32`](kernels/convolution_matrix.loom)
-helper for plain and residual convolutions. The up1/up2 resize leaves use the
-same helper with nearest-neighbor expansion and 384-to-192 / 192-to-96 channel
-reduction. A workgroup owns 32 output spatial positions by 32 output channels.
+The middle residuals and all four upsampling stages use the config-free
+[`convolution_3x3_matrix_f32`](kernels/convolution_matrix.loom) helper for
+plain and residual 3x3 convolutions, including the 192-to-384 channel expansion.
+All three resize leaves use the same helper with nearest-neighbor expansion
+and 384-to-192 / 192-to-96 channel reduction. A workgroup owns 32 output
+spatial positions by 32 output channels.
 Cooperative acquisition shares inputs across output channels and coefficients
 across pixels, while retaining original global F32 tensors. Convolutions read
 the last of three temporal weight planes; resize coefficients have one plane.
-Up0, channel expansion and RGB convolutions retain their original leaves.
+The 1x1 learned shortcut, input projection and RGB convolutions retain their
+original F32 leaves.
 
 Height and width describe physical input storage. A separate SSA upsample
-factor selects output geometry: 1 for the equal-width convolutions, 2 for the
-two large resize stages. Tap bounds are checked in the expanded output domain
-before division maps a valid tap back to its nearest physical input pixel.
+factor selects output geometry: 1 for residual convolutions, 2 for resize
+stages. Tap bounds are checked in the expanded output domain before division
+maps a valid tap back to its nearest physical input pixel.
 This preserves padding at the expanded border without allocating an expanded
 tensor or folding coefficients. The scale-1 specialization emits the same
 native code as the non-expanding helper.
@@ -1507,9 +1508,10 @@ scalar ABI.
 actual helper with an independent scalar VM function that rounds operands to
 BF16, accumulates in F64, and rounds the final result to F32.
 The two scenarios use physical 1x1 and 3x11 inputs at full 96/192/384-channel
-reduction depths. Five configurations cover the three equal-width, three-plane
-convolutions and both mixed-width, one-plane resize stages. Each runs plain
-output, distinct residual output and genuinely aliased residual/output storage.
+reduction depths. Six configurations cover the three equal-width, three-plane
+convolutions, channel expansion, and both mixed-width, one-plane resize shapes.
+Each runs plain output, distinct residual output and genuinely aliased
+residual/output storage.
 Independent temporal entries, nonzero bias/skip, row-crossing tiles and output
 sentinels expose indexing and publication errors. Scale 2 expands those inputs
 to 2x2 and 6x22 outputs, exercising padding before nearest division and a
@@ -1538,6 +1540,7 @@ done <<'SHAPES'
 96 96 3 1
 192 192 3 1
 384 384 3 1
+192 384 3 1
 384 192 1 2
 192 96 1 2
 SHAPES
@@ -1583,7 +1586,7 @@ HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_vae_decode
 
 The staged driver runs base and active-LoRA latents at 2x6 and 48x48. Its
 independent F64 primitive calculations round operands to BF16 exactly where
-the native up1/up2/up3 matrix leaves do; up0, channel expansion and RGB leaves
+the native residual/resize matrix leaves do; the learned shortcut and RGB
 retain F32 operands. Primitive comparisons retain 2e-5 absolute/relative bounds,
 and residual chains retain a 2e-5 relative-L2 bound against that matched
 arithmetic. Clamping and both composed decoder commands must equal separately
@@ -1591,23 +1594,39 @@ executed native stages bit-for-bit. Nonfinite values always fail. The final
 CPU/F32 model comparison reports numerical and pixel differences instead of
 requiring the native model to reproduce F32 arithmetic.
 
-Three actual retained base/active-LoRA latents were decoded with ordinary BF16
-matrix operands and the original checkpoint, twice each. Relative-L2 and RGB8
-errors below compare against independent CPU/F32 decodes of those same latents;
+Three actual retained base/active-LoRA latents were decoded with all wide
+3x3 convolutions using ordinary BF16 matrix operands and the original
+checkpoint, twice each. Attention was held at the scalar implementation to
+isolate the convolution arithmetic. Relative-L2 and RGB8 errors below compare
+against independent CPU/F32 decodes of those same latents;
 the 1024-square case is a full-size model output, not enlarged small data.
 All results were finite and the actual reference/native PNGs were inspected
 without visible degradation.
 
 | BF16-operand decoder result | Base 384x384 | Softwatercolor 384x384 | Base 1024x1024 |
 | --- | ---: | ---: | ---: |
-| F32 relative L2 versus CPU VAE | 0.00209814 | 0.00431517 | 0.00264603 |
-| Maximum 8-bit difference | 7 | 10 | 13 |
-| Pixel RMSE, 8-bit codes | 0.25237 | 0.36303 | 0.29265 |
-| RGB PSNR | 60.09 dB | 56.93 dB | 58.80 dB |
+| F32 relative L2 versus CPU VAE | 0.00249737 | 0.00552388 | 0.00358484 |
+| Maximum 8-bit difference | 6 | 15 | 16 |
+| Pixel RMSE, 8-bit codes | 0.28642 | 0.43239 | 0.36103 |
+| RGB PSNR | 58.99 dB | 55.41 dB | 56.98 dB |
 
 These distances are observations, not universal image-quality thresholds or an
 exact-pixel contract. They make the selected arithmetic's cost visible while
 the portable oracle checks its indexing and operations independently.
+
+On gfx1151, same-input ABABA dispatch profiles compare the replaced scalar
+leaves with the shared matrix helper at their actual 1024-image shapes:
+
+| Convolution shape | Scalar | BF16 matrix |
+| --- | ---: | ---: |
+| Middle/up0, 128 square, 384 to 384 | 98.65 ms | 10.95 ms |
+| Expansion, 256 square, 192 to 384 | 313.52 ms | 24.79 ms |
+| Resize0, physical 128 square, 384 to 192, scale 2 | 163.48 ms | 19.24 ms |
+
+These are instrumented component measurements with synthetic bounded inputs,
+not complete-request latency or accuracy evidence. The actual images above
+provide the independent model-level witness. The helper is unchanged across
+these leaves, uses 48 VGPR and 4,736 LDS bytes, and reports no spills.
 
 The complete command has 30 unique kernels and 104 parameters occupying
 286,100,492 bytes. Transient workspace is 219,709,440 bytes (209.53 MiB) at

@@ -45,13 +45,15 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up0_convolution() {
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
   %pixels = index.mul %height, %width : index
-  %padding = index.constant 127 : index
+  %padding = index.constant 31 : index
+  %tile = index.constant 32 : index
   %threads = index.constant 128 : index
   %rounded = index.add %pixels, %padding : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.div %rounded, %tile : index
   %outputs = index.constant 384 : index
+  %channel_groups = index.div %outputs, %tile : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
   %latent_height = config.get @krea2.latent_height : index
   %latent_width = config.get @krea2.latent_width : index
@@ -60,11 +62,10 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up0_convolution() {
   %width = index.mul %latent_width, %scale : index
   %inputs = index.constant 384 : index
   %outputs = index.constant 384 : index
-  %extent = index.constant 3 : index
   %planes = index.constant 3 : index
   %upsample = index.constant 1 : index
   %add_residual = scalar.constant false : i1
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %inputs, %outputs, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -75,13 +76,15 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up0_convolution_add() {
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
   %pixels = index.mul %height, %width : index
-  %padding = index.constant 127 : index
+  %padding = index.constant 31 : index
+  %tile = index.constant 32 : index
   %threads = index.constant 128 : index
   %rounded = index.add %pixels, %padding : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.div %rounded, %tile : index
   %outputs = index.constant 384 : index
+  %channel_groups = index.div %outputs, %tile : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer) {
   %latent_height = config.get @krea2.latent_height : index
   %latent_width = config.get @krea2.latent_width : index
@@ -90,11 +93,10 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up0_convolution_add() {
   %width = index.mul %latent_width, %scale : index
   %inputs = index.constant 384 : index
   %outputs = index.constant 384 : index
-  %extent = index.constant 3 : index
   %planes = index.constant 3 : index
   %upsample = index.constant 1 : index
   %add_residual = scalar.constant true : i1
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %inputs, %outputs, %planes, %upsample, %add_residual, %input, %weight, %bias, %residual, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -105,13 +107,15 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up0_resize() {
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
   %pixels = index.mul %height, %width : index
-  %padding = index.constant 127 : index
+  %padding = index.constant 31 : index
+  %tile = index.constant 32 : index
   %threads = index.constant 128 : index
   %rounded = index.add %pixels, %padding : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.div %rounded, %tile : index
   %outputs = index.constant 192 : index
+  %channel_groups = index.div %outputs, %tile : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
   %latent_height = config.get @krea2.latent_height : index
   %latent_width = config.get @krea2.latent_width : index
@@ -120,11 +124,10 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_up0_resize() {
   %width = index.mul %latent_width, %scale : index
   %inputs = index.constant 384 : index
   %outputs = index.constant 192 : index
-  %extent = index.constant 3 : index
   %planes = index.constant 1 : index
   %upsample = index.constant 2 : index
   %add_residual = scalar.constant false : i1
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %inputs, %outputs, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -485,13 +488,15 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_expand_convolution() {
   %height = index.mul %latent_height, %scale : index
   %width = index.mul %latent_width, %scale : index
   %pixels = index.mul %height, %width : index
-  %padding = index.constant 127 : index
+  %padding = index.constant 31 : index
+  %tile = index.constant 32 : index
   %threads = index.constant 128 : index
   %rounded = index.add %pixels, %padding : index
-  %groups = index.div %rounded, %threads : index
+  %groups = index.div %rounded, %tile : index
   %outputs = index.constant 384 : index
+  %channel_groups = index.div %outputs, %tile : index
   %one = index.constant 1 : index
-  kernel.launch.config workgroups(%groups, %outputs, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%groups, %channel_groups, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %bias: buffer, %output: buffer) {
   %latent_height = config.get @krea2.latent_height : index
   %latent_width = config.get @krea2.latent_width : index
@@ -500,11 +505,10 @@ kernel.def target(@vae_upsample_wave32) @krea_vae_expand_convolution() {
   %width = index.mul %latent_width, %scale : index
   %inputs = index.constant 192 : index
   %outputs = index.constant 384 : index
-  %extent = index.constant 3 : index
   %planes = index.constant 3 : index
   %upsample = index.constant 1 : index
   %add_residual = scalar.constant false : i1
-  template.apply<@image.convolution_nchw_f32>(%height, %width, %inputs, %outputs, %extent, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@image.convolution_3x3_matrix_f32>(%height, %width, %inputs, %outputs, %planes, %upsample, %add_residual, %input, %weight, %bias, %output, %output) : (index, index, index, index, index, index, i1, buffer, buffer, buffer, buffer, buffer)
   kernel.return
 }
 
