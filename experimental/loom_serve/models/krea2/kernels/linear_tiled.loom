@@ -53,9 +53,10 @@ template.def<@projection.linear_tiled_coordinates> device @linear_tiled_coordina
   template.return %row, %output : index, index
 }
 
-template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 
-// Dense BF16 X W^T, with row-major X/output and [output,input] weights.
+// BF16 X W^T, with row-major X, [output,input] weights, and explicit output
+// layout. The caller supplies an injective layout for the logical result.
 // Launch ceil(rows/64) x (outputs/64) workgroups of 256 threads, wave32.
 // Rows are a positive multiple of 16, inputs of 256, and outputs of 64.
 // Dimensions are specialization facts; this helper has no model configuration.
@@ -72,7 +73,7 @@ template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outpu
 // Four K16 accumulator chains are combined in pairs every K256 before adding
 // to the running total. This preserves the single-wave helper's F32 operation
 // order and final BF16 rounding, without global partials or weight preparation.
-template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %input: buffer, %weight: buffer, %output: buffer) {
+template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -117,7 +118,7 @@ template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: ind
   %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
   %input_view = buffer.view %input_noalias[%origin] : buffer -> view<[%rows]x[%inputs]xbf16>
   %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
-  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16, %output_layout>
   %input_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
   %weight_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
   %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<64x72xbf16>
@@ -198,8 +199,8 @@ template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: ind
   // or no output. All waves have already retired their shared-memory reads.
   %result_valid = index.cmp ult, %result_row, %rows : index
   scf.if %result_valid {
-    vector.fragment.store<result> %result0, %output_view[%result_row, %result_column0] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16>
-    vector.fragment.store<result> %result1, %output_view[%result_row, %result_column1] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16>
+    vector.fragment.store<result> %result0, %output_view[%result_row, %result_column0] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16, %output_layout>
+    vector.fragment.store<result> %result1, %output_view[%result_row, %result_column1] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16, %output_layout>
     scf.yield
   }
   template.return

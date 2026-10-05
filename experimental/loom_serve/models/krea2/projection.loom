@@ -8,9 +8,9 @@ config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536),
 
 amdgpu.target<gfx11-generic> @projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
-template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 template.decl @krea2.image_input(%rows: index, %first_row: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %strength: buffer, %output: buffer)
 
 // Each wrapper fixes shape facts before applying the reusable arithmetic.
@@ -29,7 +29,8 @@ kernel.def target(@projection_wave32) @krea_image_projection() {
   %outputs = index.constant 6144 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
   %biased = template.apply<@projection.bias_f32_as_bf16>(%outputs, %result, %bias) : (index, vector<8xf32>, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %biased, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %biased, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -46,7 +47,8 @@ kernel.def target(@projection_wave32) @krea_image_adapter_down() {
   %inputs = index.constant 64 : index
   %outputs = index.constant 32 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -63,8 +65,9 @@ kernel.def target(@projection_wave32) @krea_image_adapter_add() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 6144 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %output_layout, %result, %strength, %base) : (index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %combined, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 

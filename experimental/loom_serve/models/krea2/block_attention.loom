@@ -6,7 +6,7 @@
 
 config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 amdgpu.target<gfx11-generic> @block_attention_wave64 {subgroup_size = 64}
-template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
+template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %value_layout: encoding<layout>, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
 template.decl @attention.store_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %output: buffer)
 template.decl @attention.gate_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %gate: buffer) -> (vector<8xbf16>)
 
@@ -23,7 +23,8 @@ kernel.def target(@block_attention_wave64) @block_attention() {
   %query_heads = index.constant 48 : index
   %key_value_heads = index.constant 12 : index
   %causal = scalar.constant false : i1
-  %result = template.apply<@attention.masked_gqa_128_bf16>(%tokens, %query_heads, %key_value_heads, %causal, %query, %key, %value, %mask) : (index, index, index, i1, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
+  %value_layout = encoding.layout.strided [1, %tokens] : encoding<layout>
+  %result = template.apply<@attention.masked_gqa_128_bf16>(%tokens, %query_heads, %key_value_heads, %causal, %value_layout, %query, %key, %value, %mask) : (index, index, index, i1, encoding<layout>, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
   template.apply<@attention.store_128_bf16>(%tokens, %query_heads, %result, %output) : (index, index, vector<8xbf16>, buffer)
   kernel.return
 }
@@ -41,7 +42,8 @@ kernel.def target(@block_attention_wave64) @block_attention_gated() {
   %query_heads = index.constant 48 : index
   %key_value_heads = index.constant 12 : index
   %causal = scalar.constant false : i1
-  %result = template.apply<@attention.masked_gqa_128_bf16>(%tokens, %query_heads, %key_value_heads, %causal, %query, %key, %value, %mask) : (index, index, index, i1, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
+  %value_layout = encoding.layout.strided [1, %tokens] : encoding<layout>
+  %result = template.apply<@attention.masked_gqa_128_bf16>(%tokens, %query_heads, %key_value_heads, %causal, %value_layout, %query, %key, %value, %mask) : (index, index, index, i1, encoding<layout>, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
   %gated = template.apply<@attention.gate_128_bf16>(%tokens, %query_heads, %result, %gate) : (index, index, vector<8xbf16>, buffer) -> (vector<8xbf16>)
   template.apply<@attention.store_128_bf16>(%tokens, %query_heads, %gated, %output) : (index, index, vector<8xbf16>, buffer)
   kernel.return
@@ -52,10 +54,10 @@ command.program.def public @krea2.block_attention_ungated() launch(%query: buffe
   %origin = index.constant 0 : offset
   %query_view = buffer.view %query[%origin] : buffer -> view<[%tokens]x6144xbf16>
   %key_view = buffer.view %key[%origin] : buffer -> view<[%tokens]x1536xbf16>
-  %value_view = buffer.view %value[%origin] : buffer -> view<[%tokens]x1536xbf16>
+  %value_view = buffer.view %value[%origin] : buffer -> view<1536x[%tokens]xbf16>
   %mask_view = buffer.view %mask[%origin] : buffer -> view<[%tokens]xi8>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
-  kernel.launch @block_attention(%query_view, %key_view, %value_view, %mask_view, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x1536xbf16>, view<[%tokens]x1536xbf16>, view<[%tokens]xi8>, view<[%tokens]x6144xbf16>)
+  kernel.launch @block_attention(%query_view, %key_view, %value_view, %mask_view, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x1536xbf16>, view<1536x[%tokens]xbf16>, view<[%tokens]xi8>, view<[%tokens]x6144xbf16>)
   command.return
 }
 
@@ -64,10 +66,10 @@ command.program.def public @krea2.block_attention_context() launch(%query: buffe
   %origin = index.constant 0 : offset
   %query_view = buffer.view %query[%origin] : buffer -> view<[%tokens]x6144xbf16>
   %key_view = buffer.view %key[%origin] : buffer -> view<[%tokens]x1536xbf16>
-  %value_view = buffer.view %value[%origin] : buffer -> view<[%tokens]x1536xbf16>
+  %value_view = buffer.view %value[%origin] : buffer -> view<1536x[%tokens]xbf16>
   %mask_view = buffer.view %mask[%origin] : buffer -> view<[%tokens]xi8>
   %gate_view = buffer.view %gate[%origin] : buffer -> view<[%tokens]x6144xbf16>
   %output_view = buffer.view %output[%origin] : buffer -> view<[%tokens]x6144xbf16>
-  kernel.launch @block_attention_gated(%query_view, %key_view, %value_view, %mask_view, %gate_view, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x1536xbf16>, view<[%tokens]x1536xbf16>, view<[%tokens]xi8>, view<[%tokens]x6144xbf16>, view<[%tokens]x6144xbf16>)
+  kernel.launch @block_attention_gated(%query_view, %key_view, %value_view, %mask_view, %gate_view, %output_view) : (view<[%tokens]x6144xbf16>, view<[%tokens]x1536xbf16>, view<1536x[%tokens]xbf16>, view<[%tokens]xi8>, view<[%tokens]x6144xbf16>, view<[%tokens]x6144xbf16>)
   command.return
 }

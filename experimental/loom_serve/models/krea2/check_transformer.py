@@ -131,7 +131,9 @@ with (
             # Retain native operands, not a duplicate oracle file for every stage.
             expected_path = args.output / "expected.bf16"
             actual_path = prefix.with_suffix(f".{component}.actual.bf16")
-            expected_path.write_bytes(encode(expected))
+            value_plane = component in ("value", "value_adapted")
+            stored_expected = expected.T if value_plane else expected
+            expected_path.write_bytes(encode(stored_expected))
             command = [
                 *args.checker,
                 "--model=" + str(args.model / "qualification"),
@@ -152,9 +154,12 @@ with (
             if exact:
                 command += ["--atol=0", "--rtol=0"]
             subprocess.run(command, check=True)
-            actual = load_bf16(actual_path).reshape_as(expected)
+            actual = load_bf16(actual_path).reshape_as(stored_expected)
+            if value_plane:
+                actual = actual.T
             if exact and encode(actual) != encode(expected):
                 raise AssertionError(f"{component}: non-bitwise composition")
+            # Native consumers receive the unchanged physical output file.
             paths[component] = actual_path
             return actual
 

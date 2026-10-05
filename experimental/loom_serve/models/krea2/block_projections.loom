@@ -7,7 +7,7 @@
 config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 
 amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
-template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
 
 // Traversal selection belongs to the model's concrete contraction shapes.
@@ -44,7 +44,8 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
   %width = index.constant 6144 : index
   %minimum_grouped_rows = index.constant 2560 : index
   %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
-  template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %width, %width, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -64,7 +65,30 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_1536() {
   %outputs = index.constant 1536 : index
   %minimum_grouped_rows = index.constant 2560 : index
   %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
+  kernel.return
+}
+
+// V publishes the same logical result in the consumer's channel-major layout.
+kernel.def target(@block_projection_wave32) @block_linear_6144_1536_column_major() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 64 : index
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %tile : index
+  %output_tiles = index.constant 24 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 256 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 6144 : index
+  %outputs = index.constant 1536 : index
+  %minimum_grouped_rows = index.constant 2560 : index
+  %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
+  %output_layout = encoding.layout.strided [1, %rows] : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -84,7 +108,8 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
   %outputs = index.constant 16384 : index
   %minimum_grouped_rows = index.constant 2048 : index
   %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -104,7 +129,8 @@ kernel.def target(@block_projection_wave32) @block_linear_16384_6144() {
   %outputs = index.constant 6144 : index
   %minimum_grouped_rows = index.constant 1088 : index
   %group_size = template.apply<@krea2.projection_row_group_size>(%rows, %minimum_grouped_rows) : (index, index) -> (index)
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
   kernel.return
 }
 
@@ -132,9 +158,9 @@ command.program.def public @krea2.block_value(%layer: index) launch(%parameters:
   %rows = config.get @krea2.block_tokens : index
   %origin = index.constant 0 : offset
   %input_view = buffer.view %input[%origin] : buffer -> view<[%rows]x6144xbf16>
-  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x1536xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1536x[%rows]xbf16>
   %weight = command.parameter %parameters, "blocks.{}.attn.wv.weight"[%layer] : view<1536x6144xbf16>
-  kernel.launch @block_linear_6144_1536(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<[%rows]x1536xbf16>)
+  kernel.launch @block_linear_6144_1536_column_major(%input_view, %weight, %output_view) : (view<[%rows]x6144xbf16>, view<1536x6144xbf16>, view<1536x[%rows]xbf16>)
   command.return
 }
 

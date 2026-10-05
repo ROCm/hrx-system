@@ -12,17 +12,19 @@
 // Cases cover each 16-row tail within a 64-row workgroup, every remainder of
 // the eight-row-tile traversal group, and both image sequence sizes. Buffers
 // have exact logical extents; distinct output sentinels also expose missing
-// valid stores.
+// valid stores. Column-major cases compare the entire physical byte stream;
+// both kernels publish the same logical matrix through that selected layout.
 
 config.decl @projection_test.rows : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 config.decl @projection_test.inputs : %value: index where [range(%value, 256, 65536), mul(%value, 256)]
 config.decl @projection_test.outputs : %value: index where [range(%value, 64, 65536), mul(%value, 64)]
 config.decl @projection_test.row_tile_group_size : %value: index where [range(%value, 1, 1024)]
+config.decl @projection_test.column_major : %value: index where [range(%value, 0, 1)]
 
 amdgpu.target<gfx11-generic> @projection_test_wave32 {subgroup_size = 32}
 template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
-template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 
 kernel.def target(@projection_test_wave32) @linear_bf16_reference() {
   %rows = config.get @projection_test.rows : index
@@ -38,7 +40,14 @@ kernel.def target(@projection_test_wave32) @linear_bf16_reference() {
   %inputs = config.get @projection_test.inputs : index
   %outputs = config.get @projection_test.outputs : index
   %result = template.apply<@projection.linear_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %layout_kind = config.get @projection_test.column_major : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %column_major = index.cmp ne, %layout_kind, %zero : index
+  %row_stride = scf.select %column_major, %one, %outputs : index
+  %column_stride = scf.select %column_major, %rows, %one : index
+  %output_layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -58,7 +67,14 @@ kernel.def target(@projection_test_wave32) @linear_bf16_tiled() {
   %inputs = config.get @projection_test.inputs : index
   %outputs = config.get @projection_test.outputs : index
   %group_size = config.get @projection_test.row_tile_group_size : index
-  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+  %layout_kind = config.get @projection_test.column_major : index
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %column_major = index.cmp ne, %layout_kind, %zero : index
+  %row_stride = scf.select %column_major, %one, %outputs : index
+  %column_stride = scf.select %column_major, %rows, %one : index
+  %output_layout = encoding.layout.strided [%row_stride, %column_stride] : encoding<layout>
+  template.apply<@projection.linear_tiled_bf16>(%rows, %inputs, %outputs, %group_size, %output_layout, %input, %weight, %output) : (index, index, index, index, encoding<layout>, buffer, buffer, buffer)
   kernel.return
 }
 

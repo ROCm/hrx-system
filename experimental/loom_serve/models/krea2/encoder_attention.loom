@@ -6,7 +6,7 @@
 
 config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 amdgpu.target<gfx11-generic> @encoder_attention_wave64 {subgroup_size = 64}
-template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
+template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %value_layout: encoding<layout>, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
 template.decl @attention.store_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %output: buffer)
 
 kernel.def target(@encoder_attention_wave64) @encoder_attention() {
@@ -26,7 +26,8 @@ kernel.def target(@encoder_attention_wave64) @encoder_attention() {
   %query_heads = index.constant 32 : index
   %key_value_heads = index.constant 8 : index
   %causal = scalar.constant true : i1
-  %result = template.apply<@attention.masked_gqa_128_bf16>(%tokens, %query_heads, %key_value_heads, %causal, %query, %key, %value, %mask) : (index, index, index, i1, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
+  %value_layout = encoding.layout.dense : encoding<layout>
+  %result = template.apply<@attention.masked_gqa_128_bf16>(%tokens, %query_heads, %key_value_heads, %causal, %value_layout, %query, %key, %value, %mask) : (index, index, index, i1, encoding<layout>, buffer, buffer, buffer, buffer) -> (vector<8xbf16>)
   template.apply<@attention.store_128_bf16>(%tokens, %query_heads, %result, %output) : (index, index, vector<8xbf16>, buffer)
   kernel.return
 }

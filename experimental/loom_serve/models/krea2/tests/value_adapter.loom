@@ -1,0 +1,67 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link block_adapters.loom and kernels/linear.loom with --library, selecting
+// krea2.block_tokens=16 or 80 for the matching case. These use the production
+// column-major final writer, not a copied epilogue. Physical storage is
+// [1536,rows]; nonuniform base words expose row/column ownership changes.
+// X=1/8 and W=1/4 give an exact rank-32 delta of one. Half strength tests the
+// update branch independently of reduction error. Distinct and truly aliased
+// outputs must agree, while zero strength also preserves negative-zero bits.
+
+kernel.decl @block_adapter_add_1536_column_major() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
+
+check.case public @value_adapter_16 {
+  %input = check.generate.fill value(0.125) : tensor<16x32xbf16>
+  %weight = check.generate.fill value(0.25) : tensor<1536x32xf32>
+  %zero_strength = check.generate.fill value(0.0) : tensor<1xf32>
+  %half_strength = check.generate.fill value(0.5) : tensor<1xf32>
+  %base = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<1536x16xbf16>
+  %zero_aliased = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<1536x16xbf16>
+  %half_aliased = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<1536x16xbf16>
+  %zero_actual = check.generate.fill value(-17.0) : tensor<1536x16xbf16>
+  %half_actual = check.generate.fill value(-17.0) : tensor<1536x16xbf16>
+  %updated = check.generate.iota offset(-7.5) step(0.03125) period(512) : tensor<1536x16xbf16>
+  %negative_zero = check.generate.fill value(-0.0) : tensor<1536x16xbf16>
+  %expected_zero = check.generate.fill value(-0.0) : tensor<1536x16xbf16>
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %zero_strength, %base, %zero_actual) : (tensor<16x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x16xbf16>, tensor<1536x16xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %zero_strength, %zero_aliased, %zero_aliased) : (tensor<16x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x16xbf16>, tensor<1536x16xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %half_strength, %base, %half_actual) : (tensor<16x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x16xbf16>, tensor<1536x16xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %half_strength, %half_aliased, %half_aliased) : (tensor<16x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x16xbf16>, tensor<1536x16xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %zero_strength, %negative_zero, %negative_zero) : (tensor<16x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x16xbf16>, tensor<1536x16xbf16>)
+  check.expect.bitwise actual(%zero_actual) expected(%base) : tensor<1536x16xbf16>
+  check.expect.bitwise actual(%zero_aliased) expected(%base) : tensor<1536x16xbf16>
+  check.expect.bitwise actual(%half_actual) expected(%updated) : tensor<1536x16xbf16>
+  check.expect.bitwise actual(%half_aliased) expected(%updated) : tensor<1536x16xbf16>
+  check.expect.bitwise actual(%negative_zero) expected(%expected_zero) : tensor<1536x16xbf16>
+  check.return
+}
+
+check.case public @value_adapter_80 {
+  %input = check.generate.fill value(0.125) : tensor<80x32xbf16>
+  %weight = check.generate.fill value(0.25) : tensor<1536x32xf32>
+  %zero_strength = check.generate.fill value(0.0) : tensor<1xf32>
+  %half_strength = check.generate.fill value(0.5) : tensor<1xf32>
+  %base = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<1536x80xbf16>
+  %zero_aliased = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<1536x80xbf16>
+  %half_aliased = check.generate.iota offset(-8.0) step(0.03125) period(512) : tensor<1536x80xbf16>
+  %zero_actual = check.generate.fill value(-17.0) : tensor<1536x80xbf16>
+  %half_actual = check.generate.fill value(-17.0) : tensor<1536x80xbf16>
+  %updated = check.generate.iota offset(-7.5) step(0.03125) period(512) : tensor<1536x80xbf16>
+  %negative_zero = check.generate.fill value(-0.0) : tensor<1536x80xbf16>
+  %expected_zero = check.generate.fill value(-0.0) : tensor<1536x80xbf16>
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %zero_strength, %base, %zero_actual) : (tensor<80x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x80xbf16>, tensor<1536x80xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %zero_strength, %zero_aliased, %zero_aliased) : (tensor<80x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x80xbf16>, tensor<1536x80xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %half_strength, %base, %half_actual) : (tensor<80x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x80xbf16>, tensor<1536x80xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %half_strength, %half_aliased, %half_aliased) : (tensor<80x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x80xbf16>, tensor<1536x80xbf16>)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %zero_strength, %negative_zero, %negative_zero) : (tensor<80x32xbf16>, tensor<1536x32xf32>, tensor<1xf32>, tensor<1536x80xbf16>, tensor<1536x80xbf16>)
+  check.expect.bitwise actual(%zero_actual) expected(%base) : tensor<1536x80xbf16>
+  check.expect.bitwise actual(%zero_aliased) expected(%base) : tensor<1536x80xbf16>
+  check.expect.bitwise actual(%half_actual) expected(%updated) : tensor<1536x80xbf16>
+  check.expect.bitwise actual(%half_aliased) expected(%updated) : tensor<1536x80xbf16>
+  check.expect.bitwise actual(%negative_zero) expected(%expected_zero) : tensor<1536x80xbf16>
+  check.return
+}

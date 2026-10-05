@@ -82,7 +82,7 @@ for component, source, expected, weight_name, inputs, outputs in (
     if not torch.isfinite(oracle).all():
         raise ValueError(f"nonfinite F64 contraction oracle: {component}")
     oracle_path = args.output / f"{component}-oracle.bf16"
-    oracle_path.write_bytes(encode(oracle))
+    oracle_path.write_bytes(encode(oracle.T if component == "value" else oracle))
     library = load(expected_path).reshape_as(oracle).float()
     error = library - oracle.float()
     print(
@@ -112,8 +112,11 @@ for component, source, expected, weight_name, inputs, outputs in (
             reference_path = args.output / f"{component}-reference-{count}.bf16"
             with source_path.open("rb") as stream:
                 input_path.write_bytes(stream.read(count * inputs * 2))
-            with oracle_path.open("rb") as stream:
-                reference_path.write_bytes(stream.read(count * outputs * 2))
+            # Select logical rows before encoding this shape's physical stride.
+            selected = oracle[:count]
+            reference_path.write_bytes(
+                encode(selected.T if component == "value" else selected)
+            )
         print(json.dumps(dict(component=component, rows=count)), flush=True)
         subprocess.run(
             [

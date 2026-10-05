@@ -11,8 +11,8 @@ template.decl @normalization.zero_centered_bf16(%value: bf16, %weight: f32, %inv
 template.decl @modulation.affine_bf16(%value: bf16, %scale: bf16, %scale_table: f32, %shift: bf16, %shift_table: f32) -> (bf16)
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
-template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 template.decl @krea2.velocity_head(%rows: index, %first_row: index, %embedding_offset: offset, %adapted: i1, %parameters: buffer, %adapter: buffer, %input: buffer, %embedding: buffer, %strength: buffer, %output: buffer)
 
 // The same time embedding conditions both learned modulation rows. It stays
@@ -65,7 +65,8 @@ kernel.def target(@head_wave32) @krea_head_projection() {
   %outputs = index.constant 64 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
   %biased = template.apply<@projection.bias_f32_as_bf16>(%outputs, %result, %bias) : (index, vector<8xf32>, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %biased, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %biased, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -82,7 +83,8 @@ kernel.def target(@head_wave32) @krea_head_adapter_down() {
   %inputs = index.constant 6144 : index
   %outputs = index.constant 32 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -99,8 +101,9 @@ kernel.def target(@head_wave32) @krea_head_adapter_add() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 64 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %output_layout, %result, %strength, %base) : (index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %combined, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 

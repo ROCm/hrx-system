@@ -406,9 +406,10 @@ executable rebuild is needed to change a source kernel or specialization.
 ## Source and ownership boundary
 
 [`projection.loom`](projection.loom) owns model names, dimensions, and concrete
-wrappers. [`kernels/linear.loom`](kernels/linear.loom) receives dimensions as
-explicit SSA operands in templates. The wrappers fix those operands during
-JIT specialization; shape scalars are not carried in the device launch ABI.
+wrappers. [`kernels/linear.loom`](kernels/linear.loom) receives dimensions and
+output encodings as explicit SSA operands in templates. The wrappers fix those
+operands during JIT specialization; shapes and layouts are not carried in the
+device launch ABI.
 The WMMA layout contract is GFX11 wave32, including the fused bias epilogue.
 
 The first projection is `X W^T + bias`. F32 checkpoint values round to BF16
@@ -527,7 +528,12 @@ partial workgroup zero-fills absent input rows; every thread participates in
 the shared-memory barriers, and only complete valid 16-row fragments store.
 The supported row count therefore remains any positive multiple of 16.
 Model configuration and launch geometry stay in the concrete wrappers;
-dimensions enter the motif as SSA operands, not dispatch parameters.
+dimensions and output encoding enter the motif as SSA operands, not dispatch
+parameters. The V projection writes its logical `[tokens, 1536]` matrix with
+strides `[1, tokens]`, physically contiguous as `[1536, tokens]`. Attention reads
+that same storage directly. All other block projections remain row-major.
+This changes the final writer's coordinates, not the allocation size, weights,
+arithmetic, or number of dispatches; there is no intervening transpose.
 
 The motif takes a positive row-tile group size as an explicit SSA operand.
 The workgroup-coordinate bijection groups that many 64-row tiles before
@@ -551,8 +557,10 @@ weight residency, workspace, or command dispatch.
 against the original single-wave motif at all four widths, covering
 16/32/48/64/80/512/528/544/560/640/704/768/832/896/960/1088/2048/2560/3072/4608
 rows. Group-eight cases cover each traversal-group remainder and each 16-row
-matrix tail; both policies run at the five largest row counts, for 100 cases.
-They link the real helper sources instead of copying their implementations.
+matrix tail; both policies run at the five largest row counts, for 100 row-major
+cases. Eight additional column-major cases cover all four widths at 16 and 80
+rows, comparing the complete physical byte streams. They link the real helper
+sources instead of copying their implementations.
 The checkpoint comparisons below independently exercise the actual command
 wrappers and numerical error envelope.
 
@@ -644,6 +652,13 @@ KV-head replication or global attention-score matrix. A byte mask selects
 valid keys, independently of query position. Every request must have at least
 one valid key, which the model guarantees through its image tokens.
 
+Q and K retain row-major storage. DiT V is logically `[tokens, 1536]` with
+strides `[1, tokens]`; its projection and any in-place LoRA update write this
+layout directly into the existing V buffer. The generic attention motif takes
+the V encoding explicitly, while the text encoder and fusion callers continue
+to select row-major V. Qualification drivers serialize V in its physical order
+but retain the logical matrix for the independent F64 oracle.
+
 Some actual Krea heads have logits around 30,000 with much smaller differences
 between keys. Computing those logits directly in F32 loses meaningful bits
 before softmax subtraction. This implementation contracts `Q * (K - K_last)`;
@@ -725,7 +740,7 @@ the layer-parameterized `krea2.block_forward` template, exposed for qualificatio
 as `qualify.block_forward`. Its caller supplies hidden states, shared time
 modulation, F32 rotary tables, and the key mask. One immutable parameter root supplies the
 block's weights. Command reflection plans one reusable transient slab; the
-command contains 16 dispatches using ten distinct JITed kernels. Independent
+command contains 16 dispatches using eleven distinct JITed kernels. Independent
 Q/K/V/gate and feed-forward branches have explicit concurrent scopes. There
 are no host waits, intermediate readbacks, or per-dispatch allocations inside
 the block.
@@ -789,6 +804,34 @@ have an explicit concurrent scope; the B contraction fuses BF16 rounding,
 strength multiplication, and addition into the base output. Its same-tile
 read/write permits in-place addition without a full-width delta buffer.
 The zero-strength branch preserves the base instead of adding a rounded zero.
+For V, the base fragment read and final store both use the column-major
+encoding selected by the model wrapper. The rank-32 intermediate and the
+diagnostic, unfused B output remain row-major. The checker encodes only the
+base/final V buffers physically; its independent arithmetic stays in logical
+row/column order.
+
+[`tests/value_adapter.loom`](tests/value_adapter.loom) links the actual V
+adapter leaf. Nonuniform base values check coordinate ownership at 16 and 80
+rows, with both distinct outputs and true same-buffer read/write. Exactly
+representable factors isolate the epilogue from contraction error, while a
+separate zero-strength probe checks negative-zero preservation. With the ASAN
+`iree-test-loom` tool built above, run the two shape specializations under the
+same exclusive device lease:
+
+```sh
+for rows in 16 80; do
+  bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom \
+    experimental/loom_serve/models/krea2/tests/value_adapter.loom \
+    --library=experimental/loom_serve/models/krea2/block_adapters.loom \
+    --library=experimental/loom_serve/models/krea2/kernels/linear.loom \
+    --target=amdgpu:gfx1151 --device=amdgpu \
+    --config=krea2.block_tokens="$rows" --case="@value_adapter_$rows"
+done
+```
+
+Each invocation must report one passing sample, five passing bitwise
+expectations, and no planning issues or skips. This is a storage/alias check;
+the checkpoint-backed numerical qualification remains independent.
 
 ```sh
 python -B experimental/loom_serve/models/krea2/check_adapters.py \
@@ -824,8 +867,8 @@ generation.
 strength input to the complete block. A shared command template receives
 explicit shape and adapter-presence operands; concrete entry points own
 configuration lookup. Source specialization removes the adapter path from
-`qualify.block_forward`, retaining its original bindings and ten kernels. The
-adapted variant uses 15 distinct kernels and 32 dispatches. Strength remains device
+`qualify.block_forward`, retaining its original bindings and eleven kernels. The
+adapted variant uses 17 distinct kernels and 32 dispatches. Strength remains device
 data, so changing it does not require recompilation or base-weight mutation.
 
 The whole-block driver accepts the same adapter as the projection checker:
@@ -861,7 +904,7 @@ LoRA-enabled block, not the full 28-block denoiser or an image.
 The layer-27 fixture exercises actual final-layer inputs, including every
 component, exact queued composition, and zero-strength identity at 16 and
 1088 rows. Layer selection changes parameter keys, not numerical kernels:
-the base and adapted commands still use ten and fifteen kernels.
+the base and adapted commands still use eleven and seventeen kernels.
 
 ### Complete transformer stack
 
@@ -901,7 +944,7 @@ HF_HUB_OFFLINE=1 python -B experimental/loom_serve/models/krea2/check_stack.py \
 
 The single queued stack must equal the separate native chain byte-for-byte
 on repeated executions. Zero-strength LoRA must equal the base stack exactly.
-Reflection must show ten base or fifteen adapted kernels, exactly 28 unique
+Reflection must show eleven base or seventeen adapted kernels, exactly 28 unique
 layers of parameters, and the same workspace size as a single block.
 `--rows 16` selects the reduced-shape stress check; `--rows 1088` selects the
 entire captured 384x384/text sequence. Neither run is a performance benchmark.
@@ -923,9 +966,9 @@ independent F64 chain:
 | Base | 0.87358% | 0.90045% | 149.8125 MiB |
 | Softwatercolor, strength 1 | 1.49491% | 1.62224% | 150.078125 MiB |
 
-The base stack references 364 unique parameter tensors and ten kernels;
+The base stack references 364 unique parameter tensors and eleven kernels;
 the adapted stack references 812 tensors across two checkpoint roots and
-fifteen kernels. Each tensor has one storage range, and workspace matches a
+seventeen kernels. Each tensor has one storage range, and workspace matches a
 single block exactly. These are first-step transformer-state measurements,
 not denoised-image quality or server throughput.
 
@@ -1020,8 +1063,8 @@ python -B experimental/loom_serve/models/krea2/check_velocity.py \
 Base, zero strength, and active LoRA all match byte-for-byte on both native
 executions at 1088 combined rows and 576 image rows. Standalone head
 qualification retains all 144 passing comparisons after the composition
-refactor. The base command shares 12 kernels and 368 unique parameters;
-LoRA shares 19 kernels and 818 unique parameters. Peak transient storage is
+refactor. The base command shares 13 kernels and 368 unique parameters;
+LoRA shares 21 kernels and 818 unique parameters. Peak transient storage is
 162.5625 MiB base and 162.828125 MiB adapted: exactly single-block scratch
 plus the combined hidden state. Head temporaries reuse expired block storage.
 The driver retains only three final velocity tensors, less than 1 MiB.
@@ -1152,7 +1195,7 @@ bit-for-bit for base, zero strength, and active LoRA on both executions.
 
 | Eight-step command | Base | Softwatercolor, strength 1 |
 | --- | ---: | ---: |
-| Unique kernels | 20 | 33 |
+| Unique kernels | 21 | 35 |
 | Unique parameter tensors | 376 | 834 |
 | Parameter roots | 1 | 2 |
 | Parameter bytes | 25,382,416,640 | 25,821,294,848 |
@@ -1504,7 +1547,7 @@ differences from the earlier external-text inputs; those are not exact gates.
 
 | Complete 384x384 command | Base | LoRA |
 | --- | ---: | ---: |
-| Unique kernels | 71 | 95 |
+| Unique kernels | 72 | 97 |
 | Parameter roots | 2 | 3 |
 | Parameters | 534 | 1,062 |
 | Parameter bytes | 26,569,389,580 | 27,038,612,748 |
@@ -1951,8 +1994,8 @@ comparisons against external-encoder images remain finite-only observations.
 
 | Complete image root | Unique kernels | Parameter tensors | Weight bytes | Workspace bytes |
 | --- | ---: | ---: | ---: | ---: |
-| Base | 85 | 920 | 34,412,459,020 | 333,235,456 |
-| Adapted | 109 | 1,448 | 34,881,682,188 | 333,235,456 |
+| Base | 86 | 920 | 34,412,459,020 | 333,235,456 |
+| Adapted | 111 | 1,448 | 34,881,682,188 | 333,235,456 |
 
 Both inspected 384×384 images preserve the canonical deer/forest composition.
 On 8-bit RGB, base/active-adapter pixel RMSE is 12.9284/8.6123 against the

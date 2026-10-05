@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
+template.decl @attention.masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %value_layout: encoding<layout>, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>)
 template.decl @attention.store_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %output: buffer)
 template.decl @attention.gate_128_bf16(%tokens: index, %heads: index, %values: vector<8xbf16>, %gate: buffer) -> (vector<8xbf16>)
 
@@ -16,7 +16,8 @@ template.decl @attention.gate_128_bf16(%tokens: index, %heads: index, %values: v
 // a valid key at row zero; sequence order, not rotary phase, controls visibility.
 // The returned eight BF16 values are four consecutive query rows, with two
 // consecutive channels per lane. Softmax and running output remain F32.
-template.def<@attention.masked_gqa_128_bf16> device @masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>) {
+// Q and K are row-major. The caller supplies V's logical token/channel layout.
+template.def<@attention.masked_gqa_128_bf16> device @masked_gqa_128_bf16(%tokens: index, %query_heads: index, %key_value_heads: index, %causal: i1, %value_layout: encoding<layout>, %query: buffer, %key: buffer, %value: buffer, %mask: buffer) -> (vector<8xbf16>) {
   %origin = index.constant 0 : offset
   %start = index.constant 0 : index
   %unit = index.constant 1 : index
@@ -61,7 +62,7 @@ template.def<@attention.masked_gqa_128_bf16> device @masked_gqa_128_bf16(%tokens
   %scale = vector.constant 0.08838834764831845 : vector<4xf32>
   %query_view = buffer.view %query[%origin] : buffer -> view<[%tokens]x[%query_width]xbf16>
   %key_view = buffer.view %key[%origin] : buffer -> view<[%tokens]x[%key_value_width]xbf16>
-  %value_view = buffer.view %value[%origin] : buffer -> view<[%tokens]x[%key_value_width]xbf16>
+  %value_view = buffer.view %value[%origin] : buffer -> view<[%tokens]x[%key_value_width]xbf16, %value_layout>
   %mask_view = buffer.view %mask[%origin] : buffer -> view<[%tokens]xi8>
   %query_bytes = index.constant 4352 : offset
   %score_bytes = index.constant 6144 : offset
@@ -214,7 +215,7 @@ template.def<@attention.masked_gqa_128_bf16> device @masked_gqa_128_bf16(%tokens
           %lhs_high = vector.fragment.load<lhs> %probability_high_view[%start, %key_tile] shape [%tile, %tile] : view<16x64xbf16, %probability_layout> -> vector<16xbf16>
           %lhs_low = vector.fragment.load<lhs> %probability_low_view[%start, %key_tile] shape [%tile, %tile] : view<16x64xbf16, %probability_layout> -> vector<16xbf16>
           %lhs_tail = vector.fragment.load<lhs> %probability_tail_view[%start, %key_tile] shape [%tile, %tile] : view<16x64xbf16, %probability_layout> -> vector<16xbf16>
-          %rhs = vector.fragment.load<rhs> %value_view[%token, %global_channel] shape [%tile, %tile] : view<[%tokens]x[%key_value_width]xbf16> -> vector<16xbf16>
+          %rhs = vector.fragment.load<rhs> %value_view[%token, %global_channel] shape [%tile, %tile] : view<[%tokens]x[%key_value_width]xbf16, %value_layout> -> vector<16xbf16>
           %high_product = vector.mma %lhs_high, %rhs, %high_accumulator : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
           %low_product = vector.mma %lhs_low, %rhs, %low_accumulator : vector<16xbf16>, vector<16xbf16>, vector<4xf32>
           %tail_product = vector.mma %lhs_tail, %rhs, %tail_accumulator : vector<16xbf16>, vector<16xbf16>, vector<4xf32>

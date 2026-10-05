@@ -6,9 +6,9 @@
 
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
 template.decl @projection.linear_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 template.decl @projection.bias_f32_as_bf16(%outputs: index, %result: vector<8xf32>, %bias: buffer) -> (vector<8xf32>)
-template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 
 // Complete 16x16 tiles, row-major activations and [output,input] checkpoint
 // weights. F32 file values are rounded to BF16 before contraction, matching
@@ -110,15 +110,15 @@ template.def<@projection.linear_bf16> device @linear_bf16_weights(%rows: index, 
   template.return %result : vector<8xf32>
 }
 
-template.def<@projection.store_bf16> device @store_projection_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer) {
+template.def<@projection.store_bf16> device @store_projection_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer) {
   %origin = index.constant 0 : offset
   %tile = index.constant 16 : index
   %row_tile = kernel.workgroup.id<x> : index
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %tile : index
   %output_origin = index.mul %output_tile, %tile : index
-  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16>
-  vector.fragment.store<result> %result, %output_view[%row_origin, %output_origin] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16, %output_layout>
+  vector.fragment.store<result> %result, %output_view[%row_origin, %output_origin] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16, %output_layout>
   template.return
 }
 
@@ -141,8 +141,9 @@ template.def<@projection.bias_f32_as_bf16> device @bias_projection_f32_as_bf16(%
 }
 
 // Fusion preserves the BF16 B-projection and scaling boundaries. Reading
-// and writing the same base tile is safe: no other tile consumes its values.
-template.def<@projection.adapter_epilogue_bf16> device @adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>) {
+// and writing the same base tile is safe when both use the same injective
+// layout: no other logical tile consumes its values.
+template.def<@projection.adapter_epilogue_bf16> device @adapter_epilogue_bf16(%rows: index, %outputs: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %tile = index.constant 16 : index
@@ -150,9 +151,9 @@ template.def<@projection.adapter_epilogue_bf16> device @adapter_epilogue_bf16(%r
   %output_tile = kernel.workgroup.id<y> : index
   %row_origin = index.mul %row_tile, %tile : index
   %output_origin = index.mul %output_tile, %tile : index
-  %base_view = buffer.view %base[%origin] : buffer -> view<[%rows]x[%outputs]xbf16>
+  %base_view = buffer.view %base[%origin] : buffer -> view<[%rows]x[%outputs]xbf16, %base_layout>
   %strength_view = buffer.view %strength[%origin] : buffer -> view<1xf32>
-  %base_bf16 = vector.fragment.load<result> %base_view[%row_origin, %output_origin] shape [%tile, %tile] : view<[%rows]x[%outputs]xbf16> -> vector<8xbf16>
+  %base_bf16 = vector.fragment.load<result> %base_view[%row_origin, %output_origin] shape [%tile, %tile] : view<[%rows]x[%outputs]xbf16, %base_layout> -> vector<8xbf16>
   %base_f32 = vector.extf %base_bf16 : vector<8xbf16> to vector<8xf32>
   %scale = view.load %strength_view[%zero] : view<1xf32> -> f32
   %zero_f32 = scalar.constant 0.0 : f32

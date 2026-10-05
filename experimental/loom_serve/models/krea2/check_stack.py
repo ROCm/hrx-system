@@ -124,7 +124,7 @@ def execute(
     if comparison == "exact" and any(record["different"] for record in comparisons):
         raise AssertionError("exact composition changed output bits")
     footprint = next(record for record in records if "workspace_bytes" in record)
-    expected_kernels = 15 if adapted else 10
+    expected_kernels = 17 if adapted else 11
     if footprint["kernels"] != expected_kernels:
         raise AssertionError(f"expected {expected_kernels} cached kernels: {footprint}")
     if footprint["parameter_roots"] != (2 if adapted else 1):

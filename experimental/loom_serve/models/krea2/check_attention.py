@@ -125,7 +125,8 @@ for phase in ("base", "style"):
             ("value", selected_value),
         ):
             path = prefix.with_suffix(f".{name}.bf16")
-            path.write_bytes(encode(tensor))
+            stored = tensor.reshape(count, -1).T if name == "value" else tensor
+            path.write_bytes(encode(stored))
             input_paths.append(path)
         mask_path = prefix.with_suffix(".mask.u8")
         mask_path.write_bytes(selected_mask.numpy().astype("u1").tobytes())

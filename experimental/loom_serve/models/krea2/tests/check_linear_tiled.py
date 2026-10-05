@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Compare the real BF16 helpers with 100 row/width/traversal specializations.
+"""Compare the real BF16 helpers with 108 row/width/traversal/layout cases.
 
 The check recipe's sample ordinal controls tensor extents; compiler config
 controls kernel specialization. Bind both from the same row/width selection.
@@ -26,10 +26,16 @@ fixture = pathlib.Path(__file__).with_name("linear_tiled.loom")
 model = fixture.parent.parent
 
 
-def check_shape(inputs, outputs, sample, rows, group_size):
+def check_shape(inputs, outputs, sample, rows, group_size, *, column_major=False):
     print(
         json.dumps(
-            dict(rows=rows, inputs=inputs, outputs=outputs, group_size=group_size)
+            dict(
+                rows=rows,
+                inputs=inputs,
+                outputs=outputs,
+                group_size=group_size,
+                layout="column_major" if column_major else "row_major",
+            )
         ),
         flush=True,
     )
@@ -47,6 +53,7 @@ def check_shape(inputs, outputs, sample, rows, group_size):
             f"--config=projection_test.inputs={inputs}",
             f"--config=projection_test.outputs={outputs}",
             f"--config=projection_test.row_tile_group_size={group_size}",
+            f"--config=projection_test.column_major={int(column_major)}",
         ],
         stdout=subprocess.PIPE,
         text=True,
@@ -90,6 +97,8 @@ for inputs, outputs in ((6144, 6144), (6144, 1536), (6144, 16384), (16384, 6144)
         )
     ):
         check_shape(inputs, outputs, sample, rows, 8)
+        if rows in (16, 80):
+            check_shape(inputs, outputs, sample, rows, 8, column_major=True)
         if rows >= 1088:
             check_shape(inputs, outputs, sample, rows, (rows + 63) // 64)
-print("PASS: 100 exact BF16 helper comparisons.", flush=True)
+print("PASS: 100 row-major and eight column-major exact BF16 comparisons.", flush=True)

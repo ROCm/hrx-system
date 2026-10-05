@@ -7,8 +7,8 @@
 config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 amdgpu.target<gfx11-generic> @block_adapter_wave32 {subgroup_size = 32}
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
-template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.adapter_epilogue_bf16(%rows: index, %outputs: index, %base_layout: encoding<layout>, %result: vector<8xf32>, %strength: buffer, %base: buffer) -> (vector<8xf32>)
 
 command.program.decl @krea2.block_query(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.block_key(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
@@ -36,7 +36,8 @@ kernel.def target(@block_adapter_wave32) @block_adapter_linear_6144_32() {
   %inputs = index.constant 6144 : index
   %outputs = index.constant 32 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -53,7 +54,8 @@ kernel.def target(@block_adapter_wave32) @block_adapter_linear_16384_32() {
   %inputs = index.constant 16384 : index
   %outputs = index.constant 32 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -70,7 +72,8 @@ kernel.def target(@block_adapter_wave32) @block_adapter_linear_32_1536() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 1536 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -87,7 +90,8 @@ kernel.def target(@block_adapter_wave32) @block_adapter_linear_32_6144() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 6144 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -104,7 +108,8 @@ kernel.def target(@block_adapter_wave32) @block_adapter_linear_32_16384() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 16384 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -121,8 +126,29 @@ kernel.def target(@block_adapter_wave32) @block_adapter_add_1536() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 1536 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %output_layout, %result, %strength, %base) : (index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %combined, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
+  kernel.return
+}
+
+// The completed V base and final in-place result share one physical layout.
+kernel.def target(@block_adapter_wave32) @block_adapter_add_1536_column_major() {
+  %rows = config.get @krea2.block_tokens : index
+  %tile = index.constant 16 : index
+  %row_tiles = index.div %rows, %tile : index
+  %output_tiles = index.constant 96 : index
+  %one = index.constant 1 : index
+  %threads = index.constant 32 : index
+  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer) {
+  %rows = config.get @krea2.block_tokens : index
+  %inputs = index.constant 32 : index
+  %outputs = index.constant 1536 : index
+  %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
+  %output_layout = encoding.layout.strided [1, %rows] : encoding<layout>
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %output_layout, %result, %strength, %base) : (index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %combined, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -139,8 +165,9 @@ kernel.def target(@block_adapter_wave32) @block_adapter_add_6144() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 6144 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %output_layout, %result, %strength, %base) : (index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %combined, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -157,8 +184,9 @@ kernel.def target(@block_adapter_wave32) @block_adapter_add_16384() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 16384 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %result, %strength, %base) : (index, index, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %combined, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  %combined = template.apply<@projection.adapter_epilogue_bf16>(%rows, %outputs, %output_layout, %result, %strength, %base) : (index, index, encoding<layout>, vector<8xf32>, buffer, buffer) -> (vector<8xf32>)
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %combined, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
@@ -242,7 +270,7 @@ command.program.def public @krea2.block_value_adapter_up(%layer: index) launch(%
 
 command.program.def public @krea2.block_value_adapter_add(%layer: index) launch(%adapter: buffer, %input: buffer, %strength: buffer, %base: buffer, %output: buffer) {
   %weight = command.parameter %adapter, "transformer.transformer_blocks.{}.attn.to_v.lora_B.weight"[%layer] : view<1536x32xf32>
-  kernel.launch @block_adapter_add_1536(%input, %weight, %strength, %base, %output) : (buffer, view<1536x32xf32>, buffer, buffer, buffer)
+  kernel.launch @block_adapter_add_1536_column_major(%input, %weight, %strength, %base, %output) : (buffer, view<1536x32xf32>, buffer, buffer, buffer)
   command.return
 }
 

@@ -7,7 +7,7 @@
 config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 amdgpu.target<gfx11-generic> @text_qualification_wave32 {subgroup_size = 32}
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)
-template.decl @projection.store_bf16(%rows: index, %outputs: index, %result: vector<8xf32>, %output: buffer)
+template.decl @projection.store_bf16(%rows: index, %outputs: index, %output_layout: encoding<layout>, %result: vector<8xf32>, %output: buffer)
 kernel.decl @krea_text_adapter_down_features() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @krea_text_adapter_down_hidden() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @krea_text_adapter_add() launch(%input: buffer, %weight: buffer, %strength: buffer, %base: buffer, %output: buffer)
@@ -27,7 +27,8 @@ kernel.def target(@text_qualification_wave32) @qualify_text_adapter_up() {
   %inputs = index.constant 32 : index
   %outputs = index.constant 6144 : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %input, %weight) : (index, index, index, buffer, buffer) -> (vector<8xf32>)
-  template.apply<@projection.store_bf16>(%rows, %outputs, %result, %output) : (index, index, vector<8xf32>, buffer)
+  %output_layout = encoding.layout.dense : encoding<layout>
+  template.apply<@projection.store_bf16>(%rows, %outputs, %output_layout, %result, %output) : (index, index, encoding<layout>, vector<8xf32>, buffer)
   kernel.return
 }
 
