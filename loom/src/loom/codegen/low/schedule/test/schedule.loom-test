@@ -138,7 +138,7 @@ low.func.def target<test.low.core>(@test_target) @move_source_order_boundary(%lh
 {"format":"loom.low.schedule.v1","function":"move_source_order_boundary","target":"test_target","descriptor_set":"test.low.core","block_count":1,"node_count":4,"dependency_count":3,"dependency_group_count":3,"issue_group_count":4,"unlock_summary_publication_count":2,"candidate_decision_count":0,"resource_use_count":2,"effect_use_count":0,"hazard_use_count":0,"hazard_gap_count":0,"model_summary_count":1,"resource_summary_count":1,"blocks":[{"index":0,"node_start":0,"node_count":4,"scheduled_node_start":0,"scheduled_node_count":4,"issue_group_start":0,"issue_group_count":4}],"source_order_boundaries":[1,3],"nodes":[{"index":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":0,"kind":"descriptor","op":"low.op","descriptor":"test.mul.i32","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":1,"block":0,"source_ordinal":1,"scheduled_ordinal":1,"issue_cycle":1,"issue_group":1,"kind":"structural","op":"low.move","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":2,"block":0,"source_ordinal":2,"scheduled_ordinal":2,"issue_cycle":2,"issue_group":2,"kind":"descriptor","op":"low.op","descriptor":"test.add.i32","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":3,"block":0,"source_ordinal":3,"scheduled_ordinal":3,"issue_cycle":3,"issue_group":3,"kind":"terminator","op":"low.return","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0}],"scheduled_node_indices":[0,1,2,3],"issue_groups":[{"index":0,"block":0,"issue_cycle":0,"scheduled_node_start":0,"scheduled_node_count":1},{"index":1,"block":0,"issue_cycle":1,"scheduled_node_start":1,"scheduled_node_count":1},{"index":2,"block":0,"issue_cycle":2,"scheduled_node_start":2,"scheduled_node_count":1},{"index":3,"block":0,"issue_cycle":3,"scheduled_node_start":3,"scheduled_node_count":1}],"dependencies":[{"from":1,"to":2,"kind":"ssa","operand":0,"producer_attachment_kind":"none","producer_attachment":null,"producer_event":null,"consumer_attachment_kind":"operand","consumer_attachment":1,"consumer_event":null,"minimum_issue_separation_cycles":0,"separation_source":"structural","model_quality":0,"model_quality_name":"unknown"},{"from":0,"to":3,"kind":"ssa","operand":0,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":1,"separation_source":"schedule_class","model_quality":1,"model_quality_name":"exact"},{"from":2,"to":3,"kind":"ssa","operand":1,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":1,"separation_source":"schedule_class","model_quality":1,"model_quality_name":"exact"}],"scheduled_pressure_steps":[{"node":0,"block":0,"scheduled_ordinal":0,"issue_cycle":0,"live_units_before":2,"killed_live_units":0,"produced_live_units":1,"live_units_after":3},{"node":1,"block":0,"scheduled_ordinal":1,"issue_cycle":1,"live_units_before":3,"killed_live_units":1,"produced_live_units":1,"live_units_after":3},{"node":2,"block":0,"scheduled_ordinal":2,"issue_cycle":2,"live_units_before":3,"killed_live_units":2,"produced_live_units":1,"live_units_after":2},{"node":3,"block":0,"scheduled_ordinal":3,"issue_cycle":3,"live_units_before":2,"killed_live_units":2,"produced_live_units":0,"live_units_after":0}],"scheduled_resource_uses":[{"node":0,"block":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1},{"node":2,"block":0,"scheduled_ordinal":2,"issue_cycle":2,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1}],"model_summaries":[{"schedule_class":"test.scalar.alu","first_node":0,"use_count":2,"latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0}],"resource_summaries":[{"resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"use_count":2,"total_occupied_cycles":2,"total_unit_cycles":2,"estimated_min_cycles":2,"peak_units_per_cycle":1}],"liveness":{"format":"loom.liveness.v0","is_cfg":false,"block_count":1,"value_count":5,"blocks":[{"index":0,"label":null,"start_point":0,"end_point":4,"live_in":[],"live_out":[]}],"intervals":[{"value":{"id":0,"name":"lhs","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":2,"unit_count":1},{"value":{"id":1,"name":"rhs","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":3,"unit_count":1},{"value":{"id":4,"name":"before","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":1,"end_point":4,"unit_count":1},{"value":{"id":5,"name":"moved","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":2,"end_point":3,"unit_count":1},{"value":{"id":6,"name":"after","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":3,"end_point":4,"unit_count":1}],"pressure_summaries":[{"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"peak_live_units":3,"peak_live_values":3,"peak_block":0,"peak_op":2,"peak_point":2}]}}
 
 // ====
-// RUN: emit low-schedule-json @mixed_early_clobber_pressure strategy=resource-stall diagnostics=candidates test.i32=24 output=none
+// RUN: emit low-schedule @mixed_early_clobber_pressure strategy=resource-stall diagnostics=candidates test.i32=24 output=none
 
 test.target<low_core> @test_target
 
@@ -150,7 +150,7 @@ low.func.def target<test.low.core>(@test_target) @mixed_early_clobber_pressure(%
 }
 
 // ====
-// RUN: emit low-schedule-json @early_tied_pressure_reuses_storage strategy=resource-stall diagnostics=candidates test.i32=16 output=none
+// RUN: emit low-schedule @early_tied_pressure_reuses_storage strategy=resource-stall diagnostics=candidates test.i32=16 output=none
 
 test.target<low_core> @test_target
 
@@ -228,7 +228,7 @@ low.func.def target<test.low.core>(@test_target) @branch_edge_composed_storage_a
 {"format":"loom.low.schedule.v1","function":"branch_edge_composed_storage_antidependency","target":"test_target","descriptor_set":"test.low.core","block_count":4,"node_count":10,"dependency_count":9,"dependency_group_count":9,"issue_group_count":7,"unlock_summary_publication_count":5,"candidate_decision_count":0,"resource_use_count":3,"effect_use_count":0,"hazard_use_count":0,"hazard_gap_count":0,"model_summary_count":1,"resource_summary_count":1,"blocks":[{"index":0,"node_start":0,"node_count":1,"scheduled_node_start":0,"scheduled_node_count":1,"issue_group_start":0,"issue_group_count":1},{"index":1,"node_start":1,"node_count":1,"scheduled_node_start":1,"scheduled_node_count":1,"issue_group_start":1,"issue_group_count":1},{"index":2,"node_start":2,"node_count":7,"scheduled_node_start":2,"scheduled_node_count":7,"issue_group_start":2,"issue_group_count":4},{"index":3,"node_start":9,"node_count":1,"scheduled_node_start":9,"scheduled_node_count":1,"issue_group_start":6,"issue_group_count":1}],"source_order_boundaries":[0,1,8,9],"nodes":[{"index":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":0,"kind":"terminator","op":"low.br","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":1,"block":1,"source_ordinal":1,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":1,"kind":"terminator","op":"low.cond_br","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":2,"block":2,"source_ordinal":2,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":2,"kind":"descriptor","op":"low.op","descriptor":"test.add.v4i32","schedule_class":"test.vector.alu","latency_cycles":2,"latency_kind":2,"latency_kind_name":"estimate","model_quality":3,"model_quality_name":"estimated","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":3,"block":2,"source_ordinal":3,"scheduled_ordinal":2,"issue_cycle":2,"issue_group":4,"kind":"descriptor","op":"low.op","descriptor":"test.add.v4i32","schedule_class":"test.vector.alu","latency_cycles":2,"latency_kind":2,"latency_kind_name":"estimate","model_quality":3,"model_quality_name":"estimated","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":4,"block":2,"source_ordinal":4,"scheduled_ordinal":1,"issue_cycle":1,"issue_group":3,"kind":"descriptor","op":"low.op","descriptor":"test.add.v4i32","schedule_class":"test.vector.alu","latency_cycles":2,"latency_kind":2,"latency_kind_name":"estimate","model_quality":3,"model_quality_name":"estimated","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":5,"block":2,"source_ordinal":5,"scheduled_ordinal":3,"issue_cycle":2,"issue_group":4,"kind":"structural","op":"low.concat","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":6,"block":2,"source_ordinal":6,"scheduled_ordinal":4,"issue_cycle":2,"issue_group":4,"kind":"structural","op":"low.slice","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":7,"block":2,"source_ordinal":7,"scheduled_ordinal":5,"issue_cycle":2,"issue_group":4,"kind":"structural","op":"low.copy","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":8,"block":2,"source_ordinal":8,"scheduled_ordinal":6,"issue_cycle":4,"issue_group":5,"kind":"terminator","op":"low.br","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":9,"block":3,"source_ordinal":9,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":6,"kind":"terminator","op":"low.return","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0}],"scheduled_node_indices":[0,1,2,4,3,5,6,7,8,9],"issue_groups":[{"index":0,"block":0,"issue_cycle":0,"scheduled_node_start":0,"scheduled_node_count":1},{"index":1,"block":1,"issue_cycle":0,"scheduled_node_start":1,"scheduled_node_count":1},{"index":2,"block":2,"issue_cycle":0,"scheduled_node_start":2,"scheduled_node_count":1},{"index":3,"block":2,"issue_cycle":1,"scheduled_node_start":3,"scheduled_node_count":1},{"index":4,"block":2,"issue_cycle":2,"scheduled_node_start":4,"scheduled_node_count":4},{"index":5,"block":2,"issue_cycle":4,"scheduled_node_start":8,"scheduled_node_count":1},{"index":6,"block":3,"issue_cycle":0,"scheduled_node_start":9,"scheduled_node_count":1}],"dependencies":[{"from":3,"to":5,"kind":"ssa","operand":0,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":2,"separation_source":"schedule_class","model_quality":3,"model_quality_name":"estimated"},{"from":4,"to":5,"kind":"ssa","operand":1,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":2,"separation_source":"schedule_class","model_quality":3,"model_quality_name":"estimated"},{"from":5,"to":6,"kind":"ssa","operand":0,"producer_attachment_kind":"none","producer_attachment":null,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":0,"separation_source":"structural","model_quality":0,"model_quality_name":"unknown"},{"from":6,"to":7,"kind":"ssa","operand":0,"producer_attachment_kind":"none","producer_attachment":null,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":0,"separation_source":"structural","model_quality":0,"model_quality_name":"unknown"},{"from":2,"to":7,"kind":"storage","operand":null,"producer_attachment_kind":"operand","producer_attachment":1,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":2,"separation_source":"schedule_class","model_quality":3,"model_quality_name":"estimated"},{"from":2,"to":6,"kind":"storage","operand":null,"producer_attachment_kind":"operand","producer_attachment":1,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":2,"separation_source":"schedule_class","model_quality":3,"model_quality_name":"estimated"},{"from":2,"to":5,"kind":"storage","operand":null,"producer_attachment_kind":"operand","producer_attachment":1,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":2,"separation_source":"schedule_class","model_quality":3,"model_quality_name":"estimated"},{"from":2,"to":3,"kind":"storage","operand":null,"producer_attachment_kind":"operand","producer_attachment":1,"producer_event":null,"consumer_attachment_kind":"operand","consumer_attachment":0,"consumer_event":null,"minimum_issue_separation_cycles":2,"separation_source":"schedule_class","model_quality":3,"model_quality_name":"estimated"},{"from":7,"to":8,"kind":"ssa","operand":0,"producer_attachment_kind":"none","producer_attachment":null,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":0,"separation_source":"structural","model_quality":0,"model_quality_name":"unknown"}],"scheduled_pressure_steps":[{"node":0,"block":0,"scheduled_ordinal":0,"issue_cycle":0,"live_units_before":4,"killed_live_units":4,"produced_live_units":0,"live_units_after":0},{"node":1,"block":1,"scheduled_ordinal":0,"issue_cycle":0,"live_units_before":1,"killed_live_units":1,"produced_live_units":0,"live_units_after":0},{"node":2,"block":2,"scheduled_ordinal":0,"issue_cycle":0,"live_units_before":12,"killed_live_units":4,"produced_live_units":0,"live_units_after":8},{"node":4,"block":2,"scheduled_ordinal":1,"issue_cycle":1,"live_units_before":8,"killed_live_units":0,"produced_live_units":4,"live_units_after":12},{"node":3,"block":2,"scheduled_ordinal":2,"issue_cycle":2,"live_units_before":12,"killed_live_units":8,"produced_live_units":4,"live_units_after":8},{"node":5,"block":2,"scheduled_ordinal":3,"issue_cycle":2,"live_units_before":8,"killed_live_units":8,"produced_live_units":8,"live_units_after":8},{"node":6,"block":2,"scheduled_ordinal":4,"issue_cycle":2,"live_units_before":8,"killed_live_units":8,"produced_live_units":4,"live_units_after":4},{"node":7,"block":2,"scheduled_ordinal":5,"issue_cycle":2,"live_units_before":4,"killed_live_units":4,"produced_live_units":4,"live_units_after":4},{"node":8,"block":2,"scheduled_ordinal":6,"issue_cycle":4,"live_units_before":4,"killed_live_units":4,"produced_live_units":0,"live_units_after":0},{"node":9,"block":3,"scheduled_ordinal":0,"issue_cycle":0,"live_units_before":4,"killed_live_units":4,"produced_live_units":0,"live_units_after":0}],"scheduled_resource_uses":[{"node":2,"block":2,"scheduled_ordinal":0,"issue_cycle":0,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.vector","resource_kind":2,"resource_kind_name":"vector_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1},{"node":4,"block":2,"scheduled_ordinal":1,"issue_cycle":1,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.vector","resource_kind":2,"resource_kind_name":"vector_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1},{"node":3,"block":2,"scheduled_ordinal":2,"issue_cycle":2,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.vector","resource_kind":2,"resource_kind_name":"vector_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1}],"model_summaries":[{"schedule_class":"test.vector.alu","first_node":2,"use_count":3,"latency_cycles":2,"latency_kind":2,"latency_kind_name":"estimate","model_quality":3,"model_quality_name":"estimated","issue_use_count":1,"hazard_count":0}],"resource_summaries":[{"resource":"test.vector","resource_kind":2,"resource_kind_name":"vector_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"use_count":3,"total_occupied_cycles":3,"total_unit_cycles":3,"estimated_min_cycles":3,"peak_units_per_cycle":1}],"liveness":{"format":"loom.liveness.v0","is_cfg":true,"block_count":4,"value_count":11,"blocks":[{"index":0,"label":null,"start_point":0,"end_point":1,"live_in":[],"live_out":[0,2,3]},{"index":1,"label":"loop","start_point":2,"end_point":3,"live_in":[0,2,3],"live_out":[0,2,3,5]},{"index":2,"label":"body","start_point":4,"end_point":11,"live_in":[0,2,3,5],"live_out":[0,2,3]},{"index":3,"label":"exit","start_point":12,"end_point":13,"live_in":[5],"live_out":[]}],"intervals":[{"value":{"id":0,"name":"condition","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":12,"unit_count":1},{"value":{"id":1,"name":"seed","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":1,"unit_count":4},{"value":{"id":2,"name":"rhs0","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":12,"unit_count":4},{"value":{"id":3,"name":"rhs1","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":12,"unit_count":4},{"value":{"id":5,"name":"state","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":2,"end_point":13,"unit_count":4},{"value":{"id":6,"name":"read","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":5,"end_point":5,"unit_count":4},{"value":{"id":7,"name":"next_low","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":6,"end_point":8,"unit_count":4},{"value":{"id":8,"name":"next_high","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":7,"end_point":8,"unit_count":4},{"value":{"id":9,"name":"wide","type":"reg<test.i32 x8>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":8,"end_point":9,"unit_count":8},{"value":{"id":10,"name":"next_slice","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":9,"end_point":10,"unit_count":4},{"value":{"id":11,"name":"next","type":"reg<test.i32 x4>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":10,"end_point":11,"unit_count":4}],"pressure_summaries":[{"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"peak_live_units":17,"peak_live_values":5,"peak_block":2,"peak_op":3,"peak_point":7}]}}
 
 // ====
-// RUN: emit low-schedule-json @candidate_decision_diagnostics strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @candidate_decision_diagnostics strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -240,7 +240,7 @@ low.func.def target<test.low.core>(@test_target) @candidate_decision_diagnostics
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_prices_counter_completion_for_effect_edge strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_prices_counter_completion_for_effect_edge strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -256,7 +256,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_prices_counter_
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_prices_mixed_ssa_effect_completion strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_prices_mixed_ssa_effect_completion strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -271,7 +271,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_prices_mixed_ss
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_completion_across_schedule_alternatives strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_preserves_completion_across_schedule_alternatives strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -286,7 +286,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_compl
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_hides_load_latency strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_hides_load_latency strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -300,7 +300,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_hides_load_late
 }
 
 // ====
-// RUN: emit low-schedule-json @fences_do_not_hide_load_latency strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @fences_do_not_hide_load_latency strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -319,7 +319,7 @@ low.func.def target<test.low.core>(@test_target) @fences_do_not_hide_load_latenc
 }
 
 // ====
-// RUN: emit low-schedule-json @fences_do_not_satisfy_hazard_distance strategy=source diagnostics=hazards output=none
+// RUN: emit low-schedule @fences_do_not_satisfy_hazard_distance strategy=source diagnostics=hazards output=none
 
 test.target<low_core> @test_target
 
@@ -335,7 +335,7 @@ low.func.def target<test.low.core>(@test_target) @fences_do_not_satisfy_hazard_d
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_recovers_descriptor_storage_beyond_source_window strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_recovers_descriptor_storage_beyond_source_window strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -392,7 +392,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_recovers_descri
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_fills_open_issue_lane_before_storage_compaction strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_fills_open_issue_lane_before_storage_compaction strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -409,7 +409,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_fills_open_issu
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_completes_started_storage_setup strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_completes_started_storage_setup strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -425,7 +425,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_completes_start
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_forwards_storage_setup_readiness strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_forwards_storage_setup_readiness strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -441,7 +441,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_forwards_storag
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_defers_non_actionable_storage_setup strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_defers_non_actionable_storage_setup strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -569,7 +569,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_no
 CHECK: *"scheduled_node_indices":[5,0,*
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_excludes_live_ins_from_unspillable_activation strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_excludes_live_ins_from_unspillable_activation strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -583,7 +583,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_excludes_live_i
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_excludes_prior_ranges_from_unspillable_activation strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_excludes_prior_ranges_from_unspillable_activation strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -624,7 +624,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_excludes_loop_h
 CHECK: *"scheduled_node_indices":[0,1,2,*
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_advances_smallest_active_unspillable_completion strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_advances_smallest_active_unspillable_completion strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -648,7 +648,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_advances_smalle
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_advances_tightest_feasible_unspillable_completion strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_advances_tightest_feasible_unspillable_completion strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -718,7 +718,7 @@ CHECK: *{"from":17,"to":0,"kind":"order",*
 CHECK: *{"from":17,"to":15,"kind":"order",*
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_unconstrained_leaf_order strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_preserves_unconstrained_leaf_order strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -733,7 +733,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_uncon
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_materializes_operand_before_pressure_growth strategy=resource-stall diagnostics=candidates test.i32=10 output=none
+// RUN: emit low-schedule @resource_stall_materializes_operand_before_pressure_growth strategy=resource-stall diagnostics=candidates test.i32=10 output=none
 
 test.target<low_core> @test_target
 
@@ -775,7 +775,7 @@ CHECK: *{"from":3,"to":0,"kind":"order",*
 CHECK: *{"from":4,"to":1,"kind":"order",*
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_fills_unconstrained_issue_gap strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_fills_unconstrained_issue_gap strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -826,7 +826,7 @@ low.func.def target<test.low.core>(@test_target) @hint_schedule_fence(%lhs: reg<
 {"format":"loom.low.schedule.v1","function":"hint_schedule_fence","target":"test_target","descriptor_set":"test.low.core","block_count":1,"node_count":4,"dependency_count":2,"dependency_group_count":2,"issue_group_count":3,"unlock_summary_publication_count":1,"candidate_decision_count":0,"resource_use_count":2,"effect_use_count":0,"hazard_use_count":0,"hazard_gap_count":0,"model_summary_count":1,"resource_summary_count":1,"blocks":[{"index":0,"node_start":0,"node_count":4,"scheduled_node_start":0,"scheduled_node_count":4,"issue_group_start":0,"issue_group_count":3}],"source_order_boundaries":[1,3],"nodes":[{"index":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":0,"kind":"descriptor","op":"low.op","descriptor":"test.add.i32","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":1,"block":0,"source_ordinal":1,"scheduled_ordinal":1,"issue_cycle":1,"issue_group":1,"kind":"structural","op":"low.schedule.fence","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0},{"index":2,"block":0,"source_ordinal":2,"scheduled_ordinal":2,"issue_cycle":1,"issue_group":1,"kind":"descriptor","op":"low.op","descriptor":"test.mul.i32","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":3,"block":0,"source_ordinal":3,"scheduled_ordinal":3,"issue_cycle":2,"issue_group":2,"kind":"terminator","op":"low.return","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0}],"scheduled_node_indices":[0,1,2,3],"issue_groups":[{"index":0,"block":0,"issue_cycle":0,"scheduled_node_start":0,"scheduled_node_count":1},{"index":1,"block":0,"issue_cycle":1,"scheduled_node_start":1,"scheduled_node_count":2},{"index":2,"block":0,"issue_cycle":2,"scheduled_node_start":3,"scheduled_node_count":1}],"dependencies":[{"from":0,"to":3,"kind":"ssa","operand":0,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":1,"separation_source":"schedule_class","model_quality":1,"model_quality_name":"exact"},{"from":2,"to":3,"kind":"ssa","operand":1,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":null,"consumer_attachment_kind":"none","consumer_attachment":null,"consumer_event":null,"minimum_issue_separation_cycles":1,"separation_source":"schedule_class","model_quality":1,"model_quality_name":"exact"}],"scheduled_pressure_steps":[{"node":0,"block":0,"scheduled_ordinal":0,"issue_cycle":0,"live_units_before":2,"killed_live_units":0,"produced_live_units":1,"live_units_after":3},{"node":1,"block":0,"scheduled_ordinal":1,"issue_cycle":1,"live_units_before":3,"killed_live_units":0,"produced_live_units":0,"live_units_after":3},{"node":2,"block":0,"scheduled_ordinal":2,"issue_cycle":1,"live_units_before":3,"killed_live_units":2,"produced_live_units":1,"live_units_after":2},{"node":3,"block":0,"scheduled_ordinal":3,"issue_cycle":2,"live_units_before":2,"killed_live_units":2,"produced_live_units":0,"live_units_after":0}],"scheduled_resource_uses":[{"node":0,"block":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1},{"node":2,"block":0,"scheduled_ordinal":2,"issue_cycle":1,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1}],"model_summaries":[{"schedule_class":"test.scalar.alu","first_node":0,"use_count":2,"latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0}],"resource_summaries":[{"resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"use_count":2,"total_occupied_cycles":2,"total_unit_cycles":2,"estimated_min_cycles":2,"peak_units_per_cycle":1}],"liveness":{"format":"loom.liveness.v0","is_cfg":false,"block_count":1,"value_count":4,"blocks":[{"index":0,"label":null,"start_point":0,"end_point":4,"live_in":[],"live_out":[]}],"intervals":[{"value":{"id":0,"name":"lhs","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":3,"unit_count":1},{"value":{"id":1,"name":"rhs","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":0,"end_point":3,"unit_count":1},{"value":{"id":4,"name":"before","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":1,"end_point":4,"unit_count":1},{"value":{"id":5,"name":"after","type":"reg<test.i32>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"start_point":3,"end_point":4,"unit_count":1}],"pressure_summaries":[{"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":0},"peak_live_units":3,"peak_live_values":3,"peak_block":0,"peak_op":2,"peak_point":2}]}}
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_extends_ready_latency_window strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_extends_ready_latency_window strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -886,7 +886,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_extends_ready_l
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_advances_non_growing_latency_window strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_advances_non_growing_latency_window strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -938,7 +938,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_advances_non_gr
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_rejects_pressure_debt_from_recovery_window strategy=resource-stall diagnostics=candidates test.i32=76 output=none
+// RUN: emit low-schedule @resource_stall_rejects_pressure_debt_from_recovery_window strategy=resource-stall diagnostics=candidates test.i32=76 output=none
 
 test.target<low_core> @test_target
 
@@ -982,7 +982,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_rejects_pressur
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_completes_long_path_on_equal_stall strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_completes_long_path_on_equal_stall strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -1002,7 +1002,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_completes_long_
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_source_order_without_pressure_progress strategy=resource-stall diagnostics=candidates test.i32=6 output=none
+// RUN: emit low-schedule @resource_stall_preserves_source_order_without_pressure_progress strategy=resource-stall diagnostics=candidates test.i32=6 output=none
 
 test.target<low_core> @test_target
 
@@ -1019,7 +1019,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_sourc
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_opens_load_on_real_issue_timeline strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_opens_load_on_real_issue_timeline strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -1043,7 +1043,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_opens_load_on_r
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_avoids_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+// RUN: emit low-schedule @resource_stall_avoids_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1058,7 +1058,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_pressure
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_stays_below_near_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:73:15:14 output=none
+// RUN: emit low-schedule @resource_stall_stays_below_near_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:73:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1073,7 +1073,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_stays_below_nea
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_accounts_for_cfg_live_through_pressure strategy=resource-stall diagnostics=candidates cliff=test.i32:9:15:14 output=none
+// RUN: emit low-schedule @resource_stall_accounts_for_cfg_live_through_pressure strategy=resource-stall diagnostics=candidates cliff=test.i32:9:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1092,7 +1092,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_cf
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_ends_cfg_block_arguments_at_definition strategy=resource-stall diagnostics=candidates cliff=test.i32:14:15:14 output=none
+// RUN: emit low-schedule @resource_stall_ends_cfg_block_arguments_at_definition strategy=resource-stall diagnostics=candidates cliff=test.i32:14:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1108,7 +1108,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_ends_cfg_block_
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_accounts_for_shared_alias_capacity strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_accounts_for_shared_alias_capacity strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -1120,7 +1120,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_sh
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_avoids_creating_shared_alias_debt strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_avoids_creating_shared_alias_debt strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -1132,7 +1132,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_creating
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_cross_bank_headroom strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_preserves_cross_bank_headroom strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -1147,7 +1147,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cross
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_avoids_allocation_budget strategy=resource-stall diagnostics=candidates test.i32=72 output=none
+// RUN: emit low-schedule @resource_stall_avoids_allocation_budget strategy=resource-stall diagnostics=candidates test.i32=72 output=none
 
 test.target<low_core> @test_target
 
@@ -1162,7 +1162,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_avoids_allocati
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_reserves_aligned_value_packing strategy=resource-stall diagnostics=candidates test.i32=72 output=none
+// RUN: emit low-schedule @resource_stall_reserves_aligned_value_packing strategy=resource-stall diagnostics=candidates test.i32=72 output=none
 
 test.target<low_core> @test_target
 
@@ -1177,7 +1177,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_reserves_aligne
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_scopes_packing_reserve_to_block strategy=resource-stall diagnostics=candidates test.i32=72 output=none
+// RUN: emit low-schedule @resource_stall_scopes_packing_reserve_to_block strategy=resource-stall diagnostics=candidates test.i32=72 output=none
 
 test.target<low_core> @test_target
 
@@ -1195,7 +1195,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_scopes_packing_
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_accounts_for_early_clobber_pressure strategy=resource-stall diagnostics=candidates test.i32=74 output=none
+// RUN: emit low-schedule @resource_stall_accounts_for_early_clobber_pressure strategy=resource-stall diagnostics=candidates test.i32=74 output=none
 
 test.target<low_core> @test_target
 
@@ -1207,7 +1207,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_ea
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_does_not_persist_speculative_reserve strategy=resource-stall diagnostics=candidates test.i32=71 output=none
+// RUN: emit low-schedule @resource_stall_does_not_persist_speculative_reserve strategy=resource-stall diagnostics=candidates test.i32=71 output=none
 
 test.target<low_core> @test_target
 
@@ -1222,7 +1222,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_does_not_persis
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_ignores_authored_cliff_and_protects_next strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 cliff=test.i32:72:14:13 output=none
+// RUN: emit low-schedule @resource_stall_ignores_authored_cliff_and_protects_next strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 cliff=test.i32:72:14:13 output=none
 
 test.target<low_core> @test_target
 
@@ -1234,7 +1234,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_ignores_authore
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_hides_latency_above_authored_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
+// RUN: emit low-schedule @resource_stall_hides_latency_above_authored_pressure_cliff strategy=resource-stall diagnostics=candidates cliff=test.i32:69:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1248,7 +1248,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_hides_latency_a
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_accounts_for_collective_descriptor_frontier strategy=resource-stall diagnostics=candidates test.i32=29 output=none
+// RUN: emit low-schedule @resource_stall_accounts_for_collective_descriptor_frontier strategy=resource-stall diagnostics=candidates test.i32=29 output=none
 
 test.target<low_core> @test_target
 
@@ -1266,7 +1266,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_accounts_for_co
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_scores_pressure_limit_debt_for_neutral_work strategy=resource-stall diagnostics=candidates test.i32=69 output=none
+// RUN: emit low-schedule @resource_stall_scores_pressure_limit_debt_for_neutral_work strategy=resource-stall diagnostics=candidates test.i32=69 output=none
 
 test.target<low_core> @test_target
 
@@ -1278,7 +1278,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_scores_pressure
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_counts_live_slice_as_alias strategy=resource-stall diagnostics=candidates test.i32=72 output=none
+// RUN: emit low-schedule @resource_stall_counts_live_slice_as_alias strategy=resource-stall diagnostics=candidates test.i32=72 output=none
 
 test.target<low_core> @test_target
 
@@ -1292,7 +1292,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_counts_live_sli
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_caps_repeated_source_alias_units strategy=resource-stall diagnostics=candidates test.i32=70 output=none
+// RUN: emit low-schedule @resource_stall_caps_repeated_source_alias_units strategy=resource-stall diagnostics=candidates test.i32=70 output=none
 
 test.target<low_core> @test_target
 
@@ -1304,7 +1304,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_caps_repeated_s
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_copy strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
+// RUN: emit low-schedule @resource_stall_preserves_cliff_after_authored_copy strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1320,7 +1320,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_slice strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
+// RUN: emit low-schedule @resource_stall_preserves_cliff_after_authored_slice strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1336,7 +1336,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_concat strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
+// RUN: emit low-schedule @resource_stall_preserves_cliff_after_authored_concat strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1382,7 +1382,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_preserves_cliff_after_authored_tied_result strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
+// RUN: emit low-schedule @resource_stall_preserves_cliff_after_authored_tied_result strategy=resource-stall diagnostics=candidates cliff=test.i32:70:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1396,7 +1396,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_preserves_cliff
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_reuses_released_alias_capacity strategy=resource-stall diagnostics=candidates test.i32=72 output=none
+// RUN: emit low-schedule @resource_stall_reuses_released_alias_capacity strategy=resource-stall diagnostics=candidates test.i32=72 output=none
 
 test.target<low_core> @test_target
 
@@ -1411,7 +1411,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_reuses_released
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_resets_aliases_at_cfg_handoffs strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
+// RUN: emit low-schedule @resource_stall_resets_aliases_at_cfg_handoffs strategy=resource-stall diagnostics=candidates cliff=test.i32:67:15:14 output=none
 
 test.target<low_core> @test_target
 
@@ -1431,7 +1431,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_resets_aliases_
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_compacts_ready_concat_before_scalar_work strategy=resource-stall diagnostics=candidates output=none
+// RUN: emit low-schedule @resource_stall_compacts_ready_concat_before_scalar_work strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
 
@@ -1459,7 +1459,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_compacts_ready_
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_opens_pressure_releasing_frontier strategy=resource-stall diagnostics=candidates test.i32=24 output=none
+// RUN: emit low-schedule @resource_stall_opens_pressure_releasing_frontier strategy=resource-stall diagnostics=candidates test.i32=24 output=none
 
 test.target<low_core> @test_target
 
@@ -1485,7 +1485,7 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_opens_pressure_
 }
 
 // ====
-// RUN: emit low-schedule-json @resource_stall_recovers_pressure_beyond_source_nominees strategy=resource-stall diagnostics=candidates test.i32=69 output=none
+// RUN: emit low-schedule @resource_stall_recovers_pressure_beyond_source_nominees strategy=resource-stall diagnostics=candidates test.i32=69 output=none
 
 test.target<low_core> @test_target
 
@@ -1658,7 +1658,7 @@ low.func.def target<test.low.core>(@test_target) @explicit_live_in_state_precede
 {"format":"loom.low.schedule.v1","function":"explicit_live_in_state_precedes_first_clobber","target":"test_target","descriptor_set":"test.low.core","block_count":1,"node_count":4,"dependency_count":3,"dependency_group_count":2,"issue_group_count":4,"unlock_summary_publication_count":0,"candidate_decision_count":0,"resource_use_count":3,"effect_use_count":0,"hazard_use_count":0,"hazard_gap_count":0,"model_summary_count":1,"resource_summary_count":1,"blocks":[{"index":0,"node_start":0,"node_count":4,"scheduled_node_start":0,"scheduled_node_count":4,"issue_group_start":0,"issue_group_count":4}],"source_order_boundaries":[3],"nodes":[{"index":0,"block":0,"source_ordinal":0,"scheduled_ordinal":1,"issue_cycle":1,"issue_group":1,"kind":"descriptor","op":"low.op","descriptor":"test.state.add.schedule_state","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":1,"block":0,"source_ordinal":1,"scheduled_ordinal":2,"issue_cycle":4,"issue_group":2,"kind":"descriptor","op":"low.op","descriptor":"test.state.add.schedule_state","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":2,"block":0,"source_ordinal":2,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":0,"kind":"descriptor","op":"low.op","descriptor":"test.explicit.state.add.schedule_state","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":3,"block":0,"source_ordinal":3,"scheduled_ordinal":3,"issue_cycle":5,"issue_group":3,"kind":"terminator","op":"low.return","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0}],"scheduled_node_indices":[2,0,1,3],"issue_groups":[{"index":0,"block":0,"issue_cycle":0,"scheduled_node_start":0,"scheduled_node_count":1},{"index":1,"block":0,"issue_cycle":1,"scheduled_node_start":1,"scheduled_node_count":1},{"index":2,"block":0,"issue_cycle":4,"scheduled_node_start":2,"scheduled_node_count":1},{"index":3,"block":0,"issue_cycle":5,"scheduled_node_start":3,"scheduled_node_count":1}],"dependencies":[{"from":0,"to":1,"kind":"state","operand":null,"producer_attachment_kind":"operand","producer_attachment":3,"producer_event":"test.state.write","consumer_attachment_kind":"operand","consumer_attachment":4,"consumer_event":"test.state.read","minimum_issue_separation_cycles":3,"separation_source":"event_pair","model_quality":1,"model_quality_name":"exact"},{"from":0,"to":1,"kind":"state","operand":null,"producer_attachment_kind":"operand","producer_attachment":3,"producer_event":"test.state.write","consumer_attachment_kind":"operand","consumer_attachment":3,"consumer_event":"test.state.write","minimum_issue_separation_cycles":1,"separation_source":"event_pair","model_quality":1,"model_quality_name":"exact"},{"from":2,"to":0,"kind":"state","operand":1,"producer_attachment_kind":"operand","producer_attachment":2,"producer_event":"test.state.read","consumer_attachment_kind":"operand","consumer_attachment":3,"consumer_event":"test.state.write","minimum_issue_separation_cycles":0,"separation_source":"event_pair","model_quality":1,"model_quality_name":"exact"}],"scheduled_resource_uses":[{"node":2,"block":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1},{"node":0,"block":0,"scheduled_ordinal":1,"issue_cycle":1,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1},{"node":1,"block":0,"scheduled_ordinal":2,"issue_cycle":4,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1}],"model_summaries":[{"schedule_class":"test.scalar.alu","first_node":2,"use_count":3,"latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0}],"resource_summaries":[{"resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"use_count":3,"total_occupied_cycles":3,"total_unit_cycles":3,"estimated_min_cycles":3,"peak_units_per_cycle":1}],"liveness":{"format":"loom.liveness.v0","is_cfg":false,"block_count":1,"value_count":5,"blocks":[{"index":0,"label":null,"start_point":0,"end_point":4,"live_in":[],"live_out":[]}],"intervals":[{"value":{"id":0,"name":"state","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":0,"end_point":3,"unit_count":1},{"value":{"id":1,"name":"rhs","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":0,"end_point":3,"unit_count":1},{"value":{"id":2,"name":"first_clobber","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":1,"end_point":1,"unit_count":1},{"value":{"id":3,"name":"second_clobber","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":2,"end_point":2,"unit_count":1},{"value":{"id":4,"name":"read","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":3,"end_point":3,"unit_count":1}],"pressure_summaries":[{"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"peak_live_units":2,"peak_live_values":2,"peak_block":0,"peak_op":2,"peak_point":2}]}}
 
 // ====
-// RUN: emit low-schedule-json @dependency_cycle_diagnostics output=none
+// RUN: emit low-schedule @dependency_cycle_diagnostics output=none
 
 test.target<low_core> @test_target
 
@@ -1705,7 +1705,7 @@ low.func.def target<test.low.core>(@test_target) @dependency_cycle_json(%lhs: re
 {"format":"loom.low.schedule.v1","function":"dependency_cycle_json","target":"test_target","descriptor_set":"test.low.core","block_count":1,"node_count":4,"dependency_count":3,"dependency_group_count":3,"issue_group_count":1,"unlock_summary_publication_count":0,"candidate_decision_count":0,"resource_use_count":1,"effect_use_count":0,"hazard_use_count":0,"hazard_gap_count":0,"model_summary_count":0,"resource_summary_count":0,"error_count":1,"failure":{"kind":"dependency_cycle","flags":0,"cycle_path_truncated":false,"witness_edge_only":false,"block":0,"block_node_count":4,"scheduled_node_count":1,"unscheduled_node_count":3,"producer_node":2,"consumer_node":1,"dependency_kind":"state","operand":1,"cycle_nodes":[1,2]},"blocks":[{"index":0,"node_start":0,"node_count":4,"scheduled_node_start":0,"scheduled_node_count":1,"issue_group_start":0,"issue_group_count":1}],"source_order_boundaries":[3],"nodes":[{"index":0,"block":0,"source_ordinal":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_group":0,"kind":"descriptor","op":"low.op","descriptor":"test.add.schedule_state","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":1,"block":0,"source_ordinal":1,"scheduled_ordinal":4294967295,"issue_cycle":4294967295,"issue_group":4294967295,"kind":"descriptor","op":"low.op","descriptor":"test.state.add.schedule_state","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":2,"block":0,"source_ordinal":2,"scheduled_ordinal":4294967295,"issue_cycle":4294967295,"issue_group":4294967295,"kind":"descriptor","op":"low.op","descriptor":"test.explicit.state.add.schedule_state","schedule_class":"test.scalar.alu","latency_cycles":1,"latency_kind":1,"latency_kind_name":"exact","model_quality":1,"model_quality_name":"exact","issue_use_count":1,"hazard_count":0,"effect_count":0},{"index":3,"block":0,"source_ordinal":3,"scheduled_ordinal":4294967295,"issue_cycle":4294967295,"issue_group":4294967295,"kind":"terminator","op":"low.return","descriptor":null,"schedule_class":null,"latency_cycles":0,"latency_kind":0,"latency_kind_name":"unknown","model_quality":0,"model_quality_name":"unknown","issue_use_count":0,"hazard_count":0,"effect_count":0}],"scheduled_node_indices":[0],"issue_groups":[{"index":0,"block":0,"issue_cycle":0,"scheduled_node_start":0,"scheduled_node_count":1}],"dependencies":[{"from":1,"to":2,"kind":"ssa","operand":0,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":"test.state.write","consumer_attachment_kind":"operand","consumer_attachment":1,"consumer_event":"test.state.read","minimum_issue_separation_cycles":3,"separation_source":"event_pair","model_quality":1,"model_quality_name":"exact"},{"from":0,"to":2,"kind":"ssa","operand":1,"producer_attachment_kind":"operand","producer_attachment":0,"producer_event":"test.state.write","consumer_attachment_kind":"operand","consumer_attachment":2,"consumer_event":"test.state.read","minimum_issue_separation_cycles":3,"separation_source":"event_pair","model_quality":1,"model_quality_name":"exact"},{"from":2,"to":1,"kind":"state","operand":1,"producer_attachment_kind":"operand","producer_attachment":2,"producer_event":"test.state.read","consumer_attachment_kind":"operand","consumer_attachment":3,"consumer_event":"test.state.write","minimum_issue_separation_cycles":0,"separation_source":"event_pair","model_quality":1,"model_quality_name":"exact"}],"scheduled_resource_uses":[{"node":0,"block":0,"scheduled_ordinal":0,"issue_cycle":0,"issue_use_ordinal":0,"issue_use_kind":0,"issue_use_kind_name":"required","resource":"test.scalar","resource_kind":1,"resource_kind_name":"scalar_alu","resource_flags":0,"capacity_per_cycle":1,"contention_group":0,"stage":0,"cycles":1,"units":1}],"liveness":{"format":"loom.liveness.v0","is_cfg":false,"block_count":1,"value_count":5,"blocks":[{"index":0,"label":null,"start_point":0,"end_point":4,"live_in":[],"live_out":[]}],"intervals":[{"value":{"id":0,"name":"lhs","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":0,"end_point":2,"unit_count":1},{"value":{"id":1,"name":"rhs","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":0,"end_point":2,"unit_count":1},{"value":{"id":2,"name":"old","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":1,"end_point":3,"unit_count":1},{"value":{"id":3,"name":"writer","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":2,"end_point":3,"unit_count":1},{"value":{"id":4,"name":"cycle","type":"reg<test.schedule_state>"},"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"start_point":3,"end_point":3,"unit_count":1}],"pressure_summaries":[{"class":{"type_kind":12,"type_kind_name":"register","element_type":0,"element_type_name":null,"register_descriptor_set":2548000952762826130,"register_class_id":11},"peak_live_units":3,"peak_live_values":3,"peak_block":0,"peak_op":1,"peak_point":1}]}}
 
 // ====
-// RUN: emit low-schedule-json @source_range_state_cycle output=none
+// RUN: emit low-schedule @source_range_state_cycle output=none
 
 test.target<low_core> @test_target
 
