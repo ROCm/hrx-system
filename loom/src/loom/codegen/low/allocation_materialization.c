@@ -92,7 +92,7 @@ static void loom_low_allocation_record_materialized_spill(
       loom_low_allocation_spill_plan_assignment(table, plan);
   *record = (loom_low_allocation_materialized_spill_t){
       .value_id = plan->value_id,
-      .value_class = assignment->value_class,
+      .descriptor_reg_class_id = assignment->descriptor_reg_class_id,
       .flags = flags,
       .assignment_index = plan->assignment_index,
       .slot_index = plan->slot_index,
@@ -127,8 +127,8 @@ static iree_status_t loom_low_allocation_emit_materialized_spill(
           loom_low_diagnostic_value_name(table->module, plan->value_id)),
       loom_param_string(loom_low_diagnostic_value_origin_operation_name(
           table->module, plan->value_id, table->function_op)),
-      loom_param_string(loom_low_diagnostic_value_class_name(
-          table->target.descriptor_set, assignment->value_class)),
+      loom_param_string(loom_low_diagnostic_reg_class_name(
+          table->target.descriptor_set, assignment->descriptor_reg_class_id)),
       loom_param_string(
           loom_low_diagnostic_value_name(table->module, storage_value_id)),
       loom_param_u64(plan->byte_size),
@@ -185,8 +185,8 @@ static iree_status_t loom_low_allocation_emit_unsupported_spill_storage_space(
           loom_low_diagnostic_function_name(table->module, table->function_op)),
       loom_param_string(
           loom_low_diagnostic_value_name(table->module, plan->value_id)),
-      loom_param_string(loom_low_diagnostic_value_class_name(
-          table->target.descriptor_set, assignment->value_class)),
+      loom_param_string(loom_low_diagnostic_reg_class_name(
+          table->target.descriptor_set, assignment->descriptor_reg_class_id)),
       loom_param_string(loom_low_spill_slot_space_name(plan->slot_space)),
       loom_param_string(loom_low_storage_type_space_name(storage_space)),
       loom_param_string_list(supported_storage_space_names,

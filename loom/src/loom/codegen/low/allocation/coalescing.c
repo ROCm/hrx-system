@@ -553,7 +553,6 @@ static iree_status_t loom_low_allocation_coalescing_append_interval_at_location(
                                                interval->value_id);
   const loom_low_allocation_assignment_t assignment = {
       .value_id = interval->value_id,
-      .value_class = interval->value_class,
       .descriptor_reg_class_id = descriptor_reg_class_id,
       .start_point =
           context->search_context->unit_liveness->values[value_ordinal]
@@ -943,8 +942,8 @@ static iree_status_t loom_low_allocation_coalescing_assign_concat_interval(
             destination_assignment) ||
         destination_assignment->location_kind !=
             first_assignment->location_kind ||
-        !loom_liveness_value_class_equal(destination_assignment->value_class,
-                                         interval->value_class) ||
+        destination_assignment->descriptor_reg_class_id !=
+            interval->value_class.register_class_id ||
         edge_relation->result_unit_offset != 0 ||
         edge_relation->unit_count != destination_assignment->location_count ||
         !loom_low_allocation_coalescing_assignment_unit_span_fits(
@@ -1061,8 +1060,8 @@ loom_low_allocation_coalescing_assign_concat_source_from_result(
     bool* out_assigned) {
   *out_assigned = false;
   if (!loom_low_allocation_assignment_is_register_like(result_assignment) ||
-      !loom_liveness_value_class_equal(result_assignment->value_class,
-                                       interval->value_class)) {
+      result_assignment->descriptor_reg_class_id !=
+          interval->value_class.register_class_id) {
     return iree_ok_status();
   }
   uint16_t interval_reg_class_id = LOOM_LOW_REG_CLASS_NONE;
@@ -1183,8 +1182,8 @@ loom_low_allocation_coalescing_assign_concat_source_from_edge_destination(
     if (!destination_assignment ||
         !loom_low_allocation_assignment_is_register_like(
             destination_assignment) ||
-        !loom_liveness_value_class_equal(destination_assignment->value_class,
-                                         interval->value_class)) {
+        destination_assignment->descriptor_reg_class_id !=
+            interval->value_class.register_class_id) {
       continue;
     }
 
@@ -1304,8 +1303,8 @@ loom_low_allocation_coalescing_assign_concat_source_relation(
             context, sibling_relation->source_ordinal);
     if (!sibling_assignment ||
         !loom_low_allocation_assignment_is_register_like(sibling_assignment) ||
-        !loom_liveness_value_class_equal(sibling_assignment->value_class,
-                                         interval->value_class) ||
+        sibling_assignment->descriptor_reg_class_id !=
+            interval->value_class.register_class_id ||
         !loom_low_allocation_coalescing_assignment_unit_span_fits(
             sibling_assignment, sibling_relation->source_unit_offset,
             sibling_relation->unit_count)) {
@@ -1534,8 +1533,8 @@ iree_status_t loom_low_allocation_coalescing_assign_edge_source_interval(
     if (!destination_assignment ||
         !loom_low_allocation_assignment_is_register_like(
             destination_assignment) ||
-        !loom_liveness_value_class_equal(destination_assignment->value_class,
-                                         interval->value_class) ||
+        destination_assignment->descriptor_reg_class_id !=
+            interval->value_class.register_class_id ||
         !loom_low_allocation_coalescing_assignment_unit_span_fits(
             destination_assignment, relation->result_unit_offset,
             relation->unit_count)) {

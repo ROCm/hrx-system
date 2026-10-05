@@ -63,8 +63,8 @@ static iree_status_t loom_low_addressability_emit_error(
       loom_param_with_field_ref(loom_param_string(operand_field), field_ref),
       loom_param_string(loom_low_diagnostic_value_name(allocation->module,
                                                        assignment->value_id)),
-      loom_param_string(loom_low_diagnostic_value_class_name(
-          descriptor_set, assignment->value_class)),
+      loom_param_string(loom_low_diagnostic_reg_class_name(
+          descriptor_set, assignment->descriptor_reg_class_id)),
       loom_param_u32(assignment->location_base),
       loom_param_u32(assignment->location_count),
       loom_param_string(

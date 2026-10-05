@@ -288,12 +288,6 @@ static iree_status_t loom_wasm_program_assignment_value_type(
         "Wasm value %u uses a multi-unit target-id assignment",
         (unsigned)assignment->value_id);
   }
-  if (assignment->value_class.type_kind != LOOM_TYPE_REGISTER) {
-    return iree_make_status(
-        IREE_STATUS_FAILED_PRECONDITION,
-        "Wasm value %u is not allocated as a register value",
-        (unsigned)assignment->value_id);
-  }
   return loom_wasm_value_type_from_descriptor_register_class(
       assignment->descriptor_reg_class_id, out_value_type);
 }

@@ -35,13 +35,14 @@ enum loom_low_allocation_assignment_flag_bits_e {
 };
 typedef uint16_t loom_low_allocation_assignment_flags_t;
 
-// Assignment for one liveness interval.
+// Assignment for one register liveness interval in the allocation's resolved
+// target. Class identity is local to that target's descriptor set; the generic
+// liveness type and descriptor-set identity are not repeated per assignment.
 typedef struct loom_low_allocation_assignment_t {
   // SSA value represented by this assignment.
   loom_value_id_t value_id;
-  // Pressure/allocation class for |value_id|.
-  loom_liveness_value_class_t value_class;
-  // Descriptor-set-local register class ID for |value_class|.
+  // Register class in the allocation's target descriptor set, including when
+  // the value resides in a spill slot instead of registers.
   uint16_t descriptor_reg_class_id;
   // Assignment behavior flags.
   loom_low_allocation_assignment_flags_t flags;

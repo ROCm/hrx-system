@@ -89,7 +89,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       "matrix.wmma.f32"
       "matrix.swmmac.f32"
       "matrix.smfmac.f32"
-      "test.gpr";
+      "test.gpr"
+      "test.fpr";
   constexpr loom_string_ref_t kRegisterCopyTag = LOOM_STRING_REF(0, 17);
   constexpr loom_string_ref_t kMemoryGlobalTag = LOOM_STRING_REF(17, 22);
   constexpr loom_string_ref_t kMemoryStackLoadTag = LOOM_STRING_REF(39, 21);
@@ -98,6 +99,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   constexpr loom_string_ref_t kMatrixSwmmacTag = LOOM_STRING_REF(98, 17);
   constexpr loom_string_ref_t kMatrixSmfmacTag = LOOM_STRING_REF(115, 17);
   constexpr loom_string_ref_t kRegisterClassGpr = LOOM_STRING_REF(132, 8);
+  constexpr loom_string_ref_t kRegisterClassFpr = LOOM_STRING_REF(140, 8);
   loom_low_descriptor_t descriptors[8] = {};
   loom_low_descriptor_view_t descriptor_views[8] = {};
   descriptors[0].semantic_tag_string_ref = kRegisterCopyTag;
@@ -133,6 +135,21 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const loom_low_reg_class_t reg_classes[] = {
       {
           /*.name_string_ref=*/kRegisterClassGpr,
+          /*.target_bank_id=*/{},
+          /*.flags=*/LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
+          /*.alloc_unit_bits=*/32,
+          /*.allocatable_count=*/{},
+          /*.fixed_location_base=*/{},
+          /*.fixed_location_count=*/{},
+          /*.physical_register_candidate_start=*/{},
+          /*.candidate_lookup=*/{},
+          /*.alias_set_id=*/{},
+          /*.spill_class_id=*/LOOM_LOW_REG_CLASS_NONE,
+          /*.full_register_part_mask=*/1,
+          /*.spill_slot_space=*/LOOM_LOW_SPILL_SLOT_SPACE_STACK,
+      },
+      {
+          /*.name_string_ref=*/kRegisterClassFpr,
           /*.target_bank_id=*/{},
           /*.flags=*/LOOM_LOW_REG_CLASS_FLAG_PHYSICAL,
           /*.alloc_unit_bits=*/32,
@@ -217,7 +234,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   IREE_ASSERT_OK(loom_module_set_value_type(
       module, 5,
       loom_low_register_type(/*descriptor_set_stable_id=*/1,
-                             /*register_class_id=*/0, 2)));
+                             /*register_class_id=*/1, 2)));
   IREE_ASSERT_OK(loom_module_set_value_type(
       module, 6,
       loom_low_register_type(/*descriptor_set_stable_id=*/1,
@@ -238,7 +255,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       {
           /*.value_class=*/{
               /*.type_kind=*/LOOM_TYPE_REGISTER,
-              /*.element_type=*/LOOM_SCALAR_TYPE_I32,
+              /*.element_type=*/{},
               /*.register_class_id=*/0,
               /*.register_descriptor_set_stable_id=*/1,
           },
@@ -251,8 +268,8 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       {
           /*.value_class=*/{
               /*.type_kind=*/LOOM_TYPE_REGISTER,
-              /*.element_type=*/LOOM_SCALAR_TYPE_F32,
-              /*.register_class_id=*/0,
+              /*.element_type=*/{},
+              /*.register_class_id=*/1,
               /*.register_descriptor_set_stable_id=*/1,
           },
           /*.peak_live_units=*/11,
@@ -265,7 +282,6 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const loom_low_allocation_assignment_t assignments[] = {
       {
           /*.value_id=*/4,
-          /*.value_class=*/pressure_summaries[0].value_class,
           /*.descriptor_reg_class_id=*/0,
           /*.flags=*/{},
           /*.start_point=*/{},
@@ -277,8 +293,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       },
       {
           /*.value_id=*/5,
-          /*.value_class=*/pressure_summaries[1].value_class,
-          /*.descriptor_reg_class_id=*/0,
+          /*.descriptor_reg_class_id=*/1,
           /*.flags=*/{},
           /*.start_point=*/{},
           /*.end_point=*/{},
@@ -289,7 +304,6 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       },
       {
           /*.value_id=*/6,
-          /*.value_class=*/pressure_summaries[0].value_class,
           /*.descriptor_reg_class_id=*/0,
           /*.flags=*/{},
           /*.start_point=*/2,
@@ -448,7 +462,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const loom_low_allocation_materialized_spill_t materialized_spills[] = {
       {
           /*.value_id=*/6,
-          /*.value_class=*/pressure_summaries[0].value_class,
+          /*.descriptor_reg_class_id=*/0,
           /*.flags=*/0,
           /*.assignment_index=*/2,
           /*.slot_index=*/7,
@@ -462,7 +476,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       },
       {
           /*.value_id=*/4,
-          /*.value_class=*/pressure_summaries[0].value_class,
+          /*.descriptor_reg_class_id=*/0,
           /*.flags=*/
           LOOM_LOW_ALLOCATION_MATERIALIZED_SPILL_FLAG_VALUE_WAS_BLOCK_ARGUMENT,
           /*.assignment_index=*/0,
@@ -562,7 +576,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       IREE_SVL("unspillable-register-exhausted");
   frame.allocation.failure.value_id = 5;
   frame.allocation.failure.value_class = pressure_summaries[1].value_class;
-  frame.allocation.failure.descriptor_reg_class_id = 0;
+  frame.allocation.failure.descriptor_reg_class_id = 1;
   frame.allocation.failure.start_point = 3;
   frame.allocation.failure.end_point = 8;
   frame.allocation.failure.required_unit_count = 2;
@@ -707,6 +721,10 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   EXPECT_TRUE(iree_string_view_equal(pressure_rows[0].peak_operation_name,
                                      IREE_SV("<block-boundary>")));
   EXPECT_EQ(pressure_rows[1].peak_live_units, 11u);
+  EXPECT_TRUE(iree_string_view_equal(pressure_rows[0].register_class,
+                                     IREE_SV("test.gpr")));
+  EXPECT_TRUE(iree_string_view_equal(pressure_rows[1].register_class,
+                                     IREE_SV("test.fpr")));
   EXPECT_EQ(report.pressure_origin_rows.count, 3u);
   ASSERT_NE(report.pressure_origin_rows.head, nullptr);
   const auto* pressure_origin_rows =
@@ -899,6 +917,13 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const auto* spill_rows =
       static_cast<const loom_target_compile_report_spill_row_t*>(
           loom_target_compile_report_vec_const_rows(report.spill_rows.head));
+  for (iree_host_size_t i = 0; i < 4; ++i) {
+    EXPECT_EQ(spill_rows[i].type_kind, LOOM_TYPE_REGISTER);
+    EXPECT_EQ(spill_rows[i].element_type, LOOM_SCALAR_TYPE_NONE);
+    EXPECT_TRUE(iree_string_view_equal(
+        spill_rows[i].register_class,
+        i == 1 ? IREE_SV("test.fpr") : IREE_SV("test.gpr")));
+  }
   EXPECT_EQ(spill_rows[0].kind, LOOM_TARGET_COMPILE_REPORT_SPILL_ROW_PLANNED);
   EXPECT_TRUE(iree_string_view_equal(spill_rows[0].function_name,
                                      IREE_SV("<unnamed>")));
@@ -960,7 +985,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       iree_string_view_equal(allocation_failure_rows[0].failure_code,
                              IREE_SV("unspillable-register-exhausted")));
   EXPECT_TRUE(iree_string_view_equal(allocation_failure_rows[0].register_class,
-                                     IREE_SV("test.gpr")));
+                                     IREE_SV("test.fpr")));
   EXPECT_EQ(
       allocation_failure_rows[0].blocking_kind,
       LOOM_TARGET_COMPILE_REPORT_ALLOCATION_FAILURE_BLOCKING_ACTIVE_ASSIGNMENT);

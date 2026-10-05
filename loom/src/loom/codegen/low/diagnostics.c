@@ -146,6 +146,15 @@ iree_string_view_t loom_low_diagnostic_value_name(const loom_module_t* module,
   return loom_string_table_get(&module->strings, value->name_id);
 }
 
+iree_string_view_t loom_low_diagnostic_reg_class_name(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id) {
+  const loom_low_reg_class_t* reg_class =
+      &descriptor_set->reg_classes[descriptor_reg_class_id];
+  return loom_low_descriptor_set_string(descriptor_set,
+                                        reg_class->name_string_ref);
+}
+
 iree_string_view_t loom_low_diagnostic_value_class_name(
     const loom_low_descriptor_set_t* descriptor_set,
     loom_liveness_value_class_t value_class) {
@@ -155,10 +164,8 @@ iree_string_view_t loom_low_diagnostic_value_class_name(
       value_class.register_class_id >= descriptor_set->reg_class_count) {
     return IREE_SV("<unknown>");
   }
-  const loom_low_reg_class_t* reg_class =
-      &descriptor_set->reg_classes[value_class.register_class_id];
-  return loom_low_descriptor_set_string(descriptor_set,
-                                        reg_class->name_string_ref);
+  return loom_low_diagnostic_reg_class_name(descriptor_set,
+                                            value_class.register_class_id);
 }
 
 iree_string_view_t loom_low_diagnostic_block_name(const loom_module_t* module,

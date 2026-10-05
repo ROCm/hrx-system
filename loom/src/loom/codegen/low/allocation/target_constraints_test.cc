@@ -709,7 +709,6 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
   loom_low_allocation_assignment_t candidate = {};
   candidate.value_id = values[kFixedCount];
-  candidate.value_class = value_class;
   candidate.descriptor_reg_class_id = reg_class_id;
   candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
   candidate.location_count = 1;
@@ -857,7 +856,6 @@ TEST_F(LowAllocationTargetConstraintsTest,
 
   loom_low_allocation_assignment_t candidate = {};
   candidate.value_id = values[1];
-  candidate.value_class = intervals[1].value_class;
   candidate.descriptor_reg_class_id = narrow_reg_class_id;
   candidate.start_point = 0;
   candidate.end_point = 10;

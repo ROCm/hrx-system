@@ -76,7 +76,6 @@ loom_low_allocation_interval_assignment_max_unit_end_point_for_interval(
     loom_value_ordinal_t value_ordinal) {
   const loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
-      .value_class = interval->value_class,
       .start_point = state->context->unit_liveness->values[value_ordinal]
                          .acquisition_start_point,
       .end_point =
@@ -217,7 +216,6 @@ loom_low_allocation_interval_assignment_failure_candidate(
           value_ordinal);
   loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
-      .value_class = interval->value_class,
       .descriptor_reg_class_id = capacity->descriptor_reg_class_id,
       .start_point = state->context->unit_liveness->values[value_ordinal]
                          .acquisition_start_point,
@@ -826,7 +824,6 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
       // Verified ties preserve the source's complete register class and width.
       const loom_low_allocation_assignment_t inherited_assignment = {
           .value_id = interval->value_id,
-          .value_class = interval->value_class,
           .descriptor_reg_class_id = tied_source->descriptor_reg_class_id,
           .start_point = entry->acquisition_start_point,
           .end_point =
@@ -966,7 +963,6 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
 
     const loom_low_allocation_assignment_t assignment = {
         .value_id = interval->value_id,
-        .value_class = interval->value_class,
         .descriptor_reg_class_id = capacity.descriptor_reg_class_id,
         .start_point = entry->acquisition_start_point,
         .end_point =

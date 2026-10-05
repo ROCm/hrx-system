@@ -39,41 +39,6 @@ static iree_string_view_t loom_low_allocation_json_function_name(
   return IREE_SV("<unnamed>");
 }
 
-static iree_string_view_t loom_low_allocation_json_type_kind_name(
-    loom_type_kind_t type_kind) {
-  switch (type_kind) {
-    case LOOM_TYPE_NONE:
-      return IREE_SV("none");
-    case LOOM_TYPE_SCALAR:
-      return IREE_SV("scalar");
-    case LOOM_TYPE_TILE:
-      return IREE_SV("tile");
-    case LOOM_TYPE_TENSOR:
-      return IREE_SV("tensor");
-    case LOOM_TYPE_FUNCTION:
-      return IREE_SV("function");
-    case LOOM_TYPE_DIALECT:
-      return IREE_SV("dialect");
-    case LOOM_TYPE_ENCODING:
-      return IREE_SV("encoding");
-    case LOOM_TYPE_POOL:
-      return IREE_SV("pool");
-    case LOOM_TYPE_VECTOR:
-      return IREE_SV("vector");
-    case LOOM_TYPE_VIEW:
-      return IREE_SV("view");
-    case LOOM_TYPE_BUFFER:
-      return IREE_SV("buffer");
-    case LOOM_TYPE_REGISTER:
-      return IREE_SV("register");
-    case LOOM_TYPE_STORAGE:
-      return IREE_SV("storage");
-    case LOOM_TYPE_COUNT_:
-      break;
-  }
-  return IREE_SV("unknown");
-}
-
 static const char* loom_low_allocation_json_mode_name(uint8_t mode) {
   switch (mode) {
     case 0:
@@ -160,15 +125,6 @@ static iree_status_t loom_low_allocation_json_write_string_view_or_null(
     return loom_output_stream_write_cstring(stream, "null");
   }
   return loom_json_write_escaped_string(stream, value);
-}
-
-static iree_status_t loom_low_allocation_json_write_scalar_name_or_null(
-    loom_scalar_type_t scalar_type, loom_output_stream_t* stream) {
-  const char* name = loom_scalar_type_name(scalar_type);
-  if (!name) {
-    return loom_output_stream_write_cstring(stream, "null");
-  }
-  return loom_json_write_escaped_cstring(stream, name);
 }
 
 static iree_status_t loom_low_allocation_json_write_host_size_or_null(
@@ -261,38 +217,25 @@ static iree_status_t loom_low_allocation_json_write_value(
   return loom_json_object_end(&object);
 }
 
-static iree_status_t loom_low_allocation_json_write_value_class(
-    const loom_low_allocation_table_t* table,
-    loom_liveness_value_class_t value_class, loom_output_stream_t* stream) {
+static iree_status_t loom_low_allocation_json_write_register_class(
+    const loom_low_allocation_table_t* table, uint16_t descriptor_reg_class_id,
+    loom_output_stream_t* stream) {
   loom_json_object_writer_t object;
   IREE_RETURN_IF_ERROR(loom_json_object_begin(stream, &object));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-      &object, IREE_SV("type_kind"), (uint32_t)value_class.type_kind));
+      &object, IREE_SV("type_kind"), (uint32_t)LOOM_TYPE_REGISTER));
   IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-      &object, IREE_SV("type_kind_name"),
-      loom_low_allocation_json_type_kind_name(value_class.type_kind)));
+      &object, IREE_SV("type_kind_name"), IREE_SV("register")));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
-      &object, IREE_SV("element_type"), (uint32_t)value_class.element_type));
+      &object, IREE_SV("element_type"), LOOM_SCALAR_TYPE_NONE));
   IREE_RETURN_IF_ERROR(
-      loom_json_object_begin_field(&object, IREE_SV("element_type_name")));
-  IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_scalar_name_or_null(
-      value_class.element_type, stream));
-  if (value_class.type_kind == LOOM_TYPE_REGISTER &&
-      value_class.register_descriptor_set_stable_id ==
-          table->target.descriptor_set->stable_id &&
-      value_class.register_class_id <
-          table->target.descriptor_set->reg_class_count) {
-    const loom_low_reg_class_t* reg_class =
-        &table->target.descriptor_set
-             ->reg_classes[value_class.register_class_id];
-    IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
-        &object, IREE_SV("register_class"),
-        loom_low_descriptor_set_string(table->target.descriptor_set,
-                                       reg_class->name_string_ref)));
-  } else {
-    IREE_RETURN_IF_ERROR(
-        loom_json_object_write_null_field(&object, IREE_SV("register_class")));
-  }
+      loom_json_object_write_null_field(&object, IREE_SV("element_type_name")));
+  const loom_low_reg_class_t* reg_class =
+      &table->target.descriptor_set->reg_classes[descriptor_reg_class_id];
+  IREE_RETURN_IF_ERROR(loom_json_object_write_string_field(
+      &object, IREE_SV("register_class"),
+      loom_low_descriptor_set_string(table->target.descriptor_set,
+                                     reg_class->name_string_ref)));
   return loom_json_object_end(&object);
 }
 
@@ -336,8 +279,8 @@ static iree_status_t loom_low_allocation_json_write_assignment(
   IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_value(
       table, type_print_options, assignment->value_id, stream));
   IREE_RETURN_IF_ERROR(loom_json_object_begin_field(&object, IREE_SV("class")));
-  IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_value_class(
-      table, assignment->value_class, stream));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_register_class(
+      table, assignment->descriptor_reg_class_id, stream));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
       &object, IREE_SV("start_point"), assignment->start_point));
   IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(
@@ -666,8 +609,8 @@ static iree_status_t loom_low_allocation_json_write_failure(
       table, type_print_options, failure->value_id, stream));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&failure_object, IREE_SV("class")));
-  IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_value_class(
-      table, failure->value_class, stream));
+  IREE_RETURN_IF_ERROR(loom_low_allocation_json_write_register_class(
+      table, failure->descriptor_reg_class_id, stream));
   IREE_RETURN_IF_ERROR(
       loom_json_object_begin_field(&failure_object, IREE_SV("start_point")));
   IREE_RETURN_IF_ERROR(

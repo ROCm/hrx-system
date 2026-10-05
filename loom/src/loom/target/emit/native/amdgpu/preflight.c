@@ -138,8 +138,9 @@ loom_amdgpu_native_preflight_emit_unsupported_register_metadata(
           allocation->module, allocation->function_op)),
       loom_param_string(loom_low_diagnostic_value_name(allocation->module,
                                                        assignment->value_id)),
-      loom_param_string(loom_low_diagnostic_value_class_name(
-          allocation->target.descriptor_set, assignment->value_class)),
+      loom_param_string(loom_low_diagnostic_reg_class_name(
+          allocation->target.descriptor_set,
+          assignment->descriptor_reg_class_id)),
       loom_param_string(register_class),
       loom_param_string(metadata_contract),
   };
@@ -170,9 +171,6 @@ static iree_status_t loom_amdgpu_native_preflight_collect_register_usage(
   for (iree_host_size_t i = 0; i < allocation->assignment_count; ++i) {
     const loom_low_allocation_assignment_t* assignment =
         &allocation->assignments[i];
-    if (assignment->value_class.type_kind != LOOM_TYPE_REGISTER) {
-      continue;
-    }
     if (assignment->location_kind !=
         LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
       continue;

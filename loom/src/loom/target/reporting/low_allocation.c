@@ -758,13 +758,8 @@ static iree_status_t loom_target_compile_report_record_spill_rows(
        iree_status_is_ok(status) && i < allocation->spill_plan_count; ++i) {
     const loom_low_allocation_spill_plan_t* spill_plan =
         &allocation->spill_plans[i];
-    const loom_low_allocation_assignment_t* assignment = NULL;
-    if (spill_plan->assignment_index < allocation->assignment_count) {
-      assignment = &allocation->assignments[spill_plan->assignment_index];
-    }
-    const loom_liveness_value_class_t value_class =
-        assignment != NULL ? assignment->value_class
-                           : (loom_liveness_value_class_t){0};
+    const loom_low_allocation_assignment_t* assignment =
+        &allocation->assignments[spill_plan->assignment_index];
     const loom_target_compile_report_pressure_origin_info_t origin_info =
         loom_target_compile_report_pressure_origin_for_liveness_value(
             allocation->module, liveness, origin_infos, spill_plan->value_id);
@@ -773,10 +768,11 @@ static iree_status_t loom_target_compile_report_record_spill_rows(
         .function_name = report->function_name,
         .value_name = loom_target_compile_report_value_name(
             allocation->module, spill_plan->value_id),
-        .register_class = loom_target_compile_report_value_class_name(
-            allocation->target.descriptor_set, value_class),
-        .type_kind = value_class.type_kind,
-        .element_type = value_class.element_type,
+        .register_class = loom_low_diagnostic_reg_class_name(
+            allocation->target.descriptor_set,
+            assignment->descriptor_reg_class_id),
+        .type_kind = LOOM_TYPE_REGISTER,
+        .element_type = LOOM_SCALAR_TYPE_NONE,
         .origin_kind = origin_info.kind,
         .origin_operation_name = origin_info.operation_name,
         .semantic_tag = origin_info.semantic_tag,
@@ -839,10 +835,10 @@ iree_status_t loom_target_compile_report_record_materialized_spill_rows(
           .function_name = report->function_name,
           .value_name = loom_target_compile_report_value_name(frame->module,
                                                               spill->value_id),
-          .register_class = loom_target_compile_report_value_class_name(
-              frame->target.descriptor_set, spill->value_class),
-          .type_kind = spill->value_class.type_kind,
-          .element_type = spill->value_class.element_type,
+          .register_class = loom_low_diagnostic_reg_class_name(
+              frame->target.descriptor_set, spill->descriptor_reg_class_id),
+          .type_kind = LOOM_TYPE_REGISTER,
+          .element_type = LOOM_SCALAR_TYPE_NONE,
           .origin_kind = origin_info.kind,
           .origin_operation_name = origin_info.operation_name,
           .semantic_tag = origin_info.semantic_tag,
@@ -1228,10 +1224,10 @@ loom_target_compile_report_record_allocation_high_water_rows(
         .function_name = report->function_name,
         .value_name = loom_target_compile_report_value_name(
             allocation->module, assignment->value_id),
-        .register_class = loom_target_compile_report_value_class_name(
-            descriptor_set, assignment->value_class),
-        .type_kind = assignment->value_class.type_kind,
-        .element_type = assignment->value_class.element_type,
+        .register_class = loom_low_diagnostic_reg_class_name(
+            descriptor_set, assignment->descriptor_reg_class_id),
+        .type_kind = LOOM_TYPE_REGISTER,
+        .element_type = LOOM_SCALAR_TYPE_NONE,
         .assignment_index = entry->assignment_index,
         .origin_operation_name = origin_info.operation_name,
         .origin_kind = origin_info.kind,

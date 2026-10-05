@@ -64,7 +64,6 @@ iree_status_t EncodeDescriptor(
     }
     assignments[i] = (loom_low_allocation_assignment_t){
         /*.value_id=*/{},
-        /*.value_class=*/{},
         /*.descriptor_reg_class_id=*/
         descriptor_set->reg_class_alts[operand->reg_class_alt_start]
             .reg_class_id,

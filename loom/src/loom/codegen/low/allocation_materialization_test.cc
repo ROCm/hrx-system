@@ -118,13 +118,9 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
       FindLowFunction(module.get(), IREE_SV("stale_slice_plan"));
   const loom_value_id_t wide = FindValueByName(module.get(), IREE_SV("wide"));
   const loom_value_id_t lane = FindValueByName(module.get(), IREE_SV("lane"));
-  const loom_liveness_value_class_t register_class = {
-      /*.type_kind=*/LOOM_TYPE_REGISTER,
-  };
   const loom_low_allocation_assignment_t assignments[] = {
       {
           /*.value_id=*/wide,
-          /*.value_class=*/register_class,
           /*.descriptor_reg_class_id=*/0,
           /*.flags=*/{},
           /*.start_point=*/0,
@@ -137,7 +133,6 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
       },
       {
           /*.value_id=*/lane,
-          /*.value_class=*/register_class,
           /*.descriptor_reg_class_id=*/0,
           /*.flags=*/{},
           /*.start_point=*/1,

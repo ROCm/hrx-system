@@ -188,14 +188,6 @@ void InitializeAddressabilityTestState(
 
   state->assignments[0] = (loom_low_allocation_assignment_t){
       /*.value_id=*/0,
-      /*.value_class=*/
-      {
-          /*.type_kind=*/LOOM_TYPE_REGISTER,
-          /*.element_type=*/{},
-          /*.register_class_id=*/0,
-          /*.register_descriptor_set_stable_id=*/
-          state->descriptor_set.stable_id,
-      },
       /*.descriptor_reg_class_id=*/0,
       /*.flags=*/{},
       /*.start_point=*/{},
@@ -207,14 +199,6 @@ void InitializeAddressabilityTestState(
   };
   state->assignments[1] = (loom_low_allocation_assignment_t){
       /*.value_id=*/1,
-      /*.value_class=*/
-      {
-          /*.type_kind=*/LOOM_TYPE_REGISTER,
-          /*.element_type=*/{},
-          /*.register_class_id=*/0,
-          /*.register_descriptor_set_stable_id=*/
-          state->descriptor_set.stable_id,
-      },
       /*.descriptor_reg_class_id=*/0,
       /*.flags=*/{},
       /*.start_point=*/{},

@@ -81,8 +81,7 @@ loom_low_allocation_assignment_t Assignment(
     uint32_t unit_point_start) {
   loom_low_allocation_assignment_t assignment = {};
   assignment.value_id = value_id;
-  assignment.value_class = value_class;
-  assignment.descriptor_reg_class_id = 0;
+  assignment.descriptor_reg_class_id = value_class.register_class_id;
   assignment.start_point = start;
   assignment.end_point = end;
   assignment.unit_count = 1;

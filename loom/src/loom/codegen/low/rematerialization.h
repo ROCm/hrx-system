@@ -50,9 +50,9 @@ typedef struct loom_low_value_rematerialization_result_t {
 typedef struct loom_low_allocation_rematerialization_result_t {
   // Descriptor-guided value rematerialization performed by the repair.
   loom_low_value_rematerialization_result_t value;
-  // Original allocation or liveness pressure class for a repaired value.
-  // Owned by the analysis snapshot; valid until that snapshot is discarded.
-  const loom_liveness_value_class_t* value_class;
+  // Original register class in the allocation's target descriptor set.
+  // Retained by value across IR rewrites and analysis snapshot retirement.
+  uint16_t descriptor_reg_class_id;
 } loom_low_allocation_rematerialization_result_t;
 
 typedef struct loom_low_rematerialization_batch_result_t {

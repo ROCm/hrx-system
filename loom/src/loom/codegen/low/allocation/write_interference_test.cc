@@ -182,7 +182,8 @@ class WriteInterferenceTest : public ::testing::Test {
       ASSERT_NE(interval, nullptr);
       auto& assignment = assignments_[i];
       assignment.value_id = values_[i];
-      assignment.value_class = interval->value_class;
+      assignment.descriptor_reg_class_id =
+          interval->value_class.register_class_id;
       assignment.start_point = interval->start_point;
       assignment.end_point = interval->end_point + 1;
       assignment.unit_count = assignment.location_count = width;

@@ -125,7 +125,8 @@ class LowAllocationEdgeAliasTest : public ::testing::Test {
     loom_low_allocation_assignment_t counterpart = {};
     const auto& counterpart_interval = intervals[counterpart_ordinal];
     counterpart.value_id = counterpart_interval.value_id;
-    counterpart.value_class = counterpart_interval.value_class;
+    counterpart.descriptor_reg_class_id =
+        counterpart_interval.value_class.register_class_id;
     counterpart.start_point = counterpart_acquisition_start;
     counterpart.end_point = counterpart_interval.end_point;
     counterpart.unit_count = counterpart_interval.unit_count;

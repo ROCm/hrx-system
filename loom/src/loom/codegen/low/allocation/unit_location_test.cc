@@ -10,18 +10,10 @@
 namespace loom {
 namespace {
 
-loom_liveness_value_class_t ValueClass(uint16_t reg_class_id) {
-  loom_liveness_value_class_t value_class = {};
-  value_class.type_kind = LOOM_TYPE_REGISTER;
-  value_class.register_class_id = reg_class_id;
-  return value_class;
-}
-
 loom_low_allocation_assignment_t Assignment(
     uint16_t reg_class_id, loom_low_allocation_location_kind_t location_kind =
                                LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
   loom_low_allocation_assignment_t assignment = {};
-  assignment.value_class = ValueClass(reg_class_id);
   assignment.descriptor_reg_class_id = reg_class_id;
   assignment.start_point = 2;
   assignment.end_point = 10;

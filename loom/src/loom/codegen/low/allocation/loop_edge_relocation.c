@@ -495,8 +495,8 @@ static iree_status_t loom_low_allocation_loop_edge_relocation_collect_candidate(
   if (!loom_low_allocation_assignment_is_register_like(source_assignment) ||
       source_assignment->unit_count != destination_assignment->unit_count ||
       source_assignment->location_count != destination_assignment->unit_count ||
-      !loom_liveness_value_class_equal(destination_assignment->value_class,
-                                       source_assignment->value_class) ||
+      destination_assignment->descriptor_reg_class_id !=
+          source_assignment->descriptor_reg_class_id ||
       !loom_low_allocation_storage_assignment_classes_share(
           state->context->descriptor_set, destination_assignment,
           source_assignment)) {

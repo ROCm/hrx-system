@@ -37,8 +37,9 @@ enum {
 typedef struct loom_low_allocation_materialized_spill_t {
   // SSA value represented by the materialized spill storage.
   loom_value_id_t value_id;
-  // Register value class that could not remain fully physical.
-  loom_liveness_value_class_t value_class;
+  // Original register class in the emission frame's target descriptor set.
+  // Retained across allocation snapshot rebuilds after spill insertion.
+  uint16_t descriptor_reg_class_id;
   // Materialized spill record flags.
   loom_low_allocation_materialized_spill_flags_t flags;
   // Allocation assignment index associated with |value_id|.

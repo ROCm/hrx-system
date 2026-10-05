@@ -315,7 +315,6 @@ static bool loom_low_allocation_concat_reservation_find_location_for_source(
 
   loom_low_allocation_assignment_t reservation = {
       .value_id = result_interval->value_id,
-      .value_class = result_interval->value_class,
       .descriptor_reg_class_id = capacity.descriptor_reg_class_id,
       .start_point = reservation_start_point,
       .end_point = loom_low_allocation_live_range_interval_storage_end_point(
@@ -748,7 +747,6 @@ iree_status_t loom_low_allocation_concat_reservation_find(
         if (result_tier < source_tier) {
           *out_assignment = source_assignment;
           out_assignment->value_id = source_interval->value_id;
-          out_assignment->value_class = source_interval->value_class;
           out_assignment->start_point =
               context->unit_liveness->values[relation->source_ordinal]
                   .acquisition_start_point;
@@ -764,7 +762,6 @@ iree_status_t loom_low_allocation_concat_reservation_find(
 
   *out_assignment = (loom_low_allocation_assignment_t){
       .value_id = result_interval->value_id,
-      .value_class = result_interval->value_class,
       .descriptor_reg_class_id = capacity.descriptor_reg_class_id,
       .start_point = reservation_start_point,
       .end_point = loom_low_allocation_live_range_interval_storage_end_point(

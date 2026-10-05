@@ -66,6 +66,11 @@ iree_string_view_t loom_low_diagnostic_operation_name(
 iree_string_view_t loom_low_diagnostic_value_name(const loom_module_t* module,
                                                   loom_value_id_t value_id);
 
+// Returns the display name of a resolved register class in |descriptor_set|.
+iree_string_view_t loom_low_diagnostic_reg_class_name(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id);
+
 // Returns a descriptor-local display name for |value_class|, or "<unknown>".
 iree_string_view_t loom_low_diagnostic_value_class_name(
     const loom_low_descriptor_set_t* descriptor_set,

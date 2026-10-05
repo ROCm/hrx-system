@@ -345,8 +345,9 @@ static iree_status_t loom_low_allocation_checker_assignments(
             loom_low_allocation_checker_storage_end_point(interval) ||
         assignment->unit_count != interval->unit_count ||
         assignment->location_count != assignment->unit_count ||
-        !loom_liveness_value_class_equal(assignment->value_class,
-                                         interval->value_class) ||
+        interval->value_class.type_kind != LOOM_TYPE_REGISTER ||
+        interval->value_class.register_descriptor_set_stable_id !=
+            allocation->target.descriptor_set->stable_id ||
         assignment->descriptor_reg_class_id !=
             interval->value_class.register_class_id ||
         !loom_low_allocation_location_kind_is_known(

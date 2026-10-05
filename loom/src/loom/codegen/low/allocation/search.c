@@ -62,7 +62,6 @@ loom_low_allocation_search_candidate_assignment(
           context->unit_liveness, context->liveness, value_ordinal);
   loom_low_allocation_assignment_t candidate = {
       .value_id = interval->value_id,
-      .value_class = interval->value_class,
       .descriptor_reg_class_id = reg_class_id,
       .start_point =
           context->unit_liveness->values[value_ordinal].acquisition_start_point,

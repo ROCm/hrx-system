@@ -572,7 +572,6 @@ static bool loom_low_allocation_assignment_overlaps_failure_storage(
       &descriptor_set->reg_classes[failure->descriptor_reg_class_id];
   loom_low_allocation_assignment_t candidate = {
       .value_id = failure->value_id,
-      .value_class = failure->value_class,
       .descriptor_reg_class_id = failure->descriptor_reg_class_id,
       .unit_count = failure->required_unit_count,
       .location_kind = failure->location_kind,
@@ -611,8 +610,8 @@ static bool loom_low_allocation_rematerialization_frontier_contains(
     const loom_low_allocation_table_t* table,
     const loom_low_allocation_assignment_t* assignment,
     loom_low_allocation_rematerialization_frontier_t frontier) {
-  const bool has_failed_class = loom_liveness_value_class_equal(
-      assignment->value_class, table->failure.value_class);
+  const bool has_failed_class = assignment->descriptor_reg_class_id ==
+                                table->failure.descriptor_reg_class_id;
   if (frontier ==
       LOOM_LOW_ALLOCATION_REMATERIALIZATION_FRONTIER_PRESSURE_CLASS) {
     return has_failed_class;
@@ -695,7 +694,7 @@ static iree_status_t loom_low_allocation_try_rematerialize_live_frontier(
     out_batch->retained_placement_count +=
         out_result->value.retained_placement_count;
     if (out_result->value.rewritten_operand_count != 0) {
-      out_result->value_class = &assignment->value_class;
+      out_result->descriptor_reg_class_id = assignment->descriptor_reg_class_id;
       return iree_ok_status();
     }
     previous_pressure_area = best_pressure_area;
@@ -744,7 +743,7 @@ static iree_status_t loom_low_allocation_rematerialize_failure_value(
       out_result->value.retained_placement_count;
   if (out_result->value.rewritten_operand_count != 0 ||
       out_result->value.retained_placement_count != 0) {
-    out_result->value_class = &failure->value_class;
+    out_result->descriptor_reg_class_id = failure->descriptor_reg_class_id;
     return iree_ok_status();
   }
   return iree_ok_status();
@@ -888,7 +887,8 @@ iree_status_t loom_low_allocation_rematerialize_failure(
        ++i) {
     const loom_low_rematerialization_candidate_t* candidate = &candidates[i];
     loom_low_allocation_rematerialization_result_t result = {
-        .value_class = &candidate->interval->value_class,
+        .descriptor_reg_class_id =
+            candidate->interval->value_class.register_class_id,
     };
     status = loom_low_rematerialize_value_uses(
         module, &table->target, candidate->interval->value_id,
@@ -928,8 +928,9 @@ iree_status_t loom_low_allocation_rematerialize_spill_plan(
         module, &table->target, spill_plan->value_id, /*schedule=*/NULL, state,
         arena, &out_result->value));
     if (out_result->value.rewritten_operand_count != 0) {
-      out_result->value_class =
-          &table->assignments[spill_plan->assignment_index].value_class;
+      out_result->descriptor_reg_class_id =
+          table->assignments[spill_plan->assignment_index]
+              .descriptor_reg_class_id;
       return iree_ok_status();
     }
   }
@@ -966,8 +967,8 @@ iree_status_t loom_low_allocation_rematerialization_emit_decision(
           loom_low_diagnostic_function_name(table->module, table->function_op)),
       loom_param_string(loom_low_diagnostic_value_name(table->module,
                                                        result->value.value_id)),
-      loom_param_string(loom_low_diagnostic_value_class_name(
-          table->target.descriptor_set, *result->value_class)),
+      loom_param_string(loom_low_diagnostic_reg_class_name(
+          table->target.descriptor_set, result->descriptor_reg_class_id)),
       loom_param_string(
           loom_low_allocation_rematerialization_trigger_name(trigger)),
       loom_param_u32(result->value.cloned_packet_count),

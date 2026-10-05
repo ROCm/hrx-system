@@ -131,7 +131,7 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
 
   loom_low_allocation_assignment_t future = {};
   future.value_id = value_ids[3];
-  future.value_class = value_class;
+  future.descriptor_reg_class_id = value_class.register_class_id;
   future.unit_count = 2;
   future.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
   future.location_count = 2;

@@ -51,8 +51,8 @@ static bool loom_low_allocation_value_is_reference_register(
 static bool loom_low_allocation_fixed_value_overlaps_spill_assignment(
     const loom_low_allocation_resolved_fixed_value_t* fixed_value,
     const loom_low_allocation_assignment_t* spill_assignment) {
-  return loom_liveness_value_class_equal(fixed_value->assignment.value_class,
-                                         spill_assignment->value_class) &&
+  return fixed_value->assignment.descriptor_reg_class_id ==
+             spill_assignment->descriptor_reg_class_id &&
          spill_assignment->start_point < fixed_value->semantic_end_point &&
          fixed_value->assignment.start_point < spill_assignment->end_point;
 }
@@ -538,8 +538,9 @@ static iree_status_t loom_low_allocation_live_range_split_emit_decision(
           table->module, fixed_value->assignment.value_id)),
       loom_param_string(
           loom_low_diagnostic_value_name(table->module, split_value_id)),
-      loom_param_string(loom_low_diagnostic_value_class_name(
-          table->target.descriptor_set, fixed_value->assignment.value_class)),
+      loom_param_string(loom_low_diagnostic_reg_class_name(
+          table->target.descriptor_set,
+          fixed_value->assignment.descriptor_reg_class_id)),
       loom_param_string(IREE_SV("spill-plan")),
       loom_param_u32(1),
       loom_param_u32(rewritten_operand_count),
