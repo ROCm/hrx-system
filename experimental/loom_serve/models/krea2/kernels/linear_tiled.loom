@@ -205,3 +205,143 @@ template.def<@projection.linear_tiled_bf16> device @linear_tiled_bf16(%rows: ind
   }
   template.return
 }
+
+template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
+
+// BF16 X W^T, with row-major X, [output,input] weights, and explicit output
+// layout. The caller supplies an injective layout for the logical result.
+// Launch ceil(rows/64) x (outputs/64) workgroups of 256 threads, wave32.
+// Rows are a positive multiple of 16, inputs of 256, and outputs of 64.
+// Dimensions are specialization facts; this helper has no model configuration.
+// The positive row-tile group size is a caller-selected traversal policy.
+// A group spanning all row tiles retains the original physical coordinates.
+// Input, weight and output storage do not overlap.
+//
+// Eight waves own a 4x2 grid of 16x32 outputs. Cooperative K64 acquisition
+// shares operands through two padded 64x72 LDS tiles. Ordered publication and
+// retirement barriers allow the loop pipeline to acquire the next global tile
+// while the current tile is consumed. Missing rows are zero-filled without
+// removing any thread from a workgroup barrier.
+//
+// Two F32 output accumulators persist across the complete ascending K16
+// reduction. This intentionally changes the reduction order: there are no K256
+// partials, separate totals or intermediate resets. Final BF16 rounding and
+// operand acquisition/publication/retirement are unchanged.
+template.def<@projection.linear_tiled_full_k_bf16> device @linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %pipeline_depth = index.constant 2 : index
+  %two = index.constant 2 : index
+  %eight = index.constant 8 : index
+  %tile = index.constant 16 : index
+  %wave_outputs = index.constant 32 : index
+  %workgroup_tile = index.constant 64 : index
+  %threads = index.constant 256 : index
+  %stage_bytes = index.constant 9216 : offset
+  %rounding = index.constant 63 : index
+  %padded_rows = index.add %rows, %rounding : index
+  %row_tiles = index.div %padded_rows, %workgroup_tile : index
+  %whole_rows = index.cmp uge, %row_tile_group_size, %row_tiles : index
+  %row_group, %output_group = scf.if %whole_rows -> (index, index) {
+    %row = kernel.workgroup.id<x> : index
+    %output = kernel.workgroup.id<y> : index
+    scf.yield %row, %output : index, index
+  } else {
+    %row, %output = template.apply<@projection.linear_tiled_coordinates>(%rows, %outputs, %row_tile_group_size) : (index, index, index) -> (index, index)
+    scf.yield %row, %output : index, index
+  }
+  %workitem = kernel.workitem.id<x> : index
+  %subgroup = kernel.subgroup.id : index
+  %lane = kernel.subgroup.lane.id : index
+  %lane_row = index.rem %lane, %tile : index
+  %wave_row_group = index.div %subgroup, %two : index
+  %wave_output_group = index.rem %subgroup, %two : index
+  %wave_row = index.mul %wave_row_group, %tile : index
+  %wave_output = index.mul %wave_output_group, %wave_outputs : index
+  %weight_row0 = index.add %wave_output, %lane_row : index
+  %weight_row1 = index.add %weight_row0, %tile : index
+  %row_origin = index.mul %row_group, %workgroup_tile : index
+  %output_origin = index.mul %output_group, %workgroup_tile : index
+  %result_row = index.add %row_origin, %wave_row : index
+  %result_column0 = index.add %output_origin, %wave_output : index
+  %result_column1 = index.add %result_column0, %tile : index
+  %column_count = index.div %inputs, %workgroup_tile : index
+  %input_noalias, %weight_noalias = buffer.assume.noalias %input, %weight : buffer, buffer
+  %input_view = buffer.view %input_noalias[%origin] : buffer -> view<[%rows]x[%inputs]xbf16>
+  %weight_view = buffer.view %weight_noalias[%origin] : buffer -> view<[%outputs]x[%inputs]xbf16>
+  %output_view = buffer.view %output[%origin] : buffer -> view<[%rows]x[%outputs]xbf16, %output_layout>
+  %input_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %weight_stage = buffer.alloca<workgroup> align(16) %stage_bytes : buffer
+  %input_stage_view = buffer.view %input_stage[%origin] : buffer -> view<64x72xbf16>
+  %weight_stage_view = buffer.view %weight_stage[%origin] : buffer -> view<64x72xbf16>
+  %zeros = vector.constant 0.0 : vector<8xf32>
+  %initial = vector.fragment<init> %zeros shape [%tile, %tile] : vector<8xf32>
+  %result0, %result1 = scf.for %column_ordinal = [%zero to %column_count step %one](%acc0 = %initial : vector<8xf32>, %acc1 = %initial : vector<8xf32>) -> (vector<8xf32>, vector<8xf32>) pipeline(%pipeline_depth) {
+    %column = index.mul %column_ordinal, %workgroup_tile : index
+    scf.for %packet_round = [%zero to %two step %one] unroll schedule(linear) {
+      %packet = index.madd %packet_round, %threads, %workitem : index
+      %stage_row = index.div %packet, %eight : index
+      %stage_packet = index.rem %packet, %eight : index
+      %stage_column = index.mul %stage_packet, %eight : index
+      %input_row = index.add %row_origin, %stage_row : index
+      %output_row = index.add %output_origin, %stage_row : index
+      %input_column = index.add %column, %stage_column : index
+      %input_valid = index.cmp ult, %input_row, %rows : index
+      %input_values = scf.if %input_valid -> (vector<8xbf16>) {
+        %values = vector.load %input_view[%input_row, %input_column] : view<[%rows]x[%inputs]xbf16> -> vector<8xbf16>
+        scf.yield %values : vector<8xbf16>
+      } else {
+        %padding = vector.constant 0.0 : vector<8xbf16>
+        scf.yield %padding : vector<8xbf16>
+      }
+      %weight_values = vector.load %weight_view[%output_row, %input_column] : view<[%outputs]x[%inputs]xbf16> -> vector<8xbf16>
+      vector.store %input_values, %input_stage_view[%stage_row, %stage_column] : vector<8xbf16>, view<64x72xbf16>
+      vector.store %weight_values, %weight_stage_view[%stage_row, %stage_column] : vector<8xbf16>, view<64x72xbf16>
+    }
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    %fragment_column0 = index.constant 0 : index
+    %lhs0 = vector.fragment.load<lhs> %input_stage_view[%wave_row, %fragment_column0] shape [%tile, %tile] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values00 = vector.load %weight_stage_view[%weight_row0, %fragment_column0] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values10 = vector.load %weight_stage_view[%weight_row1, %fragment_column0] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs00 = vector.fragment<rhs> %rhs_values00 shape [%tile, %tile] : vector<16xbf16>
+    %rhs10 = vector.fragment<rhs> %rhs_values10 shape [%tile, %tile] : vector<16xbf16>
+    %next00 = vector.mma %lhs0, %rhs00, %acc0 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next10 = vector.mma %lhs0, %rhs10, %acc1 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %fragment_column1 = index.constant 16 : index
+    %lhs1 = vector.fragment.load<lhs> %input_stage_view[%wave_row, %fragment_column1] shape [%tile, %tile] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values01 = vector.load %weight_stage_view[%weight_row0, %fragment_column1] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values11 = vector.load %weight_stage_view[%weight_row1, %fragment_column1] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs01 = vector.fragment<rhs> %rhs_values01 shape [%tile, %tile] : vector<16xbf16>
+    %rhs11 = vector.fragment<rhs> %rhs_values11 shape [%tile, %tile] : vector<16xbf16>
+    %next01 = vector.mma %lhs1, %rhs01, %next00 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next11 = vector.mma %lhs1, %rhs11, %next10 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %fragment_column2 = index.constant 32 : index
+    %lhs2 = vector.fragment.load<lhs> %input_stage_view[%wave_row, %fragment_column2] shape [%tile, %tile] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values02 = vector.load %weight_stage_view[%weight_row0, %fragment_column2] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values12 = vector.load %weight_stage_view[%weight_row1, %fragment_column2] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs02 = vector.fragment<rhs> %rhs_values02 shape [%tile, %tile] : vector<16xbf16>
+    %rhs12 = vector.fragment<rhs> %rhs_values12 shape [%tile, %tile] : vector<16xbf16>
+    %next02 = vector.mma %lhs2, %rhs02, %next01 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next12 = vector.mma %lhs2, %rhs12, %next11 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %fragment_column3 = index.constant 48 : index
+    %lhs3 = vector.fragment.load<lhs> %input_stage_view[%wave_row, %fragment_column3] shape [%tile, %tile] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values03 = vector.load %weight_stage_view[%weight_row0, %fragment_column3] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs_values13 = vector.load %weight_stage_view[%weight_row1, %fragment_column3] : view<64x72xbf16> -> vector<16xbf16>
+    %rhs03 = vector.fragment<rhs> %rhs_values03 shape [%tile, %tile] : vector<16xbf16>
+    %rhs13 = vector.fragment<rhs> %rhs_values13 shape [%tile, %tile] : vector<16xbf16>
+    %next03 = vector.mma %lhs3, %rhs03, %next02 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    %next13 = vector.mma %lhs3, %rhs13, %next12 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
+    kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    scf.yield %next03, %next13 : vector<8xf32>, vector<8xf32>
+  }
+  // Rows are a multiple of 16, so every wave owns a complete valid fragment
+  // or no output. All waves have already retired their shared-memory reads.
+  %result_valid = index.cmp ult, %result_row, %rows : index
+  scf.if %result_valid {
+    vector.fragment.store<result> %result0, %output_view[%result_row, %result_column0] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16, %output_layout>
+    vector.fragment.store<result> %result1, %output_view[%result_row, %result_column1] shape [%tile, %tile] : vector<8xf32>, view<[%rows]x[%outputs]xbf16, %output_layout>
+    scf.yield
+  }
+  template.return
+}
