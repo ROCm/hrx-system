@@ -163,6 +163,21 @@ one per line. The runner indexes providers once and requests a named command
 root. The minimal corresponding catalog and programs are in
 [`testdata/jit`](../testdata/jit/sources.txt).
 
+Paths are resolved relative to the model source directory. Each catalog entry
+is indexed as a separate provider, not concatenated into one source file.
+A provider carries declarations for the configuration, templates, kernels and
+commands it references from other providers, and the target definitions needed
+to verify its own kernels. The declarations describe imported contracts; their
+definitions remain with the owning provider. For example,
+[`stage.loom`](../testdata/jit/stage.loom) declares the configuration supplied by
+its neighboring `config.loom` and defines its kernel target locally.
+
+A flattened kernel benchmark does not exercise this provider boundary. Building
+the actual command root through the model's source catalog checks both the
+per-file declarations and reachable definitions before device execution. That
+is part of the first real-weight component witness, alongside native code and
+numerical checks.
+
 The real embedding sequence in [`jit.c`](../jit.c) is:
 
 1. Create the target environment, context, prepared compiler and pipeline;
