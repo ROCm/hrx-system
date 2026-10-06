@@ -404,9 +404,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @preserved_half_before_full_wr
   s_endpgm
 
 // ====
-// Native ordering alone can accidentally hide a missing storage edge. Select
-// that one edge from the graph independently of unrelated scheduling detail.
-// RUN: with-checks emit low-schedule-json @preserved_half_write_dependency
+// Native ordering alone can accidentally hide missing storage edges. Compare
+// the complete incoming storage relation independently of schedule order.
+// RUN: emit low-schedule-query @preserved_half_write_dependency kind=storage consumer=3
 
 amdgpu.target<gfx1151> @target
 
@@ -423,4 +423,4 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @preserved_half_write_dependen
 }
 
 // ----
-CHECK: *{"from":2,"to":3,"kind":"storage",*
+node 3 <- 1, 2

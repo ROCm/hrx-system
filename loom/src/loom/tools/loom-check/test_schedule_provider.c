@@ -19,6 +19,7 @@ enum loom_check_test_schedule_option_flag_bits_e {
   LOOM_CHECK_TEST_SCHEDULE_OPTION_FLAG_HAS_KIND = 1u << 0,
   LOOM_CHECK_TEST_SCHEDULE_OPTION_FLAG_HAS_STRATEGY = 1u << 1,
   LOOM_CHECK_TEST_SCHEDULE_OPTION_FLAG_HAS_TIMING = 1u << 2,
+  LOOM_CHECK_TEST_SCHEDULE_OPTION_FLAG_HAS_DIAGNOSTICS = 1u << 3,
 };
 typedef uint32_t loom_check_test_schedule_option_flags_t;
 
@@ -45,8 +46,10 @@ typedef struct loom_check_test_schedule_options_t {
   uint32_t timing_consumer_node;
   // Dependency relation whose predecessor sets are observed.
   loom_check_test_schedule_dependency_query_t dependency_query;
-  // Candidate selection strategy used by Low frame construction.
+  // Candidate selection strategy used by Low schedule construction.
   loom_low_schedule_strategy_t schedule_strategy;
+  // Structured scheduler diagnostics requested by the RUN line.
+  loom_low_schedule_diagnostic_flags_t schedule_diagnostic_flags;
   // Low allocation budget overrides parsed from the RUN line.
   loom_low_allocation_budget_t
       allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
@@ -203,6 +206,20 @@ static iree_status_t loom_check_test_schedule_parse_option(
     IREE_RETURN_IF_ERROR(
         loom_check_test_schedule_parse_timing_edge(value, options));
     options->flags |= LOOM_CHECK_TEST_SCHEDULE_OPTION_FLAG_HAS_TIMING;
+    return iree_ok_status();
+  }
+  if (iree_string_view_equal(name, IREE_SV("diagnostics"))) {
+    if (iree_any_bit_set(
+            options->flags,
+            LOOM_CHECK_TEST_SCHEDULE_OPTION_FLAG_HAS_DIAGNOSTICS)) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "duplicate low-schedule-query option 'diagnostics'");
+    }
+    IREE_RETURN_IF_ERROR(loom_check_low_emit_parse_schedule_diagnostics(
+        value, IREE_SV("low-schedule-query"),
+        &options->schedule_diagnostic_flags));
+    options->flags |= LOOM_CHECK_TEST_SCHEDULE_OPTION_FLAG_HAS_DIAGNOSTICS;
     return iree_ok_status();
   }
   iree_string_view_t* node_list = NULL;
@@ -582,6 +599,7 @@ static iree_status_t loom_check_test_schedule_build(
       .allocation_budgets = options->allocation_budgets,
       .allocation_budget_count = options->allocation_budget_count,
       .emitter = emitter,
+      .diagnostic_flags = options->schedule_diagnostic_flags,
       .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS |
                LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
       .strategy = options->schedule_strategy,
