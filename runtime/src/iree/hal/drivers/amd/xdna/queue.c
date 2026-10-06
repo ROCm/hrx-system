@@ -65,7 +65,7 @@ struct iree_hal_amd_xdna_operation_t {
   iree_hal_amd_xdna_queue_t* queue;
   // Host owner remains usable after dropping the queue reference.
   iree_allocator_t host_allocator;
-  // Intrusive ready/completion linkage, independent of proactor linkage.
+  // Intrusive readiness linkage, independent of proactor linkage.
   iree_hal_amd_xdna_operation_t* next;
   // Captured wait semaphores, retained through readiness.
   iree_hal_semaphore_list_t waits;
@@ -184,28 +184,24 @@ static void iree_hal_amd_xdna_operation_release_resources(
 
 // Final publication deliberately follows resource release and the last queue
 // access. A waiter may destroy its device immediately after observing success.
-static void iree_hal_amd_xdna_operation_complete_list(
+static void iree_hal_amd_xdna_operation_complete(
     iree_hal_amd_xdna_operation_t* operation) {
-  while (operation) {
-    iree_hal_amd_xdna_operation_t* next = operation->next;
-    if (!iree_status_is_ok(operation->status)) {
-      iree_hal_amd_xdna_queue_report(operation->queue,
-                                     iree_status_code(operation->status),
-                                     iree_status_message(operation->status));
-    }
-    iree_hal_amd_xdna_operation_release_resources(operation);
-    if (iree_status_is_ok(operation->status)) {
-      operation->status = iree_hal_semaphore_list_signal(
-          operation->signals,
-          iree_async_single_frontier_as_const_frontier(&operation->frontier));
-    }
-    if (!iree_status_is_ok(operation->status)) {
-      iree_hal_semaphore_list_fail(operation->signals, operation->status);
-    }
-    iree_hal_semaphore_list_release(operation->signals);
-    iree_allocator_free(operation->host_allocator, operation);
-    operation = next;
+  if (!iree_status_is_ok(operation->status)) {
+    iree_hal_amd_xdna_queue_report(operation->queue,
+                                   iree_status_code(operation->status),
+                                   iree_status_message(operation->status));
   }
+  iree_hal_amd_xdna_operation_release_resources(operation);
+  if (iree_status_is_ok(operation->status)) {
+    operation->status = iree_hal_semaphore_list_signal(
+        operation->signals,
+        iree_async_single_frontier_as_const_frontier(&operation->frontier));
+  }
+  if (!iree_status_is_ok(operation->status)) {
+    iree_hal_semaphore_list_fail(operation->signals, operation->status);
+  }
+  iree_hal_semaphore_list_release(operation->signals);
+  iree_allocator_free(operation->host_allocator, operation);
 }
 
 static iree_status_t iree_hal_amd_xdna_transfer_execute(
@@ -293,12 +289,10 @@ static void iree_hal_amd_xdna_operation_retire(
 }
 
 // Runs semaphore-ready work. Only the proactor owner touches scheduling state.
-// Returning the completed list postpones user-visible publication until every
-// queue access is finished, including starting the next native command.
-static iree_hal_amd_xdna_operation_t* iree_hal_amd_xdna_queue_pump(
-    iree_hal_amd_xdna_queue_t* queue,
-    iree_hal_amd_xdna_operation_t* completed) {
-  iree_hal_amd_xdna_operation_t* completed_tail = completed;
+// Each operation publishes completion before following work begins. A ready
+// successor retains the queue across publication; without one, publication is
+// the final queue access and the caller may immediately destroy the device.
+static void iree_hal_amd_xdna_queue_pump(iree_hal_amd_xdna_queue_t* queue) {
   while (!queue->active && queue->ready.head) {
     iree_hal_amd_xdna_operation_t* operation = queue->ready.head;
     queue->ready.head = operation->next;
@@ -355,15 +349,13 @@ static iree_hal_amd_xdna_operation_t* iree_hal_amd_xdna_queue_pump(
     }
     if (operation) {
       iree_hal_amd_xdna_operation_retire(queue, operation);
-      if (completed_tail) {
-        completed_tail->next = operation;
-      } else {
-        completed = operation;
+      const bool has_ready = queue->ready.head != NULL;
+      iree_hal_amd_xdna_operation_complete(operation);
+      if (!has_ready) {
+        return;
       }
-      completed_tail = operation;
     }
   }
-  return completed;
 }
 
 static void iree_hal_amd_xdna_queue_native_complete(
@@ -402,8 +394,14 @@ static void iree_hal_amd_xdna_queue_native_complete(
       iree_hal_amd_xdna_queue_abandon_active(queue, status);
     }
   }
-  completed = iree_hal_amd_xdna_queue_pump(queue, completed);
-  iree_hal_amd_xdna_operation_complete_list(completed);
+  if (completed) {
+    const bool has_ready = queue->ready.head != NULL;
+    iree_hal_amd_xdna_operation_complete(completed);
+    if (!has_ready) {
+      return;
+    }
+  }
+  iree_hal_amd_xdna_queue_pump(queue);
 }
 
 static void iree_hal_amd_xdna_queue_ready(
@@ -418,8 +416,7 @@ static void iree_hal_amd_xdna_queue_ready(
     queue->ready.head = operation;
   }
   queue->ready.tail = operation;
-  iree_hal_amd_xdna_operation_complete_list(
-      iree_hal_amd_xdna_queue_pump(queue, NULL));
+  iree_hal_amd_xdna_queue_pump(queue);
 }
 
 static iree_status_t iree_hal_amd_xdna_operation_create(
