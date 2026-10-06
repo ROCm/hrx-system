@@ -373,8 +373,11 @@ spelling, or their combination using the flags documented in
 [`input.h`](../runtime/input.h). Krea explicitly selects special-token insertion.
 A text policy requiring the complete input can request one token beyond its
 limit and reject an excess count; a bounded prefix alone cannot establish that
-the entire prompt fit. `input.lookup` supplies vocabulary IDs. Source
-chooses framing and validation, then returns one ordinal and byte buffer. That
+the entire prompt fit. Qwen's `prepare_input` demonstrates this complete-input
+policy in the shared source VM, including fresh and retained-turn framing. Its
+callers retain original pending token IDs independently of canonical chat text.
+`input.lookup` supplies vocabulary IDs. Krea's source chooses framing and
+validation, then returns one ordinal and byte buffer. That
 buffer remains owned until accepted uploads, commands and feedback have drained.
 Cold result references outlive the temporary bootstrap program, but not their
 VM environment. Internal VM helpers are private; public functions are the

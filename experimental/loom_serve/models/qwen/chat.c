@@ -239,9 +239,64 @@ iree_status_t loom_serve_qwen_chat_policy_initialize(
       iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
       &out_policy->types));
   out_policy->invocation = loom_serve_program_invocation(program);
+  IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
+      loom_serve_program_process(program), IREE_SV("model"),
+      IREE_SV("render_tool"), &out_policy->render_tool));
   return iree_vm_process_lookup_function(
       loom_serve_program_process(program), IREE_SV("model"),
-      IREE_SV("render_tool"), &out_policy->render_tool);
+      IREE_SV("prepare_input"), &out_policy->prepare_input);
+}
+
+iree_status_t loom_serve_qwen_chat_prepare_input(
+    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t text,
+    loom_serve_qwen_chat_input_format_t format,
+    loom_serve_qwen_chat_boundary_t boundary, iree_host_size_t capacity,
+    int32_t* tokens, iree_host_size_t* out_count,
+    iree_allocator_t host_allocator) {
+  *out_count = 0;
+  iree_vm_buffer_t* input = NULL;
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_byte_span((void*)text.data, text.size),
+      iree_vm_buffer_release_callback_null(), host_allocator, &input));
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_move(&policy->types, &input),
+      iree_vm_variant_from_i32(format), iree_vm_variant_from_i32(boundary),
+      iree_vm_variant_from_i64(capacity)};
+  iree_vm_variant_t results[2] = {0};
+  iree_status_t status =
+      iree_vm_invoke(policy->invocation, policy->prepare_input,
+                     iree_vm_variant_span_from_array(arguments),
+                     iree_vm_variant_span_from_array(results));
+  iree_vm_buffer_t* output = NULL;
+  int64_t count = 0;
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_ptr_from_variant_borrowed(&policy->types,
+                                                      results[0], &output);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_i64_from_variant(results[1], &count);
+  }
+  if (iree_status_is_ok(status) &&
+      (!output || count < 0 || (uint64_t)count > capacity ||
+       (uint64_t)count > SIZE_MAX / sizeof(*tokens))) {
+    status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source input returned invalid token storage");
+  }
+  iree_const_byte_span_t bytes = iree_const_byte_span_empty();
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_vm_buffer_map_read(output, 0, count * sizeof(*tokens), &bytes);
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < (iree_host_size_t)count; ++i) {
+      tokens[i] = (int32_t)iree_unaligned_load_le_u32(bytes.data + i * 4);
+    }
+    *out_count = (iree_host_size_t)count;
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  return status;
 }
 
 // Input wrappers borrow only for this synchronous invocation. Source owns the

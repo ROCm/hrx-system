@@ -210,8 +210,6 @@ typedef struct qwen_service_t {
     // Sum of active requests' completion credit in token positions.
     iree_host_size_t reserved;
   } pool;
-  // Shared cold input rendering scratch, never borrowed by device work.
-  iree_string_builder_t input_text;
   // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
   iree_string_builder_t scratch;
   // Shared typed tool-call serialization scratch used at generation end.
@@ -469,26 +467,22 @@ static iree_status_t qwen_prepare_input(qwen_service_t* service,
       iree_string_view_equal(name, iree_make_cstring_view(session->name)) &&
       iree_string_view_starts_with(prompt, checkpoint);
   *out_retained = retained ? loom_serve_qwen_row_position(session->row) : 0;
-  iree_string_builder_reset(&service->input_text);
   iree_string_view_t input = prompt;
+  loom_serve_qwen_chat_boundary_t boundary =
+      LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH;
   if (retained) {
     session->tokens[0] = loom_serve_qwen_row_token(session->row);
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
-        &service->input_text,
-        loom_serve_qwen_row_is_eos(session->row) ? "\n" : "<|im_end|>\n"));
-    IREE_RETURN_IF_ERROR(iree_string_builder_append_string(
-        &service->input_text,
-        iree_string_view_substr(prompt, checkpoint.size, IREE_HOST_SIZE_MAX)));
-    input = iree_string_builder_view(&service->input_text);
+    boundary = loom_serve_qwen_row_is_eos(session->row)
+                   ? LOOM_SERVE_QWEN_CHAT_BOUNDARY_TERMINATED
+                   : LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN;
+    input =
+        iree_string_view_substr(prompt, checkpoint.size, IREE_HOST_SIZE_MAX);
   }
   const iree_host_size_t prefix_count = retained ? 1 : 0;
-  IREE_RETURN_IF_ERROR(
-      iree_tokenizer_encode(loom_serve_qwen_model_tokenizer(service->model),
-                            input, IREE_TOKENIZER_ENCODE_FLAG_NONE,
-                            iree_tokenizer_make_token_output(
-                                session->tokens + prefix_count, NULL, NULL,
-                                service->context_capacity - prefix_count),
-                            service->allocator, out_count));
+  IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_prepare_input(
+      chat->policy, input, LOOM_SERVE_QWEN_CHAT_INPUT_RENDERED, boundary,
+      service->context_capacity - prefix_count, session->tokens + prefix_count,
+      out_count, service->allocator));
   *out_count += prefix_count;
   if (*out_count + chat->max_tokens - 1 >
       service->context_capacity - *out_retained) {
@@ -1340,7 +1334,6 @@ iree_status_t loom_serve_qwen_service_run(
   service.heartbeat.snapshot.phase_start = iree_time_now();
   service.heartbeat.snapshot.last_completion =
       service.heartbeat.snapshot.phase_start;
-  iree_string_builder_initialize(host_allocator, &service.input_text);
   iree_string_builder_initialize(host_allocator, &service.scratch);
   iree_string_builder_initialize(host_allocator, &service.tool_calls);
   for (iree_host_size_t i = 0; i < service.row_count; ++i) {
@@ -1439,7 +1432,6 @@ iree_status_t loom_serve_qwen_service_run(
   iree_slim_mutex_deinitialize(&service.heartbeat.mutex);
   iree_string_builder_deinitialize(&service.tool_calls);
   iree_string_builder_deinitialize(&service.scratch);
-  iree_string_builder_deinitialize(&service.input_text);
   for (iree_host_size_t i = 0; i < service.pending.count; ++i) {
     loom_serve_qwen_chat_deinitialize(&service.pending.values[i].chat);
     loom_serve_http_connection_abort(service.pending.values[i].connection);

@@ -6,14 +6,17 @@
 
 #include "experimental/loom_serve/models/qwen/chat.h"
 
+#include <cstdio>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/json.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 
 IREE_FLAG(string, chat_source, "", "Production chat policy source.");
 
@@ -40,13 +43,39 @@ class QwenChatTest : public ::testing::Test {
     iree_string_builder_initialize(iree_allocator_system(), &calls_);
     IREE_ASSERT_OK(
         iree_vm_environment_allocate(iree_allocator_system(), &environment_));
+    // A real BPE tokenizer with every ASCII character, Unicode content and
+    // explicit postprocessing detects accidental special-token insertion.
+    std::string configuration = R"({"model":{"type":"BPE","vocab":{)";
+    for (int i = 0; i < 128; ++i) {
+      char entry[32];
+      snprintf(entry, sizeof(entry), "%s\"\\u%04x\":%d", i ? "," : "", i, i);
+      configuration += entry;
+    }
+    configuration += R"(,"<bos>":128,"<eos>":129,"λ":130},"merges":[]},
+      "added_tokens":[
+        {"id":128,"content":"<bos>","single_word":false,"lstrip":false,
+         "rstrip":false,"normalized":false,"special":true},
+        {"id":129,"content":"<eos>","single_word":false,"lstrip":false,
+         "rstrip":false,"normalized":false,"special":true}],
+      "post_processor":{"type":"TemplateProcessing","single":[
+        {"SpecialToken":{"id":"<bos>","type_id":0}},
+        {"Sequence":{"id":"A","type_id":0}},
+        {"SpecialToken":{"id":"<eos>","type_id":0}}],"pair":[],
+        "special_tokens":{
+          "<bos>":{"id":"<bos>","ids":[128],"tokens":["<bos>"]},
+          "<eos>":{"id":"<eos>","ids":[129],"tokens":["<eos>"]}}}})";
+    IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+        iree_make_cstring_view(configuration.c_str()), iree_allocator_system(),
+        &tokenizer_));
     IREE_ASSERT_OK(loom_serve_input_module_create(
-        environment_, nullptr, &libraries_[0], iree_allocator_system()));
+        environment_, tokenizer_, &libraries_[0], iree_allocator_system()));
     IREE_ASSERT_OK(loom_serve_json_module_create(environment_, &libraries_[1],
                                                  iree_allocator_system()));
-    const iree_string_view_t roots[] = {IREE_SVL("render_tool")};
+    const iree_string_view_t roots[] = {IREE_SVL("render_tool"),
+                                        IREE_SVL("prepare_input")};
     IREE_ASSERT_OK(loom_serve_program_create(
-        environment_, iree_make_cstring_view(FLAG_chat_source), 1, roots,
+        environment_, iree_make_cstring_view(FLAG_chat_source),
+        IREE_ARRAYSIZE(roots), roots,
         iree_vm_module_span_from_array(libraries_), iree_allocator_system(),
         &program_));
     IREE_ASSERT_OK(loom_serve_qwen_chat_policy_initialize(environment_,
@@ -61,6 +90,7 @@ class QwenChatTest : public ::testing::Test {
     loom_serve_program_destroy(program_);
     iree_vm_module_release(libraries_[1]);
     iree_vm_module_release(libraries_[0]);
+    iree_tokenizer_free(tokenizer_);
     iree_vm_environment_free(environment_);
   }
   iree_status_t Initialize(std::string body) {
@@ -93,6 +123,8 @@ class QwenChatTest : public ::testing::Test {
   iree_host_size_t call_count_ = 0;
   // Environment outliving source policy and all request buffer references.
   iree_vm_environment_t* environment_ = nullptr;
+  // Actual tokenizer borrowed by the native input capability.
+  iree_tokenizer_t* tokenizer_ = nullptr;
   // Native JSON and input validation capabilities, with no model callbacks.
   iree_vm_module_t* libraries_[2] = {};
   // One source program shared by incoming and completed chat processing.
@@ -100,6 +132,67 @@ class QwenChatTest : public ::testing::Test {
   // Cold-resolved formatter in that program.
   loom_serve_qwen_chat_policy_t policy_ = {};
 };
+
+TEST_F(QwenChatTest, CompleteInputMatchesEveryTurnFormat) {
+  for (auto format :
+       {LOOM_SERVE_QWEN_CHAT_INPUT_RENDERED, LOOM_SERVE_QWEN_CHAT_INPUT_USER}) {
+    for (auto boundary : {LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH,
+                          LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN,
+                          LOOM_SERVE_QWEN_CHAT_BOUNDARY_TERMINATED}) {
+      for (const std::string text : {"", "hello λ", "<bos>"}) {
+        SCOPED_TRACE(::testing::Message() << "format=" << format << " boundary="
+                                          << boundary << " text=" << text);
+        std::string rendered;
+        if (boundary == LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN) {
+          rendered = "<|im_end|>\n";
+        } else if (boundary == LOOM_SERVE_QWEN_CHAT_BOUNDARY_TERMINATED) {
+          rendered = "\n";
+        }
+        if (format == LOOM_SERVE_QWEN_CHAT_INPUT_USER) {
+          rendered += "<|im_start|>user\n" + text +
+                      "<|im_end|>\n"
+                      "<|im_start|>assistant\n<think>\n\n</think>\n\n";
+        } else {
+          rendered += text;
+        }
+        int32_t reference[512] = {};
+        iree_host_size_t reference_count = 0;
+        IREE_ASSERT_OK(iree_tokenizer_encode(
+            tokenizer_, iree_make_cstring_view(rendered.c_str()),
+            IREE_TOKENIZER_ENCODE_FLAG_NONE,
+            iree_tokenizer_make_token_output(reference, nullptr, nullptr,
+                                             IREE_ARRAYSIZE(reference)),
+            iree_allocator_system(), &reference_count));
+        for (iree_host_size_t capacity :
+             {iree_host_size_t{0}, reference_count / 2, reference_count,
+              reference_count + 3}) {
+          SCOPED_TRACE(capacity);
+          std::vector<int32_t> output(capacity + 1, -7);
+          iree_host_size_t count = 99;
+          iree_status_t status = loom_serve_qwen_chat_prepare_input(
+              &policy_, iree_make_cstring_view(text.c_str()), format, boundary,
+              capacity, output.data(), &count, iree_allocator_system());
+          if (capacity < reference_count) {
+            IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, status);
+            EXPECT_EQ(count, 0u);
+            EXPECT_EQ(output, std::vector<int32_t>(capacity + 1, -7));
+          } else {
+            IREE_ASSERT_OK(status);
+            EXPECT_EQ(count, reference_count);
+            EXPECT_EQ(
+                std::vector<int32_t>(output.begin(), output.begin() + count),
+                std::vector<int32_t>(reference, reference + reference_count));
+            // Neither a successful source call nor a rejected one owns the
+            // caller's unpopulated token tail.
+            for (iree_host_size_t i = count; i < output.size(); ++i) {
+              EXPECT_EQ(output[i], -7);
+            }
+          }
+        }
+      }
+    }
+  }
+}
 
 TEST_F(QwenChatTest, TextPartsAndNullHaveDistinctMeanings) {
   IREE_ASSERT_OK(Initialize(Request(

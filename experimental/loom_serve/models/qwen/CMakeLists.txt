@@ -56,6 +56,7 @@ loom_cc_binary(
   DATA
     ::sources
   DEPS
+    ::chat
     ::flags
     ::model
     iree::base
@@ -275,6 +276,8 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::program
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
     iree::vm
   ARGS
     "--chat_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom}}"
