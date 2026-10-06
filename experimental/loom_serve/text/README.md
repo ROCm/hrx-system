@@ -145,6 +145,10 @@ does not evict live history, rebuild commands, or change virtual addresses.
 Its result separates relocated blocks, copied bytes, and physically released
 bytes. The real-weight `models/qwen:epoch_check --trim` witness compares an
 uncompacted continuation, including MTP, then checks full trim and regrowth.
+The HTTP service coalesces evicted and cancelled rows into one maintenance cut
+before the next cohort. `state_trim` JSONL records expose the copied/released
+bytes and elapsed maintenance time. Active and retained idle histories survive;
+normal epochs without ownership loss do not perform this maintenance.
 
 Each row's control/input/progress and recurrent views are present. Dense
 attention is present only without a physical pool; pooled kernels find it

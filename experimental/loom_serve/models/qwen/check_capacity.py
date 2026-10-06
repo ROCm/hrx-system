@@ -172,6 +172,50 @@ def cohort(address, events, pooled):
         return [future.result() for future in futures]
 
 
+def cancel_active(address, events):
+    # Cancel only after the GPU has produced actual content. Header readiness
+    # alone would permit cancellation before any row backing was committed.
+    name = "active-cancel"
+    body = payload(messages(), 192).encode()
+    peer = socket.create_connection((address.hostname, address.port))
+    reader = peer.makefile("rb")
+    try:
+        peer.sendall(
+            (
+                "POST /v1/chat/completions HTTP/1.1\r\nHost: local\r\n"
+                "Content-Type: application/json\r\n"
+                f"X-Loom-Session: {name}\r\nContent-Length: {len(body)}\r\n\r\n"
+            ).encode()
+            + body
+        )
+        if not reader.readline().startswith(b"HTTP/1.1 200 "):
+            raise RuntimeError("active cancellation request was not admitted")
+        for line in reader:
+            if not line.startswith(b"data: "):
+                continue
+            event = json.loads(line[6:])
+            if any(c.get("delta", {}).get("content") for c in event.get("choices", [])):
+                break
+        else:
+            raise RuntimeError("active cancellation received no model output")
+        peer.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
+    finally:
+        reader.close()
+        peer.close()
+    events.wait("cancel", name)
+    result = benchmark_service.request(
+        address,
+        name,
+        [{"role": "user", "content": "What is 2+2? Reply with only one number."}],
+        8,
+    )
+    if result["text"].strip() != "4":
+        raise RuntimeError("cancelled row reuse changed output")
+    if result["usage"]["prompt_tokens_details"]["cached_tokens"]:
+        raise RuntimeError("cancelled checkpoint was retained")
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("server", "model", "weights", "tokenizer", "output"):
@@ -214,6 +258,7 @@ def main():
                 raise RuntimeError(f"server did not become ready: {log_path}")
             address = urlsplit(f"http://{endpoint}")
             results = cohort(address, events, capacity != 0)
+            results.append(cancel_active(address, events))
             results.extend(retained(address, capacity != 0))
         (arguments.output / f"pool-{capacity}.json").write_text(
             json.dumps(results, indent=2) + "\n"
@@ -243,6 +288,9 @@ def main():
                 raise RuntimeError("cancelled queued request acquired a model row")
             if not any(e.get("event") == "evict" for e in events.values):
                 raise RuntimeError("workload did not exercise idle cache eviction")
+            trims = [e for e in events.values if e.get("event") == "state_trim"]
+            if not any(e["released_bytes"] for e in trims):
+                raise RuntimeError("idle eviction did not release physical backing")
             heartbeats = [e for e in events.values if e.get("event") == "heartbeat"]
             if any(
                 max(e["pool"]["reserved_tokens"], e["pool"]["resident_tokens"])
@@ -253,7 +301,7 @@ def main():
             if not any(e["queued_requests"] for e in heartbeats):
                 raise RuntimeError("workload did not observe queued admission")
         print(
-            json.dumps({"event": "pass", "pool_capacity": capacity, "requests": 9}),
+            json.dumps({"event": "pass", "pool_capacity": capacity, "requests": 10}),
             flush=True,
         )
 

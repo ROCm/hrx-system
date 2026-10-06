@@ -104,11 +104,11 @@ typedef struct text_heartbeat_snapshot_t {
   iree_host_size_t queued_requests;
   // Pool accounting in token positions; reserved and resident overlap.
   struct {
-    // Total physical capacity; zero selects the dense comparison layout.
+    // Addressable token capacity; zero selects dense comparison storage.
     iree_host_size_t capacity;
     // Active completion credit including already resident active pages.
     iree_host_size_t reserved;
-    // Physically owned pages across active and idle rows.
+    // Token positions in owned logical pages across active and idle rows.
     iree_host_size_t resident;
   } pool;
   // Elastic mutable-state backing; weights and transient workspace are
@@ -206,12 +206,14 @@ typedef struct text_service_t {
     // A new head or released credit/row makes another admission pass useful.
     bool changed;
   } pending;
-  // Request policy over the model's physical pool, not a second page allocator.
+  // Request policy over the logical pool, not a second block allocator.
   struct {
-    // Immutable physical geometry; availability is queried at observation.
+    // Immutable logical geometry; availability is queried at observation.
     loom_serve_text_pool_usage_t geometry;
     // Sum of active requests' completion credit in token positions.
     iree_host_size_t reserved;
+    // Retired rows released storage since the last cohort maintenance cut.
+    bool trim_pending;
   } pool;
   // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
   iree_string_builder_t scratch;
@@ -533,13 +535,15 @@ static void text_pending_cancel_failed(text_service_t* service,
   }
 }
 
-static iree_status_t text_evict(text_session_t* session) {
+static iree_status_t text_evict(text_service_t* service,
+                                text_session_t* session) {
   fprintf(stderr,
           "{\"event\":\"evict\",\"session\":\"%s\",\"position\":%zu,"
           "\"resident_tokens\":%zu}\n",
           session->name, loom_serve_text_row_position(session->row),
           loom_serve_text_row_pool_usage(session->row));
   IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(session->row));
+  service->pool.trim_pending = true;
   session->name[0] = 0;
   session->serial = 0;
   loom_serve_text_chat_completion_deinitialize(&session->completion);
@@ -575,7 +579,7 @@ static iree_status_t text_reclaim_idle(text_service_t* service,
     }
     // Admission already proved active credit fits; excess is owned idle cache.
     charged -= loom_serve_text_row_pool_usage(oldest->row);
-    status = text_evict(oldest);
+    status = text_evict(service, oldest);
   }
   return status;
 }
@@ -621,7 +625,7 @@ static iree_status_t text_admit_pending(text_service_t* service) {
       break;
     }
     if (!retained_count && loom_serve_text_row_position(session->row)) {
-      status = text_evict(session);
+      status = text_evict(service, session);
     }
     if (iree_status_is_ok(status)) {
       status = text_reclaim_idle(service, session, reservation);
@@ -933,21 +937,23 @@ static iree_status_t text_selected_tokens(text_service_t* service,
 // staging packet is output credit even while the preceding send is in flight;
 // waiting for that send would split an otherwise ready cohort. A full staging
 // packet behind a busy carrier pauses only that row.
-static void text_prepare_ready(text_service_t* service, text_session_t* session,
-                               bool* out_progress,
-                               loom_serve_ready_span_t* out_ready) {
+static iree_status_t text_prepare_ready(text_service_t* service,
+                                        text_session_t* session,
+                                        bool* out_progress,
+                                        loom_serve_ready_span_t* out_ready) {
   *out_ready = (loom_serve_ready_span_t){0};
   if (!session->request.connection) {
-    return;
+    return iree_ok_status();
   }
   if (loom_serve_http_connection_failed(session->request.connection)) {
     text_request_cancel(service, session);
     *out_progress = true;
-    return;
+    service->pool.trim_pending = true;
+    return loom_serve_text_row_reset(session->row);
   }
   if (iree_string_builder_size(&session->packet)) {
     if (!loom_serve_http_connection_can_send(session->request.connection)) {
-      return;
+      return iree_ok_status();
     }
     *out_progress = true;
     iree_status_t status = loom_serve_http_connection_send(
@@ -956,12 +962,13 @@ static void text_prepare_ready(text_service_t* service, text_session_t* session,
     if (!iree_status_is_ok(status)) {
       text_diagnose("Chat stream peer failed", status);
       text_request_cancel(service, session);
-      return;
+      service->pool.trim_pending = true;
+      return loom_serve_text_row_reset(session->row);
     }
     iree_string_builder_reset(&session->packet);
     if (session->request.phase == TEXT_REQUEST_FINISHING) {
       text_request_finish(service, session);
-      return;
+      return iree_ok_status();
     }
   }
   if (session->request.phase == TEXT_REQUEST_PREFILL) {
@@ -979,6 +986,30 @@ static void text_prepare_ready(text_service_t* service, text_session_t* session,
     *out_ready = verify ? (loom_serve_ready_span_t){4, 4}
                         : (loom_serve_ready_span_t){1, 1};
   }
+  return iree_ok_status();
+}
+
+// Coalesce all admissions, idle evictions and cancellations observed for this
+// cohort into one retired cut. Resident epochs with unchanged ownership never
+// enter physical maintenance; retained histories remain pinned by their rows.
+static iree_status_t text_trim_state(text_service_t* service) {
+  if (!service->pool.trim_pending) {
+    return iree_ok_status();
+  }
+  text_observe(service, "trim");
+  const iree_time_t start = iree_time_now();
+  loom_serve_text_trim_result_t result;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(service->model, &result));
+  service->pool.trim_pending = false;
+  const loom_serve_memory_statistics_t memory =
+      loom_serve_text_model_memory_statistics(service->model);
+  fprintf(stderr,
+          "{\"event\":\"state_trim\",\"duration_ms\":%.3f,"
+          "\"moved_blocks\":%u,\"copied_bytes\":%" PRIu64
+          ",\"released_bytes\":%" PRIu64 ",\"committed_bytes\":%" PRIu64 "}\n",
+          (iree_time_now() - start) / 1e6, result.moved_blocks,
+          result.copied_bytes, result.released_bytes, memory.committed_bytes);
+  return iree_ok_status();
 }
 
 // The rotating first ready row chooses the phase; other rows of that phase
@@ -1393,7 +1424,11 @@ iree_status_t loom_serve_text_service_run(
     loom_serve_ready_span_t ready[LOOM_SERVE_TEXT_ROW_CAPACITY] = {0};
     for (iree_host_size_t i = 0;
          i < service.row_count && iree_status_is_ok(status); ++i) {
-      text_prepare_ready(&service, &service.sessions[i], &progress, &ready[i]);
+      status = text_prepare_ready(&service, &service.sessions[i], &progress,
+                                  &ready[i]);
+    }
+    if (iree_status_is_ok(status)) {
+      status = text_trim_state(&service);
     }
     if (iree_status_is_ok(status) &&
         !loom_serve_http_server_is_stopping(server)) {

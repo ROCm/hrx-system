@@ -61,6 +61,9 @@ typedef struct loom_serve_text_service_options_t {
 // Admission reserves completion capacity before assigning physical pages as
 // execution grows. Excess work waits in a bounded FIFO; impossible requests
 // reject before altering retained state. Idle cache yields to admitted work.
+// Evicted/cancelled rows trigger one compaction/physical trim per admission
+// cohort, outside ordinary decoding. state_trim events report copy, release
+// and maintenance costs separately from model epochs.
 // X-Loom-Session selects retained state, not a durable session. Active or
 // queued named sessions reject overlapping requests. Untagged requests always
 // replay. Peer cancellation discards its checkpoint at a completed stage
