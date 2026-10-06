@@ -588,11 +588,14 @@ At 4,224 rows, up/gate and square projections group eight 128-row tiles per
 traversal panel; down and the 4,608-row up/gate projections retain four.
 For the 6,144-wide inputs, those policies revisit logical input panels of
 12 MiB and 6 MiB respectively. This changes cache locality, not the issued
-operand bytes or arithmetic. The larger panel reduced measured up/gate time
+operand bytes or arithmetic. The larger panel reduced isolated up/gate time
 by about 5% and square time by 6–7%; sixteen tiles slowed up/gate and gave a
-smaller square gain. These are measured shape selections, not a cache-capacity
-guarantee or a general rule that larger panels are better. Other projection
-shapes retain the baseline motif.
+smaller square gain. In matched full-model profiles the selected square gain
+was about 3%, while up/gate improved only 0.4%; unchanged kernel families also
+varied between controls. Isolated cache reuse does not establish a full-model
+speedup. These are measured shape selections, not a cache-capacity guarantee
+or a general rule that larger panels are better. Other projection shapes
+retain the baseline motif.
 
 A workgroup-uniform branch separates full output tiles from the final partial
 tile around the entire contraction. The interior path carries an explicit
