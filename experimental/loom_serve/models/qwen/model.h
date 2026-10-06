@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_MODELS_QWEN_MODEL_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_MODELS_QWEN_MODEL_H_
 
+#include "experimental/loom_serve/models/qwen/chat.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
@@ -19,7 +20,7 @@ extern "C" {
 // One concrete Qwen3.8-27B residency. A single host owner multiplexes retained
 // rows through the same VM process, commands, weights and workspace. Calls wait
 // for their result; no row-local VM or thread is required. This runner-private
-// interface deliberately exposes model work, not chat or network sessions.
+// interface exposes model work and shared source policy, not network sessions.
 // Input-capacity rejection submits no work. An execution/submission failure
 // ends the run: destroy drains accepted work before any host payload is reused.
 typedef struct loom_serve_qwen_model_t loom_serve_qwen_model_t;
@@ -157,6 +158,9 @@ loom_serve_qwen_row_t* loom_serve_qwen_model_row(loom_serve_qwen_model_t* model,
                                                  iree_host_size_t index);
 iree_tokenizer_t* loom_serve_qwen_model_tokenizer(
     loom_serve_qwen_model_t* model);
+// Borrowed source policy; uses the same serialized invocation as model work.
+const loom_serve_qwen_chat_policy_t* loom_serve_qwen_model_chat_policy(
+    const loom_serve_qwen_model_t* model);
 iree_host_size_t loom_serve_qwen_model_context_capacity(
     const loom_serve_qwen_model_t* model);
 // Copies physical pool accounting at the single owner's completed-stage

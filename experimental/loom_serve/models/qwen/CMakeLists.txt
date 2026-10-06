@@ -94,12 +94,15 @@ loom_cc_library(
   SRCS
     "model.c"
   DEPS
+    ::chat
     iree::base
     iree::base::internal::path
     iree::experimental::loom_serve::runtime::command
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::jit
+    iree::experimental::loom_serve::runtime::json
     iree::experimental::loom_serve::runtime::module
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::runtime::program
@@ -248,22 +251,35 @@ loom_cc_library(
     iree::base
     iree::base::internal::json
     iree::base::internal::unicode
+    iree::experimental::loom_serve::runtime::program
+    iree::vm
     loom::util::json
     loom::util::stream
   PUBLIC
 )
 
+if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
     chat_test
   SRCS
     "chat_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom"
   DEPS
     ::chat
     iree::base
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::input
+    iree::experimental::loom_serve::runtime::json
+    iree::experimental::loom_serve::runtime::program
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::vm
+  ARGS
+    "--chat_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom}}"
 )
+endif()
 
 loom_cc_library(
   NAME

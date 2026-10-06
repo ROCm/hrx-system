@@ -84,10 +84,13 @@ loom_cc_library(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":chat",
         "//experimental/loom_serve/runtime:command",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/runtime:input",
         "//experimental/loom_serve/runtime:jit",
+        "//experimental/loom_serve/runtime:json",
         "//experimental/loom_serve/runtime:module",
         "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/runtime:program",
@@ -229,22 +232,34 @@ loom_cc_library(
     srcs = ["chat.c"],
     hdrs = ["chat.h"],
     deps = [
+        "//experimental/loom_serve/runtime:program",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
     ],
 )
 
 loom_cc_test(
     name = "chat_test",
     srcs = ["chat_test.cc"],
+    args = ["--chat_source=$(rootpath :control.loom)"],
+    data = ["control.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
     deps = [
         ":chat",
+        "//experimental/loom_serve/runtime:input",
+        "//experimental/loom_serve/runtime:json",
+        "//experimental/loom_serve/runtime:program",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
     ],
 )
 
@@ -353,6 +368,16 @@ py_binary(
     name = "check_rows",
     testonly = True,
     srcs = ["check_rows.py"],
+    deps = [
+        ":benchmark_service_lib",
+        ":check_service_lib",
+    ],
+)
+
+py_binary(
+    name = "check_tools",
+    testonly = True,
+    srcs = ["check_tools.py"],
     deps = [
         ":benchmark_service_lib",
         ":check_service_lib",

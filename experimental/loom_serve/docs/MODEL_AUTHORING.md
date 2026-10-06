@@ -84,8 +84,10 @@ successful compiler reuse.
 
 The source bootstrap owns all ten shape-dependent bindings, including Q8
 output bounds and quantizer group capacity. It also owns stage selection and
-retained storage geometry. Warm descriptor packing and chat policy remain
-native; source-owned startup is not the complete model-neutral text boundary.
+retained storage geometry. Warm descriptor packing and feedback publication also
+live in source, sharing the model's VM process with execution and canonical
+tool-call formatting. Role templates, generated tool parsing and session policy
+remain native; these source-owned pieces are not yet a model-neutral text ABI.
 
 Configuration is a model entry/specialization boundary. Reusable functions,
 templates, and motifs receive dimensions and layout facts as explicit SSA

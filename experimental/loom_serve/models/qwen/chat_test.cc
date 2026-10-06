@@ -9,8 +9,13 @@
 #include <string>
 #include <utility>
 
+#include "experimental/loom_serve/runtime/input.h"
+#include "experimental/loom_serve/runtime/json.h"
+#include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+
+IREE_FLAG(string, chat_source, "", "Production chat policy source.");
 
 namespace {
 
@@ -33,6 +38,19 @@ class QwenChatTest : public ::testing::Test {
   void SetUp() override {
     iree_string_builder_initialize(iree_allocator_system(), &checkpoint_);
     iree_string_builder_initialize(iree_allocator_system(), &calls_);
+    IREE_ASSERT_OK(
+        iree_vm_environment_allocate(iree_allocator_system(), &environment_));
+    IREE_ASSERT_OK(loom_serve_input_module_create(
+        environment_, nullptr, &libraries_[0], iree_allocator_system()));
+    IREE_ASSERT_OK(loom_serve_json_module_create(environment_, &libraries_[1],
+                                                 iree_allocator_system()));
+    const iree_string_view_t roots[] = {IREE_SVL("render_tool")};
+    IREE_ASSERT_OK(loom_serve_program_create(
+        environment_, iree_make_cstring_view(FLAG_chat_source), 1, roots,
+        iree_vm_module_span_from_array(libraries_), iree_allocator_system(),
+        &program_));
+    IREE_ASSERT_OK(loom_serve_qwen_chat_policy_initialize(environment_,
+                                                          program_, &policy_));
   }
   void TearDown() override {
     if (initialized_) {
@@ -40,11 +58,15 @@ class QwenChatTest : public ::testing::Test {
     }
     iree_string_builder_deinitialize(&calls_);
     iree_string_builder_deinitialize(&checkpoint_);
+    loom_serve_program_destroy(program_);
+    iree_vm_module_release(libraries_[1]);
+    iree_vm_module_release(libraries_[0]);
+    iree_vm_environment_free(environment_);
   }
   iree_status_t Initialize(std::string body) {
     body_ = std::move(body);
     auto status = loom_serve_qwen_chat_initialize(
-        iree_make_string_view(body_.data(), body_.size()), 128,
+        &policy_, iree_make_string_view(body_.data(), body_.size()), 128,
         iree_allocator_system(), &chat_);
     initialized_ = iree_status_is_ok(status);
     return status;
@@ -69,6 +91,14 @@ class QwenChatTest : public ::testing::Test {
   iree_string_builder_t calls_;
   // Number of completed tool calls.
   iree_host_size_t call_count_ = 0;
+  // Environment outliving source policy and all request buffer references.
+  iree_vm_environment_t* environment_ = nullptr;
+  // Native JSON and input validation capabilities, with no model callbacks.
+  iree_vm_module_t* libraries_[2] = {};
+  // One source program shared by incoming and completed chat processing.
+  loom_serve_program_t* program_ = nullptr;
+  // Cold-resolved formatter in that program.
+  loom_serve_qwen_chat_policy_t policy_ = {};
 };
 
 TEST_F(QwenChatTest, TextPartsAndNullHaveDistinctMeanings) {
@@ -110,7 +140,7 @@ TEST_F(QwenChatTest, GeneratedTypedCallMatchesPiToolHistoryCheckpoint) {
       tools);
   loom_serve_qwen_chat_t next;
   IREE_ASSERT_OK(loom_serve_qwen_chat_initialize(
-      iree_make_string_view(followup.data(), followup.size()), 128,
+      &policy_, iree_make_string_view(followup.data(), followup.size()), 128,
       iree_allocator_system(), &next));
   EXPECT_EQ(View(next.prompt),
             View(checkpoint_) +
@@ -135,6 +165,51 @@ TEST_F(QwenChatTest, MultipleGeneratedCallsHaveDistinctIdsAndCanonicalOrder) {
             std::string::npos);
 }
 
+TEST_F(QwenChatTest, HistoryFormatsEveryArgumentTypeInSource) {
+  IREE_ASSERT_OK(Initialize(Request(
+      R"([{"role":"user","content":"Continue."},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"inspect_v2.run-1","arguments":"{\"s\":\"\\u03bb\\n\",\"n\":-1.25e+2,\"o\":{\"x\":true},\"a\":[false,null],\"t\":true,\"f\":false,\"z\":null,\"empty\":\"\"}"}}]},{"role":"tool","tool_call_id":"call_1","content":"done"}])")));
+  EXPECT_EQ(View(chat_.prompt),
+            "<|im_start|>user\nContinue.<|im_end|>\n"
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+            "<tool_call>\n<function=inspect_v2.run-1>\n"
+            "<parameter=s>\nλ\n\n</parameter>\n"
+            "<parameter=n>\n-1.25e+2\n</parameter>\n"
+            "<parameter=o>\n{\"x\":true}\n</parameter>\n"
+            "<parameter=a>\n[false,null]\n</parameter>\n"
+            "<parameter=t>\ntrue\n</parameter>\n"
+            "<parameter=f>\nfalse\n</parameter>\n"
+            "<parameter=z>\nnull\n</parameter>\n"
+            "<parameter=empty>\n\n</parameter>\n"
+            "</function>\n</tool_call><|im_end|>\n"
+            "<|im_start|>user\n<tool_response>\ndone\n"
+            "</tool_response><|im_end|>\n"
+            "<|im_start|>assistant\n<think>\n\n</think>\n\n");
+}
+
+TEST_F(QwenChatTest, SourceRejectsInvalidIdentifiersThenAcceptsValidHistory) {
+  for (const auto& name :
+       {std::string(), std::string("has space"), std::string("<injection>"),
+        std::string("λ"), std::string(129, 'a')}) {
+    SCOPED_TRACE(name);
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        Initialize(Request(
+            R"([{"role":"user","content":"Continue."},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":")" +
+            name +
+            R"(","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"done"}])")));
+  }
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      Initialize(Request(
+          R"([{"role":"user","content":"Continue."},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{\"\\u0078\":1}"}}]},{"role":"tool","tool_call_id":"call_1","content":"done"}])")));
+  IREE_ASSERT_OK(Initialize(Request(
+      R"([{"role":"user","content":"Continue."},{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read","arguments":"{}"}}]},{"role":"tool","tool_call_id":"call_1","content":"done"}])")));
+  EXPECT_NE(
+      View(chat_.prompt)
+          .find("<tool_call>\n<function=read>\n</function>\n</tool_call>"),
+      std::string::npos);
+}
+
 TEST(QwenChatStreamingTest, EveryToolMarkerFragmentIsWithheld) {
   const std::string text = "Reading now.\n<tool_call>\n<function=read>";
   iree_host_size_t safe_end = 0;
@@ -148,7 +223,7 @@ TEST(QwenChatStreamingTest, EveryToolMarkerFragmentIsWithheld) {
   EXPECT_EQ(loom_serve_qwen_chat_text_end(IREE_SV("A < comparison"), 2), 14u);
 }
 
-TEST(QwenChatValidationTest, UnsupportedOptionsFailAtTheBoundary) {
+TEST_F(QwenChatTest, UnsupportedOptionsFailAtTheBoundary) {
   const std::string messages = R"([{"role":"user","content":"Hello"}])";
   for (const char* options :
        {R"(,"temperature":0.7)", R"(,"stream":false)", R"(,"n":2)",
@@ -158,18 +233,20 @@ TEST(QwenChatValidationTest, UnsupportedOptionsFailAtTheBoundary) {
     SCOPED_TRACE(options);
     const auto body = Request(messages, options);
     loom_serve_qwen_chat_t chat;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                          loom_serve_qwen_chat_initialize(
-                              iree_make_string_view(body.data(), body.size()),
-                              128, iree_allocator_system(), &chat));
+    IREE_EXPECT_STATUS_IS(
+        IREE_STATUS_INVALID_ARGUMENT,
+        loom_serve_qwen_chat_initialize(
+            &policy_, iree_make_string_view(body.data(), body.size()), 128,
+            iree_allocator_system(), &chat));
   }
   const auto body = Request(
       R"([{"role":"user","content":[{"type":"image_url","image_url":{}}]}])");
   loom_serve_qwen_chat_t chat;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_qwen_chat_initialize(
-                            iree_make_string_view(body.data(), body.size()),
-                            128, iree_allocator_system(), &chat));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_qwen_chat_initialize(
+          &policy_, iree_make_string_view(body.data(), body.size()), 128,
+          iree_allocator_system(), &chat));
 }
 
 TEST_F(QwenChatTest, InvalidGeneratedCallsNeverBecomeExecutableDeltas) {
@@ -190,14 +267,15 @@ TEST_F(QwenChatTest, InvalidGeneratedCallsNeverBecomeExecutableDeltas) {
   }
 }
 
-TEST(QwenChatValidationTest, ToolHistoryRequiresOneCompleteArgumentsObject) {
+TEST_F(QwenChatTest, ToolHistoryRequiresOneCompleteArgumentsObject) {
   const auto body = Request(
       R"([{"role":"user","content":"Read."},{"role":"assistant","tool_calls":[{"type":"function","function":{"name":"read","arguments":"{} trailing"}}]},{"role":"tool","tool_call_id":"call_1","content":"result"}])");
   loom_serve_qwen_chat_t chat;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_qwen_chat_initialize(
-                            iree_make_string_view(body.data(), body.size()),
-                            128, iree_allocator_system(), &chat));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_qwen_chat_initialize(
+          &policy_, iree_make_string_view(body.data(), body.size()), 128,
+          iree_allocator_system(), &chat));
 }
 
 TEST_F(QwenChatTest, InvalidGeneratedSyntaxHasABoundedPrintableDiagnostic) {
@@ -219,15 +297,16 @@ TEST_F(QwenChatTest, InvalidGeneratedSyntaxHasABoundedPrintableDiagnostic) {
   }
 }
 
-TEST(QwenChatValidationTest, StrictSamplingIsNotPretended) {
+TEST_F(QwenChatTest, StrictSamplingIsNotPretended) {
   const auto body = Request(
       R"([{"role":"user","content":"Read."}])",
       R"(,"tools":[{"type":"function","function":{"name":"read","strict":true,"parameters":{"type":"object","properties":{}}}}])");
   loom_serve_qwen_chat_t chat;
-  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
-                        loom_serve_qwen_chat_initialize(
-                            iree_make_string_view(body.data(), body.size()),
-                            128, iree_allocator_system(), &chat));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      loom_serve_qwen_chat_initialize(
+          &policy_, iree_make_string_view(body.data(), body.size()), 128,
+          iree_allocator_system(), &chat));
 }
 
 TEST_F(QwenChatTest, EventsCarryFinishReasonAndRetainedUsage) {

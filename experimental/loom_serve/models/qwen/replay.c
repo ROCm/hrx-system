@@ -150,7 +150,8 @@ static iree_status_t qwen_replay_prepare_turn(loom_serve_qwen_model_t* model,
   }
   loom_serve_qwen_chat_t chat;
   IREE_RETURN_IF_ERROR(
-      loom_serve_qwen_chat_initialize(request, 192, allocator, &chat));
+      loom_serve_qwen_chat_initialize(loom_serve_qwen_model_chat_policy(model),
+                                      request, 192, allocator, &chat));
   iree_string_builder_t text, tool_calls;
   iree_string_builder_initialize(allocator, &text);
   iree_string_builder_initialize(allocator, &tool_calls);

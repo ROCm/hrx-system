@@ -7,7 +7,9 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_MODELS_QWEN_CHAT_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_MODELS_QWEN_CHAT_H_
 
+#include "experimental/loom_serve/runtime/program.h"
 #include "iree/base/api.h"
+#include "iree/vm/buffer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,6 +17,21 @@ extern "C" {
 
 #define LOOM_SERVE_QWEN_CHAT_MODEL "qwen3.8-27b"
 #define LOOM_SERVE_QWEN_CHAT_TOOL_CAPACITY 16
+
+// Cold-resolved chat functions in the model's shared source VM. The model
+// serializes calls and outlives every request borrowing this policy.
+typedef struct loom_serve_qwen_chat_policy_t {
+  // Canonical buffer identity borrowed from the model environment.
+  iree_vm_ref_types_t types;
+  // Invocation borrowed from the model-wide program.
+  iree_vm_invocation_t* invocation;
+  // Canonical tool formatter shared by input history and generated output.
+  iree_vm_function_t render_tool;
+} loom_serve_qwen_chat_policy_t;
+
+iree_status_t loom_serve_qwen_chat_policy_initialize(
+    iree_vm_environment_t* environment, loom_serve_program_t* program,
+    loom_serve_qwen_chat_policy_t* out_policy);
 
 // Indexed tool schema borrowing the request body. XML names are literal ASCII
 // identifiers. Property schemas supply the JSON types lost by XML generation;
@@ -31,6 +48,8 @@ typedef struct loom_serve_qwen_chat_tool_t {
 // One validated text-only, greedy, non-thinking streaming chat request. The
 // prompt owns its canonical rendered text; tool views borrow the HTTP body.
 typedef struct loom_serve_qwen_chat_t {
+  // Source policy borrowed from the model for the request lifetime.
+  const loom_serve_qwen_chat_policy_t* policy;
   // Canonical Qwen template ending with the assistant generation prefix.
   iree_string_builder_t prompt;
   // Maximum selected output tokens, including a terminal EOS prediction.
@@ -48,8 +67,9 @@ typedef struct loom_serve_qwen_chat_t {
 // Body storage outlives the initialized chat. Deinitialize after success only;
 // failure releases partial storage. The HTTP layer bounds the input body.
 iree_status_t loom_serve_qwen_chat_initialize(
-    iree_string_view_t body, iree_host_size_t default_max_tokens,
-    iree_allocator_t host_allocator, loom_serve_qwen_chat_t* out_chat);
+    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t body,
+    iree_host_size_t default_max_tokens, iree_allocator_t host_allocator,
+    loom_serve_qwen_chat_t* out_chat);
 void loom_serve_qwen_chat_deinitialize(loom_serve_qwen_chat_t* chat);
 
 // Finds the next safe text extent in an accumulated decoded response. An XML

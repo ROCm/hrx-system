@@ -195,6 +195,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    json
+  HDRS
+    "json.h"
+  SRCS
+    "json.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::unicode
+    iree::vm
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     input
   HDRS
     "input.h"
@@ -206,6 +221,19 @@ loom_cc_library(
     iree::tokenizer::vocab
     iree::vm
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    json_test
+  SRCS
+    "json_test.cc"
+  DEPS
+    ::json
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
 )
 
 loom_cc_library(
