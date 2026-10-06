@@ -101,6 +101,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::jit
     iree::experimental::loom_serve::runtime::module
+    iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::runtime::program
     iree::experimental::loom_serve::runtime::weights
     iree::experimental::loom_serve::scheduling::packing
@@ -115,6 +116,30 @@ loom_cc_library(
     iree::vm
     loom::binding::c::loomc
   PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    prepare_test
+  SRCS
+    "prepare_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/prepare.loom"
+  DEPS
+    ::model
+    ::schedule
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::preparation
+    iree::experimental::loom_serve::scheduling::packing
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    loom::binding::c::loomc
+  ARGS
+    "--prepare_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/prepare.loom}}"
 )
 endif()
 

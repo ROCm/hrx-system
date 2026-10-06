@@ -30,7 +30,8 @@ typedef struct loom_serve_qwen_row_t loom_serve_qwen_row_t;
 enum { LOOM_SERVE_QWEN_ROW_CAPACITY = 16 };
 
 typedef struct loom_serve_qwen_options_t {
-  // Portable model source directory, including sources.txt and control.loom.
+  // Portable source directory containing prepare.loom, control.loom and the
+  // sources.txt command/kernel catalog.
   iree_string_view_t source_directory;
   // Maximum input count specialized into isolated prefill.
   iree_host_size_t prefill_capacity;

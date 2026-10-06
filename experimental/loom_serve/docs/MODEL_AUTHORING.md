@@ -244,10 +244,10 @@ func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
 
 Qwen's [`weights.loom`](../models/qwen/weights.loom) owns the tensor-name
 predicate and Q5 dimensions and selects the ordinary source-JIT
-[`prepare.loom`](../models/qwen/prepare.loom) command after its read. Each
-workgroup captures eight complete Q5 rows before rewriting its disjoint range;
-the permutation requires only workgroup-local storage. The target and MTP
-consumers then use that same prepared encoding. An alternative model owns its
+[`weights_prepare.loom`](../models/qwen/weights_prepare.loom) command after its
+read. Each workgroup captures eight complete Q5 rows before rewriting its
+disjoint range; the permutation requires only workgroup-local storage. The
+target and MTP consumers then use that same prepared encoding. An alternative model owns its
 own format and preparation contract, not Qwen's tensor-name predicate or
 dimensions. Layout qualification covers every consuming shape and the complete
 startup ownership path, including byte copies and peak residency. A faster
@@ -261,6 +261,15 @@ results while additional control moves into VM source; modality-specific state
 and scheduling contracts still need an actual caller before being generalized.
 
 The inference program exposes both `step` and `epoch` from one source-JIT image.
+Qwen's cold [`prepare.loom`](../models/qwen/prepare.loom) declares the commands,
+run-dependent specialization and checkpoint bindings through the same
+[`preparation`](../runtime/preparation.h) module used by image models. The
+returned opaque control buffer belongs to the residency, outlives the cold
+process, and is interpreted only by the warm source. Native code consumes
+declarations and command reflection instead of naming model commands. Qwen's
+row/cache geometry and chat policy still reside in its native adapter; this
+startup contract alone does not make that adapter model-neutral.
+
 [`control.loom`](../models/qwen/control.loom) is a concrete example of typed
 command selection, optional proposal, verification, and cache catch-up. Its
 `runner.execute_N` calls select cached commands by residency-local index;
