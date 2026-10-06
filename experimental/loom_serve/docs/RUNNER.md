@@ -30,6 +30,8 @@ state and canonical checkpoints without naming a model.
 | [`text_model`](../text/model.h) | Source-declared storage materialization, physical page ownership, scratch, source packet invocation, numerical progress | HTTP or tool semantics |
 | [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
 | [`residency`](../runtime/residency.h) | Whole-model parameter admission, nested operation/retention pins, idle LRU eviction under the shared physical budget | Which mutable state can be discarded or which workflow should run next |
+| [`memory`](../storage/memory.h) | Stable virtual roots, unique physical slab commitment, shared byte budget and retired-range trimming | Logical block identities, model geometry or eviction priority |
+| [`snapshot`](../storage/snapshot.h) | Logical-order host image and retirement-safe gather/scatter transfers over supplied ranges | Tokens, recurrent geometry, session policy or checkpoint files |
 | [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
 | [`text_schedule`](../text/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
 | [`text_service`](../text/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
@@ -141,6 +143,59 @@ one terminal host join, not a wait after every tensor. Failed readiness
 abandons the model; accepted queue operations retain resources until retirement.
 The [model guide](../models/qwen/README.md#online-weight-residency) defines
 the layout, allocation strategy, and startup profiling recipe.
+
+## Retained state and physical capacity
+
+The three lifetimes are separate. Compiled code and command bindings survive
+model inactivity. Reloadable parameter groups can deactivate under the shared
+LRU policy. Mutable row state remains owned until its caller resets, suspends
+or destroys it; weight eviction cannot infer permission to discard a session.
+
+Source bootstrap declares cache planes and row-private views.
+[`text/storage`](../text/storage.h) validates those records once and keeps their
+geometry after the initialization payloads retire. Logical block IDs come from
+the model's private free-ID pool, while their physical slabs share the device
+owner's byte budget with other models' weights and state. These are different
+units: sharing a physical allocation budget does not make block IDs or layouts
+interchangeable across models. Several live ranges can intersect one slab,
+which is committed and charged only once.
+
+At a completed maintenance cut, `model_trim` compacts live blocks, updates all
+row maps, and releases slabs containing no retained range. It uses the same
+exported, release-tracked roots as model commands; the underlying virtual
+reservation supplies commit/unmap authority, not a separate queue lifetime.
+
+An explicit cold transition uses this caller flow:
+
+1. `row_suspend` captures private/recurrent state, optional MTP carry and
+   logical-order target/draft KV into a host image. Its host position, pending
+   prediction and metrics remain unchanged. Only successful capture returns
+   the physical block IDs.
+2. `model_trim` can then reclaim backing. Another row may overwrite the old
+   IDs; the host image contains no physical-ID identity.
+3. `row_try_resume` obtains fresh IDs, admits their union of missing slabs,
+   restores the state and publishes target/draft maps before the row becomes
+   runnable. Ordinary denial returns `resumed=false` with the image intact.
+   Platform or transfer errors remain terminal.
+
+The serialized owner excludes competing mutations throughout these transitions.
+The copy helper batches descriptors without intermediate host waits and joins
+actual queue ownership before releasing host bytes, even after failed readiness.
+Neither transition needs parameter activation, JIT work or command rebuilding.
+Reset can discard a suspended image without touching unmapped device storage.
+
+Host snapshot bytes have separate accounting from device commitment. Copying
+UMA state into DRAM does not create additional machine RAM; a discrete GPU can
+release VRAM while retaining that DRAM image. HAL transfer staging is another
+host allocation, and fixed model workspace remains outside `--memory_bytes`.
+The byte limit is therefore a virtual-pool commitment bound, not a total-process
+or whole-machine memory ceiling.
+
+The current HTTP scheduler still reserves complete request credit and discards
+idle cache under pressure. It does not call these suspension APIs automatically.
+Using them for overcommit needs an explicit host-image budget and wake/eviction
+policy. Shared prefix ownership, marked rewind and file-backed images require
+distinct callers; a suspended private row is not a reusable prefix checkpoint.
 
 ## One real packed epoch
 

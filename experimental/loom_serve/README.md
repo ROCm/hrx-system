@@ -22,7 +22,7 @@ configuration, numerical policy, and model-specific reference checks.
 | [`http/`](http) | TCP carrier and bounded HTTP connection/request storage |
 | [`text/`](text) | Source-defined packed autoregressive residency, chat protocol, admission and retained token scheduling |
 | [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |
-| [`storage/`](storage) | Physical block accounting and logical page maps |
+| [`storage/`](storage) | Logical block IDs, shared physical slab accounting, relocation and retained-state snapshots |
 | [`scheduling/`](scheduling) | Allocation-free ready-span packing and token/span shape selection |
 | [`motifs/`](motifs) | Reusable tensor math and GGML format kernels, specialized by model source |
 | [`models/krea/`](models/krea) | Krea source programs, checkpoint/request policy and model-specific reference checks |
@@ -133,11 +133,16 @@ them; it does not put image requests through Qwen's token scheduler.
 
 [`text/model.{h,c}`](text/model.h) owns a source-defined text residency: shared
 parameter storage prepared in place at startup, cached prefill/decode commands,
-model VM process, residual buffer and packed workspace. One preallocated arena
+model VM process, residual buffer and packed workspace. One stable arena
 partitions private recurrent state among up to sixteen rows. With
 `--pool_capacity=N`, attention pages grow from a shared physical budget rather
 than reserving every row's logical context. Rows are data, not VM processes.
 A single host owner multiplexes their stages through the shared timeline.
+Elastic backing reserves addresses without eagerly backing every row. Explicit
+row suspension can retain an idle session in DRAM, release its device storage,
+and restore into new physical blocks without rebuilding commands. The
+[ownership guide](docs/RUNNER.md#retained-state-and-physical-capacity) separates
+that mechanism from HTTP eviction policy, shared prefixes and disk paging.
 
 Packed target completion forks compact result downloads from cache-only MTP
 catch-up. The catch-up stage consumes committed target state, not the downloaded
