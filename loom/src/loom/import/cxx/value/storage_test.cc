@@ -66,8 +66,14 @@ TEST_F(StorageTest, MemberProjectionRetainsRootAndNestedSourceOffsets) {
             4);
   auto access = storage.dereference(field, value_field->type(), owner);
   EXPECT_EQ(loom_buffer_view_buffer(producer(access.view)), field.pointer.root);
-  EXPECT_EQ(loom_buffer_view_byte_offset(producer(access.view)),
-            field.pointer.byte_offset);
+  auto* access_origin =
+      producer(loom_buffer_view_byte_offset(producer(access.view)));
+  ASSERT_TRUE(loom_index_assume_isa(access_origin));
+  EXPECT_EQ(loom_op_operands(access_origin)[0], field.pointer.byte_offset);
+  auto predicates = loom_index_assume_predicates(access_origin);
+  ASSERT_EQ(predicates.count, 1u);
+  EXPECT_EQ(predicates.predicate_list[0].args[1], 0);
+  EXPECT_EQ(predicates.predicate_list[0].args[2], 60);
   EXPECT_TRUE(loom_type_equal(
       loom_module_value_type(module_, access.view),
       loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, 1, 0)));
@@ -98,6 +104,49 @@ TEST_F(StorageTest, RetainsArrayShapeAndExplicitAlignment) {
       loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, 64, 0)));
 }
 
+TEST_F(StorageTest, AggregateArraysRetainByteFootprints) {
+  Source source(IREE_SV(R"(
+    using Float4 = float __attribute__((ext_vector_type(4)));
+    struct Record {
+      // One-byte field followed by source-owned padding.
+      unsigned char tag;
+      // Naturally aligned payload used by typed field projection.
+      unsigned value;
+    };
+  )"),
+                IREE_SV("storage_aggregate_arrays.cxx"), options());
+  Types types(source.unit(), source.diagnostics());
+  Locations locations(source.unit(), source.diagnostics(), module_);
+  Scalars scalars(source.unit(), source.diagnostics(), types, locations,
+                  builder_);
+  Storage storage(source.unit(), source.diagnostics(), types, scalars,
+                  locations, builder_);
+  auto* control = source.unit().control();
+  auto* owner = source.unit().ast();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+  const cxx::Type* element_types[] = {
+      source_type("Record"),
+      control->getBoundedArrayType(control->getUnsignedShortIntType(), 3),
+      source_type("Float4"),
+  };
+  const int64_t element_bytes[] = {8, 6, 16};
+  for (size_t i = 0; i < 3; ++i) {
+    auto* array = control->getBoundedArrayType(element_types[i], 4);
+    auto allocation = storage.allocate(
+        array, LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP, 0, owner);
+    auto* alloca = producer(allocation.pointer.root);
+    EXPECT_EQ(loom_attr_as_i64(loom_index_constant_value(
+                  producer(loom_buffer_alloca_byte_length(alloca)))),
+              4 * element_bytes[i]);
+    EXPECT_TRUE(
+        loom_type_equal(loom_module_value_type(module_, allocation.view),
+                        loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_I8,
+                                            4 * element_bytes[i], 0)));
+  }
+}
+
 TEST_F(StorageTest, ArrayAliasesRetainTheirElementTypeAndInteriorOrigin) {
   Locations locations(source_.unit(), source_.diagnostics(), module_);
   Scalars scalars(source_.unit(), source_.diagnostics(), types_, locations,
@@ -125,7 +174,13 @@ TEST_F(StorageTest, ArrayAliasesRetainTheirElementTypeAndInteriorOrigin) {
   EXPECT_TRUE(loom_type_equal(
       loom_module_value_type(module_, access.view),
       loom_type_shaped_1d(LOOM_TYPE_VIEW, LOOM_SCALAR_TYPE_F32, 1, 0)));
-  auto* origin = producer(loom_buffer_view_byte_offset(view));
+  auto* access_origin = producer(loom_buffer_view_byte_offset(view));
+  ASSERT_TRUE(loom_index_assume_isa(access_origin));
+  auto predicates = loom_index_assume_predicates(access_origin);
+  ASSERT_EQ(predicates.count, 1u);
+  EXPECT_EQ(predicates.predicate_list[0].args[1], 0);
+  EXPECT_EQ(predicates.predicate_list[0].args[2], 252);
+  auto* origin = producer(loom_op_operands(access_origin)[0]);
   auto* assumed = producer(loom_index_cast_input(origin));
   auto* sum = producer(loom_op_operands(assumed)[0]);
   EXPECT_EQ(loom_index_cast_input(producer(loom_op_operands(sum)[0])),
@@ -155,7 +210,13 @@ TEST_F(StorageTest, InteriorPointersRetainSignedDisplacementsAndRootIdentity) {
   auto* view = producer(access.view);
   ASSERT_TRUE(loom_buffer_view_isa(view));
   EXPECT_EQ(loom_buffer_view_buffer(view), allocation.pointer.root);
-  auto* offset = producer(loom_buffer_view_byte_offset(view));
+  auto* access_origin = producer(loom_buffer_view_byte_offset(view));
+  ASSERT_TRUE(loom_index_assume_isa(access_origin));
+  auto access_predicates = loom_index_assume_predicates(access_origin);
+  ASSERT_EQ(access_predicates.count, 1u);
+  EXPECT_EQ(access_predicates.predicate_list[0].args[1], 0);
+  EXPECT_EQ(access_predicates.predicate_list[0].args[2], 252);
+  auto* offset = producer(loom_op_operands(access_origin)[0]);
   ASSERT_TRUE(loom_index_cast_isa(offset));
   auto* assumed_origin = producer(loom_index_cast_input(offset));
   ASSERT_TRUE(loom_scalar_assume_isa(assumed_origin));

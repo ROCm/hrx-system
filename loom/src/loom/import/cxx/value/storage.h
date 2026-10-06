@@ -40,7 +40,9 @@ struct StorageAccess {
 struct StorageAllocation {
   // Pointer to the beginning of the declared allocation.
   Pointer pointer;
-  // Typed view retaining its element type and fixed extent.
+  // Allocation footprint view. Scalar objects and scalar arrays retain their
+  // source element type; aggregate footprints use bytes and are projected into
+  // typed field views at each access.
   loom_value_id_t view;
 };
 
@@ -108,15 +110,22 @@ class Storage {
   // Writes to the same resolved location with the source element qualifiers.
   void store(const StorageAccess& access, loom_value_id_t value,
              const cxx::Type* element_type, cxx::AST* owner);
-  // Allocates a scalar, vector or fixed scalar array using its source layout
+  // Allocates an admitted scalar, vector or fixed array using its source layout
   // and explicit alignment. Each execution creates a fresh root; initialization
   // is emitted separately. The driver owns storage-duration and scope
-  // admission.
+  // admission. Record, nested-array and vector-array elements remain
+  // addressable objects and do not acquire a whole-object SSA representation.
   StorageAllocation allocate(const cxx::Type* type,
                              loom_value_fact_memory_space_t memory_space,
                              int64_t explicit_alignment, cxx::AST* owner);
 
  private:
+  // Publishes the defined-source dereference range for a compiler-owned
+  // allocation. External buffer roots have no importer-owned extent and pass
+  // through unchanged.
+  Pointer constrain_access(Pointer pointer, int64_t access_bytes,
+                           cxx::AST* owner);
+
   // Source memory layout for element sizes and allocation alignment.
   cxx::TranslationUnit& unit_;
   // Source admission diagnostics.
@@ -129,18 +138,19 @@ class Storage {
   Locations& locations_;
   // Borrowed insertion point, controlled by the AST driver.
   loom_builder_t& builder_;
-  // A declared scalar array's direct-index view. Other array types or interior
-  // origins sharing the allocation use ordinary object-relative addressing.
-  struct ArrayView {
-    // Unqualified source array type whose extent and stride formed the view.
-    const cxx::Type* type;
-    // Declared array origin; an interior pointer cannot reuse this view.
+  // Importer-owned allocation facts indexed by the stable buffer root.
+  struct Allocation {
+    // Declared allocation extent in bytes.
+    int64_t byte_length;
+    // Source array type, or null for a scalar/vector allocation.
+    const cxx::Type* array_type;
+    // Declared allocation origin used to recognize an unchanged array base.
     loom_value_id_t byte_offset;
-    // Typed view dominating all uses of the allocation.
-    loom_value_id_t view;
+    // Direct typed view for a scalar array; aggregate arrays use projections.
+    std::optional<loom_value_id_t> array_view;
   };
-  // Declared array views retained once at the allocating producer.
-  std::unordered_map<loom_value_id_t, ArrayView> array_views_;
+  // Allocation facts retained once at their allocating producer.
+  std::unordered_map<loom_value_id_t, Allocation> allocations_;
 };
 
 }  // namespace loom::cxx_import

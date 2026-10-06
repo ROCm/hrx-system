@@ -61,6 +61,29 @@ Pointer Storage::constrain_origin(Pointer pointer, cxx::AST* owner) {
   return {pointer.root, loom_op_results(op)[0]};
 }
 
+Pointer Storage::constrain_access(Pointer pointer, int64_t access_bytes,
+                                  cxx::AST* owner) {
+  auto allocation = allocations_.find(pointer.root);
+  if (allocation == allocations_.end() ||
+      access_bytes > allocation->second.byte_length) {
+    return pointer;
+  }
+  auto source = locations_.get(owner);
+  auto offset_type = loom_type_scalar(LOOM_SCALAR_TYPE_OFFSET);
+  loom_predicate_t range = {
+      .kind = LOOM_PREDICATE_RANGE,
+      .arg_count = 3,
+      .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,
+                   LOOM_PRED_ARG_CONST},
+      .args = {pointer.byte_offset, 0,
+               allocation->second.byte_length - access_bytes},
+  };
+  loom_op_t* op;
+  check(loom_index_assume_build(&builder_, &pointer.byte_offset, 1, &range, 1,
+                                &offset_type, 1, source, &op));
+  return {pointer.root, loom_op_results(op)[0]};
+}
+
 StorageProjection Storage::project(Pointer pointer,
                                    const cxx::Type* object_type,
                                    cxx::AST* owner) {
@@ -149,6 +172,8 @@ StorageAccess Storage::dereference(StorageProjection base,
     base.pointer = constrain_origin(base.pointer, owner);
   }
   auto element = object_storage_type(types_.get(element_type, owner));
+  base.pointer = constrain_access(
+      base.pointer, types_.storage_size(element_type, owner), owner);
   auto* vector = types_.vector(element_type);
   auto view_type =
       loom_type_shaped_1d(LOOM_TYPE_VIEW, loom_type_element_type(element),
@@ -209,8 +234,9 @@ StorageAccess Storage::subscript(StorageProjection base, loom_value_id_t index,
   auto* array =
       cxx::type_cast<cxx::BoundedArrayType>(types_.unqualified(base_type));
   auto declared =
-      array ? array_views_.find(base.pointer.root) : array_views_.end();
-  if (declared != array_views_.end() && declared->second.type == array &&
+      array ? allocations_.find(base.pointer.root) : allocations_.end();
+  if (declared != allocations_.end() && declared->second.array_type == array &&
+      declared->second.array_view.has_value() &&
       declared->second.byte_offset == base.pointer.byte_offset) {
     // Widen before expressing the source's in-bounds precondition in the
     // signed range domain. Narrow unsigned indices retain their high bit.
@@ -230,7 +256,7 @@ StorageAccess Storage::subscript(StorageProjection base, loom_value_id_t index,
     check(loom_index_cast_build(&builder_, loom_op_results(cast)[0], wide_type,
                                 loom_type_scalar(LOOM_SCALAR_TYPE_INDEX),
                                 locations_.get(owner), &cast));
-    return {declared->second.view, loom_op_results(cast)[0]};
+    return {*declared->second.array_view, loom_op_results(cast)[0]};
   }
   auto advanced = advance(base, index, base_type, subscript_type,
                           cxx::TokenKind::T_PLUS, owner);
@@ -244,7 +270,6 @@ StorageAllocation Storage::allocate(const cxx::Type* type,
                                     loom_value_fact_memory_space_t memory_space,
                                     int64_t explicit_alignment,
                                     cxx::AST* owner) {
-  types_.get(type, owner);
   auto bytes = types_.storage_size(type, owner);
   auto* layout = unit_.control()->memoryLayout();
   auto alignment = layout->alignmentOf(type);
@@ -262,10 +287,24 @@ StorageAllocation Storage::allocate(const cxx::Type* type,
   auto base =
       scalars_.integer(0, LOOM_SCALAR_TYPE_OFFSET, locations_.get(owner));
   auto* array = cxx::type_cast<cxx::BoundedArrayType>(types_.unqualified(type));
-  auto* vector = types_.vector(type);
-  auto element = object_storage_type(
-      types_.get(array ? array->elementType() : type, owner));
-  auto count = array ? array->size() : vector ? vector->elementCount() : 1;
+  auto* view_source_type = array ? array->elementType() : type;
+  auto source_kind = types_.unqualified(view_source_type)->kind();
+  // A Loom view has scalar elements. Preserve the direct typed view for a
+  // scalar object or scalar array; it lets dynamic scalar array indexing keep
+  // the declared extent. Aggregate, nested-array and vector-array elements use
+  // a byte footprint view while later object projections recover typed field
+  // or vector views from the allocation root and source layout.
+  bool byte_footprint = array && (source_kind == cxx::TypeKind::kClass ||
+                                  source_kind == cxx::TypeKind::kBoundedArray ||
+                                  source_kind == cxx::TypeKind::kVector);
+  auto* vector = byte_footprint ? nullptr : types_.vector(view_source_type);
+  auto element = byte_footprint
+                     ? loom_type_scalar(LOOM_SCALAR_TYPE_I8)
+                     : object_storage_type(types_.get(view_source_type, owner));
+  auto count = byte_footprint ? bytes
+               : array        ? array->size()
+               : vector       ? vector->elementCount()
+                              : 1;
   auto view_type = loom_type_shaped_1d(
       LOOM_TYPE_VIEW, loom_type_element_type(element), count, 0);
   view_type = loom_type_view_with_alignment(
@@ -274,9 +313,14 @@ StorageAllocation Storage::allocate(const cxx::Type* type,
   check(loom_buffer_view_build(&builder_, root, base, view_type,
                                locations_.get(owner), &op));
   auto view = loom_op_results(op)[0];
-  if (array) {
-    array_views_[root] = {array, base, view};
-  }
+  allocations_[root] = {
+      .byte_length = bytes,
+      .array_type = array,
+      .byte_offset = base,
+      .array_view = array && !byte_footprint
+                        ? std::optional<loom_value_id_t>(view)
+                        : std::nullopt,
+  };
   return {{root, base}, view};
 }
 
