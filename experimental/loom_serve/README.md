@@ -140,8 +140,11 @@ A single host owner multiplexes their stages through the shared timeline.
 Packed target completion forks compact result downloads from cache-only MTP
 catch-up. The catch-up stage consumes committed target state, not the downloaded
 result records. The synchronous model call joins both branches before publishing
-host positions and recycling payloads; it does not yet provide autonomous
-inter-epoch device continuation.
+host positions and recycling payloads. Optional bounded continuation pre-issues
+a second mixed plan: the device consumes queued prompt chunks and routes
+accepted predictions into the next verifier without an intermediate host wait.
+Admission and transport are observed between these bounded cohorts; continuous
+device admission/output rings are not implemented.
 
 The Qwen tools use IREE's standard device profiling flags. Profiling begins
 after command specialization and before weight loading, so it includes startup

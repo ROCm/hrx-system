@@ -174,9 +174,13 @@ Depth zero with `--mtp` measures a warm draft state without proposal; omitting
 `--mtp` measures target-only residency.
 
 `--continuation_epochs=2` grants two device-fed epochs per scheduling turn.
-After first-epoch catch-up, a source command compacts live speculative spans,
-advances accepted positions, reduces output credit and routes pending tokens
-directly into a cached next-epoch shape. Known spans execute only once. EOS,
+The host pre-issues a second mixed plan from the admitted row cohort, including
+remaining prompt chunks and prompt tails ready to begin generation. After
+first-epoch catch-up, a source command compacts survivors, advances actual
+accepted positions, reduces output credit, copies queued known inputs and
+routes pending predictions directly into speculative anchors. A cached shape
+bounds the second plan; prompt-only plans skip drafting. Each known chunk
+executes once. EOS,
 credit and context gates run on device before further state mutation. Distinct
 result banks preserve both feedback lifetimes; the host joins once and folds
 tagged records into per-session output. KV pages cover the bounded speculative
@@ -186,7 +190,9 @@ This is a bounded continuation experiment, not the continuous admission/output
 ring. Transport and new arrivals are observed between cohorts. Fixed commands
 still execute padded stateless work if the second cohort becomes empty; the
 default remains one pending controlled endpoint measurements. Metrics count
-device epochs separately from host scheduling turns.
+device epochs separately from host scheduling turns and record prompt work
+carried into the continuation. Request input offsets advance only by known
+consumption, not by speculative inputs generated after the prompt tail.
 
 ## Queues, failure, and reclaim
 

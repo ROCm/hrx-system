@@ -46,7 +46,7 @@ class ContinuationTest : public ::testing::Test {
     constexpr int kContext = 1024;
     constexpr int kEos = 42;
     std::array<std::vector<int32_t>, 3> actual = {
-        std::vector<int32_t>(516, -99), std::vector<int32_t>(512, -77),
+        std::vector<int32_t>(1048, -99), std::vector<int32_t>(1024, -77),
         std::vector<int32_t>(208, -55)};
     auto& metadata = actual[0];
     auto& results = actual[2];
@@ -54,50 +54,89 @@ class ContinuationTest : public ::testing::Test {
     metadata[1] = count;
     metadata[2] = count * 4;
     metadata[515] = kEos;
-    std::vector<int> continuing;
-    for (int span = 0; span < count; ++span) {
-      const int kind = trial >= 10 ? trial - 10 : (span + trial) % 5;
-      const int consumed = 1 + (span + trial) % 4;
+    metadata[517] = count;
+    int queued_count = 0;
+    for (int slot = 0; slot < count; ++slot) {
+      // Rotation and reversal ensure source records cannot be recovered from
+      // the compact slot or from descriptors overwritten earlier in the loop.
+      const int first = trial % 2 ? count - 1 - slot : (slot + trial) % count;
+      const int kind = trial >= 14 ? (trial - 14) % 7 : (first + trial) % 7;
+      const bool known = kind == 1 || kind == 6;
+      const bool promoted = kind == 5;
+      const int length =
+          known ? (count == 1 ? 512 : 1 + (slot * 11 + trial) % 24) : 4;
+      const int consumed =
+          known || promoted ? 13 + first : 1 + (first + trial) % 4;
+      const int emitted = known ? 0 : promoted ? 1 : consumed;
       const int position = kind == 4   ? kContext - consumed - 3
-                           : trial % 2 ? kContext - consumed - 4
-                                       : 100 + span;
-      const int credit = kind == 3 ? consumed : trial % 2 ? consumed + 1 : 8;
-      const int fields[] = {4, position, span * 4, 15 - span, span * 4};
-      std::memcpy(metadata.data() + 3 + span * 5, fields, sizeof(fields));
-      metadata[387 + span * 2] = kind == 1 ? 0 : 2;
-      metadata[388 + span * 2] = credit;
-      results[span * 6] = consumed;
-      results[span * 6 + 1] = consumed;
+                           : trial % 2 ? kContext - consumed - length
+                                       : 100 + first;
+      const int credit = known       ? 0
+                         : kind == 3 ? emitted
+                         : trial % 2 ? emitted + 1
+                                     : 8;
+      const int fields[] = {length, position, queued_count, 15 - first,
+                            kind == 1 ? -1 : 0};
+      std::memcpy(metadata.data() + 519 + slot * 5, fields, sizeof(fields));
+      metadata[903 + slot * 2] = known ? 0 : 2;
+      metadata[904 + slot * 2] = credit;
+      metadata[1032 + slot] = first;
+      results[first * 6] = consumed;
+      results[first * 6 + 1] = emitted;
       for (int token = 0; token < 4; ++token) {
-        results[span * 6 + 2 + token] =
-            kind == 2 && token == consumed - 1 ? kEos : 1000 + span * 4 + token;
+        results[first * 6 + 2 + token] =
+            kind == 2 && token == emitted - 1 ? kEos : 1000 + first * 4 + token;
       }
-      if (kind == 0) {
-        continuing.push_back(span);
+      for (int token = 0; token < length; ++token) {
+        actual[1][512 + queued_count + token] = 10000 + queued_count + token;
       }
+      queued_count += length;
     }
     auto expected = actual;
-    std::fill(expected[1].begin(), expected[1].end(), 0);
+    std::fill(expected[1].begin(), expected[1].begin() + 512, 0);
     std::fill(expected[2].begin() + 96, expected[2].begin() + 192, 0);
     std::fill(expected[2].begin() + 192, expected[2].end(), -1);
-    for (size_t slot = 0; slot < continuing.size(); ++slot) {
-      const int span = continuing[slot];
-      const int consumed = results[span * 6];
-      const int fields[] = {4, metadata[3 + span * 5 + 1] + consumed,
-                            static_cast<int>(slot * 4), 15 - span,
-                            static_cast<int>(slot * 4)};
-      std::memcpy(expected[0].data() + 3 + slot * 5, fields, sizeof(fields));
-      expected[0][387 + slot * 2] = 2;
-      expected[0][388 + slot * 2] = metadata[388 + span * 2] - consumed;
-      for (int token = 0; token < 4; ++token) {
-        expected[0][323 + slot * 4 + token] = slot * 4 + token;
+    int live_count = 0;
+    int input_count = 0;
+    int output_count = 0;
+    for (int plan = 0; plan < count; ++plan) {
+      const int first = metadata[1032 + plan];
+      const int* descriptor = metadata.data() + 519 + plan * 5;
+      const int consumed = results[first * 6];
+      const int emitted = results[first * 6 + 1];
+      const bool speculative = metadata[903 + plan * 2] != 0;
+      const int prediction = speculative ? results[first * 6 + emitted + 1] : 0;
+      const int credit = metadata[904 + plan * 2] - emitted;
+      const int position = descriptor[1] + consumed;
+      if (speculative &&
+          (prediction == kEos || credit <= 0 || position + 4 > kContext)) {
+        continue;
       }
-      expected[1][slot * 4] = results[span * 6 + 1 + consumed];
-      expected[2][192 + slot] = span;
+      const int selected = descriptor[4] >= 0 ? (speculative ? 4 : 1) : 0;
+      const int fields[] = {descriptor[0], position, input_count, descriptor[3],
+                            selected ? output_count : -1};
+      std::memcpy(expected[0].data() + 3 + live_count * 5, fields,
+                  sizeof(fields));
+      expected[0][387 + live_count * 2] = speculative ? 2 : 0;
+      expected[0][388 + live_count * 2] = credit;
+      if (speculative) {
+        expected[1][input_count] = prediction;
+      } else {
+        std::copy_n(actual[1].begin() + 512 + descriptor[2], descriptor[0],
+                    expected[1].begin() + input_count);
+      }
+      for (int token = 0; token < selected; ++token) {
+        expected[0][323 + output_count + token] =
+            input_count + descriptor[0] - selected + token;
+      }
+      expected[2][192 + live_count] = first;
+      ++live_count;
+      input_count += descriptor[0];
+      output_count += selected;
     }
-    expected[0][0] = continuing.size() * 4;
-    expected[0][1] = continuing.size();
-    expected[0][2] = continuing.size() * 4;
+    expected[0][0] = input_count;
+    expected[0][1] = live_count;
+    expected[0][2] = output_count;
     arguments[0] = iree_vm_variant_from_i64(kContext);
     for (size_t i = 0; i < actual.size(); ++i) {
       iree_vm_buffer_t* buffer = nullptr;
@@ -133,7 +172,7 @@ class ContinuationTest : public ::testing::Test {
 
 TEST_F(ContinuationTest, CompactsLiveSpansAndPreservesFeedback) {
   for (int count = 0; count <= 16; ++count) {
-    for (int trial = 0; trial < 15; ++trial) {
+    for (int trial = 0; trial < 28; ++trial) {
       SCOPED_TRACE(count);
       SCOPED_TRACE(trial);
       ASSERT_NO_FATAL_FAILURE(Run(count, trial));

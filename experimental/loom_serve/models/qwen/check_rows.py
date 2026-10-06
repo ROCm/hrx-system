@@ -139,6 +139,21 @@ def main():
                 for row in epoch["rows"]
             ):
                 raise RuntimeError("workload did not execute device-fed continuation")
+            if arguments.continuation_epochs == 2:
+                if not any(
+                    row["kind"] == "prefill"
+                    and row["known_tokens"]
+                    and row["verification_epochs"]
+                    for epoch in epochs
+                    for row in epoch["rows"]
+                ):
+                    raise RuntimeError(
+                        "workload did not promote a prompt tail on device"
+                    )
+                if arguments.rows > 1 and not any(
+                    epoch["continued_prefill_tokens"] for epoch in epochs
+                ):
+                    raise RuntimeError("continuation did not carry ready prompt work")
             visited = {row["row"] for epoch in epochs for row in epoch["rows"]}
             if visited != set(range(arguments.rows)):
                 raise RuntimeError(f"resident rows not exercised: {visited}")
