@@ -104,6 +104,7 @@ iree_py_test(
 )
 endif()
 
+iree_package_target_name(_FILEGROUP_TARGET "::tilelang_import_tests")
 add_custom_command(OUTPUT tilelang_import_tests.stamp
     COMMAND ${CMAKE_COMMAND} -E touch tilelang_import_tests.stamp
   DEPENDS
@@ -131,10 +132,10 @@ add_custom_command(OUTPUT tilelang_import_tests.stamp
     "testdata/vector_memory.py"
 )
 
-add_custom_target(tilelang_import_tests
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS tilelang_import_tests.stamp
 )
-iree_register_generated_compile_input(tilelang_import_tests
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/tilelang_import_tests.stamp"
 )

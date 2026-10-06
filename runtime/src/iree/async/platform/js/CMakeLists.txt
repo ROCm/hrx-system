@@ -107,6 +107,7 @@ iree_wasm_entry(
   PUBLIC
 )
 
+iree_package_target_name(_FILEGROUP_TARGET "::proactor_test_runner_data")
 add_custom_command(OUTPUT proactor_test_runner_data.stamp
     COMMAND ${CMAKE_COMMAND} -E touch proactor_test_runner_data.stamp
   DEPENDS
@@ -115,10 +116,10 @@ add_custom_command(OUTPUT proactor_test_runner_data.stamp
     "proactor_test_runner.mjs"
 )
 
-add_custom_target(proactor_test_runner_data
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS proactor_test_runner_data.stamp
 )
-iree_register_generated_compile_input(proactor_test_runner_data
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/proactor_test_runner_data.stamp"
 )

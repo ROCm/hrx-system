@@ -697,9 +697,13 @@ cc_library(
 
         functions.filegroup(name="device_headers", srcs=["device.h"])
 
-        self.assertIn("add_custom_target(device_headers", converter.body)
         self.assertIn(
-            "iree_register_generated_compile_input(device_headers\n"
+            'iree_package_target_name(_FILEGROUP_TARGET "::device_headers")',
+            converter.body,
+        )
+        self.assertIn("add_custom_target(${_FILEGROUP_TARGET}", converter.body)
+        self.assertIn(
+            "iree_register_generated_compile_input(${_FILEGROUP_TARGET}\n"
             "  OUTPUTS\n"
             '    "${CMAKE_CURRENT_BINARY_DIR}/device_headers.stamp"',
             converter.body,

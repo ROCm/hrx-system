@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+iree_package_target_name(_FILEGROUP_TARGET "::amdgpu_abi_bitcode_hdrs")
 add_custom_command(OUTPUT amdgpu_abi_bitcode_hdrs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch amdgpu_abi_bitcode_hdrs.stamp
   DEPENDS
@@ -26,10 +27,10 @@ add_custom_command(OUTPUT amdgpu_abi_bitcode_hdrs.stamp
     "ubsan.h"
 )
 
-add_custom_target(amdgpu_abi_bitcode_hdrs
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS amdgpu_abi_bitcode_hdrs.stamp
 )
-iree_register_generated_compile_input(amdgpu_abi_bitcode_hdrs
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/amdgpu_abi_bitcode_hdrs.stamp"
 )

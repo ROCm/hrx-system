@@ -1459,14 +1459,15 @@ class BuildFileFunctions(object):
         depends_block = self._convert_srcs_block(srcs, block_name="DEPENDS")
         stamp_file = self._filegroup_dep_filename(name)
         self._converter.body += (
+            f'iree_package_target_name(_FILEGROUP_TARGET "::{name}")\n'
             f"add_custom_command(OUTPUT {stamp_file}\n"
             f"    COMMAND ${{CMAKE_COMMAND}} -E touch {stamp_file}\n"
             f"{depends_block}"
             f")\n\n"
-            f"add_custom_target({name}\n"
+            f"add_custom_target(${{_FILEGROUP_TARGET}}\n"
             f"    DEPENDS {stamp_file}\n"
             f")\n"
-            f"iree_register_generated_compile_input({name}\n"
+            f"iree_register_generated_compile_input(${{_FILEGROUP_TARGET}}\n"
             f"  OUTPUTS\n"
             f'    "${{CMAKE_CURRENT_BINARY_DIR}}/{stamp_file}"\n'
             f")\n\n"

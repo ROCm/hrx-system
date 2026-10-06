@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+iree_package_target_name(_FILEGROUP_TARGET "::bitcode_srcs")
 add_custom_command(OUTPUT bitcode_srcs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch bitcode_srcs.stamp
   DEPENDS
@@ -20,14 +21,15 @@ add_custom_command(OUTPUT bitcode_srcs.stamp
     "tsan.c"
 )
 
-add_custom_target(bitcode_srcs
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS bitcode_srcs.stamp
 )
-iree_register_generated_compile_input(bitcode_srcs
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/bitcode_srcs.stamp"
 )
 
+iree_package_target_name(_FILEGROUP_TARGET "::bitcode_hdrs")
 add_custom_command(OUTPUT bitcode_hdrs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch bitcode_hdrs.stamp
   DEPENDS
@@ -48,10 +50,10 @@ add_custom_command(OUTPUT bitcode_hdrs.stamp
     "tsan.h"
 )
 
-add_custom_target(bitcode_hdrs
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS bitcode_hdrs.stamp
 )
-iree_register_generated_compile_input(bitcode_hdrs
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/bitcode_hdrs.stamp"
 )
