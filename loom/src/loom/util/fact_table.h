@@ -386,6 +386,14 @@ iree_status_t loom_value_fact_table_initialize_with_arenas(
     loom_value_fact_table_t* table, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* transient_arena, iree_host_size_t initial_capacity);
 
+// Reserves at least |minimum_capacity| value entries, preserving defined facts
+// and touched membership. An existing capacity doubles until it covers the
+// minimum, but only the final array is allocated. This retains growth headroom
+// without leaving intermediate arrays in the arena during batch population.
+// An empty table starts at the requested minimum. Does not populate entries.
+iree_status_t loom_value_fact_table_reserve(loom_value_fact_table_t* table,
+                                            iree_host_size_t minimum_capacity);
+
 // Clears facts populated in the current scope and forgets transient extension
 // and scratch state. Callers that provided a separate transient arena should
 // reset that arena after this call. Direct-address entry storage and touched

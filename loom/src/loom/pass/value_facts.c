@@ -169,6 +169,8 @@ iree_status_t loom_pass_value_fact_owner_prepare(
   IREE_RETURN_IF_ERROR(loom_pass_value_fact_scope_validate(scope));
   IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_ensure_table(owner, module));
   loom_pass_value_fact_owner_clear_scope(owner);
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_reserve(
+      &owner->table, scope.minimum_value_capacity));
   owner->table.context.target_facts = scope.target_facts;
   *out_table = &owner->table;
   return iree_ok_status();
@@ -203,6 +205,8 @@ iree_status_t loom_pass_value_fact_owner_acquire(
   if (!refine_existing) {
     loom_pass_value_fact_owner_clear_scope(owner);
   }
+  IREE_RETURN_IF_ERROR(loom_value_fact_table_reserve(
+      &owner->table, scope.minimum_value_capacity));
   owner->table.context.target_facts = scope.target_facts;
   *out_table = &owner->table;
   if (owner->lifecycle_counts) {

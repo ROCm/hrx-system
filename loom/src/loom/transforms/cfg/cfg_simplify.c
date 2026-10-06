@@ -145,27 +145,13 @@ static iree_status_t loom_cfg_simplify_push_child_regions(
   return iree_ok_status();
 }
 
-static bool loom_cfg_simplify_region_is_cfg_shaped(loom_region_t* region) {
-  if (!region) {
-    return false;
-  }
-  if (region->block_count > 1) {
-    return true;
-  }
-  loom_block_t* block = NULL;
-  loom_region_for_each_block(region, block) {
-    loom_op_t* op = NULL;
-    loom_block_for_each_op(block, op) {
-      if (op->successor_count > 0) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-static iree_status_t loom_cfg_simplify_mark_cfg_regions(
-    loom_region_t* root_region, iree_arena_allocator_t* arena) {
+// Marks CFG-shaped regions and retains the definition-ID prefix discovered by
+// the same body-tree walk. The prefix reserves fact storage for this body,
+// independent of unrelated values appended elsewhere in the module.
+static iree_status_t loom_cfg_simplify_prepare_regions(
+    loom_region_t* root_region, iree_arena_allocator_t* arena,
+    uint32_t* out_value_capacity) {
+  *out_value_capacity = 0;
   if (!root_region) {
     return iree_ok_status();
   }
@@ -180,16 +166,21 @@ static iree_status_t loom_cfg_simplify_mark_cfg_regions(
 
   while (stack_count > 0) {
     loom_region_t* region = stack[--stack_count];
-    if (loom_cfg_simplify_region_is_cfg_shaped(region)) {
-      region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
-    } else {
-      region->flags &= ~LOOM_REGION_INSTANCE_FLAG_CFG;
-    }
+    bool is_cfg_shaped = region->block_count > 1;
 
     loom_block_t* block = NULL;
     loom_region_for_each_block(region, block) {
+      for (uint16_t i = 0; i < block->arg_count; ++i) {
+        *out_value_capacity =
+            iree_max(*out_value_capacity, loom_block_arg_id(block, i) + 1);
+      }
       loom_op_t* op = NULL;
       loom_block_for_each_op(block, op) {
+        is_cfg_shaped |= op->successor_count > 0;
+        const loom_value_id_t* results = loom_op_results(op);
+        for (uint16_t i = 0; i < op->result_count; ++i) {
+          *out_value_capacity = iree_max(*out_value_capacity, results[i] + 1);
+        }
         loom_region_t** regions = loom_op_regions(op);
         for (uint8_t region_index = 0; region_index < op->region_count;
              ++region_index) {
@@ -204,6 +195,11 @@ static iree_status_t loom_cfg_simplify_mark_cfg_regions(
           stack[stack_count++] = regions[region_index];
         }
       }
+    }
+    if (is_cfg_shaped) {
+      region->flags |= LOOM_REGION_INSTANCE_FLAG_CFG;
+    } else {
+      region->flags &= ~LOOM_REGION_INSTANCE_FLAG_CFG;
     }
   }
   return iree_ok_status();
@@ -1778,17 +1774,18 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
 
   iree_status_t status = loom_cfg_simplify_region_stack_initialize(
       pass->arena, &state.region_stack);
+  loom_pass_value_fact_scope_t fact_scope =
+      loom_pass_value_fact_scope_function_for_target(
+          function,
+          loom_target_function_version_target_facts(pass->function_version));
   if (iree_status_is_ok(status)) {
-    status = loom_cfg_simplify_mark_cfg_regions(body, &analysis_arena);
+    status = loom_cfg_simplify_prepare_regions(
+        body, &analysis_arena, &fact_scope.minimum_value_capacity);
   }
   loom_value_fact_table_t* fact_table = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_pass_value_facts_acquire(
-        pass, module,
-        loom_pass_value_fact_scope_function_for_target(
-            function,
-            loom_target_function_version_target_facts(pass->function_version)),
-        &fact_table);
+    status =
+        loom_pass_value_facts_acquire(pass, module, fact_scope, &fact_table);
   }
   loom_rewriter_attach_value_facts(&rewriter, fact_table);
   bool changed = true;
@@ -1809,7 +1806,8 @@ iree_status_t loom_cfg_simplify_run(loom_pass_t* pass, loom_module_t* module,
       break;
     }
 
-    status = loom_cfg_simplify_mark_cfg_regions(body, &analysis_arena);
+    status = loom_cfg_simplify_prepare_regions(
+        body, &analysis_arena, &fact_scope.minimum_value_capacity);
     if (!iree_status_is_ok(status)) {
       break;
     }

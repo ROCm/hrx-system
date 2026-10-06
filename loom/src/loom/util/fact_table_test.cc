@@ -566,6 +566,83 @@ TEST_F(FactTableTest, DefineBeyondCapacityGrowsAndPreservesEntries) {
   EXPECT_EQ(loom_value_fact_table_lookup(&table, 7).range_lo, 70);
 }
 
+TEST_F(FactTableTest, ReserveAllocatesFinalGeometricCapacityOnce) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 2048));
+  iree_arena_block_pool_statistics_t before;
+  iree_arena_block_pool_query_statistics(&block_pool_, &before);
+
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 9548));
+  EXPECT_EQ(table.capacity, 16384u);
+  EXPECT_EQ(table.count, 0u);
+  EXPECT_EQ(table.touched_count, 0u);
+  iree_arena_block_pool_statistics_t after;
+  iree_arena_block_pool_query_statistics(&block_pool_, &after);
+#if IREE_STATISTICS_ENABLE
+  EXPECT_EQ(
+      after.oversized_allocation_count - before.oversized_allocation_count, 1u);
+  EXPECT_EQ(
+      after.oversized_allocation_bytes - before.oversized_allocation_bytes,
+      16384 * sizeof(loom_value_facts_t) +
+          sizeof(iree_arena_oversized_allocation_t));
+#endif  // IREE_STATISTICS_ENABLE
+
+  // Subsequent rewrites use the same headroom as incremental doubling.
+  loom_value_facts_t* entries = table.entries;
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 9755,
+                                              loom_value_facts_exact_i64(23)));
+  EXPECT_EQ(table.entries, entries);
+  EXPECT_EQ(loom_value_fact_table_lookup(&table, 9755).range_lo, 23);
+}
+
+TEST_F(FactTableTest, ReservePreservesFactsAndUndefinedMembership) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 4));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&table, 1, loom_value_facts_exact_i64(7)));
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&table, 2, loom_value_facts_exact_i64(9)));
+  loom_value_fact_table_undefine(&table, 2);
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 130));
+  EXPECT_EQ(table.capacity, 256u);
+  EXPECT_EQ(loom_value_fact_table_lookup(&table, 1).range_lo, 7);
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 2));
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 129));
+  EXPECT_EQ(table.touched_count, 2u);
+
+  IREE_ASSERT_OK(
+      loom_value_fact_table_define(&table, 2, loom_value_facts_exact_i64(11)));
+  EXPECT_EQ(table.touched_count, 2u);
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 129,
+                                              loom_value_facts_exact_i64(13)));
+  EXPECT_EQ(table.touched_count, 3u);
+  loom_value_fact_table_clear_scope(&table);
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 1));
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 2));
+  EXPECT_FALSE(loom_value_fact_table_has_entry(&table, 129));
+  IREE_ASSERT_OK(loom_value_fact_table_define(&table, 129,
+                                              loom_value_facts_exact_i64(17)));
+  EXPECT_EQ(table.touched_count, 1u);
+}
+
+TEST_F(FactTableTest, ReserveUsesExistingCapacityAndPreservesSatisfiedStorage) {
+  loom_value_fact_table_t table = {0};
+  IREE_ASSERT_OK(loom_value_fact_table_initialize(&table, &arena_, 0));
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 0));
+  EXPECT_EQ(table.entries, nullptr);
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 3));
+  EXPECT_EQ(table.capacity, 3u);
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 14));
+  EXPECT_EQ(table.capacity, 24u);
+  loom_value_facts_t* entries = table.entries;
+  uint64_t* touched_bits = table.touched_bits;
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 24));
+  IREE_ASSERT_OK(loom_value_fact_table_reserve(&table, 0));
+  EXPECT_EQ(table.entries, entries);
+  EXPECT_EQ(table.touched_bits, touched_bits);
+  EXPECT_EQ(table.capacity, 24u);
+}
+
 //===----------------------------------------------------------------------===//
 // Range facts
 //===----------------------------------------------------------------------===//

@@ -66,6 +66,11 @@ typedef struct loom_pass_value_fact_scope_t {
   // Requested fact population scope.
   loom_pass_value_fact_scope_kind_t kind;
 
+  // Optional producer-known value-entry prefix to reserve before population.
+  // Zero leaves capacity to definition-time growth. This is a backing-storage
+  // hint, not scope identity: a cache hit never reallocates for a new hint.
+  uint32_t minimum_value_capacity;
+
   // Function context for ordinary or conditioned FUNCTION and REGION scopes.
   // REGION scopes may leave this empty when analyzing detached IR, but
   // projected func-like regions provide the owning function for op fact

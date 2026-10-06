@@ -323,6 +323,21 @@ iree_status_t loom_value_fact_table_initialize_with_arenas(
                                                          initial_capacity);
 }
 
+iree_status_t loom_value_fact_table_reserve(loom_value_fact_table_t* table,
+                                            iree_host_size_t minimum_capacity) {
+  if (minimum_capacity <= table->capacity) {
+    return iree_ok_status();
+  }
+  iree_host_size_t capacity =
+      table->capacity ? table->capacity : minimum_capacity;
+  while (capacity < minimum_capacity) {
+    if (!iree_host_size_checked_mul(capacity, 2, &capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE, "capacity overflow");
+    }
+  }
+  return loom_value_fact_table_ensure_capacity(table, capacity);
+}
+
 void loom_value_fact_table_clear_scope(loom_value_fact_table_t* table) {
   table->has_conditioned_results = false;
   table->has_boolean_branch_regions = false;
