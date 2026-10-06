@@ -680,6 +680,46 @@ low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0
 
 // ====
 
+amdgpu.target<gfx1200> @target
+
+kernel.def target(@target) @gfx1200_vector_extf_uniform_f8e4m3_load_store() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %c0 = index.constant 0 : index
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %source, %destination = buffer.assume.noalias %aligned_input, %output : buffer, buffer
+  %input_view = buffer.view %source[%base] : buffer -> view<4xf8E4M3>
+  %output_view = buffer.view %destination[%base] : buffer -> view<4xf32>
+  %packed = vector.load %input_view[%c0] : view<4xf8E4M3> -> vector<4xf8E4M3>
+  %value = vector.extf %packed : vector<4xf8E4M3> to vector<4xf32>
+  vector.store %value, %output_view[%c0] : vector<4xf32>, view<4xf32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.rdna4.core>(@target) abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 2, resource_count = 2, resource_offsets = [0, 8], resource_parameter_indices = [0, 1], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @gfx1200_vector_extf_uniform_f8e4m3_load_store() asm {
+  %input_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %output_view = resource<hal_binding> {extent = 16, index = 1, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %14 = s_mov_b32 0
+  %packed = s_load_dword %input_view, %14
+  %16 = v_mov_b32_copy %packed
+  %17 = v_cvt_pk_f32_fp8 %16
+  %18 = slice %17[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %19 = slice %17[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %21 = v_lshrrev_b32_src0_inline %16, 16
+  %22 = v_cvt_pk_f32_fp8 %21
+  %23 = slice %22[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %24 = slice %22[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %value = concat(%18, %19, %23, %24) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %26 = v_mov_b32 0
+  global_store_b128_saddr %26, %value, %output_view
+  return
+}
+
+// ====
+
 amdgpu.target<gfx1250> @target
 
 kernel.def target(@target) @gfx1250_vector_extf_direct_f8e4m3_load_store() {

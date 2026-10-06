@@ -119,9 +119,11 @@ static iree_status_t loom_amdgpu_emit_vector_fp8_pair_descriptor(
   IREE_RETURN_IF_ERROR(loom_amdgpu_materialize_full_low_vgpr_b32(
       context, source_op, source_register, &source_register));
   if (pair_storage->byte_offset != 0) {
+    const loom_type_t source_register_type = loom_module_value_type(
+        loom_low_lower_context_module(context), source_register);
     IREE_RETURN_IF_ERROR(loom_amdgpu_emit_vgpr_shift(
         context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_V_LSHRREV_B32_LIT,
-        pair_storage->byte_offset * 8u, source_register, source_lane_type,
+        pair_storage->byte_offset * 8u, source_register, source_register_type,
         &source_register));
   }
 
