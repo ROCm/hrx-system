@@ -11,6 +11,19 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    memory
+  HDRS
+    "memory.h"
+  SRCS
+    "memory.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     block_pool
   HDRS
     "block_pool.h"
@@ -20,6 +33,27 @@ loom_cc_library(
     iree::base
   PUBLIC
 )
+
+if(IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    memory_test
+  SRCS
+    "memory_test.cc"
+  DEPS
+    ::memory
+    iree::base
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::execution
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
 
 loom_cc_test(
   NAME

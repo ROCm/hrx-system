@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 
 #include "experimental/loom_serve/scheduling/packing.h"
+#include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
@@ -31,6 +32,14 @@ typedef struct loom_serve_text_row_t loom_serve_text_row_t;
 // Retained arenas are sized to row_count, not this control-payload bound.
 enum { LOOM_SERVE_TEXT_ROW_CAPACITY = 16 };
 
+typedef enum loom_serve_text_backing_e {
+  // Entire source state allocation backed at startup; also supports device
+  // address sanitization, whose shadow allocator excludes user VMM.
+  LOOM_SERVE_TEXT_BACKING_FIXED = 0,
+  // Stable virtual reservations with demand-committed physical cache slabs.
+  LOOM_SERVE_TEXT_BACKING_ELASTIC = 1,
+} loom_serve_text_backing_t;
+
 typedef struct loom_serve_text_options_t {
   // Portable source directory containing prepare.loom, control.loom and the
   // sources.txt command/kernel catalog.
@@ -39,10 +48,14 @@ typedef struct loom_serve_text_options_t {
   iree_host_size_t prefill_capacity;
   // Logical attention-position ceiling per row, not a pooled reservation.
   iree_host_size_t context_capacity;
-  // Shared physical token capacity, divisible by the source-declared page
+  // Shared cache slot capacity, divisible by the source-declared page
   // size. Nonzero selects paged packed execution; zero uses dense addressing.
   // This is independent of the logical context ceiling and requires epochs.
   iree_host_size_t pool_capacity;
+  // Physical state backing strategy, independent of logical cache indexing.
+  loom_serve_text_backing_t backing;
+  // Physical slab bytes for elastic backing; zero uses allocator granularity.
+  iree_device_size_t slab_size;
   // Number of cached packed-epoch stages; zero selects isolated execution.
   iree_host_size_t epoch_count;
   // Borrowed shapes specialized from the shared catalog during creation.
@@ -56,7 +69,7 @@ typedef struct loom_serve_text_options_t {
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
   iree_string_view_t tokenizer_path;
-  // Number of retained rows preallocated in one fixed state arena (1-16).
+  // Number of addressable retained rows in one stable state arena (1-16).
   iree_host_size_t row_count;
 } loom_serve_text_options_t;
 
@@ -132,18 +145,19 @@ typedef struct loom_serve_text_metrics_t {
   iree_duration_t decode_duration;
 } loom_serve_text_metrics_t;
 
-// Physical pooled capacity measured in token positions, including page
+// Logical pool capacity measured in token positions, including page
 // rounding. Dense comparison storage reports zero capacity and availability.
 typedef struct loom_serve_text_pool_usage_t {
   // Number of positions in one indivisible private cache page.
   iree_host_size_t block_size;
-  // Total positions backed by target and optional draft storage.
+  // Total addressable positions in target and optional draft storage.
   iree_host_size_t capacity;
   // Positions in pages not currently owned by any row.
   iree_host_size_t available;
 } loom_serve_text_pool_usage_t;
 
-// Cold setup allocates all device state and prepares immutable stages. Options
+// Cold setup reserves state and prepares immutable stages. Elastic state is
+// backed on row/page activation; fixed state is fully backed here. Options
 // strings are borrowed only for this call. Failure releases partial ownership.
 iree_status_t loom_serve_text_model_create(
     const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
@@ -169,6 +183,10 @@ iree_host_size_t loom_serve_text_model_context_capacity(
 // ownership.
 loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model);
+// Mutable virtual state only; immutable weights and shared workspace are
+// separate allocations. Fixed backing reports zero virtual-pool statistics.
+loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
+    const loom_serve_text_model_t* model);
 // Positions in the row's owned pages; zero for dense comparison storage.
 iree_host_size_t loom_serve_text_row_pool_usage(
     const loom_serve_text_row_t* row);
@@ -188,7 +206,8 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
 // each span must fit its row's remaining context. Validation rejects the whole
 // epoch before submission. Completion commits positions and selected tokens;
 // execution failure ends the run and destroy drains all accepted work.
-// Model storage, weights, commands and VM state are preallocated and reused.
+// Weights, commands and VM state are reused. Elastic backing grows only when
+// activating new row/page ranges; resident work allocates no physical memory.
 iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
                                           iree_host_size_t shape_index,
                                           iree_host_size_t span_count,
@@ -210,7 +229,7 @@ iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
 // selected first result to speculation, stopping speculative work at EOS,
 // output credit or context bound. All inputs are copied before submission.
 // Results are in caller order and valid on success. Validation and submission
-// failure have the same contracts as model_epoch; all storage is reused.
+// failure have the same contracts as model_epoch.
 iree_status_t loom_serve_text_model_verify(
     loom_serve_text_model_t* model, iree_host_size_t shape_index,
     iree_host_size_t span_count, const loom_serve_text_span_t* spans,

@@ -233,7 +233,14 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
     view.store %draft_base, %draft[%i, 1] : i64, view<16x2xi64>
     scf.yield
   }
-  %geometry_bytes = index.constant 32 : offset
+  // Cache regions are {allocation, origin, plane_count, plane_stride,
+  // block_bytes}. Model geometry stays here; physical slabs may cut across
+  // logical block boundaries and are chosen by the live allocator.
+  %header_bytes = index.constant 32 : offset
+  %target_geometry_bytes = index.constant 72 : offset
+  %draft_geometry_bytes = index.constant 112 : offset
+  %pooled_geometry_bytes = scf.select %mtp, %draft_geometry_bytes, %target_geometry_bytes : offset
+  %geometry_bytes = scf.select %pooled, %pooled_geometry_bytes, %header_bytes : offset
   %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer
   %geometry_view = buffer.view %geometry[%origin] : buffer -> view<4xi64>
   view.store %block_tokens, %geometry_view[0] : i64, view<4xi64>
@@ -241,6 +248,31 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   view.store %carry_stride, %geometry_view[2] : i64, view<4xi64>
   %feedback_split = scalar.constant 384 : i64
   view.store %feedback_split, %geometry_view[3] : i64, view<4xi64>
+  scf.if %pooled {
+    %regions = buffer.view %geometry[%header_bytes] : buffer -> view<5xi64>
+    %one64 = scalar.constant 1 : i64
+    %nine64 = scalar.constant 9 : i64
+    %target_planes = scalar.constant 32 : i64
+    %draft_planes = scalar.constant 2 : i64
+    %plane_token_bytes = scalar.constant 2048 : i64
+    %plane_stride = scalar.muli %pool, %plane_token_bytes : i64
+    %block_bytes = scalar.constant 131072 : i64
+    view.store %one64, %regions[0] : i64, view<5xi64>
+    view.store %row_bytes, %regions[1] : i64, view<5xi64>
+    view.store %target_planes, %regions[2] : i64, view<5xi64>
+    view.store %plane_stride, %regions[3] : i64, view<5xi64>
+    view.store %block_bytes, %regions[4] : i64, view<5xi64>
+    scf.if %mtp {
+      %draft_regions = buffer.view %geometry[%target_geometry_bytes] : buffer -> view<5xi64>
+      view.store %nine64, %draft_regions[0] : i64, view<5xi64>
+      view.store %zero64, %draft_regions[1] : i64, view<5xi64>
+      view.store %draft_planes, %draft_regions[2] : i64, view<5xi64>
+      view.store %plane_stride, %draft_regions[3] : i64, view<5xi64>
+      view.store %block_bytes, %draft_regions[4] : i64, view<5xi64>
+      scf.yield
+    }
+    scf.yield
+  }
   func.return %allocations, %views, %target_origins, %draft_origins, %geometry : buffer, buffer, buffer, buffer, buffer
 }
 

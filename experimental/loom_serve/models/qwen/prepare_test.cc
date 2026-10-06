@@ -123,6 +123,13 @@ class PrepareTest : public ::testing::Test {
       expected[3][row * 2 + 1] = pool ? 0 : row * context * 4096;
     }
     expected[4] = {64, 1024, 20480, 384};
+    if (pool) {
+      expected[4].insert(expected[4].end(),
+                         {1, row_bytes, 32, pool * 2048, 131072});
+      if (mtp) {
+        expected[4].insert(expected[4].end(), {9, 0, 2, pool * 2048, 131072});
+      }
+    }
     for (size_t i = 0; i < expected.size(); ++i) {
       SCOPED_TRACE(i);
       iree_vm_buffer_t* buffer = nullptr;

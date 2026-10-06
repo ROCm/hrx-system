@@ -64,10 +64,11 @@ speculation. It is not an arbitrary model-graph interpreter.
   `--mtp`; merely declaring MTP does not implement it.
 * `--continuation_epochs=2` pre-issues a second device-fed cohort. The host
   still joins each cohort; this is not an autonomous persistent device loop.
-* Device backing is allocated at startup. Page growth assigns existing
-  physical IDs. Admission reserves completion high-water credit and queues
-  excess work. This pool has private pages, not shared prefixes, paging or
-  elastic backing.
+* Pooled execution reserves stable device addresses at startup and backs
+  row/page ranges on demand. Admission reserves completion high-water credit
+  and queues excess work. These are private pages, not shared prefixes or
+  offloaded session checkpoints. Fixed backing remains an explicit comparison
+  and device-sanitizer configuration.
 
 The automatic shape catalog crosses token classes up to `--prefill_capacity`
 with span classes up to `--rows`, including exact odd endpoints. Repeated
@@ -106,7 +107,7 @@ Storage records are little-endian i64:
 | `row_views` | `rows * 5` pairs `{offset, length}` into the state arena: control, recurrent, dense attention, input IDs, progress |
 | `target_origins` | 16 pairs of source-defined byte origins, uploaded to the target row table |
 | `draft_origins` | 16 pairs uploaded to the draft row table when enabled |
-| `geometry` | `{page_tokens, page_map_byte_origin, draft_carry_stride, feedback_split}` |
+| `geometry` | Header `{page_tokens, page_map_byte_origin, draft_carry_stride, feedback_split}`, then zero or more cache-region records described below |
 
 The eleven allocation slots are residual, state arena, packed metadata,
 target origins/page map, packed input IDs, ordinary selected IDs, draft carry,
@@ -114,6 +115,25 @@ committed metadata, verification feedback, draft cache, and draft origins/page
 map. The first two are present; packed slots 2–5 exist with epoch shapes;
 draft slots 6–10 exist with MTP. Workspace size and alignment come from command
 reflection, independently of this list.
+
+Pooled sources append cache regions, each five little-endian i64 values:
+`{allocation_slot, byte_origin, plane_count, plane_stride, block_bytes}`.
+A physical block ID selects `block_bytes` consecutive bytes in every plane:
+`byte_origin + plane * plane_stride + block_id * block_bytes`. Regions describe
+actual kernel addressing; native code has no layer count or KV element type.
+Dense sources have no regions. Region extents must fit their allocation and
+each plane's block range must fit its stride.
+
+Pooled CLI execution defaults to `--pool_backing=elastic`: source allocations
+containing cache regions reserve stable addresses and commit physical slabs as
+rows/pages grow. Private row views initialize on first use. `--slab_bytes`
+selects coarse physical granularity (2 MiB by default; zero queries the
+allocator recommendation), independent of logical token-page size. The explicit
+`--pool_backing=fixed` comparison path backs all source state at startup and
+supports device address sanitization, which excludes user VMM. Unsupported VMM
+is an error, not a silent change of storage policy. Host ASAN remains usable.
+Heartbeat `elastic_state` accounting covers only virtual mutable-state
+reservations; weights and transient workspace are separate allocations.
 
 Each row's control/input/progress and recurrent views are present. Dense
 attention is present only without a physical pool; pooled kernels find it
