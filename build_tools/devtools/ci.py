@@ -35,11 +35,13 @@ BAZEL_HAL_DRIVER_DEFINES = (
     ("task", "IREE_HAL_DRIVER_TASK"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
+    ("xdna", "IREE_HAL_DRIVER_XDNA"),
 )
 CMAKE_HAL_DRIVER_DEFINES = (
     ("amdgpu", "IREE_HAL_DRIVER_AMDGPU"),
     ("vulkan", "IREE_HAL_DRIVER_VULKAN"),
     ("webgpu", "IREE_HAL_DRIVER_WEBGPU"),
+    ("xdna", "IREE_HAL_DRIVER_XDNA"),
 )
 CMAKE_LOOM_TARGET_DEFINES = (
     ("amdgpu", "LOOM_TARGET_AMDGPU"),
@@ -60,6 +62,7 @@ REPOSITORY_BUILD_HAL_DRIVERS = (
     "task",
     "vulkan",
     "webgpu",
+    "xdna",
 )
 REPOSITORY_BUILD_LOOM_TARGETS = (
     "amdgpu",
@@ -592,11 +595,11 @@ def cpu_config_steps(targets: tuple[str, ...], config: str) -> list[CiStep]:
 
 def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
     config_name = f" / {config.upper()}" if config is not None else ""
-    # The ELF consumers need the base runtime, not GPU drivers or ROCr.
+    # Native ELF consumers and the HAL share the XDNA provider.
     options = (
         "--//libamdf/config:enabled=true",
         "--//libamdf/config:families=xdna",
-        "--//runtime/config/hal:drivers=task",
+        "--//runtime/config/hal:drivers=task,xdna",
     )
     return [
         bazel_configure_step(
@@ -830,6 +833,7 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
     return [
         cmake_configure_step(
             command_name,
+            enabled_drivers=("xdna",),
             enabled_loom_targets=("xdna",),
             sanitizer=sanitizer,
             extra_options=(

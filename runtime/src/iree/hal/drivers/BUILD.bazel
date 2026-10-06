@@ -39,6 +39,11 @@ iree_runtime_cc_library(
             "//runtime/config/hal:external_driver_registry",
             ":external_registry_api",
         ] + iree_select({
+            "//runtime/config/hal:driver_xdna": [
+                "//runtime/src/iree/hal/drivers/amd/xdna/registration",
+            ],
+            "//conditions:default": [],
+        }) + iree_select({
             "//runtime/config/hal:driver_amdgpu": [
                 "//runtime/src/iree/hal/drivers/amdgpu/registration",
             ],

@@ -64,6 +64,7 @@ _RUNTIME_HAL_DRIVER_CMAKE_OPTIONS = {
     "//runtime/config/hal:driver_task": "IREE_HAL_DRIVER_TASK",
     "//runtime/config/hal:driver_vulkan": "IREE_HAL_DRIVER_VULKAN",
     "//runtime/config/hal:driver_webgpu": "IREE_HAL_DRIVER_WEBGPU",
+    "//runtime/config/hal:driver_xdna": "IREE_HAL_DRIVER_XDNA",
     "//runtime/config/hal:executable_loader_embedded_elf": "IREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF",
     "//runtime/config/hal:executable_loader_system_library": "IREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY",
 }
