@@ -9,7 +9,7 @@ config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), 
 kernel.decl @request_rotary() launch(%cosine: buffer, %sine: buffer)
 kernel.decl @request_encoder_rotary() launch(%request: buffer, %cosine: buffer, %sine: buffer)
 kernel.decl @request_constants() launch(%request: buffer, %times: buffer, %deltas: buffer, %strength: buffer, %affine: buffer)
-kernel.decl @request_prompt() launch(%request: buffer, %prompt: buffer, %tokens: buffer, %mask: buffer)
+kernel.decl @request_prompt() launch(%request: buffer, %tokens: buffer, %mask: buffer)
 
 command.program.def public @check_encoder_cosine() launch(%request: buffer, %output: buffer) {
   %texts = config.get @krea2.text_tokens : index
@@ -104,7 +104,7 @@ kernel.def target(@request_check_wave32) @request_prompt_collect() {
   kernel.return
 }
 
-command.program.def public @check_request_prompt() launch(%request: buffer, %prompt: buffer, %output: buffer) {
+command.program.def public @check_request_prompt() launch(%request: buffer, %output: buffer) {
   %texts = config.get @krea2.text_tokens : index
   %framing = index.constant 34 : index
   %padding = index.constant 48 : index
@@ -116,7 +116,7 @@ command.program.def public @check_request_prompt() launch(%request: buffer, %pro
   %mask_bytes = index.scale %rows, %one : index, offset -> offset
   %tokens = buffer.alloca<global> align(256) %id_bytes : buffer
   %mask = buffer.alloca<global> align(256) %mask_bytes : buffer
-  kernel.launch @request_prompt(%request, %prompt, %tokens, %mask) : (buffer, buffer, buffer, buffer)
+  kernel.launch @request_prompt(%request, %tokens, %mask) : (buffer, buffer, buffer)
   kernel.launch @request_prompt_collect(%tokens, %mask, %output) : (buffer, buffer, buffer)
   command.return
 }

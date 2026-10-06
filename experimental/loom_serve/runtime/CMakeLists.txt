@@ -195,6 +195,21 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    input
+  HDRS
+    "input.h"
+  SRCS
+    "input.c"
+  DEPS
+    iree::base
+    iree::tokenizer
+    iree::tokenizer::vocab
+    iree::vm
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     preparation
   HDRS
     "preparation.h"
@@ -208,6 +223,29 @@ loom_cc_library(
     loom::binding::c::loomc
   PUBLIC
 )
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    input_test
+  SRCS
+    "input_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/input/control.loom"
+  DEPS
+    ::input
+    ::program
+    iree::base
+    iree::base::tooling::flags
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::vm
+  ARGS
+    "--input_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/input/control.loom}}"
+)
+endif()
 
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(

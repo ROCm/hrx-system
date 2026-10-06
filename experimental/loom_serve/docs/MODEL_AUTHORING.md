@@ -301,31 +301,75 @@ advances one encoder hidden buffer in place and omits unused decoder/vision
 weights. It derives the downstream key mask from encoder visibility, so the
 caller cannot accidentally give two stages different text masks.
 
-The [native image CLI](../models/krea/generate.c) uses a
-[retained model leaf](../models/krea/model.h): IREE prompt tokenization and
-cold request tables, source JIT, immutable weight loading, queued request upload,
-command execution and final RGB download. The CLI encodes that output as PPM.
+The generic [image CLI](../image/generate.c) uses a
+[source-defined diffusion residency](../image/model.h): source VM bootstrap and
+request preparation, source JIT, immutable weight loading, queued request upload,
+source command execution and final RGB download. The CLI encodes that output as PPM.
 The model can serve successive serialized calls without warm JIT, weight loads
 or device allocations. Its output view lasts until the next call; the consumer
 copies or encodes it before then. It requires no external encoder or captured
-tensors. Its
-[request leaf](../models/krea/request.h) contains model-specific template and
-numeric setup, separate from shared serving code. That cold C boundary retains
-canonical F64 rotary math that the current VM's F32 transcendental lowering
-cannot express unchanged. Model stage control already lives in `.loom`.
+tensors. [Krea's control source](../models/krea/control.loom) owns prompt framing,
+token validation, stage selection and payload layout. The generic native
+[input module](../runtime/input.h) supplies bounded tokenization and vocabulary
+lookup, not model conventions. Its [command source](../models/krea/generate.loom)
+creates noise, rotary tables, schedule and affine inputs on the device. Numerical
+checks use independently justified BF16/F32 envelopes rather than host libm bits.
+Cold source declarations and returned metadata define parameter domains, request
+capacity, tokenizer asset, public name and opaque state. The same executable
+accepts another compatible source package through `--model`, without relinking.
 The [finite-image service](../image/service.h) is a second concrete serving
 pipeline. Its serialized generator returns borrowed completed RGB; one worker
 encodes it before another model call, while the application owner admits bounded
 requests and serves health checks over the shared TCP transport. Transport-owned
 response bytes decouple slow readers from model memory. The
-[Krea entry point](../models/krea/server.c) supplies only model creation and the
+[generic image entry point](../image/server.c) supplies model creation and the
 coarse generator callback. Model math and stage loops remain source commands.
 The [HTTP witness](../models/krea/check_service.py) checks real image pixels,
 overload, peer reset and in-flight shutdown using the actual checkpoint.
 This service queues images; it does not batch them. Qwen's packed token scheduler
 remains a separate consumer, and no audio model is claimed by this packet.
 
-A first tensor-in/tensor-out adapter has this ownership flow:
+### Source-defined diffusion package
+
+The image binary's external contract is documented in
+[`image/model.h`](../image/model.h). A compatible package supplies these files:
+
+| Source | Role |
+| --- | --- |
+| `sources.txt` | Relative catalog paths for model command programs, kernels and shared motifs. |
+| `prepare.loom` | Cold VM entry declaring commands, specialization and checkpoint domains; returns request capacity, tokenizer asset, public name and opaque state. |
+| `control.loom` | Warm VM entries preparing one request payload and submitting the selected command plus final feedback. |
+| Weight policy source | Cold preparation policy named by each checkpoint-domain declaration. |
+
+The caller passes dimensions, text capacity and asset paths into the cold
+entry. Source validates its architecture's geometry before declaring stages.
+Each retained command has the same reflected fixed parameter placement and
+three dynamic bindings: opaque request, F32 CHW RGB in [-1,1], and workspace.
+The native owner allocates one shared parameter bank and maximum workspace.
+The command graph owns the payload layout, mathematical preparation, stage
+composition and temporary lifetimes. Adding a postprocessing kernel is a source
+composition; it does not require a native callback or a rebuilt image binary.
+
+`prepare_request` receives the retained opaque state, stage tags, prompt, seed
+and strength. Its `input.encode` capability returns bounded little-endian i32
+tokens plus their live count; `input.lookup` supplies vocabulary IDs. Source
+chooses framing and validation, then returns one ordinal and byte buffer. That
+buffer remains owned until accepted uploads, commands and feedback have drained.
+Cold result references outlive the temporary bootstrap program, but not their
+VM environment. Internal VM helpers are private; public functions are the
+entry points specialized by the caller.
+
+For a new port, the first useful witness is one actual prompt reaching a final
+HTTP PNG through `//experimental/loom_serve/image:server --model=...`, followed
+by a repeated request in the same residency. Source and checkpoint assets travel
+separately from the executable. Shape changes within the declared catalog reuse
+the same weights and scratch. This ABI currently describes serialized,
+text-conditioned diffusion images; token sessions and image-input conditioning
+need their own real ownership contracts rather than disguised payload meanings.
+
+### Other tensor-in/tensor-out adapters
+
+A first adapter outside that diffusion contract has this ownership flow:
 
 1. It creates a [`loom_serve_device_t`](../runtime/device.h), which owns the device,
    asynchronous services, exact queues, and execution timelines. Borrowed
@@ -346,8 +390,8 @@ A first tensor-in/tensor-out adapter has this ownership flow:
    stages with `loom_serve_jit_stage_record`; recorded commands retain their
    executables and fixed buffers after compiler storage is destroyed.
 4. For a finite transform contained in one source command, it can directly use
-   `loom_serve_execution_execute`, as the Krea CLI does. A model needing host
-   source control instead registers the immutable stage
+   `loom_serve_execution_execute`. The diffusion-image owner uses source VM
+   control: it registers the immutable stage
    table and any host feedback spans with `loom_serve_module_create`, then links its
    source VM control through `loom_serve_program_create`. The HAL type provider
    and borrowed feedback storage outlive all accepted work. Requests carry

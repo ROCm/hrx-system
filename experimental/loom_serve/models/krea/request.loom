@@ -246,7 +246,7 @@ kernel.def target(@request_wave32) @request_prompt() {
   %groups = index.div %padded, %threads : index
   %one = index.constant 1 : index
   kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
-} launch(%request: buffer, %prompt: buffer, %tokens: buffer, %mask: buffer) {
+} launch(%request: buffer, %tokens: buffer, %mask: buffer) {
   %texts = config.get @krea2.text_tokens : index
   %padding = index.constant 48 : index
   %suffix_offset = index.constant 29 : index
@@ -278,7 +278,8 @@ kernel.def target(@request_wave32) @request_prompt() {
     %mask_view = buffer.view %mask[%origin] : buffer -> view<[%rows]xi8>
     view.store %visible, %mask_view[%row] : i8, view<[%rows]xi8>
     scf.if %inside {
-      %source = buffer.view %prompt[%origin] : buffer -> view<[%end]xi32>
+      %header_bytes = index.constant 16 : offset
+      %source = buffer.view %request[%header_bytes] : buffer -> view<[%end]xi32>
       %id = scf.if %prefix -> (i32) {
         %token = view.load %source[%row] : view<[%end]xi32> -> i32
         scf.yield %token : i32

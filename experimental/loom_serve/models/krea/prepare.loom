@@ -4,11 +4,19 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Cold bootstrap only declares commands and parameter domains. The runner
-// compiles the resulting configurations and streams each shared domain once.
+// Cold bootstrap declares commands, parameter domains and request metadata.
+// The runner compiles the configurations and streams each shared domain once.
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+// tokenizer/tokenizer.json
+global.rodata.def @tokenizer = bytes("746f6b656e697a65722f746f6b656e697a65722e6a736f6e")
+// krea2-turbo
+global.rodata.def @identifier = bytes("6b726561322d747572626f")
+// expected supported 16-aligned pixel/text extents and at most 65536 combined tokens
+global.rodata.def @geometry_error = bytes("657870656374656420737570706f727465642031362d616c69676e656420706978656c2f7465787420657874656e747320616e64206174206d6f737420363535333620636f6d62696e656420746f6b656e73")
 
 // generate_image
 global.rodata.def @root_base = bytes("67656e65726174655f696d616765")
@@ -90,7 +98,46 @@ func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffe
 // Stage zero is the maximum prompt extent. The smaller command preserves the
 // live-key partitions used by the attention kernels when the maximum is a
 // multiple of 64; other valid extents retain only their full-size command.
-func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer) {
+func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer) -> (i64, buffer, buffer, buffer) {
+  %zero_geometry = scalar.constant 0 : i64
+  %sixteen_geometry = scalar.constant 16 : i64
+  %pixel_limit = scalar.constant 8192 : i64
+  %token_limit = scalar.constant 65536 : i64
+  %height_positive = scalar.cmpi ugt, %height, %zero_geometry : i64
+  %width_positive = scalar.cmpi ugt, %width, %zero_geometry : i64
+  %text_positive = scalar.cmpi ugt, %text, %zero_geometry : i64
+  %height_bounded = scalar.cmpi ule, %height, %pixel_limit : i64
+  %width_bounded = scalar.cmpi ule, %width, %pixel_limit : i64
+  %text_bounded = scalar.cmpi ule, %text, %token_limit : i64
+  %height_rem = scalar.remui %height, %sixteen_geometry : i64
+  %width_rem = scalar.remui %width, %sixteen_geometry : i64
+  %text_rem = scalar.remui %text, %sixteen_geometry : i64
+  %height_aligned = scalar.cmpi eq, %height_rem, %zero_geometry : i64
+  %width_aligned = scalar.cmpi eq, %width_rem, %zero_geometry : i64
+  %text_aligned = scalar.cmpi eq, %text_rem, %zero_geometry : i64
+  %h0 = scalar.andi %height_positive, %height_bounded : i1
+  %w0 = scalar.andi %width_positive, %width_bounded : i1
+  %t0 = scalar.andi %text_positive, %text_bounded : i1
+  %h = scalar.andi %h0, %height_aligned : i1
+  %w = scalar.andi %w0, %width_aligned : i1
+  %t = scalar.andi %t0, %text_aligned : i1
+  %hw = scalar.andi %h, %w : i1
+  %valid_extents = scalar.andi %hw, %t : i1
+  %valid_extents32 = scalar.extui %valid_extents : i1 to i32
+  %diagnostic = global.load @geometry_error : buffer
+  func.call @require(%valid_extents32, %diagnostic) : (i32, buffer) -> ()
+  %rows_geometry = scalar.divui %height, %sixteen_geometry : i64
+  %columns_geometry = scalar.divui %width, %sixteen_geometry : i64
+  %patches = scalar.muli %rows_geometry, %columns_geometry : i64
+  %combined = scalar.addi %patches, %text : i64
+  %patch_rem = scalar.remui %patches, %sixteen_geometry : i64
+  %patch_aligned = scalar.cmpi eq, %patch_rem, %zero_geometry : i64
+  %patch_positive = scalar.cmpi uge, %patches, %sixteen_geometry : i64
+  %combined_bounded = scalar.cmpi ule, %combined, %token_limit : i64
+  %patch_valid = scalar.andi %patch_aligned, %patch_positive : i1
+  %valid_tokens = scalar.andi %patch_valid, %combined_bounded : i1
+  %valid_tokens32 = scalar.extui %valid_tokens : i1 to i32
+  func.call @require(%valid_tokens32, %diagnostic) : (i32, buffer) -> ()
   %length = buffer.length %adapter
   %zero_offset = index.constant 0 : offset
   %adapted = index.cmp ne, %length, %zero_offset : offset
@@ -106,5 +153,18 @@ func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buff
     func.call @declare_stage(%height, %width, %small, %directory, %adapter, %adapted) : (i64, i64, i64, buffer, buffer, i1) -> ()
     scf.yield
   }
-  func.return
+  %framing = scalar.constant 34 : i64
+  %four = scalar.constant 4 : i64
+  %header = scalar.constant 16 : i64
+  %ids = scalar.addi %text, %framing : i64
+  %id_bytes = scalar.muli %ids, %four : i64
+  %capacity = scalar.addi %id_bytes, %header : i64
+  %tokenizer = global.load @tokenizer : buffer
+  %identifier = global.load @identifier : buffer
+  %state_bytes = index.constant 8 : offset
+  %state = buffer.alloca<private> align(8) %state_bytes : buffer
+  %state_view = buffer.view %state[%zero_offset] : buffer -> view<1xi64>
+  %adapted64 = scalar.extui %adapted : i1 to i64
+  view.store %adapted64, %state_view[0] : i64, view<1xi64>
+  func.return %capacity, %tokenizer, %identifier, %state : i64, buffer, buffer, buffer
 }

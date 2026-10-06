@@ -4,8 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include <vector>
+#include <limits>
 
+#include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/program.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -24,49 +25,20 @@ class Krea2ControlTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
         &types));
-    const iree_string_view_t entry = IREE_SVL("select_stage");
+    IREE_ASSERT_OK(loom_serve_input_module_create(environment, nullptr, &input,
+                                                  allocator));
+    const iree_string_view_t root = IREE_SVL("prepare_request");
     IREE_ASSERT_OK(loom_serve_program_create(
-        environment, iree_make_cstring_view(FLAG_control_source), 1, &entry,
-        iree_vm_module_span_empty(), allocator, &program));
+        environment, iree_make_cstring_view(FLAG_control_source), 1, &root,
+        (iree_vm_module_span_t){&input, 1}, allocator, &program));
     IREE_ASSERT_OK(iree_vm_process_lookup_function(
-        loom_serve_program_process(program), IREE_SV("model"), entry, &select));
+        loom_serve_program_process(program), IREE_SV("model"), root, &prepare));
   }
 
   void TearDown() override {
     loom_serve_program_destroy(program);
+    iree_vm_module_release(input);
     iree_vm_environment_free(environment);
-  }
-
-  void ExpectSelection(const std::vector<int64_t>& tags, int32_t token_count,
-                       int32_t expected) {
-    std::vector<uint8_t> storage(tags.size() * sizeof(int64_t));
-    for (size_t i = 0; i < tags.size(); ++i) {
-      iree_unaligned_store_le_u64(storage.data() + i * sizeof(int64_t),
-                                  tags[i]);
-    }
-    iree_vm_buffer_t* buffer = nullptr;
-    IREE_ASSERT_OK(iree_vm_buffer_wrap(
-        IREE_VM_BUFFER_ACCESS_FLAG_READ,
-        iree_make_byte_span(storage.data(), storage.size()),
-        iree_vm_buffer_release_callback_null(), allocator, &buffer));
-    iree_vm_variant_t arguments[] = {
-        iree_vm_buffer_variant_from_ptr_move(&types, &buffer),
-        iree_vm_variant_from_i32((int32_t)tags.size()),
-        iree_vm_variant_from_i32(token_count),
-    };
-    iree_vm_variant_t results[1] = {};
-    iree_status_t status =
-        iree_vm_invoke(loom_serve_program_invocation(program), select,
-                       iree_vm_variant_span_from_array(arguments),
-                       iree_vm_variant_span_from_array(results));
-    int32_t selected = -1;
-    if (iree_status_is_ok(status)) {
-      IREE_EXPECT_OK(iree_vm_i32_from_variant(results[0], &selected));
-      EXPECT_EQ(selected, expected);
-    }
-    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
-    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
-    IREE_EXPECT_OK(status);
   }
 
   // Allocator owning the process and temporary argument wrappers.
@@ -75,34 +47,45 @@ class Krea2ControlTest : public ::testing::Test {
   iree_vm_environment_t* environment = nullptr;
   // Canonical buffer reference type, borrowed from environment.
   iree_vm_ref_types_t types = {};
-  // One source-JIT selector reused across all prompt counts.
+  // One source-JIT request process reused across input failures.
   loom_serve_program_t* program = nullptr;
-  // Selector export in that process.
-  iree_vm_function_t select = {};
+  // Actual source request export; no tokenizer is installed in these failures.
+  iree_vm_function_t prepare = {};
+  // Synchronous source validation capability, retained by the program.
+  iree_vm_module_t* input = nullptr;
 };
 
-TEST_F(Krea2ControlTest, RetainedShapesRespectLiveKeyBoundary) {
-  for (const int64_t maximum : {16, 80, 128, 144, 192, 512}) {
-    SCOPED_TRACE(maximum);
-    std::vector<int64_t> tags = {maximum};
-    const bool compact = maximum > 128 && maximum % 64 == 0;
-    if (compact) {
-      tags.push_back(128);
-    }
-    for (int32_t tokens : {0, 34, 88, 98, 99, 128, 429, 541}) {
-      SCOPED_TRACE(tokens);
-      if (tokens > maximum + 29) {
-        continue;
-      }
-      ExpectSelection(tags, tokens, compact && tokens <= 98 ? 1 : 0);
-    }
+TEST_F(Krea2ControlTest, SourceRejectsStrengthBeforeTokenization) {
+  for (float strength : {0.0f, std::numeric_limits<float>::infinity(),
+                         std::numeric_limits<float>::quiet_NaN(), 1.0f}) {
+    iree_vm_buffer_t* state = nullptr;
+    IREE_ASSERT_OK(iree_vm_buffer_create(8, 8, allocator, &state));
+    uint8_t tag_bytes[8];
+    iree_unaligned_store_le_u64(tag_bytes, 512);
+    iree_vm_buffer_t* tags = nullptr;
+    IREE_ASSERT_OK(iree_vm_buffer_wrap(
+        IREE_VM_BUFFER_ACCESS_FLAG_READ,
+        iree_make_byte_span(tag_bytes, sizeof(tag_bytes)),
+        iree_vm_buffer_release_callback_null(), allocator, &tags));
+    iree_vm_buffer_t* prompt = nullptr;
+    IREE_ASSERT_OK(iree_vm_buffer_create(0, 1, allocator, &prompt));
+    iree_vm_variant_t arguments[] = {
+        iree_vm_buffer_variant_from_ptr_move(&types, &state),
+        iree_vm_buffer_variant_from_ptr_move(&types, &tags),
+        iree_vm_variant_from_i32(1),
+        iree_vm_buffer_variant_from_ptr_move(&types, &prompt),
+        iree_vm_variant_from_i64(0),
+        iree_vm_variant_from_f32(strength)};
+    iree_vm_variant_t results[2] = {};
+    IREE_EXPECT_STATUS_IS(
+        strength == 1.0f ? IREE_STATUS_FAILED_PRECONDITION
+                         : IREE_STATUS_INVALID_ARGUMENT,
+        iree_vm_invoke(loom_serve_program_invocation(program), prepare,
+                       iree_vm_variant_span_from_array(arguments),
+                       iree_vm_variant_span_from_array(results)));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   }
-}
-
-TEST_F(Krea2ControlTest, SelectionFollowsTagsNotFixedSlotNumbers) {
-  ExpectSelection({512, 256, 128}, 98, 2);
-  ExpectSelection({512, 256, 128}, 99, 0);
-  ExpectSelection({512, 256}, 34, 0);
 }
 
 }  // namespace

@@ -3,14 +3,16 @@
 This includes a native prompt-to-image CLI and a retained HTTP image server.
 The `generate_image` and `generate_image_adapted` roots run through Loom's live
 source JIT, queued safetensors loading, command programs and shared device
-ownership. Their caller supplies a 16-byte seed/count/strength header and
+ownership. Source VM control supplies a 16-byte seed/count/strength header and
 validated, unpadded token IDs. Source kernels generate initial packed noise,
 timesteps, encoder/DiT rotary tables, padding/masks, Euler deltas and VAE affine
 directly in the command workspace. The command computes its own Qwen3-VL taps
-and derives the combined text/image key mask on-device. The native
-[`krea2_generate`](generate.c) and [`krea2_server`](server.c) callers use IREE
-tokenization and pack the compact request inputs, then
-return the final image. The server shares one residency across requests.
+and derives the combined text/image key mask on-device. The generic
+[`image generator`](../../image/generate.c) and
+[`image server`](../../image/server.c) load this external source package through
+the [diffusion-image ABI](../../image/model.h). Source owns model policy;
+native capabilities provide IREE tokenization, IO and device ownership.
+The server shares one residency across requests.
 No captured tensors, Python inference library or compiled model artifact is
 required by that path. The independent reference libraries below are used
 only for numerical qualification.
@@ -83,8 +85,8 @@ on a qualified GFX11 AMDGPU host with the source tree and checkpoints above:
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
-  //experimental/loom_serve/models/krea:generate
-bazel-bin/experimental/loom_serve/models/krea/generate \
+  //experimental/loom_serve/image:generate
+bazel-bin/experimental/loom_serve/image/generate \
   --model=experimental/loom_serve/models/krea \
   --checkpoint="$krea_weights" \
   --prompt="A small brass robot tending red flowers in a sunlit greenhouse, watercolor illustration" \
@@ -110,25 +112,29 @@ accepted work before borrowed upload/readback storage is freed.
 dimensions, maximum text capacity, the checkpoint directory and optional adapter
 path, then declares command roots, compiler configuration values and fixed
 parameter bindings through the runner-private `prepare` module. That module
-copies the declarations and releases the bootstrap VM before device setup.
+copies the declarations and releases the bootstrap program before device setup.
+The source also returns its public model name, tokenizer asset, request byte
+capacity and opaque state. Returned buffers remain alive independently of that
+program; their VM environment outlives the residency.
 The ordinary JIT and streaming loader consume the result; no native table of
 Krea command names, specialization formulas or weight filenames is involved.
-This is a cold-path boundary. Request framing still uses the native request
-leaf below; numerical preparation is source-owned device work.
+This is a cold-path boundary; warm request processing uses the source control
+program below without preparing new kernels or weights.
 
-[`control.loom`](control.loom) owns warm stage selection, command submission
-and final RGB feedback. Both base and adapted commands use the same request
-bindings. Its selector receives the
-source-declared stage tags and retained prompt count. One source-JIT process
+[`control.loom`](control.loom) owns prompt framing, token validation, compact
+payload construction, warm stage selection, command submission and final RGB
+feedback. Its `prepare_request` receives opaque bootstrap state, source-declared
+stage tags, prompt, seed and strength, then returns an ordinal and payload.
+Both base and adapted commands use the same request bindings. One source-JIT process
 serves the entire residency; requests are buffers and scalar arguments, not VM
 instances. The existing runner-private `execute_N` and `feedback` imports enqueue
 work without waiting. Native code retires both accepted queue frontiers before
 encoding the image or reusing request storage, including after partial failure.
 The VM's return is not a transfer of native storage ownership.
 
-The native request leaf is [`request.h`](request.h)/[`request.c`](request.c).
-Prompt framing, token validation and compact header packing remain there,
-not in the shared runner. [`request.loom`](request.loom) owns numerical request
+The generic [`input` module](../../runtime/input.h) exposes bounded encoding,
+vocabulary lookup and explicit input rejection. It knows no prompt template,
+token IDs or embedding size. [`request.loom`](request.loom) owns numerical request
 preparation, composed by [`generate.loom`](generate.loom) with the independently
 callable `sample_image` components. Its F32 device transcendental approximations
 are checked against independent BF16/F64 references; bit identity with host
@@ -160,22 +166,24 @@ does not batch images or use the Qwen token scheduler.
 
 ### Retained model ownership
 
-[`model.h`](model.h)/[`model.c`](model.c) is the reusable native residency
+[`image/model.h`](../../image/model.h)/[`image/model.c`](../../image/model.c)
+is the reusable native residency
 behind the CLI. Creation loads the tokenizer and specializes the bounded
 retained command set declared by the bootstrap. All checkpoint declarations,
 reflected parameter roots and tensor placements must match exactly before it
 streams each parameter domain once. Every command
-records the same immutable buffers, and allocation uses componentwise maximum
-input lengths plus maximum reflected workspace length and alignment.
+records the same immutable buffers. Allocation uses the source-declared input
+capacity and maximum reflected workspace length and alignment.
 Serialized `model_generate` calls take only prompt, seed and adapter strength.
 They neither compile nor reload weights nor allocate device backing. Pixel
 shape and maximum text capacity are fixed when the residency is created.
 
 The `image_residency` event reports the one-bank parameter/input/output and
-workspace bytes, workspace alignment, each retained text extent and its kernel
+workspace bytes, workspace alignment, each source stage tag and its kernel
 and entry counts. The aggregate counts include both cold compilations; shared
 weights do not imply deduplicated executable objects. Each `image_prepared`
-event reports the actual combined prefix+prompt count and selected extent.
+event reports the selected stage ordinal and opaque payload byte count.
+Krea interprets its stage tags as text extents; the generic runner does not.
 
 The returned F32 NCHW RGB is borrowed until the next generation or destruction.
 A consumer encodes or copies it before submitting another request. Host request
@@ -186,7 +194,7 @@ terminal for its owner. The application serializes calls; this leaf does not
 create an HTTP server, request queue, or implicit model worker.
 
 The full-checkpoint reuse witness runs short→long→short in one residency,
-requiring measured combined counts 40→99→40 to select 128→512→128. With an
+requiring source-selected extents 128→512→128 for combined counts 40→99→40. With an
 adapter, it repeats that sequence at strengths zero and one; without an
 adapter, it runs the base sequence. A nonfinite-strength request precedes every
 valid call. Final pixels are compared exactly with isolated CLI outputs, and
@@ -195,14 +203,14 @@ fixed-extent CLI can be supplied as `--generator` for the counterfactual.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
-  //experimental/loom_serve/models/krea:generate \
-  //experimental/loom_serve/models/krea:model_check
+  //experimental/loom_serve/image:generate \
+  //experimental/loom_serve/image:model_check
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/krea:model_test \
-  //experimental/loom_serve/models/krea:request_test
+  //experimental/loom_serve/models/krea:control_test
 python -B experimental/loom_serve/models/krea/check_model.py \
-  --generator bazel-bin/experimental/loom_serve/models/krea/generate \
-  --checker bazel-bin/experimental/loom_serve/models/krea/model_check \
+  --generator bazel-bin/experimental/loom_serve/image/generate \
+  --checker bazel-bin/experimental/loom_serve/image/model_check \
   --model experimental/loom_serve/models/krea \
   --checkpoint "$krea_weights" \
   --adapter "$krea_adapter/softwatercolor.safetensors" \
@@ -232,8 +240,8 @@ There is no inference subprocess or per-request JIT/model construction.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
-  //experimental/loom_serve/models/krea:server
-bazel-bin/experimental/loom_serve/models/krea/server \
+  //experimental/loom_serve/image:server
+bazel-bin/experimental/loom_serve/image/server \
   --model=experimental/loom_serve/models/krea \
   --checkpoint="$krea_weights" \
   --adapter="$krea_adapter/softwatercolor.safetensors" \
@@ -296,7 +304,7 @@ From the source-tree root, inside the execution host's benchmark lease:
 
 ```sh
 python -B -m experimental.loom_serve.tools.observe --log=/path/to/run.jsonl -- \
-  bazel-bin/experimental/loom_serve/models/krea/server \
+  bazel-bin/experimental/loom_serve/image/server \
   --model=experimental/loom_serve/models/krea \
   --checkpoint="$krea_weights" --height=1024 --width=1024
 ```
@@ -340,9 +348,9 @@ build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/http:request_test \
   //experimental/loom_serve/http:server_test
 build_tools/bin/iree-bazel-build --config=asan \
-  //experimental/loom_serve/models/krea:server
+  //experimental/loom_serve/image:server
 python -B experimental/loom_serve/models/krea/check_service.py \
-  --server bazel-bin/experimental/loom_serve/models/krea/server \
+  --server bazel-bin/experimental/loom_serve/image/server \
   --model experimental/loom_serve/models/krea \
   --checkpoint "$krea_weights" \
   --adapter "$krea_adapter/softwatercolor.safetensors" \
@@ -2247,35 +2255,36 @@ image-quality or performance claim. Retained output occupies 45 MiB.
 
 ### Prompt/seed and source preparation checks
 
-[`check_request.py`](check_request.py) invokes the actual compact C request
+[`check_request.py`](check_request.py) invokes the actual source VM request
 producer and JITs the source preparation kernels without loading model weights.
-It compares fourteen prompt/shape cases against the real Hugging Face tokenizer,
+It compares eighteen prompt/shape cases against the real Hugging Face tokenizer,
 Diffusers rotary and scheduler, VAE configuration and an independently
 implemented Philox/Box-Muller sequence.
 The integer noise oracle first passes the published
 [Random123 known answers](https://github.com/DEShawResearch/random123/blob/main/tests/kat_vectors).
-Every native request is prepared twice and every GPU component executes twice.
+Every source request is prepared twice and every GPU component executes twice.
 Cases include empty input, Unicode, embedded
 and terminal special tokens, long/truncated text, three seeds including all-one
-bits, and 32/512 retained text rows at 256×384/384×384 pixels.
+bits, the exact 98/99 adaptive-stage boundary, and 32/128/512 selected text rows
+at 256×384/384×384 pixels. Requested maxima are 32 and 512.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
-  //experimental/loom_serve/models/krea:request_check \
-  //experimental/loom_serve/models/krea:generate \
+  //experimental/loom_serve/image:request_check \
+  //experimental/loom_serve/image:generate \
   //experimental/loom_serve/tools:component_check \
   //loom/src/loom/tools/iree-test-loom:iree-test-loom
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve/models/krea:request_test
+  //experimental/loom_serve/models/krea:control_test
 python -B experimental/loom_serve/models/krea/check_request.py \
-  --native=bazel-bin/experimental/loom_serve/models/krea/request_check \
+  --native=bazel-bin/experimental/loom_serve/image/request_check \
   --checker=bazel-bin/experimental/loom_serve/tools/component_check \
   --loom_checker=bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom \
   --model=experimental/loom_serve/models/krea \
   --checkpoint="$krea_weights" \
   --output=/path/to/new-request-results
 python -B experimental/loom_serve/models/krea/check_generate.py \
-  --native bazel-bin/experimental/loom_serve/models/krea/generate \
+  --native bazel-bin/experimental/loom_serve/image/generate \
   --checker bazel-bin/experimental/loom_serve/tools/component_check \
   --model=experimental/loom_serve/models/krea \
   --checkpoint="$krea_weights" --adapter="$krea_adapter" \

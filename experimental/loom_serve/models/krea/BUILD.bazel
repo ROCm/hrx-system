@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_test", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -30,6 +30,7 @@ loom_cc_test(
         "//loom/config/target/arch:vm",
     ]),
     deps = [
+        "//experimental/loom_serve/runtime:input",
         "//experimental/loom_serve/runtime:preparation",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
@@ -37,62 +38,6 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
-    ],
-)
-
-loom_cc_library(
-    name = "request",
-    srcs = ["request.c"],
-    hdrs = ["request.h"],
-    deps = [
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/tokenizer",
-        "//runtime/src/iree/tokenizer/vocab",
-    ],
-)
-
-loom_cc_test(
-    name = "request_test",
-    srcs = ["request_test.cc"],
-    deps = [
-        ":request",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_binary(
-    name = "request_check",
-    testonly = True,
-    srcs = ["request_check.c"],
-    deps = [
-        ":request",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:json",
-        "//runtime/src/iree/base/internal:path",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/io:file_handle",
-        "//runtime/src/iree/tokenizer",
-        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
-    ],
-)
-
-loom_cc_binary(
-    name = "model_check",
-    testonly = True,
-    srcs = ["model_check.c"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
-    ]),
-    deps = [
-        ":model",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:path",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/io:file_handle",
     ],
 )
 
@@ -105,6 +50,7 @@ loom_cc_test(
         "//loom/config/target/arch:vm",
     ]),
     deps = [
+        "//experimental/loom_serve/runtime:input",
         "//experimental/loom_serve/runtime:program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
@@ -117,82 +63,18 @@ loom_cc_test(
 loom_cc_test(
     name = "model_test",
     srcs = ["model_test.cc"],
+    args = ["--model_source=$(rootpath :prepare.loom)"],
+    data = ["prepare.loom"],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
-        ":model",
+        "//experimental/loom_serve/image:model",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-loom_cc_library(
-    name = "model",
-    srcs = ["model.c"],
-    hdrs = ["model.h"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
-    ]),
-    deps = [
-        ":request",
-        "//experimental/loom_serve/runtime:device",
-        "//experimental/loom_serve/runtime:execution",
-        "//experimental/loom_serve/runtime:jit",
-        "//experimental/loom_serve/runtime:module",
-        "//experimental/loom_serve/runtime:preparation",
-        "//experimental/loom_serve/runtime:program",
-        "//experimental/loom_serve/runtime:weights",
-        "//loom/binding/c:loomc",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal:path",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/io:file_handle",
-        "//runtime/src/iree/module/hal:types",
-        "//runtime/src/iree/tokenizer",
-        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
-        "//runtime/src/iree/tooling:device_util",
-        "//runtime/src/iree/vm",
-    ],
-)
-
-loom_cc_binary(
-    name = "generate",
-    srcs = ["generate.c"],
-    data = [":sources"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
-    ]),
-    deps = [
-        ":model",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/internal",
-        "//runtime/src/iree/base/internal:json",
-        "//runtime/src/iree/base/tooling:flags",
-        "//runtime/src/iree/io:file_handle",
-    ],
-)
-
-loom_cc_binary(
-    name = "server",
-    srcs = ["server.c"],
-    data = [":sources"],
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target/arch:vm",
-        "//runtime/config/hal:driver_amdgpu",
-    ]),
-    deps = [
-        ":model",
-        "//experimental/loom_serve/http:server",
-        "//experimental/loom_serve/image:request",
-        "//experimental/loom_serve/image:service",
-        "//runtime/src/iree/async",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/base/tooling:flags",
     ],
 )
 

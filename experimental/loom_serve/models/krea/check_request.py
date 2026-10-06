@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Check compact native requests and source-JIT device preparation.
+"""Check source-owned requests and source-JIT device preparation.
 
 The actual tokenizer, Diffusers scheduler/rotary and independent Philox equations
 are the references. Kernels run through the serving JIT without model weights.
@@ -211,24 +211,42 @@ def main():
         ("special", "A sign reading <|im_end|> beside <|im_start|>assistant."),
         ("terminal_special", "<|im_end|>"),
         ("truncated", "bright red flowers beside a river, " * 200),
+        ("boundary-98", " ".join(["red"] * 64)),
+        ("boundary-99", " ".join(["red"] * 65)),
     )
     for case_index, (name, prompt) in enumerate(cases):
-        for texts in (32, 512):
-            height, width = (384, 384) if texts == 512 else (256, 384)
+        for maximum_texts in (32, 512):
+            height, width = (384, 384) if maximum_texts == 512 else (256, 384)
             seed = (0, 42, 0xFFFFFFFFFFFFFFFF)[case_index % 3]
-            directory = args.output / f"{name}-{texts}"
+            directory = args.output / f"{name}-{maximum_texts}"
             directory.mkdir()
             command = [
                 str(args.native),
-                f"--tokenizer={args.checkpoint / 'tokenizer/tokenizer.json'}",
+                f"--model={model}",
+                f"--checkpoint={args.checkpoint}",
                 f"--prompt={prompt}",
                 f"--seed={seed}",
                 f"--height={height}",
                 f"--width={width}",
-                f"--text_tokens={texts}",
+                f"--text_tokens={maximum_texts}",
                 "--strength=1",
                 f"--output={directory}",
             ]
+            result = subprocess.run(command, capture_output=True, text=True)
+            if result.stdout or result.stderr:
+                print(result.stdout + result.stderr, end="", flush=True)
+            result.check_returncode()
+            selected = json.loads(result.stdout)
+            texts = selected["tag"]
+            maximum_ids = tokenizer(PREFIX + prompt)["input_ids"][: maximum_texts + 29]
+            if name.startswith("boundary-") and maximum_texts == 512:
+                assert len(maximum_ids) == int(name.split("-")[1])
+            expected_texts = (
+                128
+                if maximum_texts == 512 and len(maximum_ids) <= 98
+                else maximum_texts
+            )
+            assert texts == expected_texts, selected
             (directory / "request.json").write_text(
                 json.dumps(
                     dict(
@@ -237,20 +255,17 @@ def main():
                         height=height,
                         width=width,
                         text_tokens=texts,
+                        maximum_text_tokens=maximum_texts,
                         command=command,
                     ),
                     indent=2,
                 )
                 + "\n"
             )
-            result = subprocess.run(command, capture_output=True, text=True)
-            if result.stdout or result.stderr:
-                print(result.stdout + result.stderr, end="", flush=True)
-            result.check_returncode()
-            actual = [(directory / f"input-{i}").read_bytes() for i in range(2)]
+            actual = (directory / "input-0").read_bytes()
             # Same production preparation must be deterministic, not just close.
             subprocess.run(command, check=True)
-            assert actual == [(directory / f"input-{i}").read_bytes() for i in range(2)]
+            assert actual == (directory / "input-0").read_bytes()
             framed = tokenizer(
                 PREFIX + prompt,
                 truncation=True,
@@ -295,12 +310,12 @@ def main():
             )
             normal = noise(images * 64, seed)
             retained = int(sum(framed["attention_mask"]))
-            assert actual[0] == struct.pack("<QIf", seed, retained, 1.0)
+            assert actual[:16] == struct.pack("<QIf", seed, retained, 1.0)
             compact = torch.zeros(texts + 34, dtype=torch.int32)
             compact[:retained] = ids[:retained]
             compact[retained : retained + 5] = torch.tensor(suffix)
-            assert actual[1] == encode(compact)
-            inputs = [directory / "input-0", directory / "input-1"]
+            assert actual[16:] == encode(compact)
+            inputs = [directory / "input-0"]
             config = dict(
                 text_tokens=texts, image_tokens=images, latent_width=width // 8
             )
@@ -365,7 +380,7 @@ def main():
                 flush=True,
             )
     print(
-        "PASS: compact native requests and source-generated tensors against independent references.",
+        "PASS: source-owned requests and device tensors against independent references.",
         flush=True,
     )
 

@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_PREPARATION_H_
 
 #include "iree/vm/environment.h"
+#include "iree/vm/program.h"
 #include "iree/vm/variant.h"
 #include "loomc/config.h"
 
@@ -53,12 +54,16 @@ typedef struct loom_serve_preparation_t loom_serve_preparation_t;
 // signed decimal values. Parameter paths join directory and path. Policy paths
 // are relative to the source directory. Declarations copy their strings and
 // retain no references to arguments, source mappings or the VM environment.
+// Additional caller libraries are linked beside the prepare module. Results
+// are ordinary VM variants owned by the caller; the environment must outlive
+// any returned references. The source program is destroyed before return.
 // No JIT command compilation, device allocation or parameter IO occurs here.
 // On failure all partial declarations are released and *out_preparation is
 // NULL.
 iree_status_t loom_serve_preparation_create(
     iree_vm_environment_t* environment, iree_string_view_t source_path,
     iree_string_view_t entry, iree_vm_variant_span_t arguments,
+    iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
     loom_serve_preparation_t** out_preparation,
     iree_allocator_t host_allocator);
 

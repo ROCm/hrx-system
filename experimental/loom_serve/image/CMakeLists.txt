@@ -95,4 +95,106 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_binary(
+  NAME
+    request_check
+  SRCS
+    "request_check.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::path
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::input
+    iree::experimental::loom_serve::runtime::preparation
+    iree::experimental::loom_serve::runtime::program
+    iree::io::file_handle
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::vm
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    model_check
+  SRCS
+    "model_check.c"
+  DEPS
+    ::model
+    iree::base
+    iree::base::internal::path
+    iree::base::tooling::flags
+    iree::io::file_handle
+  TESTONLY
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_library(
+  NAME
+    model
+  HDRS
+    "model.h"
+  SRCS
+    "model.c"
+  DEPS
+    iree::base
+    iree::base::internal::path
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::input
+    iree::experimental::loom_serve::runtime::jit
+    iree::experimental::loom_serve::runtime::module
+    iree::experimental::loom_serve::runtime::preparation
+    iree::experimental::loom_serve::runtime::program
+    iree::experimental::loom_serve::runtime::weights
+    iree::hal
+    iree::io::file_handle
+    iree::module::hal::types
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::tooling::device_util
+    iree::vm
+    loom::binding::c::loomc
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    generate
+  SRCS
+    "generate.c"
+  DEPS
+    ::model
+    iree::base
+    iree::base::internal
+    iree::base::internal::json
+    iree::base::tooling::flags
+    iree::io::file_handle
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    server
+  SRCS
+    "server.c"
+  DEPS
+    ::model
+    ::request
+    ::service
+    iree::async
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::http::server
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

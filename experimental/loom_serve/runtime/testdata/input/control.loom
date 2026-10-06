@@ -1,0 +1,22 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("input") @encode(%text: buffer, %capacity: i64) -> (buffer, i64)
+func.decl import("input") @lookup(%token: buffer) -> (i32)
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+func.def public @tokens(%text: buffer, %capacity: i64) -> (buffer, i64) {
+  %ids, %count = func.call @encode(%text, %capacity) : (buffer, i64) -> (buffer, i64)
+  func.return %ids, %count : buffer, i64
+}
+func.def public @find(%token: buffer) -> (i32) {
+  %id = func.call @lookup(%token) : (buffer) -> (i32)
+  func.return %id : i32
+}
+func.def public @check(%condition: i32, %diagnostic: buffer) {
+  func.call @require(%condition, %diagnostic) : (i32, buffer) -> ()
+  func.return
+}

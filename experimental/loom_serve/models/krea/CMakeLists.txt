@@ -38,6 +38,7 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::preparation
     iree::testing::gtest
     iree::testing::gtest_main
@@ -45,66 +46,6 @@ loom_cc_test(
     loom::binding::c::loomc
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/prepare.loom}}"
-)
-endif()
-
-loom_cc_library(
-  NAME
-    request
-  HDRS
-    "request.h"
-  SRCS
-    "request.c"
-  DEPS
-    iree::base
-    iree::base::internal
-    iree::tokenizer
-    iree::tokenizer::vocab
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    request_test
-  SRCS
-    "request_test.cc"
-  DEPS
-    ::request
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-loom_cc_binary(
-  NAME
-    request_check
-  SRCS
-    "request_check.c"
-  DEPS
-    ::request
-    iree::base
-    iree::base::internal::json
-    iree::base::internal::path
-    iree::base::tooling::flags
-    iree::io::file_handle
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-  TESTONLY
-)
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_binary(
-  NAME
-    model_check
-  SRCS
-    "model_check.c"
-  DEPS
-    ::model
-    iree::base
-    iree::base::internal::path
-    iree::base::tooling::flags
-    iree::io::file_handle
-  TESTONLY
 )
 endif()
 
@@ -119,6 +60,7 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::program
     iree::testing::gtest
     iree::testing::gtest_main
@@ -134,79 +76,16 @@ loom_cc_test(
     model_test
   SRCS
     "model_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/prepare.loom"
   DEPS
-    ::model
     iree::base
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::image::model
     iree::testing::gtest
     iree::testing::gtest_main
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_library(
-  NAME
-    model
-  HDRS
-    "model.h"
-  SRCS
-    "model.c"
-  DEPS
-    ::request
-    iree::base
-    iree::base::internal::path
-    iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::jit
-    iree::experimental::loom_serve::runtime::module
-    iree::experimental::loom_serve::runtime::preparation
-    iree::experimental::loom_serve::runtime::program
-    iree::experimental::loom_serve::runtime::weights
-    iree::hal
-    iree::io::file_handle
-    iree::module::hal::types
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-    iree::tooling::device_util
-    iree::vm
-    loom::binding::c::loomc
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_binary(
-  NAME
-    generate
-  SRCS
-    "generate.c"
-  DATA
-    ::sources
-  DEPS
-    ::model
-    iree::base
-    iree::base::internal
-    iree::base::internal::json
-    iree::base::tooling::flags
-    iree::io::file_handle
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_binary(
-  NAME
-    server
-  SRCS
-    "server.c"
-  DATA
-    ::sources
-  DEPS
-    ::model
-    iree::async
-    iree::base
-    iree::base::tooling::flags
-    iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::image::request
-    iree::experimental::loom_serve::image::service
+  ARGS
+    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/prepare.loom}}"
 )
 endif()
 

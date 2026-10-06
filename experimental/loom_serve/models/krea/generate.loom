@@ -7,18 +7,18 @@
 config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
 kernel.decl @request_noise() launch(%request: buffer, %output: buffer)
-kernel.decl @request_prompt() launch(%request: buffer, %prompt: buffer, %tokens: buffer, %mask: buffer)
+kernel.decl @request_prompt() launch(%request: buffer, %tokens: buffer, %mask: buffer)
 kernel.decl @request_encoder_rotary() launch(%request: buffer, %cosine: buffer, %sine: buffer)
 kernel.decl @request_rotary() launch(%cosine: buffer, %sine: buffer)
 kernel.decl @request_constants() launch(%request: buffer, %times: buffer, %deltas: buffer, %strength: buffer, %affine: buffer)
 command.program.decl @sample_image() launch(%encoder_parameters: buffer, %parameters: buffer, %vae_parameters: buffer, %sample: buffer, %token_ids: buffer, %encoder_cosine: buffer, %encoder_sine: buffer, %encoder_mask: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %deltas: buffer, %affine: buffer, %output: buffer)
 command.program.decl @sample_image_adapted() launch(%encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %token_ids: buffer, %encoder_cosine: buffer, %encoder_sine: buffer, %encoder_mask: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer)
-template.decl @krea2.generate_image(%images: index, %texts: index, %adapted: i1, %encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer)
+template.decl @krea2.generate_image(%images: index, %texts: index, %adapted: i1, %encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %output: buffer)
 
 // Request-derived tensors live in the reflected command workspace. Only the
-// compact seed/count/strength header and unpadded prompt IDs cross from the host.
+// opaque request payload crosses from the host.
 // Preparation has no mutable RNG, checkpoint access or host completion boundary.
-template.def<@krea2.generate_image> @krea2_generate_image(%images: index, %texts: index, %adapted: i1, %encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer) {
+template.def<@krea2.generate_image> @krea2_generate_image(%images: index, %texts: index, %adapted: i1, %encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %output: buffer) {
   %framing = index.constant 34 : index
   %padding = index.constant 48 : index
   %ids = index.add %texts, %framing : index
@@ -50,7 +50,7 @@ template.def<@krea2.generate_image> @krea2_generate_image(%images: index, %texts
   %affine = buffer.alloca<global> align(256) %affine_bytes : buffer
   command.concurrent {
     kernel.launch @request_noise(%request, %noise) : (buffer, buffer)
-    kernel.launch @request_prompt(%request, %prompt, %token_ids, %mask) : (buffer, buffer, buffer, buffer)
+    kernel.launch @request_prompt(%request, %token_ids, %mask) : (buffer, buffer, buffer)
     kernel.launch @request_encoder_rotary(%request, %encoder_cosine, %encoder_sine) : (buffer, buffer, buffer)
     kernel.launch @request_rotary(%cosine, %sine) : (buffer, buffer)
     kernel.launch @request_constants(%request, %times, %deltas, %strength, %affine) : (buffer, buffer, buffer, buffer, buffer)
@@ -65,18 +65,18 @@ template.def<@krea2.generate_image> @krea2_generate_image(%images: index, %texts
   template.return
 }
 
-command.program.def public @generate_image() launch(%encoder_parameters: buffer, %parameters: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer) {
+command.program.def public @generate_image() launch(%encoder_parameters: buffer, %parameters: buffer, %vae_parameters: buffer, %request: buffer, %output: buffer) {
   %images = config.get @krea2.image_tokens : index
   %texts = config.get @krea2.text_tokens : index
   %adapted = scalar.constant false : i1
-  template.apply<@krea2.generate_image>(%images, %texts, %adapted, %encoder_parameters, %parameters, %parameters, %vae_parameters, %request, %prompt, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.generate_image>(%images, %texts, %adapted, %encoder_parameters, %parameters, %parameters, %vae_parameters, %request, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }
 
-command.program.def public @generate_image_adapted() launch(%encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer) {
+command.program.def public @generate_image_adapted() launch(%encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %output: buffer) {
   %images = config.get @krea2.image_tokens : index
   %texts = config.get @krea2.text_tokens : index
   %adapted = scalar.constant true : i1
-  template.apply<@krea2.generate_image>(%images, %texts, %adapted, %encoder_parameters, %parameters, %adapter, %vae_parameters, %request, %prompt, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  template.apply<@krea2.generate_image>(%images, %texts, %adapted, %encoder_parameters, %parameters, %adapter, %vae_parameters, %request, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer)
   command.return
 }

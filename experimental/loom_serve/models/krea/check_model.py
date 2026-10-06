@@ -81,7 +81,7 @@ def main():
     assert retained.count('"event":"jit_stage"') == 2
     assert len(residencies) == 1
     residency = residencies[0]
-    assert [stage["text_tokens"] for stage in residency["stages"]] == [512, 128]
+    assert [stage["tag"] for stage in residency["stages"]] == [512, 128]
     assert residency["workspace_bytes"] == max(
         stage["workspace_bytes"] for stage in residency["stages"]
     )
@@ -96,13 +96,11 @@ def main():
     )
     assert retained.count("Streaming ") == (4 if args.adapter else 3)
     rounds = 2 if args.adapter else 1
-    assert retained.count("adapter strength must be finite") == 3 * rounds
-    assert [event["prefix_prompt_tokens"] for event in prepared] == [
-        40,
-        99,
-        40,
+    assert retained.count("strength must be finite") == 3 * rounds
+    assert [event["stage"] for event in prepared] == [1, 0, 1] * rounds
+    assert [event["input_bytes"] for event in prepared] == [
+        16 + (text + 34) * 4 for text in (128, 512, 128)
     ] * rounds
-    assert [event["text_tokens"] for event in prepared] == [128, 512, 128] * rounds
     for first in range(0, 3 * rounds, 3):
         assert (args.output / f"image-{first}.f32").read_bytes() == (
             args.output / f"image-{first + 2}.f32"

@@ -66,7 +66,7 @@ def main():
                     f"--seed={request['seed']}",
                     f"--height={request['height']}",
                     f"--width={request['width']}",
-                    f"--text_tokens={request['text_tokens']}",
+                    f"--text_tokens={request['maximum_text_tokens']}",
                     *(
                         [
                             f"--adapter={args.adapter / 'softwatercolor.safetensors'}",
@@ -148,10 +148,7 @@ def main():
                             latent_width=width // 8,
                         ).items()
                     ],
-                    *[
-                        f"--input={args.requests / name / ('input-' + str(i))}"
-                        for i in range(2)
-                    ],
+                    f"--input={args.requests / name / 'input-0'}",
                     f"--expected={reference / (name + '-' + phase + '.f32')}",
                     f"--actual={actual}",
                     "--output_type=f32",

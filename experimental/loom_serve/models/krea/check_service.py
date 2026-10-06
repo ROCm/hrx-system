@@ -250,7 +250,7 @@ def main():
         ]
         assert len(residencies) == 1
         residency = residencies[0]
-        assert [stage["text_tokens"] for stage in residency["stages"]] == [512, 128]
+        assert [stage["tag"] for stage in residency["stages"]] == [512, 128]
         assert residency["workspace_bytes"] == max(
             stage["workspace_bytes"] for stage in residency["stages"]
         )
@@ -267,23 +267,9 @@ def main():
         prepared = [
             event for event in journal.events if event.get("event") == "image_prepared"
         ]
-        assert [event["prefix_prompt_tokens"] for event in prepared] == [
-            40,
-            99,
-            40,
-            40,
-            99,
-            40,
-            40,
-        ]
-        assert [event["text_tokens"] for event in prepared] == [
-            128,
-            512,
-            128,
-            128,
-            512,
-            128,
-            128,
+        assert [event["stage"] for event in prepared] == [1, 0, 1, 1, 0, 1, 1]
+        assert [event["input_bytes"] for event in prepared] == [
+            16 + (text + 34) * 4 for text in (128, 512, 128, 128, 512, 128, 128)
         ]
         assert [
             event["request"]

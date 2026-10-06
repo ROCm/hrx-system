@@ -4,13 +4,30 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-func.decl import("runner") @execute_4(%stage: i32, %request: hal.buffer, %prompt: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
+func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+func.decl import("input") @encode(%text: buffer, %capacity: i64) -> (buffer, i64)
+func.decl import("input") @lookup(%token: buffer) -> (i32)
+
+// <|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n
+global.rodata.def @prefix = bytes("3c7c696d5f73746172747c3e73797374656d0a44657363726962652074686520696d6167652062792064657461696c696e672074686520636f6c6f722c2073686170652c2073697a652c20746578747572652c207175616e746974792c20746578742c207370617469616c2072656c6174696f6e7368697073206f6620746865206f626a6563747320616e64206261636b67726f756e643a3c7c696d5f656e647c3e0a3c7c696d5f73746172747c3e757365720a")
+// <|im_end|>\n<|im_start|>assistant\n
+global.rodata.def @suffix = bytes("3c7c696d5f656e647c3e0a3c7c696d5f73746172747c3e617373697374616e740a")
+// <|endoftext|>
+global.rodata.def @padding = bytes("3c7c656e646f66746578747c3e")
+// tokenizer does not match the Krea encoder template
+global.rodata.def @template_error = bytes("746f6b656e697a657220646f6573206e6f74206d6174636820746865204b72656120656e636f6465722074656d706c617465")
+// prepared token has no encoder embedding
+global.rodata.def @vocabulary_error = bytes("707265706172656420746f6b656e20686173206e6f20656e636f64657220656d62656464696e67")
+// strength must be finite and requires an adapter when not one
+global.rodata.def @strength_error = bytes("737472656e677468206d7573742062652066696e69746520616e6420726571756972657320616e2061646170746572207768656e206e6f74206f6e65")
 
 // Tags are the immutable i64 values declared by prepare.loom, in stage order.
 // Slot zero is the maximum. Short prompts may use any retained text128 slot
 // while preserving the kernels' prompt/suffix live-key partitions.
-func.def public @select_stage(%tags: buffer, %stage_count: i32, %token_count: i32) -> (i32) {
+func.def @select_stage(%tags: buffer, %stage_count: i32, %token_count: i32) -> (i32) {
   %origin = index.constant 0 : offset
   // Preparation requires a nonempty catalog addressable by signed i32 IDs.
   %bounded = scalar.assume %stage_count [range(%stage_count, 1, 2147483647)] : i32
@@ -33,11 +50,120 @@ func.def public @select_stage(%tags: buffer, %stage_count: i32, %token_count: i3
   func.return %selected : i32
 }
 
+
+func.def @check_ids(%ids: buffer, %count: i64) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  // input.encode returns a live count bounded by the supplied capacity.
+  // This model's bootstrap caps the text extent at 65536 plus 29 framing IDs.
+  %bounded_count = scalar.assume %count [range(%count, 0, 65565)] : i64
+  %extent = index.cast %bounded_count : i64 to index
+  %view = buffer.view %ids[%origin] : buffer -> view<[%extent]xi32>
+  %limit = scalar.constant 151936 : i32
+  %diagnostic = global.load @vocabulary_error : buffer
+  scf.for %i = [%zero to %extent step %one] {
+    %id = view.load %view[%i] : view<[%extent]xi32> -> i32
+    %valid = scalar.cmpi ult, %id, %limit : i32
+    %valid32 = scalar.extui %valid : i1 to i32
+    func.call @require(%valid32, %diagnostic) : (i32, buffer) -> ()
+    scf.yield
+  }
+  func.return
+}
+
+// The only host-visible result is a catalog ordinal and opaque upload bytes.
+// This source owns both tokenizer framing and the device payload layout.
+func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i32, %prompt: buffer, %seed: i64, %strength: f32) -> (i32, buffer) {
+  %origin = index.constant 0 : offset
+  %zero64 = scalar.constant 0 : i64
+  %one32 = scalar.constant 1 : i32
+  %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
+  %adapted64 = view.load %state_view[0] : view<1xi64> -> i64
+  %adapted = scalar.cmpi ne, %adapted64, %zero64 : i64
+  %strength_bits = scalar.bitcast %strength : f32 to i32
+  %exponent_mask = scalar.constant 2139095040 : i32
+  %one_bits = scalar.constant 1065353216 : i32
+  %exponent = scalar.andi %strength_bits, %exponent_mask : i32
+  %finite = scalar.cmpi ne, %exponent, %exponent_mask : i32
+  %identity = scalar.cmpi eq, %strength_bits, %one_bits : i32
+  %available = scalar.ori %adapted, %identity : i1
+  %valid_strength = scalar.andi %finite, %available : i1
+  %valid_strength32 = scalar.extui %valid_strength : i1 to i32
+  %strength_error = global.load @strength_error : buffer
+  func.call @require(%valid_strength32, %strength_error) : (i32, buffer) -> ()
+  %prefix = global.load @prefix : buffer
+  %suffix = global.load @suffix : buffer
+  %prefix_limit = scalar.constant 35 : i64
+  %suffix_limit = scalar.constant 6 : i64
+  %prefix_ids, %prefix_count = func.call @encode(%prefix, %prefix_limit) : (buffer, i64) -> (buffer, i64)
+  %suffix_ids, %suffix_count = func.call @encode(%suffix, %suffix_limit) : (buffer, i64) -> (buffer, i64)
+  %expected_prefix = scalar.constant 34 : i64
+  %expected_suffix = scalar.constant 5 : i64
+  %prefix_matches = scalar.cmpi eq, %prefix_count, %expected_prefix : i64
+  %suffix_matches = scalar.cmpi eq, %suffix_count, %expected_suffix : i64
+  %framing_matches = scalar.andi %prefix_matches, %suffix_matches : i1
+  %padding = global.load @padding : buffer
+  %padding_id = func.call @lookup(%padding) : (buffer) -> (i32)
+  %expected_padding = scalar.constant 151643 : i32
+  %padding_matches = scalar.cmpi eq, %padding_id, %expected_padding : i32
+  %template_matches = scalar.andi %framing_matches, %padding_matches : i1
+  %template_matches32 = scalar.extui %template_matches : i1 to i32
+  %template_error = global.load @template_error : buffer
+  func.call @require(%template_matches32, %template_error) : (i32, buffer) -> ()
+  %prefix_bytes = buffer.length %prefix
+  %prompt_bytes = buffer.length %prompt
+  %framed_bytes = index.add %prefix_bytes, %prompt_bytes : offset
+  %framed = buffer.alloca<private> align(1) %framed_bytes : buffer
+  buffer.copy %prefix[%origin], %framed[%origin], %prefix_bytes
+  buffer.copy %prompt[%origin], %framed[%prefix_bytes], %prompt_bytes
+  %bounded = scalar.assume %stage_count [range(%stage_count, 1, 2147483647)] : i32
+  %count = index.cast %bounded : i32 to index
+  %tag_view = buffer.view %tags[%origin] : buffer -> view<[%count]xi64>
+  %maximum_value = view.load %tag_view[0] : view<[%count]xi64> -> i64
+  // These tags come from this model's validated cold bootstrap.
+  %maximum = scalar.assume %maximum_value [range(%maximum_value, 16, 65536)] : i64
+  %overhead = scalar.constant 29 : i64
+  %capacity = scalar.addi %maximum, %overhead : i64
+  %ids, %live = func.call @encode(%framed, %capacity) : (buffer, i64) -> (buffer, i64)
+  func.call @check_ids(%ids, %live) : (buffer, i64) -> ()
+  func.call @check_ids(%suffix_ids, %suffix_count) : (buffer, i64) -> ()
+  %live32 = scalar.trunci %live : i64 to i32
+  %stage = func.call @select_stage(%tags, %stage_count, %live32) : (buffer, i32, i32) -> (i32)
+  %stage_value = index.cast %stage : i32 to index
+  // select_stage returns zero or an ordinal visited in this same tag table.
+  %stage_index = index.assume %stage_value [range(%stage_value, 0, 2147483646), lt(%stage_value, %count)] : index
+  %texts_value = view.load %tag_view[%stage_index] : view<[%count]xi64> -> i64
+  %texts = scalar.assume %texts_value [range(%texts_value, 16, 65536)] : i64
+  %framing = scalar.constant 34 : i64
+  %extent64 = scalar.addi %texts, %framing : i64
+  %extent = index.cast %extent64 : i64 to index
+  %four = index.constant 4 : offset
+  %header_bytes = index.constant 16 : offset
+  %id_bytes = index.scale %extent, %four : index, offset -> offset
+  %payload_bytes = index.add %id_bytes, %header_bytes : offset
+  %payload = buffer.alloca<private> align(8) %payload_bytes : buffer
+  %zero32 = scalar.constant 0 : i32
+  buffer.fill %zero32, %payload[%origin], %payload_bytes : i32
+  %seed_view = buffer.view %payload[%origin] : buffer -> view<1xi64>
+  view.store %seed, %seed_view[0] : i64, view<1xi64>
+  %header_view = buffer.view %payload[%origin] : buffer -> view<4xi32>
+  view.store %live32, %header_view[2] : i32, view<4xi32>
+  view.store %strength_bits, %header_view[3] : i32, view<4xi32>
+  %live_index = index.cast %live : i64 to index
+  %live_bytes = index.scale %live_index, %four : index, offset -> offset
+  %suffix_offset = index.add %header_bytes, %live_bytes : offset
+  %suffix_bytes = index.constant 20 : offset
+  buffer.copy %ids[%origin], %payload[%header_bytes], %live_bytes
+  buffer.copy %suffix_ids[%origin], %payload[%suffix_offset], %suffix_bytes
+  func.return %stage, %payload : i32, buffer
+}
+
 // One invocation submits the complete image and its final readback without
 // waiting. The native image owner retires both accepted queue frontiers before
 // returning the image or reusing request storage.
-func.def public @generate(%stage: i32, %output_bytes: i64, %request: hal.buffer, %prompt: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) {
-  %work = func.call @execute_4(%stage, %request, %prompt, %rgb, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+func.def public @generate(%stage: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) {
+  %work = func.call @execute_3(%stage, %request, %rgb, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   %zero = scalar.constant 0 : i32
   %offset = scalar.constant 0 : i64
   %completion = func.call @feedback(%zero, %rgb, %offset, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
