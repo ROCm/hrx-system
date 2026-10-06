@@ -7,6 +7,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_DEVICE_H_
 
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/storage/memory.h"
 
 #ifdef __cplusplus
@@ -67,6 +68,9 @@ loom_serve_execution_t* loom_serve_device_execution(
     const loom_serve_device_t* device);
 // Borrowed shared physical owner, or NULL for explicitly fixed backing.
 loom_serve_memory_pool_t* loom_serve_device_memory_pool(
+    const loom_serve_device_t* device);
+// Borrowed parameter admission, pinning and LRU policy shared by all models.
+loom_serve_residency_cache_t* loom_serve_device_residency_cache(
     const loom_serve_device_t* device);
 
 #ifdef __cplusplus

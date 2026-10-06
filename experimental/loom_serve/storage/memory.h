@@ -47,6 +47,30 @@ void loom_serve_memory_pool_destroy(loom_serve_memory_pool_t* pool);
 loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
     const loom_serve_memory_pool_t* pool);
 
+// Cold pressure policy, independent of logical storage geometry. The callback
+// may trim eligible reservations toward target_bytes of total commitment; it
+// returns a status only for an actual platform/IO failure. An unreachable
+// target is not an error. It must not commit memory or recurse into admission.
+typedef struct loom_serve_memory_reclaimer_t {
+  // Borrowed policy owner, alive until the callback is removed.
+  void* user_data;
+  // Serialized reclaim operation; NULL disables automatic reclamation.
+  iree_status_t (*fn)(void* user_data, uint64_t target_bytes);
+} loom_serve_memory_reclaimer_t;
+
+void loom_serve_memory_pool_set_reclaimer(
+    loom_serve_memory_pool_t* pool, loom_serve_memory_reclaimer_t reclaimer);
+
+// Makes room for additional physical bytes using the installed cold policy.
+// Does not allocate or reserve credit: the single owner commits before yielding
+// admission to another caller. False means ordinary capacity backpressure, not
+// an allocation failure. Consumers pin every residency they need before asking
+// for capacity, including already backed ranges the policy could otherwise
+// trim.
+iree_status_t loom_serve_memory_pool_prepare(loom_serve_memory_pool_t* pool,
+                                             uint64_t additional_bytes,
+                                             bool* out_admitted);
+
 // Reserves stable device addresses without committing physical storage.
 // The borrowed HAL buffer remains identical across commit/trim operations.
 // statistics is a caller-owned, initially zeroed accounting group shared by
@@ -63,6 +87,7 @@ iree_hal_buffer_t* loom_serve_virtual_buffer_handle(
 // contents survive. New contents are unspecified. No consumer may access new
 // ranges until this call succeeds. Failure can leave additional slabs owned;
 // they remain accounted and are reclaimed by trim/destruction.
+// The pool's pressure policy may reclaim other unpinned residencies first.
 iree_status_t loom_serve_virtual_buffer_commit(
     loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
     iree_device_size_t length);

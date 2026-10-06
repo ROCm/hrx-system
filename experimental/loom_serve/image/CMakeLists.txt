@@ -152,6 +152,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::module
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::runtime::program
+    iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::runtime::retirement
     iree::experimental::loom_serve::runtime::weights
     iree::hal

@@ -83,6 +83,7 @@ loom_cc_library(
     "device.c"
   DEPS
     ::execution
+    ::residency
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -314,6 +315,21 @@ endif()
 
 loom_cc_library(
   NAME
+    residency
+  HDRS
+    "residency.h"
+  SRCS
+    "residency.c"
+  DEPS
+    ::execution
+    ::weights
+    iree::base
+    iree::experimental::loom_serve::storage::memory
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     retirement
   HDRS
     "retirement.h"
@@ -385,6 +401,7 @@ loom_cc_test(
     ::device
     ::execution
     ::jit
+    ::residency
     ::weights
     iree::base
     iree::base::tooling::flags

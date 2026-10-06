@@ -30,6 +30,8 @@ struct loom_serve_device_t {
   loom_serve_execution_t* execution;
   // Owned physical domain shared by all model reservations; NULL when fixed.
   loom_serve_memory_pool_t* memory_pool;
+  // Parameter admission and eviction policy borrowing execution and memory.
+  loom_serve_residency_cache_t* residency_cache;
   // Device-wide profiling session enclosing every resident model.
   iree_hal_profiling_from_flags_t* profiling;
 };
@@ -114,6 +116,11 @@ iree_status_t loom_serve_device_create(
         options->memory_limit, &device->memory_pool, host_allocator);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_serve_residency_cache_create(
+        device->memory_pool, device->execution, &device->residency_cache,
+        host_allocator);
+  }
+  if (iree_status_is_ok(status)) {
     status = iree_hal_begin_device_group_profiling_from_flags(
         device->group, host_allocator, &device->profiling);
   }
@@ -135,6 +142,7 @@ iree_status_t loom_serve_device_destroy(loom_serve_device_t* device) {
                             "serving device still owns model reservations");
   }
   iree_status_t status = iree_hal_end_profiling_from_flags(device->profiling);
+  loom_serve_residency_cache_destroy(device->residency_cache);
   loom_serve_memory_pool_destroy(device->memory_pool);
   loom_serve_execution_release(device->execution);
   iree_hal_device_group_release(device->group);
@@ -172,4 +180,9 @@ loom_serve_execution_t* loom_serve_device_execution(
 loom_serve_memory_pool_t* loom_serve_device_memory_pool(
     const loom_serve_device_t* device) {
   return device->memory_pool;
+}
+
+loom_serve_residency_cache_t* loom_serve_device_residency_cache(
+    const loom_serve_device_t* device) {
+  return device->residency_cache;
 }

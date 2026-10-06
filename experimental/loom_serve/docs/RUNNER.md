@@ -29,6 +29,7 @@ state and canonical checkpoints without naming a model.
 | [`preparation`](../runtime/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
 | [`text_model`](../text/model.h) | Source-declared storage materialization, physical page ownership, scratch, source packet invocation, numerical progress | HTTP or tool semantics |
 | [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
+| [`residency`](../runtime/residency.h) | Whole-model parameter admission, nested operation/retention pins, idle LRU eviction under the shared physical budget | Which mutable state can be discarded or which workflow should run next |
 | [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
 | [`text_schedule`](../text/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
 | [`text_service`](../text/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
@@ -101,9 +102,30 @@ Creation leaves parameter payloads unread. First inference or explicit
 `model_deactivate` unmaps their physical slabs while preserving commands,
 checkpoint/preparation plans and live mutable state. Re-activation repeats
 in-place preparation from original file bytes; an already active model does
-no loading. These are explicit lifecycle operations, not automatic LRU
-admission. All elastic model reservations charge the same device physical
-budget; `--memory_bytes` excludes workspace until it uses a shared queue pool.
+no loading. Each model registers its required checkpoint plans as one admission
+group with the device's residency cache. Both parameter activation and mutable
+state growth can reclaim unpinned groups in least-recently-used order. Whole-group
+capacity admission precedes parameter I/O: a diffusion model cannot partially
+load its first domains before finding that the remaining domains exceed budget.
+
+Model invocation acquires a pin before state growth or submission and releases
+it after the existing completion boundary. Warm pins require no allocation or
+additional wait. A workflow can retain extra pins across calls through the
+model's borrowed `model_residency` handle. `residency_try_acquire` distinguishes
+ordinary capacity backpressure (`admitted=false`, no owned pin) from a terminal
+allocation, I/O or device failure. `residency_activate` is unpinned warmup;
+`residency_deactivate` rejects pinned groups. Explicit `residency_cache_trim`
+reclaims eligible weights toward a total physical-byte target without discarding
+mutable state. Insufficient eligible capacity on automatic admission preserves
+useful idle weights rather than evicting them for a request that still cannot fit.
+
+All elastic model reservations charge the same device physical budget;
+`--memory_bytes` excludes workspace until it uses a shared queue pool. The
+synchronous model APIs report capacity denial as an execution error. Scheduling
+across models can use the non-error admission result before invoking them;
+the HTTP tools still each host one model. Pooled text growth retains its logical
+completion-reservation policy; physical allocation failure during that growth
+is terminal, not an implicit offload or retry protocol.
 
 Qwen selects a preparation command that permutes FFN gate/up Q5 blocks
 in place into eight-channel groups; all other tensors retain their checkpoint
@@ -243,6 +265,9 @@ final ownership. Teardown releases cached VM/command/view references, joins
 those final releases, then frees host payloads and virtual reservations. Weight
 plans independently enforce the same boundary for their exported roots. Warm
 submission needs no additional wrapper allocation or host wait.
+An invocation error joins execution before releasing its residency pin; failed
+readiness preserves the pin through terminal resource retirement. The cache
+never treats failed readiness as permission to reuse a live weight mapping.
 
 The application destroys models before the shared device owner. That owner ends
 profiling and releases execution/group/device before its async services.
