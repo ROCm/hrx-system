@@ -1,0 +1,35 @@
+// RUN: emit source-low target=amdgpu:gfx11-generic output=low
+
+// External storage retains its symbol reference until artifact linking.
+global.rodata.decl @external_words
+
+kernel.def @read_external() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %table = global.load @external_words : buffer
+  %aligned = buffer.assume.alignment %table {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %output_view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ----
+low.kernel.def target<amdgpu.gfx11.generic.core> abi_layout({constant_count = 0, direct_arg_count = 0, direct_arg_names = {}, direct_arg_offsets = [], direct_arg_parameter_indices = [], direct_arg_sizes = [], parameter_count = 1, resource_count = 1, resource_offsets = [0], resource_parameter_indices = [0], uses_kernarg_segment_ptr = true}) workgroup_size(1, 1, 1) workgroup_count(1, 1, 1) @read_external() asm {
+  %output_view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %9 = s_getpc_b64
+  %10 = slice %9[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %11 = slice %9[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %12, %13 = s_add_u32_rhs_symbol_rel32_lo %10 {symbol = @external_words}
+  %14, %15 = s_addc_u32_rhs_symbol_rel32_hi %11, %13 {symbol = @external_words}
+  %view = concat(%12, %14) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %17 = s_mov_b32 0
+  %value = s_load_dword %view, %17
+  %19 = v_mov_b32_copy %value
+  %20 = v_mov_b32 0
+  global_store_b32_saddr %20, %19, %output_view
+  return
+}
