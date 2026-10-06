@@ -20,12 +20,15 @@
 extern "C" {
 #endif  // __cplusplus
 
-// Device-global cache of prepared single-dispatch native commands (START_CU,
+// Device-global table of prepared single-dispatch native commands (START_CU,
 // START_NPU, PARTIAL_ELF, and START_DPU), reused across one-shot command-buffer
 // instances and rebound/rewritten in place to match a freshly recorded
 // dispatch. START_DPU keeps the instruction BO alive for the hwctx lifetime
-// (XRT module_run model) and restores+repatches it on each submit.
-enum { kAmdxdnaSingleCommandCacheCapacity = 8 };
+// (XRT module_run model) and restores+repatches it on each submit. Occupied
+// entries are never LRU-evicted: destroying an instruction BO records a paging
+// fence that later hardware-queue submits wait on inside the ioctl. The table
+// grows to hold every live template.
+enum { kAmdxdnaSingleCommandCacheInitialCapacity = 8 };
 
 typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   iree_hal_amdxdna_native_queue_t* queue;
@@ -43,6 +46,12 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   // Native code bytes retained by |ctrl_code_buffer|. Kept separately from
   // ctrl_word_count so cache-wide accounting remains exact during teardown.
   iree_host_size_t retained_code_bytes;
+  // Process-unique executable identity plus the export/run that produced this
+  // command. Non-zero identity is the hot-path lookup key: it does not ABA
+  // after reload (unlike object addresses) and avoids a full TXN memcmp.
+  uint64_t src_executable_identity;
+  uint32_t src_entry_point;
+  uint32_t src_run_ordinal;
   // Static descriptor identity for late-bound START_NPU template reuse. The
   // cached command owns the mutable control-code BO/native command, while these
   // fields identify which run template it came from. They point into the owned
@@ -57,6 +66,10 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
   // same-shaped kernel falsely reuse this command's on-device control code.
   iree_hal_amdxdna_u32_list_t owned_src_asm_inst;
   iree_hal_amdxdna_u32_list_t owned_src_patches;
+  // Snapshot of the last dispatched WRITE32 constant block. Compared on the
+  // hit path so a constants-only change still republishes without a full TXN
+  // memcmp, and an unchanged block can skip publication.
+  uint8_t* owned_src_constants;
   iree_host_size_t src_constant_count;
   bool src_use_native_partial_elf;
   uint64_t last_use;
@@ -73,9 +86,9 @@ typedef struct iree_hal_amdxdna_single_command_cache_entry_t {
 typedef struct iree_hal_amdxdna_device_single_command_cache_t {
   iree_allocator_t host_allocator;
   iree_slim_mutex_t mutex;
-  iree_hal_amdxdna_single_command_cache_entry_t
-      entries[kAmdxdnaSingleCommandCacheCapacity];
+  iree_hal_amdxdna_single_command_cache_entry_t* entries;
   iree_host_size_t entry_count;
+  iree_host_size_t entry_capacity;
   uint64_t use_clock;
   // Lock-free snapshot used by chain-cache admission on every chain lookup.
   iree_atomic_int64_t retained_code_bytes;
@@ -125,6 +138,16 @@ iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
     bool use_native_partial_elf, iree_host_size_t binding_count,
     iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
 
+// Finds a retained command recorded from the same executable export on the
+// same queue and CU. Identity 0 never matches: callers without a
+// cache_identity fall back to template content. The matched command is still
+// rewritten from the fresh dispatch.
+iree_status_t iree_hal_amdxdna_find_single_command_cache_executable_entry(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    uint64_t executable_identity, uint32_t entry_point, uint32_t run_ordinal,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry);
+
 iree_status_t iree_hal_amdxdna_update_single_command_cache_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* entry,
@@ -158,6 +181,17 @@ void iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
     const iree_hal_amdxdna_u32_list_t* asm_inst,
     const iree_hal_amdxdna_u32_list_t* patches, iree_host_size_t constant_count,
     bool use_native_partial_elf, void* ctrl_code_mapped_ptr);
+
+void iree_hal_amdxdna_single_command_cache_entry_set_executable_key(
+    iree_hal_amdxdna_single_command_cache_entry_t* entry,
+    uint64_t executable_identity, uint32_t entry_point, uint32_t run_ordinal);
+
+// Copies the dispatch constant block into cache-owned storage so the next
+// rewrite can detect constants-only changes without a full TXN memcmp.
+iree_status_t iree_hal_amdxdna_single_command_cache_entry_store_constants(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_single_command_cache_entry_t* entry,
+    const void* constants, iree_host_size_t constant_count);
 
 void iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
     iree_hal_amdxdna_single_command_cache_entry_t* entry);

@@ -58,6 +58,7 @@ static void iree_hal_amdxdna_single_command_cache_entry_deinitialize(
   iree_allocator_free(cache->host_allocator, entry->binding_lengths);
   iree_allocator_free(cache->host_allocator, entry->owned_src_asm_inst.data);
   iree_allocator_free(cache->host_allocator, entry->owned_src_patches.data);
+  iree_allocator_free(cache->host_allocator, entry->owned_src_constants);
   memset(entry, 0, sizeof(*entry));
 }
 
@@ -204,6 +205,7 @@ void iree_hal_amdxdna_device_destroy_single_command_cache(
     iree_hal_amdxdna_single_command_cache_entry_deinitialize(
         cache, &cache->entries[i]);
   }
+  iree_allocator_free(cache->host_allocator, cache->entries);
   iree_slim_mutex_deinitialize(&cache->mutex);
   iree_allocator_free(cache->host_allocator, cache);
   device->single_command_cache = NULL;
@@ -397,6 +399,29 @@ iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
   return iree_ok_status();
 }
 
+iree_status_t iree_hal_amdxdna_find_single_command_cache_executable_entry(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
+    uint64_t executable_identity, uint32_t entry_point, uint32_t run_ordinal,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry) {
+  *out_entry = NULL;
+  if (executable_identity == 0) return iree_ok_status();
+  for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
+    iree_hal_amdxdna_single_command_cache_entry_t* entry = &cache->entries[i];
+    if (!entry->command || entry->queue != queue ||
+        entry->in_flight_count != 0 || entry->cu_index != cu_index ||
+        entry->src_executable_identity != executable_identity ||
+        entry->src_entry_point != entry_point ||
+        entry->src_run_ordinal != run_ordinal) {
+      continue;
+    }
+    entry->last_use = ++cache->use_clock;
+    *out_entry = entry;
+    return iree_ok_status();
+  }
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amdxdna_find_single_command_cache_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_native_queue_t* queue, uint32_t cu_index,
@@ -435,6 +460,19 @@ iree_status_t iree_hal_amdxdna_find_single_command_cache_entry(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_amdxdna_single_command_cache_reserve(
+    iree_hal_amdxdna_device_single_command_cache_t* cache) {
+  const iree_host_size_t old_capacity = cache->entry_capacity;
+  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+      cache->host_allocator, kAmdxdnaSingleCommandCacheInitialCapacity,
+      sizeof(*cache->entries), &cache->entry_capacity, (void**)&cache->entries));
+  if (cache->entry_capacity > old_capacity) {
+    memset(cache->entries + old_capacity, 0,
+           (cache->entry_capacity - old_capacity) * sizeof(*cache->entries));
+  }
+  return iree_ok_status();
+}
+
 iree_hal_amdxdna_single_command_cache_entry_t*
 iree_hal_amdxdna_store_single_command_cache_entry(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
@@ -446,20 +484,24 @@ iree_hal_amdxdna_store_single_command_cache_entry(
     const iree_device_size_t* binding_lengths, iree_host_size_t binding_count,
     iree_hal_amdxdna_native_buffer_t* ctrl_code_buffer,
     iree_hal_amdxdna_native_command_t* command) {
-  iree_host_size_t slot = cache->entry_count;
-  if (slot >= kAmdxdnaSingleCommandCacheCapacity) {
-    slot = IREE_HOST_SIZE_MAX;
-    for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
-      if (cache->entries[i].in_flight_count != 0) continue;
-      if (slot == IREE_HOST_SIZE_MAX ||
-          cache->entries[i].last_use < cache->entries[slot].last_use) {
-        slot = i;
+  iree_host_size_t slot = IREE_HOST_SIZE_MAX;
+  for (iree_host_size_t i = 0; i < cache->entry_count; ++i) {
+    if (cache->entries[i].queue == NULL &&
+        cache->entries[i].in_flight_count == 0) {
+      slot = i;
+      break;
+    }
+  }
+  bool appended = false;
+  if (slot == IREE_HOST_SIZE_MAX) {
+    if (cache->entry_count >= cache->entry_capacity) {
+      if (!iree_status_is_ok(
+              iree_hal_amdxdna_single_command_cache_reserve(cache))) {
+        return NULL;
       }
     }
-    if (slot == IREE_HOST_SIZE_MAX) return NULL;
-    iree_hal_amdxdna_single_command_cache_entry_deinitialize(
-        cache, &cache->entries[slot]);
-  } else {
+    slot = cache->entry_count;
+    appended = true;
     ++cache->entry_count;
   }
   iree_hal_amdxdna_single_command_cache_entry_t* entry = &cache->entries[slot];
@@ -470,7 +512,7 @@ iree_hal_amdxdna_store_single_command_cache_entry(
           binding_device_addrs, binding_offsets, binding_lengths,
           binding_count))) {
     iree_hal_amdxdna_single_command_cache_entry_deinitialize(cache, entry);
-    if (slot == cache->entry_count - 1) --cache->entry_count;
+    if (appended) --cache->entry_count;
     return NULL;
   }
   entry->ctrl_code_buffer = ctrl_code_buffer;
@@ -528,6 +570,41 @@ void iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
   entry->src_constant_count = constant_count;
   entry->src_use_native_partial_elf = use_native_partial_elf;
   entry->ctrl_code_mapped_ptr = ctrl_code_mapped_ptr;
+}
+
+void iree_hal_amdxdna_single_command_cache_entry_set_executable_key(
+    iree_hal_amdxdna_single_command_cache_entry_t* entry,
+    uint64_t executable_identity, uint32_t entry_point, uint32_t run_ordinal) {
+  IREE_ASSERT_ARGUMENT(entry);
+  entry->src_executable_identity = executable_identity;
+  entry->src_entry_point = entry_point;
+  entry->src_run_ordinal = run_ordinal;
+}
+
+iree_status_t iree_hal_amdxdna_single_command_cache_entry_store_constants(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_single_command_cache_entry_t* entry,
+    const void* constants, iree_host_size_t constant_count) {
+  IREE_ASSERT_ARGUMENT(cache);
+  IREE_ASSERT_ARGUMENT(entry);
+  if (constant_count == 0) {
+    iree_allocator_free(cache->host_allocator, entry->owned_src_constants);
+    entry->owned_src_constants = NULL;
+    entry->src_constant_count = 0;
+    return iree_ok_status();
+  }
+  if (entry->owned_src_constants == NULL ||
+      entry->src_constant_count != constant_count) {
+    iree_allocator_free(cache->host_allocator, entry->owned_src_constants);
+    entry->owned_src_constants = NULL;
+    entry->src_constant_count = 0;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc(
+        cache->host_allocator, constant_count,
+        (void**)&entry->owned_src_constants));
+  }
+  memcpy(entry->owned_src_constants, constants, constant_count);
+  entry->src_constant_count = constant_count;
+  return iree_ok_status();
 }
 
 void iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
