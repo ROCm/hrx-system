@@ -105,6 +105,8 @@ struct loom_serve_text_model_t {
   loom_serve_jit_t* jit;
   // Retained checkpoint/preparation plan owning stable parameter reservations.
   loom_serve_weights_t* weights;
+  // Shared-device admission registration borrowing weights until teardown.
+  loom_serve_residency_t* residency;
   // Source declarations retained independently of the temporary bootstrap VM.
   loom_serve_preparation_t* preparation;
   // Leading stages with identical shared parameter placement.
@@ -967,6 +969,9 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(text_check_layouts(model));
   IREE_RETURN_IF_ERROR(text_prepare_weights(model, options->source_directory));
+  IREE_RETURN_IF_ERROR(loom_serve_residency_create(
+      loom_serve_device_residency_cache(model->device_owner), 1,
+      &model->weights, &model->residency, model->allocator));
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {
     text_stage_t* stage = &model->stages[i];
@@ -1084,6 +1089,7 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_vm_environment_free(model->environment);
   iree_allocator_free(model->allocator, model->rows);
   iree_allocator_free(model->allocator, model->cache.maps);
+  loom_serve_residency_destroy(model->residency);
   iree_status_t memory_status = loom_serve_weights_destroy(model->weights);
   for (iree_host_size_t i = 0; i < TEXT_ALLOCATION_COUNT; ++i) {
     memory_status = iree_status_join(
@@ -1115,13 +1121,17 @@ loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
   return loom_serve_weights_statistics(model->weights);
 }
 
+loom_serve_residency_t* loom_serve_text_model_residency(
+    const loom_serve_text_model_t* model) {
+  return model->residency;
+}
+
 iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model) {
-  return loom_serve_weights_activate(model->weights);
+  return loom_serve_residency_activate(model->residency);
 }
 
 iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model) {
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
-  return loom_serve_weights_deactivate(model->weights);
+  return loom_serve_residency_deactivate(model->residency);
 }
 
 iree_status_t loom_serve_text_model_trim(
@@ -1354,7 +1364,7 @@ static iree_status_t text_invoke(loom_serve_text_model_t* model,
 
 static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
   loom_serve_text_model_t* model = row->model;
-  IREE_RETURN_IF_ERROR(loom_serve_text_model_activate(model));
+  IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
   iree_vm_variant_t arguments[TEXT_BINDING_COUNT + 2] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->vm_types,
                                                model->control_state),
@@ -1369,7 +1379,6 @@ static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
                                      iree_vm_variant_span_from_array(arguments),
                                      iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
-  IREE_RETURN_IF_ERROR(status);
   const iree_hal_transfer_operation_t downloads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
        .download = {.source_buffer = row->buffers[TEXT_TOKENS],
@@ -1381,9 +1390,14 @@ static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
                     .length = sizeof(row->transfer.progress)}},
   };
   uint64_t completion = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_execution_feedback(
-      model->execution, IREE_ARRAYSIZE(downloads), downloads, &completion));
-  return loom_serve_execution_feedback_wait(model->execution, completion);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_execution_feedback(
+        model->execution, IREE_ARRAYSIZE(downloads), downloads, &completion);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_execution_feedback_wait(model->execution, completion);
+  }
+  return loom_serve_residency_finish(model->residency, status);
 }
 
 // The whole epoch has passed its capacity check. Publish only newly assigned
@@ -1670,8 +1684,8 @@ static iree_status_t text_epoch(
                             "epoch needs %u KV blocks; %u are available",
                             required_blocks, model->cache.pool.available);
   }
-  IREE_RETURN_IF_ERROR(loom_serve_text_model_activate(model));
-  IREE_RETURN_IF_ERROR(text_grow_blocks(model, span_count, spans, extents));
+  IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
+  iree_status_t status = text_grow_blocks(model, span_count, spans, extents);
 
   const iree_host_size_t input_count =
       text_prepare_plan(model, span_count, spans, output_limits, NULL, 0, 0);
@@ -1695,16 +1709,16 @@ static iree_status_t text_epoch(
           &model->vm_types, model->host.buffers[TEXT_HOST_TOKENS]),
   };
   iree_vm_variant_t encode_results[1] = {0};
-  iree_status_t status =
-      text_invoke(model, model->encode_epoch,
-                  iree_vm_variant_span_from_array(encode_arguments),
-                  iree_vm_variant_span_from_array(encode_results));
+  if (iree_status_is_ok(status)) {
+    status = text_invoke(model, model->encode_epoch,
+                         iree_vm_variant_span_from_array(encode_arguments),
+                         iree_vm_variant_span_from_array(encode_results));
+  }
   int32_t output_count = 0;
   if (iree_status_is_ok(status)) {
     status = iree_vm_i32_from_variant(encode_results[0], &output_count);
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(encode_results));
-  IREE_RETURN_IF_ERROR(status);
   const iree_hal_transfer_operation_t uploads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = model->host.bytes[TEXT_HOST_METADATA].data,
@@ -1716,8 +1730,10 @@ static iree_status_t text_epoch(
                   .length = model->host.bytes[TEXT_HOST_TOKENS].data_length}},
   };
   uint64_t completion = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(
-      model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion));
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_execution_transfer(
+        model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion);
+  }
   iree_hal_buffer_t* buffers[] = {
       model->residual,         model->epoch.buffers[1], model->epoch.buffers[2],
       model->row_arena,        model->epoch.buffers[4], model->epoch.buffers[5],
@@ -1743,16 +1759,17 @@ static iree_status_t text_epoch(
         iree_hal_buffer_variant_from_ptr_borrowed(&model->types, buffers[i]);
   }
   iree_vm_variant_t results[1] = {0};
-  status = text_invoke(model, model->epoch_step,
-                       iree_vm_variant_span_from_array(arguments),
-                       iree_vm_variant_span_from_array(results));
+  if (iree_status_is_ok(status)) {
+    status = text_invoke(model, model->epoch_step,
+                         iree_vm_variant_span_from_array(arguments),
+                         iree_vm_variant_span_from_array(results));
+  }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   // The synchronous model boundary joins catch-up and feedback independently
   // before publishing host positions or reusing either branch's payloads,
   // including when a later native call rejects after earlier submissions.
   status =
       iree_status_join(status, loom_serve_execution_drain(model->execution));
-  IREE_RETURN_IF_ERROR(status);
   iree_vm_variant_t publish_arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->vm_types, model->host.buffers[TEXT_HOST_PLAN]),
@@ -1769,11 +1786,13 @@ static iree_status_t text_epoch(
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->vm_types, model->host.buffers[TEXT_HOST_PROGRESS]),
   };
-  IREE_RETURN_IF_ERROR(
-      text_invoke(model, model->publish_epoch,
-                  iree_vm_variant_span_from_array(publish_arguments),
-                  iree_vm_variant_span_empty()));
-  for (iree_host_size_t i = 0; i < span_count; ++i) {
+  if (iree_status_is_ok(status)) {
+    status = text_invoke(model, model->publish_epoch,
+                         iree_vm_variant_span_from_array(publish_arguments),
+                         iree_vm_variant_span_empty());
+  }
+  for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
+       ++i) {
     const uint8_t* record =
         model->host.bytes[TEXT_HOST_PROGRESS].data + i * 12 * sizeof(int32_t);
     loom_serve_text_result_t result = {
@@ -1799,7 +1818,7 @@ static iree_status_t text_epoch(
       row->transfer.progress[7] = row->transfer.tokens[0] == model->eos_token;
     }
   }
-  return iree_ok_status();
+  return loom_serve_residency_finish(model->residency, status);
 }
 
 iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,

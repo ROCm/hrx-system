@@ -43,6 +43,8 @@ struct loom_serve_image_model_t {
   loom_serve_device_t* owner;
   // Final input/output/workspace view ownership before host payload release.
   loom_serve_retirement_t retirement;
+  // Shared-device admission group protecting every checkpoint domain together.
+  loom_serve_residency_t* residency;
   // Request upload bytes retained through success or terminal queue retirement.
   iree_vm_buffer_t* input_payload;
   // Cold live-source compiler and its task pool.
@@ -111,16 +113,18 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
   loom_serve_preparation_destroy(model->preparation);
   for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
     iree_hal_buffer_release(model->weights.values[i]);
-    if (model->weights.plans) {
-      status = iree_status_join(
-          status, loom_serve_weights_destroy(model->weights.plans[i]));
-    }
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bindings); ++i) {
     iree_hal_buffer_release(model->bindings[i].buffer);
   }
   loom_serve_retirement_deinitialize(&model->retirement);
   iree_vm_buffer_release(model->input_payload);
+  loom_serve_residency_destroy(model->residency);
+  for (iree_host_size_t i = 0; model->weights.plans && i < model->weights.count;
+       ++i) {
+    status = iree_status_join(
+        status, loom_serve_weights_destroy(model->weights.plans[i]));
+  }
   iree_allocator_free(model->allocator, model->weights.values);
   iree_allocator_free(model->allocator, model->weights.plans);
   iree_allocator_free(model->allocator, (void*)model->name.data);
@@ -524,6 +528,9 @@ static iree_status_t image_model_initialize(
     iree_allocator_free(allocator, policy);
   }
   IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(loom_serve_residency_create(
+      loom_serve_device_residency_cache(model->owner), model->weights.count,
+      model->weights.plans, &model->residency, allocator));
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     image_model_stage_t* stage = &model->stages.values[i];
     IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(
@@ -659,38 +666,22 @@ static iree_status_t image_submit(loom_serve_image_model_t* model,
 }
 
 iree_status_t loom_serve_image_model_activate(loom_serve_image_model_t* model) {
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < model->weights.count && iree_status_is_ok(status);
-       ++i) {
-    status = loom_serve_weights_activate(model->weights.plans[i]);
-  }
-  return status;
+  return loom_serve_residency_activate(model->residency);
 }
 
 iree_status_t loom_serve_image_model_deactivate(
     loom_serve_image_model_t* model) {
-  IREE_RETURN_IF_ERROR(
-      loom_serve_execution_drain(loom_serve_device_execution(model->owner)));
-  iree_status_t status = iree_ok_status();
-  for (uint32_t i = 0; i < model->weights.count && iree_status_is_ok(status);
-       ++i) {
-    status = loom_serve_weights_deactivate(model->weights.plans[i]);
-  }
-  return status;
+  return loom_serve_residency_deactivate(model->residency);
+}
+
+loom_serve_residency_t* loom_serve_image_model_residency(
+    const loom_serve_image_model_t* model) {
+  return model->residency;
 }
 
 loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
     const loom_serve_image_model_t* model) {
-  loom_serve_memory_statistics_t total = {0};
-  for (uint32_t i = 0; i < model->weights.count; ++i) {
-    const loom_serve_memory_statistics_t domain =
-        loom_serve_weights_statistics(model->weights.plans[i]);
-    total.reserved_bytes += domain.reserved_bytes;
-    total.committed_bytes += domain.committed_bytes;
-    total.peak_bytes += domain.peak_bytes;
-    total.released_bytes += domain.released_bytes;
-  }
-  return total;
+  return loom_serve_residency_statistics(model->residency);
 }
 
 iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
@@ -705,8 +696,12 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
   iree_status_t status = image_prepare_request(model, prompt, seed, strength,
                                                &stage_index, &payload);
   IREE_RETURN_IF_ERROR(status);
+  status = loom_serve_residency_acquire(model->residency);
+  if (!iree_status_is_ok(status)) {
+    iree_vm_buffer_release(payload);
+    return status;
+  }
   model->input_payload = payload;
-  status = loom_serve_image_model_activate(model);
   iree_const_byte_span_t input = iree_const_byte_span_empty();
   if (iree_status_is_ok(status)) {
     status = iree_vm_buffer_map_read(payload, 0, iree_vm_buffer_length(payload),
@@ -755,5 +750,5 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
             prepare_end - prepare_begin, submit_end - prepare_end,
             completion_end - submit_end);
   }
-  return status;
+  return loom_serve_residency_finish(model->residency, status);
 }

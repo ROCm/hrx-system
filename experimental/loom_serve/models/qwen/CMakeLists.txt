@@ -126,6 +126,7 @@ loom_cc_binary(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::text::flags
     iree::experimental::loom_serve::text::model
     iree::tokenizer

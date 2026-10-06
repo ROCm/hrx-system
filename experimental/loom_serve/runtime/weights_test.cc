@@ -11,6 +11,7 @@
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/residency.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -90,9 +91,13 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
         iree_hal_buffer_release(buffer);
       }
     }
+    for (auto* residency : residencies_) {
+      loom_serve_residency_destroy(residency);
+    }
     for (auto* plan : plans_) {
       IREE_EXPECT_OK(loom_serve_weights_destroy(plan));
     }
+    IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(state_));
     iree_hal_buffer_release(output_buffer_);
     loom_serve_jit_destroy(jit_);
     IREE_EXPECT_OK(loom_serve_device_destroy(device_owner_));
@@ -120,21 +125,38 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     return {program, root, &buffers_[stage_index][root.fixed_buffer_index]};
   }
 
-  iree_status_t LoadRoots(iree_host_size_t shared_count,
-                          iree_host_size_t root_count,
-                          const loom_serve_weight_root_t* roots,
-                          const std::string& path) {
+  iree_status_t CreateRoots(iree_host_size_t shared_count,
+                            iree_host_size_t root_count,
+                            const loom_serve_weight_root_t* roots,
+                            const std::string& path) {
     const std::string policy = directory_ + "/policy.loom";
     auto** plan = &plans_[plan_count_++];
-    iree_status_t status = loom_serve_weights_create(
+    return loom_serve_weights_create(
         device_, transfer_, dispatch_, pool_, jit_,
         IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, shared_count, root_count, roots,
         iree_make_cstring_view(path.c_str()),
         iree_make_cstring_view(policy.c_str()), plan, allocator_);
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_weights_activate(*plan);
-    }
-    return status;
+  }
+
+  iree_status_t LoadRoots(iree_host_size_t shared_count,
+                          iree_host_size_t root_count,
+                          const loom_serve_weight_root_t* roots,
+                          const std::string& path) {
+    IREE_RETURN_IF_ERROR(CreateRoots(shared_count, root_count, roots, path));
+    return loom_serve_weights_activate(plans_[plan_count_ - 1]);
+  }
+
+  iree_status_t Register(iree_host_size_t index, iree_host_size_t first_plan,
+                         iree_host_size_t plan_count) {
+    return loom_serve_residency_create(
+        loom_serve_device_residency_cache(device_owner_), plan_count,
+        plans_.data() + first_plan, &residencies_[index], allocator_);
+  }
+
+  void RunPinned(iree_host_size_t index, int32_t first) {
+    IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[index]));
+    ASSERT_NO_FATAL_FAILURE(Run(index, first));
+    loom_serve_residency_release(residencies_[index]);
   }
 
   iree_status_t Load(iree_host_size_t shared_count, iree_host_size_t count) {
@@ -193,6 +215,12 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
   // Owned checkpoint plans, including partially failed construction.
   std::array<loom_serve_weights_t*, 3> plans_ = {};
+  // Admission groups borrowing their plans until final queue retirement.
+  std::array<loom_serve_residency_t*, 3> residencies_ = {};
+  // Independent live-state allocation sharing the parameter pressure policy.
+  loom_serve_virtual_buffer_t* state_ = nullptr;
+  // Mutable-state accounting retained through virtual storage destruction.
+  loom_serve_memory_statistics_t state_statistics_ = {};
   // Number of plan slots initialized by the loading helper.
   size_t plan_count_ = 0;
   // Source catalog compiler shared across all stages and preparers.
@@ -326,6 +354,139 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   Run(0, 70);
   Run(1, 70);
   Run(2, 93);
+}
+
+TEST_P(WeightsTest, AdmissionUsesRecencyOnlyAmongUnpinnedGroups) {
+  for (iree_host_size_t i = 0; i < 3; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+    IREE_ASSERT_OK(Register(i, i, 1));
+  }
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+  // Touch the oldest entry, making the other resident entry the LRU victim.
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(2, 70));
+  if (!GetParam()) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                          loom_serve_residency_deactivate(residencies_[0]));
+    ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+    return;
+  }
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            kSlabBytes);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[1]).committed_bytes, 0u);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[2]).committed_bytes,
+            kSlabBytes);
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_residency_deactivate(residencies_[0]));
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
+            kSlabBytes);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[2]).committed_bytes, 0u);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_serve_residency_release(residencies_[0]);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).peak_bytes,
+            2 * kSlabBytes);
+}
+
+TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  IREE_ASSERT_OK(Compile(1, "domains"));
+  const auto first = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &first, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto root = Root(1, i);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, i ? adapter_path_.path() : path_.path()));
+  }
+  IREE_ASSERT_OK(Register(1, 1, 2));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 90));
+  bool admitted = false;
+  IREE_ASSERT_OK(loom_serve_residency_try_acquire(residencies_[1], &admitted));
+  if (!GetParam()) {
+    ASSERT_TRUE(admitted);
+    ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+    loom_serve_residency_release(residencies_[1]);
+    loom_serve_residency_release(residencies_[0]);
+    return;
+  }
+  EXPECT_FALSE(admitted);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[1]).peak_bytes, 0u);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[2]).peak_bytes, 0u);
+  // Failed admission neither consumes its own pin nor releases retention.
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            kSlabBytes);
+  loom_serve_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_serve_residency_try_acquire(residencies_[1], &admitted));
+  ASSERT_TRUE(admitted);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+  ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+  loom_serve_residency_release(residencies_[1]);
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+}
+
+TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  if (!GetParam()) {
+    return;
+  }
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool_, 2 * kSlabBytes, 256,
+                                                  &state_statistics_, &state_));
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_RESOURCE_EXHAUSTED,
+      loom_serve_virtual_buffer_commit(state_, 0, 2 * kSlabBytes));
+  EXPECT_EQ(state_statistics_.committed_bytes, 0u);
+  loom_serve_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(state_, 0, 2 * kSlabBytes));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+  const uint32_t value = 0xA1B2C3D4;
+  uint32_t observed = 0;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill = {.target_buffer = loom_serve_virtual_buffer_handle(state_),
+               .length = sizeof(value),
+               .pattern = &value,
+               .pattern_length = sizeof(value)}};
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution_, 1, &fill, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
+  bool admitted = true;
+  IREE_ASSERT_OK(loom_serve_residency_try_acquire(residencies_[0], &admitted));
+  EXPECT_FALSE(admitted);
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(state_statistics_.committed_bytes, 2 * kSlabBytes);
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {.source_buffer = loom_serve_virtual_buffer_handle(state_),
+                   .target = &observed,
+                   .length = sizeof(observed)}};
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_feedback_wait(execution_, completion));
+  EXPECT_EQ(observed, value);
+  loom_serve_virtual_buffer_begin_trim(state_);
+  loom_serve_virtual_buffer_keep(state_, 0, sizeof(value));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(state_));
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
 }
 
 INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));

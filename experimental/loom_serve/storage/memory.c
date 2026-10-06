@@ -21,6 +21,8 @@ struct loom_serve_memory_pool_t {
   uint64_t limit_bytes;
   // Accounting across all buffers, with physical allocations counted once.
   loom_serve_memory_statistics_t statistics;
+  // Borrowed owner of cold capacity reclamation, separate from slab mechanics.
+  loom_serve_memory_reclaimer_t reclaimer;
 };
 
 typedef struct memory_slab_t {
@@ -98,6 +100,27 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
   return pool->statistics;
 }
 
+void loom_serve_memory_pool_set_reclaimer(
+    loom_serve_memory_pool_t* pool, loom_serve_memory_reclaimer_t reclaimer) {
+  pool->reclaimer = reclaimer;
+}
+
+iree_status_t loom_serve_memory_pool_prepare(loom_serve_memory_pool_t* pool,
+                                             uint64_t additional_bytes,
+                                             bool* out_admitted) {
+  *out_admitted = false;
+  if (additional_bytes > pool->limit_bytes) {
+    return iree_ok_status();
+  }
+  const uint64_t target_bytes = pool->limit_bytes - additional_bytes;
+  if (pool->statistics.committed_bytes > target_bytes && pool->reclaimer.fn) {
+    IREE_RETURN_IF_ERROR(
+        pool->reclaimer.fn(pool->reclaimer.user_data, target_bytes));
+  }
+  *out_admitted = pool->statistics.committed_bytes <= target_bytes;
+  return iree_ok_status();
+}
+
 iree_status_t loom_serve_virtual_buffer_create(
     loom_serve_memory_pool_t* pool, iree_device_size_t length,
     iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
@@ -171,17 +194,25 @@ iree_status_t loom_serve_virtual_buffer_commit(
   loom_serve_memory_pool_t* pool = buffer->pool;
   const iree_host_size_t begin = offset / pool->slab_size;
   const iree_host_size_t end = (offset + length - 1) / pool->slab_size + 1;
+  uint64_t additional_bytes = 0;
+  for (iree_host_size_t i = begin; i < end; ++i) {
+    if (!buffer->slabs[i].physical) {
+      additional_bytes += pool->slab_size;
+    }
+  }
+  bool admitted = false;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_memory_pool_prepare(pool, additional_bytes, &admitted));
+  if (!admitted) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "physical pool cannot commit %" PRIu64 " bytes",
+                            additional_bytes);
+  }
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = begin; i < end && iree_status_is_ok(status); ++i) {
     memory_slab_t* slab = &buffer->slabs[i];
     if (slab->physical) {
       continue;
-    }
-    if (pool->slab_size >
-        pool->limit_bytes - pool->statistics.committed_bytes) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                                "physical state pool reached its byte limit");
-      break;
     }
     status = iree_hal_allocator_physical_memory_allocate(
         pool->device_allocator, memory_params(), pool->slab_size,

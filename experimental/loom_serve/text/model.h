@@ -177,12 +177,19 @@ iree_status_t loom_serve_text_model_create(
 iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model);
 
 // At a serialized model boundary, release/reload parameter backing while
-// preserving compiled commands and all retained row state. Deactivation joins
-// accepted model work first and requires elastic backing. Inference activates
-// on demand; explicit activation allows warming before admission. A failed
-// activation is terminal. Neither operation discards session state.
+// preserving compiled commands and all retained row state. Deactivation
+// requires unpinned elastic backing. Inference pins through retirement and
+// activates on demand; explicit activation warms without retaining a pin.
+// Admission can reclaim idle weights of other models, never mutable state.
+// Execution/I/O failure is terminal.
 iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model);
 iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model);
+
+// Borrowed admission/retention handle. A caller can try_acquire before choosing
+// work, retaining the returned pin across invocations until release. Ordinary
+// capacity backpressure leaves all model state unchanged.
+loom_serve_residency_t* loom_serve_text_model_residency(
+    const loom_serve_text_model_t* model);
 
 // Parameter-only virtual/physical statistics, excluding mutable state.
 loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(

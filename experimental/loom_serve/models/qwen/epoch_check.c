@@ -10,6 +10,7 @@
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/device_flags.h"
+#include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
 
@@ -27,7 +28,8 @@ IREE_FLAG(bool, reload_weights, false,
 IREE_FLAG(
     bool, shared_residency, false,
     "Alternate two independent retained models on one device and physical "
-    "budget; requires elastic backing.");
+    "budget using automatic eviction; requires elastic backing and a budget "
+    "too small for both parameter sets.");
 
 typedef struct qwen_check_row_t {
   // Nonzero, permuted resident row used by packed invocations.
@@ -136,7 +138,26 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
         expected[0], allocator);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_model_deactivate(first);
+    loom_serve_residency_t* first_residency =
+        loom_serve_text_model_residency(first);
+    status = loom_serve_residency_acquire(first_residency);
+    if (iree_status_is_ok(status)) {
+      bool admitted = false;
+      status = loom_serve_residency_try_acquire(
+          loom_serve_text_model_residency(second), &admitted);
+      if (iree_status_is_ok(status) && admitted) {
+        loom_serve_residency_release(loom_serve_text_model_residency(second));
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "shared residency witness needs a smaller physical budget");
+      }
+      if (iree_status_is_ok(status) &&
+          loom_serve_text_model_weight_statistics(second).committed_bytes) {
+        status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "denied admission partially loaded weights");
+      }
+      loom_serve_residency_release(first_residency);
+    }
   }
   if (iree_status_is_ok(status)) {
     status = qwen_check_residency_reference(
@@ -146,14 +167,18 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
                 "<think>\n\n</think>\n\n"),
         expected[1], allocator);
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_text_model_deactivate(second);
+  if (iree_status_is_ok(status) &&
+      loom_serve_text_model_weight_statistics(first).committed_bytes) {
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "second model did not evict idle first model");
   }
   if (iree_status_is_ok(status)) {
     status = qwen_check_residency_continuation(first, expected[0]);
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_text_model_deactivate(first);
+  if (iree_status_is_ok(status) &&
+      loom_serve_text_model_weight_statistics(second).committed_bytes) {
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "first model did not evict idle second model");
   }
   if (iree_status_is_ok(status)) {
     status = qwen_check_residency_continuation(second, expected[1]);
@@ -163,14 +188,16 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
         loom_serve_memory_pool_statistics(
             loom_serve_device_memory_pool(device));
     fprintf(stderr,
-            "{\"event\":\"shared_residency\",\"models\":2,\"reserved_bytes\":"
+            "{\"event\":\"shared_residency\",\"models\":2,\"automatic\":true,"
+            "\"reserved_bytes\":"
             "%" PRIu64 ",\"committed_bytes\":%" PRIu64
             ",\"peak_bytes\":%" PRIu64 ",\"released_bytes\":%" PRIu64 "}\n",
             memory.reserved_bytes, memory.committed_bytes, memory.peak_bytes,
             memory.released_bytes);
     fprintf(stderr,
             "PASS: two cached models share one physical budget and preserve "
-            "independent continuations across alternating residency.\n");
+            "independent continuations across automatic eviction/reload; "
+            "retention pins deny admission without partial loading.\n");
   }
   return iree_status_join(status, loom_serve_text_model_destroy(second));
 }

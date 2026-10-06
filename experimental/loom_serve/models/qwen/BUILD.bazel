@@ -114,6 +114,7 @@ loom_cc_binary(
     ]),
     deps = [
         "//experimental/loom_serve/runtime:device_flags",
+        "//experimental/loom_serve/runtime:residency",
         "//experimental/loom_serve/text:flags",
         "//experimental/loom_serve/text:model",
         "//runtime/src/iree/base",
