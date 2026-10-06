@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/xdna/executable.h"
+#include "iree/hal/drivers/amd/xdna/executable_storage.h"
 
 #include <algorithm>
 #include <array>
@@ -106,12 +106,12 @@ class XdnaExecutableTest : public ::testing::Test {
   }
 
   iree_status_t Load() {
-    return iree_hal_amd_xdna_executable_load(image_, 0, storage_.size(),
-                                             storage_.data());
+    return iree_hal_amd_xdna_executable_storage_load(image_, 0, storage_.size(),
+                                                     storage_.data());
   }
   iree_status_t Bind() {
-    return iree_hal_amd_xdna_executable_bind(image_, 0, storage_.size(),
-                                             storage_.data(), 1, &binding_);
+    return iree_hal_amd_xdna_executable_storage_bind(
+        image_, 0, storage_.size(), storage_.data(), 1, &binding_);
   }
 
   // Admitted image with no native resource ownership.
@@ -174,7 +174,7 @@ TEST_F(XdnaExecutableTest, PreservesAndIgnoresUnusedBindingSlots) {
   IREE_ASSERT_OK(Load());
   std::array<iree_hal_amd_xdna_executable_binding_t, 2> bindings = {};
   bindings[1] = binding_;
-  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_bind(
+  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_bind(
       image_, 0, storage_.size(), storage_.data(), bindings.size(),
       bindings.data()));
   const uint64_t address = binding_.device_address + 4;
@@ -191,7 +191,7 @@ TEST_F(XdnaExecutableTest, ResolvesIndependentInvocationWithContinuation) {
   // The image names a continuation at offset 32768. Independent invocations
   // must use the establishing range even though that continuation is present.
   amdf_xdna_kernel_command_t command = {};
-  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_query_invocation(
+  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_query_invocation(
       image_, 0, storage_.size(), storage_.data(), &command));
   EXPECT_EQ(command.memory, storage_[0].memory);
   EXPECT_EQ(command.access_ordinal, 3u);
@@ -205,19 +205,19 @@ TEST_F(XdnaExecutableTest,
   amdf_xdna_kernel_command_t command = {};
   IREE_EXPECT_STATUS_IS(
       StatusCode::kOutOfRange,
-      iree_hal_amd_xdna_executable_query_invocation(image_, 1, storage_.size(),
-                                                    storage_.data(), &command));
+      iree_hal_amd_xdna_executable_storage_query_invocation(
+          image_, 1, storage_.size(), storage_.data(), &command));
   EXPECT_EQ(command.memory, nullptr);
   IREE_EXPECT_STATUS_IS(
       StatusCode::kInvalidArgument,
-      iree_hal_amd_xdna_executable_query_invocation(
+      iree_hal_amd_xdna_executable_storage_query_invocation(
           image_, 0, storage_.size() - 1, storage_.data(), &command));
   EXPECT_EQ(command.memory, nullptr);
   --storage_[0].mapping.data_length;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kInvalidArgument,
-      iree_hal_amd_xdna_executable_query_invocation(image_, 0, storage_.size(),
-                                                    storage_.data(), &command));
+      iree_hal_amd_xdna_executable_storage_query_invocation(
+          image_, 0, storage_.size(), storage_.data(), &command));
   EXPECT_EQ(command.memory, nullptr);
 }
 
@@ -248,7 +248,7 @@ TEST_F(XdnaExecutableTest, PropagatesSourceFailureAfterPartialLoad) {
   IREE_ASSERT_OK(status);
   source.remaining_reads = 1;
   IREE_EXPECT_STATUS_IS(StatusCode::kUnavailable,
-                        iree_hal_amd_xdna_executable_load(
+                        iree_hal_amd_xdna_executable_storage_load(
                             image, 0, storage_.size(), storage_.data()));
   EXPECT_TRUE(std::all_of(bytes_[0].begin(), bytes_[0].begin() + 16,
                           [](uint8_t byte) { return byte == 0xA5; }));
@@ -263,8 +263,8 @@ TEST_F(XdnaExecutableTest, ChecksBindingCountAndLogicalRanges) {
   const auto before = bytes_;
   IREE_EXPECT_STATUS_IS(
       StatusCode::kInvalidArgument,
-      iree_hal_amd_xdna_executable_bind(image_, 0, storage_.size(),
-                                        storage_.data(), 0, nullptr));
+      iree_hal_amd_xdna_executable_storage_bind(image_, 0, storage_.size(),
+                                                storage_.data(), 0, nullptr));
   binding_.buffer_ref.offset = buffer_.size() - 8;
   IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange, Bind());
   binding_.buffer_ref.offset = 4;

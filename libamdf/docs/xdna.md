@@ -288,9 +288,9 @@ tensor data. libamdf neither recognizes queue records nor infers dependencies
 from their contents. Placement, worker count, and occupancy policy likewise
 remain above the native surface.
 
-The in-tree ELF materializer's `iree_hal_amd_xdna_executable_load` and
-`iree_hal_amd_xdna_executable_bind` prepare each range before publication. Its
-external binding relocations encode declared shim-DMA addresses, including the
+The in-tree ELF materializer's `iree_hal_amd_xdna_executable_storage_load` and
+`iree_hal_amd_xdna_executable_storage_bind` prepare each range before publication.
+Its external binding relocations encode declared shim-DMA addresses, including the
 base of a queue or argument buffer. This is not a generic scalar-immediate
 argument API: a program can DMA its argument record just as it reads any other
 bound data. Other argument conventions belong to the compiler and its image

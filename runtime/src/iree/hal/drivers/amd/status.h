@@ -6,8 +6,8 @@
 
 // Conversion from portable libamdf status values to IREE statuses.
 
-#ifndef IREE_EXPERIMENTAL_XDNA_AMDF_STATUS_H_
-#define IREE_EXPERIMENTAL_XDNA_AMDF_STATUS_H_
+#ifndef IREE_HAL_DRIVERS_AMD_STATUS_H_
+#define IREE_HAL_DRIVERS_AMD_STATUS_H_
 
 #include "amdf/amdf.h"
 #include "iree/base/api.h"
@@ -34,4 +34,4 @@ iree_status_t iree_hal_amd_status_from_amdf_status(const char* file,
 }  // extern "C"
 #endif  // __cplusplus
 
-#endif  // IREE_EXPERIMENTAL_XDNA_AMDF_STATUS_H_
+#endif  // IREE_HAL_DRIVERS_AMD_STATUS_H_

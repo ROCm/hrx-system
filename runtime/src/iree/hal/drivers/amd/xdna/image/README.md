@@ -8,7 +8,7 @@ The compiler owns the device program; the loader establishes its declared
 storage and binding contract.
 
 The image object in this directory is immutable and device-independent. The
-[experimental executable adapter](../../../../../../../../experimental/xdna/executable.h) connects
+[native storage materializer](../executable_storage.h) connects
 it to caller-owned mappings and libamdf memory handles. The
 [runner](../../../../../../../../experimental/xdna/README.md) demonstrates the complete lifecycle.
 The [Loom producer](../../../../../../../../loom/src/loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h)
@@ -63,8 +63,8 @@ A real caller follows this sequence:
    drained. Keep mappings, backing, logical buffers, and context alive through
    their actual completion frontier.
 
-`iree_hal_amd_xdna_executable_load` and `_bind` allocate no memory and retain no
-resources. They check their supplied contracts before writes. A source I/O
+`iree_hal_amd_xdna_executable_storage_load` and `_bind` allocate no memory and
+retain no resources. They check their supplied contracts before writes. A source I/O
 failure during loading may leave backing partially initialized; that backing
 is not ready for submission. Failure does not promise rollback of caller
 storage. Native submission receives memory handles and byte ranges, with no
@@ -94,7 +94,7 @@ and contains no precompiled bootstrap PDI; family bootstrap belongs to libamdf.
 | [image.h](image.h) | Immutable owner and export lookup. |
 | [aie2p/target.h](aie2p/target.h) | Admitted context identity, geometry, and instruction alignment. |
 | [Shared schema](../../../../../schemas/xdna_executable.h) | Wire constants and fixed-width codecs used by producer and consumer. |
-| [Executable adapter](../../../../../../../../experimental/xdna/executable.h) | Loading, relocation, external binding, and native command resolution. |
+| [Native storage materializer](../executable_storage.h) | Loading, relocation, external binding, and native command resolution. |
 
 Admission validates untrusted file structure once. Indexed consumers use the
 established relationships. Native payload is executable code: these checks are

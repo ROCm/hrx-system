@@ -18,8 +18,8 @@
 // CTS-only reader of contiguous native XDNA ELF fixtures. The format and load,
 // binding and invocation rules are derived from runtime/src/iree/schemas/
 // xdna_executable.{h,c}, runtime/src/iree/hal/drivers/amd/xdna/image/ and
-// experimental/xdna/executable.c. This reader has no dependency on those
-// implementations.
+// runtime/src/iree/hal/drivers/amd/xdna/executable_storage.c. This reader has
+// no dependency on those implementations.
 //
 // The admitted subset is ELF32LE EM_AIE, AIE2P flags 3, metadata version 2 and
 // transaction encoding 0.1: one mutable COMMAND allocation, one allocation

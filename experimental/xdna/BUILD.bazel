@@ -4,63 +4,12 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load(":build_defs.bzl", "xdna_cc_binary", "xdna_cc_library", "xdna_cc_test", "xdna_execution_test_suite")
+load(":build_defs.bzl", "xdna_cc_binary", "xdna_execution_test_suite")
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],  # Apache 2.0
-)
-
-xdna_cc_library(
-    name = "amdf_status",
-    srcs = ["amdf_status.c"],
-    hdrs = ["amdf_status.h"],
-    deps = [
-        "//libamdf:headers",
-        "//runtime/src/iree/base",
-    ],
-)
-
-xdna_cc_test(
-    name = "amdf_status_test",
-    srcs = ["amdf_status_test.cc"],
-    deps = [
-        ":amdf_status",
-        "//libamdf:headers",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
-)
-
-xdna_cc_library(
-    name = "executable",
-    srcs = ["executable.c"],
-    hdrs = ["executable.h"],
-    visibility = [
-        "//experimental/xdna/benchmarks:__pkg__",
-        "//experimental/xdna/cts:__pkg__",
-    ],
-    deps = [
-        "//libamdf:headers",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/xdna/image",
-    ],
-)
-
-xdna_cc_test(
-    name = "executable_test",
-    srcs = ["executable_test.cc"],
-    deps = [
-        ":executable",
-        "//runtime/src/iree/base",
-        "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:image_fixture",
-        "//runtime/src/iree/testing:gtest",
-        "//runtime/src/iree/testing:gtest_main",
-    ],
 )
 
 xdna_execution_test_suite(
@@ -84,13 +33,13 @@ xdna_cc_binary(
     }),
     visibility = ["//experimental/xdna/cts:__pkg__"],
     deps = [
-        ":amdf_status",
-        ":executable",
         "//libamdf:amdf_static",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/drivers/amd/xdna:executable_storage",
         "//runtime/src/iree/hal/drivers/amd/xdna/image/aie2p:npu2",
         "//runtime/src/iree/io:file_handle",
     ],

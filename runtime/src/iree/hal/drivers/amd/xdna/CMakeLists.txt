@@ -9,4 +9,39 @@
 
 iree_add_all_subdirs()
 
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    executable_storage
+  HDRS
+    "executable_storage.h"
+  SRCS
+    "executable_storage.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::image
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    executable_storage_test
+  SRCS
+    "executable_storage_test.cc"
+  DEPS
+    ::executable_storage
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::image::testing::image_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

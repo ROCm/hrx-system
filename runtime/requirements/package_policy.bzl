@@ -18,6 +18,7 @@ load(
     "//build_tools/vulkan/requirements:defs.bzl",
     "VULKAN_DEVICE_RESOURCE",
 )
+load("//libamdf/requirements:defs.bzl", "LIBAMDF")
 load(
     "//runtime/requirements:defs.bzl",
     "AMDGPU_RESOURCE",
@@ -28,6 +29,13 @@ load(
 )
 
 PACKAGE_POLICIES = [
+    package_policy(
+        packages = [
+            "runtime/src/iree/hal/drivers/amd",
+            "runtime/src/iree/hal/drivers/amd/xdna",
+        ],
+        build_requirements = [LIBAMDF],
+    ),
     package_policy(
         packages = ["runtime/src/iree/hal/drivers/amdgpu/..."],
         excluded_packages = [
