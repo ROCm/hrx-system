@@ -66,9 +66,10 @@ speculation. It is not an arbitrary model-graph interpreter.
   still joins each cohort; this is not an autonomous persistent device loop.
 * Pooled execution reserves stable device addresses at startup and backs
   row/page ranges on demand. Admission reserves completion high-water credit
-  and queues excess work. These are private pages, not shared prefixes or
-  offloaded session checkpoints. Fixed backing remains an explicit comparison
-  and device-sanitizer configuration.
+  and queues excess work. These are private pages, not shared prefixes.
+  Explicit model-level suspend/resume is described below; HTTP admission does
+  not yet select sessions for offload. Fixed backing remains an explicit
+  comparison and device-sanitizer configuration.
 
 The automatic shape catalog crosses token classes up to `--prefill_capacity`
 with span classes up to `--rows`, including exact odd endpoints. Repeated
@@ -172,6 +173,30 @@ The HTTP service coalesces evicted and cancelled rows into one maintenance cut
 before the next cohort. `state_trim` JSONL records expose the copied/released
 bytes and elapsed maintenance time. Active and retained idle histories survive;
 normal epochs without ownership loss do not perform this maintenance.
+
+`loom_serve_text_row_suspend` captures a completed row's private state, MTP carry
+and logical-order target/draft blocks into one host-owned DRAM image before
+returning its physical IDs. Its position, selected-but-unconsumed token and
+metrics remain in the row. Trim can then unmap its private views and cache
+backing. `loom_serve_text_row_try_resume` assigns fresh IDs, admits the union of
+their missing physical slabs, restores the image, and publishes both maps
+before making the row runnable. Capacity denial reports `resumed=false` without
+discarding the image or partially committing destination slabs. Execution or
+platform failure remains terminal. The serialized owner excludes work on that
+row throughout each cold transition.
+
+Snapshots contain no physical block identities and need no weights, JIT or
+command rebuilding. Reset discards a suspended image without accessing unmapped
+private state. `loom_serve_text_row_suspended_bytes` reports host payload bytes
+separately from physical device commitment; UMA copies do not create extra
+machine RAM. Transfers use bounded descriptor batches and the HAL's staging
+pool, whose host allocation is separate from the device pool budget. The
+`models/qwen:epoch_check --suspend_rows --pool_capacity=2048 --mtp` witness
+overwrites the old blocks, denies resume under logical capacity pressure, then
+compares resumed target/MTP output with uninterrupted execution. It also covers
+unselected prefill state and resetting a suspended row. File-backed images,
+shared prefixes and automatic eviction require additional policy consumers;
+these explicit DRAM operations do not implement them.
 
 Each row's control/input/progress and recurrent views are present. Dense
 attention is present only without a physical pool; pooled kernels find it

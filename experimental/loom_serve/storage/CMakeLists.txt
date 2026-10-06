@@ -49,6 +49,21 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    snapshot
+  HDRS
+    "snapshot.h"
+  SRCS
+    "snapshot.c"
+  DEPS
+    iree::base
+    iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::retirement
+    iree::hal
+  PUBLIC
+)
+
 if(IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
@@ -95,6 +110,28 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::retirement
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+if(IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    snapshot_test
+  SRCS
+    "snapshot_test.cc"
+  DEPS
+    ::memory
+    ::snapshot
+    iree::base
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::execution
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main

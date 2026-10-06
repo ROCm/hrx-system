@@ -32,6 +32,8 @@ typedef struct memory_slab_t {
   bool mapped;
   // Whether a current maintenance range requires this slab.
   bool keep;
+  // Missing slab selected by the current serialized commitment transaction.
+  bool pending_commit;
 } memory_slab_t;
 
 struct loom_serve_virtual_buffer_t {
@@ -188,59 +190,90 @@ static iree_status_t memory_slab_release(loom_serve_virtual_buffer_t* buffer,
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_virtual_buffer_commit(
-    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
-    iree_device_size_t length) {
+static iree_status_t memory_slab_commit(loom_serve_virtual_buffer_t* buffer,
+                                        iree_host_size_t index) {
   loom_serve_memory_pool_t* pool = buffer->pool;
-  const iree_host_size_t begin = offset / pool->slab_size;
-  const iree_host_size_t end = (offset + length - 1) / pool->slab_size + 1;
+  memory_slab_t* slab = &buffer->slabs[index];
+  iree_status_t status = iree_hal_allocator_physical_memory_allocate(
+      pool->device_allocator, memory_params(), pool->slab_size,
+      pool->host_allocator, &slab->physical);
+  if (iree_status_is_ok(status)) {
+    pool->statistics.committed_bytes += pool->slab_size;
+    pool->statistics.peak_bytes =
+        iree_max(pool->statistics.peak_bytes, pool->statistics.committed_bytes);
+    buffer->statistics->committed_bytes += pool->slab_size;
+    buffer->statistics->peak_bytes = iree_max(
+        buffer->statistics->peak_bytes, buffer->statistics->committed_bytes);
+    status = iree_hal_allocator_virtual_memory_map(
+        pool->device_allocator, buffer->handle, index * pool->slab_size,
+        slab->physical, 0, pool->slab_size);
+    slab->mapped = iree_status_is_ok(status);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_allocator_virtual_memory_protect(
+        pool->device_allocator, buffer->handle, index * pool->slab_size,
+        pool->slab_size, pool->queue_affinity,
+        IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
+        IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
+  }
+  if (!iree_status_is_ok(status)) {
+    status = iree_status_join(status, memory_slab_release(buffer, index));
+  }
+  return status;
+}
+
+iree_status_t loom_serve_memory_pool_try_commit(
+    loom_serve_memory_pool_t* pool, iree_host_size_t range_count,
+    const loom_serve_memory_range_t* ranges, bool* out_admitted) {
+  *out_admitted = false;
   uint64_t additional_bytes = 0;
-  for (iree_host_size_t i = begin; i < end; ++i) {
-    if (!buffer->slabs[i].physical) {
-      additional_bytes += pool->slab_size;
+  for (iree_host_size_t r = 0; r < range_count; ++r) {
+    const loom_serve_memory_range_t* range = &ranges[r];
+    const iree_host_size_t end =
+        (range->offset + range->length - 1) / pool->slab_size + 1;
+    for (iree_host_size_t i = range->offset / pool->slab_size; i < end; ++i) {
+      memory_slab_t* slab = &range->buffer->slabs[i];
+      if (!slab->physical && !slab->pending_commit) {
+        slab->pending_commit = true;
+        additional_bytes += pool->slab_size;
+      }
     }
   }
   bool admitted = false;
+  iree_status_t status =
+      loom_serve_memory_pool_prepare(pool, additional_bytes, &admitted);
+  // Clear every temporary mark even after denial or platform failure. No plan
+  // state survives this serialized call or changes the maintenance keep set.
+  for (iree_host_size_t r = 0; r < range_count; ++r) {
+    const loom_serve_memory_range_t* range = &ranges[r];
+    const iree_host_size_t end =
+        (range->offset + range->length - 1) / pool->slab_size + 1;
+    for (iree_host_size_t i = range->offset / pool->slab_size; i < end; ++i) {
+      memory_slab_t* slab = &range->buffer->slabs[i];
+      if (slab->pending_commit) {
+        slab->pending_commit = false;
+        if (iree_status_is_ok(status) && admitted) {
+          status = memory_slab_commit(range->buffer, i);
+        }
+      }
+    }
+  }
+  *out_admitted = iree_status_is_ok(status) && admitted;
+  return status;
+}
+
+iree_status_t loom_serve_virtual_buffer_commit(
+    loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  const loom_serve_memory_range_t range = {buffer, offset, length};
+  bool admitted = false;
   IREE_RETURN_IF_ERROR(
-      loom_serve_memory_pool_prepare(pool, additional_bytes, &admitted));
+      loom_serve_memory_pool_try_commit(buffer->pool, 1, &range, &admitted));
   if (!admitted) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
-                            "physical pool cannot commit %" PRIu64 " bytes",
-                            additional_bytes);
+                            "physical pool cannot back the requested range");
   }
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = begin; i < end && iree_status_is_ok(status); ++i) {
-    memory_slab_t* slab = &buffer->slabs[i];
-    if (slab->physical) {
-      continue;
-    }
-    status = iree_hal_allocator_physical_memory_allocate(
-        pool->device_allocator, memory_params(), pool->slab_size,
-        pool->host_allocator, &slab->physical);
-    if (iree_status_is_ok(status)) {
-      pool->statistics.committed_bytes += pool->slab_size;
-      pool->statistics.peak_bytes = iree_max(pool->statistics.peak_bytes,
-                                             pool->statistics.committed_bytes);
-      buffer->statistics->committed_bytes += pool->slab_size;
-      buffer->statistics->peak_bytes = iree_max(
-          buffer->statistics->peak_bytes, buffer->statistics->committed_bytes);
-      status = iree_hal_allocator_virtual_memory_map(
-          pool->device_allocator, buffer->handle, i * pool->slab_size,
-          slab->physical, 0, pool->slab_size);
-      slab->mapped = iree_status_is_ok(status);
-    }
-    if (iree_status_is_ok(status)) {
-      status = iree_hal_allocator_virtual_memory_protect(
-          pool->device_allocator, buffer->handle, i * pool->slab_size,
-          pool->slab_size, pool->queue_affinity,
-          IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
-          IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
-    }
-    if (!iree_status_is_ok(status)) {
-      status = iree_status_join(status, memory_slab_release(buffer, i));
-    }
-  }
-  return status;
+  return iree_ok_status();
 }
 
 void loom_serve_virtual_buffer_begin_trim(loom_serve_virtual_buffer_t* buffer) {

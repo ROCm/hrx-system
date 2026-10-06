@@ -28,6 +28,19 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "storage",
+    srcs = ["storage.c"],
+    hdrs = ["storage.h"],
+    deps = [
+        "//experimental/loom_serve/storage:relocation",
+        "//experimental/loom_serve/storage:snapshot",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = ["model.c"],
     hdrs = ["model.h"],
@@ -37,6 +50,7 @@ loom_cc_library(
     ]),
     deps = [
         ":chat",
+        ":storage",
         "//experimental/loom_serve/runtime:command",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
@@ -53,6 +67,7 @@ loom_cc_library(
         "//experimental/loom_serve/storage:block_pool",
         "//experimental/loom_serve/storage:memory",
         "//experimental/loom_serve/storage:relocation",
+        "//experimental/loom_serve/storage:snapshot",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
@@ -63,6 +78,20 @@ loom_cc_library(
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/tokenizer/vocab",
         "//runtime/src/iree/tooling:device_util",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "storage_test",
+    srcs = ["storage_test.cc"],
+    deps = [
+        ":storage",
+        "//experimental/loom_serve/storage:snapshot",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
     ],
 )
