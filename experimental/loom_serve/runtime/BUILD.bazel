@@ -177,6 +177,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "input",
+    srcs = ["input.c"],
+    hdrs = ["input.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "preparation",
     srcs = ["preparation.c"],
     hdrs = ["preparation.h"],
@@ -185,6 +197,27 @@ loom_cc_library(
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "input_test",
+    srcs = ["input_test.cc"],
+    args = ["--input_source=$(rootpath :testdata/input/control.loom)"],
+    data = ["testdata/input/control.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":input",
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/vm",
     ],
 )

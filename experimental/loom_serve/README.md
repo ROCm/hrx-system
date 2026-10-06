@@ -19,11 +19,11 @@ configuration, numerical policy, and their remaining native adapters.
 | --- | --- |
 | [`runtime/`](runtime) | Source JIT, command materialization, VM imports, weight streaming and queue timelines |
 | [`http/`](http) | TCP carrier and bounded HTTP connection/request storage |
-| [`image/`](image) | Image request validation, completed-image service and output encoding; independent of diffusion architecture |
+| [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |
 | [`storage/`](storage) | Physical block accounting and logical page maps |
 | [`scheduling/`](scheduling) | Allocation-free ready-span packing and token/span shape selection |
 | [`motifs/`](motifs) | Reusable tensor math and GGML format kernels, specialized by model source |
-| [`models/krea/`](models/krea) | Krea model programs, checkpoint/request policy, image adapters and reference checks |
+| [`models/krea/`](models/krea) | Krea source programs, checkpoint/request policy and model-specific reference checks |
 | [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy, text adapters and reference checks |
 | [`tools/`](tools) | Observation, recording, workload replay, simulation and component checks |
 
@@ -31,13 +31,14 @@ The shared native headers are experimental model-author interfaces, not a
 stable ABI. Concrete model-native libraries are package-private. Only runtime
 consumes compiler-private command reflection; model callers use its serving
 interfaces. Each model's `:sources` target publishes its source-JIT catalog and
-is included in its executable's runfiles together with its shared motifs, not
-compiled ahead of time. The source catalog resolves paths relative to its model
-directory; copying that directory alone is not a complete source package.
+shared motifs, not compiled artifacts. The generic image binaries have no model
+dependency: `--model` selects an external source catalog. The catalog resolves
+paths relative to its model directory; copying that directory alone is not a
+complete source package.
 The [motif guide](motifs/README.md) describes composition and shape contracts.
 
 For example, the image server is
-`//experimental/loom_serve/models/krea:server`; the text server is
+`//experimental/loom_serve/image:server`; the text server is
 `//experimental/loom_serve/models/qwen:server`. Full serving coverage runs with
 `build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.
 
@@ -106,18 +107,21 @@ Weights, KV pools, model forward stages, scheduling policy, and transport are
 separate from this coarse execution boundary. None is inferred from buffer
 contents or command names by the native submission code.
 
-## Native Krea image generation
+## Source-defined diffusion image generation
 
 The [Krea 2 Turbo guide](models/krea/README.md#generate-an-image-natively)
 provides a second, non-autoregressive caller: prompt and seed through native
 IREE tokenization, source-JIT text encoding, conditioning, eight denoising steps
 and the complete VAE to a PPM image, with optional softwatercolor LoRA.
-[`generate.c`](models/krea/generate.c) uses the same device, source compiler,
-weight loader and execution timelines as Qwen. Its cold request leaf owns
-model-specific prompt layout and mathematical tables; the shared runner knows
-none of those semantics. All model loops and buffer lifetimes are authored in
-command programs. The separate
-[`Krea server`](models/krea/README.md#serve-images-over-http) returns native
+The generic [`generate.c`](image/generate.c) uses the same device, source
+compiler, weight loader and execution timelines as Qwen. The
+[diffusion-image ABI](image/model.h) lets source bootstrap declare command
+stages, checkpoint domains, tokenizer asset and opaque request state. Source VM
+control frames prompts, selects a stage and returns one opaque upload payload;
+the native input module supplies bounded tokenization and vocabulary lookup.
+Source command programs generate numerical inputs and own all model loops and
+temporary lifetimes. The generic
+[image server](models/krea/README.md#serve-images-over-http) returns native
 PNG images over HTTP using one retained model and a bounded request queue.
 Its modality-level worker preserves input/output lifetimes while the shared TCP
 transport serves concurrent clients. It serializes images rather than batching

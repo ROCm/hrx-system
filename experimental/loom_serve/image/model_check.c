@@ -10,26 +10,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/models/krea/model.h"
+#include "experimental/loom_serve/image/model.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
-IREE_FLAG(string, model, "experimental/loom_serve/models/krea",
-          "Source catalog.");
+IREE_FLAG(string, model, "", "Source catalog.");
 IREE_FLAG(string, checkpoint, "", "Official checkpoint directory.");
-IREE_FLAG(string, adapter, "", "Optional softwatercolor safetensors file.");
+IREE_FLAG(string, adapter, "", "Optional model-specific adapter asset.");
 IREE_FLAG(string, output, "",
           "Existing directory for completed F32 RGB files.");
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
-  if (!FLAG_output[0] || !FLAG_checkpoint[0]) {
-    fprintf(stderr, "checkpoint and output are required.\n");
+  if (!FLAG_model[0] || !FLAG_output[0] || !FLAG_checkpoint[0]) {
+    fprintf(stderr, "model, checkpoint and output are required.\n");
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
-  const loom_serve_krea2_model_options_t options = {
+  const loom_serve_image_model_options_t options = {
       .source_directory = iree_make_cstring_view(FLAG_model),
       .checkpoint_directory = iree_make_cstring_view(FLAG_checkpoint),
       .adapter_path = iree_make_cstring_view(FLAG_adapter),
@@ -37,9 +36,9 @@ int main(int argc, char** argv) {
       .width = 384,
       .text_tokens = 512,
   };
-  loom_serve_krea2_model_t* model = NULL;
+  loom_serve_image_model_t* model = NULL;
   iree_status_t status =
-      loom_serve_krea2_model_create(&options, &model, allocator);
+      loom_serve_image_model_create(&options, &model, allocator);
   const char* prompts[] = {
       "a red fox in the snow",
       "red"
@@ -54,7 +53,7 @@ int main(int argc, char** argv) {
   for (iree_host_size_t i = 0; i < case_count && iree_status_is_ok(status);
        ++i) {
     iree_const_byte_span_t rgb = iree_const_byte_span_empty();
-    iree_status_t rejected = loom_serve_krea2_model_generate(
+    iree_status_t rejected = loom_serve_image_model_generate(
         model, IREE_SV("rejected"), 0, NAN, &rgb);
     if (iree_status_code(rejected) != IREE_STATUS_INVALID_ARGUMENT ||
         rgb.data_length) {
@@ -69,7 +68,7 @@ int main(int argc, char** argv) {
       const uint32_t prompt = cases[i % IREE_ARRAYSIZE(cases)];
       const float strength =
           FLAG_adapter[0] && i < IREE_ARRAYSIZE(cases) ? 0.0f : 1.0f;
-      status = loom_serve_krea2_model_generate(
+      status = loom_serve_image_model_generate(
           model, iree_make_cstring_view(prompts[prompt]), prompt ? 42 : 0,
           strength, &rgb);
     }
@@ -87,7 +86,7 @@ int main(int argc, char** argv) {
     }
     iree_allocator_free(allocator, path);
   }
-  status = iree_status_join(status, loom_serve_krea2_model_destroy(model));
+  status = iree_status_join(status, loom_serve_image_model_destroy(model));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

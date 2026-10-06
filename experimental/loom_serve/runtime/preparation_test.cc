@@ -38,7 +38,8 @@ class PreparationTest : public ::testing::Test {
 TEST_F(PreparationTest, TextConfigurationCopiesValueSpelling) {
   IREE_ASSERT_OK(loom_serve_preparation_create(
       environment, iree_make_cstring_view(FLAG_boundary_source),
-      IREE_SV("text_config"), iree_vm_variant_span_empty(), &preparation,
+      IREE_SV("text_config"), iree_vm_variant_span_empty(),
+      iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &preparation,
       allocator));
   const auto* stage = loom_serve_preparation_stage(preparation, 0);
   ASSERT_EQ(stage->config.binding_count, 1);
@@ -63,6 +64,7 @@ TEST_F(PreparationTest, InvalidDeclarationsReleasePartialOwnership) {
         loom_serve_preparation_create(
             environment, iree_make_cstring_view(FLAG_boundary_source),
             iree_make_cstring_view(test.entry), iree_vm_variant_span_empty(),
+            iree_vm_variant_span_empty(), iree_vm_module_span_empty(),
             &preparation, allocator));
     EXPECT_EQ(preparation, nullptr);
   }

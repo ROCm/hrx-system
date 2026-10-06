@@ -321,6 +321,7 @@ static const iree_vm_module_vtable_t preparation_module_vtable = {
 iree_status_t loom_serve_preparation_create(
     iree_vm_environment_t* environment, iree_string_view_t source_path,
     iree_string_view_t entry, iree_vm_variant_span_t arguments,
+    iree_vm_variant_span_t results, iree_vm_module_span_t libraries,
     loom_serve_preparation_t** out_preparation,
     iree_allocator_t host_allocator) {
   *out_preparation = NULL;
@@ -357,11 +358,22 @@ iree_status_t loom_serve_preparation_create(
     }
   }
   loom_serve_program_t* program = NULL;
+  iree_vm_module_t** linked = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_program_create(environment, source_path, 1, &entry,
-                                       (iree_vm_module_span_t){&library, 1},
-                                       host_allocator, &program);
+    status = iree_allocator_malloc_array(host_allocator, libraries.count + 1,
+                                         sizeof(*linked), (void**)&linked);
   }
+  if (iree_status_is_ok(status)) {
+    linked[0] = library;
+    for (iree_host_size_t i = 0; i < libraries.count; ++i) {
+      linked[i + 1] = libraries.data[i];
+    }
+    status = loom_serve_program_create(
+        environment, source_path, 1, &entry,
+        (iree_vm_module_span_t){linked, libraries.count + 1}, host_allocator,
+        &program);
+  }
+  iree_allocator_free(host_allocator, linked);
   if (iree_status_is_ok(status)) {
     iree_vm_function_t function = {0};
     status =
@@ -369,7 +381,7 @@ iree_status_t loom_serve_preparation_create(
                                         IREE_SV("model"), entry, &function);
     if (iree_status_is_ok(status)) {
       status = iree_vm_invoke(loom_serve_program_invocation(program), function,
-                              arguments, iree_vm_variant_span_empty());
+                              arguments, results);
     }
   }
   loom_serve_program_destroy(program);
