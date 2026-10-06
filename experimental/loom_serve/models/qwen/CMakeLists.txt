@@ -143,6 +143,26 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    continuation_test
+  SRCS
+    "continuation_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/kernels/qwen38/continuation.loom"
+  DEPS
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::program
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+  ARGS
+    "--continuation_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/kernels/qwen38/continuation.loom}}"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_binary(
   NAME

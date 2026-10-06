@@ -47,6 +47,7 @@ def main():
     for name in ("server", "model", "weights", "tokenizer", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--rows", type=int, choices=range(1, 17), default=16)
+    parser.add_argument("--continuation-epochs", type=int, choices=(1, 2), default=1)
     parser.add_argument(
         "--catalog", choices=("automatic", "explicit"), default="automatic"
     )
@@ -81,8 +82,16 @@ def main():
             if not capacity or arguments.catalog == "explicit"
             else []
         )
+        continuation_epochs = arguments.continuation_epochs if capacity else 1
         with check_service.running_server(
-            command + shapes + [f"--pool_capacity={capacity}"], log_path, events.append
+            command
+            + shapes
+            + [
+                f"--pool_capacity={capacity}",
+                f"--continuation_epochs={continuation_epochs}",
+            ],
+            log_path,
+            events.append,
         ) as (_, endpoint):
             if endpoint is None:
                 raise RuntimeError(f"server did not become ready: {log_path}")
@@ -124,6 +133,12 @@ def main():
             raise RuntimeError("concurrent pooled output differs from dense control")
         epochs = [event for event in events if event and event.get("event") == "epoch"]
         if capacity:
+            if arguments.continuation_epochs == 2 and not any(
+                row["verification_epochs"] == 2
+                for epoch in epochs
+                for row in epoch["rows"]
+            ):
+                raise RuntimeError("workload did not execute device-fed continuation")
             visited = {row["row"] for epoch in epochs for row in epoch["rows"]}
             if visited != set(range(arguments.rows)):
                 raise RuntimeError(f"resident rows not exercised: {visited}")
@@ -160,6 +175,8 @@ def main():
                     "rows": arguments.rows,
                     "pool_capacity": capacity,
                     "epochs": len(epochs),
+                    "device_epochs": sum(epoch["traversals"] for epoch in epochs),
+                    "continuation_epochs": continuation_epochs,
                     "maximum_spans": max(epoch["spans"] for epoch in epochs),
                     "maximum_verifiers": max(epoch["mtp"]["rows"] for epoch in epochs),
                     "shapes": sorted(

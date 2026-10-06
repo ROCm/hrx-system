@@ -91,8 +91,10 @@ typedef struct loom_serve_qwen_result_t {
   iree_host_size_t consumed_count;
   // Selected output IDs, including an EOS or the first rejected replacement.
   iree_host_size_t output_count;
-  // Valid prefix of output_count IDs in generation order.
-  int32_t tokens[4];
+  // Number of speculative verifications that advanced this span.
+  iree_host_size_t verification_count;
+  // Valid prefix of output_count IDs across at most two device-fed epochs.
+  int32_t tokens[8];
 } loom_serve_qwen_result_t;
 
 typedef struct loom_serve_qwen_metrics_t {
@@ -168,21 +170,26 @@ iree_status_t loom_serve_qwen_model_epoch(loom_serve_qwen_model_t* model,
                                           const loom_serve_qwen_span_t* spans);
 
 // Mixes ordinary known spans with four-input speculative spans on one cached
-// target shape. A zero output limit denotes known input. Limits 1-4 denote
-// speculative input, require SELECT and a pending non-EOS prediction, and cap
-// the number of new selected outputs. PROPOSE spans supply only the pending
+// target shape. epoch_count is one or two; two permits device-fed continuation
+// without an intermediate host wait. A zero output limit denotes known input.
+// Limits 1 through 4*epoch_count denote speculative input, require SELECT and
+// a pending non-EOS prediction, and cap the number of new selected outputs.
+// PROPOSE spans supply only the pending
 // token: three draft rounds publish directly into the verifier input buffer.
 // Other speculative spans supply {pending token, three proposals} themselves.
 // Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
 // state is published; catch-up pairs accepted inputs with target hidden state.
 // Proposal, verification, commit and catch-up have no intermediate host wait or
 // readback. Only completed output/progress records cross back to the caller.
+// Known input executes once. Continuation compacts live speculative spans and
+// uses a cached fitting shape, stopping at EOS, output credit or context bound.
 // Results are in caller order and valid on success. Validation and submission
 // failure have the same contracts as model_epoch; all storage is reused.
 iree_status_t loom_serve_qwen_model_verify(
     loom_serve_qwen_model_t* model, iree_host_size_t shape_index,
-    iree_host_size_t span_count, const loom_serve_qwen_span_t* spans,
-    const uint32_t* output_limits, loom_serve_qwen_result_t* out_results);
+    iree_host_size_t epoch_count, iree_host_size_t span_count,
+    const loom_serve_qwen_span_t* spans, const uint32_t* output_limits,
+    loom_serve_qwen_result_t* out_results);
 
 // Clears recurrent state and position, then releases retired private KV pages.
 // Backing allocations remain fixed. Attention beyond the new logical prefix

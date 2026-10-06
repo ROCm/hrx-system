@@ -156,7 +156,7 @@ tokens, and copies SSE output into bounded transport storage. A slow client
 backpressures its row rather than forcing an unbounded output queue. These
 steps repeat under one model owner; another session has no VM instantiation.
 
-## MTP is a device chain inside that epoch boundary
+## MTP and bounded device-fed cohorts
 
 With `--mtp --mtp_depth=3`, admitted speculative rows reserve the anchor plus
 three proposals. The proposal command compacts those rows and executes three
@@ -168,10 +168,25 @@ Speculative GDN transitions remain captured until the accepted prefix is
 published; attention beyond the committed position remains unreachable.
 Catch-up advances private MTP KV/carry using accepted target information.
 Proposal, target verification, commit, and catch-up share the work timeline
-without an intermediate host readback. The host receives the completed epoch's
-output/progress records and then chooses the next epoch. Thus this is not yet
-an autonomous device decode loop. Depth zero with `--mtp` measures a warm draft
-state without proposal; omitting `--mtp` measures target-only residency.
+without an intermediate host readback. By default the host receives the
+completed epoch's output/progress records and then chooses the next epoch.
+Depth zero with `--mtp` measures a warm draft state without proposal; omitting
+`--mtp` measures target-only residency.
+
+`--continuation_epochs=2` grants two device-fed epochs per scheduling turn.
+After first-epoch catch-up, a source command compacts live speculative spans,
+advances accepted positions, reduces output credit and routes pending tokens
+directly into a cached next-epoch shape. Known spans execute only once. EOS,
+credit and context gates run on device before further state mutation. Distinct
+result banks preserve both feedback lifetimes; the host joins once and folds
+tagged records into per-session output. KV pages cover the bounded speculative
+high-water mark before submission and retire after both branches complete.
+
+This is a bounded continuation experiment, not the continuous admission/output
+ring. Transport and new arrivals are observed between cohorts. Fixed commands
+still execute padded stateless work if the second cohort becomes empty; the
+default remains one pending controlled endpoint measurements. Metrics count
+device epochs separately from host scheduling turns.
 
 ## Queues, failure, and reclaim
 
@@ -218,7 +233,7 @@ The JIT and weight integration tests use this same owner with actual queues.
 | Online shape insertion | Stage publication and immutable command-table lifetime; cached code and in-flight bindings must remain valid |
 | Overcommitted pooled sessions | Replace full-completion admission guarantees with explicit held/offloaded residency and a policy for restoring older sessions; kernels still consume only resident pages |
 | Shared prefix cache | Add shared ownership, partial-tail copy-on-write, recurrent snapshots, and retirement to the private-page lifecycle |
-| Device-owned continuation | Admission/completion rings with credit and cancellation; row progress and token routing leave the host epoch wait without recycling in-flight buffers |
+| Continuous device-owned continuation | Extend the bounded two-epoch handoff to admission/completion rings with credit, cancellation and independently retired output slots |
 | Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |
 | NPU/GPU or collective execution | Target packages, actual queue/device domains, shared-memory/coherency contracts, and cross-device completion/ownership |
 

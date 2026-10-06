@@ -100,7 +100,7 @@ class PrepareTest : public ::testing::Test {
         packed ? 64u : 0,
         mtp ? rows * 20480 : 0,
         mtp ? 1548u : 0,
-        mtp ? 384u : 0,
+        mtp ? 832u : 0,
         mtp ? (pool ? pool : rows * context) * 4096 : 0,
         mtp ? table : 0,
     };
@@ -204,6 +204,7 @@ TEST_F(PrepareTest, DeclaresCompleteProductionCatalogAndOpaqueState) {
           expected.push_back({"qwen38_mtp_verify", shape.token_capacity,
                               shape.span_capacity, 512, 512, 1});
         }
+        expected.push_back({"qwen38_continue", 1, rows, 512, 1, 0});
       }
       ASSERT_EQ(loom_serve_preparation_stage_count(preparation),
                 expected.size());

@@ -49,6 +49,9 @@ typedef struct loom_serve_qwen_service_options_t {
   // bundle on the borrowed model, with at least one epoch shape admitting four
   // tokens. Zero with a bundle measures warm target-only.
   iree_host_size_t mtp_depth;
+  // One or two device-fed epochs between transport/admission observations.
+  // Two requires MTP; output credit and speculative residency cover both.
+  iree_host_size_t continuation_epochs;
 } loom_serve_qwen_service_options_t;
 
 // Runs one application owner until transport shutdown or model failure. Model

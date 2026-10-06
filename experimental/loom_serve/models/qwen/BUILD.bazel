@@ -131,6 +131,24 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "continuation_test",
+    srcs = ["continuation_test.cc"],
+    args = ["--continuation_source=$(rootpath :kernels/qwen38/continuation.loom)"],
+    data = ["kernels/qwen38/continuation.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        "//experimental/loom_serve/runtime:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
 loom_cc_binary(
     name = "epoch_check",
     testonly = True,
