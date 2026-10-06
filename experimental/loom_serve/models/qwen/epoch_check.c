@@ -750,8 +750,10 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
 }
 
 // Each sample replays the same prefix outside timing. Both arms use the same
-// physical resident rows, weights and workspace. The baseline uses the ordinary
-// prefill/decode families, not four padded prefill calls for decode inputs.
+// resident rows, weights and workspace. The separate arm issues one public row
+// call per span: pooled/MTP calls use packed epoch stages, while dense target-
+// only calls use the isolated prefill/decode families. Results must retain the
+// backing/speculation configuration to distinguish these comparisons.
 static iree_status_t qwen_check_measure(
     loom_serve_text_model_t* model, const qwen_check_row_t rows[4],
     iree_host_size_t span_count, iree_host_size_t prefill_count,
