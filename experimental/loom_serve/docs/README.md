@@ -52,7 +52,7 @@ tokens, with an automatic source-JIT token/span catalog. Private F16 attention
 pages grow from one shared pool rather than reserving a full context per row.
 Admission reserves each request's complete high-water credit and queues excess
 work. The real HTTP differential covers single, odd, and sixteen-row cohorts;
-the [model guide](../models/qwen38/README.md#pooled-kv-and-reserved-admission)
+the [model guide](../models/qwen/README.md#pooled-kv-and-reserved-admission)
 describes those checks and capacity-pressure/reuse coverage. Recurrent state
 remains private, and this pool does not yet share prefixes or page to storage.
 The host still schedules and reads completion records between epochs.
@@ -132,22 +132,22 @@ The CPU gate is independent of model files and GPU availability:
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve:http_request_test \
-  //experimental/loom_serve:http_server_test \
-  //experimental/loom_serve:qwen_chat_test \
-  //experimental/loom_serve:block_pool_test \
-  //experimental/loom_serve:qwen_schedule_test \
-  //experimental/loom_serve:program_test \
-  //experimental/loom_serve:benchmark_service_test
+  //experimental/loom_serve/http:request_test \
+  //experimental/loom_serve/http:server_test \
+  //experimental/loom_serve/models/qwen:chat_test \
+  //experimental/loom_serve/storage:block_pool_test \
+  //experimental/loom_serve/models/qwen:schedule_test \
+  //experimental/loom_serve/models/qwen:weights_test \
+  //experimental/loom_serve/models/qwen:benchmark_service_test
 ```
 
 Then, with the GPU runner available:
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve:jit_test \
-  //experimental/loom_serve:weights_test \
-  //experimental/loom_serve:control_test
+  //experimental/loom_serve/runtime:jit_test \
+  //experimental/loom_serve/runtime:weights_test \
+  //experimental/loom_serve/runtime:control_test
 ```
 
 Success means all GPU targets pass, not skip: three JIT cases, five weight-loader
@@ -164,11 +164,11 @@ failure, and the separate cases cover invalid configuration and a command with
 no native requests. A compiler that merely accepts the source does not satisfy
 this gate.
 
-[`jit_test.cc`](../jit_test.cc) is the smallest complete embedding example:
+[`jit_test.cc`](../runtime/jit_test.cc) is the smallest complete embedding example:
 source catalog, source defaults and binding overrides, actual device-profile
 specialization, native code loading, JIT VM invocation, and shared GPU state.
 It destroys compiler storage before executing the prepared commands.
-[`control_test.cc`](../control_test.cc) adds retained rows, explicit timeline
+[`control_test.cc`](../runtime/control_test.cc) adds retained rows, explicit timeline
 edges, feedback branching, and
 device-produced indirect counts. Neither test needs model downloads.
 
@@ -178,7 +178,7 @@ The adapter expects the specific `Qwen3.8-27B-UD-Q5_K_XL.gguf` tensor layout
 and its matching Hugging Face `tokenizer.json`. MTP additionally needs the
 block-64 tensors in that weight file. Other quantization mixes or model sizes
 are different ports, not interchangeable filenames. The model's
-[source guide](../models/qwen38/README.md) describes the tensor and kernel
+[source guide](../models/qwen/README.md) describes the tensor and kernel
 contracts.
 
 The qualified GGUF is 20,218,178,624 bytes. The actual inputs used for the
@@ -225,8 +225,8 @@ Build the exact executable targets before running or transferring them:
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
-  //experimental/loom_serve:qwen_epoch_check \
-  //experimental/loom_serve:qwen_server
+  //experimental/loom_serve/models/qwen:epoch_check \
+  //experimental/loom_serve/models/qwen:server
 ```
 
 The following direct invocations belong on a qualified GPU runner. That runner
@@ -234,8 +234,8 @@ needs the binaries, this model source directory, weights, and tokenizer; it does
 not need `loom-compile`, Python model frameworks, or generated kernel files.
 
 ```sh
-bazel-bin/experimental/loom_serve/qwen_epoch_check \
-  --model=experimental/loom_serve/models/qwen38 \
+bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
+  --model=experimental/loom_serve/models/qwen \
   --prefill_capacity=128 --context_capacity=2048 --epoch=32:8 --mtp \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json"
@@ -255,8 +255,8 @@ token capacities:
 
 ```sh
 check_shapes() {
-  bazel-bin/experimental/loom_serve/qwen_epoch_check \
-    --model=experimental/loom_serve/models/qwen38 \
+  bazel-bin/experimental/loom_serve/models/qwen/epoch_check \
+    --model=experimental/loom_serve/models/qwen \
     --prefill_capacity=512 --context_capacity=2048 --mtp \
     --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
     --tokenizer="$model_dir/tokenizer.json" "$@"
@@ -274,8 +274,8 @@ smaller-token boundary checks below have a different purpose.
 After the check exits and releases the residency, start one server:
 
 ```sh
-bazel-bin/experimental/loom_serve/qwen_server \
-  --model=experimental/loom_serve/models/qwen38 \
+bazel-bin/experimental/loom_serve/models/qwen/server \
+  --model=experimental/loom_serve/models/qwen \
   --context_capacity=2048 --pool_capacity=8192 --mtp --mtp_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \
@@ -290,7 +290,7 @@ standard-library-only client verifies distinct codewords and cached history
 over two turns per client:
 
 ```sh
-python3.12 -B experimental/loom_serve/benchmark_service.py \
+python3.12 -B experimental/loom_serve/models/qwen/benchmark_service.py \
   --url=http://127.0.0.1:8080 --clients=4 --long-lines=8 --max-tokens=32
 ```
 
@@ -308,7 +308,7 @@ results. Device access instrumentation is a separate option described in the
 model guide. Shared hardware runs use the environment's benchmark lease around
 execution, not around the build.
 
-The [server lifecycle check](../check_service.py) automates startup and shutdown
+The [server lifecycle check](../models/qwen/check_service.py) automates startup and shutdown
 around a retained four-client witness. It also verifies that depth-three MTP
 rejects shape tables unable to fit four inputs, accepts the four-token boundary,
 and accepts narrow shapes alongside a wider one. Depth zero also accepts a
@@ -317,9 +317,9 @@ After building `qwen_server` as above, this runs sequential residencies, never
 multiple weight copies at once:
 
 ```sh
-python3.12 -B -m experimental.loom_serve.check_service \
-  --server=bazel-bin/experimental/loom_serve/qwen_server \
-  --model=experimental/loom_serve/models/qwen38 \
+python3.12 -B -m experimental.loom_serve.models.qwen.check_service \
+  --server=bazel-bin/experimental/loom_serve/models/qwen/server \
+  --model=experimental/loom_serve/models/qwen \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \
   --output=/path/to/run-evidence/service-check
@@ -329,12 +329,12 @@ Success ends with an `event: pass` record after eight retained requests and
 clean server retirement. Per-case stderr is kept in a new output directory;
 an existing directory is rejected to preserve previous evidence.
 
-The [pooled row-family check](../check_rows.py) compares exact streaming output,
+The [pooled row-family check](../models/qwen/check_rows.py) compares exact streaming output,
 usage, and finish reasons against a sequential dense control. Its candidate
 uses no manual epoch flags and checks that the automatic catalog follows the
 ready cohort. Run with `--rows=1`, `--rows=3`, and `--rows=16` in separate
 output directories; the last case requires a full sixteen-row verifier and a
-512-token shape. [check_capacity.py](../check_capacity.py) separately checks
+512-token shape. [check_capacity.py](../models/qwen/check_capacity.py) separately checks
 reserved admission, queued cancellation, idle eviction, and retained reuse
 under an intentionally small shared pool. Both take the same model/server/path
 arguments as the lifecycle check above.

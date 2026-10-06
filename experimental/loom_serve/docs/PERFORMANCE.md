@@ -12,16 +12,16 @@ The experiment identity includes source commit, executable/configuration,
 weight and tokenizer hashes, device/runtime versions, context lengths, active
 row distribution, shape table, proposal depth, prompt corpus, and output policy.
 Power mode, clocks, temperature, and concurrent work are part of the record.
-[`observe.py`](../observe.py) combines service events with available system
-telemetry; [`dashboard.py`](../dashboard.py) presents that stream. Missing
+[`observe.py`](../tools/observe.py) combines service events with available system
+telemetry; [`dashboard.py`](../tools/dashboard.py) presents that stream. Missing
 sensor readings remain missing, not zero power or a healthy temperature.
 
-[`qwen_epoch_check`](../qwen_epoch_check.c) establishes retained correctness;
-[`qwen_workload`](../qwen_workload.c) compares controlled isolated/packed work;
-[`qwen_replay`](../qwen_replay.c) replays retained text turns with scheduling
-windows; [`benchmark_service`](../benchmark_service.py) exercises the actual
+[`qwen_epoch_check`](../models/qwen/epoch_check.c) establishes retained correctness;
+[`qwen_workload`](../models/qwen/workload.c) compares controlled isolated/packed work;
+[`qwen_replay`](../models/qwen/replay.c) replays retained text turns with scheduling
+windows; [`benchmark_service`](../models/qwen/benchmark_service.py) exercises the actual
 HTTP service. Their detailed options are in the [runner README](../README.md)
-and [model guide](../models/qwen38/README.md). Fixed replay holds work constant;
+and [model guide](../models/qwen/README.md). Fixed replay holds work constant;
 live agents additionally expose feedback-dependent arrival patterns. Both are
 valuable, but they answer different questions.
 
@@ -29,8 +29,8 @@ Host ASAN, device sanitizers, Tracy, and device profiling are diagnostic modes.
 Performance uses an explicitly optimized build of the exact executable:
 
 ```sh
-build_tools/bin/iree-bazel-build //experimental/loom_serve:qwen_server \
-  //experimental/loom_serve:qwen_workload -c opt --features=thin_lto \
+build_tools/bin/iree-bazel-build //experimental/loom_serve/models/qwen:server \
+  //experimental/loom_serve/models/qwen:workload -c opt --features=thin_lto \
   --copt=-O3 --cxxopt=-O3 --host_copt=-O3 --host_cxxopt=-O3
 ```
 
@@ -70,7 +70,7 @@ warm inference. This lets useful shape families remain a scheduling choice
 rather than an offline artifact-management burden.
 
 An optimized, leased ABABA comparison used four workers from `9478fca24b`
-against the same source with `max_worker_count = 8` in [`jit.c`](../jit.c).
+against the same source with `max_worker_count = 8` in [`jit.c`](../runtime/jit.c).
 Both arms used sixteen resident rows, 512-token prefill capacity, 16,384-token
 logical contexts, a shared 65,536-position KV pool, and MTP depth three. No
 explicit `--epoch` overrides were supplied. All model sources, weights,
@@ -89,7 +89,7 @@ processor affinity and topology can supply fewer. Host RSS excludes device
 backing and does not isolate workspace storage from allocator retention.
 
 Each fresh residency then served barrier-released cohorts of one, three and
-sixteen clients using [`check_rows.request`](../check_rows.py), in that order.
+sixteen clients using [`check_rows.request`](../models/qwen/check_rows.py), in that order.
 These short counting prompts request 48–72 output tokens and reuse row tags
 between cohorts. Full text, usage and finish reasons matched across all five
 runs, totaling 5,880 output tokens. Median aggregate throughput was
@@ -105,9 +105,9 @@ The fixture also executes prepared commands after destroying compiler storage.
 
 ## Retained-review benchmark
 
-The checked-in [source-review workload](../testdata/source_review.json) contains
+The checked-in [source-review workload](../models/qwen/testdata/source_review.json) contains
 eight independent two-turn reviews with different prompt lengths. Each turn
-requests at most 192 output tokens. Its [provenance](../testdata/README.md)
+requests at most 192 output tokens. Its [provenance](../models/qwen/testdata/README.md)
 records the public source excerpts and immutable corpus hash. A fresh agent
 needs no private recordings to reproduce this window.
 
@@ -117,10 +117,10 @@ pinned checkpoint directory from that README. On the qualified execution host,
 select a new `run_dir`, acquire its measurement lease, and start one residency:
 
 ```sh
-python3.12 -B -m experimental.loom_serve.observe \
+python3.12 -B -m experimental.loom_serve.tools.observe \
   --log="$run_dir/observe.jsonl" -- \
-  bazel-bin/experimental/loom_serve/qwen_server \
-  --model=experimental/loom_serve/models/qwen38 \
+  bazel-bin/experimental/loom_serve/models/qwen/server \
+  --model=experimental/loom_serve/models/qwen \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \
   --prefill_capacity=512 --context_capacity=16384 --rows=8 \
@@ -134,9 +134,9 @@ the JSON `ready` event, followed by a successful `/healthz` response. Once ready
 run the client in another terminal on that host while the same lease is held:
 
 ```sh
-python3.12 -B experimental/loom_serve/benchmark_service.py \
+python3.12 -B experimental/loom_serve/models/qwen/benchmark_service.py \
   --url=http://127.0.0.1:8080 --clients=8 --session-prefix=review-0 \
-  --workload=experimental/loom_serve/testdata/source_review.json \
+  --workload=experimental/loom_serve/models/qwen/testdata/source_review.json \
   > "$run_dir/clients.jsonl"
 ```
 
@@ -235,7 +235,7 @@ of the scored controls.
 
 Commit `92f4875240` specializes the fused wide feed-forward kernel's model
 dimensions through JIT configuration and pipelines next-block weight reads
-across current matrix work. The [model guide](../models/qwen38/README.md#fused-feed-forward-projection)
+across current matrix work. The [model guide](../models/qwen/README.md#fused-feed-forward-projection)
 records the source contract and complete source-level differential checks.
 Arithmetic, weight format, retained state, scheduling policy and MTP depth
 remain unchanged. This adds no HAL or command-program ABI extension.
@@ -341,7 +341,7 @@ Commit `f076aa0955` prepares FFN gate/up Q5 blocks in eight-channel order once
 at startup. Every target and MTP consumer shares those final bytes; neither
 quantization nor arithmetic changes. The source-JIT preparer uses only
 workgroup-local scratch. Four independent read/preparation timelines replace
-the separate target and auxiliary loading joins. The [model guide](../models/qwen38/README.md#online-weight-residency)
+the separate target and auxiliary loading joins. The [model guide](../models/qwen/README.md#online-weight-residency)
 describes the layout and exact source-level comparisons.
 
 This A/B/A/B/A uses baseline `ca760be2a0` and the prepared candidate, both built
@@ -407,7 +407,7 @@ recurrent-layer command programs select this geometry for their 256- and
 512-token recipes. Smaller and intermediate recipes retain their previous
 geometry. Runtime active counts remain device data; this changes neither
 host scheduling nor canonical weights, accumulation order, shared global
-scratch, or in-place residual ownership. The [model guide](../models/qwen38/README.md#q6-metadata-contractions)
+scratch, or in-place residual ownership. The [model guide](../models/qwen/README.md#q6-metadata-contractions)
 contains the source-level comparison recipe.
 
 The 2026-10-03 A/B/A/B/A below uses the same eight-client retained-review
@@ -605,7 +605,7 @@ prompt work. Acceptance alone is insufficient: a high-acceptance draft can
 still cost more than the traversals it saves. Fixed target-only, warm-depth-zero,
 and depth-three controls separate those costs.
 
-[`simulate_packing.py`](../simulate_packing.py) can explore recorded arrivals and
+[`simulate_packing.py`](../tools/simulate_packing.py) can explore recorded arrivals and
 shape policies before device runs. Fewer modeled epochs are evidence about
 amortization opportunity, not that each epoch costs the same. Device costs
 calibrated by shape, span count, context, and proposal mode turn that replay
@@ -660,7 +660,7 @@ the experiment interpretable.
 
 The [agent authoring workflow](../../../loom/docs/src/workflows/agent-driven-kernel-development.md#workgroup-traversal-is-a-schedule)
 separates lane coalescing, workgroup-local reuse, and reuse between workgroups.
-An experiment around Krea's [dense projection motif](../models/krea2/kernels/linear_tiled.loom)
+An experiment around Krea's [dense projection motif](../models/krea/kernels/linear_tiled.loom)
 compared ordinary traversal with a bijection grouping eight 64-row tiles
 while keeping the 64x64 output tile, eight wave32s, K64 read-ahead, four-chain
 F32 accumulation, BF16 storage, and 18 KiB LDS unchanged.
@@ -743,7 +743,7 @@ The current Qwen sources provide concrete examples, not universal winners:
 the fused Q5 gate/up contraction shares encoded weight staging and publishes
 SwiGLU directly; Q6 contractions stage metadata and pipeline acquisition; output
 projection groups the requested output cohort; MTP proposal rounds feed device
-buffers without intermediate host reads. Their [kernel guide](../models/qwen38/README.md)
+buffers without intermediate host reads. Their [kernel guide](../models/qwen/README.md)
 links numerical comparisons at production dimensions and tail shapes.
 
 A candidate record states the bottleneck, one proposed mechanism, baseline,

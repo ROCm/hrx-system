@@ -1,0 +1,123 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+py_library(
+    name = "agent_trace_lib",
+    srcs = ["agent_trace.py"],
+)
+
+py_binary(
+    name = "agent_trace",
+    srcs = ["agent_trace.py"],
+)
+
+py_library(
+    name = "system_stats",
+    srcs = ["system_stats.py"],
+)
+
+py_library(
+    name = "observe_lib",
+    srcs = ["observe.py"],
+    deps = [":system_stats"],
+)
+
+py_binary(
+    name = "observe",
+    srcs = ["observe.py"],
+    deps = [":system_stats"],
+)
+
+py_test(
+    name = "observe_test",
+    size = "small",
+    srcs = ["observe_test.py"],
+    deps = [
+        ":observe_lib",
+        ":system_stats",
+    ],
+)
+
+py_library(
+    name = "dashboard_lib",
+    srcs = ["dashboard.py"],
+)
+
+py_binary(
+    name = "dashboard",
+    srcs = ["dashboard.py"],
+)
+
+py_test(
+    name = "dashboard_test",
+    size = "small",
+    srcs = ["dashboard_test.py"],
+    deps = [
+        ":dashboard_lib",
+        ":observe_lib",
+    ],
+)
+
+py_test(
+    name = "agent_trace_test",
+    size = "small",
+    srcs = ["agent_trace_test.py"],
+    deps = [":agent_trace_lib"],
+)
+
+py_library(
+    name = "simulate_packing_lib",
+    srcs = ["simulate_packing.py"],
+    deps = [":agent_trace_lib"],
+)
+
+py_binary(
+    name = "simulate_packing",
+    srcs = ["simulate_packing.py"],
+    deps = [":agent_trace_lib"],
+)
+
+py_test(
+    name = "simulate_packing_test",
+    size = "small",
+    srcs = ["simulate_packing_test.py"],
+    deps = [
+        ":agent_trace_lib",
+        ":simulate_packing_lib",
+    ],
+)
+
+loom_cc_binary(
+    name = "component_check",
+    testonly = True,
+    srcs = ["component_check.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/runtime:jit",
+        "//experimental/loom_serve/runtime:weights",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)

@@ -16,7 +16,7 @@ values and a matching retained continuation.
 
 The checked-in Qwen example has 64 target layers in sixteen groups: three Gated
 DeltaNet layers then one full-attention layer. That structure is explicit in
-[`model_prefill.loom`](../models/qwen38/programs/qwen38/model_prefill.loom),
+[`model_prefill.loom`](../models/qwen/programs/qwen38/model_prefill.loom),
 not inferred by the runtime. Its quantized tensor layouts and fixed dimensions
 are model-specific. Reusing a contraction motif does not imply reusing its
 Qwen parameter offsets or attention convention.
@@ -32,9 +32,9 @@ expands around the new model.
 | Layer | Meaning | Existing example |
 | --- | --- | --- |
 | Ordinary functions and templates | Reusable arithmetic, layouts, target-selected implementation motifs | [Authoring corpus](../../../loom/src/loom/test/corpus/authoring/README.md) |
-| Kernels | Workload-to-launch mapping and one device invocation | [Token embedding](../models/qwen38/kernels/qwen38/token_embedding.loom) |
-| Command programs | Parameter roots, transient lifetimes, layer composition, dispatch dependencies | [Packed epoch](../models/qwen38/epoch.loom) |
-| VM control and policy | Coarse orchestration through typed imports; source queries returning ordinary values and buffers | [Qwen control](../models/qwen38/control.loom), [weight policy](../models/qwen38/weights.loom) |
+| Kernels | Workload-to-launch mapping and one device invocation | [Token embedding](../models/qwen/kernels/qwen38/token_embedding.loom) |
+| Command programs | Parameter roots, transient lifetimes, layer composition, dispatch dependencies | [Packed epoch](../models/qwen/epoch.loom) |
+| VM control and policy | Coarse orchestration through typed imports; source queries returning ordinary values and buffers | [Qwen control](../models/qwen/control.loom), [weight policy](../models/qwen/weights.loom) |
 
 A kernel's workload arguments establish launch geometry and specialization;
 its launch arguments supply the values and buffers consumed by that invocation.
@@ -54,7 +54,7 @@ lifetime and represent local shared storage.
 Transient reservation begins at its source allocation, not its first memory
 access. Placing an allocation immediately before its first producing command
 lets the planner reuse storage retired by earlier commands. Krea's
-[VAE attention](../models/krea2/vae_attention.loom) allocates its attended
+[VAE attention](../models/krea/vae_attention.loom) allocates its attended
 features after QKV projection; the preceding normalization buffer is then
 available for reuse. Its full-shape composition checks both output bits and
 the four-feature-plane scratch bound.
@@ -63,7 +63,7 @@ Schedule regions express dependencies, not hints. A command-program call
 preserves its implicitly serial body when expanded inside `command.concurrent`.
 A template expands into its caller's region instead; a multi-command template
 branch needs an explicit `command.serial` scope when its operations depend on
-one another. Krea's [denoising input phase](../models/krea2/denoise.loom) uses
+one another. Krea's [denoising input phase](../models/krea/denoise.loom) uses
 that nesting to overlap text copying with image projection while keeping the
 LoRA B/add consumer after its base and A producers. Buffer aliasing does not
 create that edge. Exact composition against separately executed native stages
@@ -71,9 +71,9 @@ checks the dependency contract independently of floating-point oracle error.
 
 ## Configuration and live target facts
 
-The model's [`config.loom`](../models/qwen38/config.loom) supplies fixed typed
+The model's [`config.loom`](../models/qwen/config.loom) supplies fixed typed
 `config.def` values through the ordinary source catalog.
-[`qwen_compile_stage`](../qwen_model.c) supplies run-dependent overrides in
+[`qwen_compile_stage`](../models/qwen/model.c) supplies run-dependent overrides in
 `loomc_config_options_t`. Both feed the same command materialization and native
 source requests; the compiler retains the relationship between a kernel's
 launch math and body. Kernel declarations still constrain accepted values with
@@ -95,7 +95,7 @@ without depending on that model's keys. Launch arguments that remain runtime
 values are a different contract from template operands fixed by that wrapper.
 
 Relationships between independently configured dimensions are selection
-requirements too. Krea's [image command](../models/krea2/sample.loom) resolves
+requirements too. Krea's [image command](../models/krea/sample.loom) resolves
 its DiT token counts and VAE latent grid, then applies a provider requiring
 equal patch counts, a nonnegative text prefix, and an equal number of projected
 text rows. A mismatched configuration has no eligible provider and fails JIT
@@ -109,37 +109,37 @@ padding can exist without advancing the persistent state of inactive rows.
 The [facts guide](../../../loom/docs/src/guide/facts-and-specialization.md)
 explains both domains and path-dependent refinement.
 
-The fused [FFN block read-ahead](../models/qwen38/kernels/qwen38/ffn_gate_up_prefetch.loom)
+The fused [FFN block read-ahead](../models/qwen/kernels/qwen38/ffn_gate_up_prefetch.loom)
 resolves `qwen38.ffn.input_size` and `qwen38.ffn.output_size` in its concrete
 kernel wrappers and passes K/N into the body template. The exact block loop
 still pipelines weight acquisition; the template itself has no config reads.
-The [independent-specialization case](../models/qwen38/tests/ffn_prefetch_specialization.loom)
+The [independent-specialization case](../models/qwen/tests/ffn_prefetch_specialization.loom)
 applies that same motif at K256/N64 and K768/N128 in one module without Qwen
 config bindings, comparing both against independently staged contractions.
 Its workload carries token capacity, and its five launch buffers carry live count,
 activations, two weight views and output. There is no runtime K/N scalar to
 rediscover or a host readback to learn the active count. The
-[model guide](../models/qwen38/README.md#fused-feed-forward-projection) includes
+[model guide](../models/qwen/README.md#fused-feed-forward-projection) includes
 the matching configuration and seeded full-array checks.
 
-The [cache-map helpers](../models/qwen38/kernels/qwen38/spans.loom) and shared
+The [cache-map helpers](../models/qwen/kernels/qwen38/spans.loom) and shared
 KV preparation/WMMA templates likewise receive logical capacity explicitly.
 That capacity sizes each row's logical page map and bounds absolute positions;
 physical pool capacity independently sizes the shared K/V planes. The concrete
 dense and packed wrappers resolve configuration without adding launch arguments
 or device metadata loads. The
-[attention specialization case](../models/qwen38/tests/attention_specialization.loom)
+[attention specialization case](../models/qwen/tests/attention_specialization.loom)
 combines 81/145-position logical caches with 128/192-position physical pools
 in one composition without any model configuration bindings. It checks different
 map strides, scattered pages, complete cache contents, and masked output tails.
 These motifs still implement Qwen's fixed head geometry and RoPE; explicit
 cache operands alone do not make them arbitrary-model attention.
 
-The [packed Q5 contraction bodies](../models/qwen38/kernels/ggml/linear_q5k_q8_1_x4.loom)
+The [packed Q5 contraction bodies](../models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom)
 take token/output capacity independently of live token count and K/N. Their
 single-row and four-row schedules accept the same explicit bounds and weight
 ordering; canonical and channel-interleaved wrappers resolve the configuration.
-The [reuse case](../models/qwen38/tests/q5_specialization.loom) instantiates both
+The [reuse case](../models/qwen/tests/q5_specialization.loom) instantiates both
 schedules at two capacity pairs in one module without config bindings, including
 an odd channel tail and an untouched output row. Capacity constrains the body;
 it does not become the amount of work executed.
@@ -158,10 +158,10 @@ experiment, not a blanket optimization rule.
 
 ## Source catalog to executable commands
 
-[`sources.txt`](../models/qwen38/sources.txt) contains relative source paths,
+[`sources.txt`](../models/qwen/sources.txt) contains relative source paths,
 one per line. The runner indexes providers once and requests a named command
 root. The minimal corresponding catalog and programs are in
-[`testdata/jit`](../testdata/jit/sources.txt).
+[`testdata/jit`](../runtime/testdata/jit/sources.txt).
 
 Paths are resolved relative to the model source directory. Each catalog entry
 is indexed as a separate provider, not concatenated into one source file.
@@ -169,7 +169,7 @@ A provider carries declarations for the configuration, templates, kernels and
 commands it references from other providers, and the target definitions needed
 to verify its own kernels. The declarations describe imported contracts; their
 definitions remain with the owning provider. For example,
-[`stage.loom`](../testdata/jit/stage.loom) declares the configuration supplied by
+[`stage.loom`](../runtime/testdata/jit/stage.loom) declares the configuration supplied by
 its neighboring `config.loom` and defines its kernel target locally.
 
 A flattened kernel benchmark does not exercise this provider boundary. Building
@@ -178,7 +178,7 @@ per-file declarations and reachable definitions before device execution. That
 is part of the first real-weight component witness, alongside native code and
 numerical checks.
 
-The real embedding sequence in [`jit.c`](../jit.c) is:
+The real embedding sequence in [`jit.c`](../runtime/jit.c) is:
 
 1. Create the target environment, context, prepared compiler and pipeline;
    obtain the live HAL profile and freeze the source index. A standard
@@ -219,7 +219,7 @@ IO machinery, but its model adapter must establish names, encoding, orientation,
 and size rather than treating a matching byte count as numerical equivalence.
 
 Checkpoint encoding and inference layout need not be identical.
-[`weights.c`](../weights.c) loads each unique tensor into final
+[`weights.c`](../runtime/weights.c) loads each unique tensor into final
 residency. It calls the model's source-JIT weight policy with the tensor name as
 a read-only, non-NUL-terminated VM buffer. `prepare_weight` returns a command
 root buffer and its required tensor byte length; an empty root and zero length
@@ -242,9 +242,9 @@ func.def public @prepare_weight(%key: buffer) -> (buffer, i64) {
 }
 ```
 
-Qwen's [`weights.loom`](../models/qwen38/weights.loom) owns the tensor-name
+Qwen's [`weights.loom`](../models/qwen/weights.loom) owns the tensor-name
 predicate and Q5 dimensions and selects the ordinary source-JIT
-[`prepare.loom`](../models/qwen38/prepare.loom) command after its read. Each
+[`prepare.loom`](../models/qwen/prepare.loom) command after its read. Each
 workgroup captures eight complete Q5 rows before rewriting its disjoint range;
 the permutation requires only workgroup-local storage. The target and MTP
 consumers then use that same prepared encoding. An alternative model owns its
@@ -254,14 +254,14 @@ startup ownership path, including byte copies and peak residency. A faster
 projection alone does not establish a better serving configuration.
 
 This is a cold policy query, not a graph language interpreted by C. The same
-[`program`](../program.h) owner handles pure startup queries and the inference
+[`program`](../runtime/program.h) owner handles pure startup queries and the inference
 VM linked against native submission exports. The startup query process is gone
 before inference begins. Common native pipelines can consume model-owned query
 results while additional control moves into VM source; modality-specific state
 and scheduling contracts still need an actual caller before being generalized.
 
 The inference program exposes both `step` and `epoch` from one source-JIT image.
-[`control.loom`](../models/qwen38/control.loom) is a concrete example of typed
+[`control.loom`](../models/qwen/control.loom) is a concrete example of typed
 command selection, optional proposal, verification, and cache catch-up. Its
 `runner.execute_N` calls select cached commands by residency-local index;
 `runner.feedback` forks a download into a cold-registered host slot. The source
@@ -273,9 +273,9 @@ joining accepted work before the host recycles payloads. The
 ## Image and audio entry points
 
 The reusable embedding accepts command programs and buffer bindings, not text
-tokens. [`jit_test.cc`](../jit_test.cc) exercises it without a tokenizer, chat
+tokens. [`jit_test.cc`](../runtime/jit_test.cc) exercises it without a tokenizer, chat
 request, KV cache, or Qwen adapter. That is the smaller starting point for an
-image or audio port. The [Krea image port](../models/krea2/README.md) adds
+image or audio port. The [Krea image port](../models/krea/README.md) adds
 real checkpoint and adapter evidence: one source-JIT command now composes
 batched time conditioning, image projection, all 28 transformer layers, the
 velocity head, and eight Euler updates. Base, zero-strength, and active LoRA
@@ -286,7 +286,7 @@ and accumulated image differences. A separate source command now runs the full
 still-image VAE from packed BF16 latent to F32 RGB, with folded spatial
 upsampling and in-place residuals. Its final pixels agree with the independent
 CPU decoder to at most one 8-bit level on the qualified base/LoRA images.
-The [image root](../models/krea2/sample.loom) runs the native text-only encoder,
+The [image root](../models/krea/sample.loom) runs the native text-only encoder,
 collects and fuses twelve taps per token,
 projects the resulting features once, retains that prefix for denoising, and
 decodes without intermediate host readbacks. Fusion and the DiT share one
@@ -301,33 +301,33 @@ advances one encoder hidden buffer in place and omits unused decoder/vision
 weights. It derives the downstream key mask from encoder visibility, so the
 caller cannot accidentally give two stages different text masks.
 
-The [native image CLI](../models/krea2/generate.c) uses a
-[retained model leaf](../models/krea2/model.h): IREE prompt tokenization and
+The [native image CLI](../models/krea/generate.c) uses a
+[retained model leaf](../models/krea/model.h): IREE prompt tokenization and
 cold request tables, source JIT, immutable weight loading, queued request upload,
 command execution and final RGB download. The CLI encodes that output as PPM.
 The model can serve successive serialized calls without warm JIT, weight loads
 or device allocations. Its output view lasts until the next call; the consumer
 copies or encodes it before then. It requires no external encoder or captured
 tensors. Its
-[request leaf](../models/krea2/request.h) contains model-specific template and
+[request leaf](../models/krea/request.h) contains model-specific template and
 numeric setup, separate from shared serving code. That cold C boundary retains
 canonical F64 rotary math that the current VM's F32 transcendental lowering
 cannot express unchanged. Model stage control already lives in `.loom`.
-The [finite-image service](../image_service.h) is a second concrete serving
+The [finite-image service](../image/service.h) is a second concrete serving
 pipeline. Its serialized generator returns borrowed completed RGB; one worker
 encodes it before another model call, while the application owner admits bounded
 requests and serves health checks over the shared TCP transport. Transport-owned
 response bytes decouple slow readers from model memory. The
-[Krea entry point](../models/krea2/server.c) supplies only model creation and the
+[Krea entry point](../models/krea/server.c) supplies only model creation and the
 coarse generator callback. Model math and stage loops remain source commands.
-The [HTTP witness](../models/krea2/check_service.py) checks real image pixels,
+The [HTTP witness](../models/krea/check_service.py) checks real image pixels,
 overload, peer reset and in-flight shutdown using the actual checkpoint.
 This service queues images; it does not batch them. Qwen's packed token scheduler
 remains a separate consumer, and no audio model is claimed by this packet.
 
 A first tensor-in/tensor-out adapter has this ownership flow:
 
-1. It creates a [`loom_serve_device_t`](../device.h), which owns the device,
+1. It creates a [`loom_serve_device_t`](../runtime/device.h), which owns the device,
    asynchronous services, exact queues, and execution timelines. Borrowed
    device/queue handles create a source catalog with `loom_serve_jit_create`
    and specialize named roots with `loom_serve_jit_compile`. Source owns tensor
@@ -357,7 +357,7 @@ A first tensor-in/tensor-out adapter has this ownership flow:
    frontiers before publishing output. `runner.execute_N` returns an accepted
    submission value, not a completed tensor. An error after an earlier accepted
    submission still requires draining both execution timelines before reuse or
-   teardown. [`control_test.cc`](../control_test.cc) exercises that failure path.
+   teardown. [`control_test.cc`](../runtime/control_test.cc) exercises that failure path.
    The device owner is destroyed only after model commands, buffers, VM state,
    and accepted host payloads have retired; destroying it is not an implicit
    completion wait.
@@ -391,7 +391,7 @@ contracts, not merely that it generates discrete values.
 
 ## Correctness that survives optimization
 
-[`gdn_convolution.loom`](../models/qwen38/tests/gdn_convolution.loom) is a small
+[`gdn_convolution.loom`](../models/qwen/tests/gdn_convolution.loom) is a small
 `check.scenario`/`check.trial` example: an ordinary function runs on the GPU and
 an independent serial function runs through the VM oracle. No test kernel
 wrapper is needed. It checks the activation with an explicit numerical
@@ -400,7 +400,7 @@ an explicit oracle function with the intended serial semantics. The
 [checks guide](../../../loom/docs/src/guide/checks-and-benchmarks.md) owns the
 syntax and observation contract.
 
-For real checkpoint tensors, [`component_check`](../component_check.c) loads
+For real checkpoint tensors, [`component_check`](../tools/component_check.c) loads
 named source commands and records two complete executions. `--output_type`
 selects raw little-endian `f16`, `bf16`, `f32`, or `f64` observation without
 converting device output; its default and default tolerances describe BF16.
@@ -411,9 +411,9 @@ all four representations, signed zero, fatal nonfinite values, invalid byte
 lengths, and finite F64 values whose squares overflow or underflow:
 
 ```sh
-iree-bazel-build --config=asan //experimental/loom_serve:component_check
-python -B experimental/loom_serve/component_check_test.py \
-  --checker bazel-bin/experimental/loom_serve/component_check
+iree-bazel-build --config=asan //experimental/loom_serve/tools:component_check
+python -B experimental/loom_serve/tools/component_check_test.py \
+  --checker bazel-bin/experimental/loom_serve/tools/component_check
 ```
 
 The command runs on the selected AMDGPU runner. Model-specific drivers supply
@@ -434,7 +434,7 @@ correct in isolation yet corrupt another session or a later turn.
 
 Kernel differentials establish an implementation relationship, not necessarily
 model accuracy. Independent reference outputs establish checkpoint/math
-interpretation. [`qwen_epoch_check.c`](../qwen_epoch_check.c) then checks full
+interpretation. [`qwen_epoch_check.c`](../models/qwen/epoch_check.c) then checks full
 model retained histories, isolated versus packed execution, shape transitions,
 and MTP publication. The HTTP witness adds canonical-history reuse and visible
 multi-turn responses. These checks protect different boundaries.

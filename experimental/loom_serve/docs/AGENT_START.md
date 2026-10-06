@@ -24,10 +24,10 @@ separates existing infrastructure from the model work still required.
 For image or audio work, the
 [tensor-in/tensor-out ownership flow](MODEL_AUTHORING.md#image-and-audio-entry-points)
 starts from the same small JIT caller without importing Qwen's chat, cache, or
-stage-layout assumptions. The [Krea native CLI](../models/krea2/README.md#generate-an-image-natively)
+stage-layout assumptions. The [Krea native CLI](../models/krea/README.md#generate-an-image-natively)
 is a real prompt/seed-to-image caller with LoRA; its source commands and cold
 request leaf provide a concrete second model to study. The
-[retained image server](../models/krea2/README.md#serve-images-over-http) adds
+[retained image server](../models/krea/README.md#serve-images-over-http) adds
 bounded HTTP admission and native PNG responses without Qwen scheduling
 assumptions. Image batching, multiple-adapter composition and audio adapters
 remain distinct implementation boundaries, not capabilities implied by the
@@ -61,13 +61,13 @@ deployment path.
 
 | Evidence | What to recover from it |
 | --- | --- |
-| [`testdata/jit/config.loom`](../testdata/jit/config.loom), [`stage.loom`](../testdata/jit/stage.loom), [`control.loom`](../testdata/jit/control.loom), [`jit_test.cc`](../jit_test.cc) | Source defaults and explicit overrides through one complete VM/GPU call, including compiler storage dying before command execution |
-| [`jit.h`](../jit.h), [`jit.c`](../jit.c) | Public `loomc` embedding, source indexing, live device facts, native request ownership, reusable command recording |
-| [`command.h`](../command.h), [`execution.h`](../execution.h), [`module.h`](../module.h), [`control_test.cc`](../control_test.cc) | Buffer borrowing/retention, exact queues and timelines, accepted work, feedback lifetime, drain after failure |
-| [`program.h`](../program.h), model [`control.loom`](../models/qwen38/control.loom) | One shared source-JIT process with isolated and packed entries; indexed command selection, proposal/verify/catch-up routing, and bounded feedback without intermediate host waits |
-| [`qwen_model.h`](../qwen_model.h), [`qwen_model.c`](../qwen_model.c), [`epoch.loom`](../models/qwen38/epoch.loom) | A concrete residency: weight placement, row origins, mutable state, scratch, descriptors, packed traversal and progress |
-| [`weights.h`](../weights.h), [`weights.loom`](../models/qwen38/weights.loom), [`weights_test.cc`](../weights_test.cc) | Model-owned VM policy selecting cached preparers, actual file bytes into shared final storage, and transformation exactly once per unique tensor |
-| [`qwen_schedule.h`](../qwen_schedule.h), [`qwen_service.c`](../qwen_service.c) | Ready spans versus model rows, canonical history, output credit, admission and scheduling policy |
+| [`testdata/jit/config.loom`](../runtime/testdata/jit/config.loom), [`stage.loom`](../runtime/testdata/jit/stage.loom), [`control.loom`](../runtime/testdata/jit/control.loom), [`jit_test.cc`](../runtime/jit_test.cc) | Source defaults and explicit overrides through one complete VM/GPU call, including compiler storage dying before command execution |
+| [`jit.h`](../runtime/jit.h), [`jit.c`](../runtime/jit.c) | Public `loomc` embedding, source indexing, live device facts, native request ownership, reusable command recording |
+| [`command.h`](../runtime/command.h), [`execution.h`](../runtime/execution.h), [`module.h`](../runtime/module.h), [`control_test.cc`](../runtime/control_test.cc) | Buffer borrowing/retention, exact queues and timelines, accepted work, feedback lifetime, drain after failure |
+| [`program.h`](../runtime/program.h), model [`control.loom`](../models/qwen/control.loom) | One shared source-JIT process with isolated and packed entries; indexed command selection, proposal/verify/catch-up routing, and bounded feedback without intermediate host waits |
+| [`qwen_model.h`](../models/qwen/model.h), [`qwen_model.c`](../models/qwen/model.c), [`epoch.loom`](../models/qwen/epoch.loom) | A concrete residency: weight placement, row origins, mutable state, scratch, descriptors, packed traversal and progress |
+| [`weights.h`](../runtime/weights.h), [`weights.loom`](../models/qwen/weights.loom), [`weights_test.cc`](../runtime/weights_test.cc) | Model-owned VM policy selecting cached preparers, actual file bytes into shared final storage, and transformation exactly once per unique tensor |
+| [`qwen_schedule.h`](../models/qwen/schedule.h), [`qwen_service.c`](../models/qwen/service.c) | Ready spans versus model rows, canonical history, output credit, admission and scheduling policy |
 
 The detailed [authoring](MODEL_AUTHORING.md) and [runner](RUNNER.md) guides
 explain the invariants behind those callers. Canonical Loom documentation wins
