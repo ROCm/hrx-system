@@ -77,8 +77,8 @@ struct loom_serve_krea2_model_t {
   iree_hal_buffer_t* weights[4];
   // Inputs, final RGB and reflected workspace; partial slots are NULL.
   iree_hal_buffer_binding_t bindings[LOOM_SERVE_KREA2_INPUT_COUNT + 2];
-  // Number of input slots; the adapted command has the extra strength slot.
-  iree_host_size_t input_count;
+  // Whether this residency contains the optional adapter parameter domain.
+  bool adapted;
   // Completed NCHW F32 RGB feedback, overwritten by the next generation.
   iree_byte_span_t output;
 };
@@ -212,9 +212,8 @@ static iree_status_t krea2_prepare(
 static iree_status_t krea2_check_layouts(loom_serve_krea2_model_t* model) {
   const loom_cmd_program_t* canonical =
       loom_serve_jit_stage_program(model->stages.values[0].compiled);
-  const bool adapted = model->input_count == LOOM_SERVE_KREA2_INPUT_COUNT;
-  const iree_host_size_t binding_count = model->input_count + 2;
-  const uint32_t roots = adapted ? 4 : 3;
+  const iree_host_size_t binding_count = LOOM_SERVE_KREA2_INPUT_COUNT + 2;
+  const uint32_t roots = model->adapted ? 4 : 3;
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     const krea2_model_stage_t* stage = &model->stages.values[i];
     const loom_cmd_program_t* program =
@@ -223,7 +222,7 @@ static iree_status_t krea2_check_layouts(loom_serve_krea2_model_t* model) {
         loom_serve_preparation_stage(model->preparation, i);
     if (program->requirements.rebindable_binding_count != binding_count ||
         program->requirements.transient.binding_index !=
-            model->input_count + 1 ||
+            LOOM_SERVE_KREA2_INPUT_COUNT + 1 ||
         program->requirements.fixed_buffer_count != roots ||
         program->parameter_roots.count != roots ||
         declaration->parameter_count != roots ||
@@ -319,7 +318,7 @@ static iree_status_t krea2_create_control(loom_serve_krea2_model_t* model,
       allocator, model->stages.count, sizeof(*stages), (void**)&stages));
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     stages[i] = (loom_serve_stage_t){model->stages.values[i].command,
-                                     (uint16_t)(model->input_count + 2)};
+                                     LOOM_SERVE_KREA2_INPUT_COUNT + 2};
     iree_unaligned_store_le_u64(
         tags.data + i * sizeof(int64_t),
         (uint64_t)loom_serve_preparation_stage(model->preparation, i)->tag);
@@ -426,16 +425,15 @@ static iree_status_t krea2_model_initialize(
   const loom_cmd_program_t* program =
       loom_serve_jit_stage_program(model->stages.values[0].compiled);
   const uint32_t roots = adapted ? 4 : 3;
-  const iree_host_size_t binding_count = model->input_count + 2;
+  const iree_host_size_t binding_count = LOOM_SERVE_KREA2_INPUT_COUNT + 2;
   uint64_t parameter_bytes = 0;
   for (uint32_t i = 0; i < roots; ++i) {
     parameter_bytes +=
         loom_cmd_program_parameter_root_at(program, i).required_byte_length;
   }
   uint64_t input_bytes = 0;
-  for (iree_host_size_t i = 0; i < model->input_count; ++i) {
-    input_bytes +=
-        sizes[i + (!adapted && i >= LOOM_SERVE_KREA2_INPUT_STRENGTH)];
+  for (iree_host_size_t i = 0; i < LOOM_SERVE_KREA2_INPUT_COUNT; ++i) {
+    input_bytes += sizes[i];
   }
   printf("{\"event\":\"image_residency\",\"parameter_bytes\":%" PRIu64
          ",\"input_bytes\":%" PRIu64
@@ -491,12 +489,11 @@ static iree_status_t krea2_model_initialize(
   }
   for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
        ++i) {
-    const bool workspace = i == model->input_count + 1;
-    const iree_device_size_t length =
-        i < model->input_count
-            ? sizes[i + (!adapted && i >= LOOM_SERVE_KREA2_INPUT_STRENGTH)]
-        : workspace ? workspace_length
-                    : model->output.data_length;
+    const bool workspace = i == LOOM_SERVE_KREA2_INPUT_COUNT + 1;
+    const iree_device_size_t length = i < LOOM_SERVE_KREA2_INPUT_COUNT
+                                          ? sizes[i]
+                                      : workspace ? workspace_length
+                                                  : model->output.data_length;
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
@@ -524,8 +521,7 @@ iree_status_t loom_serve_krea2_model_create(
   model->allocator = host_allocator;
   model->height = options->height;
   model->width = options->width;
-  model->input_count =
-      LOOM_SERVE_KREA2_INPUT_COUNT - !options->adapter_path.size;
+  model->adapted = options->adapter_path.size != 0;
   iree_status_t status = krea2_model_initialize(model, options, sizes);
   if (iree_status_is_ok(status)) {
     *out_model = model;
@@ -568,20 +564,12 @@ static iree_status_t krea2_select_stage(loom_serve_krea2_model_t* model,
 
 static iree_status_t krea2_submit(loom_serve_krea2_model_t* model,
                                   uint32_t stage) {
-  const bool adapted = model->input_count == LOOM_SERVE_KREA2_INPUT_COUNT;
-  iree_vm_variant_t arguments[3 + LOOM_SERVE_KREA2_INPUT_COUNT + 2] = {0};
+  iree_vm_variant_t arguments[2 + LOOM_SERVE_KREA2_INPUT_COUNT + 2] = {0};
   arguments[0] = iree_vm_variant_from_i32((int32_t)stage);
-  arguments[1] = iree_vm_variant_from_i32(adapted);
-  arguments[2] = iree_vm_variant_from_i64((int64_t)model->output.data_length);
+  arguments[1] = iree_vm_variant_from_i64((int64_t)model->output.data_length);
   for (iree_host_size_t i = 0; i < LOOM_SERVE_KREA2_INPUT_COUNT + 2; ++i) {
-    iree_hal_buffer_t* buffer = NULL;
-    if (adapted || i != LOOM_SERVE_KREA2_INPUT_STRENGTH) {
-      buffer =
-          model->bindings[i - (!adapted && i > LOOM_SERVE_KREA2_INPUT_STRENGTH)]
-              .buffer;
-    }
-    arguments[3 + i] = iree_hal_buffer_variant_from_ptr_borrowed(
-        &model->control.hal_types, buffer);
+    arguments[2 + i] = iree_hal_buffer_variant_from_ptr_borrowed(
+        &model->control.hal_types, model->bindings[i].buffer);
   }
   iree_status_t status = iree_vm_invoke(
       loom_serve_program_invocation(model->control.program),
@@ -596,12 +584,11 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
                                               uint64_t seed, float strength,
                                               iree_const_byte_span_t* out_rgb) {
   *out_rgb = iree_const_byte_span_empty();
-  const bool adapted = model->input_count == LOOM_SERVE_KREA2_INPUT_COUNT;
   if (!isfinite(strength)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "adapter strength must be finite");
   }
-  if (!adapted && strength != 1.0f) {
+  if (!model->adapted && strength != 1.0f) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "strength requires an adapter");
   }
@@ -634,10 +621,8 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
           ",\"text_tokens\":%u,\"prefix_prompt_tokens\":%u}\n",
           prepare_end - prepare_begin, stage->text_tokens, token_count);
   iree_hal_transfer_operation_t uploads[LOOM_SERVE_KREA2_INPUT_COUNT] = {0};
-  for (iree_host_size_t i = 0; i < model->input_count; ++i) {
-    const loom_serve_krea2_input_t kind =
-        (loom_serve_krea2_input_t)(i + (!adapted &&
-                                        i >= LOOM_SERVE_KREA2_INPUT_STRENGTH));
+  for (iree_host_size_t i = 0; i < LOOM_SERVE_KREA2_INPUT_COUNT; ++i) {
+    const loom_serve_krea2_input_t kind = (loom_serve_krea2_input_t)i;
     const iree_const_byte_span_t input =
         loom_serve_krea2_request_input(request, kind);
     uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
@@ -647,8 +632,8 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
   }
   loom_serve_execution_t* execution = loom_serve_device_execution(model->owner);
   uint64_t completion = 0;
-  status = loom_serve_execution_transfer(execution, model->input_count, uploads,
-                                         &completion);
+  status = loom_serve_execution_transfer(
+      execution, LOOM_SERVE_KREA2_INPUT_COUNT, uploads, &completion);
   if (iree_status_is_ok(status)) {
     status = krea2_submit(model, stage_index);
   }

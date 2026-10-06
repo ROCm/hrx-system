@@ -84,7 +84,7 @@ TEST_F(PreparationTest, KreaDeclaresShapesAndSharedDomains) {
         const uint32_t text = i ? 128 : maximum;
         EXPECT_EQ(stage->tag, text);
         EXPECT_EQ(String(stage->root),
-                  adapted ? "sample_image_adapted" : "sample_image");
+                  adapted ? "generate_image_adapted" : "generate_image");
         std::map<std::string, std::string> config;
         for (iree_host_size_t j = 0; j < stage->config.binding_count; ++j) {
           const auto& item = stage->config.bindings[j];
@@ -132,7 +132,7 @@ TEST_F(PreparationTest, DeclarationsOutliveArgumentsAndEnvironment) {
   environment = nullptr;
   path.assign(path.size(), 'x');
   const auto* stage = loom_serve_preparation_stage(preparation, 0);
-  EXPECT_EQ(String(stage->root), "sample_image_adapted");
+  EXPECT_EQ(String(stage->root), "generate_image_adapted");
   EXPECT_EQ(String(stage->parameters[2].path),
             "/adapters/borrowed.safetensors");
   EXPECT_EQ(String(stage->parameters[2].policy), "weights.loom");

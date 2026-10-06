@@ -1,4 +1,7 @@
 config.loom
+request.loom
+generate.loom
+../../motifs/tensor/random.loom
 projection.loom
 ../../motifs/tensor/linear.loom
 ../../motifs/tensor/linear_tiled.loom
