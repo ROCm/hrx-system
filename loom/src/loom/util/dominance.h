@@ -135,6 +135,11 @@ bool loom_dominates_op(const loom_dominance_info_t* info, const loom_op_t* a,
 bool loom_dominates_block(const loom_dominance_info_t* info,
                           const loom_block_t* a, const loom_block_t* b);
 
+// Returns true when |block| participates in a directed cycle in its parent
+// CFG. Unknown or malformed CFG structure is conservatively cyclic.
+bool loom_dominance_block_is_cyclic(const loom_dominance_info_t* info,
+                                    const loom_block_t* block);
+
 // Returns the immediate dominator of |block| within its parent region.
 //
 // Returns NULL for region entry blocks, unreachable CFG blocks, malformed CFG

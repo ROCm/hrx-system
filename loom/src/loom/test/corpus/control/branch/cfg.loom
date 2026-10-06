@@ -88,3 +88,63 @@ check.case public @cfg_composition_single_row {
   check.expect.equal actual(%actual) expected(%expected) : tensor<4xi32>
   check.return
 }
+
+// A reference constructed between nested decisions is live only in the
+// success successor. The failure block is shared with the outer decision, so
+// target control-flow convergence must preserve the reference's dominance.
+kernel.def @cfg_shared_failure_live_view() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%input: buffer, %expected_first: i32, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<2xi32>
+  %first = view.load %input_view[0] : view<2xi32> -> i32
+  %first_bad = scalar.cmpi ne, %first, %expected_first : i32
+  cfg.cond_br %first_bad, ^failure, ^check_second
+^check_second:
+  %second = view.load %input_view[1] : view<2xi32> -> i32
+  %c0 = scalar.constant 0 : i32
+  %second_bad = scalar.cmpi sgt, %second, %c0 : i32
+  %success_view = buffer.view %output[%base] : buffer -> view<2xi32>
+  cfg.cond_br %second_bad, ^failure, ^success
+^failure:
+  %failure_view = buffer.view %output[%base] : buffer -> view<2xi32>
+  %failure = scalar.constant -1 : i32
+  view.store %failure, %failure_view[0] : i32, view<2xi32>
+  cfg.br ^done
+^success:
+  view.store %second, %success_view[0] : i32, view<2xi32>
+  cfg.br ^done
+^done:
+  kernel.return
+}
+
+check.case public @cfg_shared_failure_first_guard {
+  %input = check.generate.iota offset(4) step(-6) : tensor<2xi32>
+  %expected_first = check.literal value(5) : i32
+  %actual = check.generate.fill value(-123) : tensor<2xi32>
+  kernel.launch @cfg_shared_failure_live_view(%input, %expected_first, %actual) : (tensor<2xi32>, i32, tensor<2xi32>)
+  %expected = check.generate.iota offset(-1) step(-122) : tensor<2xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2xi32>
+  check.return
+}
+
+check.case public @cfg_shared_failure_second_guard {
+  %input = check.generate.iota offset(5) step(-2) : tensor<2xi32>
+  %expected_first = check.literal value(5) : i32
+  %actual = check.generate.fill value(-123) : tensor<2xi32>
+  kernel.launch @cfg_shared_failure_live_view(%input, %expected_first, %actual) : (tensor<2xi32>, i32, tensor<2xi32>)
+  %expected = check.generate.iota offset(-1) step(-122) : tensor<2xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2xi32>
+  check.return
+}
+
+check.case public @cfg_shared_failure_success {
+  %input = check.generate.iota offset(5) step(-8) : tensor<2xi32>
+  %expected_first = check.literal value(5) : i32
+  %actual = check.generate.fill value(-123) : tensor<2xi32>
+  kernel.launch @cfg_shared_failure_live_view(%input, %expected_first, %actual) : (tensor<2xi32>, i32, tensor<2xi32>)
+  %expected = check.generate.iota offset(-3) step(-120) : tensor<2xi32>
+  check.expect.bitwise actual(%actual) expected(%expected) : tensor<2xi32>
+  check.return
+}

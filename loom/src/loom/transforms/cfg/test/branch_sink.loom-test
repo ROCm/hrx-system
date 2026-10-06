@@ -75,26 +75,30 @@ func.def @keeps_external_use(%cond: i1, %a: i32, %b: i32) {
 
 // ====
 
-// Type uses are uses too: %extent appears only in the view type inside the
-// then branch, so the producer can move with the branch-local type carrier.
-func.def @sinks_type_use_only(%cond: i1, %buffer: buffer, %offset: offset, %n: index) {
-  %extent = index.add %n, %n : index
+// Structured sinking follows ordinary, type, and attribute uses into one
+// branch, including producers used only through retained metadata.
+func.def @sinks_structured_use_family(%cond: i1, %buffer: buffer, %offset: offset, %n: index, %value: f32) {
+  %attribute_extent = index.add %n, %n : index
+  %annotated = test.attrs %value {shape = #test.options<mode = fast, element_type = vector<[%attribute_extent]xf32>>} : f32
+  %view_extent = index.mul %n, %n : index
   scf.if %cond {
     %layout = encoding.layout.dense : encoding<layout>
-    %view = buffer.view %buffer[%offset] : buffer -> view<[%extent]xf32, %layout>
-    test.use %view : view<[%extent]xf32, %layout>
+    %view = buffer.view %buffer[%offset] : buffer -> view<[%view_extent]xf32, %layout>
+    test.use %annotated, %view : f32, view<[%view_extent]xf32, %layout>
   } else {
   }
   func.return
 }
 
 // ----
-func.def @sinks_type_use_only(%cond: i1, %buffer: buffer, %offset: offset, %n: index) {
+func.def @sinks_structured_use_family(%cond: i1, %buffer: buffer, %offset: offset, %n: index, %value: f32) {
   scf.if %cond {
-    %extent = index.add %n, %n : index
+    %attribute_extent = index.add %n, %n : index
+    %annotated = test.attrs %value {shape = #test.options<mode = fast, element_type = vector<[%attribute_extent]xf32>>} : f32
+    %view_extent = index.mul %n, %n : index
     %layout = encoding.layout.dense : encoding<layout>
-    %view = buffer.view %buffer[%offset] : buffer -> view<[%extent]xf32, %layout>
-    test.use %view : view<[%extent]xf32, %layout>
+    %view = buffer.view %buffer[%offset] : buffer -> view<[%view_extent]xf32, %layout>
+    test.use %annotated, %view : f32, view<[%view_extent]xf32, %layout>
   } else {
   }
   func.return
@@ -112,11 +116,86 @@ func.def @keeps_condition_producer(%a: i32, %b: i32) {
   func.return
 }
 
+// ====
+
+// CFG sinking follows ordinary, type, and attribute uses into one successor.
+// The condition producer remains in the source block without hiding earlier
+// branch-local producers from the backwards scan.
+func.def @sinks_cfg_successor_family(%outer: i1, %left: i32, %right: i32, %buffer: buffer, %offset: offset, %n: index, %a: f32, %b: f32) {
+  cfg.cond_br %outer, ^shared, ^decision
+^decision:
+  %attribute_extent = index.add %n, %n : index
+  %condition = test.cmp lt, %left, %right : i32
+  %pair = vector.from_elements %a, %b : vector<2xf32>
+  %view_extent = index.mul %n, %n : index
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%view_extent]xf32>
+  cfg.cond_br %condition, ^selected, ^shared
+^selected:
+  %annotated = test.attrs %a {shape = #test.options<mode = fast, element_type = vector<[%attribute_extent]xf32>>} : f32
+  test.use %annotated, %pair, %view : f32, vector<2xf32>, view<[%view_extent]xf32>
+  func.return
+^shared:
+  func.return
+}
+
 // ----
-func.def @keeps_condition_producer(%a: i32, %b: i32) {
-  %cond = test.cmp lt, %a, %b : i32
-  scf.if %cond {
-  } else {
-  }
+func.def @sinks_cfg_successor_family(%outer: i1, %left: i32, %right: i32, %buffer: buffer, %offset: offset, %n: index, %a: f32, %b: f32) {
+  cfg.cond_br %outer, ^shared, ^decision
+^decision:
+  %condition = test.cmp lt, %left, %right : i32
+  cfg.cond_br %condition, ^selected, ^shared
+^selected:
+  %attribute_extent = index.add %n, %n : index
+  %pair = vector.from_elements %a, %b : vector<2xf32>
+  %view_extent = index.mul %n, %n : index
+  %view = buffer.view %buffer[%offset] : buffer -> view<[%view_extent]xf32>
+  %annotated = test.attrs %a {shape = #test.options<mode = fast, element_type = vector<[%attribute_extent]xf32>>} : f32
+  test.use %annotated, %pair, %view : f32, vector<2xf32>, view<[%view_extent]xf32>
+  func.return
+^shared:
+  func.return
+}
+
+// ====
+
+// Uses in both successors keep the producer before the decision. Sinking is a
+// relocation and never duplicates a producer.
+func.def @keeps_cfg_cross_successor_use(%condition: i1, %a: i32, %b: i32) {
+  %sum = test.addi %a, %b : i32
+  cfg.cond_br %condition, ^left, ^right
+^left:
+  test.use %sum : i32
+  func.return
+^right:
+  test.use %sum : i32
+  func.return
+}
+
+// ====
+
+// A loop successor can execute more often than its source. Keep the producer
+// outside instead of multiplying work on the backedge.
+func.def @keeps_cfg_loop_header_producer(%outer: i1, %enter: i1, %again: i1, %a: f32, %b: f32) {
+  cfg.cond_br %outer, ^exit, ^decision
+^decision:
+  %pair = vector.from_elements %a, %b : vector<2xf32>
+  cfg.cond_br %enter, ^loop, ^exit
+^loop:
+  test.use %pair : vector<2xf32>
+  cfg.cond_br %again, ^loop, ^exit
+^exit:
+  func.return
+}
+
+// ----
+func.def @keeps_cfg_loop_header_producer(%outer: i1, %enter: i1, %again: i1, %a: f32, %b: f32) {
+  cfg.cond_br %outer, ^exit, ^decision
+^decision:
+  %pair = vector.from_elements %a, %b : vector<2xf32>
+  cfg.cond_br %enter, ^loop, ^exit
+^loop:
+  test.use %pair : vector<2xf32>
+  cfg.cond_br %again, ^loop, ^exit
+^exit:
   func.return
 }

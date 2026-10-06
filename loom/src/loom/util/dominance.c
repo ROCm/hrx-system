@@ -181,6 +181,22 @@ bool loom_dominates_block(const loom_dominance_info_t* info,
       &cache->dominance, (uint16_t)dominator_index, (uint16_t)dominated_index);
 }
 
+bool loom_dominance_block_is_cyclic(const loom_dominance_info_t* info,
+                                    const loom_block_t* block) {
+  if (!info || !block || !block->parent_region) {
+    return true;
+  }
+  const loom_cfg_dominance_region_t* cache =
+      loom_dominance_lookup_cfg_region(info, block->parent_region);
+  if (!cache || !cache->dominance.available) {
+    return true;
+  }
+  iree_host_size_t block_index =
+      loom_cfg_graph_block_index(&cache->graph, block);
+  return block_index == IREE_HOST_SIZE_MAX ||
+         cache->graph.blocks[block_index].component_is_cyclic;
+}
+
 const loom_block_t* loom_dominance_immediate_dominator_block(
     const loom_dominance_info_t* info, const loom_block_t* block) {
   if (!info || !block) {
