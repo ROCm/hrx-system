@@ -20,6 +20,7 @@ SUPPORTED_DRIVERS = [
     "task",
     "vulkan",
     "webgpu",
+    "xdna",
 ]
 
 # Executable loader registration defaults to both supported native library

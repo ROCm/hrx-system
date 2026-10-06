@@ -53,13 +53,16 @@ SDK_DRIVER_PACKAGES = {
 }
 ROCM_DRIVERS = frozenset(("amdgpu",))
 DEPENDENCY_MODES = frozenset(("pinned", "package", "auto"))
-SUPPORTED_ENABLE_DRIVERS = frozenset((*HOST_DRIVERS, "amdgpu", "vulkan", "webgpu"))
-ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES)
+SUPPORTED_ENABLE_DRIVERS = frozenset(
+    (*HOST_DRIVERS, "amdgpu", "vulkan", "webgpu", "xdna")
+)
+ALL_DRIVERS = tuple(HOST_DRIVERS) + tuple(SDK_DRIVER_PACKAGES) + ("xdna",)
 DRIVER_DEFINES = {
     "IREE_HAL_DRIVER_AMDGPU": "amdgpu",
     "IREE_HAL_DRIVER_TASK": "task",
     "IREE_HAL_DRIVER_VULKAN": "vulkan",
     "IREE_HAL_DRIVER_WEBGPU": "webgpu",
+    "IREE_HAL_DRIVER_XDNA": "xdna",
 }
 LOOM_TARGET_DEFINES = {
     "LOOM_TARGET_AMDGPU": "amdgpu",
@@ -731,6 +734,12 @@ def bazelrc_line(command: str, option: str) -> str:
 
 def generate_config(args: argparse.Namespace) -> str:
     request = request_from_args(args)
+    if "xdna" in request.enabled_drivers and (
+        not request.amdf_build or "xdna" not in request.enabled_amdf_families
+    ):
+        raise SystemExit(
+            "IREE_HAL_DRIVER_XDNA requires AMDF_BUILD=ON and AMDF_FAMILY_XDNA=ON"
+        )
     unsupported_enabled_drivers = request.enabled_drivers.difference(
         SUPPORTED_ENABLE_DRIVERS
     )

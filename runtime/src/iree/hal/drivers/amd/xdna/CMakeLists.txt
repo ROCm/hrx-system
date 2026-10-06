@@ -12,6 +12,86 @@ iree_add_all_subdirs()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    context
+  HDRS
+    "context.h"
+  SRCS
+    "context.c"
+  DEPS
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::drivers::amd::xdna::image::aie2p::npu2
+    iree::hal::drivers::amd::xdna::image::aie2p::target
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    memory
+  HDRS
+    "memory.h"
+  SRCS
+    "memory.c"
+  DEPS
+    ::context
+    ::executable_storage
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue
+  HDRS
+    "queue.h"
+  SRCS
+    "queue.c"
+  DEPS
+    ::context
+    ::executable
+    amdf::headers
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    executable
+  HDRS
+    "executable.h"
+  SRCS
+    "executable.c"
+  DEPS
+    ::context
+    ::executable_storage
+    ::memory
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::drivers::amd::xdna::image
+    iree::schemas::xdna_executable
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     executable_storage
   HDRS
     "executable_storage.h"
@@ -41,6 +121,51 @@ iree_cc_test(
     iree::testing::gtest_main
   LABELS
     "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    device
+  HDRS
+    "device.h"
+  SRCS
+    "device.c"
+  DEPS
+    ::context
+    ::executable
+    ::memory
+    ::queue
+    amdf::headers
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::utils::device_spec_builder
+    iree::hal::utils::host_semaphore
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    driver
+  HDRS
+    "driver.h"
+  SRCS
+    "driver.c"
+  DEPS
+    ::context
+    ::device
+    amdf::amdf_static
+    amdf::headers
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::status
+  PUBLIC
 )
 endif()
 
