@@ -164,4 +164,28 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_binary(
+  NAME
+    request_check
+  SRCS
+    "request_check.c"
+  DEPS
+    ::chat
+    iree::base
+    iree::base::internal::path
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::input
+    iree::experimental::loom_serve::runtime::json
+    iree::experimental::loom_serve::runtime::program
+    iree::io::file_handle
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
+    iree::vm
+    loom::util::json
+    loom::util::stream
+  TESTONLY
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

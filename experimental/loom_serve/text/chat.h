@@ -93,9 +93,9 @@ iree_status_t loom_serve_text_chat_prepare_input(
     int32_t* tokens, iree_host_size_t* out_count,
     iree_allocator_t host_allocator);
 
-// Indexed tool schema borrowing the request body. XML names are literal ASCII
-// identifiers. Property schemas supply the JSON types lost by XML generation;
-// the agent remains responsible for tool execution and full schema validation.
+// Indexed function-tool schema borrowing the request body. Names are literal
+// ASCII identifiers. The optional XML codec uses property types to recover
+// generated JSON values; the agent owns execution and full schema validation.
 typedef struct loom_serve_text_chat_tool_t {
   // Literal function name, without JSON quotes.
   iree_string_view_t name;
@@ -125,7 +125,8 @@ typedef struct loom_serve_text_chat_t {
 } loom_serve_text_chat_t;
 
 // Validates and renders the supported chat request. Unknown execution options
-// fail instead of pretending to implement sampling, thinking or other modes.
+// fail instead of pretending to implement unsupported execution modes. Source
+// policy interprets model_options and enable_thinking from the original body.
 // Body storage outlives the initialized chat. Deinitialize after success only;
 // failure releases partial storage. The HTTP layer bounds the input body.
 iree_status_t loom_serve_text_chat_initialize(
@@ -167,12 +168,12 @@ typedef struct loom_serve_text_chat_completion_t {
 void loom_serve_text_chat_completion_deinitialize(
     loom_serve_text_chat_completion_t* completion);
 
-// Parses complete generated XML calls against the indexed request schemas.
+// Invokes source parsing of the generated suffix into typed function calls.
 // Returns the source-owned canonical completed transcript and appends an OpenAI
 // tool_calls delta array (including indexes and stable IDs) to tool_calls.
 // previous_end is the already published ordinary-text extent in response.
-// Plain text responses produce an empty array. Malformed/truncated XML fails;
-// it is never submitted to the agent as a partial executable call.
+// Plain text responses produce an empty array. Source parser failures never
+// submit a partial executable call to the agent.
 // Replaces completion only on success, releasing its prior storage. Failure
 // leaves completion unchanged and may leave partial tool_calls bytes, which
 // the caller must not publish. The checkpoint validates subsequent client
