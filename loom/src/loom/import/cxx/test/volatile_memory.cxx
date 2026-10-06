@@ -35,6 +35,11 @@ unsigned volatile_word(const volatile unsigned* input,
   return observe_one(input, output);
 }
 
+unsigned volatile_parameter(volatile unsigned value) {
+  static_cast<void>(value);
+  return value;
+}
+
 template <class Input, class Output>
 static void copy_observations(Input* input, Output* output, unsigned count,
                               unsigned lane) {
@@ -57,6 +62,21 @@ void ordinary_memory(const unsigned* input, unsigned* output, unsigned count) {
 }
 
 using Words = unsigned __attribute__((vector_size(16)));
+
+static Words volatile_vector_parameter(volatile Words value) {
+  static_cast<void>(value);
+  return value;
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_scalar_parameter(const unsigned* input, unsigned* output) {
+  output[0] = volatile_parameter(input[0]);
+}
+
+[[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
+void volatile_vector_parameter_kernel(const Words* input, Words* output) {
+  output[0] = volatile_vector_parameter(input[0]);
+}
 
 [[loom::kernel, loom::workgroup_size(1, 1, 1), loom::workgroup_count(1, 1, 1)]]
 void volatile_vectors(const volatile Words* input, volatile Words* output) {

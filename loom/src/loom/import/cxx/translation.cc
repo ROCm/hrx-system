@@ -249,8 +249,8 @@ class Translator {
     size_t parameter_index = 0;
     for (auto* parameter : parameters) {
       bool kernel = defined.kind == FunctionKind::Kernel;
-      const auto& partition =
-          types_.partition(parameter->type(), defined.source);
+      auto* value_type = types_.unqualified(parameter->type());
+      const auto& partition = types_.partition(value_type, defined.source);
       auto value = region_value(region, argument_index,
                                 kernel ? kSSAPartition : partition);
       if (partition.kind == ValueKind::Pointer && kernel) {
@@ -263,7 +263,16 @@ class Translator {
         value = storage_.root(buffer, defined.source);
       }
       value = name(value, cxx::to_string(parameter->name()));
-      if (control_->addressed(parameter)) {
+      if (control_->addressed(parameter) ||
+          unit_.typeTraits().is_volatile(parameter->type())) {
+        if (partition.kind != ValueKind::SSA) {
+          // Diagnose the missing object representation before assuming that a
+          // multi-component callable value can initialize one memory access.
+          types_.storage_size(parameter->type(), defined.source);
+          fail(defined.source,
+               "addressable record parameters require aggregate object "
+               "initialization");
+        }
         auto access = allocate_local(parameter, 0, defined.source);
         storage_.store(access, value.ssa(), parameter->type(), defined.source);
       } else {

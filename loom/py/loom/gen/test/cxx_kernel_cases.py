@@ -1041,6 +1041,20 @@ def typed_views(arrays):
 def volatile_memory(arrays):
     cases = []
     inputs = [signed_bits(index * 0x10203041 + 0x7FFFFF00, 32) for index in range(64)]
+    parameter_values = [0, 37, -128, (1 << 31) - 1]
+    for ordinal, value in enumerate(parameter_values):
+        case = Case(arrays, f"volatile_scalar_parameter_{ordinal}", "i32", 1)
+        case.array("input", [value])
+        case.array("original", [value])
+        case.launch("volatile_scalar_parameter", "%input, %output", "tensor<1xi32>, tensor<1xi32>")
+        case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<1xi32>")
+        cases.append(case.finish([value]))
+    case = Case(arrays, "volatile_vector_parameter_values", "i32", 4)
+    case.array("input", parameter_values)
+    case.array("original", parameter_values)
+    case.launch("volatile_vector_parameter_kernel", "%input, %output", "tensor<4xi32>, tensor<4xi32>")
+    case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<4xi32>")
+    cases.append(case.finish(parameter_values))
     for kernel in ("volatile_memory", "ordinary_memory"):
         for count in (0, 1, 17, 64):
             expected = [-123] * 128
@@ -1078,7 +1092,9 @@ def volatile_memory(arrays):
         case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<64xi32>")
         cases.append(case.finish([-123, signed_bits(inputs[origin + stride + 1] * 2, 32), -123, -123]))
     declarations = "".join(f"kernel.decl @{kernel}() launch(%input: buffer, %output: buffer, %count: i32)\n\n" for kernel in ("volatile_memory", "ordinary_memory"))
-    declarations += "".join(f"kernel.decl @{kernel}() launch(%input: buffer, %output: buffer)\n\n" for kernel in ("volatile_vectors", "volatile_shared"))
+    declarations += "".join(
+        f"kernel.decl @{kernel}() launch(%input: buffer, %output: buffer)\n\n" for kernel in ("volatile_scalar_parameter", "volatile_vector_parameter_kernel", "volatile_vectors", "volatile_shared")
+    )
     declarations += "kernel.decl @volatile_views() launch(%input: buffer, %output: buffer, %origin: i32, %stride: i32)\n\n"
     return declarations + "\n".join(cases)
 

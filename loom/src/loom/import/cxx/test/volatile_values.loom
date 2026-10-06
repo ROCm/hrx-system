@@ -1,6 +1,8 @@
 // The source helper receives real storage through the ordinary callable ABI.
 func.decl @volatile_word(%input: buffer, %input_origin: offset, %output: buffer, %output_origin: offset) -> (i32)
 
+func.decl @volatile_parameter(%value: i32) -> (i32)
+
 func.def @memory_observations(%initial: i32) -> (i32, i32, i32, i32, i32) {
   %bytes = index.constant 16 : offset
   %storage = buffer.alloca<private> align(4) %bytes : buffer
@@ -31,5 +33,18 @@ check.case @qualified_pointer_observations {
   check.expect.equal actual(%output) expected(%expected) : i32
   check.expect.equal actual(%before) expected(%guard) : i32
   check.expect.equal actual(%after) expected(%guard) : i32
+  check.return
+}
+
+check.case @qualified_parameter_observations {
+  %zero = check.literal value(0) : i32
+  %high = check.literal value(2147483647) : i32
+  %all = check.literal value(-1) : i32
+  %actual_zero = func.call @volatile_parameter(%zero) : (i32) -> (i32)
+  %actual_high = func.call @volatile_parameter(%high) : (i32) -> (i32)
+  %actual_all = func.call @volatile_parameter(%all) : (i32) -> (i32)
+  check.expect.equal actual(%actual_zero) expected(%zero) : i32
+  check.expect.equal actual(%actual_high) expected(%high) : i32
+  check.expect.equal actual(%actual_all) expected(%all) : i32
   check.return
 }

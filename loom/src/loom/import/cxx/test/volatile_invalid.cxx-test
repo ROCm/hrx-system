@@ -1,7 +1,14 @@
 // RUN: verify
 // The pointer object itself has no memory backing in SSA transport.
-// ERROR@+1: LOWERING/059 "volatile objects require addressable storage"
+// ERROR@+1: LOWERING/059 "stored pointers and references require an object storage representation"
 unsigned pointer_object(unsigned* volatile input) { return *input; }
+
+// ====
+// Whole-record initialization needs aggregate memory operations rather than a
+// scalar or vector store.
+struct Record { unsigned value; };
+// ERROR@+1: LOWERING/059 "addressable record parameters require aggregate object initialization"
+unsigned record_object(volatile Record input) { return input.value; }
 
 // ====
 // Namespace storage cannot be substituted with a volatile initializer.

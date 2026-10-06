@@ -538,16 +538,17 @@ FunctionBody Functions::define(cxx::FunctionSymbol* symbol, Types& types,
   BoundSignature callable_signature;
   if (kernel) {
     for (auto* parameter : parameters) {
-      arguments.push_back(types.get(parameter->type(), definition));
+      arguments.push_back(
+          types.get(types.unqualified(parameter->type()), definition));
     }
   } else if (!check_case) {
     std::vector<const cxx::Type*> sources;
     sources.reserve(parameters.size() + !returns_void);
     size_t argument_count = 0;
     for (auto* parameter : parameters) {
-      sources.push_back(parameter->type());
-      argument_count +=
-          types.partition(parameter->type(), definition).component_count;
+      auto* value_type = types.unqualified(parameter->type());
+      sources.push_back(value_type);
+      argument_count += types.partition(value_type, definition).component_count;
     }
     if (!returns_void) {
       sources.push_back(signature->returnType());

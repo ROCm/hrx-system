@@ -56,13 +56,13 @@ Value entry(Value value) { return value; }
 // ====
 // Aggregate object addresses require whole-object initialization in storage.
 struct Value { unsigned member; };
-// ERROR@+1: LOWERING/059 "unsupported C++ type: ::Value"
+// ERROR@+1: LOWERING/059 "addressable record parameters require aggregate object initialization"
 unsigned entry(Value value) { auto* pointer = &value; return pointer->member; }
 
 // ====
 // A member address requires storage for its owning record.
 struct Value { unsigned member; };
-// ERROR@+1: LOWERING/059 "unsupported C++ type: ::Value"
+// ERROR@+1: LOWERING/059 "addressable record parameters require aggregate object initialization"
 unsigned entry(Value value) { auto* pointer = &value.member; return *pointer; }
 
 // ====
