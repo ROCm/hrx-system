@@ -33,7 +33,7 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
     IREE_ASSERT_OK(
         iree_hal_buffer_subspan(loom_serve_virtual_buffer_handle(reservation),
                                 256, 1024, iree_allocator_system(), &view));
-    for (auto** semaphore : {&gate, &completion}) {
+    for (auto** semaphore : {&gate, &uploaded, &completion}) {
       IREE_ASSERT_OK(iree_hal_semaphore_create(
           loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
           0, IREE_HAL_SEMAPHORE_FLAG_DEFAULT, semaphore));
@@ -49,6 +49,7 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
     iree_hal_buffer_release(view);
     loom_serve_retirement_deinitialize(&retirement);
     iree_hal_semaphore_release(completion);
+    iree_hal_semaphore_release(uploaded);
     iree_hal_semaphore_release(gate);
     IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(reservation));
     IREE_EXPECT_OK(loom_serve_device_destroy(device));
@@ -68,6 +69,8 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
   iree_hal_buffer_t* view = nullptr;
   // Unsignaled dependency holding accepted work without sleeps or GPU loops.
   iree_hal_semaphore_t* gate = nullptr;
+  // Explicit edge from upload to download; transaction siblings are unordered.
+  iree_hal_semaphore_t* uploaded = nullptr;
   // Readiness edge that may fail before the accepted operation can retire.
   iree_hal_semaphore_t* completion = nullptr;
   // Borrowed upload and download bytes alive until TearDown joins retirement.
@@ -107,7 +110,12 @@ TEST_P(RetirementTest, NestedQueueViewsOutliveFailedReadiness) {
   uint64_t value = 1;
   auto status = iree_hal_queue_transfer(
       loom_serve_device_transfer_queue(device), {1, &gate, &value},
-      {1, &completion, &value}, IREE_ARRAYSIZE(operations), operations);
+      {1, &uploaded, &value}, 1, operations);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_transfer(
+        loom_serve_device_transfer_queue(device), {1, &uploaded, &value},
+        {1, &completion, &value}, 1, operations + 1);
+  }
   iree_hal_buffer_release(child);
   IREE_ASSERT_OK(status);
   iree_hal_buffer_release(view);

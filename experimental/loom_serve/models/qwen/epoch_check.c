@@ -26,6 +26,11 @@ IREE_FLAG(bool, reload_weights, false,
           "Run the trim witness with weight eviction/reload before target/MTP "
           "continuation; requires elastic backing.");
 IREE_FLAG(
+    bool, suspend_rows, false,
+    "Extend the trim witness with retained-row DRAM capture, block reuse, "
+    "denied restore and fresh-ID resume; requires elastic pooled state "
+    "and pool capacity in [2048, 3584].");
+IREE_FLAG(
     bool, shared_residency, false,
     "Alternate two independent retained models on one device and physical "
     "budget using automatic eviction; requires elastic backing and a budget "
@@ -755,14 +760,91 @@ static iree_status_t qwen_check_run(loom_serve_text_model_t* model,
   return qwen_check_prediction(model, &rows[0]);
 }
 
+static iree_status_t qwen_check_suspend_roundtrip(
+    loom_serve_text_model_t* model, const int32_t input[512]) {
+  loom_serve_text_row_t* row = loom_serve_text_model_row(model, 7);
+  const iree_host_size_t position = loom_serve_text_row_position(row);
+  const int32_t prediction = loom_serve_text_row_token(row);
+  const loom_serve_text_metrics_t metrics = loom_serve_text_row_metrics(row);
+  const uint64_t before =
+      loom_serve_text_model_memory_statistics(model).committed_bytes;
+  const iree_time_t capture_start = iree_time_now();
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_suspend(row));
+  const iree_duration_t capture_duration = iree_time_now() - capture_start;
+  const iree_host_size_t saved = loom_serve_text_row_suspended_bytes(row);
+  if (!saved || loom_serve_text_row_pool_usage(row) ||
+      loom_serve_text_row_position(row) != position ||
+      loom_serve_text_row_token(row) != prediction) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "suspension changed frontier or retained IDs");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_error(loom_serve_text_row_decode(row),
+                                        IREE_STATUS_FAILED_PRECONDITION));
+  loom_serve_text_trim_result_t trimmed;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  const uint64_t after =
+      loom_serve_text_model_memory_statistics(model).committed_bytes;
+  if (!before || after || !trimmed.released_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "suspended-only model retained physical state");
+  }
+  // The remaining rows fill the whole logical pool, overwriting the old IDs.
+  // Row zero stays resident during restore, so the resumed row cannot get its
+  // original compact prefix back even after the other fillers are reset.
+  for (iree_host_size_t i = 0; i < 7; ++i) {
+    const iree_host_size_t available =
+        loom_serve_text_model_pool_usage(model).available;
+    if (!available) {
+      break;
+    }
+    IREE_RETURN_IF_ERROR(
+        qwen_check_prefill(model, i, iree_min(available, 512u), input));
+  }
+  bool resumed = true;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_resume(row, &resumed));
+  if (resumed || loom_serve_text_model_pool_usage(model).available ||
+      loom_serve_text_row_suspended_bytes(row) != saved ||
+      loom_serve_text_row_position(row) != position ||
+      loom_serve_text_row_token(row) != prediction) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "denied resume changed the saved session");
+  }
+  for (iree_host_size_t i = 1; i < 7; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  const iree_time_t restore_start = iree_time_now();
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_resume(row, &resumed));
+  const iree_duration_t restore_duration = iree_time_now() - restore_start;
+  const loom_serve_text_metrics_t restored = loom_serve_text_row_metrics(row);
+  if (!resumed || loom_serve_text_row_suspended_bytes(row) ||
+      loom_serve_text_row_position(row) != position ||
+      loom_serve_text_row_token(row) != prediction ||
+      memcmp(&metrics, &restored, sizeof(metrics))) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "resume changed the saved host frontier");
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_reset(loom_serve_text_model_row(model, 0)));
+  fprintf(stderr,
+          "{\"event\":\"row_restored\",\"host_snapshot_bytes\":%zu,"
+          "\"state_before_bytes\":%" PRIu64
+          ",\"state_suspended_bytes\":%" PRIu64 ",\"capture_ns\":%" PRId64
+          ",\"restore_ns\":%" PRId64 "}\n",
+          saved, before, after, capture_duration, restore_duration);
+  return iree_ok_status();
+}
+
 static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
                                      iree_allocator_t allocator) {
   const loom_serve_text_pool_usage_t pool =
       loom_serve_text_model_pool_usage(model);
   if (loom_serve_text_model_context_capacity(model) < 512 ||
-      pool.capacity < 2048) {
+      pool.capacity < 2048 || (FLAG_suspend_rows && pool.capacity > 3584)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "trim witness requires context >=512, pool >=2048");
+                            "trim requires context >=512, pool >=2048; "
+                            "suspend_rows requires pool <=3584");
   }
   for (iree_host_size_t i = 0; i < 8; ++i) {
     IREE_RETURN_IF_ERROR(
@@ -849,6 +931,9 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
           ",\"committed_bytes\":%" PRIu64 "}\n",
           trimmed.moved_blocks, trimmed.copied_bytes, trimmed.released_bytes,
           after.committed_bytes);
+  if (FLAG_suspend_rows) {
+    IREE_RETURN_IF_ERROR(qwen_check_suspend_roundtrip(model, input));
+  }
   if (FLAG_reload_weights) {
     const loom_serve_memory_statistics_t resident =
         loom_serve_text_model_weight_statistics(model);
@@ -908,6 +993,36 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
             loom_serve_text_model_weight_statistics(model).committed_bytes);
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(survivor));
+  if (FLAG_suspend_rows) {
+    // An unselected prefill chunk has no pending token but still owns both
+    // recurrence and KV. Restore it, finish the prompt and compare the normal
+    // selected prediction before testing reset of a suspended row.
+    const iree_host_size_t first = 32;
+    const loom_serve_text_span_t span = {7, first, input, 0};
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(model, 0, 1, &span));
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_suspend(survivor));
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+    bool resumed = false;
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_try_resume(survivor, &resumed));
+    if (!resumed) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "empty pool rejected unselected row restore");
+    }
+    IREE_RETURN_IF_ERROR(
+        qwen_check_prefill(model, 7, prefix_count - first, input + first));
+    if (loom_serve_text_row_token(survivor) != expected[0]) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "unselected row restore changed prediction");
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_suspend(survivor));
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(survivor));
+    if (loom_serve_text_row_position(survivor) ||
+        loom_serve_text_row_suspended_bytes(survivor)) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "reset retained the suspended row");
+    }
+  }
   IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
   if (loom_serve_text_model_memory_statistics(model).committed_bytes) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -1120,7 +1235,8 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status) && !FLAG_compare[0]) {
     status = qwen_check_mtp_verification(model, allocator);
   }
-  if (iree_status_is_ok(status) && (FLAG_trim || FLAG_reload_weights)) {
+  if (iree_status_is_ok(status) &&
+      (FLAG_trim || FLAG_reload_weights || FLAG_suspend_rows)) {
     status = qwen_check_trim(model, allocator);
   }
   if (iree_status_is_ok(status) && FLAG_shared_residency) {

@@ -42,6 +42,18 @@ loom_cc_library(
     ],
 )
 
+loom_cc_library(
+    name = "snapshot",
+    srcs = ["snapshot.c"],
+    hdrs = ["snapshot.h"],
+    deps = [
+        "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/runtime:retirement",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
 loom_cc_test(
     name = "memory_test",
     srcs = ["memory_test.cc"],
@@ -86,6 +98,26 @@ loom_cc_test(
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:retirement",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "snapshot_test",
+    srcs = ["snapshot_test.cc"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":memory",
+        ":snapshot",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:execution",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",

@@ -270,6 +270,28 @@ iree_status_t loom_serve_text_model_verify(
 // is inaccessible and need not clear before its pages are assigned again.
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row);
 
+// Captures an idle row's retained private/target/draft state into one DRAM
+// image, then returns its physical block IDs. Host frontier, pending prediction
+// and metrics survive. Requires elastic pooled storage; reset/empty rows are
+// already inactive. model_trim can reclaim the released device backing.
+// Suspended rows cannot be scheduled until try_resume succeeds. Calls retire
+// their transfers before returning; platform/IO failures remain terminal.
+iree_status_t loom_serve_text_row_suspend(loom_serve_text_row_t* row);
+
+// Admits fresh logical IDs and physical slabs, restores logical-order contents
+// and publishes the maps before making the row runnable. False is ordinary
+// capacity backpressure and preserves the image, frontier and prediction.
+// Already resident rows report true without work. The single host owner
+// excludes other admission/mutation until return; no weights are required.
+iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
+                                             bool* out_resumed);
+
+// Retained DRAM payload bytes while suspended, or zero while resident/empty.
+// This is separate from device pool statistics, not extra machine capacity on
+// unified-memory devices. Reset and successful resume release the image.
+iree_host_size_t loom_serve_text_row_suspended_bytes(
+    const loom_serve_text_row_t* row);
+
 // Appends one active chunk at the retained absolute position and selects the
 // next token. Input count is in [1, prefill_capacity] and must fit the context.
 // The selected token has NOT been consumed into KV/recurrent state. Another

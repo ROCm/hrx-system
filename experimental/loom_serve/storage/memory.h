@@ -92,6 +92,27 @@ iree_status_t loom_serve_virtual_buffer_commit(
     loom_serve_virtual_buffer_t* buffer, iree_device_size_t offset,
     iree_device_size_t length);
 
+// One caller-validated nonempty extent in a virtual reservation. Every range
+// in a commitment transaction belongs to the same physical pool.
+typedef struct loom_serve_memory_range_t {
+  // Borrowed reservation whose physical backing is required.
+  loom_serve_virtual_buffer_t* buffer;
+  // Byte offset within the reservation.
+  iree_device_size_t offset;
+  // Number of accessible bytes required from offset.
+  iree_device_size_t length;
+} loom_serve_memory_range_t;
+
+// Admits and commits the union of missing slabs across all ranges. Overlapping
+// ranges and views sharing a slab are counted once. False is ordinary capacity
+// backpressure: no destination slabs were added. The pressure policy may have
+// reclaimed eligible unrelated reservations. Callers pin any destination that
+// that policy could trim. The single owner excludes intervening admissions.
+// Platform failure may leave added backing, accounted for normal teardown.
+iree_status_t loom_serve_memory_pool_try_commit(
+    loom_serve_memory_pool_t* pool, iree_host_size_t range_count,
+    const loom_serve_memory_range_t* ranges, bool* out_admitted);
+
 // At a retired maintenance cut, clear the keep set, mark all still-live byte
 // ranges, then trim. Marking does not commit memory. A physical slab shared by
 // several logical ranges stays backed if any range needs it. The caller owns

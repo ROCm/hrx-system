@@ -57,8 +57,9 @@ class MemoryTest : public ::testing::Test {
     };
     uint64_t completion = 0;
     IREE_ASSERT_OK(loom_serve_execution_transfer(
-        loom_serve_device_execution(device), IREE_ARRAYSIZE(operations),
-        operations, &completion));
+        loom_serve_device_execution(device), 1, operations, &completion));
+    IREE_ASSERT_OK(loom_serve_execution_transfer(
+        loom_serve_device_execution(device), 1, operations + 1, &completion));
     IREE_ASSERT_OK(loom_serve_execution_wait(
         loom_serve_device_execution(device), completion));
     for (const auto word : observed) {
@@ -145,6 +146,43 @@ TEST_F(MemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
   EXPECT_EQ(statistics[1].released_bytes, 2 * kSlabSize);
   EXPECT_EQ(statistics[0].peak_bytes, 2 * kSlabSize);
   EXPECT_EQ(statistics[1].peak_bytes, 2 * kSlabSize);
+}
+
+TEST_F(MemoryTest, CohortAdmissionCountsUniqueSlabsAndLeavesDenialUntouched) {
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, 3 * kSlabSize, 256,
+                                                  &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, 2 * kSlabSize, 256,
+                                                  &statistics[1], &second));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, 256));
+  RoundTrip(first, 0, 0x12345678);
+  const loom_serve_memory_range_t ranges[] = {
+      {first, 0, 256},
+      {first, kSlabSize, 256},
+      {first, kSlabSize + 128, 256},
+      {second, kSlabSize - 128, 256},
+  };
+  bool admitted = true;
+  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool, IREE_ARRAYSIZE(ranges),
+                                                   ranges, &admitted));
+  EXPECT_FALSE(admitted);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, kSlabSize);
+  EXPECT_EQ(statistics[1].committed_bytes, 0u);
+  CheckRetained(first, 0, 0x12345678);
+  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool, 3, ranges, &admitted));
+  EXPECT_TRUE(admitted);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            2 * kSlabSize);
+  RoundTrip(first, kSlabSize, 0x87654321);
+  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool, 3, ranges, &admitted));
+  EXPECT_TRUE(admitted);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            2 * kSlabSize);
+  CheckRetained(first, kSlabSize, 0x87654321);
+  const loom_serve_memory_range_t last = {second, 0, 256};
+  IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool, 1, &last, &admitted));
+  EXPECT_TRUE(admitted);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
+            3 * kSlabSize);
 }
 
 }  // namespace

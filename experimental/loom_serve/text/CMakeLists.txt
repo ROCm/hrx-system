@@ -27,6 +27,22 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    storage
+  HDRS
+    "storage.h"
+  SRCS
+    "storage.c"
+  DEPS
+    iree::base
+    iree::experimental::loom_serve::storage::relocation
+    iree::experimental::loom_serve::storage::snapshot
+    iree::hal
+    iree::vm
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME
@@ -37,6 +53,7 @@ loom_cc_library(
     "model.c"
   DEPS
     ::chat
+    ::storage
     iree::base
     iree::base::internal::path
     iree::experimental::loom_serve::runtime::command
@@ -55,6 +72,7 @@ loom_cc_library(
     iree::experimental::loom_serve::storage::block_pool
     iree::experimental::loom_serve::storage::memory
     iree::experimental::loom_serve::storage::relocation
+    iree::experimental::loom_serve::storage::snapshot
     iree::hal
     iree::io::file_handle
     iree::module::hal::types
@@ -67,6 +85,21 @@ loom_cc_library(
   PUBLIC
 )
 endif()
+
+loom_cc_test(
+  NAME
+    storage_test
+  SRCS
+    "storage_test.cc"
+  DEPS
+    ::storage
+    iree::base
+    iree::experimental::loom_serve::storage::snapshot
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+)
 
 loom_cc_library(
   NAME
