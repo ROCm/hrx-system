@@ -90,7 +90,7 @@ func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verif
 // A bounded cohort reuses state/workspace on the work timeline, while each
 // feedback bank stays immutable on its independent transfer branch. Acceptance
 // produces the next input and position entirely on device; neither call waits.
-func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer, %next_results: hal.buffer) -> (i64) {
+func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %continuation_proposes: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer, %next_results: hal.buffer) -> (i64) {
   %zero = scalar.constant 0 : i32
   %one = scalar.constant 1 : i32
   %two = scalar.constant 2 : i32
@@ -106,7 +106,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     %after_shapes = scalar.addi %proposal, %shapes : i32
     %continuation = scalar.addi %after_shapes, %one : i32
     %ready = func.call @execute_3(%continuation, %metadata, %tokens, %results) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-    %next = func.call @epoch_once(%control_state, %continuation_shape, %one, %one, %sixteen, %zero, %two, %residual, %metadata, %origins, %state, %tokens, %outputs, %workspace, %carry, %committed, %next_results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %next = func.call @epoch_once(%control_state, %continuation_shape, %continuation_proposes, %one, %sixteen, %zero, %two, %residual, %metadata, %origins, %state, %tokens, %outputs, %workspace, %carry, %committed, %next_results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield %next : i64
   } else {
     scf.yield %first : i64

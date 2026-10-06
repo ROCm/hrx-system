@@ -94,9 +94,9 @@ class PrepareTest : public ::testing::Test {
     const uint64_t lengths[] = {
         10485760,
         row_bytes + pool * 65536,
-        packed ? 2064u : 0,
+        packed ? 4192u : 0,
         packed ? table : 0,
-        packed ? 2048u : 0,
+        packed ? 4096u : 0,
         packed ? 64u : 0,
         mtp ? rows * 20480 : 0,
         mtp ? 1548u : 0,

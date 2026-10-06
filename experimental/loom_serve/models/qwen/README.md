@@ -63,17 +63,21 @@ Those remaining contracts are not a model-neutral text ABI.
 `--mtp --mtp_depth=3 --continuation_epochs=2` lets the source VM enqueue two
 target/MTP epochs before returning to admission and transport. The default is
 one. The first epoch accepts mixed prompt/known and speculative spans normally.
-After catch-up, `continue.loom` compacts only live speculative spans, advances
-their positions by the accepted counts, and publishes their last selected
-tokens directly into the next input buffer. Known spans are not replayed. The
-next verifier uses a cached shape sized to the maximum continuing cohort.
+The host pre-issues a second mixed plan from those same admitted rows: remaining
+prompt chunks, continuing verifiers, and completed prompt tails ready to begin
+generation. After catch-up, `continue.loom` resolves actual accepted positions
+and output credit, compacts surviving spans, copies queued known tokens and
+routes final predictions directly into speculative anchors. Each known chunk
+is consumed once. The second shape fits its pre-issued worst-case cohort; a
+prompt-only plan skips proposal work entirely.
 There is no intermediate host wait, accepted-token download dependency or
 token re-upload between those epochs.
 
 EOS, exhausted output credit and insufficient context remove a span before
 the second epoch can mutate its state. Two result banks and original-span tags
 keep feedback immutable while later work proceeds. The result payload grows
-by 448 bytes. The host provisions the speculative high-water mark against
+by 448 bytes. A second fixed input/plan bank adds 4176 bytes, shared by all rows.
+The host provisions the speculative high-water mark against
 reserved capacity before submission and releases rejected pages
 only after both work and feedback retire. At most eight outputs per original
 span return in generation order. Cancellation and new arrivals are observed
@@ -85,7 +89,10 @@ resident worker or a claim of zero idle weight traffic. The default remains
 one epoch until controlled endpoint evidence supports a scheduling policy.
 JSONL distinguishes `device_epochs`/`traversals` from host scheduling events;
 per-row `verification_epochs` records actual advances and keeps draft acceptance
-accounting correct. The HTTP comparison tools accept `--continuation-epochs=2`
+accounting correct. `known_tokens` separates caller-supplied inputs from
+speculation, including a prompt-to-generation transition in one cohort;
+`continued_prefill_tokens` identifies prompt work carried by the second epoch.
+The HTTP comparison tools accept `--continuation-epochs=2`
 to compare device-fed pooled execution against one-epoch dense output.
 
 ## Pooled KV and reserved admission

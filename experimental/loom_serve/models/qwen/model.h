@@ -83,12 +83,32 @@ typedef struct loom_serve_qwen_span_t {
   loom_serve_qwen_span_flags_t flags;
 } loom_serve_qwen_span_t;
 
+// A pre-issued second plan borrowing rows from the first plan. Known spans
+// append new input after an unselected first chunk. Speculative spans require
+// SELECT|PROPOSE and consume the first result's final prediction on device;
+// their token_ids is unused. The producer compacts survivors without a host
+// wait. The shape bounds all entries before EOS/credit filtering.
+typedef struct loom_serve_qwen_continuation_t {
+  // Cached shape admitting the second plan's worst-case inputs and spans.
+  iree_host_size_t shape_index;
+  // Nonempty subset of distinct rows present in the first plan.
+  iree_host_size_t span_count;
+  // Borrowed next input chunks or device-produced speculative anchors.
+  const loom_serve_qwen_span_t* spans;
+  // Zero for known input; otherwise total output credit including the first
+  // plan's outputs. Device acceptance subtracts those before continuing.
+  const uint32_t* output_limits;
+} loom_serve_qwen_continuation_t;
+
 // Committed progress for one known or speculative span. A speculative span
 // consumes its pending anchor plus matched drafts; its final output stays
 // pending. Consumed and output counts therefore agree for speculative spans.
 typedef struct loom_serve_qwen_result_t {
   // Inputs consumed into retained target and MTP state.
   iree_host_size_t consumed_count;
+  // Consumed caller-supplied inputs, excluding speculative anchor/draft work.
+  // This separates prompt progress when a cohort also starts generation.
+  iree_host_size_t known_count;
   // Selected output IDs, including an EOS or the first rejected replacement.
   iree_host_size_t output_count;
   // Number of speculative verifications that advanced this span.
@@ -170,25 +190,27 @@ iree_status_t loom_serve_qwen_model_epoch(loom_serve_qwen_model_t* model,
                                           const loom_serve_qwen_span_t* spans);
 
 // Mixes ordinary known spans with four-input speculative spans on one cached
-// target shape. epoch_count is one or two; two permits device-fed continuation
-// without an intermediate host wait. A zero output limit denotes known input.
-// Limits 1 through 4*epoch_count denote speculative input, require SELECT and
-// a pending non-EOS prediction, and cap the number of new selected outputs.
-// PROPOSE spans supply only the pending
-// token: three draft rounds publish directly into the verifier input buffer.
-// Other speculative spans supply {pending token, three proposals} themselves.
-// Greedy acceptance stops at the first mismatch, EOS, or limit. Only accepted
-// state is published; catch-up pairs accepted inputs with target hidden state.
-// Proposal, verification, commit and catch-up have no intermediate host wait or
-// readback. Only completed output/progress records cross back to the caller.
-// Known input executes once. Continuation compacts live speculative spans and
-// uses a cached fitting shape, stopping at EOS, output credit or context bound.
+// target shape. An optional continuation issues a second mixed plan without
+// an intermediate host wait. A zero output limit denotes known input.
+// Limits 1 through 4 (8 with continuation) denote speculative input, require
+// SELECT and a pending non-EOS prediction, and cap the number of new selected
+// outputs. PROPOSE spans supply only the pending token: three draft rounds
+// publish directly into the verifier input buffer. Other speculative spans
+// supply {pending token, three proposals} themselves. Greedy acceptance stops
+// at the first mismatch, EOS, or limit. Only accepted state is published;
+// catch-up pairs accepted inputs with target hidden state. Proposal,
+// verification, commit and catch-up have no intermediate host wait or readback.
+// Only completed output/progress records cross back to the caller. Each known
+// input chunk executes once. Continuation advances known chunks or promotes a
+// selected first result to speculation, stopping speculative work at EOS,
+// output credit or context bound. All inputs are copied before submission.
 // Results are in caller order and valid on success. Validation and submission
 // failure have the same contracts as model_epoch; all storage is reused.
 iree_status_t loom_serve_qwen_model_verify(
     loom_serve_qwen_model_t* model, iree_host_size_t shape_index,
-    iree_host_size_t epoch_count, iree_host_size_t span_count,
-    const loom_serve_qwen_span_t* spans, const uint32_t* output_limits,
+    iree_host_size_t span_count, const loom_serve_qwen_span_t* spans,
+    const uint32_t* output_limits,
+    const loom_serve_qwen_continuation_t* continuation,
     loom_serve_qwen_result_t* out_results);
 
 // Clears recurrent state and position, then releases retired private KV pages.

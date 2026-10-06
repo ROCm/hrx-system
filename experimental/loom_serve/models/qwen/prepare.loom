@@ -146,9 +146,10 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   %gdn_offset = scalar.constant 256 : i64
   %attention_offset = scalar.addi %gdn_offset, %gdn_bytes : i64
   %token_bytes = scalar.constant 2048 : i64
+  %cohort_token_bytes = scalar.constant 4096 : i64
   %progress_bytes = scalar.constant 32 : i64
   %progress_extent = scalar.constant 256 : i64
-  %metadata_bytes = scalar.constant 2064 : i64
+  %metadata_bytes = scalar.constant 4192 : i64
   %committed_bytes = scalar.constant 1548 : i64
   %output_bytes = scalar.constant 64 : i64
   %result_bytes = scalar.constant 832 : i64
@@ -178,7 +179,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   func.call @allocation(%allocations, %one, %arena_bytes, %row_bytes) : (buffer, index, i64, i64) -> ()
   %packed_metadata = scf.select %packed, %metadata_bytes, %zero64 : i64
   %packed_table = scf.select %packed, %table_bytes, %zero64 : i64
-  %packed_tokens = scf.select %packed, %token_bytes, %zero64 : i64
+  %packed_tokens = scf.select %packed, %cohort_token_bytes, %zero64 : i64
   %packed_outputs = scf.select %packed, %output_bytes, %zero64 : i64
   func.call @allocation(%allocations, %two, %packed_metadata, %zero64) : (buffer, index, i64, i64) -> ()
   func.call @allocation(%allocations, %three, %packed_table, %zero64) : (buffer, index, i64, i64) -> ()

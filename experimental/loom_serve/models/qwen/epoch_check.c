@@ -166,9 +166,27 @@ static iree_status_t qwen_check_verified_epoch(
     const iree_host_size_t batch_count =
         qwen_check_batch_count(loom_serve_qwen_model_shapes(model)[shape_index],
                                4 - offset, spans + offset);
-    status = loom_serve_qwen_model_verify(model, shape_index, epoch_count,
-                                          batch_count, spans + offset,
-                                          limits + offset, results + offset);
+    loom_serve_qwen_span_t next[4];
+    uint32_t next_limits[4];
+    iree_host_size_t next_count = 0;
+    for (iree_host_size_t i = 0; epoch_count == 2 && i < batch_count; ++i) {
+      if (!limits[offset + i]) {
+        continue;
+      }
+      next[next_count] = spans[offset + i];
+      next[next_count].flags |= LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE;
+      next[next_count].token_ids = NULL;
+      next_limits[next_count++] = limits[offset + i];
+    }
+    const loom_serve_qwen_continuation_t continuation = {
+        .shape_index = shape_index,
+        .span_count = next_count,
+        .spans = next,
+        .output_limits = next_limits,
+    };
+    status = loom_serve_qwen_model_verify(
+        model, shape_index, batch_count, spans + offset, limits + offset,
+        next_count ? &continuation : NULL, results + offset);
     offset += batch_count;
   }
   for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
@@ -369,8 +387,8 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
   uint32_t invalid_limits[] = {5, 4, 2, 4};
   loom_serve_qwen_result_t rejected[4];
   IREE_RETURN_IF_ERROR(
-      qwen_check_error(loom_serve_qwen_model_verify(model, 0, 1, 1, spans,
-                                                    invalid_limits, rejected),
+      qwen_check_error(loom_serve_qwen_model_verify(
+                           model, 0, 1, spans, invalid_limits, NULL, rejected),
                        IREE_STATUS_INVALID_ARGUMENT));
   IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(model, 0, 1, rows, order,
                                                  spans, limits, expected));

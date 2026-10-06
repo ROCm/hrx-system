@@ -993,6 +993,97 @@ static void qwen_separate_ready(const qwen_service_t* service,
   }
 }
 
+// Pre-issues ready work from the admitted cohort. Known progress is exact;
+// speculative progress is resolved by the device before the second traversal.
+// Credit/cancellation remain bounded by the same host publication boundary.
+static void qwen_prepare_continuation(
+    qwen_service_t* service, iree_host_size_t count,
+    const loom_serve_qwen_span_t* spans, const uint32_t* output_limits,
+    loom_serve_qwen_span_t* next_spans, uint32_t* next_limits,
+    loom_serve_qwen_continuation_t* out_continuation) {
+  *out_continuation = (loom_serve_qwen_continuation_t){0};
+  if (service->continuation_epochs != 2) {
+    return;
+  }
+  loom_serve_ready_span_t ready[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
+  for (iree_host_size_t i = 0; i < count; ++i) {
+    const loom_serve_qwen_span_t* span = &spans[i];
+    const qwen_session_t* session = &service->sessions[span->row_index];
+    const iree_host_size_t remaining_output =
+        session->request.chat.max_tokens - session->request.output_count;
+    const iree_host_size_t remaining_input =
+        session->request.phase == QWEN_REQUEST_PREFILL
+            ? session->request.input_count - session->request.input_offset -
+                  span->token_count
+            : 0;
+    if (remaining_input) {
+      ready[i] = (loom_serve_ready_span_t){remaining_input, 1};
+    } else {
+      const iree_host_size_t minimum_consumed =
+          output_limits[i] ? 1 : span->token_count;
+      if (remaining_output > 1 &&
+          service->context_capacity -
+                  loom_serve_qwen_row_position(session->row) >=
+              minimum_consumed + 4) {
+        ready[i] = (loom_serve_ready_span_t){4, 4};
+      }
+    }
+  }
+  // Rotate within the leased cohort instead of repeatedly giving its first
+  // long prompt all of the expansion slots.
+  iree_host_size_t cursor = count > 1 ? 1 : 0;
+  if (service->packing_mode == LOOM_SERVE_QWEN_PACKING_SEPARATE) {
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      const iree_host_size_t first = (cursor + i) % count;
+      if (!ready[first].token_count) {
+        continue;
+      }
+      const iree_host_size_t minimum = ready[first].minimum_count;
+      for (iree_host_size_t j = 0; j < count; ++j) {
+        if (ready[j].minimum_count != minimum) {
+          ready[j] = (loom_serve_ready_span_t){0};
+        }
+      }
+      break;
+    }
+  }
+  loom_serve_packed_span_t scheduled[LOOM_SERVE_QWEN_ROW_CAPACITY];
+  loom_serve_packed_span_t scratch[LOOM_SERVE_QWEN_ROW_CAPACITY];
+  iree_host_size_t shape = 0;
+  const iree_host_size_t next_count = loom_serve_pack_shapes(
+      count, ready, service->shape_count, service->shapes, service->chunk_size,
+      &cursor, scheduled, scratch, &shape);
+  for (iree_host_size_t i = 0; i < next_count; ++i) {
+    const iree_host_size_t first = scheduled[i].row_index;
+    const iree_host_size_t row = spans[first].row_index;
+    const qwen_session_t* session = &service->sessions[row];
+    const bool speculative = ready[first].minimum_count == 4;
+    const bool select =
+        speculative || scheduled[i].token_count == ready[first].token_count;
+    next_spans[i] = (loom_serve_qwen_span_t){
+        .row_index = row,
+        .token_count = scheduled[i].token_count,
+        .token_ids = speculative
+                         ? NULL
+                         : session->tokens + session->request.input_offset +
+                               spans[first].token_count,
+        .flags = (select ? LOOM_SERVE_QWEN_SPAN_FLAG_SELECT : 0) |
+                 (speculative ? LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE : 0),
+    };
+    next_limits[i] = speculative
+                         ? (uint32_t)iree_min(output_limits[first] ? 8 : 5,
+                                              session->request.chat.max_tokens -
+                                                  session->request.output_count)
+                         : 0;
+  }
+  *out_continuation = (loom_serve_qwen_continuation_t){
+      .shape_index = shape,
+      .span_count = next_count,
+      .spans = next_spans,
+      .output_limits = next_limits,
+  };
+}
+
 static iree_status_t qwen_execute_epoch(
     qwen_service_t* service, iree_host_size_t shape_index,
     iree_host_size_t count, const loom_serve_packed_span_t* scheduled) {
@@ -1029,12 +1120,25 @@ static iree_status_t qwen_execute_epoch(
         .flags = (select ? LOOM_SERVE_QWEN_SPAN_FLAG_SELECT : 0) |
                  (output_limits[i] ? LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE : 0),
     };
-    prefill_count += prefill ? spans[i].token_count : 0;
     input_count += spans[i].token_count;
   }
+  loom_serve_qwen_span_t next_spans[LOOM_SERVE_QWEN_ROW_CAPACITY];
+  uint32_t next_limits[LOOM_SERVE_QWEN_ROW_CAPACITY];
+  loom_serve_qwen_continuation_t continuation;
+  qwen_prepare_continuation(service, count, spans, output_limits, next_spans,
+                            next_limits, &continuation);
+  if (!continuation.span_count) {
+    for (iree_host_size_t i = 0; i < count; ++i) {
+      output_limits[i] = iree_min(output_limits[i], 4u);
+    }
+  }
+  iree_host_size_t continued_prefill_count = 0;
+  for (iree_host_size_t i = 0; i < continuation.span_count; ++i) {
+    continued_prefill_count += next_limits[i] ? 0 : next_spans[i].token_count;
+  }
   const bool packed = service->schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED;
-  const iree_host_size_t device_epochs =
-      proposal_count ? service->continuation_epochs : 1;
+  const iree_host_size_t device_epochs = continuation.span_count ? 2 : 1;
+  const bool verifies = proposal_count || continuation.span_count;
   iree_host_size_t verification_count = 0;
   const char* mode =
       packed                                                       ? "packed"
@@ -1052,11 +1156,12 @@ static iree_status_t qwen_execute_epoch(
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
   iree_status_t status = iree_ok_status();
   if (packed) {
-    status = proposal_count ? loom_serve_qwen_model_verify(
-                                  service->model, shape_index, device_epochs,
-                                  count, spans, output_limits, results)
-                            : loom_serve_qwen_model_epoch(
-                                  service->model, shape_index, count, spans);
+    status = verifies
+                 ? loom_serve_qwen_model_verify(
+                       service->model, shape_index, count, spans, output_limits,
+                       continuation.span_count ? &continuation : NULL, results)
+                 : loom_serve_qwen_model_epoch(service->model, shape_index,
+                                               count, spans);
   } else {
     for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
       qwen_session_t* session = &service->sessions[spans[i].row_index];
@@ -1079,32 +1184,34 @@ static iree_status_t qwen_execute_epoch(
     const bool prefill = session->request.phase == QWEN_REQUEST_PREFILL;
     const bool select =
         iree_any_bit_set(spans[i].flags, LOOM_SERVE_QWEN_SPAN_FLAG_SELECT);
-    if (!proposal_count) {
+    if (!verifies) {
       results[i].consumed_count = spans[i].token_count;
+      results[i].known_count = spans[i].token_count;
       results[i].output_count = select ? 1 : 0;
       if (select) {
         results[i].tokens[0] = loom_serve_qwen_row_token(session->row);
       }
     }
-    decode_count += prefill ? 0 : results[i].consumed_count;
+    prefill_count += prefill ? results[i].known_count : 0;
+    decode_count +=
+        results[i].consumed_count - (prefill ? results[i].known_count : 0);
     output_count += results[i].output_count;
     verification_count += results[i].verification_count;
-    accepted_drafts += output_limits[i] ? results[i].consumed_count -
-                                              results[i].verification_count
-                                        : 0;
+    accepted_drafts += results[i].consumed_count - results[i].known_count -
+                       results[i].verification_count;
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         &service->scratch,
         "%s{\"row\":%zu,\"request\":%" PRIu64
         ",\"kind\":\"%s\",\"position\":%zu,\"tokens\":%zu,\"select\":%s,"
         "\"consumed_tokens\":%zu,\"output_tokens\":%zu,\"output_limit\":%u,"
-        "\"verification_epochs\":%zu}",
+        "\"known_tokens\":%zu,\"verification_epochs\":%zu}",
         i ? "," : "", spans[i].row_index, session->serial,
         prefill            ? "prefill"
         : output_limits[i] ? "verify"
                            : "decode",
         positions[i], spans[i].token_count, select ? "true" : "false",
         results[i].consumed_count, results[i].output_count, output_limits[i],
-        results[i].verification_count));
+        results[i].known_count, results[i].verification_count));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(&service->scratch, "]"));
@@ -1126,6 +1233,7 @@ static iree_status_t qwen_execute_epoch(
           "\"prefill_tokens\":%zu,\"decode_tokens\":%zu,"
           "\"selected_tokens_including_eos\":%zu,\"traversals\":%zu,"
           "\"model_ms\":%.3f,\"device_epochs\":%zu,"
+          "\"continued_prefill_tokens\":%zu,"
           "\"mtp\":{\"rows\":%zu,\"verifications\":%zu,\"proposed_tokens\":%zu,"
           "\"accepted_draft_inputs\":%zu},\"rows\":%.*s}\n",
           epoch, mode, count, shape_index,
@@ -1135,23 +1243,26 @@ static iree_status_t qwen_execute_epoch(
                                                                     : "mixed",
           prefill_count, decode_count, output_count,
           packed ? device_epochs : count, (completed - start) / 1e6,
-          device_epochs, proposal_count, verification_count,
-          verification_count * 3, accepted_drafts,
+          device_epochs, continued_prefill_count, proposal_count,
+          verification_count, verification_count * 3, accepted_drafts,
           (int)iree_string_builder_size(&service->scratch),
           iree_string_builder_buffer(&service->scratch));
   qwen_observe(service, "output");
   iree_host_size_t published_count = 0;
   for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
     qwen_session_t* session = &service->sessions[spans[i].row_index];
-    if (session->request.phase == QWEN_REQUEST_PREFILL) {
-      ++session->request.prefill_steps;
-      session->request.input_offset += results[i].consumed_count;
+    const bool prefill = session->request.phase == QWEN_REQUEST_PREFILL;
+    if (prefill) {
+      session->request.prefill_steps +=
+          1 + (results[i].known_count > spans[i].token_count);
+      session->request.input_offset += results[i].known_count;
       if (session->request.input_offset == session->request.input_count) {
         session->request.phase = QWEN_REQUEST_DECODE;
       }
-    } else {
-      ++session->request.decode_steps;
     }
+    session->request.decode_steps +=
+        results[i].verification_count +
+        (!prefill && results[i].known_count ? 1 : 0);
     if (results[i].output_count) {
       const iree_host_size_t previous_count = session->request.output_count;
       status = qwen_selected_tokens(service, session, results[i].output_count,
