@@ -37,6 +37,8 @@ typedef struct projection_check_t {
   loom_serve_jit_stage_t* stages[2];
   // Separate immutable checkpoint roots, one per compiled stage.
   iree_hal_buffer_t* weights[2];
+  // Retained checkpoint/preparation plan for each fixed root.
+  loom_serve_weights_t* weight_plans[2];
   // Reusable recorded base and adapter commands.
   iree_hal_command_buffer_t* commands[2];
   // Input, output, strength, and command-planned workspace allocations.
@@ -135,11 +137,15 @@ static iree_status_t projection_initialize(projection_check_t* check,
     const loom_serve_weight_root_t root = {
         program, loom_cmd_program_parameter_root_at(program, 0),
         &check->weights[i]};
-    status = loom_serve_weights_load(
-        device, loom_serve_device_transfer_queue(check->owner), dispatch,
+    status = loom_serve_weights_create(
+        device, loom_serve_device_transfer_queue(check->owner), dispatch, NULL,
         check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
         iree_make_cstring_view(checkpoints[i]),
-        iree_make_cstring_view(policy_path), allocator);
+        iree_make_cstring_view(policy_path), &check->weight_plans[i],
+        allocator);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_weights_activate(check->weight_plans[i]);
+    }
     if (iree_status_is_ok(status)) {
       status = loom_serve_jit_stage_record(
           check->stages[i], iree_hal_queue_family(dispatch),
@@ -276,6 +282,8 @@ int main(int argc, char** argv) {
     iree_hal_command_buffer_release(check.commands[i]);
     loom_serve_jit_stage_destroy(check.stages[i]);
     iree_hal_buffer_release(check.weights[i]);
+    status = iree_status_join(
+        status, loom_serve_weights_destroy(check.weight_plans[i]));
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(check.buffers); ++i) {
     iree_hal_buffer_release(check.buffers[i]);

@@ -78,6 +78,8 @@ struct loom_serve_image_model_t {
     uint32_t count;
     // Owned HAL buffer array; uninitialized slots are NULL.
     iree_hal_buffer_t** values;
+    // Owned checkpoint/preparation plans in the same domain order.
+    loom_serve_weights_t** plans;
   } weights;
   // Inputs, final RGB and reflected workspace; partial slots are NULL.
   iree_hal_buffer_binding_t bindings[3];
@@ -108,11 +110,16 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
   loom_serve_preparation_destroy(model->preparation);
   for (iree_host_size_t i = 0; i < model->weights.count; ++i) {
     iree_hal_buffer_release(model->weights.values[i]);
+    if (model->weights.plans) {
+      status = iree_status_join(
+          status, loom_serve_weights_destroy(model->weights.plans[i]));
+    }
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bindings); ++i) {
     iree_hal_buffer_release(model->bindings[i].buffer);
   }
   iree_allocator_free(model->allocator, model->weights.values);
+  iree_allocator_free(model->allocator, model->weights.plans);
   iree_allocator_free(model->allocator, (void*)model->name.data);
   loom_serve_jit_destroy(model->jit);
   iree_tokenizer_free(model->tokenizer);
@@ -460,6 +467,9 @@ static iree_status_t image_model_initialize(
       allocator, roots, sizeof(*model->weights.values),
       (void**)&model->weights.values));
   model->weights.count = roots;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      allocator, roots, sizeof(*model->weights.plans),
+      (void**)&model->weights.plans));
   const iree_host_size_t binding_count = 3;
   uint64_t parameter_bytes = 0;
   for (uint32_t i = 0; i < roots; ++i) {
@@ -507,10 +517,13 @@ static iree_status_t image_model_initialize(
       const loom_serve_weight_root_t root = {
           program, reflected,
           &model->weights.values[reflected.fixed_buffer_index]};
-      status = loom_serve_weights_load(
+      status = loom_serve_weights_create(
           device, loom_serve_device_transfer_queue(model->owner), dispatch,
-          model->jit, command_mode, 0, 1, &root, parameter->path,
-          iree_make_cstring_view(policy), allocator);
+          NULL, model->jit, command_mode, 0, 1, &root, parameter->path,
+          iree_make_cstring_view(policy), &model->weights.plans[i], allocator);
+    }
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_weights_activate(model->weights.plans[i]);
     }
     iree_allocator_free(allocator, policy);
   }

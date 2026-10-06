@@ -102,6 +102,8 @@ struct loom_serve_text_model_t {
   iree_hal_command_buffer_mode_t command_mode;
   // Shared source index and compiler for this model residency.
   loom_serve_jit_t* jit;
+  // Retained checkpoint/preparation plan owning stable parameter reservations.
+  loom_serve_weights_t* weights;
   // Source declarations retained independently of the temporary bootstrap VM.
   loom_serve_preparation_t* preparation;
   // Leading stages with identical shared parameter placement.
@@ -152,6 +154,8 @@ struct loom_serve_text_model_t {
   struct {
     // Physical allocation domain; virtual buffers borrow this owner.
     loom_serve_memory_pool_t* pool;
+    // Mutable state accounting, excluding parameters sharing the same pool.
+    loom_serve_memory_statistics_t statistics;
     // Optional virtual reservations in source allocation order.
     loom_serve_virtual_buffer_t* buffers[TEXT_ALLOCATION_COUNT];
     // Always-live initialized prefixes outside row-owned private storage.
@@ -369,11 +373,14 @@ static iree_status_t text_load_weights(loom_serve_text_model_t* model,
   iree_status_t status = iree_file_path_join(
       source_directory, checkpoint->policy, model->allocator, &policy_path);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_weights_load(
-        model->device, model->transfer, model->dispatch, model->jit,
-        model->command_mode, model->shared_stage_count, root_count, roots,
-        checkpoint->path, iree_make_cstring_view(policy_path),
-        model->allocator);
+    status = loom_serve_weights_create(
+        model->device, model->transfer, model->dispatch, model->memory.pool,
+        model->jit, model->command_mode, model->shared_stage_count, root_count,
+        roots, checkpoint->path, iree_make_cstring_view(policy_path),
+        &model->weights, model->allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_weights_activate(model->weights);
   }
   iree_allocator_free(model->allocator, policy_path);
   iree_allocator_free(model->allocator, roots);
@@ -784,7 +791,8 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
       }
       if (model->memory.pool && elastic) {
         status = loom_serve_virtual_buffer_create(
-            model->memory.pool, length, alignment, &model->memory.buffers[i]);
+            model->memory.pool, length, alignment, &model->memory.statistics,
+            &model->memory.buffers[i]);
         if (iree_status_is_ok(status)) {
           *allocations[i] =
               loom_serve_virtual_buffer_handle(model->memory.buffers[i]);
@@ -1084,7 +1092,7 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_allocator_free(model->allocator, model->stages);
   loom_serve_jit_destroy(model->jit);
   iree_allocator_free(model->allocator, model->memory.regions);
-  iree_status_t memory_status = iree_ok_status();
+  iree_status_t memory_status = loom_serve_weights_destroy(model->weights);
   for (iree_host_size_t i = 0; i < TEXT_ALLOCATION_COUNT; ++i) {
     memory_status = iree_status_join(
         memory_status,
@@ -1109,9 +1117,21 @@ loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,
 
 loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
     const loom_serve_text_model_t* model) {
-  return model->memory.pool
-             ? loom_serve_memory_pool_statistics(model->memory.pool)
-             : (loom_serve_memory_statistics_t){0};
+  return model->memory.statistics;
+}
+
+loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
+    const loom_serve_text_model_t* model) {
+  return loom_serve_weights_statistics(model->weights);
+}
+
+iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model) {
+  return loom_serve_weights_activate(model->weights);
+}
+
+iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model) {
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
+  return loom_serve_weights_deactivate(model->weights);
 }
 
 iree_status_t loom_serve_text_model_trim(
@@ -1344,6 +1364,7 @@ static iree_status_t text_invoke(loom_serve_text_model_t* model,
 
 static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
   loom_serve_text_model_t* model = row->model;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_activate(model));
   iree_vm_variant_t arguments[TEXT_BINDING_COUNT + 2] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->vm_types,
                                                model->control_state),
@@ -1659,6 +1680,7 @@ static iree_status_t text_epoch(
                             "epoch needs %u KV blocks; %u are available",
                             required_blocks, model->cache.pool.available);
   }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_activate(model));
   IREE_RETURN_IF_ERROR(text_grow_blocks(model, span_count, spans, extents));
 
   const iree_host_size_t input_count =

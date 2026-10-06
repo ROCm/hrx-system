@@ -93,3 +93,11 @@ command.program.def public @unavailable() launch(%weights: buffer, %output: buff
   kernel.launch @consume(%data, %data, %data, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
   command.return
 }
+
+command.program.def public @partial() launch(%weights: buffer, %output: buffer) {
+  %a = command.parameter %weights, "a" : view<8xi32>
+  %b = command.parameter %weights, "b" : view<8xi32>
+  %missing = command.parameter %weights, "unavailable" : view<8xi32>
+  kernel.launch @consume(%a, %b, %missing, %output) : (view<8xi32>, view<8xi32>, view<8xi32>, buffer)
+  command.return
+}

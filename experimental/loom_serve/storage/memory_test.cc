@@ -92,6 +92,8 @@ class MemoryTest : public ::testing::Test {
   loom_serve_device_t* device = nullptr;
   // One physical budget shared by the independent reservations.
   loom_serve_memory_pool_t* pool = nullptr;
+  // Independent accounting groups competing for the same physical budget.
+  std::array<loom_serve_memory_statistics_t, 2> statistics = {};
   // First model-like reservation, sparsely backed beyond four GiB.
   loom_serve_virtual_buffer_t* first = nullptr;
   // Independent reservation competing for the same physical budget.
@@ -100,9 +102,9 @@ class MemoryTest : public ::testing::Test {
 
 TEST_F(MemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, kHighOffset + kSlabSize,
-                                                  256, &first));
-  IREE_ASSERT_OK(
-      loom_serve_virtual_buffer_create(pool, 2 * kSlabSize, 256, &second));
+                                                  256, &statistics[0], &first));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, 2 * kSlabSize, 256,
+                                                  &statistics[1], &second));
   auto* const identity = loom_serve_virtual_buffer_handle(first);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, 0u);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, kHighOffset, 256));
@@ -134,6 +136,12 @@ TEST_F(MemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
   RoundTrip(first, 0, 0xCAFEBABE);
   CheckRetained(first, kHighOffset, 0x12345678);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).peak_bytes, 3 * kSlabSize);
+  EXPECT_EQ(statistics[0].committed_bytes, 2 * kSlabSize);
+  EXPECT_EQ(statistics[1].committed_bytes, 0u);
+  EXPECT_EQ(statistics[0].released_bytes, kSlabSize);
+  EXPECT_EQ(statistics[1].released_bytes, 2 * kSlabSize);
+  EXPECT_EQ(statistics[0].peak_bytes, 2 * kSlabSize);
+  EXPECT_EQ(statistics[1].peak_bytes, 2 * kSlabSize);
 }
 
 }  // namespace
