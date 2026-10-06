@@ -132,6 +132,25 @@ loom_cc_test(
 )
 
 loom_cc_test(
+    name = "packet_test",
+    srcs = ["packet_test.cc"],
+    args = ["--control_source=$(rootpath :control.loom)"],
+    data = ["control.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        "//experimental/loom_serve/runtime:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+        "//runtime/src/iree/vm:test_support",
+    ],
+)
+
+loom_cc_test(
     name = "continuation_test",
     srcs = ["continuation_test.cc"],
     args = ["--continuation_source=$(rootpath :kernels/qwen38/continuation.loom)"],

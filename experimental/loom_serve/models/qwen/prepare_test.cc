@@ -122,7 +122,7 @@ class PrepareTest : public ::testing::Test {
       expected[2][row * 2 + 1] = pool ? row_bytes : base + 156893440;
       expected[3][row * 2 + 1] = pool ? 0 : row * context * 4096;
     }
-    expected[4] = {64, 1024, 20480};
+    expected[4] = {64, 1024, 20480, 384};
     for (size_t i = 0; i < expected.size(); ++i) {
       SCOPED_TRACE(i);
       iree_vm_buffer_t* buffer = nullptr;
