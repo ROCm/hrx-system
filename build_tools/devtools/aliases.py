@@ -76,7 +76,12 @@ def posix_alias_content(python_executable: str, args: list[str]) -> str:
     return (
         "#!/usr/bin/env sh\n"
         "set -eu\n"
-        f'exec {_single_quote(python_executable)} {_single_quote(str(REPO_ROOT / "dev.py"))} {quoted_args} "$@"\n'
+        f"REPO_ROOT={_single_quote(str(REPO_ROOT))}\n"
+        'CALLER_ROOT=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || :)\n'
+        'if [ -n "$CALLER_ROOT" ] && [ -f "$CALLER_ROOT/dev.py" ]; then\n'
+        "  REPO_ROOT=$CALLER_ROOT\n"
+        "fi\n"
+        f'exec {_single_quote(python_executable)} "$REPO_ROOT/dev.py" {quoted_args} "$@"\n'
     )
 
 
@@ -84,7 +89,11 @@ def windows_alias_content(python_executable: str, args: list[str]) -> str:
     quoted_args = " ".join(_cmd_quote(arg) for arg in args)
     return (
         "@echo off\r\n"
-        f"{_cmd_quote(python_executable)} {_cmd_quote(str(REPO_ROOT / 'dev.py'))} {quoted_args} %*\r\n"
+        f'set "REPO_ROOT={REPO_ROOT}"\r\n'
+        'set "CALLER_ROOT="\r\n'
+        'for /f "delims=" %%I in (\'git -C "%CD%" rev-parse --show-toplevel 2^>nul\') do set "CALLER_ROOT=%%I"\r\n'
+        'if defined CALLER_ROOT if exist "%CALLER_ROOT%\\dev.py" set "REPO_ROOT=%CALLER_ROOT%"\r\n'
+        f'{_cmd_quote(python_executable)} "%REPO_ROOT%\\dev.py" {quoted_args} %*\r\n'
     )
 
 

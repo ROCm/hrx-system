@@ -2,5 +2,9 @@
 set -eu
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
+CALLER_ROOT=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null || :)
+if [ -n "$CALLER_ROOT" ] && [ -f "$CALLER_ROOT/dev.py" ]; then
+  REPO_ROOT=$CALLER_ROOT
+fi
 PYTHON=${PYTHON:-python3}
 exec "$PYTHON" "$REPO_ROOT/dev.py" cmake fuzz "$@"

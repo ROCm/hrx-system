@@ -1059,6 +1059,46 @@ class CliTest(unittest.TestCase):
                 wrapper_lines = (wrapper_directory / name).read_text().splitlines()
                 self.assertEqual(wrapper_lines[-1], invocation)
 
+    def test_generated_posix_wrapper_selects_calling_worktree(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            installed_root = root / "installed"
+            calling_root = root / "calling"
+            installed_root.mkdir()
+            calling_root.mkdir()
+            (installed_root / "dev.py").write_text("")
+            (calling_root / "dev.py").write_text("")
+            subprocess.run(
+                ["git", "init", "--quiet", str(calling_root)],
+                check=True,
+            )
+            caller_directory = calling_root / "nested"
+            caller_directory.mkdir()
+            recorded_arguments = root / "arguments"
+            interpreter = root / "python"
+            interpreter.write_text(
+                '#!/usr/bin/env sh\nprintf "%s\\n" "$@" > "$RECORDED_ARGUMENTS"\n'
+            )
+            interpreter.chmod(0o755)
+            wrapper = root / "iree-bazel-test"
+            with mock.patch.object(aliases, "REPO_ROOT", installed_root):
+                wrapper.write_text(
+                    aliases.posix_alias_content(str(interpreter), ["bazel", "test"])
+                )
+            wrapper.chmod(0o755)
+
+            subprocess.run(
+                [str(wrapper), "//runtime:all"],
+                cwd=caller_directory,
+                env={**os.environ, "RECORDED_ARGUMENTS": str(recorded_arguments)},
+                check=True,
+            )
+
+            self.assertEqual(
+                recorded_arguments.read_text().splitlines(),
+                [str(calling_root / "dev.py"), "bazel", "test", "//runtime:all"],
+            )
+
     def test_root_verbose_survives_nested_command_parser(self):
         args = cli.parse_arguments(["--verbose", "bazel", "build"])
 
