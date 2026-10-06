@@ -929,8 +929,11 @@ have an explicit concurrent scope; the B contraction fuses BF16 rounding,
 strength multiplication, and addition into the base output. Its same-tile
 read/write permits in-place addition without a full-width delta buffer.
 The zero-strength branch preserves the base instead of adding a rounded zero.
-The rank-32 A contractions visit both output halves of each input panel
-adjacently, reusing those rows before advancing through the large activation.
+The 16384-input rank-32 A contraction visits both output halves of each input
+panel adjacently, reusing those rows before advancing through the activation.
+The 6144-input A contraction traverses rows first. These orders are selected
+from the complete adapted graph: overlapping base contractions change the
+resource/cache context, so an isolated A-kernel gain need not survive there.
 The 6144- and 16384-wide row-major additions traverse output tiles first, so
 successive workgroups visit adjacent columns rather than striding over the
 entire activation matrix. Contraction, base-read and store motifs take the
@@ -972,7 +975,8 @@ expectations.
 
 [`tests/adapter_down_traversal.loom`](tests/adapter_down_traversal.loom) calls
 both rank-32 A leaves at 80 rows with the same libraries and configuration.
-Five row tiles and two output tiles check launch/origin coverage; exactly
+Five row tiles and two output tiles check launch/origin coverage for both
+the rows-first 6144-input leaf and output-first 16384-input leaf. Exactly
 representable factors yield two bitwise expectations without a numerical
 tolerance or a separate test kernel.
 

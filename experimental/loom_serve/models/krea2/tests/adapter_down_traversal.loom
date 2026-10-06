@@ -6,7 +6,8 @@
 
 // Link block_adapters.loom and kernels/linear.loom with --library and bind
 // krea2.block_tokens=80. Five row tiles and two output tiles expose one-sided
-// grid/origin swaps. X=1/8, W=1/4 and the K256 partials are exactly representable.
+// grid/origin swaps in the rows-first 6144-input and output-first 16384-input
+// leaves. X=1/8, W=1/4 and the K256 partials are exactly representable.
 kernel.decl @block_adapter_linear_6144_32() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @block_adapter_linear_16384_32() launch(%input: buffer, %weight: buffer, %output: buffer)
 
