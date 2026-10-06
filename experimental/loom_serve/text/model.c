@@ -572,6 +572,9 @@ static iree_status_t text_prepare_storage(loom_serve_text_model_t* model,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "pooled state requires source cache regions");
   }
+  if (!model->memory.region_count) {
+    return iree_ok_status();
+  }
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       model->allocator, model->memory.region_count,
       sizeof(*model->memory.regions), (void**)&model->memory.regions));
