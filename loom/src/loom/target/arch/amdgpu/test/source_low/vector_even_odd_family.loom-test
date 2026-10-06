@@ -1,0 +1,129 @@
+// RUN: with-checks compile-report target-legalize{mode=final},source-to-low
+
+// Keep every AMDGPU vector storage family native through target legalization
+// and selected by source-to-Low lowering. Exact lowering cases separately cover
+// both literal-selector and register-selector byte-permutation packet forms.
+
+amdgpu.target<gfx11-generic> @target
+
+// Exercise the minimum admitted extent for each physical storage contract.
+func.def target(@target) @i1_min(%even: vector<1xi1>, %odd: vector<1xi1>) -> (vector<2xi1>, vector<1xi1>, vector<1xi1>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<1xi1>, vector<1xi1> -> vector<2xi1>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<2xi1> -> vector<1xi1>, vector<1xi1>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2xi1>, vector<1xi1>, vector<1xi1>
+}
+
+func.def target(@target) @i8_min(%even: vector<1xi8>, %odd: vector<1xi8>) -> (vector<2xi8>, vector<1xi8>, vector<1xi8>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<1xi8>, vector<1xi8> -> vector<2xi8>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<2xi8> -> vector<1xi8>, vector<1xi8>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2xi8>, vector<1xi8>, vector<1xi8>
+}
+
+func.def target(@target) @i16_min(%even: vector<1xi16>, %odd: vector<1xi16>) -> (vector<2xi16>, vector<1xi16>, vector<1xi16>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<1xi16>, vector<1xi16> -> vector<2xi16>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<2xi16> -> vector<1xi16>, vector<1xi16>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2xi16>, vector<1xi16>, vector<1xi16>
+}
+
+func.def target(@target) @i32_min(%even: vector<1xi32>, %odd: vector<1xi32>) -> (vector<2xi32>, vector<1xi32>, vector<1xi32>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<1xi32>, vector<1xi32> -> vector<2xi32>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<2xi32> -> vector<1xi32>, vector<1xi32>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2xi32>, vector<1xi32>, vector<1xi32>
+}
+
+func.def target(@target) @i64_min(%even: vector<1xi64>, %odd: vector<1xi64>) -> (vector<2xi64>, vector<1xi64>, vector<1xi64>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<1xi64>, vector<1xi64> -> vector<2xi64>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<2xi64> -> vector<1xi64>, vector<1xi64>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2xi64>, vector<1xi64>, vector<1xi64>
+}
+
+// Exercise the maximum admitted extent for every scalar storage type.
+func.def target(@target) @i1_max(%even: vector<16xi1>, %odd: vector<16xi1>) -> (vector<32xi1>, vector<16xi1>, vector<16xi1>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<16xi1>, vector<16xi1> -> vector<32xi1>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<32xi1> -> vector<16xi1>, vector<16xi1>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<32xi1>, vector<16xi1>, vector<16xi1>
+}
+
+func.def target(@target) @i8_max(%even: vector<32xi8>, %odd: vector<32xi8>) -> (vector<64xi8>, vector<32xi8>, vector<32xi8>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<32xi8>, vector<32xi8> -> vector<64xi8>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<64xi8> -> vector<32xi8>, vector<32xi8>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<64xi8>, vector<32xi8>, vector<32xi8>
+}
+
+func.def target(@target) @i16_max(%even: vector<16xi16>, %odd: vector<16xi16>) -> (vector<32xi16>, vector<16xi16>, vector<16xi16>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<16xi16>, vector<16xi16> -> vector<32xi16>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<32xi16> -> vector<16xi16>, vector<16xi16>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<32xi16>, vector<16xi16>, vector<16xi16>
+}
+
+func.def target(@target) @i32_max(%even: vector<16xi32>, %odd: vector<16xi32>) -> (vector<32xi32>, vector<16xi32>, vector<16xi32>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<16xi32>, vector<16xi32> -> vector<32xi32>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<32xi32> -> vector<16xi32>, vector<16xi32>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<32xi32>, vector<16xi32>, vector<16xi32>
+}
+
+func.def target(@target) @i64_max(%even: vector<8xi64>, %odd: vector<8xi64>) -> (vector<16xi64>, vector<8xi64>, vector<8xi64>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<8xi64>, vector<8xi64> -> vector<16xi64>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<16xi64> -> vector<8xi64>, vector<8xi64>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<16xi64>, vector<8xi64>, vector<8xi64>
+}
+
+func.def target(@target) @f8e4m3_max(%even: vector<32xf8E4M3>, %odd: vector<32xf8E4M3>) -> (vector<64xf8E4M3>, vector<32xf8E4M3>, vector<32xf8E4M3>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<32xf8E4M3>, vector<32xf8E4M3> -> vector<64xf8E4M3>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<64xf8E4M3> -> vector<32xf8E4M3>, vector<32xf8E4M3>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<64xf8E4M3>, vector<32xf8E4M3>, vector<32xf8E4M3>
+}
+
+func.def target(@target) @f8e5m2_max(%even: vector<32xf8E5M2>, %odd: vector<32xf8E5M2>) -> (vector<64xf8E5M2>, vector<32xf8E5M2>, vector<32xf8E5M2>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<32xf8E5M2>, vector<32xf8E5M2> -> vector<64xf8E5M2>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<64xf8E5M2> -> vector<32xf8E5M2>, vector<32xf8E5M2>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<64xf8E5M2>, vector<32xf8E5M2>, vector<32xf8E5M2>
+}
+
+func.def target(@target) @f16_max(%even: vector<32xf16>, %odd: vector<32xf16>) -> (vector<64xf16>, vector<32xf16>, vector<32xf16>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<32xf16>, vector<32xf16> -> vector<64xf16>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<64xf16> -> vector<32xf16>, vector<32xf16>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<64xf16>, vector<32xf16>, vector<32xf16>
+}
+
+func.def target(@target) @bf16_max(%even: vector<32xbf16>, %odd: vector<32xbf16>) -> (vector<64xbf16>, vector<32xbf16>, vector<32xbf16>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<32xbf16>, vector<32xbf16> -> vector<64xbf16>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<64xbf16> -> vector<32xbf16>, vector<32xbf16>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<64xbf16>, vector<32xbf16>, vector<32xbf16>
+}
+
+func.def target(@target) @f32_max(%even: vector<16xf32>, %odd: vector<16xf32>) -> (vector<32xf32>, vector<16xf32>, vector<16xf32>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<16xf32>, vector<16xf32> -> vector<32xf32>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<32xf32> -> vector<16xf32>, vector<16xf32>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<32xf32>, vector<16xf32>, vector<16xf32>
+}
+
+func.def target(@target) @f64_max(%even: vector<8xf64>, %odd: vector<8xf64>) -> (vector<16xf64>, vector<8xf64>, vector<8xf64>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<8xf64>, vector<8xf64> -> vector<16xf64>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<16xf64> -> vector<8xf64>, vector<8xf64>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<16xf64>, vector<8xf64>, vector<8xf64>
+}
+
+// Cover the first, middle, and last axes of shaped register-unit payloads.
+func.def target(@target) @first_axis(%even: vector<1x2xi32>, %odd: vector<1x2xi32>) -> (vector<2x2xi32>, vector<1x2xi32>, vector<1x2xi32>) {
+  %interleaved = vector.interleave<0> %even, %odd : vector<1x2xi32>, vector<1x2xi32> -> vector<2x2xi32>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<0> %interleaved : vector<2x2xi32> -> vector<1x2xi32>, vector<1x2xi32>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2x2xi32>, vector<1x2xi32>, vector<1x2xi32>
+}
+
+func.def target(@target) @middle_axis(%even: vector<2x1x2xi1>, %odd: vector<2x1x2xi1>) -> (vector<2x2x2xi1>, vector<2x1x2xi1>, vector<2x1x2xi1>) {
+  %interleaved = vector.interleave<1> %even, %odd : vector<2x1x2xi1>, vector<2x1x2xi1> -> vector<2x2x2xi1>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<1> %interleaved : vector<2x2x2xi1> -> vector<2x1x2xi1>, vector<2x1x2xi1>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2x2x2xi1>, vector<2x1x2xi1>, vector<2x1x2xi1>
+}
+
+func.def target(@target) @last_axis(%even: vector<2x1xi64>, %odd: vector<2x1xi64>) -> (vector<2x2xi64>, vector<2x1xi64>, vector<2x1xi64>) {
+  %interleaved = vector.interleave<1> %even, %odd : vector<2x1xi64>, vector<2x1xi64> -> vector<2x2xi64>
+  %roundtrip_even, %roundtrip_odd = vector.deinterleave<1> %interleaved : vector<2x2xi64> -> vector<2x1xi64>, vector<2x1xi64>
+  func.return %interleaved, %roundtrip_even, %roundtrip_odd : vector<2x2xi64>, vector<2x1xi64>, vector<2x1xi64>
+}
+
+// ----
+CHECK: COMPILE-REPORT: source_low selected_ops=38 * rows=38
+CHECK: COMPILE-REPORT: target_legalization * scalarized=0 * rows=38
+CHECK-NOT: scalarized=true

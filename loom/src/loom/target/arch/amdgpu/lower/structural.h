@@ -44,7 +44,7 @@ typedef struct loom_amdgpu_vector_shuffle_plan_t {
     // Packed-byte permutation data for packed-byte-permute mode.
     struct {
       // Best available V_PERM_B32 selector representation.
-      loom_amdgpu_i8_pack_permute_plan_t packet;
+      loom_amdgpu_byte_permute_plan_t packet;
       // Source registers selected for the two V_PERM_B32 inputs.
       uint8_t source_register_indices[2]
                                      [LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
@@ -53,7 +53,7 @@ typedef struct loom_amdgpu_vector_shuffle_plan_t {
     } packed_bytes;
   } strategy;
 } loom_amdgpu_vector_shuffle_plan_t;
-static_assert(sizeof(loom_amdgpu_vector_shuffle_plan_t) == 116,
+static_assert(sizeof(loom_amdgpu_vector_shuffle_plan_t) == 112,
               "AMDGPU vector shuffle plans must stay cache dense");
 static_assert(LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS <= UINT8_MAX,
               "packed vector register counts must fit compact plans");

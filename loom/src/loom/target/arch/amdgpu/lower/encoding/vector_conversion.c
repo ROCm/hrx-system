@@ -1126,7 +1126,7 @@ loom_amdgpu_lower_vector_fp8_encode_software_literal_permute(
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t lane_type) {
   IREE_ASSERT_EQ(plan->strategy.fp8_encode.packed_i8_permute.kind,
-                 LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR);
+                 LOOM_AMDGPU_BYTE_PERMUTE_KIND_LITERAL_SELECTOR);
   IREE_ASSERT_LE(plan->result_register_count,
                  LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS);
 
@@ -1226,7 +1226,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_encode_software(
   IREE_ASSERT(
       loom_amdgpu_fp8_encode_plan_is_software(&plan->strategy.fp8_encode));
   if (plan->strategy.fp8_encode.packed_i8_permute.kind ==
-      LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_LITERAL_SELECTOR) {
+      LOOM_AMDGPU_BYTE_PERMUTE_KIND_LITERAL_SELECTOR) {
     return loom_amdgpu_lower_vector_fp8_encode_software_literal_permute(
         context, source_op, plan, emission_state, low_source, source_lane_type,
         lane_type);
@@ -1252,7 +1252,7 @@ static iree_status_t loom_amdgpu_lower_vector_fp8_encode_software(
   loom_value_id_t result_registers[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS] = {
       0};
   if (plan->strategy.fp8_encode.packed_i8_permute.kind !=
-      LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_NONE) {
+      LOOM_AMDGPU_BYTE_PERMUTE_KIND_NONE) {
     IREE_RETURN_IF_ERROR(loom_amdgpu_pack_i8_lanes_with_permute(
         context, source_op, &plan->strategy.fp8_encode.packed_i8_permute,
         encoded_lanes, packed_lane_count, lane_type, result_registers));

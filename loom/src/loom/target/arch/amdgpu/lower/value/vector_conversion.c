@@ -12,6 +12,7 @@
 #include "loom/ops/vector/scalarization.h"
 #include "loom/target/arch/amdgpu/lower/arithmetic.h"
 #include "loom/target/arch/amdgpu/lower/bitpack.h"
+#include "loom/target/arch/amdgpu/lower/byte_permute.h"
 #include "loom/target/arch/amdgpu/lower/descriptor_ref.h"
 #include "loom/target/arch/amdgpu/lower/emit.h"
 #include "loom/target/arch/amdgpu/lower/legality.h"
@@ -479,10 +480,10 @@ static bool loom_amdgpu_select_vector_conversion_plan_for_op(
     return false;
   }
 
-  loom_amdgpu_i8_pack_permute_plan_t packed_i8_permute = {0};
+  loom_amdgpu_byte_permute_plan_t packed_i8_permute = {0};
   if (loom_amdgpu_vector_conversion_can_use_packed_i8_permute(
           &result_storage)) {
-    loom_amdgpu_select_i8_pack_permute_plan(descriptor_set, &packed_i8_permute);
+    loom_amdgpu_select_byte_permute_plan(descriptor_set, &packed_i8_permute);
   }
 
   *out_plan = (loom_amdgpu_vector_conversion_plan_t){
@@ -728,7 +729,7 @@ static iree_status_t loom_amdgpu_lower_vector_conversion_packed_result(
     const loom_amdgpu_vector_conversion_plan_t* plan,
     loom_value_id_t low_source, loom_type_t source_lane_type,
     loom_type_t lane_type) {
-  if (plan->packed_i8_permute.kind != LOOM_AMDGPU_I8_PACK_PERMUTE_KIND_NONE) {
+  if (plan->packed_i8_permute.kind != LOOM_AMDGPU_BYTE_PERMUTE_KIND_NONE) {
     loom_value_id_t converted_lanes[LOOM_AMDGPU_MAX_PACKED_I8_LANES];
     for (uint32_t i = 0; i < plan->lane_count; ++i) {
       loom_value_id_t source_lane = LOOM_VALUE_ID_INVALID;

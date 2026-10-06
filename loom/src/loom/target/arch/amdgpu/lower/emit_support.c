@@ -569,7 +569,7 @@ iree_status_t loom_amdgpu_build_low_register_range(
     const loom_value_id_t* low_registers, uint32_t register_count,
     loom_type_t result_type, loom_value_id_t* out_low_result) {
   IREE_ASSERT_GT(register_count, 0);
-  IREE_ASSERT_LE(register_count, LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES);
+  IREE_ASSERT_LE(register_count, LOOM_AMDGPU_MAX_VECTOR_STORAGE_REGISTER_UNITS);
   *out_low_result = LOOM_VALUE_ID_INVALID;
   if (register_count == 1) {
     *out_low_result = low_registers[0];

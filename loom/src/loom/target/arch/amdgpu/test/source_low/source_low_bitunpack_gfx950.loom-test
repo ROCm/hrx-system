@@ -65,20 +65,20 @@ func.def target(@target) @i8x8_to_u4x16_bitunpack_i8_result(%packed: vector<8xi8
 
 // ----
 low.func.def target<amdgpu.cdna4.core>(@target) abi(hal_kernel) @i8x8_to_u4x16_bitunpack_i8_result(%packed: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x4>) asm {
-  %5 = s_mov_b32 83952640
-  %6 = s_mov_b32 117638658
-  %7 = slice %packed[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %5 = slice %packed[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = v_and_b32_lit %5, 252645135
+  %7 = v_lshrrev_b32_src0_inline %5, 4
   %8 = v_and_b32_lit %7, 252645135
-  %9 = v_lshrrev_b32_src0_inline %7, 4
-  %10 = v_and_b32_lit %9, 252645135
-  %11 = v_perm_b32 %10, %8, %5
-  %12 = v_perm_b32 %10, %8, %6
+  %9 = s_mov_b32 83952640
+  %10 = v_perm_b32 %8, %6, %9
+  %11 = s_mov_b32 117638658
+  %12 = v_perm_b32 %8, %6, %11
   %13 = slice %packed[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %14 = v_and_b32_lit %13, 252645135
   %15 = v_lshrrev_b32_src0_inline %13, 4
   %16 = v_and_b32_lit %15, 252645135
-  %17 = v_perm_b32 %16, %14, %5
-  %18 = v_perm_b32 %16, %14, %6
-  %unpacked = concat(%11, %12, %17, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %17 = v_perm_b32 %16, %14, %9
+  %18 = v_perm_b32 %16, %14, %11
+  %unpacked = concat(%10, %12, %17, %18) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %unpacked
 }

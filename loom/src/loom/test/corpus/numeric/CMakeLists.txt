@@ -85,6 +85,7 @@ loom_corpus_sources(
     "vector/integer_bitwise.loom"
     "vector/integer_comparison.loom"
     "vector/integer_widening.loom"
+    "vector/interleave.loom"
     "vector/packed_arithmetic.loom"
     "vector/packed_selection.loom"
     "vector/reductions.loom"

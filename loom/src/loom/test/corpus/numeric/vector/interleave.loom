@@ -1,0 +1,99 @@
+// Applies distinct biases to the even and odd byte streams before weaving them
+// back together. The unequal arithmetic keeps both structural operations
+// observable while exercising wrapping byte payloads.
+func.def @packed_byte_even_odd_bias(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 8 : index
+  %input_bytes = buffer.view %input[%base] : buffer -> view<64xi8>
+  %output_bytes = buffer.view %output[%base] : buffer -> view<64xi8>
+  %even_bias = vector.constant 1 : vector<4xi8>
+  %odd_bias = vector.constant -3 : vector<4xi8>
+  scf.for %i = [%begin to %end step %step] {
+    %packet = vector.load %input_bytes[%i] : view<64xi8> -> vector<8xi8>
+    %even, %odd = vector.deinterleave<0> %packet : vector<8xi8> -> vector<4xi8>, vector<4xi8>
+    %biased_even = vector.addi %even, %even_bias : vector<4xi8>
+    %biased_odd = vector.addi %odd, %odd_bias : vector<4xi8>
+    %result = vector.interleave<0> %biased_even, %biased_odd : vector<4xi8>, vector<4xi8> -> vector<8xi8>
+    vector.store %result, %output_bytes[%i] : vector<8xi8>, view<64xi8>
+  }
+  func.return
+}
+
+// Scalar loads and stores keep the oracle independent of vector structural
+// lowering and make the alternating lane contract explicit.
+func.def @packed_byte_even_odd_bias_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 8 : index
+  %c1_index = index.constant 1 : index
+  %c2_index = index.constant 2 : index
+  %c3_index = index.constant 3 : index
+  %c4_index = index.constant 4 : index
+  %c5_index = index.constant 5 : index
+  %c6_index = index.constant 6 : index
+  %c7_index = index.constant 7 : index
+  %even_bias = scalar.constant 1 : i8
+  %odd_bias = scalar.constant -3 : i8
+  %input_bytes = buffer.view %input[%base] : buffer -> view<64xi8>
+  %output_bytes = buffer.view %output[%base] : buffer -> view<64xi8>
+  scf.for %i0 = [%begin to %end step %step] {
+    %i1 = index.add %i0, %c1_index : index
+    %i2 = index.add %i0, %c2_index : index
+    %i3 = index.add %i0, %c3_index : index
+    %i4 = index.add %i0, %c4_index : index
+    %i5 = index.add %i0, %c5_index : index
+    %i6 = index.add %i0, %c6_index : index
+    %i7 = index.add %i0, %c7_index : index
+    %v0 = view.load %input_bytes[%i0] : view<64xi8> -> i8
+    %v1 = view.load %input_bytes[%i1] : view<64xi8> -> i8
+    %v2 = view.load %input_bytes[%i2] : view<64xi8> -> i8
+    %v3 = view.load %input_bytes[%i3] : view<64xi8> -> i8
+    %v4 = view.load %input_bytes[%i4] : view<64xi8> -> i8
+    %v5 = view.load %input_bytes[%i5] : view<64xi8> -> i8
+    %v6 = view.load %input_bytes[%i6] : view<64xi8> -> i8
+    %v7 = view.load %input_bytes[%i7] : view<64xi8> -> i8
+    %r0 = scalar.addi %v0, %even_bias : i8
+    %r1 = scalar.addi %v1, %odd_bias : i8
+    %r2 = scalar.addi %v2, %even_bias : i8
+    %r3 = scalar.addi %v3, %odd_bias : i8
+    %r4 = scalar.addi %v4, %even_bias : i8
+    %r5 = scalar.addi %v5, %odd_bias : i8
+    %r6 = scalar.addi %v6, %even_bias : i8
+    %r7 = scalar.addi %v7, %odd_bias : i8
+    view.store %r0, %output_bytes[%i0] : i8, view<64xi8>
+    view.store %r1, %output_bytes[%i1] : i8, view<64xi8>
+    view.store %r2, %output_bytes[%i2] : i8, view<64xi8>
+    view.store %r3, %output_bytes[%i3] : i8, view<64xi8>
+    view.store %r4, %output_bytes[%i4] : i8, view<64xi8>
+    view.store %r5, %output_bytes[%i5] : i8, view<64xi8>
+    view.store %r6, %output_bytes[%i6] : i8, view<64xi8>
+    view.store %r7, %output_bytes[%i7] : i8, view<64xi8>
+  }
+  func.return
+}
+
+check.scenario @packed_byte_even_odd_bias_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) period(256) : tensor<64xi8>
+    %output_storage = check.generate.fill value(91) : tensor<72xi8>
+    %output = check.tensor.view %output_storage offset(4) : tensor<72xi8> -> tensor<64xi8>
+    check.compare<@packed_byte_even_odd_bias, @packed_byte_even_odd_bias_oracle>(%input, %output) : (tensor<64xi8>, tensor<64xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<72xi8>
+    }
+  }
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<64xi8>
+    %output_storage = check.generate.fill value(-37) : tensor<72xi8>
+    %output = check.tensor.view %output_storage offset(4) : tensor<72xi8> -> tensor<64xi8>
+    check.compare<@packed_byte_even_odd_bias, @packed_byte_even_odd_bias_oracle>(%input, %output) : (tensor<64xi8>, tensor<64xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<64xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<72xi8>
+    }
+  }
+  check.return
+}
