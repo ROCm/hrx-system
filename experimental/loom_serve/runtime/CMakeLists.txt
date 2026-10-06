@@ -314,6 +314,42 @@ endif()
 
 loom_cc_library(
   NAME
+    retirement
+  HDRS
+    "retirement.h"
+  SRCS
+    "retirement.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::hal
+  PUBLIC
+)
+
+if(IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    retirement_test
+  SRCS
+    "retirement_test.cc"
+  DEPS
+    ::device
+    ::retirement
+    iree::base
+    iree::base::threading
+    iree::experimental::loom_serve::storage::memory
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
+loom_cc_library(
+  NAME
     weights
   HDRS
     "weights.h"
@@ -322,8 +358,8 @@ loom_cc_library(
   DEPS
     ::jit
     ::program
+    ::retirement
     iree::base
-    iree::base::threading
     iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::io::parameter_index

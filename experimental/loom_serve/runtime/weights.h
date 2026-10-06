@@ -87,7 +87,8 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights);
 loom_serve_memory_statistics_t loom_serve_weights_statistics(
     const loom_serve_weights_t* weights);
 
-// Consumer commands and root references must be released and work retired.
+// Consumer commands and root references must be released. Joins final queue
+// ownership of those roots before unmapping, even after readiness has failed.
 // A cleanup failure preserves outstanding ownership; NULL is accepted.
 iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights);
 

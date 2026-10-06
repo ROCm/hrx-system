@@ -236,14 +236,19 @@ its epoch's result before rescheduling, even though the lower execution API
 supports this branch.
 
 A synchronous enqueue rejection advances neither frontier. An accepted failure
-is propagated through completion/drain. Host upload and download storage stays
-alive until accepted work retires, including teardown after an error. Final
-model destruction joins both branches before releasing retained resources.
-It ends profiling before releasing command metadata, then releases VM, commands,
-buffers and JIT before destroying the device owner. The owner releases its
-execution/group/device before its async services. Destroying the owner is not
-an implicit drain; it cannot determine which host payloads the model borrowed.
-The JIT and weight integration tests use this same owner with actual queues.
+is propagated through completion/drain. Failed readiness alone cannot authorize
+freeing borrowed host payloads or unmapping virtual storage. Model setup creates
+release-tracked HAL views once; child views and queue consumers retain their
+final ownership. Teardown releases cached VM/command/view references, joins
+those final releases, then frees host payloads and virtual reservations. Weight
+plans independently enforce the same boundary for their exported roots. Warm
+submission needs no additional wrapper allocation or host wait.
+
+The application destroys models before the shared device owner. That owner ends
+profiling and releases execution/group/device before its async services.
+Destroying the owner is not an implicit drain; it cannot determine which host
+payloads the model borrowed. The JIT and weight integration tests use this same
+owner with actual queues.
 
 ## Extension boundaries
 
