@@ -1831,6 +1831,21 @@ const loom_link_plan_symbol_t* loom_link_plan_symbol_at(
   return &plan->symbols.values[ordinal].selection;
 }
 
+iree_host_size_t loom_link_plan_symbol_identity_ordinal(
+    const loom_link_plan_t* plan, iree_host_size_t ordinal) {
+  if (!plan || ordinal >= plan->symbols.count) {
+    return LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+  }
+  const loom_link_plan_symbol_work_item_t* work_item =
+      &plan->symbols.values[ordinal];
+  const iree_host_size_t definition_ordinal =
+      work_item->resolved_definition_symbol_ordinal;
+  return definition_ordinal != LOOM_LINK_PLAN_DEFINITION_UNCHECKED_ORDINAL &&
+                 definition_ordinal != LOOM_LINK_PLAN_DEFINITION_ABSENT_ORDINAL
+             ? definition_ordinal
+             : work_item->selection.symbol_ordinal;
+}
+
 iree_host_size_t loom_link_plan_facet_count(const loom_link_plan_t* plan) {
   return plan ? plan->facets.count : 0;
 }

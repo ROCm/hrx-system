@@ -200,6 +200,13 @@ iree_host_size_t loom_link_plan_symbol_count(const loom_link_plan_t* plan);
 const loom_link_plan_symbol_t* loom_link_plan_symbol_at(
     const loom_link_plan_t* plan, iree_host_size_t ordinal);
 
+// Returns the index-wide symbol ordinal defining the construction identity of
+// selected symbol |ordinal|, or INVALID_ORDINAL when |ordinal| is out of range.
+// A declaration resolved to a concrete definition shares that definition's
+// identity; every other selected symbol retains its own identity.
+iree_host_size_t loom_link_plan_symbol_identity_ordinal(
+    const loom_link_plan_t* plan, iree_host_size_t ordinal);
+
 // Returns the number of explicit structural facet selections in a link plan.
 // Merge plans retain complete symbols without enumerating facets.
 iree_host_size_t loom_link_plan_facet_count(const loom_link_plan_t* plan);

@@ -1286,6 +1286,12 @@ TEST_F(LinkPlannerTest, LinkDeclarationMayUsePrivateOwnerDefinition) {
                                             IREE_SV("callee"));
   EXPECT_TRUE(ContainsSymbol(plan.get(), callee_decl));
   EXPECT_TRUE(ContainsSymbol(plan.get(), callee_def));
+  const loom_link_plan_symbol_t* planned_declaration =
+      FindPlannedSymbol(plan.get(), callee_decl);
+  ASSERT_NE(planned_declaration, nullptr);
+  EXPECT_EQ(loom_link_plan_symbol_identity_ordinal(
+                plan.get(), planned_declaration->ordinal),
+            callee_def->ordinal);
 }
 
 TEST_F(LinkPlannerTest, UnresolvedDeclarationIgnoresPrivateLibraryDefinition) {

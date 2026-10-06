@@ -699,6 +699,158 @@ func.def public @same(%x: i32) -> (i32) {
 }
 
 TEST_F(LinkIndexMaterializerTest,
+       MergeResolvesPrivateOwnerIndependentOfProviderOrder) {
+  const iree_string_view_t owner_source = IREE_SV(R"(
+func.def @helper(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+
+func.def @local(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  const iree_string_view_t requester_source = IREE_SV(R"(
+func.decl @helper(%x: i32) -> (i32)
+
+func.def @local(%x: i32) -> (i32) {
+  %sum = scalar.addi %x, %x : i32
+  func.return %sum : i32
+}
+
+func.def public @entry(%x: i32) -> (i32) {
+  %result = func.call @helper(%x) : (i32) -> (i32)
+  func.return %result : i32
+}
+)");
+  const iree_string_view_t companion_source = IREE_SV(R"(
+func.def @sentinel(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)");
+  loom_module_t* owner = Parse(owner_source, IREE_SV("owner.loom"));
+  loom_module_t* requester = Parse(requester_source, IREE_SV("requester.loom"));
+  loom_module_t* companion = Parse(companion_source, IREE_SV("companion.loom"));
+  const std::vector<uint8_t> owner_bytecode = WriteModule(owner);
+  const std::vector<uint8_t> requester_bytecode = WriteModule(requester);
+  const std::vector<uint8_t> companion_bytecode = WriteModule(companion);
+
+  enum ProviderId {
+    kOwner,
+    kRequester,
+    kCompanion,
+  };
+  struct Variant {
+    const char* name;
+    std::array<ProviderId, 3> insertion_order;
+    std::array<ProviderForm, 3> provider_forms;
+  };
+  const Variant variants[] = {
+      {
+          "owner-first",
+          {kOwner, kCompanion, kRequester},
+          {ProviderForm::kMaterialized, ProviderForm::kText,
+           ProviderForm::kBytecode},
+      },
+      {
+          "requester-first",
+          {kRequester, kOwner, kCompanion},
+          {ProviderForm::kMaterialized, ProviderForm::kText,
+           ProviderForm::kBytecode},
+      },
+      {
+          "owner-last",
+          {kCompanion, kRequester, kOwner},
+          {ProviderForm::kMaterialized, ProviderForm::kText,
+           ProviderForm::kBytecode},
+      },
+  };
+
+  std::vector<LinkedSymbolShape> reference_symbols;
+  for (const Variant& variant : variants) {
+    SCOPED_TRACE(variant.name);
+    IndexPtr index = CreateIndex();
+    iree_host_size_t owner_provider = LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    iree_host_size_t requester_provider =
+        LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL;
+    for (iree_host_size_t i = 0; i < variant.insertion_order.size(); ++i) {
+      switch (variant.insertion_order[i]) {
+        case kOwner:
+          owner_provider = AddProvider(
+              index.get(), variant.provider_forms[i], owner_source, owner,
+              owner_bytecode, IREE_SV("owner"), LOOM_LINK_PROVIDER_ROLE_INPUT);
+          break;
+        case kRequester:
+          requester_provider =
+              AddProvider(index.get(), variant.provider_forms[i],
+                          requester_source, requester, requester_bytecode,
+                          IREE_SV("requester"), LOOM_LINK_PROVIDER_ROLE_INPUT);
+          break;
+        case kCompanion:
+          AddProvider(index.get(), variant.provider_forms[i], companion_source,
+                      companion, companion_bytecode, IREE_SV("companion"),
+                      LOOM_LINK_PROVIDER_ROLE_INPUT);
+          break;
+      }
+    }
+    ASSERT_NE(owner_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+    ASSERT_NE(requester_provider, LOOM_LINK_MODULE_INDEX_INVALID_ORDINAL);
+
+    loom_link_index_materialization_t merged = {};
+    IREE_ASSERT_OK(TryMerge(index.get(), &merged));
+    Verify(merged.product.module);
+    ASSERT_EQ(merged.product.module->symbols.count, 5u);
+    const loom_symbol_t* helper =
+        FindSymbol(merged.product.module, IREE_SV("helper"));
+    ASSERT_NE(helper, nullptr);
+    EXPECT_FALSE(loom_symbol_definition_is_declaration(helper->definition));
+    EXPECT_EQ(FindSymbol(merged.product.module, IREE_SV("helper$link0")),
+              nullptr);
+    EXPECT_NE(FindSymbol(merged.product.module, IREE_SV("local")), nullptr);
+    EXPECT_NE(FindSymbol(merged.product.module, IREE_SV("local$link0")),
+              nullptr);
+    EXPECT_NE(FindSymbol(merged.product.module, IREE_SV("entry")), nullptr);
+    EXPECT_NE(FindSymbol(merged.product.module, IREE_SV("sentinel")), nullptr);
+
+    const loom_link_module_index_symbol_t* source_definition =
+        FindIndexedProviderSymbol(index.get(), owner_provider,
+                                  IREE_SV("helper"));
+    const loom_link_module_index_symbol_t* source_declaration =
+        FindIndexedProviderSymbol(index.get(), requester_provider,
+                                  IREE_SV("helper"));
+    ASSERT_NE(source_definition, nullptr);
+    ASSERT_NE(source_declaration, nullptr);
+    const loom_symbol_ref_t definition_target =
+        merged.product.target_symbols.values[source_definition->ordinal];
+    const loom_symbol_ref_t declaration_target =
+        merged.product.target_symbols.values[source_declaration->ordinal];
+    EXPECT_EQ(declaration_target.module_id, definition_target.module_id);
+    EXPECT_EQ(declaration_target.symbol_id, definition_target.symbol_id);
+
+    const std::vector<LinkedSymbolShape> merged_symbols =
+        CaptureSymbolShapes(merged.product.module);
+    if (reference_symbols.empty()) {
+      reference_symbols = merged_symbols;
+    } else {
+      EXPECT_EQ(merged_symbols, reference_symbols);
+    }
+
+    const std::vector<uint8_t> merged_bytecode =
+        WriteModule(merged.product.module);
+    IndexPtr linked_index = CreateIndex();
+    AddBytecode(linked_index.get(), merged_bytecode, IREE_SV("merged.loombc"),
+                LOOM_LINK_PROVIDER_ROLE_INPUT);
+    loom_link_index_materialization_t linked =
+        Materialize(linked_index.get(), IREE_SV("@entry"));
+    Verify(linked.product.module);
+    EXPECT_EQ(linked.product.module->symbols.count, 2u);
+    EXPECT_NE(FindSymbol(linked.product.module, IREE_SV("helper")), nullptr);
+    EXPECT_NE(FindSymbol(linked.product.module, IREE_SV("entry")), nullptr);
+    loom_link_index_materialization_deinitialize(&linked);
+    loom_link_index_materialization_deinitialize(&merged);
+  }
+}
+
+TEST_F(LinkIndexMaterializerTest,
        SelectsTransitiveDiamondOnceAcrossBytecodeLibraries) {
   loom_module_t* root = Parse(IREE_SV(R"(
 template.decl @demo.left(%x: i32) -> (i32)

@@ -140,10 +140,15 @@
           },
           "stdout": {
             "contains": [
-              "@register_type_binding$link0(%width: reg<amdgpu.sgpr : index>, %value: reg<amdgpu.vgpr : vector<[%width]xf32>>) asm {",
-              "low.func.decl public retain target<amdgpu.rdna3.core> @register_type_binding(%width: reg<amdgpu.sgpr : index>, %value: reg<amdgpu.vgpr : vector<[%width]xf32>>)"
+              "low.func.def public retain target<amdgpu.rdna3.core> @register_type_binding(%width: reg<amdgpu.sgpr : index>, %value: reg<amdgpu.vgpr : vector<[%width]xf32>>) asm {"
             ],
-            "not_contains": ["@resource_type_binding", "vector<?", "low.return"]
+            "not_contains": [
+              "@resource_type_binding",
+              "$link",
+              "low.func.decl",
+              "vector<?",
+              "low.return"
+            ]
           },
           "stderr": {"empty": true}
         },
@@ -159,11 +164,17 @@
           },
           "stdout": {
             "contains": [
-              "@register_type_binding$link0(%width: reg<amdgpu.sgpr : index>, %value: reg<amdgpu.vgpr : vector<[%width]xf32>>) asm {",
+              "@register_type_binding(%width: reg<amdgpu.sgpr : index>, %value: reg<amdgpu.vgpr : vector<[%width]xf32>>) asm {",
               "@call_register_type_binding(%width: reg<amdgpu.sgpr : index>, %value: reg<amdgpu.vgpr : vector<[%width]xf32>>) asm {",
               "low.func.call @register_type_binding"
             ],
-            "not_contains": ["@resource_type_binding", "vector<?", "low.return"]
+            "not_contains": [
+              "@resource_type_binding",
+              "$link",
+              "low.func.decl",
+              "vector<?",
+              "low.return"
+            ]
           },
           "stderr": {"empty": true}
         }

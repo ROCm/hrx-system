@@ -552,6 +552,7 @@ static void BenchmarkExactLink(benchmark::State& state,
     CheckStatus(loom_linker_add_module_symbols(
         linker, fixture.module(), source_symbols,
         loom_linker_source_symbol_binding_list_empty(),
+        loom_linker_selected_symbol_target_list_empty(),
         loom_linker_source_symbol_output_list_empty(),
         loom_linker_target_symbol_list_empty()));
     benchmark::DoNotOptimize(linker);
@@ -584,7 +585,9 @@ static void BM_LinkExactDense_Catalog(benchmark::State& state) {
                                      iree_allocator_system(), &linker));
     state.ResumeTiming();
     CheckStatus(loom_linker_add_exact_module(
-        linker, fixture.module(), loom_linker_source_symbol_output_list_empty(),
+        linker, fixture.module(),
+        loom_linker_selected_symbol_target_list_empty(),
+        loom_linker_source_symbol_output_list_empty(),
         loom_linker_target_symbol_list_empty()));
     benchmark::DoNotOptimize(linker);
     state.PauseTiming();
@@ -663,7 +666,9 @@ static void BenchmarkLinkMaterializeAndLink(
       std::abort();
     }
     CheckStatus(loom_linker_add_exact_module(
-        linker, selected_module, loom_linker_source_symbol_output_list_empty(),
+        linker, selected_module,
+        loom_linker_selected_symbol_target_list_empty(),
+        loom_linker_source_symbol_output_list_empty(),
         loom_linker_target_symbol_list_empty()));
     loom_module_free(selected_module);
     benchmark::DoNotOptimize(linker);

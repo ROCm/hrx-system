@@ -146,6 +146,22 @@ loom_linker_source_symbol_binding_list_empty(void) {
   return (loom_linker_source_symbol_binding_list_t){0};
 }
 
+// Existing target identities parallel to an exact source-symbol selection.
+typedef struct loom_linker_selected_symbol_target_list_t {
+  // Number of target refs, or zero when every symbol resolves normally.
+  iree_host_size_t count;
+  // Target refs in source-selection order. Null refs request normal identity
+  // resolution. Valid refs must have been produced by an earlier linker add;
+  // the selected source operation is still cloned or merged into that target.
+  const loom_symbol_ref_t* values;
+} loom_linker_selected_symbol_target_list_t;
+
+// Returns an empty selected-symbol target list.
+static inline loom_linker_selected_symbol_target_list_t
+loom_linker_selected_symbol_target_list_empty(void) {
+  return (loom_linker_selected_symbol_target_list_t){0};
+}
+
 // Allocates an incremental linker over |context|.
 //
 // The linker owns a fresh target module allocated from |block_pool|. The
@@ -189,19 +205,23 @@ iree_status_t loom_linker_add_module(loom_linker_t* linker,
 // closure: references from selected IR to omitted source symbols fail unless
 // |source_bindings| explicitly maps them to symbols projected by a prior add.
 // Bindings do not clone, merge, or otherwise inspect the omitted source
-// definition; the caller owns compatibility with the projected target.
+// definition; the caller owns compatibility with the projected target. When
+// |selected_targets| is non-empty it must have one entry per selected source
+// symbol. A valid entry selects an existing target produced by an earlier add
+// while a null entry uses ordinary name and linkage identity resolution.
 // When |source_outputs| is non-empty it must have one entry per selected source
 // symbol. Authored disposition preserves the source linkage surface;
 // dependency disposition internalizes it; root disposition preserves and
 // retains the requester-facing surface. When
 // |out_target_symbols| is non-empty it must have one entry per selected source
 // symbol and receives the corresponding stable linked-module references. The
-// linker retains no pointers into any source or output storage after this call
-// returns.
+// selected-target input may alias the target-symbol output. The linker retains
+// no pointers into any source or output storage after this call returns.
 iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
     loom_linker_source_symbol_binding_list_t source_bindings,
+    loom_linker_selected_symbol_target_list_t selected_targets,
     loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_target_symbol_list_t out_target_symbols);
 
@@ -213,12 +233,15 @@ iree_status_t loom_linker_add_module_symbols(
 // exact target-symbol projection. Non-symbol module metadata is also cloned.
 // |source_outputs| follows the same contract as
 // loom_linker_add_module_symbols and uses dense symbol order. When
+// |selected_targets| is non-empty it follows the same contract as
+// loom_linker_add_module_symbols and uses dense symbol order. When
 // |out_target_symbols| is non-empty it must have one entry per source symbol
-// and receives the corresponding stable linked-module references. The linker
-// retains no pointers into any source or output storage after this call
-// returns.
+// and receives the corresponding stable linked-module references. The
+// selected-target input may alias the target-symbol output. The linker retains
+// no pointers into any source or output storage after this call returns.
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
+    loom_linker_selected_symbol_target_list_t selected_targets,
     loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_target_symbol_list_t out_target_symbols);
 

@@ -261,12 +261,14 @@ func.def @helper(%x: i32) -> (i32) {
   loom_linker_t* linker = CreateIncrementalLinker();
   loom_symbol_ref_t declaration_targets[2] = {};
   IREE_ASSERT_OK(loom_linker_add_exact_module(
-      linker, declaration, loom_linker_source_symbol_output_list_empty(),
+      linker, declaration, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
       {/*.count=*/IREE_ARRAYSIZE(declaration_targets),
        /*.values=*/declaration_targets}));
   loom_symbol_ref_t definition_targets[2] = {};
   IREE_ASSERT_OK(loom_linker_add_exact_module(
-      linker, definition, loom_linker_source_symbol_output_list_empty(),
+      linker, definition, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
       {/*.count=*/IREE_ARRAYSIZE(definition_targets),
        /*.values=*/definition_targets}));
 
@@ -288,6 +290,65 @@ func.def @helper(%x: i32) -> (i32) {
   EXPECT_TRUE(iree_string_view_starts_with(
       loom_string_table_get(&linked->strings, second_helper->name_id),
       IREE_SV("helper$link")));
+}
+
+TEST_F(LinkerTest, ExactSelectionMergesIntoSelectedTargetIdentity) {
+  loom_module_t* definition = Parse(IREE_SV(R"(
+func.def @identity(%x: i32) -> (i32) {
+  func.return %x : i32
+}
+)"));
+  loom_module_t* requester = Parse(IREE_SV(R"(
+func.decl @identity(%x: i32) -> (i32)
+
+func.def public @caller(%x: i32) -> (i32) {
+  %y = func.call @identity(%x) : (i32) -> (i32)
+  func.return %y : i32
+}
+)"));
+  loom_module_t* unrelated = Parse(IREE_SV(R"(
+func.def @identity(%x: i32) -> (i32) {
+  %sum = scalar.addi %x, %x : i32
+  func.return %sum : i32
+}
+)"));
+
+  loom_linker_t* linker = CreateIncrementalLinker();
+  loom_symbol_ref_t definition_target = loom_symbol_ref_null();
+  IREE_ASSERT_OK(loom_linker_add_exact_module(
+      linker, definition, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
+      {/*.count=*/1, /*.values=*/&definition_target}));
+  ASSERT_TRUE(loom_symbol_ref_is_valid(definition_target));
+
+  const loom_symbol_ref_t requester_targets[] = {
+      definition_target,
+      loom_symbol_ref_null(),
+  };
+  IREE_ASSERT_OK(loom_linker_add_exact_module(
+      linker, requester,
+      (loom_linker_selected_symbol_target_list_t){
+          /*.count=*/IREE_ARRAYSIZE(requester_targets),
+          /*.values=*/requester_targets,
+      },
+      loom_linker_source_symbol_output_list_empty(),
+      loom_linker_target_symbol_list_empty()));
+  IREE_ASSERT_OK(loom_linker_add_exact_module(
+      linker, unrelated, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
+      loom_linker_target_symbol_list_empty()));
+
+  loom_module_t* linked = nullptr;
+  IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
+  loom_linker_free(linker);
+  modules_.push_back(linked);
+  Verify(linked);
+
+  const std::string text = Print(linked);
+  EXPECT_EQ(text.find("func.decl @identity"), std::string::npos);
+  EXPECT_NE(text.find("func.call @identity"), std::string::npos);
+  EXPECT_NE(text.find("func.def @identity("), std::string::npos);
+  EXPECT_NE(text.find("func.def @identity$link0("), std::string::npos);
 }
 
 TEST_F(LinkerTest, CommandDefinitionSupersedesMatchingDeclaration) {
@@ -1138,6 +1199,7 @@ func.def @unused_corpus(%x: i32) -> (i32) {
           /*.ordinals=*/harness_symbols,
       },
       loom_linker_source_symbol_binding_list_empty(),
+      loom_linker_selected_symbol_target_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
       loom_linker_target_symbol_list_empty()));
   const iree_host_size_t corpus_symbols[] = {0};
@@ -1148,6 +1210,7 @@ func.def @unused_corpus(%x: i32) -> (i32) {
           /*.ordinals=*/corpus_symbols,
       },
       loom_linker_source_symbol_binding_list_empty(),
+      loom_linker_selected_symbol_target_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
       loom_linker_target_symbol_list_empty()));
   const iree_string_view_t roots[] = {IREE_SV("@caller")};
@@ -1186,7 +1249,8 @@ func.def public @caller(%x: i32) -> (i32) {
 
   loom_linker_t* linker = CreateIncrementalLinker();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
-      linker, source, loom_linker_source_symbol_output_list_empty(),
+      linker, source, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
       loom_linker_target_symbol_list_empty()));
   const iree_string_view_t roots[] = {IREE_SV("@caller")};
   IREE_ASSERT_OK(
@@ -1212,7 +1276,8 @@ TEST_F(LinkerTest, ExactModuleLinksMetadataWithoutSymbols) {
 
   loom_linker_t* linker = CreateIncrementalLinker();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
-      linker, source, loom_linker_source_symbol_output_list_empty(),
+      linker, source, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
       loom_linker_target_symbol_list_empty()));
   loom_module_t* linked = nullptr;
   IREE_ASSERT_OK(loom_linker_finish(linker, &linked));
@@ -1245,7 +1310,8 @@ func.def @second() {
 
   loom_linker_t* dense_linker = CreateIncrementalLinker();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
-      dense_linker, source, loom_linker_source_symbol_output_list_empty(),
+      dense_linker, source, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
       loom_linker_target_symbol_list_empty()));
   loom_module_t* dense_linked = nullptr;
   IREE_ASSERT_OK(loom_linker_finish(dense_linker, &dense_linked));
@@ -1262,6 +1328,7 @@ func.def @second() {
           /*.ordinals=*/source_symbols,
       },
       loom_linker_source_symbol_binding_list_empty(),
+      loom_linker_selected_symbol_target_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
       loom_linker_target_symbol_list_empty()));
   loom_module_t* sparse_linked = nullptr;
@@ -1302,6 +1369,7 @@ func.def public @caller(%x: i32) -> (i32) {
                                 /*.ordinals=*/source_symbols,
                             },
                             loom_linker_source_symbol_binding_list_empty(),
+                            loom_linker_selected_symbol_target_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   loom_linker_free(linker);
@@ -1325,7 +1393,8 @@ func.def public @caller(%x: i32) -> (i32) {
   loom_linker_t* linker = CreateIncrementalLinker();
   loom_symbol_ref_t projected_target = loom_symbol_ref_null();
   IREE_ASSERT_OK(loom_linker_add_exact_module(
-      linker, projected, loom_linker_source_symbol_output_list_empty(),
+      linker, projected, loom_linker_selected_symbol_target_list_empty(),
+      loom_linker_source_symbol_output_list_empty(),
       (loom_linker_target_symbol_list_t){
           /*.count=*/1,
           /*.values=*/&projected_target,
@@ -1347,6 +1416,7 @@ func.def public @caller(%x: i32) -> (i32) {
           /*.count=*/IREE_ARRAYSIZE(source_bindings),
           /*.values=*/source_bindings,
       },
+      loom_linker_selected_symbol_target_list_empty(),
       loom_linker_source_symbol_output_list_empty(),
       loom_linker_target_symbol_list_empty()));
 
@@ -1382,6 +1452,7 @@ func.def @second() {
                                 /*.ordinals=*/nullptr,
                             },
                             loom_linker_source_symbol_binding_list_empty(),
+                            loom_linker_selected_symbol_target_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   const iree_host_size_t duplicate_symbols[] = {0, 0};
@@ -1393,6 +1464,7 @@ func.def @second() {
                                 /*.ordinals=*/duplicate_symbols,
                             },
                             loom_linker_source_symbol_binding_list_empty(),
+                            loom_linker_selected_symbol_target_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   const iree_host_size_t descending_symbols[] = {1, 0};
@@ -1404,6 +1476,7 @@ func.def @second() {
                                 /*.ordinals=*/descending_symbols,
                             },
                             loom_linker_source_symbol_binding_list_empty(),
+                            loom_linker_selected_symbol_target_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   const iree_host_size_t out_of_range_symbols[] = {2};
@@ -1415,6 +1488,7 @@ func.def @second() {
                                 /*.ordinals=*/out_of_range_symbols,
                             },
                             loom_linker_source_symbol_binding_list_empty(),
+                            loom_linker_selected_symbol_target_list_empty(),
                             loom_linker_source_symbol_output_list_empty(),
                             loom_linker_target_symbol_list_empty()));
   loom_linker_free(linker);

@@ -102,6 +102,8 @@ typedef struct loom_linker_exact_selection_t {
   const iree_host_size_t* ordinals;
   // Omitted source symbols already projected into the target module.
   loom_linker_source_symbol_binding_list_t bindings;
+  // Existing target identities parallel to selected source symbols.
+  loom_linker_selected_symbol_target_list_t targets;
   // Output dispositions in source-selection order, or NULL when authored.
   const loom_linker_symbol_output_t* outputs;
   // Number of selected source symbols.
@@ -1992,6 +1994,14 @@ static iree_status_t loom_linker_add_exact_selection(
     loom_linker_exact_selection_t selection,
     loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_target_symbol_list_t out_target_symbols) {
+  if (selection.targets.count != 0 &&
+      (selection.targets.count != selection.count ||
+       selection.targets.values == NULL)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "selected target input has %zu entries but selection has %zu",
+        selection.targets.count, selection.count);
+  }
   if (source_outputs.count != 0 && (source_outputs.count != selection.count ||
                                     source_outputs.values == NULL)) {
     return iree_make_status(
@@ -2007,7 +2017,7 @@ static iree_status_t loom_linker_add_exact_selection(
         "target symbol output has %zu entries but selection has %zu",
         out_target_symbols.count, selection.count);
   }
-  if (source_outputs.count != 0) {
+  if (source_outputs.count != 0 || selection.targets.count != 0) {
     iree_host_size_t required_capacity = 0;
     if (!iree_host_size_checked_add(linker->target_module->symbols.count,
                                     selection.count, &required_capacity)) {
@@ -2046,7 +2056,32 @@ static iree_status_t loom_linker_add_exact_selection(
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < source.exact.count; ++i) {
-      source.target_symbols[i] = loom_symbol_ref_null();
+      source.target_symbols[i] = selection.targets.count != 0
+                                     ? selection.targets.values[i]
+                                     : loom_symbol_ref_null();
+      if (loom_symbol_ref_is_valid(source.target_symbols[i]) &&
+          (source.target_symbols[i].module_id != 0 ||
+           source.target_symbols[i].symbol_id >=
+               linker->target_module->symbols.count)) {
+        status = iree_make_status(
+            IREE_STATUS_OUT_OF_RANGE,
+            "selected target ref {module=%u, symbol=%u} at index %zu is not "
+            "an existing linker target",
+            (unsigned)source.target_symbols[i].module_id,
+            (unsigned)source.target_symbols[i].symbol_id, i);
+        break;
+      }
+      if (loom_symbol_ref_is_valid(source.target_symbols[i])) {
+        const uint16_t source_symbol_id =
+            (uint16_t)(selection.dense ? i : selection.ordinals[i]);
+        const loom_symbol_t* source_symbol =
+            &source_module->symbols.entries[source_symbol_id];
+        if (loom_link_symbol_has_global_identity(source_module,
+                                                 source_symbol)) {
+          linker->planned.symbols[source.target_symbols[i].symbol_id]
+              .global_identity = true;
+        }
+      }
     }
   }
   for (iree_host_size_t i = 0;
@@ -2092,6 +2127,7 @@ iree_status_t loom_linker_add_module_symbols(
     loom_linker_t* linker, const loom_module_t* source_module,
     loom_linker_source_symbol_list_t source_symbols,
     loom_linker_source_symbol_binding_list_t source_bindings,
+    loom_linker_selected_symbol_target_list_t selected_targets,
     loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
@@ -2103,6 +2139,7 @@ iree_status_t loom_linker_add_module_symbols(
       (loom_linker_exact_selection_t){
           .ordinals = source_symbols.ordinals,
           .bindings = source_bindings,
+          .targets = selected_targets,
           .count = source_symbols.count,
       },
       source_outputs, out_target_symbols);
@@ -2110,6 +2147,7 @@ iree_status_t loom_linker_add_module_symbols(
 
 iree_status_t loom_linker_add_exact_module(
     loom_linker_t* linker, const loom_module_t* source_module,
+    loom_linker_selected_symbol_target_list_t selected_targets,
     loom_linker_source_symbol_output_list_t source_outputs,
     loom_linker_target_symbol_list_t out_target_symbols) {
   IREE_RETURN_IF_ERROR(
@@ -2117,6 +2155,7 @@ iree_status_t loom_linker_add_exact_module(
   return loom_linker_add_exact_selection(
       linker, source_module,
       (loom_linker_exact_selection_t){
+          .targets = selected_targets,
           .count = source_module->symbols.count,
           .dense = true,
       },
