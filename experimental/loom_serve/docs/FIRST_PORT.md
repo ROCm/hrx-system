@@ -100,7 +100,9 @@ not part of this model's transformer block.
 
 The source index, public JIT embedding, command recorder, queue/timeline owner,
 and coarse VM module have no Qwen arithmetic. They are the template to reuse.
-The model adapter and model sources are the port.
+The [text runner](../text/README.md) supplies the bounded residency and HTTP
+consumer. Bootstrap, model math, storage layout, chat and token policy are the
+source port; they do not require a new model-specific native adapter.
 
 | New-model responsibility | Existing starting point and mismatch |
 | --- | --- |
@@ -142,8 +144,11 @@ numerical drift stop expansion at this gate with a concrete reproducer.
 After that gate, the same composition covers all layers, tied output projection,
 and device greedy selection. A short reference continuation establishes final
 user-visible output. Two interleaved retained rows then compare against their
-independent continuations, including reset and a second turn. Only then does
-the HTTP service need a model-specific chat adapter.
+independent continuations, including reset and a second turn. The model's source
+chat entries then establish HTTP framing and canonical history through the
+same native service. Its attention-only storage plan must account explicitly
+for the text ABI's resettable private-state lane; no Gated DeltaNet layout is
+required, but the present materializer requires a nonempty view.
 
 This model has no checkpoint MTP head. Its initial comparison is target-only.
 Speculation would need a separately selected draft model and acceptance

@@ -4,22 +4,22 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/models/qwen/schedule.h"
+#include "experimental/loom_serve/text/schedule.h"
 
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "iree/testing/gtest.h"
 
 namespace {
 
-TEST(QwenScheduleTest, DefaultCatalogCoversTheCapacityFamily) {
+TEST(TextScheduleTest, DefaultCatalogCoversTheCapacityFamily) {
   for (iree_host_size_t rows = 1; rows <= 16; ++rows) {
     for (iree_host_size_t tokens = 1; tokens <= 512; ++tokens) {
       loom_serve_packing_shape_t
-          shapes[LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY + 1] = {};
+          shapes[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY + 1] = {};
       const iree_host_size_t count =
-          loom_serve_qwen_default_shapes(rows, tokens, shapes);
+          loom_serve_text_default_shapes(rows, tokens, shapes);
       ASSERT_GT(count, 0);
-      ASSERT_LE(count, LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY);
+      ASSERT_LE(count, LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY);
       EXPECT_EQ(shapes[count].token_capacity, 0);
       EXPECT_EQ(shapes[count].span_capacity, 0);
       EXPECT_EQ(shapes[0].token_capacity, iree_min(32, tokens));
@@ -49,10 +49,10 @@ TEST(QwenScheduleTest, DefaultCatalogCoversTheCapacityFamily) {
   }
 }
 
-TEST(QwenScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
-  loom_serve_packing_shape_t shapes[LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY];
+TEST(TextScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
+  loom_serve_packing_shape_t shapes[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY];
   const iree_host_size_t shape_count =
-      loom_serve_qwen_default_shapes(16, 512, shapes);
+      loom_serve_text_default_shapes(16, 512, shapes);
   ASSERT_EQ(shape_count, 25);
   loom_serve_packed_span_t spans[16], scratch[16];
   for (iree_host_size_t active = 1; active <= 16; ++active) {
@@ -90,7 +90,7 @@ TEST(QwenScheduleTest, DefaultCatalogShrinksBothAxesWithLiveReadiness) {
   EXPECT_EQ(spans[15].token_count, 452);
 }
 
-TEST(QwenScheduleTest, CompletionReservationCoversLegalWriteHighWater) {
+TEST(TextScheduleTest, CompletionReservationCoversLegalWriteHighWater) {
   for (iree_host_size_t context = 1; context <= 260; ++context) {
     for (iree_host_size_t input = 1; input <= context; ++input) {
       for (iree_host_size_t outputs = 1;
@@ -107,7 +107,7 @@ TEST(QwenScheduleTest, CompletionReservationCoversLegalWriteHighWater) {
             high_water = iree_max(high_water, position + (verify ? 4 : 1));
           }
           const iree_host_size_t expected = ((high_water + 63) / 64) * 64;
-          ASSERT_EQ(loom_serve_qwen_request_reservation(context, input, outputs,
+          ASSERT_EQ(loom_serve_text_request_reservation(context, input, outputs,
                                                         depth, 64),
                     expected)
               << "context=" << context << " input=" << input

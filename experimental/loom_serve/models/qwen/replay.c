@@ -12,9 +12,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/models/qwen/chat.h"
-#include "experimental/loom_serve/models/qwen/flags.h"
 #include "experimental/loom_serve/scheduling/packing.h"
+#include "experimental/loom_serve/text/chat.h"
+#include "experimental/loom_serve/text/flags.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -26,7 +26,7 @@ IREE_FLAG_LIST(string, window,
                "repeat to interleave policies in the same residency.");
 
 enum {
-  QWEN_REPLAY_ROWS = LOOM_SERVE_QWEN_ROW_CAPACITY,
+  QWEN_REPLAY_ROWS = LOOM_SERVE_TEXT_ROW_CAPACITY,
   QWEN_REPLAY_SHAPES = 8
 };
 
@@ -72,12 +72,12 @@ typedef struct qwen_replay_window_t {
 } qwen_replay_window_t;
 
 static iree_status_t qwen_replay_window_parse(
-    loom_serve_qwen_model_t* model, iree_string_view_t text,
+    loom_serve_text_model_t* model, iree_string_view_t text,
     qwen_replay_window_t* out_window) {
   memset(out_window, 0, sizeof(*out_window));
-  const iree_host_size_t shape_count = loom_serve_qwen_model_shape_count(model);
+  const iree_host_size_t shape_count = loom_serve_text_model_shape_count(model);
   const loom_serve_packing_shape_t* shapes =
-      loom_serve_qwen_model_shapes(model);
+      loom_serve_text_model_shapes(model);
   iree_string_view_t remaining = text;
   do {
     iree_string_view_t value;
@@ -108,15 +108,15 @@ static iree_status_t qwen_replay_window_parse(
 }
 
 static iree_status_t qwen_replay_append(
-    loom_serve_qwen_model_t* model, iree_string_view_t text,
-    loom_serve_qwen_chat_boundary_t boundary, qwen_replay_row_t* row,
+    loom_serve_text_model_t* model, iree_string_view_t text,
+    loom_serve_text_chat_boundary_t boundary, qwen_replay_row_t* row,
     iree_allocator_t allocator) {
   const iree_host_size_t capacity =
-      loom_serve_qwen_model_context_capacity(model);
+      loom_serve_text_model_context_capacity(model);
   iree_host_size_t count = 0;
-  IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_prepare_input(
-      loom_serve_qwen_model_chat_policy(model), text,
-      LOOM_SERVE_QWEN_CHAT_INPUT_RENDERED, boundary,
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_prepare_input(
+      loom_serve_text_model_chat_policy(model), text,
+      LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED, boundary,
       capacity - row->token_count, row->tokens + row->token_count, &count,
       allocator));
   row->token_count += count;
@@ -124,9 +124,9 @@ static iree_status_t qwen_replay_append(
 }
 
 static iree_status_t qwen_replay_prepare_turn(
-    loom_serve_qwen_model_t* model, iree_string_view_t fixture,
+    loom_serve_text_model_t* model, iree_string_view_t fixture,
     qwen_replay_row_t* row, qwen_replay_turn_t* turn,
-    loom_serve_qwen_chat_completion_t* completion, iree_allocator_t allocator) {
+    loom_serve_text_chat_completion_t* completion, iree_allocator_t allocator) {
   iree_string_view_t request, response;
   IREE_RETURN_IF_ERROR(
       iree_json_lookup_object_value(fixture, IREE_SV("request"), &request));
@@ -145,9 +145,9 @@ static iree_status_t qwen_replay_prepare_turn(
                             "text replay requires length-capped responses; "
                             "EOS needs the original selected token IDs");
   }
-  loom_serve_qwen_chat_t chat;
+  loom_serve_text_chat_t chat;
   IREE_RETURN_IF_ERROR(
-      loom_serve_qwen_chat_initialize(loom_serve_qwen_model_chat_policy(model),
+      loom_serve_text_chat_initialize(loom_serve_text_model_chat_policy(model),
                                       request, 192, allocator, &chat));
   iree_string_builder_t text, tool_calls;
   iree_string_builder_initialize(allocator, &text);
@@ -156,8 +156,8 @@ static iree_status_t qwen_replay_prepare_turn(
   const iree_string_view_t prior = completion->transcript;
   iree_status_t status = iree_ok_status();
   iree_string_view_t input = prompt;
-  loom_serve_qwen_chat_boundary_t boundary =
-      LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH;
+  loom_serve_text_chat_boundary_t boundary =
+      LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH;
   if (prior.size) {
     if (!iree_string_view_starts_with(prompt, prior)) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -165,7 +165,7 @@ static iree_status_t qwen_replay_prepare_turn(
     } else {
       // The previous pending token is already last in the fixed trajectory.
       // The live service prefixes that ID and then encodes this same suffix.
-      boundary = LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN;
+      boundary = LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN;
       input = iree_string_view_substr(prompt, prior.size, IREE_HOST_SIZE_MAX);
     }
   }
@@ -187,7 +187,7 @@ static iree_status_t qwen_replay_prepare_turn(
     if (iree_status_is_ok(status)) {
       iree_string_builder_commit_append(&text, length);
       status = qwen_replay_append(model, iree_string_builder_view(&text),
-                                  LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH, row,
+                                  LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH, row,
                                   allocator);
     }
   }
@@ -201,22 +201,22 @@ static iree_status_t qwen_replay_prepare_turn(
   }
   if (iree_status_is_ok(status)) {
     turn->end = row->token_count - 1;
-    status = loom_serve_qwen_chat_complete(
+    status = loom_serve_text_chat_complete(
         &chat, iree_string_builder_view(&text), 0, 0, &tool_calls, completion);
   }
   iree_string_builder_deinitialize(&tool_calls);
   iree_string_builder_deinitialize(&text);
-  loom_serve_qwen_chat_deinitialize(&chat);
+  loom_serve_text_chat_deinitialize(&chat);
   return status;
 }
 
-static iree_status_t qwen_replay_prepare(loom_serve_qwen_model_t* model,
+static iree_status_t qwen_replay_prepare(loom_serve_text_model_t* model,
                                          iree_string_view_t sessions,
                                          iree_host_size_t row_count,
                                          qwen_replay_row_t* rows,
                                          iree_allocator_t allocator) {
   const iree_host_size_t capacity =
-      loom_serve_qwen_model_context_capacity(model);
+      loom_serve_text_model_context_capacity(model);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
        ++i) {
@@ -247,7 +247,7 @@ static iree_status_t qwen_replay_prepare(loom_serve_qwen_model_t* model,
       status = iree_allocator_malloc(allocator, capacity * sizeof(int32_t),
                                      (void**)&row->reference);
     }
-    loom_serve_qwen_chat_completion_t completion = {0};
+    loom_serve_text_chat_completion_t completion = {0};
     for (iree_host_size_t j = 0;
          j < row->turn_count && iree_status_is_ok(status); ++j) {
       iree_string_view_t turn;
@@ -257,7 +257,7 @@ static iree_status_t qwen_replay_prepare(loom_serve_qwen_model_t* model,
                                           &completion, allocator);
       }
     }
-    loom_serve_qwen_chat_completion_deinitialize(&completion);
+    loom_serve_text_chat_completion_deinitialize(&completion);
     if (iree_status_is_ok(status)) {
       printf("{\"event\":\"trajectory\",\"row\":%zu,\"turns\":[", i);
       for (iree_host_size_t j = 0; j < row->turn_count; ++j) {
@@ -278,7 +278,7 @@ static iree_status_t qwen_replay_prepare(loom_serve_qwen_model_t* model,
   return status;
 }
 
-static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
+static iree_status_t qwen_replay_run(loom_serve_text_model_t* model,
                                      const qwen_replay_window_t* policy,
                                      iree_host_size_t row_count,
                                      qwen_replay_row_t* rows,
@@ -286,7 +286,7 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
        ++i) {
-    status = loom_serve_qwen_row_reset(loom_serve_qwen_model_row(model, i));
+    status = loom_serve_text_row_reset(loom_serve_text_model_row(model, i));
     rows[i].turn = 0;
     rows[i].position = 0;
   }
@@ -316,7 +316,7 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
     if (!count) {
       break;
     }
-    loom_serve_qwen_span_t spans[QWEN_REPLAY_ROWS];
+    loom_serve_text_span_t spans[QWEN_REPLAY_ROWS];
     iree_host_size_t prompt_count = 0, decode_count = 0, output_count = 0;
     for (iree_host_size_t i = 0; i < count; ++i) {
       const iree_host_size_t index = scheduled[i].row_index;
@@ -325,15 +325,15 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
       const iree_host_size_t length = scheduled[i].token_count;
       const bool prompt = row->position < turn->prompt_end;
       const bool select = !prompt || row->position + length == turn->prompt_end;
-      spans[i] = (loom_serve_qwen_span_t){
+      spans[i] = (loom_serve_text_span_t){
           index, length, row->tokens + row->position,
-          select ? LOOM_SERVE_QWEN_SPAN_FLAG_SELECT : 0};
+          select ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT : 0};
       prompt_count += prompt ? length : 0;
       decode_count += prompt ? 0 : length;
       output_count += select;
     }
     const iree_time_t issue = iree_time_now();
-    status = loom_serve_qwen_model_epoch(model, policy->indexes[choice], count,
+    status = loom_serve_text_model_epoch(model, policy->indexes[choice], count,
                                          spans);
     if (!iree_status_is_ok(status)) {
       break;
@@ -352,19 +352,19 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
         policy->shapes[choice].token_capacity, count, prompt_count,
         decode_count, output_count, duration);
     for (iree_host_size_t i = 0; i < count && iree_status_is_ok(status); ++i) {
-      const loom_serve_qwen_span_t* span = &spans[i];
+      const loom_serve_text_span_t* span = &spans[i];
       qwen_replay_row_t* row = &rows[span->row_index];
       row->position += span->token_count;
       const bool selected =
-          iree_any_bit_set(span->flags, LOOM_SERVE_QWEN_SPAN_FLAG_SELECT);
-      const loom_serve_qwen_row_t* device_row =
-          loom_serve_qwen_model_row(model, span->row_index);
-      if (loom_serve_qwen_row_position(device_row) != row->position) {
+          iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT);
+      const loom_serve_text_row_t* device_row =
+          loom_serve_text_model_row(model, span->row_index);
+      if (loom_serve_text_row_position(device_row) != row->position) {
         status = iree_make_status(IREE_STATUS_DATA_LOSS,
                                   "row %zu frontier differs", span->row_index);
       }
       const int32_t prediction =
-          selected ? loom_serve_qwen_row_token(device_row) : -1;
+          selected ? loom_serve_text_row_token(device_row) : -1;
       if (selected) {
         if (!window) {
           row->reference[row->position] = prediction;
@@ -409,7 +409,7 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   const iree_host_size_t epoch_count =
-      loom_serve_qwen_explicit_shape_count_from_flags();
+      loom_serve_text_explicit_shape_count_from_flags();
   const iree_flag_string_list_t windows = FLAG_window_list();
   if (!FLAG_workload[0] || !epoch_count || epoch_count > QWEN_REPLAY_SHAPES ||
       !windows.count) {
@@ -441,13 +441,13 @@ int main(int argc, char** argv) {
     status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "replay requires one through sixteen sessions");
   }
-  const loom_serve_qwen_flag_defaults_t defaults = {.row_count = row_count};
-  loom_serve_qwen_model_t* model = NULL;
+  const loom_serve_text_flag_defaults_t defaults = {.row_count = row_count};
+  loom_serve_text_model_t* model = NULL;
   qwen_replay_row_t rows[QWEN_REPLAY_ROWS] = {0};
   qwen_replay_window_t* policies = NULL;
   if (iree_status_is_ok(status)) {
     status =
-        loom_serve_qwen_model_create_from_flags(&defaults, &model, allocator);
+        loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
   }
   if (iree_status_is_ok(status)) {
     status = qwen_replay_prepare(model, sessions, row_count, rows, allocator);
@@ -464,7 +464,7 @@ int main(int argc, char** argv) {
        ++i) {
     status = qwen_replay_run(model, &policies[i], row_count, rows, i);
   }
-  status = iree_status_join(status, loom_serve_qwen_model_destroy(model));
+  status = iree_status_join(status, loom_serve_text_model_destroy(model));
   iree_allocator_free(allocator, policies);
   for (iree_host_size_t i = 0; i < QWEN_REPLAY_ROWS; ++i) {
     iree_allocator_free(allocator, rows[i].turns);

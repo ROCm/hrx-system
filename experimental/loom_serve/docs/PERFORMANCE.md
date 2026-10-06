@@ -29,7 +29,7 @@ Host ASAN, device sanitizers, Tracy, and device profiling are diagnostic modes.
 Performance uses an explicitly optimized build of the exact executable:
 
 ```sh
-build_tools/bin/iree-bazel-build //experimental/loom_serve/models/qwen:server \
+build_tools/bin/iree-bazel-build //experimental/loom_serve/text:server \
   //experimental/loom_serve/models/qwen:workload -c opt --features=thin_lto \
   --copt=-O3 --cxxopt=-O3 --host_copt=-O3 --host_cxxopt=-O3
 ```
@@ -112,14 +112,14 @@ records the public source excerpts and immutable corpus hash. A fresh agent
 needs no private recordings to reproduce this window.
 
 After the correctness checks in the [packet README](README.md), build the exact
-optimized `qwen_server` target with the flags above. Set `model_dir` to the
+optimized `text_server` target with the flags above. Set `model_dir` to the
 pinned checkpoint directory from that README. On the qualified execution host,
 select a new `run_dir`, acquire its measurement lease, and start one residency:
 
 ```sh
 python3.12 -B -m experimental.loom_serve.tools.observe \
   --log="$run_dir/observe.jsonl" -- \
-  bazel-bin/experimental/loom_serve/models/qwen/server \
+  bazel-bin/experimental/loom_serve/text/server \
   --model=experimental/loom_serve/models/qwen \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \

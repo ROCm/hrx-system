@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/models/qwen/chat.h"
+#include "experimental/loom_serve/text/chat.h"
 
 #include <string.h>
 
@@ -159,12 +159,12 @@ static iree_status_t chat_content(const chat_field_t* field,
 static iree_status_t chat_tool_schema(void* user_data, iree_host_size_t index,
                                       iree_json_value_type_t type,
                                       iree_string_view_t value) {
-  loom_serve_qwen_chat_t* chat = user_data;
+  loom_serve_text_chat_t* chat = user_data;
   if (type != IREE_JSON_VALUE_TYPE_OBJECT ||
-      index >= LOOM_SERVE_QWEN_CHAT_TOOL_CAPACITY) {
+      index >= LOOM_SERVE_TEXT_CHAT_TOOL_CAPACITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "tools must contain at most %d function objects",
-                            LOOM_SERVE_QWEN_CHAT_TOOL_CAPACITY);
+                            LOOM_SERVE_TEXT_CHAT_TOOL_CAPACITY);
   }
   chat_field_t fields[] = {{"type", CHAT_STRING}, {"function", CHAT_OBJECT}};
   IREE_RETURN_IF_ERROR(
@@ -207,20 +207,20 @@ static iree_status_t chat_tool_schema(void* user_data, iree_host_size_t index,
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "tool parameters must use an object schema");
   }
-  chat->tools[chat->tool_count++] = (loom_serve_qwen_chat_tool_t){
+  chat->tools[chat->tool_count++] = (loom_serve_text_chat_tool_t){
       function[0].value, schema[1].value, schema[2].value};
   return iree_ok_status();
 }
 
-void loom_serve_qwen_chat_policy_deinitialize(
-    loom_serve_qwen_chat_policy_t* policy) {
+void loom_serve_text_chat_policy_deinitialize(
+    loom_serve_text_chat_policy_t* policy) {
   iree_vm_buffer_release(policy->name_storage);
   memset(policy, 0, sizeof(*policy));
 }
 
-iree_status_t loom_serve_qwen_chat_policy_initialize(
+iree_status_t loom_serve_text_chat_policy_initialize(
     iree_vm_environment_t* environment, loom_serve_program_t* program,
-    loom_serve_qwen_chat_policy_t* out_policy) {
+    loom_serve_text_chat_policy_t* out_policy) {
   memset(out_policy, 0, sizeof(*out_policy));
   IREE_RETURN_IF_ERROR(iree_vm_ref_types_resolve(
       iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
@@ -277,14 +277,14 @@ iree_status_t loom_serve_qwen_chat_policy_initialize(
   }
   iree_vm_variant_reset(&result);
   if (!iree_status_is_ok(status)) {
-    loom_serve_qwen_chat_policy_deinitialize(out_policy);
+    loom_serve_text_chat_policy_deinitialize(out_policy);
   }
   return status;
 }
 
 // Request fragments never escape this synchronous call. The returned buffer
 // may alias an input; it is appended before argument references are released.
-static iree_status_t chat_render(const loom_serve_qwen_chat_policy_t* policy,
+static iree_status_t chat_render(const loom_serve_text_chat_policy_t* policy,
                                  iree_vm_function_t function,
                                  iree_host_size_t input_count,
                                  const iree_string_view_t* inputs,
@@ -346,10 +346,10 @@ static iree_status_t chat_render(const loom_serve_qwen_chat_policy_t* policy,
   return status;
 }
 
-iree_status_t loom_serve_qwen_chat_prepare_input(
-    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t text,
-    loom_serve_qwen_chat_input_format_t format,
-    loom_serve_qwen_chat_boundary_t boundary, iree_host_size_t capacity,
+iree_status_t loom_serve_text_chat_prepare_input(
+    const loom_serve_text_chat_policy_t* policy, iree_string_view_t text,
+    loom_serve_text_chat_input_format_t format,
+    loom_serve_text_chat_boundary_t boundary, iree_host_size_t capacity,
     int32_t* tokens, iree_host_size_t* out_count,
     iree_allocator_t host_allocator) {
   *out_count = 0;
@@ -401,7 +401,7 @@ iree_status_t loom_serve_qwen_chat_prepare_input(
 // Input wrappers borrow only for this synchronous invocation. Source owns the
 // returned bytes until they are appended; no references escape into a request.
 static iree_status_t chat_function_render(
-    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t name,
+    const loom_serve_text_chat_policy_t* policy, iree_string_view_t name,
     iree_string_view_t arguments, iree_host_size_t ordinal,
     iree_string_builder_t* output) {
   const iree_string_view_t inputs[] = {name, arguments};
@@ -456,7 +456,7 @@ static iree_status_t chat_function_render(
 
 typedef struct chat_history_t {
   // Request being rendered.
-  loom_serve_qwen_chat_t* chat;
+  loom_serve_text_chat_t* chat;
   // Decoded content, reasoning and argument scratch.
   iree_string_builder_t scratch;
   // Decoded JSON argument document, stable while its values are rendered.
@@ -623,10 +623,10 @@ static iree_status_t chat_request_render(iree_string_view_t body,
                      NULL, 1, &history->state, NULL, &history->chat->prompt);
 }
 
-iree_status_t loom_serve_qwen_chat_initialize(
-    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t body,
+iree_status_t loom_serve_text_chat_initialize(
+    const loom_serve_text_chat_policy_t* policy, iree_string_view_t body,
     iree_host_size_t default_max_tokens, iree_allocator_t host_allocator,
-    loom_serve_qwen_chat_t* out_chat) {
+    loom_serve_text_chat_t* out_chat) {
   memset(out_chat, 0, sizeof(*out_chat));
   out_chat->policy = policy;
   out_chat->max_tokens = default_max_tokens;
@@ -642,19 +642,19 @@ iree_status_t loom_serve_qwen_chat_initialize(
   iree_string_builder_deinitialize(&history.arguments);
   iree_string_builder_deinitialize(&history.scratch);
   if (!iree_status_is_ok(status)) {
-    loom_serve_qwen_chat_deinitialize(out_chat);
+    loom_serve_text_chat_deinitialize(out_chat);
   }
   return status;
 }
 
-void loom_serve_qwen_chat_deinitialize(loom_serve_qwen_chat_t* chat) {
+void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat) {
   iree_string_builder_deinitialize(&chat->prompt);
   memset(chat, 0, sizeof(*chat));
 }
 
-iree_status_t loom_serve_qwen_chat_text_end(
-    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t response,
-    iree_host_size_t previous_end, loom_serve_qwen_chat_output_phase_t phase,
+iree_status_t loom_serve_text_chat_text_end(
+    const loom_serve_text_chat_policy_t* policy, iree_string_view_t response,
+    iree_host_size_t previous_end, loom_serve_text_chat_output_phase_t phase,
     iree_host_size_t* out_end, iree_allocator_t host_allocator) {
   *out_end = previous_end;
   iree_vm_buffer_t* input = NULL;
@@ -687,8 +687,8 @@ iree_status_t loom_serve_qwen_chat_text_end(
   return status;
 }
 
-void loom_serve_qwen_chat_completion_deinitialize(
-    loom_serve_qwen_chat_completion_t* completion) {
+void loom_serve_text_chat_completion_deinitialize(
+    loom_serve_text_chat_completion_t* completion) {
   iree_vm_buffer_release(completion->storage);
   memset(completion, 0, sizeof(*completion));
 }
@@ -696,9 +696,9 @@ void loom_serve_qwen_chat_completion_deinitialize(
 // Returned buffers may alias any argument. Owned input clones make every such
 // result independent of HTTP claims, mutable builders and invocation storage.
 static iree_status_t chat_checkpoint(
-    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t prompt,
+    const loom_serve_text_chat_policy_t* policy, iree_string_view_t prompt,
     iree_string_view_t content, iree_string_view_t tools,
-    loom_serve_qwen_chat_completion_t* completion,
+    loom_serve_text_chat_completion_t* completion,
     iree_allocator_t host_allocator) {
   const iree_string_view_t inputs[] = {prompt, content, tools};
   iree_vm_variant_t arguments[3] = {0};
@@ -784,7 +784,7 @@ static iree_status_t chat_xml_name(iree_string_view_t* cursor,
 }
 
 static iree_status_t chat_parameter_value(
-    const loom_serve_qwen_chat_tool_t* tool, iree_string_view_t name,
+    const loom_serve_text_chat_tool_t* tool, iree_string_view_t name,
     iree_string_view_t value, iree_string_builder_t* arguments) {
   char name_storage[129];
   memcpy(name_storage, name.data, name.size);
@@ -870,7 +870,7 @@ static iree_status_t chat_required_parameter(void* user_data,
 }
 
 static iree_status_t chat_parameters_parse(
-    iree_string_view_t* cursor, const loom_serve_qwen_chat_tool_t* tool,
+    iree_string_view_t* cursor, const loom_serve_text_chat_tool_t* tool,
     iree_string_builder_t* arguments) {
   chat_parameter_names_t names = {0};
   IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(arguments, "{"));
@@ -934,7 +934,7 @@ static iree_status_t chat_parameters_parse(
   return status;
 }
 
-static iree_status_t chat_parse_xml(const loom_serve_qwen_chat_t* chat,
+static iree_status_t chat_parse_xml(const loom_serve_text_chat_t* chat,
                                     iree_string_view_t text,
                                     iree_string_builder_t* tool_calls) {
   iree_host_size_t tool_count = 0;
@@ -949,7 +949,7 @@ static iree_status_t chat_parse_xml(const loom_serve_qwen_chat_t* chat,
     if (iree_status_is_ok(status)) {
       status = chat_xml_name(&cursor, IREE_SV("<function="), &name);
     }
-    const loom_serve_qwen_chat_tool_t* tool = NULL;
+    const loom_serve_text_chat_tool_t* tool = NULL;
     for (iree_host_size_t i = 0; i < chat->tool_count; ++i) {
       if (iree_string_view_equal(chat->tools[i].name, name)) {
         tool = &chat->tools[i];
@@ -1000,7 +1000,7 @@ static iree_status_t chat_parse_xml(const loom_serve_qwen_chat_t* chat,
 
 typedef struct chat_completion_tools_t {
   // Source policy used for canonical history formatting.
-  const loom_serve_qwen_chat_policy_t* policy;
+  const loom_serve_text_chat_policy_t* policy;
   // Request-unique namespace for transport tool IDs.
   uint64_t request_id;
   // Number of fully parsed calls.
@@ -1060,15 +1060,15 @@ static iree_status_t chat_completion_tool(void* user_data,
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_qwen_chat_complete(
-    const loom_serve_qwen_chat_t* chat, iree_string_view_t response,
+iree_status_t loom_serve_text_chat_complete(
+    const loom_serve_text_chat_t* chat, iree_string_view_t response,
     iree_host_size_t previous_end, uint64_t request_id,
     iree_string_builder_t* tool_calls,
-    loom_serve_qwen_chat_completion_t* completion) {
-  loom_serve_qwen_chat_completion_t result = {0};
+    loom_serve_text_chat_completion_t* completion) {
+  loom_serve_text_chat_completion_t result = {0};
   IREE_RETURN_IF_ERROR(
-      loom_serve_qwen_chat_text_end(chat->policy, response, previous_end,
-                                    LOOM_SERVE_QWEN_CHAT_OUTPUT_COMPLETE,
+      loom_serve_text_chat_text_end(chat->policy, response, previous_end,
+                                    LOOM_SERVE_TEXT_CHAT_OUTPUT_COMPLETE,
                                     &result.text_end, tool_calls->allocator));
   const iree_string_view_t content =
       iree_string_view_substr(response, 0, result.text_end);
@@ -1105,15 +1105,15 @@ iree_status_t loom_serve_qwen_chat_complete(
   iree_string_builder_deinitialize(&tools.rendered);
   iree_string_builder_deinitialize(&parsed);
   if (iree_status_is_ok(status)) {
-    loom_serve_qwen_chat_completion_deinitialize(completion);
+    loom_serve_text_chat_completion_deinitialize(completion);
     *completion = result;
   } else {
-    loom_serve_qwen_chat_completion_deinitialize(&result);
+    loom_serve_text_chat_completion_deinitialize(&result);
   }
   return status;
 }
 
-iree_status_t loom_serve_qwen_chat_event(iree_string_view_t model_name,
+iree_status_t loom_serve_text_chat_event(iree_string_view_t model_name,
                                          uint64_t request_id,
                                          iree_string_view_t delta,
                                          iree_string_view_t finish_reason,
@@ -1135,7 +1135,7 @@ iree_status_t loom_serve_qwen_chat_event(iree_string_view_t model_name,
   return iree_string_builder_append_cstring(output, "}]}\n\n");
 }
 
-iree_status_t loom_serve_qwen_chat_usage(iree_string_view_t model_name,
+iree_status_t loom_serve_text_chat_usage(iree_string_view_t model_name,
                                          uint64_t request_id,
                                          iree_host_size_t input_tokens,
                                          iree_host_size_t retained_tokens,
@@ -1191,7 +1191,7 @@ static iree_status_t chat_tools_start(
                               "tool input must be UTF-8");
     }
   }
-  loom_serve_qwen_chat_t schema = {0};
+  loom_serve_text_chat_t schema = {0};
   IREE_RETURN_IF_ERROR(
       iree_json_enumerate_array_typed(inputs[0], chat_tool_schema, &schema));
   iree_string_builder_t output;
@@ -1264,7 +1264,7 @@ static const iree_vm_module_vtable_t chat_tools_vtable = {
     .metadata_by_ordinal = iree_vm_module_metadata_by_ordinal_none,
 };
 
-iree_status_t loom_serve_qwen_chat_tools_module_create(
+iree_status_t loom_serve_text_chat_tools_module_create(
     iree_vm_environment_t* environment, iree_vm_module_t** out_module,
     iree_allocator_t host_allocator) {
   *out_module = NULL;

@@ -14,13 +14,14 @@ base before the prepared-weight comparison.
 | --- | --- |
 | Where does a fresh agent start, and what counts as success? | [Agent entry point](AGENT_START.md) |
 | How does model math become runnable source? | [Model authoring](MODEL_AUTHORING.md) |
+| Which exact source entries and storage records does a text port implement? | [Text package contract](../text/README.md) |
 | Where do compiler, VM, HAL, scheduler, and sessions meet? | [Runner architecture](RUNNER.md) |
 | How do we find substantial gains and establish that they are real? | [Performance experiments](PERFORMANCE.md) |
 | What is an approachable next model, and what exactly needs implementing? | [First independent port](FIRST_PORT.md) |
 
 ## What is demonstrated
 
-The Qwen3.8-27B adapter runs its authored quantized model from Loom text,
+The generic text runner runs the authored Qwen3.8-27B model from Loom text,
 weights, and tokenizer data. Startup compiles command programs, their reachable
 GPU kernels, and VM control in process through the public `loomc` API. There
 is no prerequisite compiler subprocess or prepared model-artifact directory.
@@ -47,7 +48,7 @@ This is a self-comparison. The [current matched-MTP qualification](PERFORMANCE.m
 records incomplete retained follow-ups in both tested llama.cpp backends;
 no current MTP-to-MTP throughput ratio is claimed.
 
-The concrete adapter supports 1–16 resident rows and up to 512 packed input
+The text runner supports 1–16 resident rows and up to 512 packed input
 tokens, with an automatic source-JIT token/span catalog. Private F16 attention
 pages grow from one shared pool rather than reserving a full context per row.
 Admission reserves each request's complete high-water credit and queues excess
@@ -136,7 +137,7 @@ build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/http:server_test \
   //experimental/loom_serve/models/qwen:chat_test \
   //experimental/loom_serve/storage:block_pool_test \
-  //experimental/loom_serve/models/qwen:schedule_test \
+  //experimental/loom_serve/text:schedule_test \
   //experimental/loom_serve/models/qwen:weights_test \
   //experimental/loom_serve/models/qwen:benchmark_service_test
 ```
@@ -226,7 +227,7 @@ Build the exact executable targets before running or transferring them:
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
   //experimental/loom_serve/models/qwen:epoch_check \
-  //experimental/loom_serve/models/qwen:server
+  //experimental/loom_serve/text:server
 ```
 
 The following direct invocations belong on a qualified GPU runner. That runner
@@ -274,7 +275,7 @@ smaller-token boundary checks below have a different purpose.
 After the check exits and releases the residency, start one server:
 
 ```sh
-bazel-bin/experimental/loom_serve/models/qwen/server \
+bazel-bin/experimental/loom_serve/text/server \
   --model=experimental/loom_serve/models/qwen \
   --context_capacity=2048 --pool_capacity=8192 --mtp --mtp_depth=3 \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
@@ -299,7 +300,7 @@ values and a final `summary` with `clients: 4`, `requests: 8`, plus exit zero.
 The client fails on a wrong codeword, missing retained-prefix reuse, incomplete
 SSE, or empty response. A healthy HTTP port alone does not establish model
 correctness. The service can now be inspected or used by another client; the
-larger [runner README](../README.md#shared-qwen-execution) describes session and
+larger [runner README](../README.md#shared-text-execution) describes session and
 chat behavior.
 
 SIGINT/SIGTERM drains accepted model work and shuts down transport ownership.
@@ -313,12 +314,12 @@ around a retained four-client witness. It also verifies that depth-three MTP
 rejects shape tables unable to fit four inputs, accepts the four-token boundary,
 and accepts narrow shapes alongside a wider one. Depth zero also accepts a
 one-token shape.
-After building `qwen_server` as above, this runs sequential residencies, never
+After building `text_server` as above, this runs sequential residencies, never
 multiple weight copies at once:
 
 ```sh
 python3.12 -B -m experimental.loom_serve.models.qwen.check_service \
-  --server=bazel-bin/experimental/loom_serve/models/qwen/server \
+  --server=bazel-bin/experimental/loom_serve/text/server \
   --model=experimental/loom_serve/models/qwen \
   --weights="$model_dir/Qwen3.8-27B-UD-Q5_K_XL.gguf" \
   --tokenizer="$model_dir/tokenizer.json" \
@@ -341,9 +342,17 @@ arguments as the lifecycle check above.
 
 ## What another model author can take away
 
-The reusable unit is the source-to-command JIT and coarse queue/timeline
-boundary. The Qwen C adapter still owns concrete dimensions, buffer meanings,
-weight interpretation, and retained-state rules. Supplying another directory
-to `--model` does not make an arbitrary Hugging Face model run. A new adapter
-and its model source establish those semantics; the runtime below that boundary
-already has a real caller and lifetime tests.
+The text and image executables contain no built-in model package. A compatible
+port supplies source bootstrap, control, commands, kernels and weight policy
+through `--model`; it adds no per-model C or native registration entry.
+The [text contract](../text/README.md) makes the current token/span bounds,
+storage lanes, numerical entry points and chat policy explicit. The
+[diffusion contract](MODEL_AUTHORING.md#source-defined-diffusion-package)
+describes the separate finite-image flow.
+
+A raw Hugging Face checkpoint is not executable Loom source. Its port must
+establish actual tensor interpretation, numerical kernels and retained-state
+semantics. The independent plain-text/JSON chat fixture proves that the same
+native text caller accepts another policy; it does not prove another model's
+math. A new modality outside these two contracts needs a bounded ownership
+slice through the shared runtime, not a model-name branch in the server.

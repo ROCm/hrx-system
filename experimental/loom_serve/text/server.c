@@ -8,8 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/models/qwen/flags.h"
-#include "experimental/loom_serve/models/qwen/service.h"
+#include "experimental/loom_serve/text/flags.h"
+#include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 
@@ -42,7 +42,7 @@ IREE_FLAG(int32_t, heartbeat_ms, 1000,
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   if (FLAG_port < 0 || FLAG_port > 65535 || FLAG_rows < 1 ||
-      FLAG_rows > LOOM_SERVE_QWEN_ROW_CAPACITY || FLAG_chunk_size < 0 ||
+      FLAG_rows > LOOM_SERVE_TEXT_ROW_CAPACITY || FLAG_chunk_size < 0 ||
       FLAG_max_tokens < 1 || FLAG_max_tokens > 16384 || FLAG_heartbeat_ms < 0 ||
       FLAG_connections < 1 || FLAG_pending_requests < 1 ||
       FLAG_request_body_bytes < 1) {
@@ -51,13 +51,13 @@ int main(int argc, char** argv) {
             "limits.\n");
     return EXIT_FAILURE;
   }
-  loom_serve_qwen_schedule_mode_t schedule_mode;
+  loom_serve_text_schedule_mode_t schedule_mode;
   if (!strcmp(FLAG_scheduler, "packed")) {
-    schedule_mode = LOOM_SERVE_QWEN_SCHEDULE_PACKED;
+    schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED;
   } else if (!strcmp(FLAG_scheduler, "isolated")) {
-    schedule_mode = LOOM_SERVE_QWEN_SCHEDULE_ISOLATED;
+    schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_ISOLATED;
   } else if (!strcmp(FLAG_scheduler, "matched")) {
-    schedule_mode = LOOM_SERVE_QWEN_SCHEDULE_MATCHED;
+    schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_MATCHED;
   } else {
     fprintf(stderr, "scheduler must be packed, isolated, or matched.\n");
     return EXIT_FAILURE;
@@ -65,47 +65,47 @@ int main(int argc, char** argv) {
   if (FLAG_continuation_epochs < 1 || FLAG_continuation_epochs > 2 ||
       (FLAG_continuation_epochs == 2 && FLAG_mtp_depth != 3) ||
       (FLAG_mtp_depth != 0 && FLAG_mtp_depth != 3) ||
-      (FLAG_mtp_depth && !loom_serve_qwen_mtp_from_flags()) ||
-      (loom_serve_qwen_mtp_from_flags() &&
-       schedule_mode != LOOM_SERVE_QWEN_SCHEDULE_PACKED)) {
+      (FLAG_mtp_depth && !loom_serve_text_mtp_from_flags()) ||
+      (loom_serve_text_mtp_from_flags() &&
+       schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED)) {
     fprintf(stderr,
             "mtp_depth must be 0 or 3; MTP requires --mtp and packed "
             "scheduling; continuation_epochs must be 1 or 2, and 2 requires "
             "mtp_depth=3.\n");
     return EXIT_FAILURE;
   }
-  loom_serve_qwen_packing_mode_t packing_mode;
+  loom_serve_text_packing_mode_t packing_mode;
   if (!strcmp(FLAG_packing, "mixed")) {
-    packing_mode = LOOM_SERVE_QWEN_PACKING_MIXED;
+    packing_mode = LOOM_SERVE_TEXT_PACKING_MIXED;
   } else if (!strcmp(FLAG_packing, "separate")) {
-    packing_mode = LOOM_SERVE_QWEN_PACKING_SEPARATE;
+    packing_mode = LOOM_SERVE_TEXT_PACKING_SEPARATE;
   } else {
     fprintf(stderr, "packing must be mixed or separate.\n");
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
   iree_status_t status = iree_async_signal_block_default();
-  loom_serve_qwen_model_t* model = NULL;
+  loom_serve_text_model_t* model = NULL;
   loom_serve_http_server_t* server = NULL;
-  const loom_serve_qwen_flag_defaults_t defaults = {
+  const loom_serve_text_flag_defaults_t defaults = {
       .row_count = (iree_host_size_t)FLAG_rows,
       .pool_capacity =
-          schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED ? 65536 : 0,
-      .automatic_shapes = schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED,
+          schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED ? 65536 : 0,
+      .automatic_shapes = schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED,
   };
   if (iree_status_is_ok(status)) {
     status =
-        loom_serve_qwen_model_create_from_flags(&defaults, &model, allocator);
+        loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
   }
   iree_host_size_t epoch_count = 0;
   iree_host_size_t chunk_size = 0;
   if (iree_status_is_ok(status)) {
-    epoch_count = loom_serve_qwen_model_shape_count(model);
-    iree_host_size_t capacity = loom_serve_qwen_model_prefill_capacity(model);
-    if (schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED) {
+    epoch_count = loom_serve_text_model_shape_count(model);
+    iree_host_size_t capacity = loom_serve_text_model_prefill_capacity(model);
+    if (schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED) {
       capacity = 0;
       const loom_serve_packing_shape_t* shapes =
-          loom_serve_qwen_model_shapes(model);
+          loom_serve_text_model_shapes(model);
       for (iree_host_size_t i = 0; i < epoch_count; ++i) {
         capacity = iree_max(capacity, shapes[i].token_capacity);
       }
@@ -146,9 +146,9 @@ int main(int argc, char** argv) {
               "\"continuation_epochs\":%d}\n",
               (int)address.size, address.data, FLAG_rows, chunk_size,
               FLAG_scheduler, epoch_count, FLAG_packing,
-              loom_serve_qwen_mtp_from_flags() ? "true" : "false",
+              loom_serve_text_mtp_from_flags() ? "true" : "false",
               FLAG_mtp_depth, FLAG_continuation_epochs);
-      const loom_serve_qwen_service_options_t service_options = {
+      const loom_serve_text_service_options_t service_options = {
           .row_count = (iree_host_size_t)FLAG_rows,
           .chunk_size = chunk_size,
           .default_max_tokens = (iree_host_size_t)FLAG_max_tokens,
@@ -159,12 +159,12 @@ int main(int argc, char** argv) {
           .mtp_depth = (iree_host_size_t)FLAG_mtp_depth,
           .continuation_epochs = (iree_host_size_t)FLAG_continuation_epochs,
       };
-      status = loom_serve_qwen_service_run(model, server, &service_options,
+      status = loom_serve_text_service_run(model, server, &service_options,
                                            allocator);
     }
   }
   status = iree_status_join(status, loom_serve_http_server_destroy(server));
-  status = iree_status_join(status, loom_serve_qwen_model_destroy(model));
+  status = iree_status_join(status, loom_serve_text_model_destroy(model));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

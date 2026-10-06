@@ -1,9 +1,9 @@
 # Start here: a working handoff, not a framework specification
 
 The first outcome is an observed execution, not a new serving abstraction. This
-branch has a source-defined image runner, a working Qwen adapter, and reusable
-JIT/queue ownership code. A
-fresh agent can establish that boundary without a model download, reproduce the
+branch has source-defined image and text runners, with Krea and Qwen examples,
+and reusable JIT/queue ownership code. A fresh agent can establish that boundary
+without a model download, reproduce the
 qualified Qwen run when the hardware fits, then implement a smaller model using
 the same embedding path. No private working history is required.
 
@@ -11,16 +11,23 @@ An initial assignment can be this concrete:
 
 > Establish the source-only JIT tests using this packet's README and record the
 > actual target, build configuration, and passing case counts. Read the minimal
-> JIT caller before the Qwen adapter. Then implement the pinned SmolLM2-135M
+> JIT caller and the text source contract before the Qwen numerical package.
+> Then implement the pinned SmolLM2-135M
 > candidate through one real-weight block and a retained greedy continuation,
-> with an independent numerical reference. Keep the model-specific adapter
-> small, reuse the queue/JIT ownership boundary, and expose unsupported compiler
+> with an independent numerical reference. Keep model math and policy in its
+> source package, reuse the text residency and queue/JIT ownership boundary,
+> and expose unsupported compiler
 > behavior with the smallest real reproducer. HTTP and performance expansion
 > follow a correct retained continuation, not the other way around.
 
 That is a new model implementation assignment. Changing Qwen's `--model` path
 alone cannot load SmolLM2. [FIRST_PORT.md](FIRST_PORT.md) pins the candidate and
 separates existing infrastructure from the model work still required.
+
+For an already assigned text model, the same sequence applies to that model's
+pinned artifacts. The [text contract](../text/README.md) is the implementation
+map: source bootstrap, warm numerical entries, semantic spans and chat policy.
+There is no C model adapter to copy and no native model registry to extend.
 
 For image or audio work, the
 [tensor-in/tensor-out ownership flow](MODEL_AUTHORING.md#image-and-audio-entry-points)
@@ -51,10 +58,10 @@ Skipped hardware tests remain unqualified. A cached test result represents the
 same declared inputs; a fresh-device qualification records a real execution.
 
 The authoring loop is source-driven. Editing model `.loom` files changes the
-next runner process without rebuilding the C executable; editing the C adapter
-requires building its exact target again. `sources.txt` lists source providers,
-while `prepare.loom`, `control.loom` and the cold `weights.loom` policy are loaded separately.
-An added command/kernel library must be present in
+next runner process without rebuilding the C executable; editing shared native
+mechanisms requires building their exact target again. `sources.txt` lists
+source providers, while `prepare.loom`, `control.loom` and the cold weight policy
+are loaded separately. An added command/kernel library must be present in
 that catalog; a generated HSACO or compiler subprocess is not part of this
 deployment path.
 
@@ -67,9 +74,9 @@ deployment path.
 | [`command.h`](../runtime/command.h), [`execution.h`](../runtime/execution.h), [`module.h`](../runtime/module.h), [`control_test.cc`](../runtime/control_test.cc) | Buffer borrowing/retention, exact queues and timelines, accepted work, feedback lifetime, drain after failure |
 | [`program.h`](../runtime/program.h), model [`control.loom`](../models/qwen/control.loom) | One shared source-JIT process with isolated and packed entries; indexed command selection, proposal/verify/catch-up routing, and bounded feedback without intermediate host waits |
 | [`preparation.h`](../runtime/preparation.h), model [`prepare.loom`](../models/qwen/prepare.loom) | Source-owned startup declarations, run-dependent specialization, checkpoint bindings and opaque control state surviving cold process teardown |
-| [`qwen_model.h`](../models/qwen/model.h), [`qwen_model.c`](../models/qwen/model.c), [`epoch.loom`](../models/qwen/epoch.loom) | A concrete residency: weight placement, row origins, mutable state, scratch, descriptors, packed traversal and progress |
+| [`model.h`](../text/model.h), [`model.c`](../text/model.c), [`epoch.loom`](../models/qwen/epoch.loom) | A concrete residency: weight placement, row origins, mutable state, scratch, descriptors, packed traversal and progress |
 | [`weights.h`](../runtime/weights.h), [`weights.loom`](../models/qwen/weights.loom), [`weights_test.cc`](../runtime/weights_test.cc) | Model-owned VM policy selecting cached preparers, actual file bytes into shared final storage, and transformation exactly once per unique tensor |
-| [`qwen_schedule.h`](../models/qwen/schedule.h), [`qwen_service.c`](../models/qwen/service.c) | Ready spans versus model rows, canonical history, output credit, admission and scheduling policy |
+| [`schedule.h`](../text/schedule.h), [`service.c`](../text/service.c) | Ready spans versus model rows, canonical history, output credit, admission and scheduling policy |
 
 The detailed [authoring](MODEL_AUTHORING.md) and [runner](RUNNER.md) guides
 explain the invariants behind those callers. Canonical Loom documentation wins
@@ -99,9 +106,10 @@ keeps regressions interpretable. A narrow kernel win returns to the retained
 multi-agent workload before it becomes a serving claim. The
 [performance guide](PERFORMANCE.md) supplies controls and measurement details.
 
-The code is an experimentation platform. A model-specific second adapter earns
-an abstraction by exposing a genuinely shared contract, not by anticipating
-every modality. One compiler/JIT residency, shared weights and code, data rows
+The code is an experimentation platform. A model outside the text/image
+contracts first proves a concrete ownership flow through the shared runtime.
+Additional modality machinery earns its place through that caller, not by
+anticipating every model family. One compiler/JIT residency, shared weights and code, data rows
 instead of per-session VMs, explicit dependency edges, and no steady-state
 device allocation are the intended invariants. HAL and the command-program ABI
 are not extension slots for model bookkeeping. The current host epoch wait and

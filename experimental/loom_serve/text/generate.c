@@ -4,14 +4,14 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Concrete multi-row Qwen CLI and completed-stage timing witness.
+// Concrete multi-row text CLI and completed-stage timing witness.
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/models/qwen/chat.h"
-#include "experimental/loom_serve/models/qwen/flags.h"
+#include "experimental/loom_serve/text/chat.h"
+#include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
@@ -29,9 +29,9 @@ IREE_FLAG(int32_t, chunk_size, 0,
 IREE_FLAG(int32_t, iterations, 1,
           "Independent repetitions within one loaded model.");
 
-typedef struct qwen_cli_row_t {
+typedef struct text_cli_row_t {
   // Borrowed retained device row.
-  loom_serve_qwen_row_t* row;
+  loom_serve_text_row_t* row;
   // Host input storage sized to the model context.
   int32_t* input;
   // Host generated-token storage sized to the model context.
@@ -45,10 +45,10 @@ typedef struct qwen_cli_row_t {
   // Admission-to-first-prediction duration for this turn.
   iree_duration_t first_token_duration;
   // Stage counters at the beginning of this turn.
-  loom_serve_qwen_metrics_t initial_metrics;
-} qwen_cli_row_t;
+  loom_serve_text_metrics_t initial_metrics;
+} text_cli_row_t;
 
-static iree_status_t qwen_print(iree_tokenizer_t* tokenizer,
+static iree_status_t text_print(iree_tokenizer_t* tokenizer,
                                 iree_host_size_t count, const int32_t* tokens,
                                 iree_allocator_t allocator) {
   iree_host_size_t state_size = 0;
@@ -97,14 +97,14 @@ static iree_status_t qwen_print(iree_tokenizer_t* tokenizer,
   return status;
 }
 
-static iree_status_t qwen_prepare_turn(loom_serve_qwen_model_t* model,
+static iree_status_t text_prepare_turn(loom_serve_text_model_t* model,
                                        iree_host_size_t row_count,
-                                       qwen_cli_row_t* rows, int turn,
+                                       text_cli_row_t* rows, int turn,
                                        iree_allocator_t allocator) {
   const iree_host_size_t capacity =
-      loom_serve_qwen_model_context_capacity(model);
-  const loom_serve_qwen_chat_policy_t* policy =
-      loom_serve_qwen_model_chat_policy(model);
+      loom_serve_text_model_context_capacity(model);
+  const loom_serve_text_chat_policy_t* policy =
+      loom_serve_text_model_chat_policy(model);
   const iree_flag_string_list_t prompts = FLAG_prompt_list();
   iree_io_file_contents_t* contents = NULL;
   iree_status_t status = iree_ok_status();
@@ -114,29 +114,29 @@ static iree_status_t qwen_prepare_turn(loom_serve_qwen_model_t* model,
   }
   for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
        ++i) {
-    qwen_cli_row_t* row = &rows[i];
+    text_cli_row_t* row = &rows[i];
     iree_string_view_t text = iree_string_view_empty();
-    loom_serve_qwen_chat_input_format_t format =
-        LOOM_SERVE_QWEN_CHAT_INPUT_USER;
-    loom_serve_qwen_chat_boundary_t boundary =
-        LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH;
+    loom_serve_text_chat_input_format_t format =
+        LOOM_SERVE_TEXT_CHAT_INPUT_USER;
+    loom_serve_text_chat_boundary_t boundary =
+        LOOM_SERVE_TEXT_CHAT_BOUNDARY_FRESH;
     if (turn) {
       // The last selected token was returned to the user, not consumed. Append
       // it before the role delimiter so retained state matches the transcript.
-      row->input[0] = loom_serve_qwen_row_token(row->row);
+      row->input[0] = loom_serve_text_row_token(row->row);
       text = iree_make_cstring_view(FLAG_followup);
-      boundary = loom_serve_qwen_row_is_eos(row->row)
-                     ? LOOM_SERVE_QWEN_CHAT_BOUNDARY_TERMINATED
-                     : LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN;
+      boundary = loom_serve_text_row_is_eos(row->row)
+                     ? LOOM_SERVE_TEXT_CHAT_BOUNDARY_TERMINATED
+                     : LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN;
     } else if (contents) {
       text = iree_make_string_view((const char*)contents->const_buffer.data,
                                    contents->const_buffer.data_length);
-      format = LOOM_SERVE_QWEN_CHAT_INPUT_RENDERED;
+      format = LOOM_SERVE_TEXT_CHAT_INPUT_RENDERED;
     } else {
       text = prompts.count ? prompts.values[i % prompts.count]
                            : IREE_SV("What is 2+2? Answer with one number.");
     }
-    status = loom_serve_qwen_chat_prepare_input(
+    status = loom_serve_text_chat_prepare_input(
         policy, text, format, boundary, capacity - turn, row->input + turn,
         &row->input_count, allocator);
     if (iree_status_is_ok(status)) {
@@ -144,20 +144,20 @@ static iree_status_t qwen_prepare_turn(loom_serve_qwen_model_t* model,
     }
     if (iree_status_is_ok(status) &&
         row->input_count + (iree_host_size_t)FLAG_max_tokens - 1 >
-            capacity - loom_serve_qwen_row_position(row->row)) {
+            capacity - loom_serve_text_row_position(row->row)) {
       status = iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
           "row %zu input and output exceed remaining context", i);
     }
     row->input_offset = 0;
     row->output_count = 0;
-    row->initial_metrics = loom_serve_qwen_row_metrics(row->row);
+    row->initial_metrics = loom_serve_text_row_metrics(row->row);
   }
   iree_io_file_contents_free(contents);
   return status;
 }
 
-static iree_status_t qwen_turn(iree_host_size_t row_count, qwen_cli_row_t* rows,
+static iree_status_t text_turn(iree_host_size_t row_count, text_cli_row_t* rows,
                                iree_host_size_t chunk_size) {
   const iree_time_t start = iree_time_now();
   iree_status_t status = iree_ok_status();
@@ -166,27 +166,27 @@ static iree_status_t qwen_turn(iree_host_size_t row_count, qwen_cli_row_t* rows,
     active = false;
     for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
          ++i) {
-      qwen_cli_row_t* row = &rows[i];
+      text_cli_row_t* row = &rows[i];
       if (row->input_offset < row->input_count) {
         const iree_host_size_t count =
             iree_min(chunk_size, row->input_count - row->input_offset);
-        status = loom_serve_qwen_row_prefill(row->row, count,
+        status = loom_serve_text_row_prefill(row->row, count,
                                              row->input + row->input_offset);
         if (iree_status_is_ok(status)) {
           row->input_offset += count;
           if (row->input_offset == row->input_count) {
             row->output[row->output_count++] =
-                loom_serve_qwen_row_token(row->row);
+                loom_serve_text_row_token(row->row);
             row->first_token_duration = iree_time_now() - start;
           }
         }
         active = true;
-      } else if (!loom_serve_qwen_row_is_eos(row->row) &&
+      } else if (!loom_serve_text_row_is_eos(row->row) &&
                  row->output_count < (iree_host_size_t)FLAG_max_tokens) {
-        status = loom_serve_qwen_row_decode(row->row);
+        status = loom_serve_text_row_decode(row->row);
         if (iree_status_is_ok(status)) {
           row->output[row->output_count++] =
-              loom_serve_qwen_row_token(row->row);
+              loom_serve_text_row_token(row->row);
         }
         active = true;
       }
@@ -195,13 +195,13 @@ static iree_status_t qwen_turn(iree_host_size_t row_count, qwen_cli_row_t* rows,
   return status;
 }
 
-static iree_status_t qwen_run(loom_serve_qwen_model_t* model,
+static iree_status_t text_run(loom_serve_text_model_t* model,
                               iree_host_size_t row_count,
                               iree_allocator_t allocator) {
   const iree_host_size_t capacity =
-      loom_serve_qwen_model_context_capacity(model);
+      loom_serve_text_model_context_capacity(model);
   const iree_host_size_t prefill_capacity =
-      loom_serve_qwen_model_prefill_capacity(model);
+      loom_serve_text_model_prefill_capacity(model);
   const iree_host_size_t chunk_size =
       FLAG_chunk_size ? (iree_host_size_t)FLAG_chunk_size : prefill_capacity;
   if (chunk_size > prefill_capacity ||
@@ -213,9 +213,9 @@ static iree_status_t qwen_run(loom_serve_qwen_model_t* model,
   int32_t* storage = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       allocator, 2 * capacity * row_count, sizeof(int32_t), (void**)&storage));
-  qwen_cli_row_t rows[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
+  text_cli_row_t rows[LOOM_SERVE_TEXT_ROW_CAPACITY] = {0};
   for (iree_host_size_t i = 0; i < row_count; ++i) {
-    rows[i].row = loom_serve_qwen_model_row(model, i);
+    rows[i].row = loom_serve_text_model_row(model, i);
     rows[i].input = storage + i * capacity * 2;
     rows[i].output = rows[i].input + capacity;
   }
@@ -224,21 +224,21 @@ static iree_status_t qwen_run(loom_serve_qwen_model_t* model,
        iteration < FLAG_iterations && iree_status_is_ok(status); ++iteration) {
     for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
          ++i) {
-      status = loom_serve_qwen_row_reset(rows[i].row);
+      status = loom_serve_text_row_reset(rows[i].row);
     }
     const int turn_count = FLAG_followup[0] ? 2 : 1;
     for (int turn = 0; turn < turn_count && iree_status_is_ok(status); ++turn) {
-      status = qwen_prepare_turn(model, row_count, rows, turn, allocator);
+      status = text_prepare_turn(model, row_count, rows, turn, allocator);
       const iree_time_t start = iree_time_now();
       if (iree_status_is_ok(status)) {
-        status = qwen_turn(row_count, rows, chunk_size);
+        status = text_turn(row_count, rows, chunk_size);
       }
       const iree_duration_t elapsed = iree_time_now() - start;
       for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
            ++i) {
-        const qwen_cli_row_t* row = &rows[i];
-        const loom_serve_qwen_metrics_t metrics =
-            loom_serve_qwen_row_metrics(row->row);
+        const text_cli_row_t* row = &rows[i];
+        const loom_serve_text_metrics_t metrics =
+            loom_serve_text_row_metrics(row->row);
         fprintf(
             stderr,
             "{\"iteration\":%d,\"turn\":%d,\"row\":%zu,\"input_tokens\":%zu,"
@@ -249,7 +249,7 @@ static iree_status_t qwen_run(loom_serve_qwen_model_t* model,
             ",\"decode_ms\":%.3f,"
             "\"model_ttft_ms\":%.3f,\"round_robin_ms\":%.3f}\n",
             iteration, turn, i, row->input_count, row->output_count,
-            loom_serve_qwen_row_position(row->row),
+            loom_serve_text_row_position(row->row),
             metrics.prefill_steps - row->initial_metrics.prefill_steps,
             (metrics.prefill_duration - row->initial_metrics.prefill_duration) /
                 1e6,
@@ -260,7 +260,7 @@ static iree_status_t qwen_run(loom_serve_qwen_model_t* model,
         if (row_count > 1 || turn_count > 1 || FLAG_iterations > 1) {
           printf("\n[iteration %d turn %d row %zu]\n", iteration, turn, i);
         }
-        status = qwen_print(loom_serve_qwen_model_tokenizer(model),
+        status = text_print(loom_serve_text_model_tokenizer(model),
                             row->output_count, row->output, allocator);
       }
     }
@@ -274,7 +274,7 @@ int main(int argc, char** argv) {
   const iree_flag_string_list_t prompts = FLAG_prompt_list();
   const iree_host_size_t row_count =
       FLAG_rows ? (iree_host_size_t)FLAG_rows : iree_max(prompts.count, 1);
-  if (FLAG_rows < 0 || row_count > LOOM_SERVE_QWEN_ROW_CAPACITY ||
+  if (FLAG_rows < 0 || row_count > LOOM_SERVE_TEXT_ROW_CAPACITY ||
       FLAG_max_tokens < 1 || FLAG_iterations < 1 || FLAG_chunk_size < 0 ||
       (FLAG_prompt_file[0] && prompts.count)) {
     fprintf(stderr,
@@ -283,14 +283,14 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   iree_allocator_t allocator = iree_allocator_system();
-  const loom_serve_qwen_flag_defaults_t defaults = {.row_count = row_count};
-  loom_serve_qwen_model_t* model = NULL;
+  const loom_serve_text_flag_defaults_t defaults = {.row_count = row_count};
+  loom_serve_text_model_t* model = NULL;
   iree_status_t status =
-      loom_serve_qwen_model_create_from_flags(&defaults, &model, allocator);
+      loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
   if (iree_status_is_ok(status)) {
-    status = qwen_run(model, row_count, allocator);
+    status = text_run(model, row_count, allocator);
   }
-  status = iree_status_join(status, loom_serve_qwen_model_destroy(model));
+  status = iree_status_join(status, loom_serve_text_model_destroy(model));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

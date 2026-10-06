@@ -5,6 +5,13 @@ The embedding supplies a live device, model configuration, parameter storage,
 and mutable state. This runner uses text sources directly; source changes are
 picked up by the next process without rebuilding its executable.
 
+The [text package contract](../text/README.md) lists the exact cold and warm
+exports, storage records, semantic span protocol and chat-policy entry points.
+Text ports implement that source contract over `text:server`/`text:generate`;
+the [diffusion contract](#source-defined-diffusion-package) similarly targets
+`image:server`/`image:generate`. Neither executable links a model package or
+uses a native model registry.
+
 ## Start from a concrete numerical and storage contract
 
 For a new model, the input evidence is its pinned configuration, checkpoint,
@@ -217,11 +224,11 @@ shows the public ownership protocol without a model dependency. In this runner,
 stage calls remain synchronous; their native kernel requests compile in parallel.
 No task queue or compiler work is introduced into the serving epoch path.
 
-The Qwen adapter validates shared parameter placement across its independently
+The text materializer validates shared parameter placement across independently
 compiled roots before assigning one weight slab. Auxiliary MTP roots either
 view existing tensors or own additional tensors. IREE's parameter index/provider
 loads bytes into those destinations. Another checkpoint format can reuse the
-IO machinery, but its model adapter must establish names, encoding, orientation,
+IO machinery, but its model source must establish names, encoding, orientation,
 and size rather than treating a matching byte count as numerical equivalence.
 
 Checkpoint encoding and inference layout need not be identical.

@@ -4,9 +4,9 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/models/qwen/schedule.h"
+#include "experimental/loom_serve/text/schedule.h"
 
-iree_host_size_t loom_serve_qwen_default_shapes(
+iree_host_size_t loom_serve_text_default_shapes(
     iree_host_size_t row_count, iree_host_size_t token_capacity,
     loom_serve_packing_shape_t* shapes) {
   iree_host_size_t count = 0;
@@ -27,7 +27,7 @@ iree_host_size_t loom_serve_qwen_default_shapes(
   return count;
 }
 
-iree_host_size_t loom_serve_qwen_request_reservation(
+iree_host_size_t loom_serve_text_request_reservation(
     iree_host_size_t context_capacity, iree_host_size_t input_count,
     iree_host_size_t output_count, iree_host_size_t proposal_depth,
     iree_host_size_t block_size) {

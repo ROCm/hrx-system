@@ -340,7 +340,7 @@ they contain no Qwen routing. The host joins accepted work and feedback even
 when a later native call fails, then publishes row frontiers only on success.
 
 The model's optional MTP bundle warms its private cache after committed target
-epochs. `loom_serve_qwen_model_verify` packs four-input verifiers with ordinary
+epochs. `loom_serve_text_model_verify` packs four-input verifiers with ordinary
 known spans. A `PROPOSE` span supplies just its pending anchor. One cached
 command compacts the proposal rows, gathers committed carry, and runs three
 draft rounds whose sampled tokens feed both the next round and their reserved
@@ -414,9 +414,9 @@ sanitization. They use the corresponding kernels plus `gdn_spans.loom`,
 From the repository root:
 
 ```sh
-build_tools/bin/iree-bazel-build --config=asan //experimental/loom_serve/models/qwen:generate
+build_tools/bin/iree-bazel-build --config=asan //experimental/loom_serve/text:generate
 # Run on a qualified GPU host with the source directory available.
-bazel-bin/experimental/loom_serve/models/qwen/generate \
+bazel-bin/experimental/loom_serve/text/generate \
   --model=experimental/loom_serve/models/qwen \
   --prefill_capacity=512 --context_capacity=2048 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
@@ -818,7 +818,7 @@ Padded output rows are zeroed; the fixed head still computes padded rows,
 including when no prediction is requested. Stateless dense work also covers
 the selected token capacity. These are explicit schedule costs to measure.
 
-The runner's `loom_serve_qwen_model_epoch` accepts distinct resident row indices,
+The runner's `loom_serve_text_model_epoch` accepts distinct resident row indices,
 input spans and output-selection flags. One VM process, weight slab, workspace
 and state arena serve every row. Cold setup creates the immutable row-origin
 table and reusable epoch buffers. Completion commits consumed positions and
