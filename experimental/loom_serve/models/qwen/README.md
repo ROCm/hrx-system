@@ -78,6 +78,14 @@ typed offsets into an input buffer, and `json.unescape` decodes into source-owne
 storage. Those utilities contain no chat-template or model policy. Formatting is
 request-scoped; it creates no additional VM process, JIT compilation or GPU work.
 
+`prepare_input` in the same program owns single-user framing, retained-turn
+delimiters and complete raw-token encoding for HTTP, CLI and fixed-trajectory
+replay. It requests one extra token from the bounded input capability and rejects
+overflow instead of silently truncating a prompt. The native caller preserves
+the exact selected-but-unconsumed token separately, copies complete returned IDs
+into request storage and releases all VM references before admission. Rendered
+fresh input passes to the tokenizer without an intermediate text copy.
+
 The native adapter still manages page IDs, validates semantic spans, owns role
 templates, generated XML/schema interpretation and retained-session policy, and
 joins each bounded cohort before applying semantic progress. Those remaining

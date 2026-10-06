@@ -48,6 +48,7 @@ loom_cc_binary(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":chat",
         ":flags",
         ":model",
         "//runtime/src/iree/base",
@@ -259,6 +260,8 @@ loom_cc_test(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/vm",
     ],
 )

@@ -27,11 +27,41 @@ typedef struct loom_serve_qwen_chat_policy_t {
   iree_vm_invocation_t* invocation;
   // Canonical tool formatter shared by input history and generated output.
   iree_vm_function_t render_tool;
+  // Turn framing and complete raw-token encoding shared by all text callers.
+  iree_vm_function_t prepare_input;
 } loom_serve_qwen_chat_policy_t;
 
 iree_status_t loom_serve_qwen_chat_policy_initialize(
     iree_vm_environment_t* environment, loom_serve_program_t* program,
     loom_serve_qwen_chat_policy_t* out_policy);
+
+// Source input format. Rendered text passes through unchanged; user content
+// receives one user envelope and the assistant generation prefix.
+typedef enum loom_serve_qwen_chat_input_format_e {
+  LOOM_SERVE_QWEN_CHAT_INPUT_RENDERED = 0,
+  LOOM_SERVE_QWEN_CHAT_INPUT_USER = 1,
+} loom_serve_qwen_chat_input_format_t;
+
+// Framing before the new text. Retained callers separately preserve the exact
+// selected-but-unconsumed token ID; this operation never reconstructs that ID
+// from the canonical transcript. TERMINATED means that ID already ends the
+// prior turn; OPEN requires the source program to close it.
+typedef enum loom_serve_qwen_chat_boundary_e {
+  LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH = 0,
+  LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN = 1,
+  LOOM_SERVE_QWEN_CHAT_BOUNDARY_TERMINATED = 2,
+} loom_serve_qwen_chat_boundary_t;
+
+// Frames and encodes the complete input in the shared source VM. Text is
+// borrowed only during this synchronous call. On success, copies at most
+// capacity IDs into tokens; on failure, tokens is untouched and count is zero.
+// Incomplete prefixes are rejected. No VM reference escapes into session state.
+iree_status_t loom_serve_qwen_chat_prepare_input(
+    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t text,
+    loom_serve_qwen_chat_input_format_t format,
+    loom_serve_qwen_chat_boundary_t boundary, iree_host_size_t capacity,
+    int32_t* tokens, iree_host_size_t* out_count,
+    iree_allocator_t host_allocator);
 
 // Indexed tool schema borrowing the request body. XML names are literal ASCII
 // identifiers. Property schemas supply the JSON types lost by XML generation;

@@ -245,6 +245,86 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
 func.decl import("json") @members(%text: buffer) -> (buffer, i32, i64)
 func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+
+global.rodata.def @input_user_prefix = bytes("3c7c696d5f73746172747c3e757365720a")
+global.rodata.def @input_user_suffix = bytes("3c7c696d5f656e647c3e0a3c7c696d5f73746172747c3e617373697374616e740a3c7468696e6b3e0a0a3c2f7468696e6b3e0a0a")
+global.rodata.def @input_open_boundary = bytes("3c7c696d5f656e647c3e0a")
+global.rodata.def @input_terminated_boundary = bytes("0a")
+global.rodata.def @input_empty_boundary = bytes("")
+global.rodata.def @input_mode_error = bytes("756e737570706f7274656420736f7572636520696e70757420666f726d6174206f72207475726e20626f756e64617279")
+global.rodata.def @input_capacity_error = bytes("736f7572636520696e70757420746f6b656e206361706163697479206973206f7574206f662072616e6765")
+global.rodata.def @input_overflow_error = bytes("636f6d706c65746520696e707574206578636565647320746f6b656e206361706163697479")
+
+// Request-cold framing shared by HTTP, CLI and fixed-trajectory replay. Format
+// is rendered text (0) or one user message (1). Boundary is fresh (0), open (1),
+// or already terminated (2). The caller preserves the original pending ID.
+func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64) {
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %two32 = scalar.constant 2 : i32
+  %valid_format = scalar.cmpi ule, %format, %one32 : i32
+  %valid_boundary = scalar.cmpi ule, %boundary, %two32 : i32
+  %valid_modes = scalar.andi %valid_format, %valid_boundary : i1
+  %valid_modes32 = scalar.extui %valid_modes : i1 to i32
+  %mode_error = global.load @input_mode_error : buffer
+  func.call @require(%valid_modes32, %mode_error) : (i32, buffer) -> ()
+  %capacity_limit = scalar.constant 2305843009213693950 : i64
+  %valid_capacity = scalar.cmpi ule, %capacity, %capacity_limit : i64
+  %valid_capacity32 = scalar.extui %valid_capacity : i1 to i32
+  %capacity_error = global.load @input_capacity_error : buffer
+  func.call @require(%valid_capacity32, %capacity_error) : (i32, buffer) -> ()
+  %user = scalar.cmpi eq, %format, %one32 : i32
+  %open = scalar.cmpi eq, %boundary, %one32 : i32
+  %terminated = scalar.cmpi eq, %boundary, %two32 : i32
+  %empty = global.load @input_empty_boundary : buffer
+  %user_prefix = global.load @input_user_prefix : buffer
+  %user_suffix = global.load @input_user_suffix : buffer
+  %open_boundary = global.load @input_open_boundary : buffer
+  %terminated_boundary = global.load @input_terminated_boundary : buffer
+  %not_open = scf.select %terminated, %terminated_boundary, %empty : buffer
+  %separator = scf.select %open, %open_boundary, %not_open : buffer
+  %prefix = scf.select %user, %user_prefix, %empty : buffer
+  %suffix = scf.select %user, %user_suffix, %empty : buffer
+  %text_size = buffer.length %text
+  %separator_size = buffer.length %separator
+  %prefix_size = buffer.length %prefix
+  %suffix_size = buffer.length %suffix
+  %leading_size = index.add %separator_size, %prefix_size : offset
+  %with_text = index.add %leading_size, %text_size : offset
+  %total_size = index.add %with_text, %suffix_size : offset
+  %origin = index.constant 0 : offset
+  // Raw input needs no rendering allocation or text copy.
+  %rendered = scf.if %user -> (buffer) {
+    %output = buffer.alloca<private> align(1) %total_size : buffer
+    buffer.copy %separator[%origin], %output[%origin], %separator_size
+    buffer.copy %prefix[%origin], %output[%separator_size], %prefix_size
+    buffer.copy %text[%origin], %output[%leading_size], %text_size
+    buffer.copy %suffix[%origin], %output[%with_text], %suffix_size
+    scf.yield %output : buffer
+  } else {
+    %fresh = scalar.cmpi eq, %boundary, %zero32 : i32
+    %result = scf.if %fresh -> (buffer) {
+      scf.yield %text : buffer
+    } else {
+      %output = buffer.alloca<private> align(1) %total_size : buffer
+      buffer.copy %separator[%origin], %output[%origin], %separator_size
+      buffer.copy %text[%origin], %output[%separator_size], %text_size
+      scf.yield %output : buffer
+    }
+    scf.yield %result : buffer
+  }
+  // The shared encoder returns a bounded prefix. One extra ID distinguishes
+  // a complete fit from a truncated prompt without a second tokenizer pass.
+  %one64 = scalar.constant 1 : i64
+  %probe_capacity = scalar.addi %capacity, %one64 : i64
+  %tokens, %count = func.call @encode(%rendered, %zero32, %probe_capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %fits = scalar.cmpi ule, %count, %capacity : i64
+  %fits32 = scalar.extui %fits : i1 to i32
+  %overflow_error = global.load @input_overflow_error : buffer
+  func.call @require(%fits32, %overflow_error) : (i32, buffer) -> ()
+  func.return %tokens, %count : buffer, i64
+}
 
 global.rodata.def @tool_open = bytes("3c746f6f6c5f63616c6c3e0a3c66756e6374696f6e3d")
 global.rodata.def @tag_end = bytes("3e0a")

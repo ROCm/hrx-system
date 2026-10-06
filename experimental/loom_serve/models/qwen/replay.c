@@ -107,19 +107,18 @@ static iree_status_t qwen_replay_window_parse(
   return iree_ok_status();
 }
 
-static iree_status_t qwen_replay_append(loom_serve_qwen_model_t* model,
-                                        iree_string_view_t text,
-                                        qwen_replay_row_t* row,
-                                        iree_allocator_t allocator) {
+static iree_status_t qwen_replay_append(
+    loom_serve_qwen_model_t* model, iree_string_view_t text,
+    loom_serve_qwen_chat_boundary_t boundary, qwen_replay_row_t* row,
+    iree_allocator_t allocator) {
   const iree_host_size_t capacity =
       loom_serve_qwen_model_context_capacity(model);
   iree_host_size_t count = 0;
-  IREE_RETURN_IF_ERROR(iree_tokenizer_encode(
-      loom_serve_qwen_model_tokenizer(model), text,
-      IREE_TOKENIZER_ENCODE_FLAG_NONE,
-      iree_tokenizer_make_token_output(row->tokens + row->token_count, NULL,
-                                       NULL, capacity - row->token_count),
-      allocator, &count));
+  IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_prepare_input(
+      loom_serve_qwen_model_chat_policy(model), text,
+      LOOM_SERVE_QWEN_CHAT_INPUT_RENDERED, boundary,
+      capacity - row->token_count, row->tokens + row->token_count, &count,
+      allocator));
   row->token_count += count;
   return iree_ok_status();
 }
@@ -158,6 +157,9 @@ static iree_status_t qwen_replay_prepare_turn(loom_serve_qwen_model_t* model,
   const iree_string_view_t prompt = iree_string_builder_view(&chat.prompt);
   const iree_string_view_t prior = iree_string_builder_view(checkpoint);
   iree_status_t status = iree_ok_status();
+  iree_string_view_t input = prompt;
+  loom_serve_qwen_chat_boundary_t boundary =
+      LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH;
   if (prior.size) {
     if (!iree_string_view_starts_with(prompt, prior)) {
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -165,19 +167,12 @@ static iree_status_t qwen_replay_prepare_turn(loom_serve_qwen_model_t* model,
     } else {
       // The previous pending token is already last in the fixed trajectory.
       // The live service prefixes that ID and then encodes this same suffix.
-      status = iree_string_builder_append_cstring(&text, "<|im_end|>\n");
-      if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_string(
-            &text,
-            iree_string_view_substr(prompt, prior.size, IREE_HOST_SIZE_MAX));
-      }
+      boundary = LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN;
+      input = iree_string_view_substr(prompt, prior.size, IREE_HOST_SIZE_MAX);
     }
-  } else {
-    status = iree_string_builder_append_string(&text, prompt);
   }
   if (iree_status_is_ok(status)) {
-    status = qwen_replay_append(model, iree_string_builder_view(&text), row,
-                                allocator);
+    status = qwen_replay_append(model, input, boundary, row, allocator);
   }
   turn->prompt_end = row->token_count;
   iree_string_builder_reset(&text);
@@ -193,7 +188,8 @@ static iree_status_t qwen_replay_prepare_turn(loom_serve_qwen_model_t* model,
                                        response_data, &length);
     if (iree_status_is_ok(status)) {
       iree_string_builder_commit_append(&text, length);
-      status = qwen_replay_append(model, iree_string_builder_view(&text), row,
+      status = qwen_replay_append(model, iree_string_builder_view(&text),
+                                  LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH, row,
                                   allocator);
     }
   }

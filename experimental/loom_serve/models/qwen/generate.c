@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/loom_serve/models/qwen/chat.h"
 #include "experimental/loom_serve/models/qwen/flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -102,7 +103,8 @@ static iree_status_t qwen_prepare_turn(loom_serve_qwen_model_t* model,
                                        iree_allocator_t allocator) {
   const iree_host_size_t capacity =
       loom_serve_qwen_model_context_capacity(model);
-  iree_tokenizer_t* tokenizer = loom_serve_qwen_model_tokenizer(model);
+  const loom_serve_qwen_chat_policy_t* policy =
+      loom_serve_qwen_model_chat_policy(model);
   const iree_flag_string_list_t prompts = FLAG_prompt_list();
   iree_io_file_contents_t* contents = NULL;
   iree_status_t status = iree_ok_status();
@@ -113,43 +115,33 @@ static iree_status_t qwen_prepare_turn(loom_serve_qwen_model_t* model,
   for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
        ++i) {
     qwen_cli_row_t* row = &rows[i];
-    iree_string_builder_t prompt;
-    iree_string_builder_initialize(allocator, &prompt);
+    iree_string_view_t text = iree_string_view_empty();
+    loom_serve_qwen_chat_input_format_t format =
+        LOOM_SERVE_QWEN_CHAT_INPUT_USER;
+    loom_serve_qwen_chat_boundary_t boundary =
+        LOOM_SERVE_QWEN_CHAT_BOUNDARY_FRESH;
     if (turn) {
       // The last selected token was returned to the user, not consumed. Append
       // it before the role delimiter so retained state matches the transcript.
       row->input[0] = loom_serve_qwen_row_token(row->row);
-      status = iree_string_builder_append_format(
-          &prompt,
-          "%s\n<|im_start|>user\n%s<|im_end|>\n"
-          "<|im_start|>assistant\n<think>\n\n</think>\n\n",
-          loom_serve_qwen_row_is_eos(row->row) ? "" : "<|im_end|>",
-          FLAG_followup);
+      text = iree_make_cstring_view(FLAG_followup);
+      boundary = loom_serve_qwen_row_is_eos(row->row)
+                     ? LOOM_SERVE_QWEN_CHAT_BOUNDARY_TERMINATED
+                     : LOOM_SERVE_QWEN_CHAT_BOUNDARY_OPEN;
     } else if (contents) {
-      status = iree_string_builder_append_string(
-          &prompt,
-          iree_make_string_view((const char*)contents->const_buffer.data,
-                                contents->const_buffer.data_length));
+      text = iree_make_string_view((const char*)contents->const_buffer.data,
+                                   contents->const_buffer.data_length);
+      format = LOOM_SERVE_QWEN_CHAT_INPUT_RENDERED;
     } else {
-      const iree_string_view_t text =
-          prompts.count ? prompts.values[i % prompts.count]
-                        : IREE_SV("What is 2+2? Answer with one number.");
-      status = iree_string_builder_append_format(
-          &prompt,
-          "<|im_start|>user\n%.*s<|im_end|>\n"
-          "<|im_start|>assistant\n<think>\n\n</think>\n\n",
-          (int)text.size, text.data);
+      text = prompts.count ? prompts.values[i % prompts.count]
+                           : IREE_SV("What is 2+2? Answer with one number.");
     }
+    status = loom_serve_qwen_chat_prepare_input(
+        policy, text, format, boundary, capacity - turn, row->input + turn,
+        &row->input_count, allocator);
     if (iree_status_is_ok(status)) {
-      status = iree_tokenizer_encode(
-          tokenizer, iree_string_builder_view(&prompt),
-          IREE_TOKENIZER_ENCODE_FLAG_NONE,
-          iree_tokenizer_make_token_output(row->input + turn, NULL, NULL,
-                                           capacity - turn),
-          allocator, &row->input_count);
       row->input_count += turn;
     }
-    iree_string_builder_deinitialize(&prompt);
     if (iree_status_is_ok(status) &&
         row->input_count + (iree_host_size_t)FLAG_max_tokens - 1 >
             capacity - loom_serve_qwen_row_position(row->row)) {
