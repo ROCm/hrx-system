@@ -156,6 +156,24 @@ typedef struct loom_serve_text_pool_usage_t {
   iree_host_size_t available;
 } loom_serve_text_pool_usage_t;
 
+typedef struct loom_serve_text_trim_result_t {
+  // Logical blocks moved across every target/draft plane.
+  uint32_t moved_blocks;
+  // Device bytes copied to compact surviving state.
+  uint64_t copied_bytes;
+  // Physical bytes returned to the allocator during this maintenance cut.
+  uint64_t released_bytes;
+} loom_serve_text_trim_result_t;
+
+// Retires accepted work, compacts live private blocks, publishes target/draft
+// maps, then releases physical slabs containing no live state. Live rows and
+// cached commands survive; reset rows can regrow in the same virtual buffers.
+// This is an explicit maintenance operation, not part of ordinary decoding.
+// Fixed/dense comparison backing is unchanged and reports zero reclamation.
+// Execution/platform failure ends the run, as with model_epoch.
+iree_status_t loom_serve_text_model_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result);
+
 // Cold setup reserves state and prepares immutable stages. Elastic state is
 // backed on row/page activation; fixed state is fully backed here. Options
 // strings are borrowed only for this call. Failure releases partial ownership.
@@ -238,7 +256,7 @@ iree_status_t loom_serve_text_model_verify(
     loom_serve_text_result_t* out_results);
 
 // Clears recurrent state and position, then releases retired private KV pages.
-// Backing allocations remain fixed. Attention beyond the new logical prefix
+// Physical backing stays warm until model_trim. Attention beyond the new prefix
 // is inaccessible and need not clear before its pages are assigned again.
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row);
 

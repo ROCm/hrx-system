@@ -41,3 +41,33 @@ void loom_serve_block_pool_release(loom_serve_block_pool_t* pool,
     pool->free_blocks[pool->available++] = blocks[i];
   }
 }
+
+uint32_t loom_serve_block_pool_plan_compaction(
+    const loom_serve_block_pool_t* pool, uint32_t* destinations) {
+  for (uint32_t i = 0; i < pool->capacity; ++i) {
+    destinations[i] = i;
+  }
+  for (uint32_t i = 0; i < pool->available; ++i) {
+    destinations[pool->free_blocks[i]] = UINT32_MAX;
+  }
+  const uint32_t live = pool->capacity - pool->available;
+  uint32_t high = pool->capacity;
+  uint32_t moved = 0;
+  for (uint32_t low = 0; low < live; ++low) {
+    if (destinations[low] != UINT32_MAX) {
+      continue;
+    }
+    do {
+      --high;
+    } while (destinations[high] == UINT32_MAX);
+    destinations[high] = low;
+    ++moved;
+  }
+  return moved;
+}
+
+void loom_serve_block_pool_commit_compaction(loom_serve_block_pool_t* pool) {
+  for (uint32_t i = 0; i < pool->available; ++i) {
+    pool->free_blocks[i] = pool->capacity - i - 1;
+  }
+}

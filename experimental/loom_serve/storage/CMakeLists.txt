@@ -34,6 +34,21 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    relocation
+  HDRS
+    "relocation.h"
+  SRCS
+    "relocation.c"
+  DEPS
+    ::memory
+    iree::base
+    iree::experimental::loom_serve::runtime::execution
+    iree::hal
+  PUBLIC
+)
+
 if(IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
@@ -66,5 +81,27 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
 )
+
+if(IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    relocation_test
+  SRCS
+    "relocation_test.cc"
+  DEPS
+    ::memory
+    ::relocation
+    iree::base
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::execution
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
 
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

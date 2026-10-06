@@ -17,6 +17,9 @@ IREE_FLAG(string, compare, "",
           "decode. Empty runs the correctness witness.");
 IREE_FLAG(int32_t, continuation_epochs, 1,
           "One or two device-fed epochs in the mixed MTP witness.");
+IREE_FLAG(bool, trim, false,
+          "Also compare live compaction, physical trim and regrowth with an "
+          "uncompacted continuation; requires pooled state and context >=512.");
 
 typedef struct qwen_check_row_t {
   // Nonzero, permuted resident row used by packed invocations.
@@ -605,6 +608,147 @@ static iree_status_t qwen_check_run(loom_serve_text_model_t* model,
   return qwen_check_prediction(model, &rows[0]);
 }
 
+static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
+                                     iree_allocator_t allocator) {
+  const loom_serve_text_pool_usage_t pool =
+      loom_serve_text_model_pool_usage(model);
+  if (loom_serve_text_model_context_capacity(model) < 512 ||
+      pool.capacity < 2048) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "trim witness requires context >=512, pool >=2048");
+  }
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  loom_serve_text_trim_result_t trimmed;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  if (loom_serve_text_model_memory_statistics(model).committed_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "empty state still has physical backing");
+  }
+  int32_t input[512], prompt[128], padding[32];
+  iree_host_size_t prompt_count = 0, padding_count = 0;
+  IREE_RETURN_IF_ERROR(iree_tokenizer_encode(
+      loom_serve_text_model_tokenizer(model),
+      IREE_SV("<|im_start|>user\nReturn exactly: amber cedar maple raven "
+              "copper hazel sparrow juniper bronze larch heron poplar crimson "
+              "beech kestrel spruce.<|im_end|>\n<|im_start|>assistant\n"
+              "<think>\n\n</think>\n\n"),
+      IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_tokenizer_make_token_output(prompt, NULL, NULL,
+                                       IREE_ARRAYSIZE(prompt)),
+      allocator, &prompt_count));
+  IREE_RETURN_IF_ERROR(iree_tokenizer_encode(
+      loom_serve_text_model_tokenizer(model), IREE_SV("Background context.\n"),
+      IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_tokenizer_make_token_output(padding, NULL, NULL,
+                                       IREE_ARRAYSIZE(padding)),
+      allocator, &padding_count));
+  if (!padding_count) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "empty fixture padding");
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(input); ++i) {
+    input[i] = padding[i % padding_count];
+  }
+  // Sixteen low blocks pin at least one physical slab per plane. The survivor
+  // then starts above those blocks and must move when their rows are reset.
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 0, 512, input));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 1, 512, input));
+  const iree_host_size_t prefix_count = 193;
+  memcpy(input + prefix_count - prompt_count, prompt,
+         prompt_count * sizeof(*prompt));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, prefix_count, input));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 6, prefix_count, input));
+  loom_serve_text_row_t* survivor = loom_serve_text_model_row(model, 7);
+  loom_serve_text_row_t* reference = loom_serve_text_model_row(model, 6);
+  int32_t expected[8];
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
+    expected[i] = loom_serve_text_row_token(reference);
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+  }
+  const int32_t expected_pending = loom_serve_text_row_token(reference);
+  loom_serve_text_result_t expected_verification = {0};
+  const uint32_t limit = 4;
+  if (loom_serve_text_mtp_from_flags()) {
+    const loom_serve_text_span_t span = {
+        6, 4, &expected_pending,
+        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_verify(
+        model, 0, 1, &span, &limit, NULL, &expected_verification));
+  }
+  const iree_host_size_t expected_position =
+      loom_serve_text_row_position(reference);
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(reference));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_reset(loom_serve_text_model_row(model, 0)));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_reset(loom_serve_text_model_row(model, 1)));
+  const loom_serve_memory_statistics_t before =
+      loom_serve_text_model_memory_statistics(model);
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  const loom_serve_memory_statistics_t after =
+      loom_serve_text_model_memory_statistics(model);
+  if (before.reserved_bytes &&
+      (!trimmed.moved_blocks || !trimmed.released_bytes ||
+       after.committed_bytes >= before.committed_bytes)) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "live compaction did not move blocks and free backing");
+  }
+  fprintf(stderr,
+          "{\"event\":\"memory_trimmed\",\"moved_blocks\":%u,"
+          "\"copied_bytes\":%" PRIu64 ",\"released_bytes\":%" PRIu64
+          ",\"committed_bytes\":%" PRIu64 "}\n",
+          trimmed.moved_blocks, trimmed.copied_bytes, trimmed.released_bytes,
+          after.committed_bytes);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
+    if (loom_serve_text_row_token(survivor) != expected[i]) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "compaction changed continuation token %zu", i);
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(survivor));
+  }
+  if (loom_serve_text_row_token(survivor) != expected_pending) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "compaction changed pending token");
+  }
+  if (loom_serve_text_mtp_from_flags()) {
+    const loom_serve_text_span_t span = {
+        7, 4, &expected_pending,
+        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
+    loom_serve_text_result_t actual;
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_verify(model, 0, 1, &span,
+                                                      &limit, NULL, &actual));
+    if (actual.consumed_count != expected_verification.consumed_count ||
+        actual.output_count != expected_verification.output_count ||
+        memcmp(actual.tokens, expected_verification.tokens,
+               actual.output_count * sizeof(*actual.tokens))) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "compaction changed draft verification");
+    }
+  }
+  if (loom_serve_text_row_position(survivor) != expected_position) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "compaction changed frontier");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(survivor));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  if (loom_serve_text_model_memory_statistics(model).committed_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "final trim retained backing");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, prefix_count, input));
+  if (loom_serve_text_row_token(survivor) != expected[0]) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "regrowth changed prediction");
+  }
+  fprintf(stderr,
+          "PASS: live relocation, target/draft continuation, full trim and "
+          "regrowth.\n");
+  return iree_ok_status();
+}
+
 // Each sample replays the same prefix outside timing. Both arms use the same
 // physical resident rows, weights and workspace. The baseline uses the ordinary
 // prefill/decode families, not four padded prefill calls for decode inputs.
@@ -793,6 +937,9 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status) && !FLAG_compare[0]) {
     status = qwen_check_mtp_verification(model, allocator);
+  }
+  if (iree_status_is_ok(status) && FLAG_trim) {
+    status = qwen_check_trim(model, allocator);
   }
   if (iree_status_is_ok(status)) {
     const loom_serve_memory_statistics_t memory =

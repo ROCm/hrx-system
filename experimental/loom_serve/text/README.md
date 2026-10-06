@@ -135,6 +135,17 @@ is an error, not a silent change of storage policy. Host ASAN remains usable.
 Heartbeat `elastic_state` accounting covers only virtual mutable-state
 reservations; weights and transient workspace are separate allocations.
 
+`loom_serve_text_model_trim` compacts owned blocks into a live ID prefix and
+returns empty physical slabs. Source regions drive bounded device-copy batches;
+KV never reads back to the host. Copies retire before host and device maps
+change, and map uploads retire before old backing is unmapped. Live recurrent
+state and partially occupied slabs stay backed. Reset rows release their private
+backing at this maintenance cut and initialize again on reuse. The operation
+does not evict live history, rebuild commands, or change virtual addresses.
+Its result separates relocated blocks, copied bytes, and physically released
+bytes. The real-weight `models/qwen:epoch_check --trim` witness compares an
+uncompacted continuation, including MTP, then checks full trim and regrowth.
+
 Each row's control/input/progress and recurrent views are present. Dense
 attention is present only without a physical pool; pooled kernels find it
 through source origins. The recurrent view is the zero-resettable private

@@ -23,6 +23,7 @@
 #include "experimental/loom_serve/runtime/program.h"
 #include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/storage/block_pool.h"
+#include "experimental/loom_serve/storage/relocation.h"
 #include "iree/base/internal/path.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
@@ -76,14 +77,8 @@ typedef struct text_stage_t {
 typedef struct text_cache_region_t {
   // Source allocation slot containing these repeated cache planes.
   iree_host_size_t allocation;
-  // Byte origin of the first plane in its allocation.
-  iree_device_size_t origin;
-  // Number of identical planes addressed by every logical block ID.
-  iree_host_size_t count;
-  // Byte distance between adjacent plane origins.
-  iree_device_size_t stride;
-  // Contiguous bytes occupied by one block in each plane.
-  iree_device_size_t block_bytes;
+  // Source-owned disjoint cache planes inside that allocation.
+  loom_serve_block_region_t blocks;
 } text_cache_region_t;
 
 struct loom_serve_text_model_t {
@@ -150,6 +145,8 @@ struct loom_serve_text_model_t {
     loom_serve_block_pool_t pool;
     // Fixed row-major host maps, retained through queued uploads.
     uint32_t* maps;
+    // Cold relocation plan indexed by physical ID, reused at maintenance cuts.
+    uint32_t* destinations;
   } cache;
   // Elastic physical backing, separate from logical row/block ownership.
   struct {
@@ -157,6 +154,8 @@ struct loom_serve_text_model_t {
     loom_serve_memory_pool_t* pool;
     // Optional virtual reservations in source allocation order.
     loom_serve_virtual_buffer_t* buffers[TEXT_ALLOCATION_COUNT];
+    // Always-live initialized prefixes outside row-owned private storage.
+    iree_device_size_t private_lengths[TEXT_ALLOCATION_COUNT];
     // Owned source-defined cache plane groups.
     text_cache_region_t* regions;
     // Number of validated cache plane groups.
@@ -603,7 +602,8 @@ static iree_status_t text_prepare_storage(loom_serve_text_model_t* model,
                               "cache region %zu exceeds its allocation", i);
     }
     model->memory.regions[i] =
-        (text_cache_region_t){allocation, origin, count, stride, block_bytes};
+        (text_cache_region_t){.allocation = allocation,
+                              .blocks = {origin, count, stride, block_bytes}};
   }
   return iree_ok_status();
 }
@@ -729,6 +729,10 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
         model->allocator, model->row_count * model->cache.blocks_per_row,
         sizeof(*model->cache.maps), (void**)&model->cache.maps));
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        model->allocator, model->cache.pool.capacity,
+        sizeof(*model->cache.destinations),
+        (void**)&model->cache.destinations));
   }
   uint64_t workspace_length = 0;
   uint64_t workspace_alignment = 0;
@@ -783,6 +787,7 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
               loom_serve_virtual_buffer_handle(model->memory.buffers[i]);
           iree_hal_buffer_retain(*allocations[i]);
           if (clear_length && i != 1) {
+            model->memory.private_lengths[i] = clear_length;
             status = loom_serve_virtual_buffer_commit(model->memory.buffers[i],
                                                       0, clear_length);
           }
@@ -1049,6 +1054,7 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   }
   iree_allocator_free(model->allocator, model->rows);
   iree_allocator_free(model->allocator, model->cache.maps);
+  iree_allocator_free(model->allocator, model->cache.destinations);
   loom_serve_block_pool_deinitialize(&model->cache.pool);
   iree_hal_buffer_release(model->epoch.buffers[1]);
   iree_hal_buffer_release(model->epoch.buffers[2]);
@@ -1103,6 +1109,113 @@ loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
   return model->memory.pool
              ? loom_serve_memory_pool_statistics(model->memory.pool)
              : (loom_serve_memory_statistics_t){0};
+}
+
+iree_status_t loom_serve_text_model_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result) {
+  *out_result = (loom_serve_text_trim_result_t){0};
+  if (!model->memory.pool) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
+  const uint64_t released_before =
+      loom_serve_memory_pool_statistics(model->memory.pool).released_bytes;
+  out_result->moved_blocks = loom_serve_block_pool_plan_compaction(
+      &model->cache.pool, model->cache.destinations);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       out_result->moved_blocks && i < model->memory.region_count &&
+       iree_status_is_ok(status);
+       ++i) {
+    const text_cache_region_t* region = &model->memory.regions[i];
+    uint64_t copied_bytes = 0;
+    status = loom_serve_block_region_relocate(
+        model->execution, model->memory.buffers[region->allocation],
+        &region->blocks, model->cache.pool.capacity, model->cache.destinations,
+        &copied_bytes);
+    out_result->copied_bytes += copied_bytes;
+  }
+  // Even a rejected later copy batch leaves earlier submissions owning their
+  // sources/destinations. Observe retirement before publishing or returning.
+  status =
+      iree_status_join(status, loom_serve_execution_drain(model->execution));
+  if (iree_status_is_ok(status) && out_result->moved_blocks) {
+    for (iree_host_size_t i = 0; i < model->row_count; ++i) {
+      uint32_t* blocks = model->cache.maps + i * model->cache.blocks_per_row;
+      for (uint32_t j = 0; j < model->rows[i].block_count; ++j) {
+        blocks[j] = model->cache.destinations[blocks[j]];
+      }
+    }
+    const iree_device_size_t length = model->row_count *
+                                      model->cache.blocks_per_row *
+                                      sizeof(*model->cache.maps);
+    const iree_hal_transfer_operation_t uploads[] = {
+        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+         .upload = {.source = model->cache.maps,
+                    .target_buffer = model->epoch.buffers[2],
+                    .target_offset = model->cache.map_origin,
+                    .length = length}},
+        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+         .upload = {.source = model->cache.maps,
+                    .target_buffer = model->mtp.row_table,
+                    .target_offset = model->cache.map_origin,
+                    .length = length}},
+    };
+    uint64_t completion = 0;
+    status = loom_serve_execution_transfer(
+        model->execution, model->mtp.enabled ? 2 : 1, uploads, &completion);
+    status =
+        iree_status_join(status, loom_serve_execution_drain(model->execution));
+  }
+  if (iree_status_is_ok(status)) {
+    loom_serve_block_pool_commit_compaction(&model->cache.pool);
+    for (iree_host_size_t i = 0; i < TEXT_ALLOCATION_COUNT; ++i) {
+      if (!model->memory.buffers[i]) {
+        continue;
+      }
+      loom_serve_virtual_buffer_begin_trim(model->memory.buffers[i]);
+      if (model->memory.private_lengths[i]) {
+        loom_serve_virtual_buffer_keep(model->memory.buffers[i], 0,
+                                       model->memory.private_lengths[i]);
+      }
+    }
+    for (iree_host_size_t i = 0;
+         model->memory.buffers[1] && i < model->row_count; ++i) {
+      if (!model->rows[i].position) {
+        continue;
+      }
+      for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
+           ++binding) {
+        iree_hal_buffer_t* view = model->rows[i].buffers[binding];
+        if (view) {
+          loom_serve_virtual_buffer_keep(model->memory.buffers[1],
+                                         iree_hal_buffer_byte_offset(view),
+                                         iree_hal_buffer_byte_length(view));
+        }
+      }
+    }
+    const uint32_t live =
+        model->cache.pool.capacity - model->cache.pool.available;
+    for (iree_host_size_t i = 0; live && i < model->memory.region_count; ++i) {
+      const text_cache_region_t* region = &model->memory.regions[i];
+      for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
+        loom_serve_virtual_buffer_keep(
+            model->memory.buffers[region->allocation],
+            region->blocks.origin + plane * region->blocks.stride,
+            live * region->blocks.block_bytes);
+      }
+    }
+  }
+  for (iree_host_size_t i = 0;
+       i < TEXT_ALLOCATION_COUNT && iree_status_is_ok(status); ++i) {
+    if (model->memory.buffers[i]) {
+      status = loom_serve_virtual_buffer_trim(model->memory.buffers[i]);
+    }
+  }
+  out_result->released_bytes =
+      loom_serve_memory_pool_statistics(model->memory.pool).released_bytes -
+      released_before;
+  return status;
 }
 
 iree_tokenizer_t* loom_serve_text_model_tokenizer(
@@ -1315,11 +1428,12 @@ static iree_status_t text_grow_blocks(loom_serve_text_model_t* model,
     row->block_count = needed;
     for (iree_host_size_t j = 0;
          model->memory.pool && j < model->memory.region_count; ++j) {
-      const text_cache_region_t* region = &model->memory.regions[j];
+      const text_cache_region_t* cache_region = &model->memory.regions[j];
+      const loom_serve_block_region_t* region = &cache_region->blocks;
       for (iree_host_size_t plane = 0; plane < region->count; ++plane) {
         for (iree_host_size_t block = 0; block < count; ++block) {
           IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_commit(
-              model->memory.buffers[region->allocation],
+              model->memory.buffers[cache_region->allocation],
               region->origin + plane * region->stride +
                   blocks[block] * region->block_bytes,
               region->block_bytes));
