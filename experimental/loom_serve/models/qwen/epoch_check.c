@@ -780,11 +780,27 @@ int main(int argc, char** argv) {
   iree_status_t status =
       loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
   if (iree_status_is_ok(status)) {
+    const loom_serve_memory_statistics_t memory =
+        loom_serve_text_model_memory_statistics(model);
+    fprintf(stderr,
+            "{\"event\":\"memory_created\",\"reserved_bytes\":%" PRIu64
+            ",\"committed_bytes\":%" PRIu64 "}\n",
+            memory.reserved_bytes, memory.committed_bytes);
+  }
+  if (iree_status_is_ok(status)) {
     status = FLAG_compare[0] ? qwen_check_compare(model, allocator)
                              : qwen_check_run(model, allocator);
   }
   if (iree_status_is_ok(status) && !FLAG_compare[0]) {
     status = qwen_check_mtp_verification(model, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    const loom_serve_memory_statistics_t memory =
+        loom_serve_text_model_memory_statistics(model);
+    fprintf(stderr,
+            "{\"event\":\"memory_completed\",\"reserved_bytes\":%" PRIu64
+            ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64 "}\n",
+            memory.reserved_bytes, memory.committed_bytes, memory.peak_bytes);
   }
   status = iree_status_join(status, loom_serve_text_model_destroy(model));
   if (!iree_status_is_ok(status)) {

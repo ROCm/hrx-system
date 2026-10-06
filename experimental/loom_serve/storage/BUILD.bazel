@@ -4,7 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test")
+load("//build_tools/bazel:test_resources.bzl", "GPU_DEVICE_RESOURCE_GROUP")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:public"],
@@ -13,10 +14,39 @@ package(
 )
 
 loom_cc_library(
+    name = "memory",
+    srcs = ["memory.c"],
+    hdrs = ["memory.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_library(
     name = "block_pool",
     srcs = ["block_pool.c"],
     hdrs = ["block_pool.h"],
     deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "memory_test",
+    srcs = ["memory_test.cc"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":memory",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
 )
 
 loom_cc_test(

@@ -49,6 +49,7 @@ loom_cc_library(
         "//experimental/loom_serve/runtime:weights",
         "//experimental/loom_serve/scheduling:packing",
         "//experimental/loom_serve/storage:block_pool",
+        "//experimental/loom_serve/storage:memory",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
