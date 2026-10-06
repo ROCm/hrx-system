@@ -223,10 +223,13 @@ bool loom_low_allocation_search_assignment_conflicts(
     const loom_value_id_t* ignored_storage_lease_value_ids,
     uint16_t ignored_storage_lease_value_count,
     loom_low_allocation_storage_release_policy_t release_policy) {
+  loom_low_allocation_write_interference_t* interference =
+      context->unit_liveness->write_interference;
   const loom_value_ordinal_t retained_origin =
-      loom_low_allocation_write_interference_conflicting_read(
-          context->unit_liveness->write_interference, context->assignment_map,
-          candidate);
+      interference != NULL
+          ? loom_low_allocation_write_interference_conflicting_read(
+                interference, context->assignment_map, candidate)
+          : LOOM_VALUE_ORDINAL_INVALID;
   if (retained_origin != LOOM_VALUE_ORDINAL_INVALID) {
     if (context->retained_fixed_value_index_plus_one == 0 &&
         context->target_constraints->fixed_value_count != 0) {

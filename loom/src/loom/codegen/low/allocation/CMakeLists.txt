@@ -793,6 +793,7 @@ loom_cc_library(
     ::table
     ::target_constraints
     ::unit_liveness
+    ::write_interference
     iree::base
     iree::base::internal::arena
     loom::analysis::consumption

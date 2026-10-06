@@ -18,6 +18,7 @@
 #include "loom/codegen/low/allocation/spill_plan.h"
 #include "loom/codegen/low/allocation/spill_traffic.h"
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/diagnostics.h"
 #include "loom/ir/local_value_domain.h"
@@ -613,6 +614,9 @@ static uint32_t loom_low_allocation_interval_assignment_publish_assignment(
       state->result.assignment_count;
   state->result.assignment_indices_by_value_ordinal[value_ordinal] =
       assignment_index;
+  loom_low_allocation_write_interference_note_assignment(
+      state->context->unit_liveness->write_interference, value_ordinal,
+      assignment);
   loom_low_allocation_target_constraints_record_location_extent(
       state->context->target_constraints, assignment->descriptor_reg_class_id,
       assignment->location_kind, assignment->location_base,
@@ -1064,6 +1068,8 @@ iree_status_t loom_low_allocation_interval_assignment_build(
   if (iree_status_is_ok(status)) {
     *out_result = state.result;
   }
+  loom_low_allocation_write_interference_reset_inference(
+      context->unit_liveness->write_interference);
   iree_arena_checkpoint_restore(&scratch_checkpoint);
   return status;
 }

@@ -704,6 +704,7 @@ loom_cc_library(
         ":table",
         ":target_constraints",
         ":unit_liveness",
+        ":write_interference",
         "//loom/src/loom/analysis:consumption",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",

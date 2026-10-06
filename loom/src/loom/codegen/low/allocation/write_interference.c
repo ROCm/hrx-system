@@ -157,9 +157,14 @@ struct loom_low_allocation_write_interference_t {
   iree_host_size_t access_count;
   // Logical capacity of |accesses|, at most UINT32_MAX.
   iree_host_size_t access_capacity;
-  // Number of bits in the compact retained allocation-unit domain, a subset
-  // of the producer-bounded unit-liveness domain.
-  uint32_t retained_unit_count;
+  // Construction units and query inference have disjoint lifetimes.
+  union {
+    // Number of bits in the compact retained allocation-unit domain, a subset
+    // of the producer-bounded unit-liveness domain. Retires at finalization.
+    uint32_t retained_unit_count;
+    // Origins in the current successful query witness, or zero when empty.
+    uint32_t inferred_count;
+  };
   // Immutable retained-range snapshots shared by events with unchanged state.
   loom_low_write_retained_t* retained;
   // Number of initialized retained ranges.
@@ -173,9 +178,9 @@ struct loom_low_allocation_write_interference_t {
   // Immutable row addresses grouped by any participating storage origin.
   // The stable segments share this table's complete decision lifetime.
   const loom_low_write_constraint_t** indexed_constraints;
-  // Reusable candidate-local equality propagation workspace.
+  // Inferred bases in the current witness; other entries are UINT32_MAX.
   uint32_t* inferred_bases;
-  // Origins reached by candidate-local zero-copy implications.
+  // Origins reached by the current zero-copy implication witness.
   loom_value_ordinal_t* inferred_origins;
 };
 
@@ -1249,6 +1254,7 @@ static iree_status_t loom_low_write_finalize_impl(
   IREE_RETURN_IF_ERROR(loom_low_write_index_constraints(table, arena));
   memset(table->inferred_bases, 0xFF,
          table->value_count * sizeof(*table->inferred_bases));
+  table->inferred_count = 0;
   return iree_ok_status();
 }
 
@@ -1273,20 +1279,36 @@ iree_status_t loom_low_allocation_write_interference_finalize(
 #define LOOM_LOW_WRITE_LOCATION_UNKNOWN ((int64_t)UINT32_MAX)
 #define LOOM_LOW_WRITE_LOCATION_SPILLED ((int64_t)UINT32_MAX + 1)
 
-static int64_t loom_low_write_location(
+void loom_low_allocation_write_interference_reset_inference(
+    loom_low_allocation_write_interference_t* table) {
+  if (table == NULL) {
+    return;
+  }
+  for (uint32_t i = 0; i < table->inferred_count; ++i) {
+    table->inferred_bases[table->inferred_origins[i]] = UINT32_MAX;
+  }
+  table->inferred_count = 0;
+}
+
+void loom_low_allocation_write_interference_note_assignment(
+    loom_low_allocation_write_interference_t* table,
+    loom_value_ordinal_t ordinal,
+    const loom_low_allocation_assignment_t* assignment) {
+  if (table == NULL || table->inferred_count == 0 ||
+      !loom_low_allocation_assignment_is_physical_register_class(
+          assignment, table->register_class)) {
+    return;
+  }
+  const loom_value_ordinal_t origin = table->values[ordinal].origin;
+  if (table->inferred_bases[origin] != assignment->location_base) {
+    loom_low_allocation_write_interference_reset_inference(table);
+  }
+}
+
+static int64_t loom_low_write_committed_location(
     const loom_low_allocation_write_interference_t* table,
     const loom_low_allocation_assignment_map_t* assignments,
-    loom_value_ordinal_t value, loom_value_ordinal_t candidate, uint32_t base,
-    const loom_low_allocation_write_proposal_t* proposal) {
-  if (value == candidate) {
-    return base;
-  }
-  if (proposal != NULL && proposal->bases[value] != UINT32_MAX) {
-    return proposal->bases[value];
-  }
-  if (table->inferred_bases[value] != UINT32_MAX) {
-    return table->inferred_bases[value];
-  }
+    loom_value_ordinal_t value) {
   // Constraint endpoints and retained ranges already name valid local values.
   // The assignment owner publishes an index only after its record exists.
   const uint32_t assignment_index =
@@ -1303,6 +1325,23 @@ static int64_t loom_low_write_location(
     }
   }
   return table->values[value].fixed_base;
+}
+
+static int64_t loom_low_write_location(
+    const loom_low_allocation_write_interference_t* table,
+    const loom_low_allocation_assignment_map_t* assignments,
+    loom_value_ordinal_t value, loom_value_ordinal_t candidate, uint32_t base,
+    const loom_low_allocation_write_proposal_t* proposal) {
+  if (value == candidate) {
+    return base;
+  }
+  if (proposal != NULL && proposal->bases[value] != UINT32_MAX) {
+    return proposal->bases[value];
+  }
+  if (table->inferred_bases[value] != UINT32_MAX) {
+    return table->inferred_bases[value];
+  }
+  return loom_low_write_committed_location(table, assignments, value);
 }
 
 // Records a new candidate-local implication after its prior location was
@@ -1388,9 +1427,7 @@ static loom_value_ordinal_t loom_low_write_origin_conflicting_read(
       }
     }
   }
-  for (uint32_t i = 0; i < pending_count; ++i) {
-    table->inferred_bases[table->inferred_origins[i]] = UINT32_MAX;
-  }
+  table->inferred_count = pending_count;
   return retained_origin;
 }
 
@@ -1407,15 +1444,32 @@ loom_value_ordinal_t loom_low_allocation_write_interference_conflicting_read(
     loom_low_allocation_write_interference_t* table,
     const loom_low_allocation_assignment_map_t* assignments,
     const loom_low_allocation_assignment_t* candidate) {
-  if (table == NULL || table->constraint_count == 0 ||
+  if (table->constraint_count == 0 ||
       !loom_low_allocation_assignment_is_physical_register_class(
           candidate, table->register_class)) {
     return LOOM_VALUE_ORDINAL_INVALID;
   }
   const loom_value_ordinal_t origin =
       loom_low_write_assignment_origin(table, assignments, candidate);
-  return loom_low_write_origin_conflicting_read(table, assignments, origin,
-                                                candidate->location_base, NULL);
+  if (table->inferred_bases[origin] == candidate->location_base) {
+    return LOOM_VALUE_ORDINAL_INVALID;
+  }
+  loom_low_allocation_write_interference_reset_inference(table);
+  const loom_value_ordinal_t retained = loom_low_write_origin_conflicting_read(
+      table, assignments, origin, candidate->location_base, NULL);
+  if (retained != LOOM_VALUE_ORDINAL_INVALID) {
+    loom_low_allocation_write_interference_reset_inference(table);
+  } else if (table->inferred_count > 1) {
+    // A query may hypothetically recolor an assigned root. Another inferred
+    // origin cannot reuse that proof against the root's unchanged location.
+    const int64_t committed =
+        loom_low_write_committed_location(table, assignments, origin);
+    if (committed < LOOM_LOW_WRITE_LOCATION_UNKNOWN &&
+        committed != candidate->location_base) {
+      loom_low_allocation_write_interference_reset_inference(table);
+    }
+  }
+  return retained;
 }
 
 iree_status_t loom_low_allocation_write_proposal_initialize(
@@ -1467,11 +1521,14 @@ bool loom_low_allocation_write_proposal_conflicts(
     loom_low_allocation_write_interference_t* table,
     const loom_low_allocation_assignment_map_t* assignments,
     const loom_low_allocation_write_proposal_t* proposal) {
+  loom_low_allocation_write_interference_reset_inference(table);
   for (iree_host_size_t i = 0; i < proposal->count; ++i) {
     const loom_value_ordinal_t origin = proposal->origins[i];
-    if (loom_low_write_origin_conflicting_read(
-            table, assignments, origin, proposal->bases[origin], proposal) !=
-        LOOM_VALUE_ORDINAL_INVALID) {
+    const loom_value_ordinal_t retained =
+        loom_low_write_origin_conflicting_read(
+            table, assignments, origin, proposal->bases[origin], proposal);
+    loom_low_allocation_write_interference_reset_inference(table);
+    if (retained != LOOM_VALUE_ORDINAL_INVALID) {
       return true;
     }
   }

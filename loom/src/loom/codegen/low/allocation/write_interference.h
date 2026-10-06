@@ -64,11 +64,31 @@ iree_status_t loom_low_allocation_write_interference_finalize(
     const loom_low_placement_table_t* placement, iree_arena_allocator_t* arena,
     iree_arena_allocator_t* scratch_arena);
 
-// Returns the retained origin rejecting a candidate, or INVALID. Future
+// Records a published assignment before the next candidate query. A successful
+// query's inferred locations remain a valid positive witness when publication
+// agrees with them. Other tracked physical assignments invalidate that witness;
+// provisional spills only remove constraints. |ordinal| is the published value,
+// before canonicalizing required aliases.
+void loom_low_allocation_write_interference_note_assignment(
+    loom_low_allocation_write_interference_t* interference,
+    loom_value_ordinal_t ordinal,
+    const loom_low_allocation_assignment_t* assignment);
+
+// Ends an assignment attempt's inference lifetime on success or failure. The
+// immutable constraints remain available for a new coloring or relocation.
+void loom_low_allocation_write_interference_reset_inference(
+    loom_low_allocation_write_interference_t* interference);
+
+// Returns the retained origin rejecting a candidate, or INVALID. The search
+// owner skips this query when the optional finalized table is absent. Future
 // fixed assignments participate. Producer-proved zero-copy equations propagate
 // in both directions using reusable inference scratch, without assigning their
-// endpoints. Provisional spills end propagation: spill plans rebuild allocation
-// before emission. Required aliases query their canonical storage origin.
+// endpoints. Successful inference remains reusable until assignment publication
+// invalidates it or the owning attempt ends. Provisional spills end
+// propagation: spill plans rebuild allocation before emission. Required aliases
+// query their canonical storage origin. Hypothetical recoloring of an already
+// located root does not publish its implications for queries rooted at other
+// values.
 loom_value_ordinal_t loom_low_allocation_write_interference_conflicting_read(
     loom_low_allocation_write_interference_t* interference,
     const loom_low_allocation_assignment_map_t* assignments,
