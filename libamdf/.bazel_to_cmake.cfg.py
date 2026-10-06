@@ -12,6 +12,7 @@ import bazel_to_cmake_requirements
 from loom_binary import LoomBinaryBuildFileFunctions
 
 _AMDF_CONFIG_CMAKE_OPTIONS = {
+    "//loom/config/import:cxx": "LOOM_IMPORT_CXX",
     "//libamdf/config:enabled_setting": "AMDF_BUILD",
     "//libamdf/config/family:cdna": "AMDF_FAMILY_CDNA",
     "//libamdf/config/family:gpu": "AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA",
@@ -107,7 +108,17 @@ class AmdfBuildFileFunctions(
         )
 
     def amdf_cts_gpu_kernel_set(
-        self, name, srcs, targets, entry_point, namespace, visibility=None
+        self,
+        name,
+        srcs,
+        targets,
+        entry_point,
+        namespace,
+        data=None,
+        input_format="",
+        inputopts=None,
+        visibility=None,
+        target_compatible_with=None,
     ):
         del visibility
         capabilities = self._loaded_modules.symbol(
@@ -127,8 +138,11 @@ class AmdfBuildFileFunctions(
             for target in targets
         }
         compatibility["//conditions:default"] = ["@platforms//:incompatible"]
+        target_compatible_with = (target_compatible_with or []) + self.select(
+            compatibility
+        )
         policy = self._apply_amdf_cmake_policy(
-            {"target_compatible_with": self.select(compatibility)}
+            {"target_compatible_with": target_compatible_with}
         )
         self._emit_platform_guard_begin(policy["target_compatible_with"])
         srcs_block, srcs_selection = self._convert_platform_select_strings(
@@ -139,6 +153,11 @@ class AmdfBuildFileFunctions(
             + "amdf_cts_gpu_kernel_set(\n"
             + self._convert_string_arg_block("NAME", name)
             + srcs_block
+            + self._convert_data_srcs_block(data, block_name="DATA", sort=False)
+            + self._convert_string_arg_block("INPUT_FORMAT", input_format or None)
+            + self._convert_string_list_block(
+                "INPUTOPTS", self._convert_location_args(inputopts), sort=False
+            )
             + self._convert_string_list_block("TARGETS", targets)
             + self._convert_string_arg_block("ENTRY_POINT", entry_point)
             + self._convert_string_arg_block("NAMESPACE", namespace)
@@ -241,6 +260,7 @@ class AmdfBuildFileFunctions(
         name,
         srcs,
         deps,
+        defines=None,
         linkage_modes=("dynamic",),
         linkopts=None,
         tags=None,
@@ -258,6 +278,7 @@ class AmdfBuildFileFunctions(
             name=corpus_name,
             testonly=True,
             srcs=srcs,
+            defines=defines,
             deps=deps,
             linkopts=linkopts,
             alwayslink=True,

@@ -11,6 +11,7 @@ load("//libamdf/build_tools/bazel:cts_gpu_kernel.bzl", "amdf_cts_gpu_kernel_set"
 load("//libamdf/requirements:package_policy.bzl", "apply_amdf_target_policy")
 load("//loom/build_tools/amdgpu:descriptor_sets.bzl", "loom_amdgpu_selected_descriptor_set_values")
 load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET", "LOOM_AMDGPU_SUPPORTED_TARGETS")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 load("//loom/build_tools/bazel:defs.bzl", "loom_target_profile")
 
 package(
@@ -29,9 +30,13 @@ exports_files([
     "completed_tick_rdna4_gfx125x.loom",
     "completed_tick_rdna4_gfx1251.loom",
     "completed_tick_rdna4_gfx1250_a0.loom",
+    "file_demand.cxx",
     "file_demand.loom",
+    "file_exchange.cxx",
     "file_exchange.loom",
+    "file_gather.cxx",
     "file_gather.loom",
+    "file_latency.cxx",
     "file_latency.loom",
     "geometry_ids.loom",
     "lds_exchange.loom",
@@ -61,6 +66,8 @@ _KERNEL_TARGETS = sorted([
 
 # Resident exchange programs are submitted through the RDNA PM4 path.
 _RDNA_KERNEL_TARGETS = [target for target in _KERNEL_TARGETS if not target.startswith("gfx9")]
+
+_CXX_COMPATIBILITY = loom_config_compatible_with(["//loom/config/import:cxx"])
 
 _KERNEL_TARGETS_BY_CAPABILITY = {
     capability: [
@@ -180,6 +187,16 @@ amdf_cts_gpu_kernel_set(
     targets = _RDNA_KERNEL_TARGETS,
 )
 
+amdf_cts_gpu_kernel_set(
+    name = "file_exchange_cxx_kernels",
+    srcs = ["file_exchange.cxx"],
+    entry_point = "file_exchange",
+    inputopts = ["cxx:root=file_exchange"],
+    namespace = "kernels::file_exchange_cxx",
+    target_compatible_with = _CXX_COMPATIBILITY,
+    targets = _RDNA_KERNEL_TARGETS,
+)
+
 amdf_cc_library(
     name = "file_exchange",
     testonly = True,
@@ -194,6 +211,16 @@ amdf_cts_gpu_kernel_set(
     targets = _RDNA_KERNEL_TARGETS,
 )
 
+amdf_cts_gpu_kernel_set(
+    name = "file_gather_cxx_kernels",
+    srcs = ["file_gather.cxx"],
+    entry_point = "file_gather",
+    inputopts = ["cxx:root=file_gather"],
+    namespace = "kernels::file_gather_cxx",
+    target_compatible_with = _CXX_COMPATIBILITY,
+    targets = _RDNA_KERNEL_TARGETS,
+)
+
 amdf_cc_library(
     name = "file_gather",
     testonly = True,
@@ -205,6 +232,16 @@ amdf_cts_gpu_kernel_set(
     srcs = ["file_gather.loom"],
     entry_point = "file_gather",
     namespace = "kernels::file_gather",
+    targets = _RDNA_KERNEL_TARGETS,
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "file_latency_cxx_kernels",
+    srcs = _COMPLETED_TICK_SRCS + ["file_latency.cxx"],
+    entry_point = "file_latency",
+    inputopts = ["cxx:root=file_latency"],
+    namespace = "kernels::file_latency_cxx",
+    target_compatible_with = _CXX_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
@@ -226,6 +263,16 @@ amdf_cc_library(
     name = "file_demand",
     testonly = True,
     hdrs = ["file_demand.h"],
+)
+
+amdf_cts_gpu_kernel_set(
+    name = "file_demand_cxx_kernels",
+    srcs = _COMPLETED_TICK_SRCS + ["file_demand.cxx"],
+    entry_point = "file_demand",
+    inputopts = ["cxx:root=file_demand"],
+    namespace = "kernels::file_demand_cxx",
+    target_compatible_with = _CXX_COMPATIBILITY,
+    targets = _RDNA_KERNEL_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(

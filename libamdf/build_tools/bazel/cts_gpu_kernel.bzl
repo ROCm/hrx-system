@@ -47,7 +47,17 @@ _embed_gpu_kernel_set = rule(
     },
 )
 
-def amdf_cts_gpu_kernel_set(name, srcs, targets, entry_point, namespace, visibility = None):
+def amdf_cts_gpu_kernel_set(
+        name,
+        srcs,
+        targets,
+        entry_point,
+        namespace,
+        data = [],
+        input_format = "",
+        inputopts = [],
+        visibility = None,
+        target_compatible_with = []):
     """Compiles one behavior for each target and embeds its immutable products.
 
     Args:
@@ -56,9 +66,15 @@ def amdf_cts_gpu_kernel_set(name, srcs, targets, entry_point, namespace, visibil
       targets: Physical selectors, also naming package-local target profiles.
       entry_point: Exported kernel symbol to extract.
       namespace: C++ namespace containing the kKernels set.
+      data: Declared inputs used while admitting the authored sources.
+      input_format: Optional source provider override.
+      inputopts: Provider-scoped source admission options.
       visibility: Visibility of the generated kernel library.
+      target_compatible_with: Additional source-provider constraints applied to
+          every generated target.
     """
     policy = apply_amdf_target_policy({})
+    policy["target_compatible_with"] += target_compatible_with
     products = {}
     selectors = {}
     compatibility = {"//conditions:default": ["@platforms//:incompatible"]}
@@ -70,6 +86,9 @@ def amdf_cts_gpu_kernel_set(name, srcs, targets, entry_point, namespace, visibil
             name = product_name,
             testonly = True,
             srcs = srcs,
+            data = data,
+            input_format = input_format,
+            inputopts = inputopts,
             out = product_name + ".hsaco",
             roots = ["@" + entry_point],
             target = ":" + target,
@@ -96,6 +115,6 @@ def amdf_cts_gpu_kernel_set(name, srcs, targets, entry_point, namespace, visibil
         srcs = [name + ".cc"],
         hdrs = [name + ".h"],
         deps = ["//libamdf/cts/gpu/kernels:kernel"],
-        target_compatible_with = selected_compatibility,
+        target_compatible_with = target_compatible_with + selected_compatibility,
         visibility = visibility,
     )

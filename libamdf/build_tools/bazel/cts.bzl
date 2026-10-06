@@ -15,6 +15,7 @@ def amdf_cts_test_suite(
         name,
         srcs,
         deps,
+        defines = None,
         linkage_modes = ["dynamic"],
         linkopts = None,
         tags = None,
@@ -27,6 +28,7 @@ def amdf_cts_test_suite(
       name: Aggregate test-suite target name.
       srcs: Sources for one independently selectable conformance corpus.
       deps: Public API and test-helper dependencies of the corpus.
+      defines: Preprocessor definitions applied to the corpus sources.
       linkage_modes: Providers to link: dynamic (runtime-loaded, the default),
         shared (link-time shared), or static. Each mode adds one executable.
       linkopts: Native libraries required by the foreign API under test.
@@ -49,6 +51,7 @@ def amdf_cts_test_suite(
         name = corpus_name,
         testonly = True,
         srcs = srcs,
+        defines = defines,
         deps = deps,
         linkopts = linkopts,
         alwayslink = True,

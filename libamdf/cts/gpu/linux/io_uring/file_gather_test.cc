@@ -17,12 +17,21 @@
 #include <tuple>
 #include <vector>
 
+#if defined(AMDF_FILE_IO_CXX_KERNELS)
+#include "libamdf/cts/gpu/kernels/file_gather_cxx_kernels.h"
+#else
 #include "libamdf/cts/gpu/kernels/file_gather_kernels.h"
+#endif
 #include "libamdf/cts/gpu/linux/io_uring/file_io_fixture.h"
 
 namespace {
 
 namespace protocol = kernels::file_gather;
+#if defined(AMDF_FILE_IO_CXX_KERNELS)
+namespace products = kernels::file_gather_cxx;
+#else
+namespace products = kernels::file_gather;
+#endif
 
 // The fixture writes native fields directly, including both user_data words.
 static_assert(sizeof(io_uring_sqe) == 64);
@@ -146,7 +155,7 @@ class GpuFileGatherTest : public GpuFileIoFixture {
   void Run(FileMode mode, uint32_t held_slot, Fault fault = Fault::kNone,
            uint32_t request_capacity = protocol::kRequestCapacity,
            FileIoPath path = FileIoPath::kDevice) {
-    const auto* product = protocol::kKernels.Find(gpu_endpoint_info_);
+    const auto* product = products::kKernels.Find(gpu_endpoint_info_);
     ASSERT_NE(product, nullptr) << "missing compiled file-gather kernel";
     const auto& kernel = *product;
     ASSERT_EQ(kernel.private_segment_byte_length, 0u);

@@ -13,12 +13,21 @@
 #include <vector>
 
 #include "libamdf/cts/gpu/kernels/file_exchange.h"
+#if defined(AMDF_FILE_IO_CXX_KERNELS)
+#include "libamdf/cts/gpu/kernels/file_exchange_cxx_kernels.h"
+#else
 #include "libamdf/cts/gpu/kernels/file_exchange_kernels.h"
+#endif
 #include "libamdf/cts/gpu/linux/io_uring/file_io_fixture.h"
 
 namespace {
 
 namespace protocol = kernels::file_exchange;
+#if defined(AMDF_FILE_IO_CXX_KERNELS)
+namespace products = kernels::file_exchange_cxx;
+#else
+namespace products = kernels::file_exchange;
+#endif
 
 // The shader writes the native UAPI, not a host-translated command record.
 static_assert(sizeof(io_uring_sqe) == 64);
@@ -52,7 +61,7 @@ class GpuFileIoTest : public GpuFileIoFixture {
   void Run(FileMode mode, Workload workload,
            FileIoPath path = FileIoPath::kDevice,
            uint32_t submission_entries = 8) {
-    const auto* product = protocol::kKernels.Find(gpu_endpoint_info_);
+    const auto* product = products::kKernels.Find(gpu_endpoint_info_);
     ASSERT_NE(product, nullptr) << "missing compiled file-exchange kernel";
     const auto& kernel = *product;
     ASSERT_EQ(kernel.private_segment_byte_length, 0u);

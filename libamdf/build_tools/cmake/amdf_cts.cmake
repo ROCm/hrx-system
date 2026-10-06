@@ -39,8 +39,8 @@ function(amdf_cts_gpu_kernel_set)
   if(NOT IREE_BUILD_TESTS)
     return()
   endif()
-  cmake_parse_arguments(_RULE "" "NAME;ENTRY_POINT;NAMESPACE"
-    "SRCS;TARGETS" ${ARGN})
+  cmake_parse_arguments(_RULE "" "NAME;ENTRY_POINT;NAMESPACE;INPUT_FORMAT"
+    "SRCS;DATA;INPUTOPTS;TARGETS" ${ARGN})
   if(_RULE_UNPARSED_ARGUMENTS OR NOT _RULE_NAME OR NOT _RULE_SRCS OR
      NOT _RULE_ENTRY_POINT OR NOT _RULE_NAMESPACE OR NOT _RULE_TARGETS)
     message(FATAL_ERROR "Incomplete GPU CTS kernel set declaration")
@@ -59,6 +59,9 @@ function(amdf_cts_gpu_kernel_set)
       TARGET "::${_SELECTOR}"
       OUTPUT "${_PRODUCT}.hsaco"
       SRCS ${_RULE_SRCS}
+      DATA ${_RULE_DATA}
+      INPUT_FORMAT "${_RULE_INPUT_FORMAT}"
+      INPUTOPTS ${_RULE_INPUTOPTS}
       ROOTS "@${_RULE_ENTRY_POINT}"
       TESTONLY
     )

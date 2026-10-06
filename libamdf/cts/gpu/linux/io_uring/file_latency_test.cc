@@ -30,13 +30,23 @@
 
 #include "gtest/gtest-spi.h"
 #include "libamdf/cts/gpu/kernels/file_demand.h"
+#if defined(AMDF_FILE_IO_CXX_KERNELS)
+#include "libamdf/cts/gpu/kernels/file_demand_cxx_kernels.h"
+#include "libamdf/cts/gpu/kernels/file_latency_cxx_kernels.h"
+#else
 #include "libamdf/cts/gpu/kernels/file_demand_kernels.h"
 #include "libamdf/cts/gpu/kernels/file_latency_kernels.h"
+#endif
 #include "libamdf/cts/gpu/linux/io_uring/file_io_fixture.h"
 
 namespace {
 
 namespace protocol = kernels::file_latency;
+#if defined(AMDF_FILE_IO_CXX_KERNELS)
+namespace latency_products = kernels::file_latency_cxx;
+#else
+namespace latency_products = kernels::file_latency;
+#endif
 constexpr uint32_t kGuard = 0x9d372be5u;
 constexpr uint32_t kGuardWords = 16;
 enum class InputFault { kNone, kShortFile, kAbsentFile };
@@ -614,7 +624,7 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
   }
 
   void Run(const Profile& profile, InputFault fault = InputFault::kNone) {
-    const auto* kernel = protocol::kKernels.Find(gpu_endpoint_info_);
+    const auto* kernel = latency_products::kKernels.Find(gpu_endpoint_info_);
     ASSERT_NE(kernel, nullptr);
     ASSERT_NO_FATAL_FAILURE(OpenClock());
     uint32_t repetitions = 1;
@@ -821,6 +831,11 @@ INSTANTIATE_TEST_SUITE_P(FileModes, GpuFileLatencyTest,
                          });
 
 namespace demand = kernels::file_demand;
+#if defined(AMDF_FILE_IO_CXX_KERNELS)
+namespace demand_products = kernels::file_demand_cxx;
+#else
+namespace demand_products = kernels::file_demand;
+#endif
 
 // Offered bursts are independent of the transport's completion rate. Credits
 // bound backing, not demand count; duplicate readers retain the same credit.
@@ -1142,7 +1157,7 @@ class GpuFileDemandTest : public GpuFileLatencyTest {
   void RunDemand(const DemandProfile& profile,
                  InputFault fault = InputFault::kNone) {
     ASSERT_LE(profile.credits, demand::kMaximumCredits);
-    const auto* kernel = demand::kKernels.Find(gpu_endpoint_info_);
+    const auto* kernel = demand_products::kKernels.Find(gpu_endpoint_info_);
     ASSERT_NE(kernel, nullptr);
     ASSERT_NO_FATAL_FAILURE(OpenClock());
     uint32_t repetitions = 1;

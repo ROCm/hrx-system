@@ -7,6 +7,7 @@
 load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
 load("//loom/build_tools/amdgpu:target_config.bzl", "LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -24,6 +25,35 @@ _RDNA_COMPATIBILITY = {
 }
 
 _RDNA_COMPATIBILITY["//conditions:default"] = ["@platforms//:incompatible"]
+
+_FILE_IO_SRCS = [
+    "file_gather_test.cc",
+    "file_io_test.cc",
+    "file_latency_test.cc",
+]
+
+_FILE_IO_HOST_COMPATIBILITY = [
+    "@platforms//os:linux",
+    "@platforms//cpu:x86_64",
+]
+
+_FILE_IO_COMPATIBILITY = _FILE_IO_HOST_COMPATIBILITY + select(_RDNA_COMPATIBILITY)
+
+_FILE_IO_CXX_COMPATIBILITY = (
+    _FILE_IO_HOST_COMPATIBILITY + loom_config_compatible_with([
+        "//loom/config/import:cxx",
+    ]) + select(_RDNA_COMPATIBILITY)
+)
+
+_FILE_IO_DEPS = [
+    ":file_io_fixture",
+    "//libamdf/cts/gpu/kernels:file_demand",
+    "//libamdf/cts/gpu/kernels:file_exchange",
+    "//libamdf/cts/gpu/kernels:file_gather",
+    "//libamdf/cts/gpu/kernels:file_latency",
+    "//third_party:google_test",
+    "//third_party:linux_amdgpu_uapi",
+]
 
 amdf_cc_library(
     name = "file_io_fixture",
@@ -45,27 +75,27 @@ amdf_cc_library(
 
 amdf_cts_test_suite(
     name = "file_io",
-    srcs = [
-        "file_gather_test.cc",
-        "file_io_test.cc",
-        "file_latency_test.cc",
-    ],
-    target_compatible_with = [
-        "@platforms//os:linux",
-        "@platforms//cpu:x86_64",
-    ] + select(_RDNA_COMPATIBILITY),
+    srcs = _FILE_IO_SRCS,
+    target_compatible_with = _FILE_IO_COMPATIBILITY,
     visibility = ["//visibility:public"],
-    deps = [
-        ":file_io_fixture",
-        "//libamdf/cts/gpu/kernels:file_demand",
+    deps = _FILE_IO_DEPS + [
         "//libamdf/cts/gpu/kernels:file_demand_kernels",
-        "//libamdf/cts/gpu/kernels:file_exchange",
         "//libamdf/cts/gpu/kernels:file_exchange_kernels",
-        "//libamdf/cts/gpu/kernels:file_gather",
         "//libamdf/cts/gpu/kernels:file_gather_kernels",
-        "//libamdf/cts/gpu/kernels:file_latency",
         "//libamdf/cts/gpu/kernels:file_latency_kernels",
-        "//third_party:google_test",
-        "//third_party:linux_amdgpu_uapi",
+    ],
+)
+
+amdf_cts_test_suite(
+    name = "file_io_cxx",
+    srcs = _FILE_IO_SRCS,
+    defines = ["AMDF_FILE_IO_CXX_KERNELS=1"],
+    target_compatible_with = _FILE_IO_CXX_COMPATIBILITY,
+    visibility = ["//visibility:public"],
+    deps = _FILE_IO_DEPS + [
+        "//libamdf/cts/gpu/kernels:file_demand_cxx_kernels",
+        "//libamdf/cts/gpu/kernels:file_exchange_cxx_kernels",
+        "//libamdf/cts/gpu/kernels:file_gather_cxx_kernels",
+        "//libamdf/cts/gpu/kernels:file_latency_cxx_kernels",
     ],
 )
