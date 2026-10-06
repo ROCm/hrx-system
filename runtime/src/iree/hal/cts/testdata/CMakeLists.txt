@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+iree_package_target_name(_FILEGROUP_TARGET "::executable_srcs")
 add_custom_command(OUTPUT executable_srcs.stamp
     COMMAND ${CMAKE_COMMAND} -E touch executable_srcs.stamp
   DEPENDS
@@ -21,10 +22,10 @@ add_custom_command(OUTPUT executable_srcs.stamp
     "executable_test.mlir"
 )
 
-add_custom_target(executable_srcs
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS executable_srcs.stamp
 )
-iree_register_generated_compile_input(executable_srcs
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/executable_srcs.stamp"
 )

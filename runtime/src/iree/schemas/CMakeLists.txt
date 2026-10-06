@@ -9,6 +9,7 @@
 
 iree_add_all_subdirs()
 
+iree_package_target_name(_FILEGROUP_TARGET "::cpu_data_headers_filegroup")
 add_custom_command(OUTPUT cpu_data_headers_filegroup.stamp
     COMMAND ${CMAKE_COMMAND} -E touch cpu_data_headers_filegroup.stamp
   DEPENDS
@@ -16,10 +17,10 @@ add_custom_command(OUTPUT cpu_data_headers_filegroup.stamp
     "cpu_feature_bits.inl"
 )
 
-add_custom_target(cpu_data_headers_filegroup
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS cpu_data_headers_filegroup.stamp
 )
-iree_register_generated_compile_input(cpu_data_headers_filegroup
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/cpu_data_headers_filegroup.stamp"
 )

@@ -92,16 +92,17 @@ iree_py_test(
 )
 endif()
 
+iree_package_target_name(_FILEGROUP_TARGET "::mlir_import_tests")
 add_custom_command(OUTPUT mlir_import_tests.stamp
     COMMAND ${CMAKE_COMMAND} -E touch mlir_import_tests.stamp
   DEPENDS
     "testdata/vector_reduce_amdgpu.mlir"
 )
 
-add_custom_target(mlir_import_tests
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS mlir_import_tests.stamp
 )
-iree_register_generated_compile_input(mlir_import_tests
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/mlir_import_tests.stamp"
 )

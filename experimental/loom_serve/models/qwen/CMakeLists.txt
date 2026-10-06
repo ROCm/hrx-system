@@ -13,6 +13,7 @@ file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DI
 file(GLOB _GLOB_KERNELS_GGML_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/ggml/*.loom)
 file(GLOB _GLOB_KERNELS_QWEN38_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/qwen38/*.loom)
 file(GLOB _GLOB_PROGRAMS_QWEN38_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS programs/qwen38/*.loom)
+iree_package_target_name(_FILEGROUP_TARGET "::sources")
 add_custom_command(OUTPUT sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
   DEPENDS
@@ -23,10 +24,10 @@ add_custom_command(OUTPUT sources.stamp
     "sources.txt"
 )
 
-add_custom_target(sources
+add_custom_target(${_FILEGROUP_TARGET}
     DEPENDS sources.stamp
 )
-iree_register_generated_compile_input(sources
+iree_register_generated_compile_input(${_FILEGROUP_TARGET}
   OUTPUTS
     "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
 )
