@@ -1002,6 +1002,85 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_emit_chain_cmd(
   return status;
 }
 
+// True when the cached instruction image must be rewritten before resubmit.
+// |owned_asm| is the last cloned TXN (NULL/empty means "unknown", so copy).
+// FLM can bake immediates (GDN context length) into the TXN rather than the
+// WRITE32 sentinel table, so the template bytes are compared too.
+static bool iree_hal_amdxdna_ctrl_inputs_changed(
+    const iree_hal_amdxdna_u32_list_t* owned_asm,
+    const uint8_t* owned_constants, iree_host_size_t owned_constant_count,
+    const uint64_t* cached_addrs, iree_host_size_t cached_binding_count,
+    const iree_hal_amdxdna_chain_cmd_t* fresh, bool* out_txn_changed) {
+  const uint32_t* owned_data = owned_asm ? owned_asm->data : NULL;
+  const iree_host_size_t owned_count = owned_asm ? owned_asm->count : 0;
+  const bool txn_changed =
+      owned_data == NULL || owned_count != fresh->src_asm_inst->count ||
+      memcmp(owned_data, fresh->src_asm_inst->data,
+             fresh->src_asm_inst->count * sizeof(uint32_t)) != 0;
+  *out_txn_changed = txn_changed;
+  const bool constants_changed =
+      owned_constant_count != fresh->src_constant_count ||
+      (fresh->src_constant_count != 0 &&
+       (owned_constants == NULL ||
+        memcmp(owned_constants, fresh->src_constants,
+               fresh->src_constant_count) != 0));
+  const bool addrs_changed =
+      fresh->binding_count != 0 &&
+      (cached_binding_count != fresh->binding_count ||
+       memcmp(cached_addrs, fresh->binding_device_addrs,
+              fresh->binding_count * sizeof(*cached_addrs)) != 0);
+  return txn_changed || constants_changed || addrs_changed;
+}
+
+static bool iree_hal_amdxdna_ctrl_bindings_changed(
+    iree_hal_amdxdna_native_buffer_t* const* cached_buffers,
+    const iree_device_size_t* cached_offsets,
+    const iree_device_size_t* cached_lengths, iree_host_size_t cached_count,
+    const iree_hal_amdxdna_chain_cmd_t* fresh) {
+  return fresh->binding_count != 0 &&
+         (cached_count != fresh->binding_count ||
+          memcmp(cached_buffers, fresh->binding_buffers,
+                 fresh->binding_count * sizeof(*cached_buffers)) != 0 ||
+          memcmp(cached_offsets, fresh->binding_offsets,
+                 fresh->binding_count * sizeof(*cached_offsets)) != 0 ||
+          memcmp(cached_lengths, fresh->binding_lengths,
+                 fresh->binding_count * sizeof(*cached_lengths)) != 0);
+}
+
+static void iree_hal_amdxdna_copy_ctrl_binding_snapshot(
+    iree_hal_amdxdna_native_buffer_t** dst_buffers, uint64_t* dst_addrs,
+    iree_device_size_t* dst_offsets, iree_device_size_t* dst_lengths,
+    const iree_hal_amdxdna_chain_cmd_t* fresh) {
+  if (fresh->binding_count == 0) return;
+  memcpy(dst_buffers, fresh->binding_buffers,
+         fresh->binding_count * sizeof(*dst_buffers));
+  memcpy(dst_addrs, fresh->binding_device_addrs,
+         fresh->binding_count * sizeof(*dst_addrs));
+  memcpy(dst_offsets, fresh->binding_offsets,
+         fresh->binding_count * sizeof(*dst_offsets));
+  memcpy(dst_lengths, fresh->binding_lengths,
+         fresh->binding_count * sizeof(*dst_lengths));
+}
+
+// Materialize a complete TXN into the mapped instruction BO from the
+// immutable template, patch WRITE32 / BD addresses in place, then publish.
+// Path-B restages from `buffer.cpu_ptr`; the destination must already be that
+// mapping (or deferred storage that materialize will copy from).
+static iree_status_t iree_hal_amdxdna_patch_publish_mapped_ctrl(
+    iree_hal_amdxdna_native_buffer_t* ctrl_code, uint32_t* dst,
+    const iree_hal_amdxdna_chain_cmd_t* fresh) {
+  const size_t bytes = fresh->src_asm_inst->count * sizeof(uint32_t);
+  memcpy(dst, fresh->src_asm_inst->data, bytes);
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_dynamic_fields_from_template(
+      dst, fresh->src_asm_inst->data, fresh->src_asm_inst->count,
+      fresh->src_constant_patches,
+      iree_make_const_byte_span(fresh->src_constants,
+                                fresh->src_constant_count),
+      fresh->src_patches->data, fresh->src_patches->count,
+      fresh->binding_device_addrs, fresh->binding_count));
+  return iree_hal_amdxdna_publish_ctrl_code(ctrl_code);
+}
+
 static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
     iree_hal_amdxdna_chain_cmd_t* cached,
@@ -1018,7 +1097,6 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
   }
 
   const iree_hal_amdxdna_u32_list_t* txn = fresh->src_asm_inst;
-  const iree_hal_amdxdna_u32_list_t* patches = fresh->src_patches;
   const size_t bytes = txn->count * sizeof(uint32_t);
   if (IREE_UNLIKELY(bytes >
                     iree_hal_amdxdna_native_buffer_c_size(cached->ctrl_code))) {
@@ -1027,50 +1105,43 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
         "amdxdna START_NPU cached control buffer is too small");
   }
 
-  void* mapped_ptr = NULL;
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_remap_ctrl_code(
-      cached->ctrl_code, &cached->ctrl_code_mapped_ptr));
-  mapped_ptr = cached->ctrl_code_mapped_ptr;
-  uint32_t* dst = (uint32_t*)mapped_ptr;
-  memcpy(dst, txn->data, bytes);
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_dynamic_fields_from_template(
-      dst, txn->data, txn->count, fresh->src_constant_patches,
-      iree_make_const_byte_span(fresh->src_constants,
-                                fresh->src_constant_count),
-      patches->data, patches->count, fresh->binding_device_addrs,
-      fresh->binding_count));
-
   if (IREE_UNLIKELY(cached->ctrl_word_count != txn->count ||
                     cached->binding_count != fresh->binding_count)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "amdxdna START_NPU cached command signature shape "
                             "changed unexpectedly");
   }
-  memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
-  // Keep the descriptor describing the control words just realized above: the
-  // constants are a dispatch input baked into them, so a stale copy would let a
-  // later exact descriptor match resubmit this entry unchanged for a dispatch
-  // that needs different control code. The template match precondition
-  // guarantees the two constant blocks are the same size.
+
+  void* mapped_ptr = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_remap_ctrl_code(
+      cached->ctrl_code, &cached->ctrl_code_mapped_ptr));
+  mapped_ptr = cached->ctrl_code_mapped_ptr;
+  uint32_t* dst = (uint32_t*)mapped_ptr;
+  bool txn_changed = false;
+  const bool control_changed = iree_hal_amdxdna_ctrl_inputs_changed(
+      cached->src_asm_inst, cached->src_constants, cached->src_constant_count,
+      cached->binding_device_addrs, cached->binding_count, fresh,
+      &txn_changed);
+  const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
+      cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
+      cached->binding_count, fresh);
+  if (control_changed) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_publish_mapped_ctrl(
+        cached->ctrl_code, dst, fresh));
+    memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
+  }
   if (fresh->src_constant_count != 0) {
     memcpy(cached->src_constants, fresh->src_constants,
            fresh->src_constant_count);
   }
-  memcpy(cached->binding_buffers, fresh->binding_buffers,
-         fresh->binding_count * sizeof(*cached->binding_buffers));
-  memcpy(cached->binding_device_addrs, fresh->binding_device_addrs,
-         fresh->binding_count * sizeof(*cached->binding_device_addrs));
-  memcpy(cached->binding_offsets, fresh->binding_offsets,
-         fresh->binding_count * sizeof(*cached->binding_offsets));
-  memcpy(cached->binding_lengths, fresh->binding_lengths,
-         fresh->binding_count * sizeof(*cached->binding_lengths));
-
-  IREE_RETURN_IF_ERROR(iree_hal_amdxdna_publish_ctrl_code(cached->ctrl_code));
+  iree_hal_amdxdna_copy_ctrl_binding_snapshot(
+      cached->binding_buffers, cached->binding_device_addrs,
+      cached->binding_offsets, cached->binding_lengths, fresh);
 
   const bool native_uses_dpu_regmap_args =
       command_buffer->device->native_caps.default_dispatch_opcode ==
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
-  if (native_uses_dpu_regmap_args) {
+  if (native_uses_dpu_regmap_args && (bindings_changed || control_changed)) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdxdna_native_command_c_reset_bound_buffers(cached->command));
     iree_status_t update_status = iree_ok_status();
@@ -1115,8 +1186,10 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_start_npu_cmd(
 
 static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* cached,
     const iree_hal_amdxdna_chain_cmd_t* fresh) {
+  IREE_ASSERT_ARGUMENT(cache);
   IREE_ASSERT_ARGUMENT(cached);
   IREE_ASSERT_ARGUMENT(fresh);
   if (IREE_UNLIKELY(!cached->ctrl_code_buffer || !cached->command ||
@@ -1136,7 +1209,6 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
   }
 
   const iree_hal_amdxdna_u32_list_t* txn = fresh->src_asm_inst;
-  const iree_hal_amdxdna_u32_list_t* patches = fresh->src_patches;
   const size_t bytes = txn->count * sizeof(uint32_t);
   if (IREE_UNLIKELY(bytes > iree_hal_amdxdna_native_buffer_c_size(
                                 cached->ctrl_code_buffer))) {
@@ -1158,6 +1230,14 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
   uint32_t* dst = (uint32_t*)mapped_ptr;
   const bool use_start_dpu =
       iree_hal_amdxdna_device_uses_start_dpu(command_buffer->device);
+  bool txn_changed = false;
+  const bool control_changed = iree_hal_amdxdna_ctrl_inputs_changed(
+      &cached->owned_src_asm_inst, cached->owned_src_constants,
+      cached->src_constant_count, cached->binding_device_addrs,
+      cached->binding_count, fresh, &txn_changed);
+  const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
+      cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
+      cached->binding_count, fresh);
   if (use_start_dpu) {
     // AIE4: restore the ELF template and re-apply patch57 (including
     // control-code-* self-patches). The AIE2P dynamic-field rewriter does
@@ -1167,32 +1247,30 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
         fresh->src_constant_patches,
         iree_make_const_byte_span(fresh->src_constants,
                                   fresh->src_constant_count),
-        patches->data, patches->count, fresh->binding_device_addrs,
-        fresh->binding_count,
+        fresh->src_patches->data, fresh->src_patches->count,
+        fresh->binding_device_addrs, fresh->binding_count,
         iree_hal_amdxdna_native_buffer_c_device_address(
             cached->ctrl_code_buffer)));
-  } else {
-    memcpy(dst, txn->data, bytes);
-    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_dynamic_fields_from_template(
-        dst, txn->data, txn->count, fresh->src_constant_patches,
-        iree_make_const_byte_span(fresh->src_constants,
-                                  fresh->src_constant_count),
-        patches->data, patches->count, fresh->binding_device_addrs,
-        fresh->binding_count));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_publish_ctrl_code(cached->ctrl_code_buffer));
+    memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
+  } else if (control_changed) {
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_publish_mapped_ctrl(
+        cached->ctrl_code_buffer, dst, fresh));
+    memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
   }
-
-  memcpy(cached->ctrl_words, dst, txn->count * sizeof(*cached->ctrl_words));
-  memcpy(cached->binding_buffers, fresh->binding_buffers,
-         fresh->binding_count * sizeof(*cached->binding_buffers));
-  memcpy(cached->binding_device_addrs, fresh->binding_device_addrs,
-         fresh->binding_count * sizeof(*cached->binding_device_addrs));
-  memcpy(cached->binding_offsets, fresh->binding_offsets,
-         fresh->binding_count * sizeof(*cached->binding_offsets));
-  memcpy(cached->binding_lengths, fresh->binding_lengths,
-         fresh->binding_count * sizeof(*cached->binding_lengths));
-
+  if (txn_changed) {
+    iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+        cache, cached, fresh->src_asm_inst, fresh->src_patches,
+        fresh->src_constant_count, fresh->src_use_native_partial_elf,
+        mapped_ptr);
+  }
   IREE_RETURN_IF_ERROR(
-      iree_hal_amdxdna_publish_ctrl_code(cached->ctrl_code_buffer));
+      iree_hal_amdxdna_single_command_cache_entry_store_constants(
+          cache, cached, fresh->src_constants, fresh->src_constant_count));
+  iree_hal_amdxdna_copy_ctrl_binding_snapshot(
+      cached->binding_buffers, cached->binding_device_addrs,
+      cached->binding_offsets, cached->binding_lengths, fresh);
 
   if (use_start_dpu) {
     // XRT keeps the START_DPU exec BO intact across runs and only restores
@@ -1208,7 +1286,7 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
       command_buffer->device->native_caps.default_dispatch_opcode ==
       IREE_HAL_AMDXDNA_NATIVE_C_COMMAND_OPCODE_START_NPU;
   bool rebuild_command = !native_uses_dpu_regmap_args;
-  if (native_uses_dpu_regmap_args) {
+  if (native_uses_dpu_regmap_args && (bindings_changed || control_changed)) {
     IREE_RETURN_IF_ERROR(
         iree_hal_amdxdna_native_command_c_reset_bound_buffers(cached->command));
     for (iree_host_size_t i = 0; i < fresh->binding_count; ++i) {
@@ -1260,6 +1338,8 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
     iree_hal_amdxdna_device_single_command_cache_t* cache,
     iree_hal_amdxdna_single_command_cache_entry_t* cached,
     const iree_hal_amdxdna_chain_cmd_t* fresh) {
+  IREE_ASSERT_ARGUMENT(command_buffer);
+  IREE_ASSERT_ARGUMENT(cache);
   IREE_ASSERT_ARGUMENT(cached);
   IREE_ASSERT_ARGUMENT(fresh);
   if (IREE_UNLIKELY(!cached->ctrl_code_buffer || !cached->command ||
@@ -1276,35 +1356,30 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_remap_ctrl_code(
       cached->ctrl_code_buffer, &cached->ctrl_code_mapped_ptr));
   mapped_ptr = cached->ctrl_code_mapped_ptr;
+  uint32_t* dst = (uint32_t*)mapped_ptr;
   const size_t control_bytes = fresh->src_asm_inst->count * sizeof(uint32_t);
-  uint32_t* prepared_words = NULL;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc(
-      command_buffer->host_allocator, control_bytes, (void**)&prepared_words));
-  memcpy(prepared_words, fresh->src_asm_inst->data, control_bytes);
-  iree_status_t status = iree_hal_amdxdna_patch_dynamic_fields_from_template(
-      prepared_words, fresh->src_asm_inst->data, fresh->src_asm_inst->count,
-      fresh->src_constant_patches,
-      iree_make_const_byte_span(fresh->src_constants,
-                                fresh->src_constant_count),
-      fresh->src_patches->data, fresh->src_patches->count,
-      fresh->binding_device_addrs, fresh->binding_count);
-  if (!iree_status_is_ok(status)) {
-    iree_allocator_free(command_buffer->host_allocator, prepared_words);
-    return status;
+  bool txn_changed = false;
+  const bool control_changed = iree_hal_amdxdna_ctrl_inputs_changed(
+      &cached->owned_src_asm_inst, cached->owned_src_constants,
+      cached->src_constant_count, cached->binding_device_addrs,
+      cached->binding_count, fresh, &txn_changed);
+  const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
+      cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
+      cached->binding_count, fresh);
+
+  iree_status_t status = iree_ok_status();
+  if (control_changed) {
+    status = iree_hal_amdxdna_patch_publish_mapped_ctrl(
+        cached->ctrl_code_buffer, dst, fresh);
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command);
+    }
+    if (iree_status_is_ok(status)) {
+      memcpy(cached->ctrl_words, dst, control_bytes);
+    }
   }
-
-  const bool control_changed =
-      memcmp(cached->ctrl_words, prepared_words, control_bytes) != 0;
-  const bool bindings_changed =
-      fresh->binding_count != 0 &&
-      (memcmp(cached->binding_buffers, fresh->binding_buffers,
-              fresh->binding_count * sizeof(*cached->binding_buffers)) != 0 ||
-       memcmp(cached->binding_offsets, fresh->binding_offsets,
-              fresh->binding_count * sizeof(*cached->binding_offsets)) != 0 ||
-       memcmp(cached->binding_lengths, fresh->binding_lengths,
-              fresh->binding_count * sizeof(*cached->binding_lengths)) != 0);
-
-  if (bindings_changed) {
+  if (iree_status_is_ok(status) && bindings_changed) {
     status =
         iree_hal_amdxdna_native_command_c_reset_bound_buffers(cached->command);
     for (iree_host_size_t i = 0;
@@ -1313,37 +1388,23 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_single_partial_elf_cmd(
           cached->command, i + 1, fresh->binding_buffers[i],
           fresh->binding_offsets[i], fresh->binding_lengths[i]);
     }
-    if (!iree_status_is_ok(status)) {
-      iree_hal_amdxdna_single_command_cache_entry_discard(cache, cached);
-      iree_allocator_free(command_buffer->host_allocator, prepared_words);
-      return status;
-    }
   }
-  if (control_changed) {
-    memcpy(mapped_ptr, prepared_words, control_bytes);
-    status = iree_hal_amdxdna_publish_ctrl_code(cached->ctrl_code_buffer);
-    if (iree_status_is_ok(status)) {
-      status =
-          iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command);
-    }
-    if (!iree_status_is_ok(status)) {
-      iree_hal_amdxdna_single_command_cache_entry_discard(cache, cached);
-      iree_allocator_free(command_buffer->host_allocator, prepared_words);
-      return status;
-    }
-    memcpy(cached->ctrl_words, prepared_words, control_bytes);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amdxdna_single_command_cache_entry_discard(cache, cached);
+    return status;
   }
-  if (fresh->binding_count != 0) {
-    memcpy(cached->binding_buffers, fresh->binding_buffers,
-           fresh->binding_count * sizeof(*cached->binding_buffers));
-    memcpy(cached->binding_device_addrs, fresh->binding_device_addrs,
-           fresh->binding_count * sizeof(*cached->binding_device_addrs));
-    memcpy(cached->binding_offsets, fresh->binding_offsets,
-           fresh->binding_count * sizeof(*cached->binding_offsets));
-    memcpy(cached->binding_lengths, fresh->binding_lengths,
-           fresh->binding_count * sizeof(*cached->binding_lengths));
+  if (txn_changed) {
+    iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+        cache, cached, fresh->src_asm_inst, fresh->src_patches,
+        fresh->src_constant_count, fresh->src_use_native_partial_elf,
+        mapped_ptr);
   }
-  iree_allocator_free(command_buffer->host_allocator, prepared_words);
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amdxdna_single_command_cache_entry_store_constants(
+          cache, cached, fresh->src_constants, fresh->src_constant_count));
+  iree_hal_amdxdna_copy_ctrl_binding_snapshot(
+      cached->binding_buffers, cached->binding_device_addrs,
+      cached->binding_offsets, cached->binding_lengths, fresh);
   return iree_ok_status();
 }
 
@@ -1371,53 +1432,15 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_chain_partial_elf_cmd(
   IREE_RETURN_IF_ERROR(iree_hal_amdxdna_remap_ctrl_code(
       cached->ctrl_code, &cached->ctrl_code_mapped_ptr));
   mapped_ptr = cached->ctrl_code_mapped_ptr;
-  // FLM can bake immediates (e.g. GDN context length) into the TXN itself
-  // rather than the WRITE32 A1EC sentinel table. Constants/binding addrs can
-  // stay the same while the control program bytes change, so the template must
-  // be compared too; otherwise PARTIAL_ELF reuse skips rewriting the immediate
-  // and the device keeps executing the first-token image.
-  const bool txn_changed =
-      cached->src_asm_inst &&
-      (cached->src_asm_inst->count != fresh->src_asm_inst->count ||
-       memcmp(cached->src_asm_inst->data, fresh->src_asm_inst->data,
-              fresh->src_asm_inst->count * sizeof(uint32_t)) != 0);
-  const bool code_changed =
-      txn_changed ||
-      (fresh->src_constant_count != 0 &&
-       memcmp(cached->src_constants, fresh->src_constants,
-              fresh->src_constant_count) != 0) ||
-      (fresh->binding_count != 0 &&
-       memcmp(cached->binding_device_addrs, fresh->binding_device_addrs,
-              fresh->binding_count * sizeof(*cached->binding_device_addrs)) !=
-           0);
-  const bool bindings_changed =
-      fresh->binding_count != 0 &&
-      (memcmp(cached->binding_buffers, fresh->binding_buffers,
-              fresh->binding_count * sizeof(*cached->binding_buffers)) != 0 ||
-       memcmp(cached->binding_offsets, fresh->binding_offsets,
-              fresh->binding_count * sizeof(*cached->binding_offsets)) != 0 ||
-       memcmp(cached->binding_lengths, fresh->binding_lengths,
-              fresh->binding_count * sizeof(*cached->binding_lengths)) != 0);
-
-  uint32_t* prepared_words = NULL;
-  size_t control_bytes = 0;
-  if (code_changed) {
-    const iree_const_byte_span_t constants = iree_make_const_byte_span(
-        fresh->src_constants, fresh->src_constant_count);
-    control_bytes = fresh->src_asm_inst->count * sizeof(uint32_t);
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, control_bytes,
-                                               (void**)&prepared_words));
-    memcpy(prepared_words, fresh->src_asm_inst->data, control_bytes);
-    iree_status_t status = iree_hal_amdxdna_patch_dynamic_fields_from_template(
-        prepared_words, fresh->src_asm_inst->data, fresh->src_asm_inst->count,
-        fresh->src_constant_patches, constants, fresh->src_patches->data,
-        fresh->src_patches->count, fresh->binding_device_addrs,
-        fresh->binding_count);
-    if (!iree_status_is_ok(status)) {
-      iree_allocator_free(host_allocator, prepared_words);
-      return status;
-    }
-  }
+  uint32_t* dst = (uint32_t*)mapped_ptr;
+  bool txn_changed = false;
+  const bool code_changed = iree_hal_amdxdna_ctrl_inputs_changed(
+      cached->src_asm_inst, cached->src_constants, cached->src_constant_count,
+      cached->binding_device_addrs, cached->binding_count, fresh,
+      &txn_changed);
+  const bool bindings_changed = iree_hal_amdxdna_ctrl_bindings_changed(
+      cached->binding_buffers, cached->binding_offsets, cached->binding_lengths,
+      cached->binding_count, fresh);
 
   if (bindings_changed) {
     iree_status_t status =
@@ -1428,26 +1451,21 @@ static iree_status_t iree_hal_amdxdna_rewrite_cached_chain_partial_elf_cmd(
           cached->command, i + 1, fresh->binding_buffers[i],
           fresh->binding_offsets[i], fresh->binding_lengths[i]);
     }
-    if (!iree_status_is_ok(status)) {
-      iree_allocator_free(host_allocator, prepared_words);
-      return status;
-    }
+    IREE_RETURN_IF_ERROR(status);
     cached->native_bindings_current = true;
   }
   if (code_changed) {
-    IREE_RETURN_IF_ERROR(
-        iree_hal_amdxdna_chain_cmd_replace_deferred_lists_owned(host_allocator,
-                                                                cached, fresh));
-    memcpy(mapped_ptr, prepared_words, control_bytes);
-    memcpy(cached->ctrl_words, prepared_words, control_bytes);
-    iree_status_t status =
-        iree_hal_amdxdna_publish_ctrl_code(cached->ctrl_code);
-    if (iree_status_is_ok(status)) {
-      status =
-          iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command);
+    IREE_RETURN_IF_ERROR(iree_hal_amdxdna_patch_publish_mapped_ctrl(
+        cached->ctrl_code, dst, fresh));
+    if (txn_changed) {
+      IREE_RETURN_IF_ERROR(
+          iree_hal_amdxdna_chain_cmd_replace_deferred_lists_owned(
+              host_allocator, cached, fresh));
     }
-    iree_allocator_free(host_allocator, prepared_words);
-    IREE_RETURN_IF_ERROR(status);
+    memcpy(cached->ctrl_words, dst,
+           fresh->src_asm_inst->count * sizeof(*cached->ctrl_words));
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amdxdna_native_command_c_mark_code_dirty(cached->command));
   }
   if (fresh->src_constant_count != 0) {
     memcpy(cached->src_constants, fresh->src_constants,
@@ -1844,6 +1862,37 @@ iree_hal_amdxdna_direct_command_buffer_submit_uncached_parent_chains(
   return status;
 }
 
+static iree_status_t iree_hal_amdxdna_find_prepared_single_command(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_native_queue_t* queue,
+    const iree_hal_amdxdna_chain_cmd_t* cmd,
+    iree_hal_amdxdna_single_command_cache_entry_t** out_entry) {
+  if (cmd->src_executable_identity != 0) {
+    return iree_hal_amdxdna_find_single_command_cache_executable_entry(
+        cache, queue, cmd->src_cu_idx.index, cmd->src_executable_identity,
+        cmd->src_entry_point, cmd->src_run_ordinal, out_entry);
+  }
+  return iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
+      cache, queue, cmd->src_cu_idx.index, cmd->src_asm_inst, cmd->src_patches,
+      cmd->src_constant_count, cmd->src_use_native_partial_elf,
+      cmd->binding_count, out_entry);
+}
+
+static void iree_hal_amdxdna_bind_prepared_single_command_identity(
+    iree_hal_amdxdna_device_single_command_cache_t* cache,
+    iree_hal_amdxdna_single_command_cache_entry_t* entry,
+    const iree_hal_amdxdna_chain_cmd_t* cmd, void* ctrl_code_mapped_ptr) {
+  iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
+      cache, entry, cmd->src_asm_inst, cmd->src_patches,
+      cmd->src_constant_count, cmd->src_use_native_partial_elf,
+      ctrl_code_mapped_ptr);
+  iree_hal_amdxdna_single_command_cache_entry_set_executable_key(
+      entry, cmd->src_executable_identity, cmd->src_entry_point,
+      cmd->src_run_ordinal);
+  iree_status_ignore(iree_hal_amdxdna_single_command_cache_entry_store_constants(
+      cache, entry, cmd->src_constants, cmd->src_constant_count));
+}
+
 static iree_status_t
 iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     iree_hal_amdxdna_direct_command_buffer* command_buffer,
@@ -1906,17 +1955,13 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     if (iree_status_is_ok(status) && single_command_cache) {
       iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
       single_cache_locked = true;
-      status =
-          iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
-              single_command_cache, group->queue, cmd->src_cu_idx.index,
-              cmd->src_asm_inst, cmd->src_patches, cmd->src_constant_count,
-              cmd->src_use_native_partial_elf, cmd->binding_count,
-              &single_cache_entry);
+      status = iree_hal_amdxdna_find_prepared_single_command(
+          single_command_cache, group->queue, cmd, &single_cache_entry);
     }
 
     if (iree_status_is_ok(status) && single_cache_entry) {
       status = iree_hal_amdxdna_rewrite_cached_single_start_npu_cmd(
-          command_buffer, single_cache_entry, cmd);
+          command_buffer, single_command_cache, single_cache_entry, cmd);
       if (!iree_status_is_ok(status)) {
         iree_hal_amdxdna_single_command_cache_entry_discard(
             single_command_cache, single_cache_entry);
@@ -1979,10 +2024,9 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
             cmd->binding_lengths, cmd->binding_count, cmd->ctrl_code,
             cmd->command);
         if (single_cache_entry) {
-          iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
-              single_command_cache, single_cache_entry, cmd->src_asm_inst,
-              cmd->src_patches, cmd->src_constant_count,
-              cmd->src_use_native_partial_elf, cmd->ctrl_code_mapped_ptr);
+          iree_hal_amdxdna_bind_prepared_single_command_identity(
+              single_command_cache, single_cache_entry, cmd,
+              cmd->ctrl_code_mapped_ptr);
           cmd->ctrl_code = NULL;
           cmd->ctrl_code_mapped_ptr = NULL;
           cmd->command = NULL;
@@ -2040,23 +2084,17 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   if (iree_status_is_ok(status)) {
     iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
     single_cache_locked = true;
-    status =
-        iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
-            single_command_cache, group->queue, cmd->src_cu_idx.index,
-            cmd->src_asm_inst, cmd->src_patches, cmd->src_constant_count,
-            cmd->src_use_native_partial_elf, cmd->binding_count,
-            &single_cache_entry);
+    status = iree_hal_amdxdna_find_prepared_single_command(
+        single_command_cache, group->queue, cmd, &single_cache_entry);
   }
-  // Descriptor identity only reuses a command recorded from the same run
-  // template. Models that fan one dispatch out over many distinct templates
-  // (MoE expert layers) never match, so every dispatch would otherwise
-  // allocate, make resident, and destroy a fresh control-code BO. Each of those
-  // allocations records a paging fence that every later hardware-queue submit
-  // has to wait on, which costs far more than the allocation itself. Reuse any
-  // idle PARTIAL_ELF command of the same shape instead and re-patch it in
-  // place, mirroring what the chain cache already does.
+  // Shape reuse exists so anonymous (identity 0) PARTIAL_ELF dispatches can
+  // share a same-shaped instruction BO instead of allocating on every miss.
+  // Identified executables keep one prepared command per export: stealing
+  // another template's BO would force that template to miss and allocate
+  // again, which is the paging-fence path this cache is meant to avoid.
   bool reused_partial_elf_shape = false;
-  if (iree_status_is_ok(status) && !single_cache_entry && single_cache_locked) {
+  if (iree_status_is_ok(status) && !single_cache_entry && single_cache_locked &&
+      cmd->src_executable_identity == 0) {
     status = iree_hal_amdxdna_find_single_command_cache_partial_elf_shape_entry(
         single_command_cache, group->queue, cmd->src_cu_idx.index,
         cmd->src_asm_inst->count, cmd->binding_count, &single_cache_entry);
@@ -2069,10 +2107,8 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
     // entry's recorded identity has to follow it or a later exact-descriptor
     // lookup would match contents that are no longer there.
     if (iree_status_is_ok(status) && reused_partial_elf_shape) {
-      iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
-          single_command_cache, single_cache_entry, cmd->src_asm_inst,
-          cmd->src_patches, cmd->src_constant_count,
-          cmd->src_use_native_partial_elf,
+      iree_hal_amdxdna_bind_prepared_single_command_identity(
+          single_command_cache, single_cache_entry, cmd,
           single_cache_entry->ctrl_code_mapped_ptr);
     }
     if (iree_status_is_ok(status) &&
@@ -2133,25 +2169,23 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
   if (iree_status_is_ok(status)) {
     iree_hal_amdxdna_lock_single_command_cache(single_command_cache);
     single_cache_locked = true;
-    status =
-        iree_hal_amdxdna_find_single_command_cache_descriptor_template_entry(
+    if (cmd->src_executable_identity == 0) {
+      status = iree_hal_amdxdna_find_prepared_single_command(
+          single_command_cache, group->queue, cmd, &single_cache_entry);
+      if (iree_status_is_ok(status) && single_cache_entry) {
+        status = iree_hal_amdxdna_update_single_command_cache_entry(
+            single_command_cache, single_cache_entry, prepared_ctrl_words,
+            cmd->src_asm_inst->count, cmd->binding_buffers,
+            cmd->binding_device_addrs, cmd->binding_offsets,
+            cmd->binding_lengths, cmd->binding_count);
+      }
+      if (iree_status_is_ok(status) && !single_cache_entry) {
+        status = iree_hal_amdxdna_find_single_command_cache_entry(
             single_command_cache, group->queue, cmd->src_cu_idx.index,
-            cmd->src_asm_inst, cmd->src_patches, cmd->src_constant_count,
-            cmd->src_use_native_partial_elf, cmd->binding_count,
-            &single_cache_entry);
-    if (iree_status_is_ok(status) && single_cache_entry) {
-      status = iree_hal_amdxdna_update_single_command_cache_entry(
-          single_command_cache, single_cache_entry, prepared_ctrl_words,
-          cmd->src_asm_inst->count, cmd->binding_buffers,
-          cmd->binding_device_addrs, cmd->binding_offsets, cmd->binding_lengths,
-          cmd->binding_count);
-    }
-    if (iree_status_is_ok(status) && !single_cache_entry) {
-      status = iree_hal_amdxdna_find_single_command_cache_entry(
-          single_command_cache, group->queue, cmd->src_cu_idx.index,
-          prepared_ctrl_words, cmd->src_asm_inst->count, cmd->binding_buffers,
-          cmd->binding_device_addrs, cmd->binding_offsets, cmd->binding_lengths,
-          cmd->binding_count, &single_cache_entry);
+            prepared_ctrl_words, cmd->src_asm_inst->count, cmd->binding_buffers,
+            cmd->binding_device_addrs, cmd->binding_offsets,
+            cmd->binding_lengths, cmd->binding_count, &single_cache_entry);
+      }
     }
   }
 
@@ -2226,10 +2260,8 @@ iree_hal_amdxdna_direct_command_buffer_submit_accumulated_single(
           cmd->binding_count, ctrl_code_buffer, command);
     }
     if (iree_status_is_ok(status) && single_cache_entry) {
-      iree_hal_amdxdna_single_command_cache_entry_set_descriptor_template(
-          single_command_cache, single_cache_entry, cmd->src_asm_inst,
-          cmd->src_patches, cmd->src_constant_count,
-          cmd->src_use_native_partial_elf, instr_buffer_ptr);
+      iree_hal_amdxdna_bind_prepared_single_command_identity(
+          single_command_cache, single_cache_entry, cmd, instr_buffer_ptr);
       if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
               command_buffer)) {
         iree_hal_amdxdna_single_command_cache_entry_acquire_in_flight(
@@ -3157,6 +3189,9 @@ static iree_status_t iree_hal_amdxdna_direct_command_buffer_normal_run(
           asm_inst->count, binding_buffers, binding_addrs, binding_offsets,
           binding_lengths, native_binding_count, ctrl_code_buffer, command);
       transferred_to_cache = single_cache_entry != NULL;
+      if (transferred_to_cache) {
+        single_cache_entry->ctrl_code_mapped_ptr = instr_buffer_ptr;
+      }
     }
     if (iree_status_is_ok(status) && single_cache_entry) {
       if (iree_hal_amdxdna_direct_command_buffer_uses_async_completion(
