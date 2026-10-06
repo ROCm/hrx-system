@@ -51,12 +51,28 @@ draft cache and draft origins. Each contains byte length, alignment and initial
 zero extent. Zero length omits an inactive packed/MTP resource. Row views contain
 five offset/length pairs per row in control, recurrent, attention, input and
 progress order. Two initial origin payloads and a page-size/map-origin/carry-
-stride record complete the cold result. These roles remain a private adapter
-contract, not a universal storage language.
+stride/feedback-split record complete the cold result. These roles remain a
+private adapter contract, not a universal storage language.
 
-The native adapter still manages page IDs, packs incoming transfer records,
-owns chat policy, and joins each bounded cohort before publishing host progress.
-Those remaining contracts are not a model-neutral text ABI.
+`control.loom:encode_epoch` maps semantic host spans into opaque device metadata
+and padded token banks. Each host record carries input length, original position,
+resident row, known-ID start/count, selection/proposal flags, output credit and
+the precomputed first-plan index. The second plan occupies the next sixteen
+records. The input stream contains only known IDs; speculative continuation
+anchors come from device results. Native code owns the semantic table and ID
+stream but contains no device descriptor, selection or verification-bank layout.
+
+After both execution frontiers retire, `publish_epoch` folds ordinary or verified
+feedback into `{consumed, known, outputs, verifications, tokens[8]}` records.
+This preserves caller order across compacted continuation rows and distinguishes
+prompt progress from speculation. All host buffers and VM wrappers are allocated
+once; opaque upload/readback sizes come from source-declared device storage.
+Encoding, submission and publication share one process and invocation. The
+native owner retains all backing through partial submission failure and teardown.
+
+The native adapter still manages page IDs, validates semantic spans, owns chat
+policy, and joins each bounded cohort before applying semantic progress. Those
+remaining contracts are not yet a model-neutral text ABI.
 
 ## Bounded device-fed continuation
 

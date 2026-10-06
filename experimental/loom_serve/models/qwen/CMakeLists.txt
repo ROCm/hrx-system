@@ -146,6 +146,27 @@ endif()
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
+    packet_test
+  SRCS
+    "packet_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom"
+  DEPS
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::program
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    iree::vm::test_support
+  ARGS
+    "--control_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom}}"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
     continuation_test
   SRCS
     "continuation_test.cc"

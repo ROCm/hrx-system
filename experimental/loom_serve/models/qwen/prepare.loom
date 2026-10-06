@@ -233,12 +233,14 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
     view.store %draft_base, %draft[%i, 1] : i64, view<16x2xi64>
     scf.yield
   }
-  %geometry_bytes = index.constant 24 : offset
+  %geometry_bytes = index.constant 32 : offset
   %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer
-  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<3xi64>
-  view.store %block_tokens, %geometry_view[0] : i64, view<3xi64>
-  view.store %map_origin, %geometry_view[1] : i64, view<3xi64>
-  view.store %carry_stride, %geometry_view[2] : i64, view<3xi64>
+  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<4xi64>
+  view.store %block_tokens, %geometry_view[0] : i64, view<4xi64>
+  view.store %map_origin, %geometry_view[1] : i64, view<4xi64>
+  view.store %carry_stride, %geometry_view[2] : i64, view<4xi64>
+  %feedback_split = scalar.constant 384 : i64
+  view.store %feedback_split, %geometry_view[3] : i64, view<4xi64>
   func.return %allocations, %views, %target_origins, %draft_origins, %geometry : buffer, buffer, buffer, buffer, buffer
 }
 
