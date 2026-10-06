@@ -15,10 +15,11 @@
 extern "C" {
 #endif
 
-// Rewrites supported static multidimensional vector operations into rank-one
-// structural operations and shape-only bitcasts. Mixed static/dynamic insert
-// coordinates are linearized when the resulting structural expansion is
-// bounded. Returns without rewriting dynamic shapes or rank-one operations.
+// Rewrites supported static vector operations into rank-one structural
+// operations and shape-only bitcasts. Mixed static/dynamic insert coordinates
+// are linearized when the resulting structural expansion is bounded. Rank-one
+// singleton broadcasts become one extract and one splat. Returns without
+// rewriting dynamic shapes or expansions above the static operation bound.
 iree_status_t loom_vector_static_shape_rewrite_op(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten);

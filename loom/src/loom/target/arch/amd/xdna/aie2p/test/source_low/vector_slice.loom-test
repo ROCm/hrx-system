@@ -143,24 +143,34 @@ CHECK: return %even, %odd
 
 // ====
 
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 func.def @i32x4_broadcast_rank2(%values: vector<4xi32>) -> (vector<2x4xi32>) {
   %result = vector.broadcast %values : vector<4xi32> -> vector<2x4xi32>
   func.return %result : vector<2x4xi32>
 }
 
 // ----
-CHECK: return %result
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32x4_broadcast_rank2(%values: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %7 = mova.i32 16
+  %8 = vshift %values, %values, %7
+  %9 = mova.i32 48
+  %result = vshift %8, %values, %9
+  return %result
+}
 
 // ====
 
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 func.def @i16x1_broadcast(%value: vector<1xi16>) -> (vector<16xi16>) {
   %result = vector.broadcast %value : vector<1xi16> -> vector<16xi16>
   func.return %result : vector<16xi16>
 }
 
 // ----
-CHECK: %result = vextbcst.16 *
-CHECK: return %result
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i16x1_broadcast(%value: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %result = vextbcst.16 %value, 0
+  return %result
+}
 
 // ====
 

@@ -305,6 +305,16 @@ func.def @unsupported_vector_scalar_fallback(%values: vector<129xi1>) -> (vector
 
 // RUN: emit source-low target=amd.xdna.aie2p:core output=none
 
+func.def @bounded_broadcast_rejects_scalar_expansion(%values: vector<32x1xi8>) -> (vector<32x2xi8>) {
+  // ERROR@+1: TARGET/007
+  %result = vector.broadcast %values : vector<32x1xi8> -> vector<32x2xi8>
+  func.return %result : vector<32x2xi8>
+}
+
+// ====
+
+// RUN: emit source-low target=amd.xdna.aie2p:core output=none
+
 // ERROR@+1: TARGET/031 {op_name="func.def", type_constraint="vector.target_carrier"}
 func.def @unsupported_vector_carrier(%value: vector<2x3x16xi16>) {
   func.return

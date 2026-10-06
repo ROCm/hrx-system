@@ -72,3 +72,88 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @insert_f64_row(%r
   %result = concat(%20, %21) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
   return %result
 }
+
+// ====
+
+func.def @broadcast_i8_singleton_axis(%source: vector<2x1xi8>) -> (vector<2x4xi8>) {
+  %result = vector.broadcast %source : vector<2x1xi8> -> vector<2x4xi8>
+  func.return %result : vector<2x4xi8>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_i8_singleton_axis(%source: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %12 = vextract.8.imm %source, 0
+  %13 = vbcst.8 %12
+  %14 = vextract.8.imm %source, 1
+  %15 = vbcst.8 %14
+  %16 = mova.i32 4
+  %17 = vshift %13, %13, %16
+  %18 = mova.i32 60
+  %result = vshift %17, %15, %18
+  return %result
+}
+
+// ====
+
+func.def @broadcast_i1_wide_predicate(%source: vector<1xi1>) -> (vector<128xi1>) {
+  %result = vector.broadcast %source : vector<1xi1> -> vector<128xi1>
+  func.return %result : vector<128xi1>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_i1_wide_predicate(%source: reg<aie2p.elpredicate>) -> (reg<aie2p.elpredicate x2>) asm {
+  %10 = mov.short 1
+  %11 = vbcst.8 %10
+  %12 = vsub.8 %11, %11
+  %13 = vsel.8 %12, %11, %source
+  %14 = vextract.8.imm %13, 0
+  %15 = vbcst.8 %14
+  %16 = vsub.8 %15, %15
+  %17 = vlt.u8x64 %16, %15
+  %result = concat(%17, %17) : (reg<aie2p.elpredicate>, reg<aie2p.elpredicate>) -> reg<aie2p.elpredicate x2>
+  return %result
+}
+
+// ====
+
+func.def @broadcast_f32_accumulator(%source: vector<1xf32>) -> (vector<32xf32>) {
+  %result = vector.broadcast %source : vector<1xf32> -> vector<32xf32>
+  func.return %result : vector<32xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_f32_accumulator(%source: reg<aie2p.vec256 x2>) -> (reg<aie2p.mbms x2>) asm {
+  %7 = vextract.32.imm %source, 0
+  %8 = vbcst.32 %7
+  %9 = vmov.vector512.to.accumulator512 %8
+  %result = concat(%9, %9) : (reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x2>
+  return %result
+}
+
+// ====
+
+func.def @broadcast_i64_wide_accumulator(%source: vector<1xi64>) -> (vector<32xi64>) {
+  %result = vector.broadcast %source : vector<1xi64> -> vector<32xi64>
+  func.return %result : vector<32xi64>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_i64_wide_accumulator(%source: reg<aie2p.vec256 x2>) -> (reg<aie2p.mbms x4>) asm {
+  %15 = vextract.64.imm %source, 0
+  %16 = vbcst.64 %15
+  %19 = vmov.vector512.to.accumulator512 %16
+  %result = concat(%19, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  return %result
+}
+
+// ====
+
+func.def @broadcast_f64_identity(%source: vector<4xf64>) -> (vector<4xf64>) {
+  %result = vector.broadcast %source : vector<4xf64> -> vector<4xf64>
+  func.return %result : vector<4xf64>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @broadcast_f64_identity(%source: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  return %source
+}

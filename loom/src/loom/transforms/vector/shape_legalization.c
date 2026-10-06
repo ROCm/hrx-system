@@ -12,11 +12,16 @@
 #include "loom/ops/index/ops.h"
 #include "loom/ops/vector/ops.h"
 
-// Bounds structural expansion for dynamic tail-vector insertion. The row
-// strategy emits about five operations per destination row; the lane strategy
-// emits about three operations per inserted lane. The cheaper bounded form is
-// selected for each shape.
+// Bounds static structural expansion. Broadcast planning counts every new
+// slice, extract, and splat together with its flatten, concat, and restore
+// operations. Dynamic tail-vector insertion selects between strategies that
+// emit about five operations per destination row or three per inserted lane.
 #define LOOM_VECTOR_STATIC_SHAPE_OP_LIMIT 64u
+
+// Bounds the lane walk used to plan static broadcast segments. Current target
+// consumers admit at most 1024 logical lanes, and larger shapes must be
+// packetized or rejected before structural expansion.
+#define LOOM_VECTOR_STATIC_SHAPE_LANE_LIMIT 1024u
 
 static loom_type_t loom_vector_static_shape_flat_type(loom_type_t type,
                                                       uint64_t element_count) {
@@ -45,11 +50,14 @@ static iree_status_t loom_vector_static_shape_restore_result(
     loom_target_legalization_context_t* context, loom_op_t* op,
     loom_value_id_t flat_value, loom_type_t flat_type, loom_type_t result_type,
     loom_value_id_t value_checkpoint) {
-  loom_op_t* bitcast_op = NULL;
-  IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
-      &context->rewriter->builder, flat_value, flat_type, result_type,
-      op->location, &bitcast_op));
-  loom_value_id_t replacement = loom_vector_bitcast_result(bitcast_op);
+  loom_value_id_t replacement = flat_value;
+  if (!loom_type_equal(flat_type, result_type)) {
+    loom_op_t* bitcast_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        &context->rewriter->builder, flat_value, flat_type, result_type,
+        op->location, &bitcast_op));
+    replacement = loom_vector_bitcast_result(bitcast_op);
+  }
   IREE_RETURN_IF_ERROR(loom_rewriter_preserve_result_names_on_new_values(
       context->rewriter, op, &replacement, 1, value_checkpoint));
   return loom_rewriter_replace_all_uses_and_erase(context->rewriter, op,
@@ -175,6 +183,29 @@ static uint64_t loom_vector_static_shape_broadcast_source_ordinal(
   return source_ordinal;
 }
 
+typedef enum loom_vector_static_shape_broadcast_segment_kind_e {
+  // Copies a contiguous source interval into the result.
+  LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SEQUENCE = 0,
+  // Replicates one source lane across the result interval.
+  LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SPLAT = 1,
+} loom_vector_static_shape_broadcast_segment_kind_t;
+
+typedef struct loom_vector_static_shape_broadcast_segment_t {
+  // Kind of source mapping represented by this segment.
+  loom_vector_static_shape_broadcast_segment_kind_t kind;
+  // First flat source lane selected by the segment.
+  uint64_t source_ordinal;
+  // Number of flat result lanes produced by the segment.
+  uint64_t lane_count;
+} loom_vector_static_shape_broadcast_segment_t;
+
+static bool loom_vector_static_shape_broadcast_segment_equal(
+    const loom_vector_static_shape_broadcast_segment_t* lhs,
+    const loom_vector_static_shape_broadcast_segment_t* rhs) {
+  return lhs->kind == rhs->kind && lhs->source_ordinal == rhs->source_ordinal &&
+         lhs->lane_count == rhs->lane_count;
+}
+
 static iree_status_t loom_vector_static_shape_broadcast_rewrite(
     loom_target_legalization_context_t* context, loom_op_t* op,
     bool* out_rewritten) {
@@ -185,31 +216,95 @@ static iree_status_t loom_vector_static_shape_broadcast_rewrite(
       loom_module_value_type(context->module, loom_vector_broadcast_result(op));
   uint64_t source_count = 0;
   uint64_t result_count = 0;
-  if (loom_type_rank(result_type) <= 1 ||
-      !loom_type_static_element_count(source_type, &source_count) ||
+  if (!loom_type_static_element_count(source_type, &source_count) ||
       !loom_type_static_element_count(result_type, &result_count) ||
       source_count == 0 || result_count == 0 || source_count > INT64_MAX ||
-      result_count > INT64_MAX || result_count % source_count != 0) {
+      result_count > LOOM_VECTOR_STATIC_SHAPE_LANE_LIMIT ||
+      result_count % source_count != 0) {
     return iree_ok_status();
   }
 
-  const uint64_t packet_count = result_count / source_count;
-  if (packet_count > IREE_HOST_SIZE_MAX || source_count > IREE_HOST_SIZE_MAX) {
+  if (loom_type_equal(source_type, result_type)) {
+    IREE_RETURN_IF_ERROR(loom_rewriter_replace_all_uses_and_erase(
+        context->rewriter, op, &source, 1));
+    *out_rewritten = true;
     return iree_ok_status();
   }
-  loom_value_id_t single_packet = LOOM_VALUE_ID_INVALID;
-  loom_value_id_t* packets = &single_packet;
-  if (packet_count > 1) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->arena, (iree_host_size_t)packet_count, sizeof(*packets),
-        (void**)&packets));
+
+  // Partition the row-major result into contiguous source sequences and
+  // repeated source lanes. This keeps leading-axis replication as shared
+  // source references and lowers singleton axes through native splats instead
+  // of arbitrary shuffles that targets may scalarize. Identical segments are
+  // materialized once and reused by the final concat.
+  loom_vector_static_shape_broadcast_segment_t
+      segments[LOOM_VECTOR_STATIC_SHAPE_OP_LIMIT] = {0};
+  iree_host_size_t segment_count = 0;
+  iree_host_size_t operation_count = 0;
+  uint64_t result_ordinal = 0;
+  while (result_ordinal < result_count) {
+    if (segment_count == IREE_ARRAYSIZE(segments)) {
+      return iree_ok_status();
+    }
+    const uint64_t source_ordinal =
+        loom_vector_static_shape_broadcast_source_ordinal(
+            source_type, result_type, result_ordinal);
+    uint64_t repeat_count = 1;
+    while (result_ordinal + repeat_count < result_count &&
+           loom_vector_static_shape_broadcast_source_ordinal(
+               source_type, result_type, result_ordinal + repeat_count) ==
+               source_ordinal) {
+      ++repeat_count;
+    }
+    uint64_t sequence_count = 1;
+    while (result_ordinal + sequence_count < result_count &&
+           source_ordinal + sequence_count < source_count &&
+           loom_vector_static_shape_broadcast_source_ordinal(
+               source_type, result_type, result_ordinal + sequence_count) ==
+               source_ordinal + sequence_count) {
+      ++sequence_count;
+    }
+
+    loom_vector_static_shape_broadcast_segment_t* segment =
+        &segments[segment_count++];
+    segment->kind = repeat_count > sequence_count
+                        ? LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SPLAT
+                        : LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SEQUENCE;
+    segment->source_ordinal = source_ordinal;
+    segment->lane_count =
+        segment->kind == LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SPLAT
+            ? repeat_count
+            : sequence_count;
+    result_ordinal += segment->lane_count;
+
+    bool reuses_segment = false;
+    for (iree_host_size_t i = 0; i + 1 < segment_count; ++i) {
+      reuses_segment = loom_vector_static_shape_broadcast_segment_equal(
+          &segments[i], segment);
+      if (reuses_segment) {
+        break;
+      }
+    }
+    if (!reuses_segment &&
+        !(segment->kind ==
+              LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SEQUENCE &&
+          segment->source_ordinal == 0 &&
+          segment->lane_count == source_count)) {
+      operation_count +=
+          segment->kind == LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SPLAT
+              ? 2u
+              : 1u;
+    }
   }
-  int64_t single_source_lane = 0;
-  int64_t* source_lanes = &single_source_lane;
-  if (source_count > 1) {
-    IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        context->arena, (iree_host_size_t)source_count, sizeof(*source_lanes),
-        (void**)&source_lanes));
+
+  const loom_type_t flat_source_type =
+      loom_vector_static_shape_flat_type(source_type, source_count);
+  const loom_type_t flat_result_type =
+      loom_vector_static_shape_flat_type(result_type, result_count);
+  operation_count += !loom_type_equal(source_type, flat_source_type);
+  operation_count += segment_count > 1;
+  operation_count += !loom_type_equal(flat_result_type, result_type);
+  if (operation_count > LOOM_VECTOR_STATIC_SHAPE_OP_LIMIT) {
+    return iree_ok_status();
   }
 
   loom_rewriter_t* rewriter = context->rewriter;
@@ -220,38 +315,60 @@ static iree_status_t loom_vector_static_shape_broadcast_rewrite(
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_flatten_value(
       &rewriter->builder, source, source_type, source_count, op->location,
       &flat_source));
-  const loom_type_t flat_source_type =
-      loom_vector_static_shape_flat_type(source_type, source_count);
-  // A shuffle preserves its source width, so partition the result into
-  // source-width packets before concatenating the complete flat carrier.
-  for (uint64_t packet = 0; packet < packet_count; ++packet) {
-    bool identity = true;
-    for (uint64_t lane = 0; lane < source_count; ++lane) {
-      const uint64_t result_ordinal = packet * source_count + lane;
-      const uint64_t source_ordinal =
-          loom_vector_static_shape_broadcast_source_ordinal(
-              source_type, result_type, result_ordinal);
-      source_lanes[lane] = (int64_t)source_ordinal;
-      identity &= source_ordinal == lane;
+
+  loom_value_id_t segment_values[LOOM_VECTOR_STATIC_SHAPE_OP_LIMIT] = {0};
+  for (iree_host_size_t segment_index = 0; segment_index < segment_count;
+       ++segment_index) {
+    const loom_vector_static_shape_broadcast_segment_t* segment =
+        &segments[segment_index];
+    bool reused_segment = false;
+    for (iree_host_size_t i = 0; i < segment_index; ++i) {
+      if (loom_vector_static_shape_broadcast_segment_equal(&segments[i],
+                                                           segment)) {
+        segment_values[segment_index] = segment_values[i];
+        reused_segment = true;
+        break;
+      }
     }
-    packets[packet] = flat_source;
-    if (!identity) {
-      loom_op_t* shuffle_op = NULL;
-      IREE_RETURN_IF_ERROR(loom_vector_shuffle_build(
-          &rewriter->builder, source_lanes, (iree_host_size_t)source_count,
-          flat_source, flat_source_type, op->location, &shuffle_op));
-      packets[packet] = loom_vector_shuffle_result(shuffle_op);
+    if (reused_segment) {
+      continue;
+    }
+
+    if (segment->kind == LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SEQUENCE &&
+        segment->source_ordinal == 0 && segment->lane_count == source_count) {
+      segment_values[segment_index] = flat_source;
+      continue;
+    }
+
+    const loom_type_t segment_type =
+        loom_vector_static_shape_flat_type(result_type, segment->lane_count);
+    const int64_t static_ordinal = (int64_t)segment->source_ordinal;
+    if (segment->kind == LOOM_VECTOR_STATIC_SHAPE_BROADCAST_SEGMENT_SPLAT) {
+      loom_op_t* extract_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_extract_build(
+          &rewriter->builder, flat_source, NULL, 0, &static_ordinal, 1,
+          loom_type_scalar(loom_type_element_type(source_type)), op->location,
+          &extract_op));
+      loom_op_t* splat_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_splat_build(
+          &rewriter->builder, loom_vector_extract_result(extract_op),
+          segment_type, op->location, &splat_op));
+      segment_values[segment_index] = loom_vector_splat_result(splat_op);
+    } else {
+      loom_op_t* slice_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_slice_build(
+          &rewriter->builder, flat_source, NULL, 0, &static_ordinal, 1,
+          segment_type, op->location, &slice_op));
+      segment_values[segment_index] = loom_vector_slice_result(slice_op);
     }
   }
 
-  const loom_type_t flat_result_type =
-      loom_vector_static_shape_flat_type(result_type, result_count);
-  loom_value_id_t flat_result = packets[0];
-  if (packet_count > 1) {
+  loom_value_id_t flat_result = segment_values[0];
+  if (segment_count > 1) {
     loom_op_t* concat_op = NULL;
     IREE_RETURN_IF_ERROR(loom_vector_concat_build(
-        &rewriter->builder, 0, packets, (iree_host_size_t)packet_count,
-        flat_result_type, op->location, &concat_op));
+        &rewriter->builder, 0, segment_values, segment_count, flat_result_type,
+        op->location, &concat_op));
     flat_result = loom_vector_concat_result(concat_op);
   }
   IREE_RETURN_IF_ERROR(loom_vector_static_shape_restore_result(

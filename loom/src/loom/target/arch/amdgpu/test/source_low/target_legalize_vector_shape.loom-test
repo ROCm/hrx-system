@@ -1,4 +1,4 @@
-// RUN: with-checks pass target-legalize{mode=final,policy=require-native}
+// RUN: pass target-legalize{mode=final,policy=require-native}
 
 amdgpu.target<gfx11-generic> @target
 
@@ -8,14 +8,17 @@ func.def target(@target) @leading_broadcast(%row: vector<4xf32>) -> (vector<2x4x
 }
 
 // ----
-CHECK: * = vector.concat<0> %row, %row : vector<4xf32>, vector<4xf32> -> vector<8xf32>
-CHECK: %tile = vector.bitcast * : vector<8xf32> to vector<2x4xf32>
-CHECK-NOT: vector.broadcast
-CHECK-NOT: scalar.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @leading_broadcast(%row: vector<4xf32>) -> (vector<2x4xf32>) {
+  %3 = vector.concat<0> %row, %row : vector<4xf32>, vector<4xf32> -> vector<8xf32>
+  %tile = vector.bitcast %3 : vector<8xf32> to vector<2x4xf32>
+  func.return %tile : vector<2x4xf32>
+}
 
 // ====
 
-// RUN: with-checks pass target-legalize{mode=final,policy=require-native}
+// RUN: pass target-legalize{mode=final,policy=require-native}
 
 amdgpu.target<gfx11-generic> @target
 
@@ -25,17 +28,22 @@ func.def target(@target) @singleton_axis_broadcast(%column: vector<2x1xi32>) -> 
 }
 
 // ----
-CHECK: * = vector.bitcast %column : vector<2x1xi32> to vector<2xi32>
-CHECK: * = vector.shuffle<[0, 0]> * : vector<2xi32>
-CHECK: * = vector.shuffle<[1, 1]> * : vector<2xi32>
-CHECK: * = vector.concat<0> *, * : vector<2xi32>, vector<2xi32> -> vector<4xi32>
-CHECK: %tile = vector.bitcast * : vector<4xi32> to vector<2x2xi32>
-CHECK-NOT: vector.broadcast
-CHECK-NOT: scalar.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @singleton_axis_broadcast(%column: vector<2x1xi32>) -> (vector<2x2xi32>) {
+  %3 = vector.bitcast %column : vector<2x1xi32> to vector<2xi32>
+  %4 = vector.extract %3[0] : vector<2xi32> -> i32
+  %5 = vector.splat %4 : vector<2xi32>
+  %6 = vector.extract %3[1] : vector<2xi32> -> i32
+  %7 = vector.splat %6 : vector<2xi32>
+  %8 = vector.concat<0> %5, %7 : vector<2xi32>, vector<2xi32> -> vector<4xi32>
+  %tile = vector.bitcast %8 : vector<4xi32> to vector<2x2xi32>
+  func.return %tile : vector<2x2xi32>
+}
 
 // ====
 
-// RUN: with-checks pass target-legalize{mode=final,policy=require-native}
+// RUN: pass target-legalize{mode=final,policy=require-native}
 
 amdgpu.target<gfx11-generic> @target
 
@@ -45,16 +53,20 @@ func.def target(@target) @tail_insert(%row: vector<2xf32>, %dest: vector<3x2xf32
 }
 
 // ----
-CHECK: * = vector.bitcast %dest : vector<3x2xf32> to vector<6xf32>
-CHECK: * = vector.slice *[0] : vector<6xf32> -> vector<2xf32>
-CHECK: * = vector.slice *[4] : vector<6xf32> -> vector<2xf32>
-CHECK: * = vector.concat<0> *, %row, * : vector<2xf32>, vector<2xf32>, vector<2xf32> -> vector<6xf32>
-CHECK: %tile = vector.bitcast * : vector<6xf32> to vector<3x2xf32>
-CHECK-NOT: scalar.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @tail_insert(%row: vector<2xf32>, %dest: vector<3x2xf32>) -> (vector<3x2xf32>) {
+  %4 = vector.bitcast %dest : vector<3x2xf32> to vector<6xf32>
+  %5 = vector.slice %4[0] : vector<6xf32> -> vector<2xf32>
+  %6 = vector.slice %4[4] : vector<6xf32> -> vector<2xf32>
+  %7 = vector.concat<0> %5, %row, %6 : vector<2xf32>, vector<2xf32>, vector<2xf32> -> vector<6xf32>
+  %tile = vector.bitcast %7 : vector<6xf32> to vector<3x2xf32>
+  func.return %tile : vector<3x2xf32>
+}
 
 // ====
 
-// RUN: with-checks pass target-legalize{mode=final,policy=require-native}
+// RUN: pass target-legalize{mode=final,policy=require-native}
 
 amdgpu.target<gfx11-generic> @target
 
@@ -64,14 +76,18 @@ func.def target(@target) @scalar_insert(%value: i32, %dest: vector<2x2xi32>) -> 
 }
 
 // ----
-CHECK: * = vector.bitcast %dest : vector<2x2xi32> to vector<4xi32>
-CHECK: * = vector.insert %value into *[2] : i32, vector<4xi32>
-CHECK: %tile = vector.bitcast * : vector<4xi32> to vector<2x2xi32>
-CHECK-NOT: scalar.
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @scalar_insert(%value: i32, %dest: vector<2x2xi32>) -> (vector<2x2xi32>) {
+  %4 = vector.bitcast %dest : vector<2x2xi32> to vector<4xi32>
+  %5 = vector.insert %value into %4[2] : i32, vector<4xi32>
+  %tile = vector.bitcast %5 : vector<4xi32> to vector<2x2xi32>
+  func.return %tile : vector<2x2xi32>
+}
 
 // ====
 
-// RUN: with-checks pass target-legalize{mode=eager,policy=require-native}
+// RUN: pass target-legalize{mode=eager,policy=require-native}
 
 amdgpu.target<gfx11-generic> @target
 
@@ -81,8 +97,12 @@ func.def target(@target) @oversized_broadcast(%row: vector<4xf32>) -> (vector<9x
 }
 
 // ----
-CHECK: %tile = vector.broadcast %row : vector<4xf32> -> vector<9x4xf32>
-CHECK-NOT: vector.concat
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @oversized_broadcast(%row: vector<4xf32>) -> (vector<9x4xf32>) {
+  %tile = vector.broadcast %row : vector<4xf32> -> vector<9x4xf32>
+  func.return %tile : vector<9x4xf32>
+}
 
 // ====
 

@@ -1,13 +1,26 @@
 // RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
 
-func.def @broadcast_scalarization(%values: vector<4xi32>) -> (vector<2x4xi32>) {
+func.def @leading_broadcast(%values: vector<4xi32>) -> (vector<2x4xi32>) {
   %result = vector.broadcast %values : vector<4xi32> -> vector<2x4xi32>
   func.return %result : vector<2x4xi32>
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
-CHECK: COMPILE-REPORT: target_legalization[0] * source_op=vector.broadcast * action=rewritten * legalizer=aie2p strategy=target * scalarized=true * created_ops=9 erased_ops=1
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
+CHECK: COMPILE-REPORT: target_legalization[0] * source_op=vector.broadcast * action=rewritten * legalizer=aie2p strategy=target * scalarized=false * created_ops=2 erased_ops=1
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @singleton_broadcast(%value: vector<1xf64>) -> (vector<8xf64>) {
+  %result = vector.broadcast %value : vector<1xf64> -> vector<8xf64>
+  func.return %result : vector<8xf64>
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1
+CHECK: COMPILE-REPORT: target_legalization[0] * source_op=vector.broadcast * action=rewritten * legalizer=aie2p strategy=target * scalarized=false * created_ops=2 erased_ops=1
 
 // ====
 
