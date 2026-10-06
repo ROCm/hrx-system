@@ -8,7 +8,7 @@ config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536),
 
 amdgpu.target<gfx11-generic> @block_projection_wave32 {subgroup_size = 32}
 template.decl @projection.linear_tiled_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
-template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)
+template.decl @projection.linear_temporal_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %rhs_read_ahead: i1, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @krea2.projection_row_group_size(%rows: index, %minimum_grouped_rows: index) -> (index)
 
 // Traversal selection belongs to the model's concrete contraction shapes.
@@ -55,7 +55,8 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
   %temporal = index.cmp eq, %rows, %short_text_rows : index
   scf.if %temporal {
     %group_size = index.constant 8 : index
-    template.apply<@projection.linear_temporal_bf16>(%rows, %width, %width, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+    %rhs_read_ahead = scalar.constant true : i1
+    template.apply<@projection.linear_temporal_bf16>(%rows, %width, %width, %group_size, %rhs_read_ahead, %input, %weight, %output) : (index, index, index, index, i1, buffer, buffer, buffer)
     scf.yield
   } else {
     %minimum_grouped_rows = index.constant 2560 : index
@@ -144,7 +145,8 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
     %short_text_group = index.constant 8 : index
     %full_text_group = index.constant 4 : index
     %group_size = scf.select %short_text, %short_text_group, %full_text_group : index
-    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+    %rhs_read_ahead = scalar.constant true : i1
+    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %rhs_read_ahead, %input, %weight, %output) : (index, index, index, index, i1, buffer, buffer, buffer)
     scf.yield
   } else {
     %minimum_grouped_rows = index.constant 2048 : index
@@ -188,7 +190,8 @@ kernel.def target(@block_projection_wave32) @block_linear_16384_6144() {
   %temporal = scalar.ori %short_text, %full_text : i1
   scf.if %temporal {
     %group_size = index.constant 4 : index
-    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
+    %rhs_read_ahead = scalar.constant false : i1
+    template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %rhs_read_ahead, %input, %weight, %output) : (index, index, index, index, i1, buffer, buffer, buffer)
     scf.yield
   } else {
     %minimum_grouped_rows = index.constant 1088 : index

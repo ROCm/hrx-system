@@ -597,6 +597,20 @@ speedup. These are measured shape selections, not a cache-capacity guarantee
 or a general rule that larger panels are better. Other projection shapes
 retain the baseline motif.
 
+The same motif specializes its RHS acquisition order through an ordinary SSA
+operand supplied by the model leaf. Up/gate and square contractions with
+6,144-wide inputs allow the next RHS pair's LDS loads to overlap the current
+pair's four WMMAs. Compiler scheduling fences retire the old pair before a
+third pair can become live. The 16,384-wide down contraction retains
+pair-at-a-time acquisition. This changes neither temporal-bank publication
+nor accumulation order, issued operand bytes, or runtime dispatches; the
+schedule branch folds during JIT specialization. On the measured shapes,
+read-ahead uses 216 rather than 208 VGPRs, retains the same LDS-limited
+residency without spills, and improves isolated up/square time by 1–3%.
+The shorter-text down contraction regressed slightly with that order, so the
+selection belongs to concrete callers rather than becoming a universal
+policy in the reusable helper.
+
 A workgroup-uniform branch separates full output tiles from the final partial
 tile around the entire contraction. The interior path carries an explicit
 origin bound into the packet loader, letting path-dependent facts eliminate
@@ -633,11 +647,12 @@ against the full-K64 helper with nonuniform BF16 inputs. Its `exact_short`
 case binds `wide_test.rows=16`, `wide_test.inputs=6144` and
 `wide_test.outputs=16384`; `exact_tail` binds 528, 6144 and 256 respectively.
 [`tests/linear_temporal.loom`](tests/linear_temporal.loom) compares the real
-temporal helper with full-K64 at 528x256x320. This exercises the shortest
-supported K, both matrix tails, the interior/tail split and a partial traversal
-group without external weights or stored expected tensors. The two full-K
-algorithms retain the same K16 accumulation order; this exact helper comparison
-does not require equality with the baseline's four-chain/K256 reduction.
+temporal helper's two RHS schedules with full-K64 at 528x256x320. This exercises
+the shortest supported K, both matrix tails, the interior/tail split and a
+partial traversal group without external weights or stored expected tensors.
+The two full-K algorithms retain the same K16 accumulation order; this exact
+helper comparison does not require equality with the baseline's four-chain/K256
+reduction.
 
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
