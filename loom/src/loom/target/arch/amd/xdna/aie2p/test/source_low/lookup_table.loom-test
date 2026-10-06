@@ -40,24 +40,42 @@ func.def @f32_table_lookup_i32_codes(%codes: vector<2xi32>) -> (vector<2xf32>) {
 
 // ----
 CHECK: low.func.def * @f32_table_lookup_i32_codes(*) *
-CHECK: * = vextract.32.reg %grid, *
-CHECK: %decoded = vinsert.32.reg *
+CHECK: * = vextbcst.32 %grid, 0
+CHECK: * = vextbcst.32 %grid, 2
+CHECK: %decoded = vsel.32.mask64 *
 CHECK: return %decoded
-CHECK-NOT: * = vextbcst.*
+CHECK-NOT: * = vextract.32.reg %grid, *
+CHECK-NOT: %decoded = vinsert.32.reg *
 
 // ====
 
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
 func.def @f32_table_lookup_dynamic_grid(%grid: vector<3xf32>, %codes: vector<2xi32>) -> (vector<2xf32>) {
   %decoded = vector.table.lookup %grid[%codes] : vector<3xf32>, vector<2xi32> -> vector<2xf32>
   func.return %decoded : vector<2xf32>
 }
 
 // ----
-CHECK: low.func.def * @f32_table_lookup_dynamic_grid(*) *
-CHECK: * = vextract.32.reg %grid, *
-CHECK: %decoded = vinsert.32.reg *
-CHECK: return %decoded
-CHECK-NOT: * = vextbcst.*
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_table_lookup_dynamic_grid(%grid: reg<aie2p.vec256 x2>, %codes: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %22 = mov.short 0
+  %23 = vbcst.32 %22
+  %24 = mov.short 1
+  %25 = vbcst.32 %24
+  %26 = vband %codes, %25
+  %27 = vlt.u32x16.el.low32 %23, %26
+  %28 = predicate.complete.zero.high32 %27, 0
+  %29 = mov.short 2
+  %30 = vbcst.32 %29
+  %31 = vband %codes, %30
+  %32 = vlt.u32x16.el.low32 %23, %31
+  %33 = predicate.complete.zero.high32 %32, 0
+  %34 = vextbcst.32 %grid, 0
+  %35 = vextbcst.32 %grid, 1
+  %36 = vsel.32.mask64 %34, %35, %28
+  %37 = vextbcst.32 %grid, 2
+  %decoded = vsel.32.mask64 %36, %37, %33
+  return %decoded
+}
 
 // ====
 
@@ -115,9 +133,11 @@ func.def @i8_table_lookup_u4_dynamic_table(%grid: vector<16xi8>, %packed: vector
 // ----
 CHECK: * = and *, *
 CHECK: * = lshl *, *
-CHECK: * = vextract.8.reg %grid, *
-CHECK: %decoded = vinsert.8.reg *
-CHECK-NOT: * = vextbcst.*
+CHECK: * = vextbcst.8 %grid, 0
+CHECK: * = vextbcst.8 %grid, 15
+CHECK: %decoded = vsel.8 *
+CHECK-NOT: * = vextract.8.reg %grid, *
+CHECK-NOT: %decoded = vinsert.8.reg *
 
 // ====
 
@@ -129,10 +149,12 @@ func.def @i8_table_lookup_masked_codes(%grid: vector<16xi8>, %packed: vector<4xi
 }
 
 // ----
-CHECK: * = and *, *
-CHECK: * = vextract.8.reg %grid, *
-CHECK: %decoded = vinsert.8.reg *
-CHECK-NOT: * = vextbcst.*
+CHECK: %codes = vband %packed, %mask
+CHECK: * = vextbcst.8 %grid, 0
+CHECK: * = vextbcst.8 %grid, 15
+CHECK: %decoded = vsel.8 *
+CHECK-NOT: * = vextract.8.reg %grid, *
+CHECK-NOT: %decoded = vinsert.8.reg *
 
 // ====
 
@@ -145,9 +167,11 @@ func.def @i8_table_lookup_shifted_codes(%grid: vector<16xi8>, %packed: vector<4x
 
 // ----
 CHECK: * = lshl *, *
-CHECK: * = vextract.8.reg %grid, *
-CHECK: %decoded = vinsert.8.reg *
-CHECK-NOT: * = vextbcst.*
+CHECK: * = vextbcst.8 %grid, 0
+CHECK: * = vextbcst.8 %grid, 15
+CHECK: %decoded = vsel.8 *
+CHECK-NOT: * = vextract.8.reg %grid, *
+CHECK-NOT: %decoded = vinsert.8.reg *
 
 // ====
 
@@ -177,9 +201,11 @@ func.def @i8_table_lookup_u4_constant_table(%packed: vector<2xi8>) -> (vector<4x
 // ----
 CHECK: * = mov.short -15
 CHECK: %grid = vinsert.8.reg *
-CHECK: * = vextract.8.reg %grid, *
-CHECK: %decoded = vinsert.8.reg *
-CHECK-NOT: * = vextbcst.*
+CHECK: * = vextbcst.8 %grid, 0
+CHECK: * = vextbcst.8 %grid, 15
+CHECK: %decoded = vsel.8 *
+CHECK-NOT: * = vextract.8.reg %grid, *
+CHECK-NOT: %decoded = vinsert.8.reg *
 
 // ====
 
@@ -208,8 +234,10 @@ func.def @i8_table_indexed_bytes(%table: vector<16xi8>, %raw: vector<4xi8>) -> (
 }
 
 // ----
-CHECK: * = and *, *
-CHECK: * = extend.s8 *
-CHECK: * = vextract.8.reg %table, *
-CHECK: %result = vinsert.8.reg *
+CHECK: %indices = vband %raw, %mask
+CHECK: * = vextbcst.8 %table, 0
+CHECK: * = vextbcst.8 %table, 15
+CHECK: %result = vsel.8 *
 CHECK: return %result
+CHECK-NOT: * = vextract.8.reg %table, *
+CHECK-NOT: %result = vinsert.8.reg *

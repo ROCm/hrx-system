@@ -14,11 +14,14 @@
 extern "C" {
 #endif
 
-// Packetizes wide indices and results before expanding profitable register
-// lookups into packed bit tests and selection trees. Uniform table-index leaves
-// retain native indexed-broadcast selection. Returns false through
-// |out_rewritten| when scalar lanes are cheaper or the source types do not fit
-// the native packed comparison and selection carriers.
+// Packetizes wide indices and results before expanding register lookups into
+// packed bit tests and selection trees. Double-word indices narrow to native
+// word predicates after packetization because every defined table index fits.
+// Predicate table packets widen once to bytes so every leaf can retain native
+// indexed-broadcast selection before the selected bytes return to a predicate;
+// other uniform leaves remain direct native broadcasts. Returns false through
+// |out_rewritten| when direct target selection should handle the lookup or no
+// supported vector rewrite exists.
 iree_status_t loom_aie2p_table_lookup_rewrite(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* packet_policy,

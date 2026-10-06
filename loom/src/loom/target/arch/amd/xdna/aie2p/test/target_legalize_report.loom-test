@@ -62,3 +62,55 @@ func.def @vector_f64_extrema(%value: vector<2xf64>, %lhs: vector<2xf64>, %rhs: v
 CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=2 scalarized=0 target_rewritten=2 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=2
 CHECK: COMPILE-REPORT: target_legalization[*] function=vector_f64_extrema source_op=vector.minimumf * action=rewritten * legalizer=aie2p strategy=target * scalarized=false *
 CHECK: COMPILE-REPORT: target_legalization[*] function=vector_f64_extrema source_op=vector.clampf * action=rewritten * legalizer=aie2p strategy=target * scalarized=false *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @i64_five_lane_selection(%table: vector<2xi64>, %indices: vector<5xi8>) -> (vector<5xi64>) {
+  %result = vector.table.lookup %table[%indices] : vector<2xi64>, vector<5xi8> -> vector<5xi64>
+  func.return %result : vector<5xi64>
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 * rows=1
+CHECK: COMPILE-REPORT: target_legalization[0] function=i64_five_lane_selection source_op=vector.table.lookup * action=rewritten * legalizer=aie2p strategy=target * scalarized=false *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @i16_word_index_selection(%table: vector<9xi16>, %indices: vector<8xi32>) -> (vector<8xi16>) {
+  %result = vector.table.lookup %table[%indices] : vector<9xi16>, vector<8xi32> -> vector<8xi16>
+  func.return %result : vector<8xi16>
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 * rows=1
+CHECK: COMPILE-REPORT: target_legalization[0] function=i16_word_index_selection source_op=vector.table.lookup * action=rewritten * legalizer=aie2p strategy=target * scalarized=false *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @i64_index_selection(%table: vector<3xf32>, %indices: vector<2xi64>) -> (vector<2xf32>) {
+  %result = vector.table.lookup %table[%indices] : vector<3xf32>, vector<2xi64> -> vector<2xf32>
+  func.return %result : vector<2xf32>
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 * rows=1
+CHECK: COMPILE-REPORT: target_legalization[0] function=i64_index_selection source_op=vector.table.lookup * action=rewritten * legalizer=aie2p strategy=target * scalarized=false *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @predicate_table_selection(%table: vector<2xi1>, %indices: vector<4xi8>) -> (vector<4xi1>) {
+  %result = vector.table.lookup %table[%indices] : vector<2xi1>, vector<4xi8> -> vector<4xi1>
+  func.return %result : vector<4xi1>
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 * rows=1
+CHECK: COMPILE-REPORT: target_legalization[0] function=predicate_table_selection source_op=vector.table.lookup * action=rewritten * legalizer=aie2p strategy=target * scalarized=false *
