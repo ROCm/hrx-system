@@ -9,8 +9,7 @@
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/program.h"
-#include "iree/base/threading/mutex.h"
-#include "iree/base/threading/notification.h"
+#include "experimental/loom_serve/runtime/retirement.h"
 #include "iree/io/parameter_index_provider.h"
 #include "iree/tooling/parameter_util.h"
 #include "iree/vm/buffer.h"
@@ -64,6 +63,8 @@ struct loom_serve_weights_t {
   loom_serve_memory_pool_t* pool;
   // Parameter-only accounting across all unique roots.
   loom_serve_memory_statistics_t statistics;
+  // Final consumer ownership before virtual roots can be unmapped at teardown.
+  loom_serve_retirement_t retirement;
   // Owned original checkpoint provider and imported-file cache.
   iree_io_parameter_provider_t* provider;
   // Owned placement/preparation records, with keys in the owned key storage.
@@ -166,8 +167,10 @@ static iree_status_t weight_resolve_root(loom_serve_weights_t* weights,
                                          root.required_byte_length,
                                          root.minimum_alignment, out_buffer));
   }
-  storage->buffer = *out_buffer;
   const iree_host_size_t storage_index = weights->storage_count++;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_retirement_track(&weights->retirement, out_buffer, allocator));
+  storage->buffer = *out_buffer;
   for (uint32_t i = 0; i < program->parameters.count; ++i) {
     const loom_cmd_program_parameter_t parameter =
         loom_cmd_program_parameter_at(program, i);
@@ -352,34 +355,6 @@ static iree_status_t weight_enumerate(void* user_data, iree_host_size_t i,
   return iree_ok_status();
 }
 
-// Readiness failure can precede retirement of an earlier file transfer. Each
-// activation lends views to queues and joins their final ownership release,
-// independently of the semaphores that cancel dependent work on failure.
-typedef struct weight_retirement_t {
-  // Serializes final notification with observation of zero outstanding views.
-  iree_slim_mutex_t mutex;
-  // Wakes the cold activation owner after a view's final queue release.
-  iree_notification_t notification;
-  // Views not yet released by all accepted read/preparation operations.
-  iree_host_size_t count;
-} weight_retirement_t;
-
-static void weight_retire_view(void* user_data, iree_hal_buffer_t* buffer) {
-  weight_retirement_t* retirement = user_data;
-  iree_slim_mutex_lock(&retirement->mutex);
-  --retirement->count;
-  iree_notification_post(&retirement->notification, IREE_ALL_WAITERS);
-  iree_slim_mutex_unlock(&retirement->mutex);
-}
-
-static bool weight_views_retired(void* user_data) {
-  weight_retirement_t* retirement = user_data;
-  iree_slim_mutex_lock(&retirement->mutex);
-  const bool retired = retirement->count == 0;
-  iree_slim_mutex_unlock(&retirement->mutex);
-  return retired;
-}
-
 static iree_status_t weight_stream(loom_serve_weights_t* weights) {
   const iree_allocator_t allocator = weights->allocator;
   const iree_host_size_t span_count = weights->span_count;
@@ -396,20 +371,13 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
     status = iree_allocator_malloc_array(allocator, weights->storage_count,
                                          sizeof(*views), (void**)&views);
   }
-  weight_retirement_t retirement = {0};
-  iree_slim_mutex_initialize(&retirement.mutex);
-  iree_notification_initialize(&retirement.notification);
+  loom_serve_retirement_t retirement;
+  loom_serve_retirement_initialize(&retirement);
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
-    iree_hal_buffer_t* buffer = weights->storages[i].buffer;
-    status = iree_hal_subspan_buffer_create_with_callback(
-        buffer, iree_hal_buffer_byte_offset(buffer),
-        iree_hal_buffer_byte_length(buffer),
-        (iree_hal_buffer_release_callback_t){weight_retire_view, &retirement},
-        allocator, &views[i]);
-    if (iree_status_is_ok(status)) {
-      ++retirement.count;
-    }
+    views[i] = weights->storages[i].buffer;
+    iree_hal_buffer_retain(views[i]);
+    status = loom_serve_retirement_track(&retirement, &views[i], allocator);
   }
   iree_hal_semaphore_t* reads[WEIGHT_LANES] = {0};
   iree_hal_semaphore_t* ready[WEIGHT_LANES] = {0};
@@ -512,10 +480,7 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
       iree_hal_buffer_release(views[i]);
     }
   }
-  iree_notification_await(&retirement.notification, weight_views_retired,
-                          &retirement, iree_infinite_timeout());
-  iree_notification_deinitialize(&retirement.notification);
-  iree_slim_mutex_deinitialize(&retirement.mutex);
+  loom_serve_retirement_deinitialize(&retirement);
   iree_allocator_free(allocator, views);
   iree_allocator_free(allocator, gathers);
   iree_allocator_free(allocator, groups);
@@ -539,6 +504,7 @@ iree_status_t loom_serve_weights_create(
   weights->transfer = transfer;
   weights->dispatch = dispatch;
   weights->pool = pool;
+  loom_serve_retirement_initialize(&weights->retirement);
   *out_weights = weights;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_host_size_t capacity =
@@ -669,6 +635,7 @@ iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights) {
   if (!weights) {
     return iree_ok_status();
   }
+  loom_serve_retirement_await(&weights->retirement);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
@@ -679,6 +646,7 @@ iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights) {
     }
   }
   if (iree_status_is_ok(status)) {
+    loom_serve_retirement_deinitialize(&weights->retirement);
     for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
       iree_hal_command_buffer_release(weights->spans[i].prepare);
     }

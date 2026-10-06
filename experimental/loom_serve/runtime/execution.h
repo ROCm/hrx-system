@@ -68,7 +68,9 @@ iree_status_t loom_serve_execution_feedback_wait(
     loom_serve_execution_t* execution, uint64_t value);
 
 // Joins both accepted frontiers and their failures. A synchronous rejection
-// never advances either frontier to an unsignaled value.
+// never advances either frontier to an unsignaled value. A failed semaphore is
+// not proof of final queue resource retirement; terminal owners also join their
+// tracked buffer views before freeing borrowed payloads or virtual mappings.
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution);
 
 #ifdef __cplusplus

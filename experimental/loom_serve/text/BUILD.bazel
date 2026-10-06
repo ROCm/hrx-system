@@ -46,6 +46,7 @@ loom_cc_library(
         "//experimental/loom_serve/runtime:module",
         "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/runtime:program",
+        "//experimental/loom_serve/runtime:retirement",
         "//experimental/loom_serve/runtime:weights",
         "//experimental/loom_serve/scheduling:packing",
         "//experimental/loom_serve/storage:block_pool",

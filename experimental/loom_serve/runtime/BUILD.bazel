@@ -279,16 +279,47 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "retirement",
+    srcs = ["retirement.c"],
+    hdrs = ["retirement.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+loom_cc_test(
+    name = "retirement_test",
+    srcs = ["retirement_test.cc"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":device",
+        ":retirement",
+        "//experimental/loom_serve/storage:memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "weights",
     srcs = ["weights.c"],
     hdrs = ["weights.h"],
     deps = [
         ":jit",
         ":program",
+        ":retirement",
         "//experimental/loom_serve/storage:memory",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
-        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/io:parameter_index_provider",

@@ -140,6 +140,7 @@ loom_cc_library(
         "//experimental/loom_serve/runtime:module",
         "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/runtime:program",
+        "//experimental/loom_serve/runtime:retirement",
         "//experimental/loom_serve/runtime:weights",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",

@@ -14,6 +14,7 @@
 #include "experimental/loom_serve/runtime/module.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/runtime/program.h"
+#include "experimental/loom_serve/runtime/retirement.h"
 #include "experimental/loom_serve/runtime/weights.h"
 #include "iree/base/internal/path.h"
 #include "iree/io/file_contents.h"
@@ -40,6 +41,10 @@ struct loom_serve_image_model_t {
   iree_tokenizer_t* tokenizer;
   // Borrowed shared device/timeline owner, outliving the model.
   loom_serve_device_t* owner;
+  // Final input/output/workspace view ownership before host payload release.
+  loom_serve_retirement_t retirement;
+  // Request upload bytes retained through success or terminal queue retirement.
+  iree_vm_buffer_t* input_payload;
   // Cold live-source compiler and its task pool.
   loom_serve_jit_t* jit;
   // Owned source declarations, independent of the bootstrap VM and arguments.
@@ -114,6 +119,8 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bindings); ++i) {
     iree_hal_buffer_release(model->bindings[i].buffer);
   }
+  loom_serve_retirement_deinitialize(&model->retirement);
+  iree_vm_buffer_release(model->input_payload);
   iree_allocator_free(model->allocator, model->weights.values);
   iree_allocator_free(model->allocator, model->weights.plans);
   iree_allocator_free(model->allocator, (void*)model->name.data);
@@ -537,6 +544,10 @@ static iree_status_t image_model_initialize(
     status = iree_hal_allocator_allocate_buffer(
         iree_hal_device_allocator(device), params, length,
         &model->bindings[i].buffer);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_retirement_track(
+          &model->retirement, &model->bindings[i].buffer, allocator);
+    }
     model->bindings[i].length = length;
   }
   IREE_RETURN_IF_ERROR(status);
@@ -557,6 +568,7 @@ iree_status_t loom_serve_image_model_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*model), (void**)&model));
   model->allocator = host_allocator;
+  loom_serve_retirement_initialize(&model->retirement);
   model->owner = device;
   iree_status_t status = image_model_initialize(model, options);
   if (iree_status_is_ok(status)) {
@@ -693,6 +705,7 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
   iree_status_t status = image_prepare_request(model, prompt, seed, strength,
                                                &stage_index, &payload);
   IREE_RETURN_IF_ERROR(status);
+  model->input_payload = payload;
   status = loom_serve_image_model_activate(model);
   iree_const_byte_span_t input = iree_const_byte_span_empty();
   if (iree_status_is_ok(status)) {
@@ -723,16 +736,17 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
             "{\"event\":\"image_submitted\",\"submit_ns\":%" PRId64 "}\n",
             submit_end - prepare_end);
   }
-  // Native ownership follows accepted work, not a source-returned integer.
-  // This also retires a successful upload preceding a later VM rejection.
+  // Success retires the borrowed upload. Failure preserves it until teardown
+  // joins actual view ownership, independently of failed readiness.
   status = iree_status_join(status, loom_serve_execution_drain(execution));
   const iree_time_t completion_end = iree_time_now();
   if (iree_status_is_ok(status)) {
     *out_rgb = iree_make_const_byte_span(model->output.data,
                                          model->output.data_length);
   }
-  iree_vm_buffer_release(payload);
   if (iree_status_is_ok(status)) {
+    iree_vm_buffer_release(model->input_payload);
+    model->input_payload = NULL;
     // Submission overlaps device work. The remaining wait includes queued
     // transfers and final readback, not an isolated GPU execution interval.
     fprintf(stderr,

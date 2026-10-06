@@ -21,6 +21,7 @@
 #include "experimental/loom_serve/runtime/module.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/runtime/program.h"
+#include "experimental/loom_serve/runtime/retirement.h"
 #include "experimental/loom_serve/runtime/weights.h"
 #include "experimental/loom_serve/storage/block_pool.h"
 #include "experimental/loom_serve/storage/relocation.h"
@@ -96,6 +97,8 @@ struct loom_serve_text_model_t {
   iree_hal_queue_t* transfer;
   // Borrowed stage/input timelines with independently retired feedback.
   loom_serve_execution_t* execution;
+  // Final state-view ownership enclosing borrowed host payloads and mappings.
+  loom_serve_retirement_t retirement;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
   // Shared source index and compiler for this model residency.
@@ -337,8 +340,10 @@ static iree_status_t text_allocate_buffer(loom_serve_text_model_t* runner,
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   params.min_alignment = minimum_alignment;
-  return iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(runner->device), params, length, out_buffer);
+  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(runner->device), params, length, out_buffer));
+  return loom_serve_retirement_track(&runner->retirement, out_buffer,
+                                     runner->allocator);
 }
 
 // Weight placement and preparation are cold model-wide work. Session rows
@@ -792,7 +797,9 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
           *allocations[i] =
               loom_serve_virtual_buffer_handle(model->memory.buffers[i]);
           iree_hal_buffer_retain(*allocations[i]);
-          if (clear_length && i != 1) {
+          status = loom_serve_retirement_track(
+              &model->retirement, allocations[i], model->allocator);
+          if (iree_status_is_ok(status) && clear_length && i != 1) {
             model->memory.private_lengths[i] = clear_length;
             status = loom_serve_virtual_buffer_commit(model->memory.buffers[i],
                                                       0, clear_length);
@@ -1008,6 +1015,7 @@ iree_status_t loom_serve_text_model_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*model), (void**)&model));
   model->allocator = host_allocator;
+  loom_serve_retirement_initialize(&model->retirement);
   model->device_owner = device;
   model->row_count = options->row_count;
   iree_status_t status = text_initialize(model, options);
@@ -1029,12 +1037,6 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   loom_serve_text_chat_policy_deinitialize(&model->chat_policy);
   loom_serve_program_destroy(model->program);
   iree_vm_module_release(model->native_module);
-  text_release_initialization(model);
-  iree_vm_buffer_release(model->control_state);
-  for (iree_host_size_t i = 0; i < TEXT_HOST_BUFFER_COUNT; ++i) {
-    iree_vm_buffer_release(model->host.buffers[i]);
-  }
-  iree_vm_environment_free(model->environment);
   loom_serve_preparation_destroy(model->preparation);
   if (model->rows) {
     for (iree_host_size_t i = 0; i < model->row_count; ++i) {
@@ -1044,8 +1046,6 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
       }
     }
   }
-  iree_allocator_free(model->allocator, model->rows);
-  iree_allocator_free(model->allocator, model->cache.maps);
   iree_allocator_free(model->allocator, model->cache.destinations);
   loom_serve_block_pool_deinitialize(&model->cache.pool);
   iree_hal_buffer_release(model->epoch.buffers[1]);
@@ -1073,6 +1073,17 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_allocator_free(model->allocator, model->stages);
   loom_serve_jit_destroy(model->jit);
   iree_allocator_free(model->allocator, model->memory.regions);
+  // A failed semaphore does not retire borrowed transfer payloads. Final queue
+  // ownership of their device counterparts does, including nested row views.
+  loom_serve_retirement_deinitialize(&model->retirement);
+  text_release_initialization(model);
+  iree_vm_buffer_release(model->control_state);
+  for (iree_host_size_t i = 0; i < TEXT_HOST_BUFFER_COUNT; ++i) {
+    iree_vm_buffer_release(model->host.buffers[i]);
+  }
+  iree_vm_environment_free(model->environment);
+  iree_allocator_free(model->allocator, model->rows);
+  iree_allocator_free(model->allocator, model->cache.maps);
   iree_status_t memory_status = loom_serve_weights_destroy(model->weights);
   for (iree_host_size_t i = 0; i < TEXT_ALLOCATION_COUNT; ++i) {
     memory_status = iree_status_join(
