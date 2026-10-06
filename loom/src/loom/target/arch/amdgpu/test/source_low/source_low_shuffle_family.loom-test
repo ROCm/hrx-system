@@ -1,0 +1,146 @@
+// RUN: emit source-low output=low
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i1_complete_mask_groups(%values: vector<3xi1>) -> (vector<3xi1>) {
+  %result = vector.shuffle<[2, 0, 1]> %values : vector<3xi1>
+  func.return %result : vector<3xi1>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i1_complete_mask_groups(%values: reg<amdgpu.sgpr x6>) -> (reg<amdgpu.sgpr x6>) asm {
+  %5 = slice %values[4] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
+  %6 = slice %values[5] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
+  %7 = slice %values[0] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
+  %8 = slice %values[1] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
+  %9 = slice %values[2] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
+  %10 = slice %values[3] : reg<amdgpu.sgpr x6> -> reg<amdgpu.sgpr>
+  %result = concat(%5, %6, %7, %8, %9, %10) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x6>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i64_complete_register_pairs(%values: vector<3xi64>) -> (vector<3xi64>) {
+  %result = vector.shuffle<[2, 0, 1]> %values : vector<3xi64>
+  func.return %result : vector<3xi64>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i64_complete_register_pairs(%values: reg<amdgpu.vgpr x6>) -> (reg<amdgpu.vgpr x6>) asm {
+  %5 = slice %values[4] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %6 = slice %values[5] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %7 = slice %values[0] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %8 = slice %values[1] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %9 = slice %values[2] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %10 = slice %values[3] : reg<amdgpu.vgpr x6> -> reg<amdgpu.vgpr>
+  %result = concat(%5, %6, %7, %8, %9, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x6>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i8_four_source_tail(%values: vector<15xi8>) -> (vector<15xi8>) {
+  %result = vector.shuffle<[0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11]> %values : vector<15xi8>
+  func.return %result : vector<15xi8>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8_four_source_tail(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
+  %5 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = v_perm_b32_src2_lit %5, %6, 67371012
+  %8 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_perm_b32_src2_lit %7, %8, 117441796
+  %10 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = v_perm_b32_src2_lit %9, %10, 394500
+  %12 = v_perm_b32_src2_lit %5, %6, 67371269
+  %13 = v_perm_b32_src2_lit %12, %8, 117507332
+  %14 = v_perm_b32_src2_lit %13, %10, 17171716
+  %15 = v_perm_b32_src2_lit %5, %6, 67371526
+  %16 = v_perm_b32_src2_lit %15, %8, 117572868
+  %17 = v_perm_b32_src2_lit %16, %10, 33948932
+  %18 = v_perm_b32_src2_lit %5, %6, 117703431
+  %19 = v_perm_b32_src2_lit %18, %8, 117638404
+  %result = concat(%11, %14, %17, %19) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx11-generic> @target
+
+func.def target(@target) @i16_cross_word_tail(%values: vector<5xi16>) -> (vector<5xi16>) {
+  %result = vector.shuffle<[0, 2, 4, 1, 3]> %values : vector<5xi16>
+  func.return %result : vector<5xi16>
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i16_cross_word_tail(%values: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x3>) asm {
+  %5 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %6 = slice %values[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %7 = v_perm_b32_src2_lit %5, %6, 16778500
+  %8 = slice %values[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %9 = v_perm_b32_src2_lit %8, %5, 50464004
+  %10 = v_perm_b32_src2_lit %6, %6, 117835526
+  %result = concat(%7, %9, %10) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  return %result
+}
+
+// ====
+
+amdgpu.target<gfx942> @target
+
+func.def target(@target) @i8_selector_working_set(%values: vector<40xi8>) -> (vector<40xi8>) {
+  %result = vector.shuffle<[0, 0, 4, 8, 0, 0, 5, 9, 0, 0, 6, 10, 0, 0, 7, 11, 0, 4, 8, 0, 0, 4, 9, 1, 0, 4, 10, 2, 0, 4, 11, 3, 0, 5, 8, 8, 0, 0, 4, 8]> %values : vector<40xi8>
+  func.return %result : vector<40xi8>
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core>(@target) abi(hal_kernel) @i8_selector_working_set(%values: reg<amdgpu.vgpr x10>) -> (reg<amdgpu.vgpr x10>) asm {
+  %5 = slice %values[0] : reg<amdgpu.vgpr x10> -> reg<amdgpu.vgpr>
+  %6 = slice %values[1] : reg<amdgpu.vgpr x10> -> reg<amdgpu.vgpr>
+  %7 = s_mov_b32 67109892
+  %8 = v_perm_b32 %5, %6, %7
+  %9 = slice %values[2] : reg<amdgpu.vgpr x10> -> reg<amdgpu.vgpr>
+  %10 = s_mov_b32 394500
+  %11 = v_perm_b32 %8, %9, %10
+  %12 = s_mov_b32 67175428
+  %13 = v_perm_b32 %5, %6, %12
+  %14 = s_mov_b32 17171716
+  %15 = v_perm_b32 %13, %9, %14
+  %16 = s_mov_b32 67240964
+  %17 = v_perm_b32 %5, %6, %16
+  %18 = s_mov_b32 33948932
+  %19 = v_perm_b32 %17, %9, %18
+  %20 = s_mov_b32 67306500
+  %21 = v_perm_b32 %5, %6, %20
+  %22 = s_mov_b32 50726148
+  %23 = v_perm_b32 %21, %9, %22
+  %24 = s_mov_b32 67371012
+  %25 = v_perm_b32 %5, %6, %24
+  %26 = s_mov_b32 117441796
+  %27 = v_perm_b32 %25, %9, %26
+  %28 = s_mov_b32 84148228
+  %29 = v_perm_b32 %5, %6, %28
+  %30 = s_mov_b32 117507332
+  %31 = v_perm_b32 %29, %9, %30
+  %32 = s_mov_b32 100925444
+  %33 = v_perm_b32 %5, %6, %32
+  %34 = s_mov_b32 117572868
+  %35 = v_perm_b32 %33, %9, %34
+  %36 = s_mov_b32 117702660
+  %37 = v_perm_b32 %5, %6, %36
+  %38 = s_mov_b32 117638404
+  %39 = v_perm_b32 %37, %9, %38
+  %40 = s_mov_b32 67371268
+  %41 = v_perm_b32 %5, %6, %40
+  %42 = s_mov_b32 1284
+  %43 = v_perm_b32 %41, %9, %42
+  %result = concat(%11, %15, %19, %23, %27, %31, %35, %39, %43, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x10>
+  return %result
+}

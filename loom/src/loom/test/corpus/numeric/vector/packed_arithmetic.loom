@@ -191,6 +191,27 @@ func.def @packed_byte_transpose_4x4(%input: buffer, %output: buffer) {
   func.return
 }
 
+// Transposes the same packed tile through vector.shuffle. Every output word
+// draws one byte from each of four input words, exercising the maximum
+// per-word source fan-in of the fixed lane map.
+func.def @packed_byte_shuffle_4x4(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %aligned_input = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %aligned_output = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %source, %destination = buffer.assume.noalias %aligned_input, %aligned_output : buffer, buffer
+  %input_bytes = buffer.view %source[%base] : buffer -> view<256x16xi8>
+  %output_bytes = buffer.view %destination[%base] : buffer -> view<256x16xi8>
+  scf.for %packet = [%begin to %end step %step] {
+    %bytes = vector.load %input_bytes[%packet, 0] : view<256x16xi8> -> vector<16xi8>
+    %transposed = vector.shuffle<[0, 4, 8, 12, 1, 5, 9, 13, 2, 6, 10, 14, 3, 7, 11, 15]> %bytes : vector<16xi8>
+    vector.store %transposed, %output_bytes[%packet, 0] : vector<16xi8>, view<256x16xi8>
+  }
+  func.return
+}
+
 // Scalar row and column accesses keep the oracle independent of vector
 // bitcasts, table lookup, and shuffle lowering.
 func.def @packed_byte_transpose_4x4_oracle(%input: buffer, %output: buffer) {
@@ -218,6 +239,19 @@ check.scenario @packed_byte_transpose_4x4_values {
     %output_storage = check.generate.fill value(91) : tensor<4128xi8>
     %output = check.tensor.view %output_storage offset(16) : tensor<4128xi8> -> tensor<4096xi8>
     check.compare<@packed_byte_transpose_4x4, @packed_byte_transpose_4x4_oracle>(%input, %output) : (tensor<4096xi8>, tensor<4096xi8>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<4096xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<4128xi8>
+    }
+  }
+  check.return
+}
+
+check.scenario @packed_byte_shuffle_4x4_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(1) period(256) : tensor<4096xi8>
+    %output_storage = check.generate.fill value(-37) : tensor<4128xi8>
+    %output = check.tensor.view %output_storage offset(16) : tensor<4128xi8> -> tensor<4096xi8>
+    check.compare<@packed_byte_shuffle_4x4, @packed_byte_transpose_4x4_oracle>(%input, %output) : (tensor<4096xi8>, tensor<4096xi8>) -> () {
       check.expect.bitwise actual(%input) expected(%input) : tensor<4096xi8>
       check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<4128xi8>
     }

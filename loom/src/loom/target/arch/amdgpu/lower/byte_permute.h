@@ -30,7 +30,7 @@ typedef struct loom_amdgpu_byte_permute_emitter_t {
   loom_low_lower_resolved_descriptor_t descriptor;
   // SGPR type used to materialize selectors for the regular packet form.
   loom_type_t selector_type;
-  // Emission-local selector SGPRs interned by immediate payload.
+  // Most recently used selector SGPRs cached by immediate payload.
   loom_amdgpu_byte_permute_selector_cache_entry_t
       selector_cache[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
   // Number of populated entries in |selector_cache|.
@@ -48,7 +48,7 @@ iree_status_t loom_amdgpu_byte_permute_emitter_initialize(
     const loom_amdgpu_byte_permute_plan_t* plan,
     loom_amdgpu_byte_permute_emitter_t* out_emitter);
 
-// Emits one byte permutation, interning a register selector when required.
+// Emits one byte permutation, reusing recent register selectors when required.
 iree_status_t loom_amdgpu_byte_permute_emitter_emit(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_amdgpu_byte_permute_emitter_t* emitter, loom_value_id_t source0,

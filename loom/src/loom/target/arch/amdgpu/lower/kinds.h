@@ -29,6 +29,12 @@ extern "C" {
 #define LOOM_AMDGPU_MAX_VECTOR_STORAGE_REGISTER_UNITS \
   (LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES * 2u)
 
+// Maximum number of logical elements in one directly represented vector
+// value. Packed byte and halfword payloads may carry twice the scalarized
+// numeric-lane budget.
+#define LOOM_AMDGPU_MAX_VECTOR_STORAGE_ELEMENTS \
+  (LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES * 2u)
+
 // Maximum number of direct memory packets needed to move one scalarized source
 // vector payload. Packed 16-bit vectors with an odd lane count may need one
 // final sub-dword tail packet after the whole-register packets. Packed bytes

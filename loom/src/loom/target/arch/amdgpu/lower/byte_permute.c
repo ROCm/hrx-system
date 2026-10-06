@@ -33,9 +33,9 @@ iree_status_t loom_amdgpu_byte_permute_emitter_initialize(
     const loom_amdgpu_byte_permute_plan_t* plan,
     loom_amdgpu_byte_permute_emitter_t* out_emitter) {
   IREE_ASSERT_NE(plan->kind, LOOM_AMDGPU_BYTE_PERMUTE_KIND_NONE);
-  *out_emitter = (loom_amdgpu_byte_permute_emitter_t){
-      .plan = *plan,
-  };
+  out_emitter->plan = *plan;
+  out_emitter->selector_type = loom_type_none();
+  out_emitter->selector_count = 0;
   IREE_RETURN_IF_ERROR(loom_amdgpu_resolve_descriptor_ref(
       context, plan->descriptor_ref, &out_emitter->descriptor));
   if (plan->kind == LOOM_AMDGPU_BYTE_PERMUTE_KIND_REGISTER_SELECTOR) {
@@ -61,20 +61,31 @@ iree_status_t loom_amdgpu_byte_permute_emitter_emit(
              emitter->selector_cache[selector_index].immediate != selector) {
         ++selector_index;
       }
+      loom_amdgpu_byte_permute_selector_cache_entry_t entry;
+      uint32_t promotion_index = selector_index;
       if (selector_index == emitter->selector_count) {
-        IREE_ASSERT_LT(emitter->selector_count,
-                       IREE_ARRAYSIZE(emitter->selector_cache));
-        loom_amdgpu_byte_permute_selector_cache_entry_t* entry =
-            &emitter->selector_cache[emitter->selector_count++];
-        entry->immediate = selector;
+        entry.immediate = selector;
         IREE_RETURN_IF_ERROR(loom_amdgpu_emit_const_u32(
             context, source_op, LOOM_AMDGPU_DESCRIPTOR_REF_S_MOV_B32, selector,
-            emitter->selector_type, &entry->register_value));
+            emitter->selector_type, &entry.register_value));
+        if (emitter->selector_count < IREE_ARRAYSIZE(emitter->selector_cache)) {
+          promotion_index = emitter->selector_count++;
+        } else {
+          promotion_index = emitter->selector_count - 1u;
+        }
+      } else {
+        entry = emitter->selector_cache[selector_index];
       }
+      // Keep reuse bounded by the existing fixed working set. Arbitrary
+      // shuffles can use more selector payloads than the cache can hold; an
+      // evicted selector is safely rematerialized if it appears again.
+      for (uint32_t i = promotion_index; i > 0; --i) {
+        emitter->selector_cache[i] = emitter->selector_cache[i - 1u];
+      }
+      emitter->selector_cache[0] = entry;
       return loom_amdgpu_emit_resolved_vgpr_ternary(
           context, source_op, &emitter->descriptor, source0, source1,
-          emitter->selector_cache[selector_index].register_value, result_type,
-          out_value);
+          entry.register_value, result_type, out_value);
     }
     case LOOM_AMDGPU_BYTE_PERMUTE_KIND_NONE:
     default:

@@ -297,11 +297,10 @@ func.def target(@target) @i8x5_shuffle_tail(%values: vector<5xi8>) -> (vector<5x
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x5_shuffle_tail(%values: reg<amdgpu.vgpr x2>) -> (reg<amdgpu.vgpr x2>) asm {
-  %5 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %6 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
-  %7 = v_perm_b32_src2_lit %6, %5, 16909060
-  %8 = v_perm_b32_src2_lit %5, %5, 67372036
-  %shuffled = concat(%7, %8) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %5 = slice %values[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %6 = slice %values[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %7 = v_perm_b32_src2_lit %5, %6, 16909060
+  %shuffled = concat(%7, %6) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
   return %shuffled
 }
 
@@ -316,52 +315,14 @@ func.def target(@target) @i8x12_shuffle_three_source_group(%values: vector<12xi8
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x12_shuffle_three_source_group(%values: reg<amdgpu.vgpr x3>) -> (reg<amdgpu.vgpr x3>) asm {
-  %18 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %19 = v_bfe_i32_offset_width_inline %18 {offset = 0, width = 8}
-  %20 = slice %values[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %21 = v_bfe_i32_offset_width_inline %20 {offset = 0, width = 8}
-  %22 = slice %values[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
-  %23 = v_bfe_i32_offset_width_inline %22 {offset = 0, width = 8}
-  %25 = v_bfe_i32_offset_width_inline %18 {offset = 8, width = 8}
-  %27 = v_bfe_i32_offset_width_inline %18 {offset = 16, width = 8}
-  %29 = v_ashrrev_i32_src0_inline %18, 24
-  %31 = v_bfe_i32_offset_width_inline %20 {offset = 8, width = 8}
-  %33 = v_bfe_i32_offset_width_inline %20 {offset = 16, width = 8}
-  %35 = v_ashrrev_i32_src0_inline %20, 24
-  %37 = v_bfe_i32_offset_width_inline %22 {offset = 8, width = 8}
-  %39 = v_bfe_i32_offset_width_inline %22 {offset = 16, width = 8}
-  %41 = v_ashrrev_i32_src0_inline %22, 24
-  %42 = v_and_b32_lit %19, 255
-  %43 = v_and_b32_lit %21, 255
-  %44 = v_lshlrev_b32_src0_inline %43, 8
-  %45 = v_or_b32 %42, %44
-  %46 = v_and_b32_lit %23, 255
-  %47 = v_lshlrev_b32_src0_inline %46, 16
-  %48 = v_or_b32 %45, %47
-  %49 = v_and_b32_lit %25, 255
-  %50 = v_lshlrev_b32_src0_inline %49, 24
-  %51 = v_or_b32 %48, %50
-  %52 = v_and_b32_lit %27, 255
-  %53 = v_and_b32_lit %29, 255
-  %54 = v_lshlrev_b32_src0_inline %53, 8
-  %55 = v_or_b32 %52, %54
-  %56 = v_and_b32_lit %31, 255
-  %57 = v_lshlrev_b32_src0_inline %56, 16
-  %58 = v_or_b32 %55, %57
-  %59 = v_and_b32_lit %33, 255
-  %60 = v_lshlrev_b32_src0_inline %59, 24
-  %61 = v_or_b32 %58, %60
-  %62 = v_and_b32_lit %35, 255
-  %63 = v_and_b32_lit %37, 255
-  %64 = v_lshlrev_b32_src0_inline %63, 8
-  %65 = v_or_b32 %62, %64
-  %66 = v_and_b32_lit %39, 255
-  %67 = v_lshlrev_b32_src0_inline %66, 16
-  %68 = v_or_b32 %65, %67
-  %69 = v_and_b32_lit %41, 255
-  %70 = v_lshlrev_b32_src0_inline %69, 24
-  %71 = v_or_b32 %68, %70
-  %shuffled = concat(%51, %61, %71) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
+  %5 = slice %values[0] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %6 = slice %values[1] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %7 = v_perm_b32_src2_lit %5, %6, 84148228
+  %8 = slice %values[2] : reg<amdgpu.vgpr x3> -> reg<amdgpu.vgpr>
+  %9 = v_perm_b32_src2_lit %7, %8, 117441796
+  %10 = v_perm_b32_src2_lit %5, %6, 33621766
+  %11 = v_perm_b32_src2_lit %6, %8, 50462983
+  %shuffled = concat(%9, %10, %11) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x3>
   return %shuffled
 }
 
@@ -653,66 +614,22 @@ func.def target(@target) @i8x16_shuffle_transpose_4x4(%values: vector<16xi8>) ->
 
 // ----
 low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @i8x16_shuffle_transpose_4x4(%values: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr x4>) asm {
-  %22 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %23 = v_bfe_i32_offset_width_inline %22 {offset = 0, width = 8}
-  %24 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %25 = v_bfe_i32_offset_width_inline %24 {offset = 0, width = 8}
-  %26 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %27 = v_bfe_i32_offset_width_inline %26 {offset = 0, width = 8}
-  %28 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
-  %29 = v_bfe_i32_offset_width_inline %28 {offset = 0, width = 8}
-  %31 = v_bfe_i32_offset_width_inline %22 {offset = 8, width = 8}
-  %33 = v_bfe_i32_offset_width_inline %24 {offset = 8, width = 8}
-  %35 = v_bfe_i32_offset_width_inline %26 {offset = 8, width = 8}
-  %37 = v_bfe_i32_offset_width_inline %28 {offset = 8, width = 8}
-  %39 = v_bfe_i32_offset_width_inline %22 {offset = 16, width = 8}
-  %41 = v_bfe_i32_offset_width_inline %24 {offset = 16, width = 8}
-  %43 = v_bfe_i32_offset_width_inline %26 {offset = 16, width = 8}
-  %45 = v_bfe_i32_offset_width_inline %28 {offset = 16, width = 8}
-  %47 = v_ashrrev_i32_src0_inline %22, 24
-  %49 = v_ashrrev_i32_src0_inline %24, 24
-  %51 = v_ashrrev_i32_src0_inline %26, 24
-  %53 = v_ashrrev_i32_src0_inline %28, 24
-  %54 = v_and_b32_lit %23, 255
-  %55 = v_and_b32_lit %25, 255
-  %56 = v_lshlrev_b32_src0_inline %55, 8
-  %57 = v_or_b32 %54, %56
-  %58 = v_and_b32_lit %27, 255
-  %59 = v_lshlrev_b32_src0_inline %58, 16
-  %60 = v_or_b32 %57, %59
-  %61 = v_and_b32_lit %29, 255
-  %62 = v_lshlrev_b32_src0_inline %61, 24
-  %63 = v_or_b32 %60, %62
-  %64 = v_and_b32_lit %31, 255
-  %65 = v_and_b32_lit %33, 255
-  %66 = v_lshlrev_b32_src0_inline %65, 8
-  %67 = v_or_b32 %64, %66
-  %68 = v_and_b32_lit %35, 255
-  %69 = v_lshlrev_b32_src0_inline %68, 16
-  %70 = v_or_b32 %67, %69
-  %71 = v_and_b32_lit %37, 255
-  %72 = v_lshlrev_b32_src0_inline %71, 24
-  %73 = v_or_b32 %70, %72
-  %74 = v_and_b32_lit %39, 255
-  %75 = v_and_b32_lit %41, 255
-  %76 = v_lshlrev_b32_src0_inline %75, 8
-  %77 = v_or_b32 %74, %76
-  %78 = v_and_b32_lit %43, 255
-  %79 = v_lshlrev_b32_src0_inline %78, 16
-  %80 = v_or_b32 %77, %79
-  %81 = v_and_b32_lit %45, 255
-  %82 = v_lshlrev_b32_src0_inline %81, 24
-  %83 = v_or_b32 %80, %82
-  %84 = v_and_b32_lit %47, 255
-  %85 = v_and_b32_lit %49, 255
-  %86 = v_lshlrev_b32_src0_inline %85, 8
-  %87 = v_or_b32 %84, %86
-  %88 = v_and_b32_lit %51, 255
-  %89 = v_lshlrev_b32_src0_inline %88, 16
-  %90 = v_or_b32 %87, %89
-  %91 = v_and_b32_lit %53, 255
-  %92 = v_lshlrev_b32_src0_inline %91, 24
-  %93 = v_or_b32 %90, %92
-  %shuffled = concat(%63, %73, %83, %93) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
+  %5 = slice %values[0] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %6 = slice %values[1] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %7 = v_perm_b32_src2_lit %5, %6, 67371012
+  %8 = slice %values[2] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %9 = v_perm_b32_src2_lit %7, %8, 117441796
+  %10 = slice %values[3] : reg<amdgpu.vgpr x4> -> reg<amdgpu.vgpr>
+  %11 = v_perm_b32_src2_lit %9, %10, 394500
+  %12 = v_perm_b32_src2_lit %5, %6, 67371269
+  %13 = v_perm_b32_src2_lit %12, %8, 117507332
+  %14 = v_perm_b32_src2_lit %13, %10, 17171716
+  %15 = v_perm_b32_src2_lit %5, %6, 67371526
+  %16 = v_perm_b32_src2_lit %15, %8, 117572868
+  %17 = v_perm_b32_src2_lit %16, %10, 33948932
+  %18 = v_perm_b32_src2_lit %5, %6, 67371783
+  %19 = v_perm_b32_src2_lit %18, %8, 117638404
+  %20 = v_perm_b32_src2_lit %19, %10, 50726148
+  %shuffled = concat(%11, %14, %17, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x4>
   return %shuffled
 }

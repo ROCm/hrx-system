@@ -20,43 +20,33 @@ extern "C" {
 typedef uint8_t loom_amdgpu_vector_shuffle_kind_t;
 enum loom_amdgpu_vector_shuffle_kind_e {
   LOOM_AMDGPU_VECTOR_SHUFFLE_KIND_NONE = 0,
-  LOOM_AMDGPU_VECTOR_SHUFFLE_KIND_REGISTER_MAP = 1,
-  LOOM_AMDGPU_VECTOR_SHUFFLE_KIND_PACKED_BYTE_PERMUTE = 2,
+  LOOM_AMDGPU_VECTOR_SHUFFLE_KIND_REGISTER_UNITS = 1,
+  LOOM_AMDGPU_VECTOR_SHUFFLE_KIND_PACKED_BYTES = 2,
 };
 
-// Immutable register permutation selected for one vector.shuffle operation.
+// Immutable storage-shaped permutation selected for one vector.shuffle.
 typedef struct loom_amdgpu_vector_shuffle_plan_t {
   // Source vector value supplying every selected logical lane.
   loom_value_id_t source;
   // Result vector value receiving the shuffled payload.
   loom_value_id_t result;
+  // Best available V_PERM_B32 form for packed sub-dword payloads.
+  loom_amdgpu_byte_permute_plan_t byte_permute;
   // Selected lowering strategy for the source and lane map.
   loom_amdgpu_vector_shuffle_kind_t kind;
-  // Static 32-bit backing register count shared by source and result.
-  uint8_t register_count;
-  // Strategy-specific plan data selected by |kind|.
-  union {
-    // Whole-register source selection for register-map mode.
-    struct {
-      // Source register selected for each result register.
-      uint8_t source_register_indices[LOOM_AMDGPU_MAX_SCALARIZED_32BIT_LANES];
-    } register_map;
-    // Packed-byte permutation data for packed-byte-permute mode.
-    struct {
-      // Best available V_PERM_B32 selector representation.
-      loom_amdgpu_byte_permute_plan_t packet;
-      // Source registers selected for the two V_PERM_B32 inputs.
-      uint8_t source_register_indices[2]
-                                     [LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
-      // V_PERM_B32 byte selector literal for each result register.
-      uint32_t selectors[LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS];
-    } packed_bytes;
-  } strategy;
+  // Number of logical elements shared by the source and result.
+  uint8_t element_count;
+  // Number of 32-bit register units occupied by one logical element.
+  uint8_t element_register_count;
+  // Number of payload bits occupied by one logical element.
+  uint8_t element_bit_count;
+  // Source logical element selected for each result logical element.
+  uint8_t source_element_indices[LOOM_AMDGPU_MAX_VECTOR_STORAGE_ELEMENTS];
 } loom_amdgpu_vector_shuffle_plan_t;
-static_assert(sizeof(loom_amdgpu_vector_shuffle_plan_t) == 112,
+static_assert(sizeof(loom_amdgpu_vector_shuffle_plan_t) == 80,
               "AMDGPU vector shuffle plans must stay cache dense");
-static_assert(LOOM_AMDGPU_MAX_PACKED_32BIT_REGISTERS <= UINT8_MAX,
-              "packed vector register counts must fit compact plans");
+static_assert(LOOM_AMDGPU_MAX_VECTOR_STORAGE_ELEMENTS <= UINT8_MAX,
+              "vector element counts must fit compact shuffle plans");
 
 // Selects an AMDGPU vector.bitcast register reinterpretation plan.
 iree_status_t loom_amdgpu_select_vector_bitcast_plan(
