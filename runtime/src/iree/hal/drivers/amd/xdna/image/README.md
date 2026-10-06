@@ -10,7 +10,7 @@ storage and binding contract.
 The image object in this directory is immutable and device-independent. The
 [native storage materializer](../executable_storage.h) connects
 it to caller-owned mappings and libamdf memory handles. The
-[runner](../../../../../../../../experimental/xdna/README.md) demonstrates the complete lifecycle.
+[XDNA HAL](../README.md) owns the complete device execution lifecycle.
 The [Loom producer](../../../../../../../../loom/src/loom/target/arch/amd/xdna/aie2p/emit/xdna_product.h)
 and reader share the fixed-width codecs in
 [xdna_executable.h](../../../../../schemas/xdna_executable.h).

@@ -8,7 +8,8 @@
 
 static iree_status_t loom_run_hal_testbench_staging_transfer(
     const loom_run_hal_runtime_t* runtime,
-    const loom_run_hal_testbench_staging_t* staging) {
+    const loom_run_hal_testbench_staging_t* staging,
+    iree_hal_transfer_operation_type_t type) {
   if (staging->transfer_count == 0) {
     return iree_ok_status();
   }
@@ -16,21 +17,64 @@ static iree_status_t loom_run_hal_testbench_staging_transfer(
   IREE_RETURN_IF_ERROR(iree_hal_semaphore_create(
       runtime->device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
       IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &completion));
+  iree_hal_transfer_operation_t* operations = NULL;
+  iree_hal_buffer_mapping_t* mappings = NULL;
+  iree_status_t status = iree_allocator_malloc_array(
+      staging->host_allocator, staging->transfer_count, sizeof(*operations),
+      (void**)&operations);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(staging->host_allocator,
+                                         staging->transfer_count,
+                                         sizeof(*mappings), (void**)&mappings);
+  }
+  iree_host_size_t mapping_count = 0;
+  for (iree_host_size_t i = 0;
+       iree_status_is_ok(status) && i < staging->transfer_count; ++i) {
+    const iree_hal_transfer_operation_t* transfer = &staging->transfers[i];
+    const iree_hal_memory_access_t access =
+        type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD
+            ? IREE_HAL_MEMORY_ACCESS_READ
+            : IREE_HAL_MEMORY_ACCESS_WRITE;
+    status = iree_hal_buffer_map_range(
+        transfer->copy.source_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
+        IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, transfer->copy.length, &mappings[i]);
+    if (iree_status_is_ok(status)) {
+      ++mapping_count;
+      operations[i].type = type;
+      if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
+        operations[i].upload.source = mappings[i].contents.data;
+        operations[i].upload.target_buffer = transfer->copy.target_buffer;
+        operations[i].upload.length = transfer->copy.length;
+      } else {
+        operations[i].download.source_buffer = transfer->copy.target_buffer;
+        operations[i].download.target = mappings[i].contents.data;
+        operations[i].download.length = transfer->copy.length;
+      }
+    }
+  }
   uint64_t completion_value = 1;
   const iree_hal_semaphore_list_t signal_semaphore_list = {
       .count = 1,
       .semaphores = &completion,
       .payload_values = &completion_value,
   };
-  iree_status_t status = iree_hal_queue_transfer(
-      runtime->transfer_queue, iree_hal_semaphore_list_empty(),
-      signal_semaphore_list, staging->transfer_count, staging->transfers,
-      /*barriers=*/NULL);
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_queue_transfer(
+        runtime->transfer_queue, iree_hal_semaphore_list_empty(),
+        signal_semaphore_list, staging->transfer_count, operations,
+        /*barriers=*/NULL);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_semaphore_wait(completion, completion_value,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE);
   }
+  for (iree_host_size_t i = 0; i < mapping_count; ++i) {
+    status =
+        iree_status_join(status, iree_hal_buffer_unmap_range(&mappings[i]));
+  }
+  iree_allocator_free(staging->host_allocator, mappings);
+  iree_allocator_free(staging->host_allocator, operations);
   iree_hal_semaphore_release(completion);
   return status;
 }
@@ -52,7 +96,9 @@ iree_status_t loom_run_hal_testbench_staging_initialize(
   for (iree_host_size_t i = 0; iree_status_is_ok(status) && i < binding_count;
        ++i) {
     iree_hal_buffer_binding_t* binding = &bindings[i];
-    if (iree_all_bits_set(iree_hal_buffer_memory_type(binding->buffer),
+    if (iree_hal_buffer_allocation_placement(binding->buffer).device ==
+            runtime->device &&
+        iree_all_bits_set(iree_hal_buffer_memory_type(binding->buffer),
                           IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL)) {
       continue;
     }
@@ -97,7 +143,8 @@ iree_status_t loom_run_hal_testbench_staging_initialize(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_staging_transfer(runtime, out_staging);
+    status = loom_run_hal_testbench_staging_transfer(
+        runtime, out_staging, IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD);
   }
   return status;
 }
@@ -105,22 +152,8 @@ iree_status_t loom_run_hal_testbench_staging_initialize(
 iree_status_t loom_run_hal_testbench_staging_readback(
     const loom_run_hal_runtime_t* runtime,
     loom_run_hal_testbench_staging_t* staging) {
-  for (iree_host_size_t i = 0; i < staging->transfer_count; ++i) {
-    iree_hal_transfer_operation_t* transfer = &staging->transfers[i];
-    iree_hal_buffer_t* host_buffer = transfer->copy.source_buffer;
-    transfer->copy.source_buffer = transfer->copy.target_buffer;
-    transfer->copy.target_buffer = host_buffer;
-  }
-  iree_status_t status =
-      loom_run_hal_testbench_staging_transfer(runtime, staging);
-  // Restore the upload direction so teardown always owns target_buffer.
-  for (iree_host_size_t i = 0; i < staging->transfer_count; ++i) {
-    iree_hal_transfer_operation_t* transfer = &staging->transfers[i];
-    iree_hal_buffer_t* device_buffer = transfer->copy.source_buffer;
-    transfer->copy.source_buffer = transfer->copy.target_buffer;
-    transfer->copy.target_buffer = device_buffer;
-  }
-  return status;
+  return loom_run_hal_testbench_staging_transfer(
+      runtime, staging, IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD);
 }
 
 void loom_run_hal_testbench_staging_deinitialize(

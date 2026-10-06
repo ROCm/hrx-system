@@ -22,6 +22,9 @@
 #ifndef IREE_TEST_LOOM_HAVE_SPIRV
 #define IREE_TEST_LOOM_HAVE_SPIRV 0
 #endif  // IREE_TEST_LOOM_HAVE_SPIRV
+#ifndef IREE_TEST_LOOM_HAVE_XDNA
+#define IREE_TEST_LOOM_HAVE_XDNA 0
+#endif  // IREE_TEST_LOOM_HAVE_XDNA
 #ifndef IREE_TEST_LOOM_HAVE_VM
 #define IREE_TEST_LOOM_HAVE_VM 0
 #endif  // IREE_TEST_LOOM_HAVE_VM
@@ -35,7 +38,7 @@
 
 #define IREE_TEST_LOOM_HAVE_ANY_DEVICE_PROVIDER               \
   (IREE_TEST_LOOM_HAVE_AMDGPU || IREE_TEST_LOOM_HAVE_SPIRV || \
-   IREE_TEST_LOOM_HAVE_TASK)
+   IREE_TEST_LOOM_HAVE_XDNA || IREE_TEST_LOOM_HAVE_TASK)
 
 #if IREE_TEST_LOOM_HAVE_AMDGPU
 #include "loom/tooling/target/amdgpu/testbench_requirements.h"
@@ -45,6 +48,9 @@
 #include "loom/tooling/target/spirv/testbench_requirements.h"
 #include "loomc/target/spirv/iree_hal.h"
 #endif  // IREE_TEST_LOOM_HAVE_SPIRV
+#if IREE_TEST_LOOM_HAVE_XDNA
+#include "loomc/target/amd/xdna/iree_hal.h"
+#endif  // IREE_TEST_LOOM_HAVE_XDNA
 #if IREE_TEST_LOOM_HAVE_TASK
 #include "loomc/target/cpu/iree_hal.h"
 #endif  // IREE_TEST_LOOM_HAVE_TASK
@@ -131,6 +137,12 @@ int main(int argc, char** argv) {
           .provider = loomc_spirv_iree_hal_target_provider(),
       },
 #endif  // IREE_TEST_LOOM_HAVE_SPIRV
+#if IREE_TEST_LOOM_HAVE_XDNA
+      {
+          .driver_name = IREE_SV("xdna"),
+          .provider = loomc_xdna_iree_hal_target_provider(),
+      },
+#endif  // IREE_TEST_LOOM_HAVE_XDNA
 #if IREE_TEST_LOOM_HAVE_TASK
       {
           .driver_name = IREE_SV("task"),

@@ -79,6 +79,7 @@ LOOMC_TARGET_CPU_IREE_HAL_PUBLIC_HDRS = [
 LOOMC_TARGET_XDNA_PUBLIC_HDRS = [
     "include/loomc/target/amd/xdna.h",
     "include/loomc/target/amd/xdna/base.h",
+    "include/loomc/target/amd/xdna/iree_hal.h",
     "include/loomc/target/amd/xdna/profile.h",
 ]
 

@@ -600,6 +600,8 @@ def xdna_steps(targets: tuple[str, ...], config: str | None) -> list[CiStep]:
         "--//libamdf/config:enabled=true",
         "--//libamdf/config:families=xdna",
         "--//runtime/config/hal:drivers=task,xdna",
+        "--//loom/config/execute:enable=iree_hal",
+        "--//loom/config/emit:enable=xdna",
     )
     return [
         bazel_configure_step(
@@ -839,7 +841,7 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
         cmake_configure_step(
             command_name,
             enabled_drivers=("xdna",),
-            enabled_loom_targets=("xdna",),
+            enabled_loom_targets=("vm", "xdna"),
             sanitizer=sanitizer,
             extra_options=(
                 "-DAMDF_BUILD=ON",
@@ -847,6 +849,7 @@ def cmake_xdna_steps(command_name: str, sanitizer: str | None) -> list[CiStep]:
                 "-DAMDF_FAMILY_CDNA=OFF",
                 "-DAMDF_FAMILY_XDNA=ON",
                 "-DLOOM_BUILD=ON",
+                "-DLOOM_EMIT_XDNA=ON",
             ),
         ),
         cmake_build_step(

@@ -213,6 +213,8 @@ static const iree_hal_buffer_vtable_t iree_hal_amd_xdna_buffer_vtable = {
 typedef struct iree_hal_amd_xdna_allocator_t {
   // HAL allocator resource header.
   iree_hal_resource_t resource;
+  // Borrowed device identifying the origin of allocated buffers.
+  iree_hal_device_t* device;
   // Borrowed context dominating all allocation lifetimes.
   iree_hal_amd_xdna_context_t* context;
   // Allocator owning the facade and each buffer wrapper.
@@ -318,9 +320,13 @@ static iree_status_t iree_hal_amd_xdna_allocator_allocate_buffer(
       actual_params.type |= IREE_HAL_MEMORY_TYPE_HOST_CACHED;
     }
     iree_hal_buffer_initialize(
-        iree_hal_buffer_placement_undefined(), &buffer->base, allocation_size,
-        0, allocation_size, actual_params.type, actual_params.access,
-        actual_params.usage, &iree_hal_amd_xdna_buffer_vtable, &buffer->base);
+        (iree_hal_buffer_placement_t){
+            .device = allocator->device,
+            .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        },
+        &buffer->base, allocation_size, 0, allocation_size, actual_params.type,
+        actual_params.access, actual_params.usage,
+        &iree_hal_amd_xdna_buffer_vtable, &buffer->base);
     *out_buffer = &buffer->base;
   } else {
     iree_allocator_free(allocator->host_allocator, buffer);
@@ -462,14 +468,15 @@ static const iree_hal_allocator_vtable_t iree_hal_amd_xdna_allocator_vtable = {
 };
 
 iree_status_t iree_hal_amd_xdna_allocator_create(
-    iree_hal_amd_xdna_context_t* context, iree_allocator_t host_allocator,
-    iree_hal_allocator_t** out_allocator) {
+    iree_hal_device_t* device, iree_hal_amd_xdna_context_t* context,
+    iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator) {
   *out_allocator = NULL;
   iree_hal_amd_xdna_allocator_t* allocator = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*allocator),
                                              (void**)&allocator));
   iree_hal_resource_initialize(&iree_hal_amd_xdna_allocator_vtable,
                                &allocator->resource);
+  allocator->device = device;
   allocator->context = context;
   allocator->host_allocator = host_allocator;
   // XDNA uses system DRAM as its ordinary storage; both processors access the

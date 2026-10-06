@@ -16,6 +16,10 @@ package(
     licenses = ["notice"],  # Apache 2.0
 )
 
+_XDNA_COMPATIBLE_WITH = loom_config_compatible_with([
+    "//loom/config/target:xdna_artifacts",
+])
+
 loom_cc_library(
     name = "xdna",
     srcs = ["xdna.c"],
@@ -25,13 +29,27 @@ loom_cc_library(
         "//loom/binding/c:include/loomc/target/amd/xdna/profile.h",
     ],
     linkstatic = True,
-    target_compatible_with = loom_config_compatible_with([
-        "//loom/config/target:xdna_artifacts",
-    ]),
+    target_compatible_with = _XDNA_COMPATIBLE_WITH,
     deps = [
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:artifact",
         "//loom/src/loom/target/arch/amd/xdna/aie2p:target_profile",
+    ],
+    alwayslink = True,
+)
+
+loom_cc_library(
+    name = "iree_hal",
+    srcs = ["iree_hal.c"],
+    hdrs = ["//loom/binding/c:include/loomc/target/amd/xdna/iree_hal.h"],
+    linkstatic = True,
+    target_compatible_with = _XDNA_COMPATIBLE_WITH,
+    deps = [
+        ":xdna",
+        "//loom/binding/c:loomc",
+        "//loom/binding/c/target/iree_hal",
+        "//loom/src/loom/target/arch/amd/xdna/aie2p:target_profile",
+        "//runtime/src/iree/hal",
     ],
     alwayslink = True,
 )

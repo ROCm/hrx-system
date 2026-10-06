@@ -27,7 +27,8 @@ typedef struct loom_run_hal_testbench_staging_t {
 
 // Uploads each distinct host fixture allocation once and redirects |bindings|
 // to its device-local backing, preserving all allocation-relative offsets.
-// Device-local bindings pass through without allocation or transfer. Fixture
+// Bindings local to |runtime->device| pass through without allocation or
+// transfer. Other bindings must be host-mappable. Fixture
 // allocations must remain live and exclusively owned by this execution through
 // readback. The caller deinitializes |out_staging| even when staging fails.
 iree_status_t loom_run_hal_testbench_staging_initialize(

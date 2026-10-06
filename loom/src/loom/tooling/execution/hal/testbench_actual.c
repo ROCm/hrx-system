@@ -327,7 +327,7 @@ void loom_run_hal_testbench_actual_provider_initialize(
       .pass_program = options->pass_program,
       .requested_target_profile = options->requested_target_profile,
       .sanitizer = options->sanitizer,
-      .kernel_launch = options->kernel_launch,
+      .invocation = options->invocation,
       .result_callback = options->result_callback,
       .compile_report = options->compile_report,
       .artifact_manifest = options->artifact_manifest,
@@ -519,14 +519,14 @@ static iree_status_t loom_run_hal_testbench_reflect_function_parameters(
   if (function_info.parameter_count == 0) {
     return iree_ok_status();
   }
-  if (function_info.parameter_count != provider->kernel_launch->input_count) {
+  if (function_info.parameter_count != provider->invocation->input_count) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "loaded HAL function '%.*s' reflects %u parameters for %" PRIhsz
         " source inputs",
         (int)function_name.size, function_name.data,
         (unsigned)function_info.parameter_count,
-        provider->kernel_launch->input_count);
+        provider->invocation->input_count);
   }
 
   iree_hal_executable_function_parameter_t* parameters = NULL;
@@ -550,10 +550,23 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     return iree_ok_status();
   }
   if (provider->compilation == NULL || provider->module == NULL ||
-      provider->native_module == NULL || provider->kernel_launch == NULL) {
+      provider->native_module == NULL || provider->invocation == NULL) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "HAL actual provider requires compilation, module, "
+                            "and invocation state");
+  }
+  const bool is_pipeline =
+      provider->invocation->kind == LOOM_TESTBENCH_INVOCATION_PIPELINE;
+  if (!is_pipeline &&
+      provider->invocation->kind != LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "HAL actual provider requires compilation, module, and launch state");
+        "HAL actual provider requires a kernel or finite pipeline invocation");
+  }
+  if (is_pipeline && provider->invocation->workload_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "HAL pipeline specialization arguments are not implemented");
   }
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_context_add_module_runtime_requirements(
@@ -561,7 +574,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
 
   iree_string_view_t entry_symbol = iree_string_view_empty();
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_module_symbol_name_from_ref(
-      provider->native_module, provider->kernel_launch->callee_ref,
+      provider->native_module, provider->invocation->callee_ref,
       &entry_symbol));
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_export_name(
       provider->module, entry_symbol,
@@ -647,7 +660,8 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
       .target_profile = provider->selected_target_profile,
       .config = provider->compilation->config,
       .emit_options = &emit_options,
-      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
+      .artifact_flags =
+          is_pipeline ? 0 : LOOMC_COMPILE_ARTIFACT_FLAG_LAUNCH_CONFIG,
   };
   if (iree_status_is_ok(status)) {
     status = iree_status_from_loomc(loomc_compile_artifact(
@@ -677,29 +691,33 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
     return status;
   }
   if (provider->artifacts.executable == NULL ||
-      provider->artifacts.launch_config == NULL) {
+      (!is_pipeline && provider->artifacts.launch_config == NULL)) {
     return iree_make_status(
         IREE_STATUS_INTERNAL,
-        "compiler did not return executable and launch-config artifacts");
+        is_pipeline
+            ? "compiler did not return a pipeline executable artifact"
+            : "compiler did not return executable and launch-config artifacts");
   }
 
-  status = iree_status_from_loomc(loomc_launch_config_program_load(
-      provider->artifacts.launch_config,
-      loomc_allocator_from_iree(provider->context->host_allocator),
-      &provider->launch_config_program));
-  if (iree_status_is_ok(status)) {
-    status = iree_status_from_loomc(loomc_launch_config_program_lookup_function(
-        provider->launch_config_program,
-        loomc_string_view_from_iree(provider->invocation_options.function_name),
-        &provider->launch_config_function));
+  if (!is_pipeline) {
+    status = iree_status_from_loomc(loomc_launch_config_program_load(
+        provider->artifacts.launch_config,
+        loomc_allocator_from_iree(provider->context->host_allocator),
+        &provider->launch_config_program));
+    if (iree_status_is_ok(status)) {
+      status =
+          iree_status_from_loomc(loomc_launch_config_program_lookup_function(
+              provider->launch_config_program,
+              loomc_string_view_from_iree(
+                  provider->invocation_options.function_name),
+              &provider->launch_config_function));
+    }
   }
-  if (iree_status_is_ok(status) &&
-      provider->kernel_launch->workload_count != 0) {
-    status =
-        iree_allocator_malloc_array(provider->context->host_allocator,
-                                    provider->kernel_launch->workload_count,
-                                    sizeof(*provider->workload_argument_bits),
-                                    (void**)&provider->workload_argument_bits);
+  if (iree_status_is_ok(status) && provider->invocation->workload_count != 0) {
+    status = iree_allocator_malloc_array(
+        provider->context->host_allocator, provider->invocation->workload_count,
+        sizeof(*provider->workload_argument_bits),
+        (void**)&provider->workload_argument_bits);
   }
 
   const loom_device_artifact_t device_artifact = {
@@ -936,9 +954,17 @@ static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
     loom_run_hal_testbench_actual_provider_t* provider,
     iree_host_size_t workload_count,
     loom_run_hal_invocation_options_t* out_options) {
-  if (workload_count != provider->kernel_launch->workload_count) {
+  if (workload_count != provider->invocation->workload_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HAL kernel launch workload count mismatch");
+                            "HAL invocation workload count mismatch");
+  }
+  if (provider->invocation->kind == LOOM_TESTBENCH_INVOCATION_PIPELINE) {
+    // Array-program distribution is part of the compiled executable. One HAL
+    // dispatch invokes the complete array program.
+    out_options->workgroup_count[0] = 1;
+    out_options->workgroup_count[1] = 1;
+    out_options->workgroup_count[2] = 1;
+    return iree_ok_status();
   }
   IREE_ASSERT(provider->launch_config_program != NULL);
   loomc_launch_config_t config = {
@@ -977,14 +1003,14 @@ iree_status_t loom_run_hal_testbench_actual_provider_materialize_invocation(
         IREE_STATUS_FAILED_PRECONDITION,
         "HAL actual provider must be prepared before materializing values");
   }
-  const loom_testbench_invocation_plan_t* invocation = provider->kernel_launch;
+  const loom_testbench_invocation_plan_t* invocation = provider->invocation;
   if (input_count != invocation->input_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HAL kernel launch input count mismatch");
+                            "HAL invocation input count mismatch");
   }
   if (workload_count != invocation->workload_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HAL kernel launch workload count mismatch");
+                            "HAL invocation workload count mismatch");
   }
 
   *out_options = provider->invocation_options;
@@ -1029,7 +1055,7 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
   (void)out_results;
   loom_run_hal_testbench_actual_provider_t* provider =
       (loom_run_hal_testbench_actual_provider_t*)user_data;
-  if (invocation != provider->kernel_launch) {
+  if (invocation != provider->invocation) {
     return iree_make_status(
         IREE_STATUS_FAILED_PRECONDITION,
         "HAL actual provider received an unexpected invocation");
@@ -1037,11 +1063,11 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
   IREE_ASSERT(result_count == 0);
   if (input_count != invocation->input_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HAL kernel launch input count mismatch");
+                            "HAL invocation input count mismatch");
   }
   if (workload_count != invocation->workload_count) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "HAL kernel launch workload count mismatch");
+                            "HAL invocation workload count mismatch");
   }
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_actual_provider_compile(provider));
@@ -1151,8 +1177,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
         invocations[invocation_offset].provider;
     IREE_ASSERT(provider != NULL);
     IREE_ASSERT(provider->context == out_span->context);
-    const loom_testbench_invocation_plan_t* invocation =
-        provider->kernel_launch;
+    const loom_testbench_invocation_plan_t* invocation = provider->invocation;
     IREE_ASSERT(
         invocation ==
         &case_plan->invocations[first_invocation_index + invocation_offset]);
@@ -1261,8 +1286,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
        invocation_offset < invocation_count; ++invocation_offset) {
     loom_run_hal_testbench_actual_provider_t* provider =
         invocations[invocation_offset].provider;
-    const loom_testbench_invocation_plan_t* invocation =
-        provider->kernel_launch;
+    const loom_testbench_invocation_plan_t* invocation = provider->invocation;
     iree_host_size_t step_binding_count = 0;
     for (iree_host_size_t input_index = 0;
          input_index < invocation->input_count; ++input_index) {
@@ -1349,7 +1373,7 @@ iree_status_t loom_run_hal_testbench_actual_sequence_execution_create(
       loom_run_hal_testbench_actual_provider_t* provider =
           providers[provider_index++];
       IREE_ASSERT(provider != NULL);
-      IREE_ASSERT(provider->kernel_launch ==
+      IREE_ASSERT(provider->invocation ==
                   &case_plan->invocations[invocation_index]);
       execution->invocations[invocation_index].provider = provider;
       ++invocation_index;
@@ -1412,7 +1436,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_resolve_values(
   for (iree_host_size_t invocation_offset = 0;
        invocation_offset < span->invocation_count; ++invocation_offset) {
     const loom_testbench_invocation_plan_t* invocation =
-        span->invocations[invocation_offset].provider->kernel_launch;
+        span->invocations[invocation_offset].provider->invocation;
     for (iree_host_size_t workload_index = 0;
          workload_index < invocation->workload_count; ++workload_index) {
       const loom_testbench_value_t* workload = NULL;
@@ -1453,8 +1477,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
     loom_run_hal_dispatch_sequence_step_t* step =
         &span->steps[invocation_offset];
     step->options = provider->invocation_options;
-    const loom_testbench_invocation_plan_t* invocation =
-        provider->kernel_launch;
+    const loom_testbench_invocation_plan_t* invocation = provider->invocation;
     for (iree_host_size_t workload_index = 0;
          workload_index < invocation->workload_count; ++workload_index) {
       IREE_RETURN_IF_ERROR(loom_run_hal_testbench_workload_argument_bits(
@@ -1657,7 +1680,7 @@ iree_status_t loom_run_hal_testbench_actual_sequence_initialize(
         .pass_program = options->pass_program,
         .requested_target_profile = options->requested_target_profile,
         .sanitizer = options->sanitizer,
-        .kernel_launch = invocation,
+        .invocation = invocation,
         .result_callback = options->result_callback,
         .compile_report = options->compile_report,
         .artifact_manifest = options->artifact_manifest,
@@ -1715,7 +1738,7 @@ iree_status_t loom_run_hal_testbench_materialize_invocation_from_table(
     loom_run_hal_testbench_actual_provider_t* provider,
     iree_allocator_t allocator, loom_run_hal_invocation_options_t* out_options,
     loom_run_hal_binding_list_t* out_bindings) {
-  const loom_testbench_invocation_plan_t* invocation = provider->kernel_launch;
+  const loom_testbench_invocation_plan_t* invocation = provider->invocation;
   *out_options = provider->invocation_options;
   loom_run_hal_binding_list_initialize(out_bindings);
   iree_status_t status = iree_ok_status();
