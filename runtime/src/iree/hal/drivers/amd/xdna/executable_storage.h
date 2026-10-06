@@ -6,8 +6,8 @@
 
 // Direct loading and binding of native XDNA executable storage.
 
-#ifndef IREE_EXPERIMENTAL_XDNA_EXECUTABLE_H_
-#define IREE_EXPERIMENTAL_XDNA_EXECUTABLE_H_
+#ifndef IREE_HAL_DRIVERS_AMD_XDNA_EXECUTABLE_STORAGE_H_
+#define IREE_HAL_DRIVERS_AMD_XDNA_EXECUTABLE_STORAGE_H_
 
 #include "amdf/xdna.h"
 #include "iree/base/api.h"
@@ -56,7 +56,7 @@ typedef struct iree_hal_amd_xdna_executable_binding_t {
 // untouched. Argument checks precede writes. A source IO failure may leave
 // partially loaded storage, which the caller cannot submit. Shared immutable
 // backing may be published only after all loading and static relocation ends.
-iree_status_t iree_hal_amd_xdna_executable_load(
+iree_status_t iree_hal_amd_xdna_executable_storage_load(
     const iree_hal_amd_xdna_image_t* image, uint32_t entry_ordinal,
     iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage);
@@ -67,7 +67,7 @@ iree_status_t iree_hal_amd_xdna_executable_load(
 // submission. Independent storage ranges can bind the same or different images
 // to different addresses while other ranges remain pending. Binding modifies
 // only the supplied storage; it establishes no queue-global argument state.
-iree_status_t iree_hal_amd_xdna_executable_bind(
+iree_status_t iree_hal_amd_xdna_executable_storage_bind(
     const iree_hal_amd_xdna_image_t* image, uint32_t entry_ordinal,
     iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage,
@@ -80,7 +80,7 @@ iree_status_t iree_hal_amd_xdna_executable_bind(
 // backing and bindings remain valid; no host reload or relocation is required.
 // Time-sliced contexts do not guarantee resident state between submissions,
 // so this finite execution adapter does not follow image continuations.
-iree_status_t iree_hal_amd_xdna_executable_query_invocation(
+iree_status_t iree_hal_amd_xdna_executable_storage_query_invocation(
     const iree_hal_amd_xdna_image_t* image, uint32_t entry_ordinal,
     iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage,
@@ -90,4 +90,4 @@ iree_status_t iree_hal_amd_xdna_executable_query_invocation(
 }  // extern "C"
 #endif
 
-#endif  // IREE_EXPERIMENTAL_XDNA_EXECUTABLE_H_
+#endif  // IREE_HAL_DRIVERS_AMD_XDNA_EXECUTABLE_STORAGE_H_

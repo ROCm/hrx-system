@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/xdna/executable.h"
+#include "iree/hal/drivers/amd/xdna/executable_storage.h"
 
 #include <string.h>
 
@@ -198,7 +198,7 @@ static iree_status_t iree_hal_amd_xdna_executable_validate_allocations(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_xdna_executable_load(
+iree_status_t iree_hal_amd_xdna_executable_storage_load(
     const iree_hal_amd_xdna_image_t* image, uint32_t entry_ordinal,
     iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage) {
@@ -249,7 +249,7 @@ iree_status_t iree_hal_amd_xdna_executable_load(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_xdna_executable_bind(
+iree_status_t iree_hal_amd_xdna_executable_storage_bind(
     const iree_hal_amd_xdna_image_t* image, uint32_t entry_ordinal,
     iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage,
@@ -297,7 +297,7 @@ iree_status_t iree_hal_amd_xdna_executable_bind(
   return iree_ok_status();
 }
 
-iree_status_t iree_hal_amd_xdna_executable_query_invocation(
+iree_status_t iree_hal_amd_xdna_executable_storage_query_invocation(
     const iree_hal_amd_xdna_image_t* image, uint32_t entry_ordinal,
     iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage,

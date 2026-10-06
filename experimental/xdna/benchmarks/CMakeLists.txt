@@ -20,8 +20,8 @@ iree_cc_binary_benchmark(
     amdf::amdf
     amdf::headers
     iree::base
-    iree::experimental::xdna::executable
     iree::hal
+    iree::hal::drivers::amd::xdna::executable_storage
     iree::hal::drivers::amd::xdna::image::aie2p::npu2
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4

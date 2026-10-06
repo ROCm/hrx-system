@@ -9,75 +9,6 @@
 
 iree_add_all_subdirs()
 
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
-iree_cc_library(
-  NAME
-    amdf_status
-  HDRS
-    "amdf_status.h"
-  SRCS
-    "amdf_status.c"
-  DEPS
-    amdf::headers
-    iree::base
-  PUBLIC
-)
-endif()
-
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
-iree_cc_test(
-  NAME
-    amdf_status_test
-  SRCS
-    "amdf_status_test.cc"
-  DEPS
-    ::amdf_status
-    amdf::headers
-    iree::base
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=libamdf"
-    "iree-build-requirement=libamdf.xdna"
-)
-endif()
-
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
-iree_cc_library(
-  NAME
-    executable
-  HDRS
-    "executable.h"
-  SRCS
-    "executable.c"
-  DEPS
-    amdf::headers
-    iree::base
-    iree::hal
-    iree::hal::drivers::amd::xdna::image
-  PUBLIC
-)
-endif()
-
-if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
-iree_cc_test(
-  NAME
-    executable_test
-  SRCS
-    "executable_test.cc"
-  DEPS
-    ::executable
-    iree::base
-    iree::hal
-    iree::hal::drivers::amd::xdna::image::testing::image_fixture
-    iree::testing::gtest
-    iree::testing::gtest_main
-  LABELS
-    "iree-build-requirement=libamdf"
-    "iree-build-requirement=libamdf.xdna"
-)
-endif()
-
 if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_execution_test_suite(
   NAME
@@ -99,13 +30,13 @@ iree_cc_binary(
   SRCS
     "iree-xdna-run.c"
   DEPS
-    ::amdf_status
-    ::executable
     amdf::amdf_static
     amdf::headers
     iree::base
     iree::base::tooling::flags
     iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::drivers::amd::xdna::executable_storage
     iree::hal::drivers::amd::xdna::image::aie2p::npu2
     iree::io::file_handle
 )

@@ -17,7 +17,7 @@ buffers through actual terminal completion. Native command bytes remain opaque
 to the loader; they are executable code, not sandboxed input.
 
 `iree-xdna-run` executes one entry from an intact Loom `.xdna` file through the
-experimental adapters and libamdf. It selects the image target from the
+runtime storage materializer and libamdf. It selects the image target from the
 enumerated endpoint: Strix NPU4 `17f0:10` or Strix Halo NPU5 `17f0:11`.
 The ELF must match that device's exact compiler profile identity; the shared
 NPU2 array architecture does not make the images interchangeable. The platform

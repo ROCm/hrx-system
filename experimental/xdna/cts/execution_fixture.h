@@ -14,9 +14,9 @@
 #include <utility>
 #include <vector>
 
-#include "experimental/xdna/executable.h"
 #include "iree/base/internal/shm.h"
 #include "iree/base/internal/span.h"
+#include "iree/hal/drivers/amd/xdna/executable_storage.h"
 #include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32_npu4.h"
@@ -569,12 +569,12 @@ class XdnaExecutionFixture : public XdnaDeviceFixture {
     storage.mapping =
         iree_make_byte_span(instructions.pointer, execution->byte_length);
     storage.device_address = firmware_address;
-    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_load(
+    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_load(
         executable_, entry_ordinal_, 1, &storage));
-    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_bind(
+    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_bind(
         executable_, entry_ordinal_, 1, &storage, bindings.size(),
         bindings.data()));
-    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_query_invocation(
+    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_query_invocation(
         executable_, entry_ordinal_, 1, &storage, &execution->command));
     execution->original_instructions.assign(
         instructions.pointer, instructions.pointer + execution->byte_length);

@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/xdna/amdf_status.h"
+#include "iree/hal/drivers/amd/status.h"
 
 static iree_status_code_t iree_hal_amd_status_code_from_amdf_api(
     uint32_t code) {

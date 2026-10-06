@@ -11,7 +11,7 @@
 #include <vector>
 
 #include "benchmark/benchmark.h"
-#include "experimental/xdna/executable.h"
+#include "iree/hal/drivers/amd/xdna/executable_storage.h"
 #include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32_npu4.h"
@@ -423,12 +423,12 @@ class ExecutionBenchmark {
                                            AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE,
                                            &storage.device_address),
                 "instruction_address");
-    CheckIreeStatus(iree_hal_amd_xdna_executable_load(
+    CheckIreeStatus(iree_hal_amd_xdna_executable_storage_load(
         executable_, entry_ordinal, 1, &storage));
-    CheckIreeStatus(iree_hal_amd_xdna_executable_bind(
+    CheckIreeStatus(iree_hal_amd_xdna_executable_storage_bind(
         executable_, entry_ordinal, 1, &storage, resolved_bindings.size(),
         resolved_bindings.data()));
-    CheckIreeStatus(iree_hal_amd_xdna_executable_query_invocation(
+    CheckIreeStatus(iree_hal_amd_xdna_executable_storage_query_invocation(
         executable_, entry_ordinal, 1, &storage, &command_));
     original_instructions_.assign(
         instructions_.pointer,
