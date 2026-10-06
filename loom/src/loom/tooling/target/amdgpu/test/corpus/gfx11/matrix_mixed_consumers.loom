@@ -1,0 +1,105 @@
+// A result fragment with both an ordinary vector consumer and a transposed
+// fragment store must retain one logical value across both uses. The VM oracle
+// computes the matrix product and canonical GFX11 lane payload independently.
+amdgpu.target<gfx11-generic> @matrix_mixed_consumers_gfx11 {subgroup_size = 32}
+
+kernel.def target(@matrix_mixed_consumers_gfx11) @matrix_mixed_consumers() {
+  %unit = index.constant 1 : index
+  %workgroup_size = index.constant 32 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%workgroup_size, %unit, %unit) : index
+} launch(%lhs_buffer: buffer, %rhs_buffer: buffer, %tile_buffer: buffer, %lane_sum_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %origin = index.constant 0 : index
+  %m = index.constant 16 : index
+  %n = index.constant 16 : index
+  %k = index.constant 16 : index
+  %lhs_global = buffer.assume.memory_space<global> %lhs_buffer : buffer
+  %rhs_global = buffer.assume.memory_space<global> %rhs_buffer : buffer
+  %tile_global = buffer.assume.memory_space<global> %tile_buffer : buffer
+  %lane_sum_global = buffer.assume.memory_space<global> %lane_sum_buffer : buffer
+  %transposed_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_global[%base] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_global[%base] : buffer -> view<16x16xf16, %transposed_layout>
+  %tile_view = buffer.view %tile_global[%base] : buffer -> view<16x16xf16, %transposed_layout>
+  %lane_sum_view = buffer.view %lane_sum_global[%base] : buffer -> view<32xf32>
+  %lhs = vector.fragment.load<lhs> %lhs_view[%origin, %origin] shape [%m, %k] : view<16x16xf16> -> vector<16xf16>
+  %rhs = vector.fragment.load<rhs> %rhs_view[%origin, %origin] shape [%k, %n] : view<16x16xf16, %transposed_layout> -> vector<16xf16>
+  %c0_f32x8 = vector.constant 0.0 : vector<8xf32>
+  %init = vector.fragment<init> %c0_f32x8 shape [%m, %n] : vector<8xf32>
+  %result = vector.mma %lhs, %rhs, %init : vector<16xf16>, vector<16xf16>, vector<8xf32>
+  %sum_init = scalar.constant 0.0 : f32
+  %lane_sum = vector.reduce<addf> %result, %sum_init : vector<8xf32>, f32
+  %lane0 = kernel.subgroup.lane.id : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  view.store %lane_sum, %lane_sum_view[%lane] : f32, view<32xf32>
+  vector.fragment.store<result> %result, %tile_view[%origin, %origin] shape [%m, %n] : vector<8xf32>, view<16x16xf16, %transposed_layout>
+  kernel.return
+}
+
+func.def inline @matrix_mixed_consumers_element(%lhs_buffer: buffer, %rhs_buffer: buffer, %row: index, %column: index) -> (f32) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  %c0_f32 = scalar.constant 0.0 : f32
+  %transposed_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %lhs_view = buffer.view %lhs_buffer[%base] : buffer -> view<16x16xf16>
+  %rhs_view = buffer.view %rhs_buffer[%base] : buffer -> view<16x16xf16, %transposed_layout>
+  %result = scf.for %k = [%begin to %end step %step](%sum = %c0_f32 : f32) -> (f32) {
+    %lhs_half = view.load %lhs_view[%row, %k] : view<16x16xf16> -> f16
+    %rhs_half = view.load %rhs_view[%k, %column] : view<16x16xf16, %transposed_layout> -> f16
+    %lhs = scalar.extf %lhs_half : f16 to f32
+    %rhs = scalar.extf %rhs_half : f16 to f32
+    %next = scalar.fmaf %lhs, %rhs, %sum : f32
+    scf.yield %next : f32
+  }
+  func.return %result : f32
+}
+
+func.def @matrix_mixed_consumers_oracle(%lhs_buffer: buffer, %rhs_buffer: buffer, %tile_buffer: buffer, %lane_sum_buffer: buffer) {
+  %base = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %tile_end = index.constant 16 : index
+  %lane_end = index.constant 32 : index
+  %payload_end = index.constant 8 : index
+  %step = index.constant 1 : index
+  %row_step = index.constant 2 : index
+  %c0_f32 = scalar.constant 0.0 : f32
+  %transposed_layout = encoding.layout.strided [1, 16] : encoding<layout>
+  %tile_view = buffer.view %tile_buffer[%base] : buffer -> view<16x16xf16, %transposed_layout>
+  %lane_sum_view = buffer.view %lane_sum_buffer[%base] : buffer -> view<32xf32>
+  scf.for %row = [%begin to %tile_end step %step] {
+    scf.for %column = [%begin to %tile_end step %step] {
+      %value = func.call @matrix_mixed_consumers_element(%lhs_buffer, %rhs_buffer, %row, %column) : (buffer, buffer, index, index) -> (f32)
+      %narrow = scalar.fptrunc %value : f32 to f16
+      view.store %narrow, %tile_view[%row, %column] : f16, view<16x16xf16, %transposed_layout>
+    }
+  }
+  scf.for %lane = [%begin to %lane_end step %step] {
+    %row_parity = index.div %lane, %tile_end : index
+    %column = index.rem %lane, %tile_end : index
+    %lane_sum = scf.for %payload = [%begin to %payload_end step %step](%sum = %c0_f32 : f32) -> (f32) {
+      %row_offset = index.mul %payload, %row_step : index
+      %row = index.add %row_parity, %row_offset : index
+      %value = func.call @matrix_mixed_consumers_element(%lhs_buffer, %rhs_buffer, %row, %column) : (buffer, buffer, index, index) -> (f32)
+      %next = scalar.addf %sum, %value : f32
+      scf.yield %next : f32
+    }
+    view.store %lane_sum, %lane_sum_view[%lane] : f32, view<32xf32>
+  }
+  func.return
+}
+
+check.scenario public @matrix_mixed_consumers_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %lhs = check.generate.iota offset(1.0) step(1.0) : tensor<16x16xf16>
+    %rhs = check.generate.fill value(1.0) : tensor<16x16xf16>
+    %tile = check.generate.fill value(-1.0) : tensor<16x16xf16>
+    %lane_sums = check.generate.fill value(-1.0) : tensor<32xf32>
+    check.compare<@matrix_mixed_consumers, @matrix_mixed_consumers_oracle>(%lhs, %rhs, %tile, %lane_sums) : (tensor<16x16xf16>, tensor<16x16xf16>, tensor<16x16xf16>, tensor<32xf32>) -> () {
+      check.expect.bitwise actual(%tile) expected(%tile) : tensor<16x16xf16>
+      check.expect.bitwise actual(%lane_sums) expected(%lane_sums) : tensor<32xf32>
+    }
+  }
+  check.return
+}

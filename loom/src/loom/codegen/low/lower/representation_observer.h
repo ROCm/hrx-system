@@ -94,6 +94,11 @@ typedef void (*loom_low_lower_representation_callable_boundary_fn_t)(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_low_lower_representation_recorder_t* recorder);
 
+typedef void (*loom_low_lower_representation_unclaimed_operand_fn_t)(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, uint16_t source_operand_index,
+    loom_low_lower_representation_recorder_t* recorder);
+
 // Target policy for one function-local physical-representation plan.
 typedef struct loom_low_lower_representation_provider_t {
   // Returns true when a common relation on |source_op| requires the two source
@@ -111,6 +116,12 @@ typedef struct loom_low_lower_representation_provider_t {
   // callable dialects.
   loom_low_lower_representation_callable_boundary_fn_t
       observe_callable_boundary;
+  // Observes each operand use that was not claimed by an accepted common
+  // relation, callable boundary, or target boundary. This required callback is
+  // the completeness boundary for representation-sensitive values introduced
+  // by new source operations.
+  loom_low_lower_representation_unclaimed_operand_fn_t
+      observe_unclaimed_operand;
   // Source operation boundaries, contiguous and ordered within each span.
   const loom_low_lower_representation_boundary_t* boundaries;
   // Dense dialect spans indexed by dialect id minus |boundary_dialect_base_id|.
@@ -150,6 +161,14 @@ void loom_low_lower_representation_record_costs(
     loom_value_id_t source_value_id,
     const loom_low_representation_candidate_t* candidates,
     iree_host_size_t candidate_count);
+
+// Claims one source operand use whose physical representation is modeled by
+// the active target boundary. Accepted common relations and callable
+// boundaries claim their operand uses automatically. Every remaining operand
+// is offered to the provider's unclaimed-operand callback.
+void loom_low_lower_representation_claim_operand(
+    loom_low_lower_representation_recorder_t* recorder,
+    uint16_t source_operand_index);
 
 // Returns whether |source_value_id|'s current component has already received
 // an exact candidate domain. The query does not make an absent value

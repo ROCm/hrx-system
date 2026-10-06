@@ -500,6 +500,20 @@ static void loom_amdgpu_matrix_representation_observe_store(
   }
 }
 
+static void loom_amdgpu_source_representation_observe_unclaimed_operand(
+    void* user_data, loom_low_lower_context_t* context,
+    const loom_op_t* source_op, uint16_t source_operand_index,
+    loom_low_lower_representation_recorder_t* recorder) {
+  (void)user_data;
+  const loom_value_id_t value_id =
+      loom_op_const_operands(source_op)[source_operand_index];
+  const loom_type_t type =
+      loom_module_value_type(loom_low_lower_context_module(context), value_id);
+  if (loom_type_is_vector(type)) {
+    loom_amdgpu_matrix_representation_pin_value(context, value_id, recorder);
+  }
+}
+
 static void loom_amdgpu_source_representation_observe_boundary(
     void* user_data, uint8_t action,
     loom_low_lower_representation_boundary_flags_t flags,
@@ -524,6 +538,9 @@ static void loom_amdgpu_source_representation_observe_boundary(
         loom_amdgpu_matrix_representation_pin_values(
             context, loom_op_operands(source_op), source_op->operand_count,
             recorder);
+        for (uint16_t i = 0; i < source_op->operand_count; ++i) {
+          loom_low_lower_representation_claim_operand(recorder, i);
+        }
       }
       if (iree_any_bit_set(
               flags, LOOM_LOW_LOWER_REPRESENTATION_BOUNDARY_FLAG_RESULTS)) {
@@ -535,10 +552,12 @@ static void loom_amdgpu_source_representation_observe_boundary(
     case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_STORE:
       loom_amdgpu_matrix_representation_observe_store(context, source_op,
                                                       recorder);
+      loom_low_lower_representation_claim_operand(recorder, 0);
       return;
     case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_MMA:
       loom_amdgpu_matrix_representation_observe_mma(context, source_op,
                                                     recorder);
+      loom_low_lower_representation_claim_operand(recorder, 2);
       return;
     case LOOM_AMDGPU_MATRIX_REPRESENTATION_ACTION_FRAGMENT:
       loom_amdgpu_matrix_representation_observe_fragment(context, source_op,
@@ -719,6 +738,8 @@ static const loom_low_lower_representation_provider_t
         .observe_boundary = loom_amdgpu_source_representation_observe_boundary,
         .observe_callable_boundary =
             loom_amdgpu_source_representation_observe_callable_boundary,
+        .observe_unclaimed_operand =
+            loom_amdgpu_source_representation_observe_unclaimed_operand,
         .boundaries = kAmdgpuSourceRepresentationBoundaries,
         .boundary_spans = kAmdgpuSourceRepresentationBoundarySpans,
         .boundary_count = IREE_ARRAYSIZE(kAmdgpuSourceRepresentationBoundaries),
