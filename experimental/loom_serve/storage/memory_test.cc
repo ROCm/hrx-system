@@ -18,12 +18,14 @@ namespace {
 class MemoryTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(loom_serve_device_create(IREE_SV("amdgpu"),
-                                            iree_allocator_system(), &device));
-    IREE_ASSERT_OK(loom_serve_memory_pool_create(
-        iree_hal_device_allocator(loom_serve_device_handle(device)),
-        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, kSlabSize, 3 * kSlabSize, &pool,
-        iree_allocator_system()));
+    const loom_serve_device_options_t options = {
+        .uri = IREE_SV("amdgpu"),
+        .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
+        .slab_size = kSlabSize,
+        .memory_limit = 3 * kSlabSize};
+    IREE_ASSERT_OK(
+        loom_serve_device_create(&options, &device, iree_allocator_system()));
+    pool = loom_serve_device_memory_pool(device);
   }
 
   void TearDown() override {
@@ -34,8 +36,7 @@ class MemoryTest : public ::testing::Test {
     const auto statistics = loom_serve_memory_pool_statistics(pool);
     EXPECT_EQ(statistics.committed_bytes, 0u);
     EXPECT_EQ(statistics.reserved_bytes, 0u);
-    loom_serve_memory_pool_destroy(pool);
-    loom_serve_device_destroy(device);
+    IREE_EXPECT_OK(loom_serve_device_destroy(device));
   }
 
   void RoundTrip(loom_serve_virtual_buffer_t* buffer, uint64_t offset,
@@ -106,6 +107,8 @@ TEST_F(MemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool, 2 * kSlabSize, 256,
                                                   &statistics[1], &second));
   auto* const identity = loom_serve_virtual_buffer_handle(first);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                        loom_serve_device_destroy(device));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, 0u);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, kHighOffset, 256));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, 512));

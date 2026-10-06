@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
@@ -285,12 +286,18 @@ int main(int argc, char** argv) {
   iree_allocator_t allocator = iree_allocator_system();
   const loom_serve_text_flag_defaults_t defaults = {.row_count = row_count};
   loom_serve_text_model_t* model = NULL;
+  loom_serve_device_t* device = NULL;
   iree_status_t status =
-      loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
+      loom_serve_device_create_from_flags(&device, allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+                                                     allocator);
+  }
   if (iree_status_is_ok(status)) {
     status = text_run(model, row_count, allocator);
   }
   status = iree_status_join(status, loom_serve_text_model_destroy(model));
+  status = iree_status_join(status, loom_serve_device_destroy(device));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

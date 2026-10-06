@@ -7,7 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
 #define EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
 
-#include "iree/base/api.h"
+#include "experimental/loom_serve/runtime/device.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -51,16 +51,30 @@ typedef struct loom_serve_image_model_options_t {
 // bindings: opaque request bytes, output F32 CHW RGB [-1,1], and workspace.
 // All retained stages have identical parameter placement. Input capacity comes
 // from source; workspace extent/alignment comes from compiler reflection.
-// Parameters stream once into their final shared allocations. No warm JIT,
-// parameter preparation or device backing allocation occurs. Failure releases
+// Creation indexes parameters and records commands without reading weight
+// payloads. The device owner outlives the model and serializes all model calls.
+// Its physical pool backs parameter roots independently of cached commands.
+// First generation or explicit activation streams/prepares weights. Already
+// active generation does no JIT or parameter preparation. Failure releases
 // partial ownership and leaves *out_model NULL.
 iree_status_t loom_serve_image_model_create(
+    loom_serve_device_t* device,
     const loom_serve_image_model_options_t* options,
     loom_serve_image_model_t** out_model, iree_allocator_t host_allocator);
 
 // Drains accepted work before releasing buffers, programs and device services.
 // No generate call or borrowed RGB may remain active. NULL is accepted.
 iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model);
+
+// Reloads or releases every checkpoint domain while preserving compiled
+// commands. Deactivation joins accepted work and requires elastic backing.
+// Next generation activates on demand. Neither operation affects other models
+// sharing the device. Execution/I/O failure is terminal.
+iree_status_t loom_serve_image_model_activate(loom_serve_image_model_t* model);
+iree_status_t loom_serve_image_model_deactivate(
+    loom_serve_image_model_t* model);
+loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
+    const loom_serve_image_model_t* model);
 
 // Borrows the source-declared public identifier for this residency.
 iree_string_view_t loom_serve_image_model_name(

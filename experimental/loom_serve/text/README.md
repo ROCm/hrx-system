@@ -124,7 +124,7 @@ actual kernel addressing; native code has no layer count or KV element type.
 Dense sources have no regions. Region extents must fit their allocation and
 each plane's block range must fit its stride.
 
-Pooled CLI execution defaults to `--pool_backing=elastic`: source allocations
+CLI execution defaults to `--pool_backing=elastic`: pooled source allocations
 containing cache regions reserve stable addresses and commit physical slabs as
 rows/pages grow. Private row views initialize on first use. `--slab_bytes`
 selects coarse physical granularity (2 MiB by default; zero queries the
@@ -136,6 +136,15 @@ Elastic backing also reserves stable parameter roots in the same physical
 allocation domain. Heartbeat `elastic_state` and `elastic_parameters` account
 mutable state and weights independently; transient workspace is separate.
 
+The caller creates one `loom_serve_device_t` and passes it to each text or
+image model constructor. That owner holds the common physical pool, queues,
+execution timelines, and profiling session. It outlives all models; one host
+owner serializes their calls and residency transitions. `--memory_bytes` bounds
+physical parameter/state commitment across those models, not virtual address
+space or separately allocated workspace. Creation compiles, indexes, and
+records without loading parameter payloads. Explicit activation can warm a
+model before accepting requests; otherwise its first inference loads weights.
+
 `loom_serve_text_model_deactivate` retires consuming work and releases parameter
 backing without discarding retained rows or rebuilding commands. The next
 inference call activates on demand; `loom_serve_text_model_activate` can warm
@@ -145,6 +154,9 @@ and preparing them in place. It neither JITs nor holds a second weight copy.
 An already active model does no loading/preparation. Fixed backing rejects
 deactivation explicitly. The `models/qwen:epoch_check --reload_weights` witness
 checks real target/MTP continuation across compaction and parameter eviction.
+`--shared_residency` additionally alternates two independently retained models
+on one device. A physical budget below their combined weight extent exercises
+reuse of returned backing rather than simultaneous residency.
 
 `loom_serve_text_model_trim` compacts owned blocks into a live ID prefix and
 returns empty physical slabs. Source regions drive bounded device-copy batches;

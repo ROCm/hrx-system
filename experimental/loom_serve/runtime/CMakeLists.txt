@@ -87,8 +87,24 @@ loom_cc_library(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
+    iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::hal::drivers
+    iree::tooling::device_util
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    device_flags
+  HDRS
+    "device_flags.h"
+  SRCS
+    "device_flags.c"
+  DEPS
+    ::device
+    iree::base
+    iree::base::tooling::flags
   PUBLIC
 )
 

@@ -12,6 +12,7 @@
 #include <string.h>
 
 #include "experimental/loom_serve/image/model.h"
+#include "experimental/loom_serve/runtime/device_flags.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/internal/math.h"
 #include "iree/base/tooling/flags.h"
@@ -83,15 +84,20 @@ static iree_status_t image_run(iree_allocator_t allocator) {
       .text_tokens = (uint32_t)FLAG_text_tokens,
   };
   loom_serve_image_model_t* model = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_image_model_create(&options, &model, allocator));
+  loom_serve_device_t* device = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_device_create_from_flags(&device, allocator));
+  iree_status_t status =
+      loom_serve_image_model_create(device, &options, &model, allocator);
   iree_const_byte_span_t rgb = iree_const_byte_span_empty();
-  iree_status_t status = loom_serve_image_model_generate(
-      model, iree_make_cstring_view(FLAG_prompt), seed, FLAG_strength, &rgb);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_image_model_generate(
+        model, iree_make_cstring_view(FLAG_prompt), seed, FLAG_strength, &rgb);
+  }
   if (iree_status_is_ok(status)) {
     status = image_write_image(rgb, allocator);
   }
-  return iree_status_join(status, loom_serve_image_model_destroy(model));
+  status = iree_status_join(status, loom_serve_image_model_destroy(model));
+  return iree_status_join(status, loom_serve_device_destroy(device));
 }
 
 int main(int argc, char** argv) {

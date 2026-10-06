@@ -20,7 +20,7 @@ state and canonical checkpoints without naming a model.
 
 | Component | Receives and owns | Does not infer |
 | --- | --- | --- |
-| [`device`](../runtime/device.h) | HAL device URI, async I/O services, device/group, exact queues and execution timelines | Compiler target support, model resources or request lifetimes |
+| [`device`](../runtime/device.h) | HAL device URI, async I/O services, device/group, exact queues, execution timelines, physical pool and profiling | Compiler target support, logical model state or request lifetimes |
 | [`jit`](../runtime/jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
 | [`command`](../runtime/command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
 | [`execution`](../runtime/execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
@@ -43,8 +43,8 @@ directly, rather than reconstructed in host code.
 
 `text_initialize` first invokes the source bootstrap, retains its opaque control
 state, and loads the tokenizer with the source-declared terminal marker. It then
-creates a shared device owner and JIT, compiles the declared stages, checks their
-layout agreement, loads shared weights, records commands, creates the warm VM
+borrows the caller's device owner, creates its JIT, compiles the declared stages,
+checks their layout agreement, indexes parameter plans, records commands, creates the warm VM
 program/native capabilities, and allocates retained rows and MTP state. Each
 stage can have different kernel choices while binding the same model storage.
 No session gets another copy of the weights or code.
@@ -57,8 +57,12 @@ until teardown drains accepted work. Workspace extent/alignment comes directly
 from compiler reflection, not a model formula or a source-side estimate.
 
 `loom_serve_device_create` establishes one runtime domain from a HAL device
-URI. Model components borrow its device, group, exact queues and execution
-object; the helper does not contain a tokenizer, stage catalog or model policy.
+URI and explicit backing/budget options. Model components borrow its device,
+group, exact queues, execution object and physical pool; the helper does not
+contain a tokenizer, stage catalog or model policy. Text and image constructors
+can share this owner. One host owner serializes calls and residency changes.
+The application destroys models before their device owner; profiling spans the
+whole device lifetime rather than opening overlapping per-model sessions.
 The current JIT still selects AMDGPU explicitly. A different device URI alone
 does not provide a compiler backend or model kernels for that device.
 
@@ -76,12 +80,12 @@ The packed server constructs a bounded Cartesian catalog of token classes and
 independent span classes, including exact terminal sizes for odd residency
 counts. Explicit `--epoch` lists replace it for experiments. Shapes share one
 maximum workspace; proposal storage follows resident count and verification
-capture follows each compiled span capacity. Neither a shape change nor a row's
-page growth allocates more device backing during steady-state execution.
+capture follows each compiled span capacity. Shape changes reuse backing;
+elastic row/page growth commits new physical slabs only as capacity is needed.
 
-`text_load_weights` delegates cold residency to `loom_serve_weights_load`.
+`text_prepare_weights` delegates cold planning to `loom_serve_weights_create`.
 It resolves all target/MTP parameter sharing before I/O, so each unique tensor
-is loaded once. Each call selects explicit reflected roots from one checkpoint
+is loaded once per activation. Each call selects explicit reflected roots from one checkpoint
 domain. Distinct domains, such as an immutable base and its LoRA adapter, load
 separately and cannot collide through equal tensor names. Recorded commands
 can bind roots from both domains. The model's [`weights.loom`](../models/qwen/weights.loom)
@@ -91,6 +95,15 @@ file bytes. Otherwise the loader checks the exact reflected size and JITs each
 distinct root once. This query owns Qwen's tensor-name and shape rules; the
 native loader has none. Its pure cold VM process is destroyed before the shared
 inference process is created, and no session receives VM state.
+
+Creation leaves parameter payloads unread. First inference or explicit
+`model_activate` streams them into stable virtual roots. At a retired cut,
+`model_deactivate` unmaps their physical slabs while preserving commands,
+checkpoint/preparation plans and live mutable state. Re-activation repeats
+in-place preparation from original file bytes; an already active model does
+no loading. These are explicit lifecycle operations, not automatic LRU
+admission. All elastic model reservations charge the same device physical
+budget; `--memory_bytes` excludes workspace until it uses a shared queue pool.
 
 Qwen selects a preparation command that permutes FFN gate/up Q5 blocks
 in place into eight-channel groups; all other tensors retain their checkpoint

@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "experimental/loom_serve/text/service.h"
 #include "iree/async/proactor.h"
@@ -86,6 +87,7 @@ int main(int argc, char** argv) {
   const iree_allocator_t allocator = iree_allocator_system();
   iree_status_t status = iree_async_signal_block_default();
   loom_serve_text_model_t* model = NULL;
+  loom_serve_device_t* device = NULL;
   loom_serve_http_server_t* server = NULL;
   const loom_serve_text_flag_defaults_t defaults = {
       .row_count = (iree_host_size_t)FLAG_rows,
@@ -94,8 +96,11 @@ int main(int argc, char** argv) {
       .automatic_shapes = schedule_mode == LOOM_SERVE_TEXT_SCHEDULE_PACKED,
   };
   if (iree_status_is_ok(status)) {
-    status =
-        loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
+    status = loom_serve_device_create_from_flags(&device, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+                                                     allocator);
   }
   iree_host_size_t epoch_count = 0;
   iree_host_size_t chunk_size = 0;
@@ -165,6 +170,7 @@ int main(int argc, char** argv) {
   }
   status = iree_status_join(status, loom_serve_http_server_destroy(server));
   status = iree_status_join(status, loom_serve_text_model_destroy(model));
+  status = iree_status_join(status, loom_serve_device_destroy(device));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

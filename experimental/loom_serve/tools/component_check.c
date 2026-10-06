@@ -152,8 +152,9 @@ static iree_status_t component_initialize(component_check_t* check,
   }
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(allocator, output_bytes, (void**)&check->output));
+  const loom_serve_device_options_t device_options = {.uri = IREE_SV("amdgpu")};
   IREE_RETURN_IF_ERROR(
-      loom_serve_device_create(IREE_SV("amdgpu"), allocator, &check->owner));
+      loom_serve_device_create(&device_options, &check->owner, allocator));
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(check->owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(device, dispatch,
@@ -454,7 +455,7 @@ int main(int argc, char** argv) {
   iree_allocator_free(allocator, check.files);
   iree_allocator_free(allocator, check.output);
   loom_serve_jit_destroy(check.jit);
-  loom_serve_device_destroy(check.owner);
+  status = iree_status_join(status, loom_serve_device_destroy(check.owner));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

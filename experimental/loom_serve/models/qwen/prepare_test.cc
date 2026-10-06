@@ -313,15 +313,15 @@ TEST(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
       .row_count = 3,
   };
   loom_serve_text_model_t* model = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_NOT_FOUND,
-      loom_serve_text_model_create(&options, iree_allocator_system(), &model));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        loom_serve_text_model_create(nullptr, &options, &model,
+                                                     iree_allocator_system()));
   EXPECT_EQ(model, nullptr);
   auto invalid = options;
   invalid.pool_capacity = 65;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_model_create(&invalid, iree_allocator_system(), &model));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_model_create(nullptr, &invalid, &model,
+                                                     iree_allocator_system()));
   EXPECT_EQ(model, nullptr);
 }
 

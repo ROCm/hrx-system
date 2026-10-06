@@ -9,6 +9,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/init.h"
+#include "iree/tooling/device_util.h"
 
 struct loom_serve_device_t {
   // Allocation policy for the owner and its runtime resources.
@@ -27,6 +28,10 @@ struct loom_serve_device_t {
   iree_hal_queue_t* transfer;
   // Owned work and feedback timelines retaining both exact queues.
   loom_serve_execution_t* execution;
+  // Owned physical domain shared by all model reservations; NULL when fixed.
+  loom_serve_memory_pool_t* memory_pool;
+  // Device-wide profiling session enclosing every resident model.
+  iree_hal_profiling_from_flags_t* profiling;
 };
 
 static iree_hal_queue_t* loom_serve_device_select_queue(
@@ -82,33 +87,62 @@ static iree_status_t loom_serve_device_initialize(loom_serve_device_t* device,
                                      device->allocator, &device->execution);
 }
 
-iree_status_t loom_serve_device_create(iree_string_view_t uri,
-                                       iree_allocator_t host_allocator,
-                                       loom_serve_device_t** out_device) {
+iree_status_t loom_serve_device_create(
+    const loom_serve_device_options_t* options,
+    loom_serve_device_t** out_device, iree_allocator_t host_allocator) {
   *out_device = NULL;
+  if (options->backing != LOOM_SERVE_DEVICE_BACKING_FIXED &&
+      options->backing != LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported physical backing strategy");
+  }
+  if (options->backing == LOOM_SERVE_DEVICE_BACKING_FIXED &&
+      options->memory_limit) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "a physical budget requires elastic backing");
+  }
   loom_serve_device_t* device = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*device), (void**)&device));
   device->allocator = host_allocator;
-  iree_status_t status = loom_serve_device_initialize(device, uri);
+  iree_status_t status = loom_serve_device_initialize(device, options->uri);
+  if (iree_status_is_ok(status) &&
+      options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
+    status = loom_serve_memory_pool_create(
+        iree_hal_device_allocator(device->handle),
+        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, options->slab_size,
+        options->memory_limit, &device->memory_pool, host_allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_begin_device_group_profiling_from_flags(
+        device->group, host_allocator, &device->profiling);
+  }
   if (iree_status_is_ok(status)) {
     *out_device = device;
   } else {
-    loom_serve_device_destroy(device);
+    status = iree_status_join(status, loom_serve_device_destroy(device));
   }
   return status;
 }
 
-void loom_serve_device_destroy(loom_serve_device_t* device) {
+iree_status_t loom_serve_device_destroy(loom_serve_device_t* device) {
   if (!device) {
-    return;
+    return iree_ok_status();
   }
+  if (device->memory_pool &&
+      loom_serve_memory_pool_statistics(device->memory_pool).reserved_bytes) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "serving device still owns model reservations");
+  }
+  iree_status_t status = iree_hal_end_profiling_from_flags(device->profiling);
+  loom_serve_memory_pool_destroy(device->memory_pool);
   loom_serve_execution_release(device->execution);
   iree_hal_device_group_release(device->group);
   iree_hal_device_release(device->handle);
   iree_async_frontier_tracker_release(device->frontier_tracker);
   iree_async_proactor_pool_release(device->proactor_pool);
   iree_allocator_free(device->allocator, device);
+  return status;
 }
 
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device) {
@@ -133,4 +167,9 @@ iree_hal_queue_t* loom_serve_device_transfer_queue(
 loom_serve_execution_t* loom_serve_device_execution(
     const loom_serve_device_t* device) {
   return device->execution;
+}
+
+loom_serve_memory_pool_t* loom_serve_device_memory_pool(
+    const loom_serve_device_t* device) {
+  return device->memory_pool;
 }

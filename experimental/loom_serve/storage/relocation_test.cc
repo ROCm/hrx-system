@@ -18,20 +18,20 @@ namespace {
 class RelocationTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(loom_serve_device_create(IREE_SV("amdgpu"),
-                                            iree_allocator_system(), &device));
-    IREE_ASSERT_OK(loom_serve_memory_pool_create(
-        iree_hal_device_allocator(loom_serve_device_handle(device)),
-        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 2 * 1024 * 1024, 0, &pool,
-        iree_allocator_system()));
+    const loom_serve_device_options_t options = {
+        .uri = IREE_SV("amdgpu"),
+        .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
+        .slab_size = 2 * 1024 * 1024};
+    IREE_ASSERT_OK(
+        loom_serve_device_create(&options, &device, iree_allocator_system()));
+    pool = loom_serve_device_memory_pool(device);
     execution = loom_serve_device_execution(device);
   }
 
   void TearDown() override {
     IREE_ASSERT_OK(loom_serve_execution_drain(execution));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(buffer));
-    loom_serve_memory_pool_destroy(pool);
-    loom_serve_device_destroy(device);
+    IREE_EXPECT_OK(loom_serve_device_destroy(device));
   }
 
   // Device owner enclosing all queue work and memory.

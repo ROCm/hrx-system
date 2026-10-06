@@ -19,9 +19,9 @@ namespace {
 TEST(Krea2ModelTest, RejectsGeometryBeforeAllocationOrDeviceAccess) {
   loom_serve_image_model_options_t options = {};
   loom_serve_image_model_t* model = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_OUT_OF_RANGE,
-      loom_serve_image_model_create(&options, &model, iree_allocator_null()));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_serve_image_model_create(nullptr, &options, &model,
+                                                      iree_allocator_null()));
   EXPECT_EQ(model, nullptr);
 }
 
@@ -30,9 +30,9 @@ TEST(Krea2ModelTest, FailedAllocationReturnsNoOwnership) {
   options.height = options.width = 384;
   options.text_tokens = 512;
   loom_serve_image_model_t* model = nullptr;
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_image_model_create(&options, &model, iree_allocator_null()));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_image_model_create(nullptr, &options, &model,
+                                                      iree_allocator_null()));
   EXPECT_EQ(model, nullptr);
   IREE_EXPECT_OK(loom_serve_image_model_destroy(model));
 }
@@ -48,9 +48,9 @@ TEST(Krea2ModelTest, MissingTokenizerReleasesPartialOwnership) {
   for (const uint32_t maximum : {16u, 80u, 128u, 144u, 192u, 512u}) {
     options.text_tokens = maximum;
     loom_serve_image_model_t* model = nullptr;
-    IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
-                          loom_serve_image_model_create(
-                              &options, &model, iree_allocator_system()));
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND, loom_serve_image_model_create(
+                                                     nullptr, &options, &model,
+                                                     iree_allocator_system()));
     EXPECT_EQ(model, nullptr);
   }
 }

@@ -47,18 +47,19 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   }
 
   void SetUp() override {
-    IREE_ASSERT_OK(loom_serve_device_create(IREE_SV("amdgpu"), allocator_,
-                                            &device_owner_));
+    const loom_serve_device_options_t options = {
+        .uri = IREE_SV("amdgpu"),
+        .backing = GetParam() ? LOOM_SERVE_DEVICE_BACKING_ELASTIC
+                              : LOOM_SERVE_DEVICE_BACKING_FIXED,
+        .slab_size = kSlabBytes,
+        .memory_limit = GetParam() ? 2 * kSlabBytes : 0};
+    IREE_ASSERT_OK(
+        loom_serve_device_create(&options, &device_owner_, allocator_));
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     transfer_ = loom_serve_device_transfer_queue(device_owner_);
     execution_ = loom_serve_device_execution(device_owner_);
-    if (GetParam()) {
-      IREE_ASSERT_OK(loom_serve_memory_pool_create(
-          iree_hal_device_allocator(device_),
-          IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, kSlabBytes, 2 * kSlabBytes,
-          &pool_, allocator_));
-    }
+    pool_ = loom_serve_device_memory_pool(device_owner_);
     directory_ =
         std::filesystem::path(FLAG_weight_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
@@ -92,10 +93,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     for (auto* plan : plans_) {
       IREE_EXPECT_OK(loom_serve_weights_destroy(plan));
     }
-    loom_serve_memory_pool_destroy(pool_);
     iree_hal_buffer_release(output_buffer_);
     loom_serve_jit_destroy(jit_);
-    loom_serve_device_destroy(device_owner_);
+    IREE_EXPECT_OK(loom_serve_device_destroy(device_owner_));
     if (path_.Exists()) {
       EXPECT_TRUE(path_.Remove());
     }

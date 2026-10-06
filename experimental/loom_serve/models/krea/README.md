@@ -104,6 +104,13 @@ Use the execution host's normal exclusive-run mechanism on a shared device.
 This caller creates one immutable set of encoder, Turbo, optional LoRA and VAE
 parameter domains, shared by its cold-compiled retained commands. They also
 share one input/output bank and the maximum reflected scratch allocation.
+The model borrows a caller-owned serving device and its physical pool. Cold
+creation indexes parameters without reading payloads; first generation or
+explicit activation streams them. Deactivation releases all base/adapter
+parameter backing without rebuilding commands. The next request reloads and
+prepares into the same roots. `image:model_check --reload_weights` exercises
+this lifecycle across base and adapted output. Workspace remains a retained
+allocation separate from the elastic parameter budget.
 Request inputs upload once. A single source command runs all model stages;
 only completed F32 RGB comes back. Both normal completion and failure drain
 accepted work before borrowed upload/readback storage is freed.

@@ -134,6 +134,7 @@ loom_cc_binary(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::runtime::device_flags
 )
 endif()
 
@@ -149,6 +150,7 @@ loom_cc_binary(
     ::model
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::device_flags
     iree::io::file_handle
     iree::tokenizer
 )

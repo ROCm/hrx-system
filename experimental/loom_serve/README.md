@@ -148,8 +148,8 @@ accepted predictions into the next verifier without an intermediate host wait.
 Admission and transport are observed between these bounded cohorts; continuous
 device admission/output rings are not implemented.
 
-The text tools use IREE's standard device profiling flags. Profiling begins
-after command specialization and before weight loading, so it includes startup
+The tools use IREE's standard device profiling flags. One shared device
+profiling session begins before model preparation, so it includes startup
 transfers and preparation as well as inference. Shutdown drains accepted work
 before ending the session and propagates profiling failures. For aggregate
 execution statistics, add `--print_device_statistics=true`. Per-dispatch
@@ -279,7 +279,9 @@ set. Cold model creation and final text printing are outside those durations.
 For a warm decode rate, divide decode steps by decode seconds; aggregate rate
 uses the whole set's elapsed time, not the sum of per-row rates.
 
-All device backing is allocated before generation. The current host stage API
+Model creation leaves parameter payloads unloaded; explicit activation can
+warm before measurement, or the first inference includes loading. Elastic KV
+backing grows with actual row/page use. The current host stage API
 waits for readback and is single-owner; transport can run independently. These
 checks do not establish zero allocations inside VM/HAL submission or batched
 throughput. Controlled performance uses an optimized binary and benchmark lock,

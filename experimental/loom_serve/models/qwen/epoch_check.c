@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
 
@@ -23,6 +24,10 @@ IREE_FLAG(bool, trim, false,
 IREE_FLAG(bool, reload_weights, false,
           "Run the trim witness with weight eviction/reload before target/MTP "
           "continuation; requires elastic backing.");
+IREE_FLAG(
+    bool, shared_residency, false,
+    "Alternate two independent retained models on one device and physical "
+    "budget; requires elastic backing.");
 
 typedef struct qwen_check_row_t {
   // Nonzero, permuted resident row used by packed invocations.
@@ -56,6 +61,118 @@ static iree_status_t qwen_check_prefill(loom_serve_text_model_t* model,
     offset += length;
   }
   return status;
+}
+
+// Captures uninterrupted continuation, then rewinds to its starting frontier.
+static iree_status_t qwen_check_residency_reference(
+    loom_serve_text_model_t* model, iree_string_view_t prompt,
+    int32_t expected[8], iree_allocator_t allocator) {
+  int32_t tokens[256];
+  iree_host_size_t token_count = 0;
+  IREE_RETURN_IF_ERROR(
+      iree_tokenizer_encode(loom_serve_text_model_tokenizer(model), prompt,
+                            IREE_TOKENIZER_ENCODE_FLAG_NONE,
+                            iree_tokenizer_make_token_output(
+                                tokens, NULL, NULL, IREE_ARRAYSIZE(tokens)),
+                            allocator, &token_count));
+  loom_serve_text_row_t* row = loom_serve_text_model_row(model, 0);
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(row));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 0, token_count, tokens));
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < 8 && iree_status_is_ok(status); ++i) {
+    expected[i] = loom_serve_text_row_token(row);
+    status = loom_serve_text_row_decode(row);
+  }
+  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(row));
+  return qwen_check_prefill(model, 0, token_count, tokens);
+}
+
+static iree_status_t qwen_check_residency_continuation(
+    loom_serve_text_model_t* model, const int32_t expected[8]) {
+  loom_serve_text_row_t* row = loom_serve_text_model_row(model, 0);
+  const iree_host_size_t initial_position = loom_serve_text_row_position(row);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < 8 && iree_status_is_ok(status); ++i) {
+    if (loom_serve_text_row_token(row) != expected[i]) {
+      status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "shared residency changed token %zu", i);
+    } else {
+      status = loom_serve_text_row_decode(row);
+    }
+  }
+  if (iree_status_is_ok(status) &&
+      loom_serve_text_row_position(row) != initial_position + 8) {
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "shared residency changed retained frontier");
+  }
+  return status;
+}
+
+static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
+                                                 loom_serve_text_model_t* first,
+                                                 iree_allocator_t allocator) {
+  if (!loom_serve_device_memory_pool(device)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "shared residency witness requires elastic backing");
+  }
+  const loom_serve_text_flag_defaults_t defaults = {.row_count = 1};
+  loom_serve_text_model_t* second = NULL;
+  iree_status_t status = loom_serve_text_model_create_from_flags(
+      device, &defaults, &second, allocator);
+  if (iree_status_is_ok(status) &&
+      loom_serve_text_model_weight_statistics(second).committed_bytes) {
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "cold model creation materialized parameters");
+  }
+  int32_t expected[2][8] = {{0}};
+  if (iree_status_is_ok(status)) {
+    status = qwen_check_residency_reference(
+        first,
+        IREE_SV("<|im_start|>user\nRepeat: amber cedar maple violet birch "
+                "willow falcon.<|im_end|>\n<|im_start|>assistant\n"
+                "<think>\n\n</think>\n\n"),
+        expected[0], allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_deactivate(first);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_check_residency_reference(
+        second,
+        IREE_SV("<|im_start|>user\nRepeat: silver pine oak robin copper "
+                "hazel sparrow.<|im_end|>\n<|im_start|>assistant\n"
+                "<think>\n\n</think>\n\n"),
+        expected[1], allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_deactivate(second);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_check_residency_continuation(first, expected[0]);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_deactivate(first);
+  }
+  if (iree_status_is_ok(status)) {
+    status = qwen_check_residency_continuation(second, expected[1]);
+  }
+  if (iree_status_is_ok(status)) {
+    const loom_serve_memory_statistics_t memory =
+        loom_serve_memory_pool_statistics(
+            loom_serve_device_memory_pool(device));
+    fprintf(stderr,
+            "{\"event\":\"shared_residency\",\"models\":2,\"reserved_bytes\":"
+            "%" PRIu64 ",\"committed_bytes\":%" PRIu64
+            ",\"peak_bytes\":%" PRIu64 ",\"released_bytes\":%" PRIu64 "}\n",
+            memory.reserved_bytes, memory.committed_bytes, memory.peak_bytes,
+            memory.released_bytes);
+    fprintf(stderr,
+            "PASS: two cached models share one physical budget and preserve "
+            "independent continuations across alternating residency.\n");
+  }
+  return iree_status_join(status, loom_serve_text_model_destroy(second));
 }
 
 static iree_status_t qwen_check_prediction(loom_serve_text_model_t* model,
@@ -954,8 +1071,13 @@ int main(int argc, char** argv) {
   const iree_allocator_t allocator = iree_allocator_system();
   const loom_serve_text_flag_defaults_t defaults = {.row_count = 8};
   loom_serve_text_model_t* model = NULL;
+  loom_serve_device_t* device = NULL;
   iree_status_t status =
-      loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
+      loom_serve_device_create_from_flags(&device, allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+                                                     allocator);
+  }
   if (iree_status_is_ok(status)) {
     const loom_serve_memory_statistics_t memory =
         loom_serve_text_model_memory_statistics(model);
@@ -974,6 +1096,9 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status) && (FLAG_trim || FLAG_reload_weights)) {
     status = qwen_check_trim(model, allocator);
   }
+  if (iree_status_is_ok(status) && FLAG_shared_residency) {
+    status = qwen_check_shared_residency(device, model, allocator);
+  }
   if (iree_status_is_ok(status)) {
     const loom_serve_memory_statistics_t memory =
         loom_serve_text_model_memory_statistics(model);
@@ -983,6 +1108,7 @@ int main(int argc, char** argv) {
             memory.reserved_bytes, memory.committed_bytes, memory.peak_bytes);
   }
   status = iree_status_join(status, loom_serve_text_model_destroy(model));
+  status = iree_status_join(status, loom_serve_device_destroy(device));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

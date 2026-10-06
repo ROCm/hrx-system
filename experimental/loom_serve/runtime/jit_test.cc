@@ -25,8 +25,9 @@ namespace {
 class JitTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    IREE_ASSERT_OK(loom_serve_device_create(IREE_SV("amdgpu"), allocator_,
-                                            &device_owner_));
+    const loom_serve_device_options_t options = {.uri = IREE_SV("amdgpu")};
+    IREE_ASSERT_OK(
+        loom_serve_device_create(&options, &device_owner_, allocator_));
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     execution_ = loom_serve_device_execution(device_owner_);
@@ -53,7 +54,7 @@ class JitTest : public ::testing::Test {
     }
     iree_hal_buffer_release(buffer_);
     loom_serve_jit_destroy(jit_);
-    loom_serve_device_destroy(device_owner_);
+    IREE_EXPECT_OK(loom_serve_device_destroy(device_owner_));
   }
 
   // Null uses the source provider; text overlays its value for this request.
