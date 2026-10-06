@@ -34,6 +34,10 @@ typedef struct loom_check_test_schedule_options_t {
   iree_string_view_t consumer_nodes;
   // Comma-separated source nodes whose scheduled order is requested.
   iree_string_view_t order_nodes;
+  // Comma-separated source nodes whose issue cycles are requested.
+  iree_string_view_t issue_nodes;
+  // Comma-separated source nodes whose selected descriptors are requested.
+  iree_string_view_t descriptor_nodes;
   // Producer and consumer source nodes whose dependency timing is requested.
   uint32_t timing_producer_node;
   uint32_t timing_consumer_node;
@@ -41,6 +45,11 @@ typedef struct loom_check_test_schedule_options_t {
   loom_check_test_schedule_dependency_query_t dependency_query;
   // Candidate selection strategy used by Low frame construction.
   loom_low_schedule_strategy_t schedule_strategy;
+  // Low allocation budget overrides parsed from the RUN line.
+  loom_low_allocation_budget_t
+      allocation_budgets[LOOM_CHECK_LOW_EMIT_MAX_ALLOCATION_BUDGETS];
+  // Number of entries in |allocation_budgets|.
+  iree_host_size_t allocation_budget_count;
   // Presence of required or uniquely specified RUN options.
   loom_check_test_schedule_option_flags_t flags;
 } loom_check_test_schedule_options_t;
@@ -199,10 +208,15 @@ static iree_status_t loom_check_test_schedule_parse_option(
     node_list = &options->consumer_nodes;
   } else if (iree_string_view_equal(name, IREE_SV("order"))) {
     node_list = &options->order_nodes;
+  } else if (iree_string_view_equal(name, IREE_SV("issue"))) {
+    node_list = &options->issue_nodes;
+  } else if (iree_string_view_equal(name, IREE_SV("descriptor"))) {
+    node_list = &options->descriptor_nodes;
   } else {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "unknown low-schedule-query option '%.*s'",
-                            (int)name.size, name.data);
+    return loom_check_low_emit_parse_allocation_budget(
+        token, IREE_SV("low-schedule-query"), options->allocation_budgets,
+        IREE_ARRAYSIZE(options->allocation_budgets),
+        &options->allocation_budget_count);
   }
   if (!iree_string_view_is_empty(*node_list)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -262,10 +276,13 @@ static iree_status_t loom_check_test_schedule_parse_options(
         "'timing', and requires at least one of them");
   }
   if (!has_consumers && !has_timing &&
-      iree_string_view_is_empty(out_options->order_nodes)) {
+      iree_string_view_is_empty(out_options->order_nodes) &&
+      iree_string_view_is_empty(out_options->issue_nodes) &&
+      iree_string_view_is_empty(out_options->descriptor_nodes)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "low-schedule-query requires option 'consumer', 'order', or 'timing'");
+        "low-schedule-query requires option 'consumer', 'order', 'issue', "
+        "'descriptor', or 'timing'");
   }
   return iree_ok_status();
 }
@@ -393,6 +410,51 @@ static iree_status_t loom_check_test_schedule_append_predecessors(
       builder, predecessor_count == 0 ? "none\n" : "\n");
 }
 
+static iree_status_t loom_check_test_schedule_append_issue_cycles(
+    const loom_low_schedule_table_t* schedule, iree_string_view_t selected,
+    iree_string_builder_t* builder) {
+  uint32_t node_index = 0;
+  while (loom_check_test_schedule_consume_node(&selected, &node_index)) {
+    if (node_index >= schedule->node_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "low-schedule-query issue node %" PRIu32
+                              " is out of range for %" PRIhsz " nodes",
+                              node_index, schedule->node_count);
+    }
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "node %" PRIu32 " issue-cycle: %" PRIu32 "\n", node_index,
+        schedule->nodes[node_index].issue_cycle));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t loom_check_test_schedule_append_descriptors(
+    const loom_low_schedule_table_t* schedule, iree_string_view_t selected,
+    iree_string_builder_t* builder) {
+  uint32_t node_index = 0;
+  while (loom_check_test_schedule_consume_node(&selected, &node_index)) {
+    if (node_index >= schedule->node_count) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "low-schedule-query descriptor node %" PRIu32
+                              " is out of range for %" PRIhsz " nodes",
+                              node_index, schedule->node_count);
+    }
+    const loom_low_descriptor_t* descriptor =
+        schedule->nodes[node_index].descriptor;
+    if (descriptor == NULL) {
+      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+          builder, "node %" PRIu32 " descriptor: none\n", node_index));
+      continue;
+    }
+    const iree_string_view_t descriptor_key = loom_low_descriptor_set_string(
+        schedule->target.descriptor_set, descriptor->key_string_ref);
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        builder, "node %" PRIu32 " descriptor: %.*s\n", node_index,
+        (int)descriptor_key.size, descriptor_key.data));
+  }
+  return iree_ok_status();
+}
+
 static bool loom_check_test_schedule_has_predecessor(
     const loom_low_schedule_table_t* schedule,
     const loom_check_test_schedule_dependency_query_t* query,
@@ -497,6 +559,8 @@ static iree_status_t loom_check_test_schedule_execute(
 
   const loom_low_emission_frame_options_t frame_options = {
       .schedule_strategy = options.schedule_strategy,
+      .allocation_budgets = options.allocation_budgets,
+      .allocation_budget_count = options.allocation_budget_count,
   };
   loom_low_emission_frame_t frame = {0};
   bool frame_accepted = false;
@@ -516,6 +580,11 @@ static iree_status_t loom_check_test_schedule_execute(
 
   IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_order(
       &frame.schedule, options.order_nodes, &request->result->actual_output));
+  IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_issue_cycles(
+      &frame.schedule, options.issue_nodes, &request->result->actual_output));
+  IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_descriptors(
+      &frame.schedule, options.descriptor_nodes,
+      &request->result->actual_output));
   if (iree_string_view_equal(options.consumer_nodes, IREE_SV("*"))) {
     IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_all_predecessors(
         &frame.schedule, &options.dependency_query,
