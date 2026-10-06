@@ -1,0 +1,31 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Link block_adapters.loom and kernels/linear.loom with --library and bind
+// krea2.block_tokens=80. Five row tiles and two output tiles expose one-sided
+// grid/origin swaps. X=1/8, W=1/4 and the K256 partials are exactly representable.
+kernel.decl @block_adapter_linear_6144_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+kernel.decl @block_adapter_linear_16384_32() launch(%input: buffer, %weight: buffer, %output: buffer)
+
+check.case public @adapter_down_traversal_6144 {
+  %input = check.generate.fill value(0.125) : tensor<80x6144xbf16>
+  %weight = check.generate.fill value(0.25) : tensor<32x6144xf32>
+  %output = check.generate.fill value(-17.0) : tensor<80x32xbf16>
+  %expected = check.generate.fill value(192.0) : tensor<80x32xbf16>
+  kernel.launch @block_adapter_linear_6144_32(%input, %weight, %output) : (tensor<80x6144xbf16>, tensor<32x6144xf32>, tensor<80x32xbf16>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<80x32xbf16>
+  check.return
+}
+
+check.case public @adapter_down_traversal_16384 {
+  %input = check.generate.fill value(0.125) : tensor<80x16384xbf16>
+  %weight = check.generate.fill value(0.25) : tensor<32x16384xf32>
+  %output = check.generate.fill value(-17.0) : tensor<80x32xbf16>
+  %expected = check.generate.fill value(512.0) : tensor<80x32xbf16>
+  kernel.launch @block_adapter_linear_16384_32(%input, %weight, %output) : (tensor<80x16384xbf16>, tensor<32x16384xf32>, tensor<80x32xbf16>)
+  check.expect.bitwise actual(%output) expected(%expected) : tensor<80x32xbf16>
+  check.return
+}

@@ -926,6 +926,8 @@ have an explicit concurrent scope; the B contraction fuses BF16 rounding,
 strength multiplication, and addition into the base output. Its same-tile
 read/write permits in-place addition without a full-width delta buffer.
 The zero-strength branch preserves the base instead of adding a rounded zero.
+The rank-32 A contractions visit both output halves of each input panel
+adjacently, reusing those rows before advancing through the large activation.
 The 6144- and 16384-wide row-major additions traverse output tiles first, so
 successive workgroups visit adjacent columns rather than striding over the
 entire activation matrix. Contraction, base-read and store motifs take the
@@ -964,6 +966,12 @@ wide row-major writers at 80 rows, including distinct output, true alias and
 signed-zero bypass. With the same tool and two libraries, set
 `--config=krea2.block_tokens=80`; its two samples each have three exact
 expectations.
+
+[`tests/adapter_down_traversal.loom`](tests/adapter_down_traversal.loom) calls
+both rank-32 A leaves at 80 rows with the same libraries and configuration.
+Five row tiles and two output tiles check launch/origin coverage; exactly
+representable factors yield two bitwise expectations without a numerical
+tolerance or a separate test kernel.
 
 ```sh
 python -B experimental/loom_serve/models/krea2/check_adapters.py \

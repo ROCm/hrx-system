@@ -23,6 +23,8 @@ command.program.decl @krea2.block_feed_forward_down(%layer: index) launch(%param
 // arithmetic helpers receive SSA operands and contain no model configuration.
 // The F32 file factors round to BF16 before the matrix contractions.
 
+// Adjacent output halves of each rank-32 A projection share the same input
+// panel instead of revisiting it after a complete sweep through the rows.
 kernel.def target(@block_adapter_wave32) @block_adapter_linear_6144_32() {
   %rows = config.get @krea2.block_tokens : index
   %tile = index.constant 16 : index
@@ -30,14 +32,14 @@ kernel.def target(@block_adapter_wave32) @block_adapter_linear_6144_32() {
   %output_tiles = index.constant 2 : index
   %one = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%output_tiles, %row_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %inputs = index.constant 6144 : index
   %outputs = index.constant 32 : index
   %projection_tile = index.constant 16 : index
-  %row_tile = kernel.workgroup.id<x> : index
-  %output_tile = kernel.workgroup.id<y> : index
+  %row_tile = kernel.workgroup.id<y> : index
+  %output_tile = kernel.workgroup.id<x> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
@@ -53,14 +55,14 @@ kernel.def target(@block_adapter_wave32) @block_adapter_linear_16384_32() {
   %output_tiles = index.constant 2 : index
   %one = index.constant 1 : index
   %threads = index.constant 32 : index
-  kernel.launch.config workgroups(%row_tiles, %output_tiles, %one) workgroup_size(%threads, %one, %one) : index
+  kernel.launch.config workgroups(%output_tiles, %row_tiles, %one) workgroup_size(%threads, %one, %one) : index
 } launch(%input: buffer, %weight: buffer, %output: buffer) {
   %rows = config.get @krea2.block_tokens : index
   %inputs = index.constant 16384 : index
   %outputs = index.constant 32 : index
   %projection_tile = index.constant 16 : index
-  %row_tile = kernel.workgroup.id<x> : index
-  %output_tile = kernel.workgroup.id<y> : index
+  %row_tile = kernel.workgroup.id<y> : index
+  %output_tile = kernel.workgroup.id<x> : index
   %row_origin = index.mul %row_tile, %projection_tile : index
   %output_origin = index.mul %output_tile, %projection_tile : index
   %result = template.apply<@projection.linear_f32_as_bf16>(%rows, %inputs, %outputs, %row_origin, %output_origin, %input, %weight) : (index, index, index, index, index, buffer, buffer) -> (vector<8xf32>)
