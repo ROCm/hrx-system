@@ -144,7 +144,7 @@ from loom.target.contracts.source_memory import (
     SourceMemoryConstraint,
 )
 from loom.target.contracts.temporary_allocation import allocate_temporary_slots
-from loom.target.low_descriptors import ConstraintKind, EffectKind
+from loom.target.low_descriptors import ConstraintKind
 
 
 def _emit_operand_value_refs(emit: ContractEmit) -> tuple[ValueRef, ...]:
@@ -1694,10 +1694,7 @@ class _LowerRuleSetCompiler:
                 emit.source_memory_byte_offset_materializer,
                 emit.source_memory_address_materializer,
             )
-            if any(
-                effect.kind in (EffectKind.READ, EffectKind.WRITE)
-                for effect in emit.descriptor.effects
-            ):
+            if any(effect.is_memory_access for effect in emit.descriptor.effects):
                 flags |= LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY
 
         self._emits.append(

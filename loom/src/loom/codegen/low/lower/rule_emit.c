@@ -447,8 +447,7 @@ static loom_memory_access_flags_t loom_low_lower_resolve_emit_access_flags(
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const loom_low_effect_t* effect =
         &descriptor_set->effects[descriptor->effect_start + i];
-    if (effect->kind == LOOM_LOW_EFFECT_KIND_READ ||
-        effect->kind == LOOM_LOW_EFFECT_KIND_WRITE) {
+    if (loom_low_effect_is_memory_access(effect)) {
       return access_flags;
     }
   }

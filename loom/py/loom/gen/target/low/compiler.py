@@ -279,7 +279,9 @@ def derive_instruction_classes(
     if EffectKind.CONTROL in effect_kinds:
         classes.add(InstructionClass.CONTROL)
 
-    has_memory_effect = bool({EffectKind.READ, EffectKind.WRITE}.intersection(effect_kinds))
+    has_memory_read = any(effect.kind is EffectKind.READ and effect.is_memory_access for effect in descriptor.effects)
+    has_memory_write = any(effect.kind is EffectKind.WRITE and effect.is_memory_access for effect in descriptor.effects)
+    has_memory_effect = has_memory_read or has_memory_write
     has_memory_resource = any(resources[issue_use.resource].kind in (ResourceKind.LOAD, ResourceKind.STORE) for issue_use in schedule_class.issue_uses)
     if (has_memory_effect or has_memory_resource) and not _MEMORY_INSTRUCTION_CLASSES.intersection(classes):
         classes.add(InstructionClass.GENERIC_MEMORY)
@@ -300,21 +302,21 @@ def derive_instruction_classes(
     if InstructionClass.PRIVATE_MEMORY in classes and InstructionClass.GLOBAL_MEMORY in classes:
         raise ValueError(f"descriptor '{descriptor.key}' combines private and global memory instruction classes")
     if InstructionClass.ATOMIC in classes and not has_memory_effect:
-        raise ValueError(f"descriptor '{descriptor.key}' has the atomic instruction class without a read or write effect")
+        raise ValueError(f"descriptor '{descriptor.key}' has the atomic instruction class without a memory read or write effect")
     if InstructionClass.EXECUTION_BARRIER in classes and EffectKind.BARRIER not in effect_kinds:
         raise ValueError(f"descriptor '{descriptor.key}' has the execution-barrier instruction class without a barrier effect")
     read_classes = {
         InstructionClass.GLOBAL_LOAD,
         InstructionClass.BUFFER_LOAD,
     }
-    if read_classes.intersection(classes) and EffectKind.READ not in effect_kinds:
-        raise ValueError(f"descriptor '{descriptor.key}' has a load instruction class without a read effect")
+    if read_classes.intersection(classes) and not has_memory_read:
+        raise ValueError(f"descriptor '{descriptor.key}' has a load instruction class without a memory read effect")
     write_classes = {
         InstructionClass.GLOBAL_STORE,
         InstructionClass.BUFFER_STORE,
     }
-    if write_classes.intersection(classes) and EffectKind.WRITE not in effect_kinds:
-        raise ValueError(f"descriptor '{descriptor.key}' has a store instruction class without a write effect")
+    if write_classes.intersection(classes) and not has_memory_write:
+        raise ValueError(f"descriptor '{descriptor.key}' has a store instruction class without a memory write effect")
 
     return tuple(instruction_class for instruction_class in InstructionClass if instruction_class in classes)
 

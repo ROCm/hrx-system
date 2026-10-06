@@ -99,8 +99,7 @@ static void loom_target_compile_report_accumulate_low_memory_effect(
     const loom_low_effect_t* effect,
     loom_low_instruction_class_flags_t instruction_classes,
     loom_target_compile_report_static_instruction_mix_t* mix) {
-  if (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
-      effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) {
+  if (!loom_low_effect_is_memory_access(effect)) {
     return;
   }
 

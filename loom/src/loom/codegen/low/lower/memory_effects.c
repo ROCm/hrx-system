@@ -84,8 +84,7 @@ iree_status_t loom_low_lower_record_memory_packet(
   for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
     const loom_low_effect_t* effect =
         &context->descriptor_set->effects[descriptor->effect_start + i];
-    if ((effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
-         effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) ||
+    if (!loom_low_effect_is_memory_access(effect) ||
         !iree_any_bit_set(effect->flags, LOOM_LOW_EFFECT_FLAG_DEPENDENCY)) {
       continue;
     }

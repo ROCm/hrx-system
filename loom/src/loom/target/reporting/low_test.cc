@@ -57,6 +57,53 @@ TEST(CompileReportLowMixTest, CountsExecutionBarriersFromInstructionClasses) {
   EXPECT_EQ(total.execution_barrier_count, 4u);
 }
 
+TEST(CompileReportLowMixTest, CountsOnlyMemoryAttachedReadWriteEffects) {
+  loom_low_effect_t effects[6] = {};
+  effects[0].kind = LOOM_LOW_EFFECT_KIND_READ;
+  effects[1].kind = LOOM_LOW_EFFECT_KIND_WRITE;
+  effects[1].width_bits = 64;
+  effects[2].kind = LOOM_LOW_EFFECT_KIND_READ;
+  effects[2].memory_space = LOOM_LOW_MEMORY_SPACE_GENERIC;
+  effects[3].kind = LOOM_LOW_EFFECT_KIND_WRITE;
+  effects[3].memory_space = LOOM_LOW_MEMORY_SPACE_GLOBAL;
+  effects[3].width_bits = 7;
+  effects[4].kind = LOOM_LOW_EFFECT_KIND_READ;
+  effects[4].memory_space = LOOM_LOW_MEMORY_SPACE_GLOBAL;
+  effects[4].width_bits = 32;
+  effects[5].kind = LOOM_LOW_EFFECT_KIND_WRITE;
+  effects[5].memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP;
+  effects[5].width_bits = 64;
+  loom_low_descriptor_t descriptors[IREE_ARRAYSIZE(effects)] = {};
+  loom_low_descriptor_view_t descriptor_views[IREE_ARRAYSIZE(effects)] = {};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(descriptors); ++i) {
+    descriptors[i].effect_start = i;
+    descriptors[i].effect_count = 1;
+  }
+  loom_low_descriptor_set_t descriptor_set = {};
+  descriptor_set.descriptors = descriptors;
+  descriptor_set.descriptor_views = descriptor_views;
+  descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
+  descriptor_set.effects = effects;
+  descriptor_set.effect_count = IREE_ARRAYSIZE(effects);
+  loom_low_schedule_table_t schedule = {};
+  loom_low_allocation_table_t allocation = {};
+  loom_target_compile_report_static_instruction_mix_t mix = {};
+
+  for (const auto& descriptor : descriptors) {
+    loom_low_schedule_node_t node = {};
+    node.kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
+    node.descriptor = &descriptor;
+    loom_target_compile_report_accumulate_low_node_static_mix(
+        &schedule, &allocation, &descriptor_set, &node, &mix);
+  }
+
+  EXPECT_EQ(mix.descriptor_count, 6u);
+  EXPECT_EQ(mix.memory_read_unknown_width_count, 1u);
+  EXPECT_EQ(mix.memory_write_unknown_width_count, 1u);
+  EXPECT_EQ(mix.memory_read_byte_count, 4u);
+  EXPECT_EQ(mix.memory_write_byte_count, 8u);
+}
+
 template <typename T>
 static const T* CompileReportRowAt(
     const loom_target_compile_report_row_list_t& row_list,
@@ -116,7 +163,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   const loom_low_effect_t effects[] = {
       {
           /*.kind=*/LOOM_LOW_EFFECT_KIND_READ,
-          /*.memory_space=*/{},
+          /*.memory_space=*/LOOM_LOW_MEMORY_SPACE_STACK,
           /*.scope_id=*/{},
           /*.flags=*/{},
           /*.counter_id=*/{},
@@ -124,7 +171,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
       },
       {
           /*.kind=*/LOOM_LOW_EFFECT_KIND_WRITE,
-          /*.memory_space=*/{},
+          /*.memory_space=*/LOOM_LOW_MEMORY_SPACE_STACK,
           /*.scope_id=*/{},
           /*.flags=*/{},
           /*.counter_id=*/{},

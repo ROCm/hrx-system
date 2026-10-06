@@ -432,8 +432,7 @@ loom_low_descriptor_memory_effect_summary(
     const uint32_t effect_index = descriptor->effect_start + i;
     IREE_ASSERT(effect_index < descriptor_set->effect_count);
     const loom_low_effect_t* effect = &descriptor_set->effects[effect_index];
-    if (effect->kind != LOOM_LOW_EFFECT_KIND_READ &&
-        effect->kind != LOOM_LOW_EFFECT_KIND_WRITE) {
+    if (!loom_low_effect_is_memory_access(effect)) {
       continue;
     }
     if (effect->width_bits == 0 || (effect->width_bits % 8u) != 0) {

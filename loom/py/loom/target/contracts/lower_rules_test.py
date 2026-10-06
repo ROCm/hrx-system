@@ -22,6 +22,7 @@ from loom.dialect.vector import defs as vector
 from loom.dsl import EncodingOperandSummaryDef, Op
 from loom.target.contracts import (
     LOWER_EMIT_FLAG_BIND_RESULTS_TO_REFS,
+    LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY,
     LOWER_EMIT_FLAG_RESULT_DESCRIPTOR_TYPE,
     LOWER_RULE_FLAG_CONTRACT_ONLY,
     LOWER_RULE_FLAG_ORDINAL_VALUE_ALIAS,
@@ -73,7 +74,16 @@ from loom.target.contracts import (
     compile_lower_rule_set,
 )
 from loom.target.contracts.lower_rule_diagnostics import _source_memory_diagnostics
-from loom.target.low_descriptors import EnumDomain, EnumValue, Immediate, ImmediateKind
+from loom.target.low_descriptors import (
+    Descriptor,
+    Effect,
+    EffectKind,
+    EnumDomain,
+    EnumValue,
+    Immediate,
+    ImmediateKind,
+    MemorySpace,
+)
 from loom.target.test.descriptors import (
     TEST_LOW_ACCUMULATE_V8I32_DESCRIPTOR,
     TEST_LOW_ADD_F32_DESCRIPTOR,
@@ -588,18 +598,29 @@ def _source_memory_address_rule(
     )
 
 
-def _source_memory_root_rule(*, with_source_memory: bool) -> ContractFragment:
+def _source_memory_root_rule(
+    *,
+    with_source_memory: bool,
+    descriptor: Descriptor = TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+) -> ContractFragment:
+    descriptor_set = replace(
+        TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptors=tuple(
+            descriptor if row.key == TEST_LOW_LOAD_V4I32_DESCRIPTOR.key else row
+            for row in TEST_LOW_CORE_DESCRIPTOR_SET.descriptors
+        ),
+    )
     return ContractFragment(
         name="test.source-memory-root",
-        descriptor_set=TEST_LOW_CORE_DESCRIPTOR_SET,
+        descriptor_set=descriptor_set,
         cases=[
             DescriptorRule(
                 source_op=vector.vector_load,
-                descriptor=TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+                descriptor=descriptor,
                 guards=(Guard.value_type("result", Vector("i32", lanes=4)),),
                 emit=(
                     EmitDescriptorOp(
-                        descriptor=TEST_LOW_LOAD_V4I32_DESCRIPTOR,
+                        descriptor=descriptor,
                         operands={"address": ValueRef.source_memory_root()},
                         results={"dst": ValueRef.result("result")},
                         source_memory=(
@@ -2044,6 +2065,32 @@ def test_compile_lower_rule_set_compiles_source_memory_root() -> None:
         SourceValueKind.SOURCE_MEMORY_ROOT,
     )
     assert emit.source_memory_ordinal != 0
+
+
+@pytest.mark.parametrize(
+    ("effect", "expected_recording"),
+    [
+        (Effect(EffectKind.READ), False),
+        (Effect(EffectKind.READ, memory_space=MemorySpace.GLOBAL), True),
+    ],
+)
+def test_compile_lower_rule_set_records_only_attached_source_memory(
+    effect: Effect,
+    expected_recording: bool,
+) -> None:
+    descriptor = replace(TEST_LOW_LOAD_V4I32_DESCRIPTOR, effects=(effect,))
+    compiled = compile_lower_rule_set(
+        _source_memory_root_rule(
+            with_source_memory=True,
+            descriptor=descriptor,
+        ),
+        dialect_ops={"vector": ALL_VECTOR_OPS},
+    )
+
+    records_source_memory = bool(
+        compiled.emits[0].flags & LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY
+    )
+    assert records_source_memory is expected_recording
 
 
 def test_source_memory_root_requires_source_memory_emit() -> None:

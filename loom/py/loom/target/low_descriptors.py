@@ -594,6 +594,15 @@ class Effect:
     producer_event: str | None = None
     consumer_event: str | None = None
 
+    @property
+    def is_memory_access(self) -> bool:
+        """Returns whether this read or write has a memory attachment."""
+
+        return (
+            self.kind in (EffectKind.READ, EffectKind.WRITE)
+            and self.memory_space is not MemorySpace.NONE
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class StorageLease:

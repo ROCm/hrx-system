@@ -173,10 +173,7 @@ def test_lowering_uses_the_projected_descriptors():
         records_access = bool(emit.flags & LOWER_EMIT_FLAG_RECORD_SOURCE_MEMORY)
         assert records_access == bool(
             emit.source_memory_ordinal
-            and any(
-                effect.kind in (EffectKind.READ, EffectKind.WRITE)
-                for effect in emit.descriptor.effects
-            )
+            and any(effect.is_memory_access for effect in emit.descriptor.effects)
         )
     descriptors = VM_CORE_DESCRIPTOR_SET.descriptors
     cases = (

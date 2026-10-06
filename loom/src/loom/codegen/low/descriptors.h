@@ -907,7 +907,7 @@ typedef struct loom_low_enum_value_t {
 typedef struct loom_low_effect_t {
   // Effect kind used by dependency and legality construction.
   loom_low_effect_kind_t kind;
-  // Memory space or external resource touched by the effect.
+  // Memory space touched, or NONE for an attachment-free external resource.
   loom_low_memory_space_t memory_space;
   // Target-owned scope identifier for ordering and visibility.
   uint16_t scope_id;
@@ -924,15 +924,24 @@ typedef struct loom_low_effect_t {
   uint16_t consumer_event_id;
 } loom_low_effect_t;
 
+// Returns true when |effect| describes a read or write with a memory-space
+// attachment. Attachment-free reads and writes describe external resources.
+static inline bool loom_low_effect_is_memory_access(
+    const loom_low_effect_t* effect) {
+  return effect->memory_space != LOOM_LOW_MEMORY_SPACE_NONE &&
+         (effect->kind == LOOM_LOW_EFFECT_KIND_READ ||
+          effect->kind == LOOM_LOW_EFFECT_KIND_WRITE);
+}
+
 // Summary of descriptor memory effect widths.
 typedef struct loom_low_descriptor_memory_effect_summary_t {
-  // Byte width of descriptor read effects with byte-aligned known widths.
+  // Byte width of memory-attached read effects with byte-aligned known widths.
   uint32_t read_byte_count;
-  // Byte width of descriptor write effects with byte-aligned known widths.
+  // Byte width of memory-attached write effects with byte-aligned known widths.
   uint32_t write_byte_count;
-  // Number of descriptor read effects without known byte-aligned widths.
+  // Number of memory-attached read effects without known byte-aligned widths.
   uint16_t read_unknown_width_count;
-  // Number of descriptor write effects without known byte-aligned widths.
+  // Number of memory-attached write effects without known byte-aligned widths.
   uint16_t write_unknown_width_count;
 } loom_low_descriptor_memory_effect_summary_t;
 

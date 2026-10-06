@@ -1316,10 +1316,41 @@ def test_compiler_rejects_contradictory_memory_instruction_classes() -> None:
         compiler.compile_descriptor_set(descriptor_set)
 
 
+@pytest.mark.parametrize(
+    ("effect", "expected_memory_class"),
+    [
+        (Effect(EffectKind.READ), False),
+        (Effect(EffectKind.WRITE), False),
+        (Effect(EffectKind.READ, memory_space=MemorySpace.GLOBAL), True),
+        (Effect(EffectKind.WRITE, memory_space=MemorySpace.STACK), True),
+    ],
+)
+def test_compiler_derives_memory_class_only_from_attached_effects(
+    effect: Effect,
+    expected_memory_class: bool,
+) -> None:
+    descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        effects=(effect,),
+        semantic_tag=None,
+    )
+    schedule_classes = {schedule_class.name: schedule_class for schedule_class in TEST_LOW_CORE_DESCRIPTOR_SET.schedule_classes}
+    resources = {resource.name: resource for resource in TEST_LOW_CORE_DESCRIPTOR_SET.resources}
+
+    classes = compiler.derive_instruction_classes(
+        descriptor,
+        schedule_classes[descriptor.schedule_class],
+        resources,
+    )
+
+    assert (InstructionClass.GENERIC_MEMORY in classes) is expected_memory_class
+
+
 def test_compiler_rejects_load_instruction_class_without_read_effect() -> None:
     descriptor = replace(
         TEST_LOW_ADD_I32_DESCRIPTOR,
         semantic_tag=None,
+        effects=(Effect(EffectKind.READ),),
         instruction_classes=(InstructionClass.GLOBAL_LOAD,),
     )
     descriptor_set = replace(
@@ -1329,7 +1360,7 @@ def test_compiler_rejects_load_instruction_class_without_read_effect() -> None:
 
     with pytest.raises(
         ValueError,
-        match=re.escape("descriptor 'test.add.i32' has a load instruction class without a read effect"),
+        match=re.escape("descriptor 'test.add.i32' has a load instruction class without a memory read effect"),
     ):
         compiler.compile_descriptor_set(descriptor_set)
 
