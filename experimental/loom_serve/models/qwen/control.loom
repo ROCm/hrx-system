@@ -10,17 +10,15 @@ func.decl import("runner") @execute_8(%stage: i32, %b0: hal.buffer, %b1: hal.buf
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 // The program is shared; all request state arrives as buffer bindings.
-func.def public @step(%initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
+func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %state[%origin] : buffer -> view<4xi32>
+  %prefill = view.load %view[0] : view<4xi32> -> i32
+  %decode = view.load %view[1] : view<4xi32> -> i32
   %zero = scalar.constant 0 : i32
-  %one = scalar.constant 1 : i32
   %is_prefill = scalar.cmpi ne, %initialize, %zero : i32
-  %completion = scf.if %is_prefill -> (i64) {
-    %prefill = func.call @execute_7(%zero, %residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-    scf.yield %prefill : i64
-  } else {
-    %decode = func.call @execute_7(%one, %residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-    scf.yield %decode : i64
-  }
+  %stage = scf.select %is_prefill, %prefill, %decode : i32
+  %completion = func.call @execute_7(%stage, %residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   func.return %completion : i64
 }
 
@@ -29,7 +27,11 @@ func.def public @step(%initialize: i32, %residual: hal.buffer, %control: hal.buf
 // commands and one process; descriptors and buffers carry their live state.
 // Feedback slots zero/one hold ordinary tokens/verification records. Neither
 // branch waits: the owner joins both timelines before advancing host frontiers.
-func.def public @epoch(%shape: i32, %shape_count: i32, %mtp_first: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
+func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
+  %origin = index.constant 0 : offset
+  %view = buffer.view %control_state[%origin] : buffer -> view<4xi32>
+  %shape_count = view.load %view[2] : view<4xi32> -> i32
+  %mtp_first = view.load %view[3] : view<4xi32> -> i32
   %zero = scalar.constant 0 : i32
   %one = scalar.constant 1 : i32
   %two = scalar.constant 2 : i32

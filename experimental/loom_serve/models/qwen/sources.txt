@@ -1,6 +1,6 @@
 config.loom
 prefill.loom
-prepare.loom
+weights_prepare.loom
 epoch.loom
 mtp.loom
 verify.loom

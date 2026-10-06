@@ -9,9 +9,10 @@ The shared `control.loom` has isolated and packed entry points. Source owns
 prefill/decode selection and the proposal, target/verify, feedback, and catch-up
 sequence. The native model adapter publishes validated descriptors, invokes
 that program once per epoch, joins both timelines, and commits host progress.
-Cold stage selection, dynamic configuration, state geometry, and descriptor
-construction still live in the model adapter; moving the submission chain does
-not make those model-independent.
+Cold stage selection and dynamic configuration come from `prepare.loom` through
+the shared declaration module. State geometry and descriptor construction still
+live in the Qwen adapter; source-owned startup does not make those remaining
+contracts model-independent.
 
 ## Boundaries and the information each owns
 
@@ -23,6 +24,7 @@ not make those model-independent.
 | [`execution`](../runtime/execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
 | [`module`](../runtime/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
 | [`program`](../runtime/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
+| [`preparation`](../runtime/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
 | [`qwen_model`](../models/qwen/model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
 | [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
 | [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
@@ -37,11 +39,13 @@ directly, rather than reconstructed in host code.
 
 ## Cold residency
 
-`qwen_initialize` creates a shared device owner and JIT, loads the tokenizer, compiles
-isolated and packed stages, checks their layout agreement, loads shared weights,
-records commands, creates the VM program/native capabilities, and allocates retained
-rows and MTP state. Each stage can have different kernel choices while binding
-the same model storage. No session gets another copy of the weights or code.
+`qwen_initialize` first invokes the source bootstrap, retains its opaque control
+state, and loads the tokenizer with the source-declared terminal marker. It then
+creates a shared device owner and JIT, compiles the declared stages, checks their
+layout agreement, loads shared weights, records commands, creates the warm VM
+program/native capabilities, and allocates retained rows and MTP state. Each
+stage can have different kernel choices while binding the same model storage.
+No session gets another copy of the weights or code.
 
 `loom_serve_device_create` establishes one runtime domain from a HAL device
 URI. Model components borrow its device, group, exact queues and execution
@@ -50,7 +54,7 @@ The current JIT still selects AMDGPU explicitly. A different device URI alone
 does not provide a compiler backend or model kernels for that device.
 
 The model catalog includes `config.loom` for fixed specialization bounds.
-Native startup supplies run-dependent overrides to the same public compiler
+The source bootstrap supplies run-dependent overrides to the public compiler
 configuration interface; reusable device helpers still take explicit operands.
 
 The source JIT shares immutable compiler state and uses the standard loomc task

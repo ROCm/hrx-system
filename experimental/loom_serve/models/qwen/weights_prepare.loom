@@ -1,0 +1,63 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Startup weight layout: [channel][K256][176B] becomes
+// [channel/8][K256][channel%8][176B].
+// A workgroup owns eight complete K5120 rows and captures every source packet
+// before publishing in place. No workgroup reads another workgroup's range;
+// final storage, codes and scales are unchanged. The 28160-byte local slab
+// exists only during startup and requires no global scratch.
+amdgpu.target<gfx11-generic> @qwen38_prepare_q5k_channel8_target {subgroup_size = 64}
+
+kernel.def target(@qwen38_prepare_q5k_channel8_target) @qwen38_prepare_q5k_channel8(%output_size0: index) {
+  %output_size = index.assume %output_size0 [range(%output_size0, 0, 32768), mul(%output_size0, 8)] : index
+  %c8 = index.constant 8 : index
+  %groups = index.div %output_size, %c8 : index
+  %c1 = index.constant 1 : index
+  %c256 = index.constant 256 : index
+  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
+} launch(%weight: buffer) {
+  %c4 = index.constant 4 : index
+  %c8 = index.constant 8 : index
+  %c11 = index.constant 11 : index
+  %c20 = index.constant 20 : index
+  %c220 = index.constant 220 : index
+  %c256 = index.constant 256 : index
+  %c1760 = index.constant 1760 : index
+  %zero = index.constant 0 : offset
+  %group_bytes = index.constant 28160 : offset
+  %group = kernel.workgroup.id<x> : index
+  %workitem = kernel.workitem.id<x> : index
+  %group_base = index.scale %group, %group_bytes : index, offset -> offset
+  %weight_view = buffer.view %weight[%group_base] : buffer -> view<7040xi32>
+  %stage = buffer.alloca<workgroup> align(16) %group_bytes : buffer
+  %stage_view = buffer.view %stage[%zero] : buffer -> view<7040xi32>
+  scf.for %packet = [%workitem to %c1760 step %c256] {
+    %channel = index.div %packet, %c220 : index
+    %flat_block = index.div %packet, %c11 : index
+    %block = index.rem %flat_block, %c20 : index
+    %within = index.rem %packet, %c11 : index
+    %prepared_block = index.madd %block, %c8, %channel : index
+    %prepared_packet = index.madd %prepared_block, %c11, %within : index
+    %source_word = index.mul %packet, %c4 : index
+    %target_word = index.mul %prepared_packet, %c4 : index
+    %values = vector.load %weight_view[%source_word] : view<7040xi32> -> vector<4xi32>
+    vector.store %values, %stage_view[%target_word] : vector<4xi32>, view<7040xi32>
+  }
+  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+  scf.for %packet = [%workitem to %c1760 step %c256] {
+    %word = index.mul %packet, %c4 : index
+    %values = vector.load %stage_view[%word] : view<7040xi32> -> vector<4xi32>
+    vector.store %values, %weight_view[%word] : vector<4xi32>, view<7040xi32>
+  }
+  kernel.return
+}
+
+// Both target and MTP FFN gate/up tensors have K5120 and N17408.
+command.program.def public @qwen38_prepare_ffn() launch(%weight: buffer) {
+  %outputs = index.constant 17408 : index
+  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](buffer)
+  command.return
+}

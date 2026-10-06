@@ -6,12 +6,13 @@ their artifacts are independent of the host scheduler. Parameter placement must
 match across roots so all stages share one resident weight slab.
 
 The runner consumes this directory directly with `--model`. Its
-`sources.txt` catalog indexes configuration, command and kernel providers once;
-`config.loom` owns fixed specialization bounds, while `control.loom` contains
-isolated and packed inference VM entries, and `weights.loom` owns cold tensor
-preparation policy. `--prefill_capacity` bounds the automatic packed token
-catalog; `--rows` bounds its independent span axis. Repeated
-`--epoch=tokens:spans` replace that catalog with explicit JIT specializations.
+`sources.txt` catalog indexes configuration, command and kernel providers once.
+`prepare.loom` is the cold VM entry: it declares command roots, run-dependent
+specialization and checkpoint bindings. `config.loom` owns fixed specialization
+bounds; `control.loom` contains isolated and packed inference VM entries;
+`weights.loom` owns cold tensor preparation policy. `--prefill_capacity` bounds
+the automatic packed token catalog; `--rows` bounds its independent span axis.
+Repeated `--epoch=tokens:spans` replace that catalog with explicit JIT specializations.
 `--context_capacity` sets the logical attention ceiling. Native code is
 generated for the actual HAL device, not selected from precompiled directories.
 
@@ -20,6 +21,25 @@ The proposal uses a 32-token projection tile and the configured resident-row
 count (1–16); each target epoch gets matching catch-up and verifier variants.
 Shared embedding, target normalization, and full-vocabulary output roots reference the existing weight slab. Extra block-64
 parameter groups load once. There is no command ABI or HAL extension.
+
+## Source startup and control
+
+The native constructor calls `prepare` with the requested prefill, context,
+pool and resident-row capacities, MTP selection, packed shapes and checkpoint
+path. Shapes cross as little-endian i64 token/span pairs, not a native struct.
+The source declares stages through `prepare.stage`, `prepare.config_i64` and
+`prepare.parameter`. It returns the effective prefill capacity, the number of
+leading stages sharing target parameter placement, an opaque control buffer,
+and the terminal token spelling. The constructor JITs those declarations and
+checks shared placement before streaming one parameter bank.
+
+The temporary startup process is destroyed before device setup. Its returned
+control buffer survives in the residency's VM environment and is passed to
+both warm entries; only source interprets its stage indices. There is no native
+command-name/configuration table or per-row VM. The native adapter still owns
+row arenas, KV map geometry, transfer records and chat policy, and still joins
+each epoch before publishing host row progress. These remain concrete Qwen
+contracts, not a model-neutral text ABI.
 
 ## Pooled KV and reserved admission
 
@@ -123,8 +143,8 @@ generic small-batch, and wide fused FFN entries all consume the same format.
 Their `_channel8` entry points specialize shared arithmetic implementations;
 canonical entries remain useful for other model tensors and exact comparisons.
 
-`prepare.loom` is an ordinary source-JIT command. Each workgroup captures eight
-complete K5120 rows in 28,160 bytes of local memory, then publishes the
+`weights_prepare.loom` is an ordinary source-JIT command. Each workgroup captures
+eight complete K5120 rows in 28,160 bytes of local memory, then publishes the
 permutation into that same owned range. No workgroup overwrites another's
 unread input. Target and MTP tensors are prepared once during creation, never
 on an inference path.
@@ -164,7 +184,7 @@ for case in narrow narrow_zero generic_1_1 generic_4_4 generic_8_8 \
   build_tools/bin/iree-bazel-run --config=asan \
     //loom/src/loom/tools/iree-test-loom -- \
     "$model/tests/prepared_q5.loom" \
-    --library="$model/prepare.loom" \
+    --library="$model/weights_prepare.loom" \
     --library="$model/kernels/qwen38/linear_q5k_f16_wmma.loom" \
     --library="$model/kernels/qwen38/ffn_gate_up_prefetch.loom" \
     --library="experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom" \

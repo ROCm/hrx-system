@@ -1,62 +1,165 @@
 // Copyright 2026 The IREE Authors
 //
 // Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Permutes [channel][K256][176B] into [channel/8][K256][channel%8][176B].
-// A workgroup owns eight complete K5120 rows and captures every source packet
-// before publishing in place. No workgroup reads another workgroup's range;
-// final storage, codes and scales are unchanged. The 28160-byte local slab
-// exists only during startup and requires no global scratch.
-amdgpu.target<gfx11-generic> @qwen38_prepare_q5k_channel8_target {subgroup_size = 64}
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
-kernel.def target(@qwen38_prepare_q5k_channel8_target) @qwen38_prepare_q5k_channel8(%output_size0: index) {
-  %output_size = index.assume %output_size0 [range(%output_size0, 0, 32768), mul(%output_size0, 8)] : index
-  %c8 = index.constant 8 : index
-  %groups = index.div %output_size, %c8 : index
-  %c1 = index.constant 1 : index
-  %c256 = index.constant 256 : index
-  kernel.launch.config workgroups(%groups, %c1, %c1) workgroup_size(%c256, %c1, %c1) : index
-} launch(%weight: buffer) {
-  %c4 = index.constant 4 : index
-  %c8 = index.constant 8 : index
-  %c11 = index.constant 11 : index
-  %c20 = index.constant 20 : index
-  %c220 = index.constant 220 : index
-  %c256 = index.constant 256 : index
-  %c1760 = index.constant 1760 : index
-  %zero = index.constant 0 : offset
-  %group_bytes = index.constant 28160 : offset
-  %group = kernel.workgroup.id<x> : index
-  %workitem = kernel.workitem.id<x> : index
-  %group_base = index.scale %group, %group_bytes : index, offset -> offset
-  %weight_view = buffer.view %weight[%group_base] : buffer -> view<7040xi32>
-  %stage = buffer.alloca<workgroup> align(16) %group_bytes : buffer
-  %stage_view = buffer.view %stage[%zero] : buffer -> view<7040xi32>
-  scf.for %packet = [%workitem to %c1760 step %c256] {
-    %channel = index.div %packet, %c220 : index
-    %flat_block = index.div %packet, %c11 : index
-    %block = index.rem %flat_block, %c20 : index
-    %within = index.rem %packet, %c11 : index
-    %prepared_block = index.madd %block, %c8, %channel : index
-    %prepared_packet = index.madd %prepared_block, %c11, %within : index
-    %source_word = index.mul %packet, %c4 : index
-    %target_word = index.mul %prepared_packet, %c4 : index
-    %values = vector.load %weight_view[%source_word] : view<7040xi32> -> vector<4xi32>
-    vector.store %values, %stage_view[%target_word] : vector<4xi32>, view<7040xi32>
+// qwen38_prefill
+global.rodata.def @prefill_root = bytes("7177656e33385f70726566696c6c")
+// qwen38_text_decode_greedy
+global.rodata.def @decode_root = bytes("7177656e33385f746578745f6465636f64655f677265656479")
+// qwen38_epoch
+global.rodata.def @epoch_root = bytes("7177656e33385f65706f6368")
+// qwen38_mtp_propose
+global.rodata.def @proposal_root = bytes("7177656e33385f6d74705f70726f706f7365")
+// qwen38_mtp_warm
+global.rodata.def @warm_root = bytes("7177656e33385f6d74705f7761726d")
+// qwen38_mtp_verify
+global.rodata.def @verify_root = bytes("7177656e33385f6d74705f766572696679")
+// weights.loom
+global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
+// <|im_end|>
+global.rodata.def @terminal = bytes("3c7c696d5f656e647c3e")
+// Empty path component.
+global.rodata.def @empty = bytes("")
+// runner.qwen38.prefill_token_count
+global.rodata.def @prefill_key = bytes("72756e6e65722e7177656e33382e70726566696c6c5f746f6b656e5f636f756e74")
+// runner.qwen38.span_capacity
+global.rodata.def @span_key = bytes("72756e6e65722e7177656e33382e7370616e5f6361706163697479")
+// ggml.linear_q4k_q8_1_x4.token_capacity
+global.rodata.def @q4_key = bytes("67676d6c2e6c696e6561725f71346b5f71385f315f78342e746f6b656e5f6361706163697479")
+// ggml.linear_q5k_q8_1_x4.token_capacity
+global.rodata.def @q5_key = bytes("67676d6c2e6c696e6561725f71356b5f71385f315f78342e746f6b656e5f6361706163697479")
+// ggml.linear_q6k_q8_1_x4.token_capacity
+global.rodata.def @q6_key = bytes("67676d6c2e6c696e6561725f71366b5f71385f315f78342e746f6b656e5f6361706163697479")
+// ggml.linear_q8_0_q8_1_x4.token_capacity
+global.rodata.def @q8_key = bytes("67676d6c2e6c696e6561725f71385f305f71385f315f78342e746f6b656e5f6361706163697479")
+// ggml.linear_q8_0_q8_1_x4.output_capacity
+global.rodata.def @outputs_key = bytes("67676d6c2e6c696e6561725f71385f305f71385f315f78342e6f75747075745f6361706163697479")
+// ggml.quantize_q8_1_x4.group_capacity
+global.rodata.def @groups_key = bytes("67676d6c2e7175616e74697a655f71385f315f78342e67726f75705f6361706163697479")
+// qwen38.attention.cache_capacity
+global.rodata.def @context_key = bytes("7177656e33382e617474656e74696f6e2e63616368655f6361706163697479")
+// qwen38.attention.pool_capacity
+global.rodata.def @pool_key = bytes("7177656e33382e617474656e74696f6e2e706f6f6c5f6361706163697479")
+
+func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %capacity: i64, %q8_capacity: i64, %context: i64, %pool: i64, %roots: i32, %weights: buffer) -> (i32) {
+  %stage = func.call @stage(%root, %tokens) : (buffer, i64) -> (i32)
+  %one64 = scalar.constant 1 : i64
+  %narrow = scalar.cmpi eq, %q8_capacity, %one64 : i64
+  %small_outputs = scalar.constant 1024 : i64
+  %large_outputs = scalar.constant 5120 : i64
+  %outputs = scf.select %narrow, %small_outputs, %large_outputs : i64
+  %groups_per_token = scalar.constant 136 : i64
+  %groups = scalar.muli %groups_per_token, %capacity : i64
+  %prefill_key = global.load @prefill_key : buffer
+  func.call @config_i64(%stage, %prefill_key, %tokens) : (i32, buffer, i64) -> ()
+  %span_key = global.load @span_key : buffer
+  func.call @config_i64(%stage, %span_key, %spans) : (i32, buffer, i64) -> ()
+  %q4_key = global.load @q4_key : buffer
+  func.call @config_i64(%stage, %q4_key, %capacity) : (i32, buffer, i64) -> ()
+  %q5_key = global.load @q5_key : buffer
+  func.call @config_i64(%stage, %q5_key, %capacity) : (i32, buffer, i64) -> ()
+  %q6_key = global.load @q6_key : buffer
+  func.call @config_i64(%stage, %q6_key, %capacity) : (i32, buffer, i64) -> ()
+  %q8_key = global.load @q8_key : buffer
+  func.call @config_i64(%stage, %q8_key, %q8_capacity) : (i32, buffer, i64) -> ()
+  %outputs_key = global.load @outputs_key : buffer
+  func.call @config_i64(%stage, %outputs_key, %outputs) : (i32, buffer, i64) -> ()
+  %groups_key = global.load @groups_key : buffer
+  func.call @config_i64(%stage, %groups_key, %groups) : (i32, buffer, i64) -> ()
+  %context_key = global.load @context_key : buffer
+  func.call @config_i64(%stage, %context_key, %context) : (i32, buffer, i64) -> ()
+  %pool_key = global.load @pool_key : buffer
+  func.call @config_i64(%stage, %pool_key, %pool) : (i32, buffer, i64) -> ()
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %bounded_roots = scalar.assume %roots [range(%roots, 1, 7)] : i32
+  %root_count = index.cast %bounded_roots : i32 to index
+  %empty = global.load @empty : buffer
+  %policy = global.load @policy : buffer
+  scf.for %i = [%zero to %root_count step %one] {
+    %binding = index.cast %i : index to i32
+    func.call @parameter(%stage, %binding, %empty, %weights, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+    scf.yield
   }
-  kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
-  scf.for %packet = [%workitem to %c1760 step %c256] {
-    %word = index.mul %packet, %c4 : index
-    %values = vector.load %stage_view[%word] : view<7040xi32> -> vector<4xi32>
-    vector.store %values, %weight_view[%word] : vector<4xi32>, view<7040xi32>
-  }
-  kernel.return
+  func.return %stage : i32
 }
 
-// Both target and MTP FFN gate/up tensors have K5120 and N17408.
-command.program.def public @qwen38_prepare_ffn() launch(%weight: buffer) {
-  %outputs = index.constant 17408 : index
-  kernel.launch @qwen38_prepare_q5k_channel8[%outputs](%weight) : [index](buffer)
-  command.return
+// The caller supplies validated native payload capacities. Shape pairs are
+// little-endian i64 {tokens, spans}; no C struct layout crosses this boundary.
+// Commands, specialization and their shared checkpoint identity are source
+// policy. Returned state is interpreted only by control.loom.
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %mtp: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %zero32 = scalar.constant 0 : i32
+  %one32 = scalar.constant 1 : i32
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %capacity = scalar.constant 512 : i64
+  %bounded = scalar.assume %shape_count [range(%shape_count, 0, 2147483647)] : i64
+  %count = index.cast %bounded : i64 to index
+  %view = buffer.view %shapes[%origin] : buffer -> view<[%count]x2xi64>
+  %prefill_root = global.load @prefill_root : buffer
+  %decode_root = global.load @decode_root : buffer
+  %epoch_root = global.load @epoch_root : buffer
+  %prefill_stage = func.call @declare_stage(%prefill_root, %prefill, %rows, %capacity, %one64, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
+  %decode_stage = func.call @declare_stage(%decode_root, %prefill, %rows, %one64, %one64, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
+  %maximum = scf.for %i = [%zero to %count step %one](%previous = %zero64 : i64) -> (i64) {
+    %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
+    %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
+    %target = func.call @declare_stage(%epoch_root, %tokens, %spans, %capacity, %one64, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
+    %larger = scalar.cmpi ugt, %tokens, %previous : i64
+    %next = scf.select %larger, %tokens, %previous : i64
+    scf.yield %next : i64
+  }
+  %enabled = scalar.cmpi ne, %mtp, %zero32 : i32
+  %proposal_stage = scf.if %enabled -> (i32) {
+    %proposal_root = global.load @proposal_root : buffer
+    %warm_root = global.load @warm_root : buffer
+    %verify_root = global.load @verify_root : buffer
+    %proposal_tokens = scalar.constant 32 : i64
+    %five32 = scalar.constant 5 : i32
+    %seven32 = scalar.constant 7 : i32
+    %proposal = func.call @declare_stage(%proposal_root, %proposal_tokens, %rows, %capacity, %capacity, %context, %pool, %five32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
+    scf.for %i = [%zero to %count step %one] {
+      %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
+      %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
+      %warm = func.call @declare_stage(%warm_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %seven32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
+      scf.yield
+    }
+    scf.for %i = [%zero to %count step %one] {
+      %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
+      %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
+      %verify = func.call @declare_stage(%verify_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
+      scf.yield
+    }
+    scf.yield %proposal : i32
+  } else {
+    scf.yield %zero32 : i32
+  }
+  %pooled = scalar.cmpi ne, %pool, %zero64 : i64
+  %uses_packed = scalar.ori %pooled, %enabled : i1
+  %smaller = scalar.cmpi ult, %maximum, %prefill : i64
+  %packed_capacity = scf.select %smaller, %maximum, %prefill : i64
+  %effective_prefill = scf.select %uses_packed, %packed_capacity, %prefill : i64
+  %two64 = scalar.constant 2 : i64
+  %shared64 = scalar.addi %shape_count, %two64 : i64
+  %shared = scalar.trunci %shared64 : i64 to i32
+  %state_bytes = index.constant 16 : offset
+  %state = buffer.alloca<private> align(4) %state_bytes : buffer
+  %state_view = buffer.view %state[%origin] : buffer -> view<4xi32>
+  %count32 = scalar.trunci %shape_count : i64 to i32
+  view.store %prefill_stage, %state_view[0] : i32, view<4xi32>
+  view.store %decode_stage, %state_view[1] : i32, view<4xi32>
+  view.store %count32, %state_view[2] : i32, view<4xi32>
+  view.store %proposal_stage, %state_view[3] : i32, view<4xi32>
+  %terminal = global.load @terminal : buffer
+  func.return %effective_prefill, %shared, %state, %terminal : i64, i32, buffer, buffer
 }

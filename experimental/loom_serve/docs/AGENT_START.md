@@ -1,7 +1,8 @@
 # Start here: a working handoff, not a framework specification
 
 The first outcome is an observed execution, not a new serving abstraction. This
-branch has one working Qwen adapter and reusable JIT/queue ownership code. A
+branch has a source-defined image runner, a working Qwen adapter, and reusable
+JIT/queue ownership code. A
 fresh agent can establish that boundary without a model download, reproduce the
 qualified Qwen run when the hardware fits, then implement a smaller model using
 the same embedding path. No private working history is required.
@@ -52,7 +53,7 @@ same declared inputs; a fresh-device qualification records a real execution.
 The authoring loop is source-driven. Editing model `.loom` files changes the
 next runner process without rebuilding the C executable; editing the C adapter
 requires building its exact target again. `sources.txt` lists source providers,
-while `control.loom` and the cold `weights.loom` policy are loaded separately.
+while `prepare.loom`, `control.loom` and the cold `weights.loom` policy are loaded separately.
 An added command/kernel library must be present in
 that catalog; a generated HSACO or compiler subprocess is not part of this
 deployment path.
@@ -65,6 +66,7 @@ deployment path.
 | [`jit.h`](../runtime/jit.h), [`jit.c`](../runtime/jit.c) | Public `loomc` embedding, source indexing, live device facts, native request ownership, reusable command recording |
 | [`command.h`](../runtime/command.h), [`execution.h`](../runtime/execution.h), [`module.h`](../runtime/module.h), [`control_test.cc`](../runtime/control_test.cc) | Buffer borrowing/retention, exact queues and timelines, accepted work, feedback lifetime, drain after failure |
 | [`program.h`](../runtime/program.h), model [`control.loom`](../models/qwen/control.loom) | One shared source-JIT process with isolated and packed entries; indexed command selection, proposal/verify/catch-up routing, and bounded feedback without intermediate host waits |
+| [`preparation.h`](../runtime/preparation.h), model [`prepare.loom`](../models/qwen/prepare.loom) | Source-owned startup declarations, run-dependent specialization, checkpoint bindings and opaque control state surviving cold process teardown |
 | [`qwen_model.h`](../models/qwen/model.h), [`qwen_model.c`](../models/qwen/model.c), [`epoch.loom`](../models/qwen/epoch.loom) | A concrete residency: weight placement, row origins, mutable state, scratch, descriptors, packed traversal and progress |
 | [`weights.h`](../runtime/weights.h), [`weights.loom`](../models/qwen/weights.loom), [`weights_test.cc`](../runtime/weights_test.cc) | Model-owned VM policy selecting cached preparers, actual file bytes into shared final storage, and transformation exactly once per unique tensor |
 | [`qwen_schedule.h`](../models/qwen/schedule.h), [`qwen_service.c`](../models/qwen/service.c) | Ready spans versus model rows, canonical history, output credit, admission and scheduling policy |

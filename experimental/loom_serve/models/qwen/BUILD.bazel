@@ -89,6 +89,7 @@ loom_cc_library(
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:jit",
         "//experimental/loom_serve/runtime:module",
+        "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/runtime:program",
         "//experimental/loom_serve/runtime:weights",
         "//experimental/loom_serve/scheduling:packing",
@@ -103,6 +104,29 @@ loom_cc_library(
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/tokenizer/vocab",
         "//runtime/src/iree/tooling:device_util",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "prepare_test",
+    srcs = ["prepare_test.cc"],
+    args = ["--prepare_source=$(rootpath :prepare.loom)"],
+    data = ["prepare.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":model",
+        ":schedule",
+        "//experimental/loom_serve/runtime:preparation",
+        "//experimental/loom_serve/scheduling:packing",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
     ],
 )
