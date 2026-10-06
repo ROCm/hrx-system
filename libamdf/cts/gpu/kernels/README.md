@@ -239,15 +239,20 @@ Prestart ABORT acknowledges without accessing the request, response or
 transcript allocations. The recipe checks full payloads, immutable storage,
 guards and final drain; raw device-clock observations accompany each exchange.
 
-The shared [clock declaration](completed_tick.loom) uses ordinary Loom templates
-with one provider module per physical instruction representation. The
-[build declarations](BUILD.bazel) include only providers whose descriptor sets
-are linked into Loom. The selected template drains the resident
-program's vector loads and stores before sampling the reference clock, then
-waits for the message result. Compact request samples use the low 32 bits;
-full-width interval endpoints establish their wrap bound. These are raw ticks,
-independent of the caller's release/acquire visibility operations. The complete
-program is linked from authored source; runtime selection never patches code.
+The shared [clock module](completed_tick.loom) uses ordinary Loom template
+specialization to keep the GFX11, GFX12, GFX12.5 and RDNA4m providers in one
+authored source. The selected provider drains the resident program's vector
+loads and stores before sampling the reference clock, then waits for the
+message result. Compact request samples use the low 32 bits; full-width interval
+endpoints establish their wrap bound. These are raw ticks, independent of the
+caller's release/acquire visibility operations. The complete program is linked
+from authored source; runtime selection never patches code.
+
+Source admission parses every target Low fragment before template selection.
+A compiler configured with only one exact descriptor therefore omits the
+dependent CTS products instead of constructing a descriptor-specific source
+module. The default compiler carries the four source representations and emits
+the selected physical products from the same module.
 
 ## Fixed private storage
 

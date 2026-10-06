@@ -23,13 +23,6 @@ exports_files([
     "README.md",
     "byte_copy_unaligned.loom",
     "completed_tick.loom",
-    "completed_tick_rdna3.loom",
-    "completed_tick_rdna3_5.loom",
-    "completed_tick_rdna4m.loom",
-    "completed_tick_rdna4.loom",
-    "completed_tick_rdna4_gfx125x.loom",
-    "completed_tick_rdna4_gfx1251.loom",
-    "completed_tick_rdna4_gfx1250_a0.loom",
     "file_demand.cxx",
     "file_demand.loom",
     "file_exchange.cxx",
@@ -78,28 +71,21 @@ _KERNEL_TARGETS_BY_CAPABILITY = {
     for capability in LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITIES
 }
 
-_RDNA_DESCRIPTOR_CONFIGS = {
-    "//loom/config/target/amdgpu:" + LOOM_AMDGPU_DESCRIPTOR_SET_CAPABILITY_BY_TARGET[target]: []
-    for target in _RDNA_KERNEL_TARGETS
-}
+# The completed-tick module deliberately carries every target specialization in
+# one source. Compilers with a restricted representation vocabulary omit the
+# dependent CTS products instead of selecting source fragments in the build.
+_COMPLETED_TICK_CONFIGS = [
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_5_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_rdna4m_core",
+]
 
-_RDNA_TEST_DEPS = {config: [":resident_kernel_test"] for config in _RDNA_DESCRIPTOR_CONFIGS}
+_COMPLETED_TICK_COMPATIBILITY = loom_config_compatible_with(_COMPLETED_TICK_CONFIGS)
 
-_RDNA_TEST_DEPS["//conditions:default"] = []
-
-_RDNA_DESCRIPTOR_CONFIGS["//conditions:default"] = ["@platforms//:incompatible"]
-
-# Parsing Low assembly requires its representation to be linked into Loom,
-# even when a later template specialization would select a different body.
-_COMPLETED_TICK_SRCS = ["completed_tick.loom"] + loom_amdgpu_selected_descriptor_set_values({
-    "descriptor_set_rdna3_5_core": ["completed_tick_rdna3_5.loom"],
-    "descriptor_set_rdna3_core": ["completed_tick_rdna3.loom"],
-    "descriptor_set_rdna4_core": ["completed_tick_rdna4.loom"],
-    "descriptor_set_rdna4_gfx1250_a0_core": ["completed_tick_rdna4_gfx1250_a0.loom"],
-    "descriptor_set_rdna4_gfx1251_core": ["completed_tick_rdna4_gfx1251.loom"],
-    "descriptor_set_rdna4_gfx125x_core": ["completed_tick_rdna4_gfx125x.loom"],
-    "descriptor_set_rdna4m_core": ["completed_tick_rdna4m.loom"],
-})
+_CXX_COMPLETED_TICK_COMPATIBILITY = loom_config_compatible_with(
+    ["//loom/config/import:cxx"] + _COMPLETED_TICK_CONFIGS,
+)
 
 [
     loom_target_profile(
@@ -181,9 +167,13 @@ amdf_cts_gpu_kernel_set(
 
 amdf_cts_gpu_kernel_set(
     name = "resident_exchange_kernels",
-    srcs = _COMPLETED_TICK_SRCS + ["resident_exchange.loom"],
+    srcs = [
+        "completed_tick.loom",
+        "resident_exchange.loom",
+    ],
     entry_point = "resident_exchange",
     namespace = "kernels::resident_exchange",
+    target_compatible_with = _COMPLETED_TICK_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
@@ -237,11 +227,14 @@ amdf_cts_gpu_kernel_set(
 
 amdf_cts_gpu_kernel_set(
     name = "file_latency_cxx_kernels",
-    srcs = _COMPLETED_TICK_SRCS + ["file_latency.cxx"],
+    srcs = [
+        "completed_tick.loom",
+        "file_latency.cxx",
+    ],
     entry_point = "file_latency",
     inputopts = ["cxx:root=file_latency"],
     namespace = "kernels::file_latency_cxx",
-    target_compatible_with = _CXX_COMPATIBILITY,
+    target_compatible_with = _CXX_COMPLETED_TICK_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
@@ -253,9 +246,13 @@ amdf_cc_library(
 
 amdf_cts_gpu_kernel_set(
     name = "file_latency_kernels",
-    srcs = _COMPLETED_TICK_SRCS + ["file_latency.loom"],
+    srcs = [
+        "completed_tick.loom",
+        "file_latency.loom",
+    ],
     entry_point = "file_latency",
     namespace = "kernels::file_latency",
+    target_compatible_with = _COMPLETED_TICK_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
@@ -267,35 +264,50 @@ amdf_cc_library(
 
 amdf_cts_gpu_kernel_set(
     name = "file_demand_cxx_kernels",
-    srcs = _COMPLETED_TICK_SRCS + ["file_demand.cxx"],
+    srcs = [
+        "completed_tick.loom",
+        "file_demand.cxx",
+    ],
     entry_point = "file_demand",
     inputopts = ["cxx:root=file_demand"],
     namespace = "kernels::file_demand_cxx",
-    target_compatible_with = _CXX_COMPATIBILITY,
+    target_compatible_with = _CXX_COMPLETED_TICK_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(
     name = "file_demand_kernels",
-    srcs = _COMPLETED_TICK_SRCS + ["file_demand.loom"],
+    srcs = [
+        "completed_tick.loom",
+        "file_demand.loom",
+    ],
     entry_point = "file_demand",
     namespace = "kernels::file_demand",
+    target_compatible_with = _COMPLETED_TICK_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(
     name = "resident_channels_kernels",
-    srcs = _COMPLETED_TICK_SRCS + ["resident_channels.loom"],
+    srcs = [
+        "completed_tick.loom",
+        "resident_channels.loom",
+    ],
     entry_point = "resident_channels",
     namespace = "kernels::resident_channels",
+    target_compatible_with = _COMPLETED_TICK_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(
     name = "resident_npu_initiated_kernels",
-    srcs = _COMPLETED_TICK_SRCS + ["resident_npu_initiated.loom"],
+    srcs = [
+        "completed_tick.loom",
+        "resident_npu_initiated.loom",
+    ],
     entry_point = "resident_npu_initiated",
     namespace = "kernels::resident_npu_initiated",
+    target_compatible_with = _COMPLETED_TICK_COMPATIBILITY,
     targets = _RDNA_KERNEL_TARGETS,
 )
 
@@ -342,7 +354,7 @@ amdf_cc_test(
         ":transform_kernels",
         "//third_party:google_test",
         "//third_party:google_test_main",
-    ] + select(_RDNA_TEST_DEPS),
+    ],
 )
 
 amdf_cc_library(
@@ -355,11 +367,10 @@ amdf_cc_library(
     ],
 )
 
-amdf_cc_library(
+amdf_cc_test(
     name = "resident_kernel_test",
-    testonly = True,
     srcs = ["resident_kernel_test.cc"],
-    target_compatible_with = select(_RDNA_DESCRIPTOR_CONFIGS),
+    target_compatible_with = _COMPLETED_TICK_COMPATIBILITY,
     deps = [
         ":file_demand",
         ":file_demand_kernels",
@@ -377,8 +388,8 @@ amdf_cc_library(
         ":resident_npu_initiated",
         ":resident_npu_initiated_kernels",
         "//third_party:google_test",
+        "//third_party:google_test_main",
     ],
-    alwayslink = True,
 )
 
 amdf_cc_library(

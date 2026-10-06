@@ -6,12 +6,20 @@
 
 load("//libamdf/build_tools/bazel:cc.bzl", "amdf_cc_library")
 load("//libamdf/build_tools/bazel:cts.bzl", "amdf_cts_test_suite")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_config_compatible_with")
 
 package(
     default_visibility = ["//visibility:private"],
     features = ["layering_check"],
     licenses = ["notice"],
 )
+
+_COMPLETED_TICK_COMPATIBILITY = loom_config_compatible_with([
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_5_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_rdna4m_core",
+])
 
 exports_files(["README.md"])
 
@@ -59,11 +67,15 @@ amdf_cts_test_suite(
         "gpu_xdna_test.cc",
         "resident_test.cc",
     ],
-    target_compatible_with = ["@platforms//cpu:x86_64"] + select({
-        "@platforms//os:linux": [],
-        "@platforms//os:windows": [],
-        "//conditions:default": ["@platforms//:incompatible"],
-    }),
+    target_compatible_with = (
+        ["@platforms//cpu:x86_64"] +
+        _COMPLETED_TICK_COMPATIBILITY +
+        select({
+            "@platforms//os:linux": [],
+            "@platforms//os:windows": [],
+            "//conditions:default": ["@platforms//:incompatible"],
+        })
+    ),
     visibility = ["//visibility:public"],
     deps = [
         ":device_fixture",

@@ -37,12 +37,27 @@ _FILE_IO_HOST_COMPATIBILITY = [
     "@platforms//cpu:x86_64",
 ]
 
-_FILE_IO_COMPATIBILITY = _FILE_IO_HOST_COMPATIBILITY + select(_RDNA_COMPATIBILITY)
+_COMPLETED_TICK_CONFIGS = [
+    "//loom/config/target/amdgpu:descriptor_set_gfx11_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_gfx12_5_generic_core",
+    "//loom/config/target/amdgpu:descriptor_set_rdna4m_core",
+]
+
+_COMPLETED_TICK_COMPATIBILITY = loom_config_compatible_with(_COMPLETED_TICK_CONFIGS)
+
+_FILE_IO_COMPATIBILITY = (
+    _FILE_IO_HOST_COMPATIBILITY +
+    _COMPLETED_TICK_COMPATIBILITY +
+    select(_RDNA_COMPATIBILITY)
+)
 
 _FILE_IO_CXX_COMPATIBILITY = (
-    _FILE_IO_HOST_COMPATIBILITY + loom_config_compatible_with([
-        "//loom/config/import:cxx",
-    ]) + select(_RDNA_COMPATIBILITY)
+    _FILE_IO_HOST_COMPATIBILITY +
+    loom_config_compatible_with(
+        ["//loom/config/import:cxx"] + _COMPLETED_TICK_CONFIGS,
+    ) +
+    select(_RDNA_COMPATIBILITY)
 )
 
 _FILE_IO_DEPS = [
