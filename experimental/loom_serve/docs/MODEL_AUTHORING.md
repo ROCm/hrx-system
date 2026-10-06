@@ -58,6 +58,13 @@ storage; the runner allocates its backing during setup. It is not a per-token
 HAL queue allocation. Workgroup allocations inside kernels have a different
 lifetime and represent local shared storage.
 
+Workspace contents are undefined when a model invocation begins. Each command
+transient is initialized by its producers before any consumer reads it;
+allocator zeros and previous requests are not initializers. State that survives
+between invocations, including KV, recurrent state and speculative carry, uses
+explicit persistent bindings. This separation permits different model programs
+to consume the same physical workspace at non-overlapping execution lifetimes.
+
 Transient reservation begins at its source allocation, not its first memory
 access. Placing an allocation immediately before its first producing command
 lets the planner reuse storage retired by earlier commands. Krea's

@@ -756,6 +756,8 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
         workspace_alignment,
         model->stages[i].program.requirements.transient.minimum_alignment);
   }
+  // Workspace contents are undefined on entry. Retained state belongs to the
+  // source-declared allocations below, never to command transient storage.
   IREE_RETURN_IF_ERROR(text_allocate_buffer(
       model, workspace_length, workspace_alignment, &model->workspace));
   // Binding roles are the private adapter contract. Sizes, views, initial
@@ -769,7 +771,7 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
       &model->mtp.row_table,
   };
   const uint32_t zero = 0;
-  iree_hal_transfer_operation_t transfers[TEXT_ALLOCATION_COUNT + 3] = {0};
+  iree_hal_transfer_operation_t transfers[TEXT_ALLOCATION_COUNT + 2] = {0};
   iree_host_size_t transfer_count = 0;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -881,13 +883,6 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
     };
   }
   if (iree_status_is_ok(status)) {
-    transfers[transfer_count++] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-        .fill = {.target_buffer = model->workspace,
-                 .length = workspace_length,
-                 .pattern = &zero,
-                 .pattern_length = sizeof(zero)},
-    };
     uint64_t completion = 0;
     status = loom_serve_execution_transfer(model->execution, transfer_count,
                                            transfers, &completion);
