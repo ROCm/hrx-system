@@ -8,6 +8,9 @@
 
 #include <string.h>
 
+#include "loom/error/diagnostic.h"
+#include "loom/error/error_catalog.h"
+#include "loom/error/source.h"
 #include "loom/ir/value_replacement.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/index/ops.h"
@@ -50,6 +53,38 @@ typedef struct loom_run_hal_testbench_scenario_batch_t {
   // Alias-preserving host-to-device staging for the flat binding table.
   loom_run_hal_testbench_staging_t staging;
 } loom_run_hal_testbench_scenario_batch_t;
+
+static iree_status_t loom_run_hal_testbench_scenario_emit_unsupported_results(
+    const loom_run_hal_testbench_scenario_profile_t* profile,
+    const loom_testbench_invocation_plan_t* invocation) {
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(profile->name),
+      loom_param_u32((uint32_t)invocation->result_count),
+  };
+  loom_source_range_t source_location = {
+      .provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE,
+  };
+  const loom_run_module_t* run_module = profile->provider_options.run_module;
+  if (run_module != NULL && invocation->op != NULL) {
+    loom_source_resolve(loom_run_module_source_resolver(run_module),
+                        invocation->module, invocation->op->location,
+                        &source_location);
+  }
+  const loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = LOOM_ERR_TARGET_093,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .emitter = LOOM_EMITTER_BUILDER,
+      .origin = source_location,
+      .source_location = source_location,
+  };
+  IREE_RETURN_IF_ERROR(loom_diagnostic_emit(
+      &profile->provider_options.diagnostic_sink, &diagnostic));
+  return iree_make_status(
+      IREE_STATUS_FAILED_PRECONDITION,
+      "HAL scenario profile cannot transport invocation results");
+}
 
 static void loom_run_hal_testbench_scenario_batch_deinitialize(
     loom_run_hal_testbench_scenario_batch_t* batch) {
@@ -550,6 +585,8 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
     loom_testbench_prepared_product_t* out_product) {
   (void)configuration;
   *out_product = (loom_testbench_prepared_product_t){0};
+  loom_run_hal_testbench_scenario_profile_t* profile =
+      (loom_run_hal_testbench_scenario_profile_t*)user_data;
   if (invocation->kind != LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH &&
       invocation->kind != LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
@@ -557,13 +594,10 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
                             "function subject");
   }
   if (invocation->result_count != 0) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "HAL scenario subjects cannot return invocation results");
+    return loom_run_hal_testbench_scenario_emit_unsupported_results(profile,
+                                                                    invocation);
   }
 
-  loom_run_hal_testbench_scenario_profile_t* profile =
-      (loom_run_hal_testbench_scenario_profile_t*)user_data;
   if (profile->provider_options.run_module == NULL ||
       profile->provider_options.run_module->module != invocation->module) {
     return iree_make_status(

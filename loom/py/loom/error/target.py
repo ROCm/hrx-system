@@ -1595,6 +1595,26 @@ ERR_TARGET_092 = ErrorDef(
     ),
 )
 
+# ERR_TARGET_093: Target execution profile cannot transport invocation results.
+ERR_TARGET_093 = ErrorDef(
+    domain=ErrorDomain.TARGET,
+    code=93,
+    severity=Severity.ERROR,
+    summary="Target execution profile cannot transport invocation results.",
+    message=(
+        "target execution profile '{profile}' cannot transport "
+        "{result_count} result(s) from the scenario subject"
+    ),
+    params=(
+        ErrorParam("profile", ParamKind.STRING),
+        ErrorParam("result_count", ParamKind.U32),
+    ),
+    fix_hint=(
+        "Use a resultless subject with explicit output storage or implement "
+        "result transport for '{profile}'."
+    ),
+)
+
 ALL_TARGET_ERRORS = (
     ERR_TARGET_001,
     ERR_TARGET_002,
@@ -1672,4 +1692,5 @@ ALL_TARGET_ERRORS = (
     ERR_TARGET_090,
     ERR_TARGET_091,
     ERR_TARGET_092,
+    ERR_TARGET_093,
 )

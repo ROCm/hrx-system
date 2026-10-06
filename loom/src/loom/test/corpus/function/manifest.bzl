@@ -11,7 +11,9 @@ load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_manifest")
 FUNCTION_CORPUS = loom_corpus_manifest(
     name = "function",
     package = "//loom/src/loom/test/corpus/function",
-    srcs = [
+    scenario_srcs = [
+    ],
+    legacy_case_srcs = [
         "buffer/arguments.loom",
         "buffer/call_overflow.loom",
         "buffer/calls.loom",

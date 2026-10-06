@@ -24,6 +24,28 @@ def _profile_with_runner_args(profile, runner_args):
         target_family = profile.target_family,
     )
 
+def _select_failure_qualifications(catalog, qualifications, field_name):
+    selected_sources = {program.identity: None for program in catalog.programs}
+    known_sources = {program.identity: None for program in catalog.all_programs}
+    selected_qualifications = {}
+    for profile_name, entries in qualifications.items():
+        profile_qualifications = {}
+        for identity, diagnostic in entries.items():
+            separator = identity.find(":@")
+            if separator == -1:
+                fail(
+                    "%s identity %r must use '<source>:@<record>'" %
+                    (field_name, identity),
+                )
+            source_identity = identity[:separator]
+            if source_identity not in known_sources:
+                fail("%s names unknown source %r" % (field_name, source_identity))
+            if source_identity in selected_sources:
+                profile_qualifications[identity] = diagnostic
+        if profile_qualifications:
+            selected_qualifications[profile_name] = profile_qualifications
+    return selected_qualifications
+
 def _partition_failure_qualifications(
         catalog,
         profiles_by_name,
@@ -238,7 +260,7 @@ def loom_corpus_test(
 
     for manifest in catalog.manifests:
         native.test_suite(
-            name = manifest.name + "_test",
+            name = name + "_" + manifest.name,
             tags = tags,
             tests = tests_by_manifest[manifest.name],
             visibility = visibility,
@@ -248,4 +270,80 @@ def loom_corpus_test(
         tags = tags,
         tests = tests,
         visibility = visibility,
+    )
+
+def loom_scenario_test(
+        name,
+        catalog,
+        execution_profiles,
+        allowed_failures = {},
+        excludes = {},
+        xfails = {},
+        args = [],
+        size = "small",
+        tags = [],
+        visibility = None,
+        target_compatible_with = []):
+    """Runs every scenario source against target-owned execution profiles."""
+    if getattr(catalog, "harness", None) != "scenario":
+        fail("loom_scenario_test requires a catalog created by loom_scenario_corpus")
+    loom_corpus_test(
+        name = name,
+        allowed_failures = _select_failure_qualifications(
+            catalog,
+            allowed_failures,
+            "loom_scenario_test allowed failure",
+        ),
+        args = args,
+        catalog = catalog,
+        excludes = excludes,
+        execution_profiles = execution_profiles,
+        size = size,
+        tags = tags,
+        target_compatible_with = target_compatible_with,
+        visibility = visibility,
+        xfails = _select_failure_qualifications(
+            catalog,
+            xfails,
+            "loom_scenario_test xfail",
+        ),
+    )
+
+def loom_legacy_case_test(
+        name,
+        catalog,
+        execution_profiles,
+        allowed_failures = {},
+        excludes = {},
+        profile_sources = {},
+        xfails = {},
+        args = [],
+        size = "small",
+        tags = [],
+        visibility = None,
+        target_compatible_with = []):
+    """Runs the shrinking quarantine of direct check.case sources."""
+    if getattr(catalog, "harness", None) != "legacy_case":
+        fail("loom_legacy_case_test requires a catalog created by loom_legacy_case_corpus")
+    loom_corpus_test(
+        name = name,
+        allowed_failures = _select_failure_qualifications(
+            catalog,
+            allowed_failures,
+            "loom_legacy_case_test allowed failure",
+        ),
+        args = args,
+        catalog = catalog,
+        excludes = excludes,
+        execution_profiles = execution_profiles,
+        profile_sources = profile_sources,
+        size = size,
+        tags = tags,
+        target_compatible_with = target_compatible_with,
+        visibility = visibility,
+        xfails = _select_failure_qualifications(
+            catalog,
+            xfails,
+            "loom_legacy_case_test xfail",
+        ),
     )

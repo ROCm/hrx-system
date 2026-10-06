@@ -11,13 +11,15 @@ load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_manifest")
 KERNEL_CORPUS = loom_corpus_manifest(
     name = "kernel",
     package = "//loom/src/loom/test/corpus/kernel",
-    srcs = [
-        "subgroup/active_predicate.loom",
-        "subgroup/ballot.loom",
-        "subgroup/shuffle_dynamic.loom",
+    scenario_srcs = [
         "subgroup/shuffle_participation.loom",
         "subgroup/transport.loom",
         "subgroup/transport_carrier.loom",
+    ],
+    legacy_case_srcs = [
+        "subgroup/active_predicate.loom",
+        "subgroup/ballot.loom",
+        "subgroup/shuffle_dynamic.loom",
         "workgroup/loop_state.loom",
         "workgroup/reduce_partial.loom",
         "workgroup/reduce_tree.loom",

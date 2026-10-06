@@ -8,21 +8,20 @@ func.def public @integer_widths(%boolean: i1, %word: i32, %wide: i64) -> (i32, i
   func.return %signed_boolean, %unsigned_boolean, %signed_word, %unsigned_word, %low_bit, %low_word : i32, i64, i64, i64, i1, i32
 }
 
-check.case @integer_sign_and_low_bits {
-  %boolean = check.literal value(true) : i1
-  %word = check.literal value(-1) : i32
-  %wide = check.literal value(-4294967295) : i64
-  %signed_boolean, %unsigned_boolean, %signed_word, %unsigned_word, %low_bit, %low_word = func.call @integer_widths(%boolean, %word, %wide) : (i1, i32, i64) -> (i32, i64, i64, i64, i1, i32)
-  %one = check.literal value(1) : i32
-  %wide_one = check.literal value(1) : i64
-  %negative_one = check.literal value(-1) : i64
-  %max_word = check.literal value(4294967295) : i64
-  check.expect.equal actual(%signed_boolean) expected(%word) : i32
-  check.expect.equal actual(%unsigned_boolean) expected(%wide_one) : i64
-  check.expect.equal actual(%signed_word) expected(%negative_one) : i64
-  check.expect.equal actual(%unsigned_word) expected(%max_word) : i64
-  check.expect.equal actual(%low_bit) expected(%boolean) : i1
-  check.expect.equal actual(%low_word) expected(%one) : i32
+check.scenario @integer_width_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %boolean = check.literal value(true) : i1
+    %word = check.literal value(-1) : i32
+    %wide = check.literal value(-4294967295) : i64
+    check.compare<@integer_widths>(%boolean, %word, %wide) : (i1, i32, i64) -> [actual(%actual_signed_boolean: i32, %actual_unsigned_boolean: i64, %actual_signed_word: i64, %actual_unsigned_word: i64, %actual_low_bit: i1, %actual_low_word: i32), expected(%expected_signed_boolean: i32, %expected_unsigned_boolean: i64, %expected_signed_word: i64, %expected_unsigned_word: i64, %expected_low_bit: i1, %expected_low_word: i32)] {
+      check.expect.equal actual(%actual_signed_boolean) expected(%expected_signed_boolean) : i32
+      check.expect.equal actual(%actual_unsigned_boolean) expected(%expected_unsigned_boolean) : i64
+      check.expect.equal actual(%actual_signed_word) expected(%expected_signed_word) : i64
+      check.expect.equal actual(%actual_unsigned_word) expected(%expected_unsigned_word) : i64
+      check.expect.equal actual(%actual_low_bit) expected(%expected_low_bit) : i1
+      check.expect.equal actual(%actual_low_word) expected(%expected_low_word) : i32
+    }
+  }
   check.return
 }
 
@@ -37,27 +36,31 @@ func.def public @float_width_bits(%single_bits: i32, %double_bits: i64) -> (i64,
   func.return %wide_bits, %narrow_bits : i64, i32
 }
 
-check.case @float_width_signed_zero {
-  %single_bits = check.literal value(-2147483648) : i32
-  %double_bits = check.literal value(-9223372036854775808) : i64
-  %wide_bits, %narrow_bits = func.call @float_width_bits(%single_bits, %double_bits) : (i32, i64) -> (i64, i32)
-  check.expect.equal actual(%wide_bits) expected(%double_bits) : i64
-  check.expect.equal actual(%narrow_bits) expected(%single_bits) : i32
-  check.return
-}
-
-check.case @float_width_nearest_even {
-  %one_f32 = check.literal value(1065353216) : i32
-  %one_f64 = check.literal value(4607182418800017408) : i64
-  %midpoint = check.literal value(4607182419068452864) : i64
-  %above_midpoint = check.literal value(4607182419068452865) : i64
-  %next_f32 = check.literal value(1065353217) : i32
-  %wide, %rounded = func.call @float_width_bits(%one_f32, %midpoint) : (i32, i64) -> (i64, i32)
-  %wide_next, %rounded_next = func.call @float_width_bits(%one_f32, %above_midpoint) : (i32, i64) -> (i64, i32)
-  check.expect.equal actual(%wide) expected(%one_f64) : i64
-  check.expect.equal actual(%wide_next) expected(%one_f64) : i64
-  check.expect.equal actual(%rounded) expected(%one_f32) : i32
-  check.expect.equal actual(%rounded_next) expected(%next_f32) : i32
+check.scenario @float_width_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %single_bits = check.literal value(-2147483648) : i32
+    %double_bits = check.literal value(-9223372036854775808) : i64
+    check.compare<@float_width_bits>(%single_bits, %double_bits) : (i32, i64) -> [actual(%actual_wide_bits: i64, %actual_narrow_bits: i32), expected(%expected_wide_bits: i64, %expected_narrow_bits: i32)] {
+      check.expect.bitwise actual(%actual_wide_bits) expected(%expected_wide_bits) : i64
+      check.expect.bitwise actual(%actual_narrow_bits) expected(%expected_narrow_bits) : i32
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %single_bits = check.literal value(1065353216) : i32
+    %midpoint = check.literal value(4607182419068452864) : i64
+    check.compare<@float_width_bits>(%single_bits, %midpoint) : (i32, i64) -> [actual(%actual_wide_bits: i64, %actual_narrow_bits: i32), expected(%expected_wide_bits: i64, %expected_narrow_bits: i32)] {
+      check.expect.bitwise actual(%actual_wide_bits) expected(%expected_wide_bits) : i64
+      check.expect.bitwise actual(%actual_narrow_bits) expected(%expected_narrow_bits) : i32
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %single_bits = check.literal value(1065353216) : i32
+    %above_midpoint = check.literal value(4607182419068452865) : i64
+    check.compare<@float_width_bits>(%single_bits, %above_midpoint) : (i32, i64) -> [actual(%actual_wide_bits: i64, %actual_narrow_bits: i32), expected(%expected_wide_bits: i64, %expected_narrow_bits: i32)] {
+      check.expect.bitwise actual(%actual_wide_bits) expected(%expected_wide_bits) : i64
+      check.expect.bitwise actual(%actual_narrow_bits) expected(%expected_narrow_bits) : i32
+    }
+  }
   check.return
 }
 
@@ -71,27 +74,6 @@ func.def public @integer_to_float(%word: i32, %wide: i64) -> (f32, f64, f32, f64
   %unsigned_wide_f32 = scalar.uitofp %wide : i64 to f32
   %unsigned_wide_f64 = scalar.uitofp %wide : i64 to f64
   func.return %signed_word_f32, %signed_word_f64, %unsigned_word_f32, %unsigned_word_f64, %signed_wide_f32, %signed_wide_f64, %unsigned_wide_f32, %unsigned_wide_f64 : f32, f64, f32, f64, f32, f64, f32, f64
-}
-
-check.case @integer_to_float_signedness {
-  %word = check.literal value(-1) : i32
-  %wide = check.literal value(-1) : i64
-  %signed_word_f32, %signed_word_f64, %unsigned_word_f32, %unsigned_word_f64, %signed_wide_f32, %signed_wide_f64, %unsigned_wide_f32, %unsigned_wide_f64 = func.call @integer_to_float(%word, %wide) : (i32, i64) -> (f32, f64, f32, f64, f32, f64, f32, f64)
-  %negative_f32 = check.literal value(-1.0) : f32
-  %negative_f64 = check.literal value(-1.0) : f64
-  %max_word_f32 = check.literal value(4294967296.0) : f32
-  %max_word_f64 = check.literal value(4294967295.0) : f64
-  %max_wide_f32 = check.literal value(1.8446744073709552e+19) : f32
-  %max_wide_f64 = check.literal value(1.8446744073709552e+19) : f64
-  check.expect.equal actual(%signed_word_f32) expected(%negative_f32) : f32
-  check.expect.equal actual(%signed_word_f64) expected(%negative_f64) : f64
-  check.expect.equal actual(%unsigned_word_f32) expected(%max_word_f32) : f32
-  check.expect.equal actual(%unsigned_word_f64) expected(%max_word_f64) : f64
-  check.expect.equal actual(%signed_wide_f32) expected(%negative_f32) : f32
-  check.expect.equal actual(%signed_wide_f64) expected(%negative_f64) : f64
-  check.expect.equal actual(%unsigned_wide_f32) expected(%max_wide_f32) : f32
-  check.expect.equal actual(%unsigned_wide_f64) expected(%max_wide_f64) : f64
-  check.return
 }
 
 // Returns the exact conversion payloads so targets are compared independently
@@ -216,27 +198,22 @@ func.def public @float_to_integer(%signed_single: f32, %unsigned_single: f32, %s
   func.return %signed_single_word, %signed_single_wide, %unsigned_single_word, %unsigned_single_wide, %signed_double_word, %signed_double_wide, %unsigned_double_word, %unsigned_double_wide : i32, i64, i32, i64, i32, i64, i32, i64
 }
 
-check.case @float_to_integer_truncates {
-  %signed_single = check.literal value(-7.75) : f32
-  %unsigned_single = check.literal value(4294967040.0) : f32
-  %signed_double = check.literal value(-2147483648.75) : f64
-  %unsigned_double = check.literal value(4294967295.5) : f64
-  %signed_single_word, %signed_single_wide, %unsigned_single_word, %unsigned_single_wide, %signed_double_word, %signed_double_wide, %unsigned_double_word, %unsigned_double_wide = func.call @float_to_integer(%signed_single, %unsigned_single, %signed_double, %unsigned_double) : (f32, f32, f64, f64) -> (i32, i64, i32, i64, i32, i64, i32, i64)
-  %negative_single_word = check.literal value(-7) : i32
-  %negative_single_wide = check.literal value(-7) : i64
-  %large_single_word = check.literal value(-256) : i32
-  %large_single_wide = check.literal value(4294967040) : i64
-  %negative_double_word = check.literal value(-2147483648) : i32
-  %negative_double_wide = check.literal value(-2147483648) : i64
-  %large_double_word = check.literal value(-1) : i32
-  %large_double_wide = check.literal value(4294967295) : i64
-  check.expect.equal actual(%signed_single_word) expected(%negative_single_word) : i32
-  check.expect.equal actual(%signed_single_wide) expected(%negative_single_wide) : i64
-  check.expect.equal actual(%unsigned_single_word) expected(%large_single_word) : i32
-  check.expect.equal actual(%unsigned_single_wide) expected(%large_single_wide) : i64
-  check.expect.equal actual(%signed_double_word) expected(%negative_double_word) : i32
-  check.expect.equal actual(%signed_double_wide) expected(%negative_double_wide) : i64
-  check.expect.equal actual(%unsigned_double_word) expected(%large_double_word) : i32
-  check.expect.equal actual(%unsigned_double_wide) expected(%large_double_wide) : i64
+check.scenario @float_to_integer_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %signed_single = check.literal value(-7.75) : f32
+    %unsigned_single = check.literal value(4294967040.0) : f32
+    %signed_double = check.literal value(-2147483648.75) : f64
+    %unsigned_double = check.literal value(4294967295.5) : f64
+    check.compare<@float_to_integer>(%signed_single, %unsigned_single, %signed_double, %unsigned_double) : (f32, f32, f64, f64) -> [actual(%actual_signed_single_word: i32, %actual_signed_single_wide: i64, %actual_unsigned_single_word: i32, %actual_unsigned_single_wide: i64, %actual_signed_double_word: i32, %actual_signed_double_wide: i64, %actual_unsigned_double_word: i32, %actual_unsigned_double_wide: i64), expected(%expected_signed_single_word: i32, %expected_signed_single_wide: i64, %expected_unsigned_single_word: i32, %expected_unsigned_single_wide: i64, %expected_signed_double_word: i32, %expected_signed_double_wide: i64, %expected_unsigned_double_word: i32, %expected_unsigned_double_wide: i64)] {
+      check.expect.equal actual(%actual_signed_single_word) expected(%expected_signed_single_word) : i32
+      check.expect.equal actual(%actual_signed_single_wide) expected(%expected_signed_single_wide) : i64
+      check.expect.equal actual(%actual_unsigned_single_word) expected(%expected_unsigned_single_word) : i32
+      check.expect.equal actual(%actual_unsigned_single_wide) expected(%expected_unsigned_single_wide) : i64
+      check.expect.equal actual(%actual_signed_double_word) expected(%expected_signed_double_word) : i32
+      check.expect.equal actual(%actual_signed_double_wide) expected(%expected_signed_double_wide) : i64
+      check.expect.equal actual(%actual_unsigned_double_word) expected(%expected_unsigned_double_word) : i32
+      check.expect.equal actual(%actual_unsigned_double_wide) expected(%expected_unsigned_double_wide) : i64
+    }
+  }
   check.return
 }

@@ -223,7 +223,7 @@ loom_corpus_test(
     tags = ["manual"],
     xfails = {
         "reference": {
-            "sample/nested/fixture.loom:@fixture_cases": "TARGET/003,EXPECT/003",
+            "sample/nested/fixture.loom:@fixture_scenario": "TARGET/003,EXPECT/003",
         },
     },
 )

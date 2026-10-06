@@ -22,50 +22,8 @@ func.def @narrow_f32_bits(%bits: i32) -> (i32, i32, i32, i32) {
   func.return %bf16_result, %f16_result, %e4m3_result, %e5m2_result : i32, i32, i32, i32
 }
 
-check.case @narrow_f32_positive_infinity {
-  %bits = check.literal value(2139095040) : i32
-  %bf16, %f16, %e4m3, %e5m2 = func.call @narrow_f32_bits(%bits) : (i32) -> (i32, i32, i32, i32)
-  %expected_bf16 = check.literal value(32640) : i32
-  %expected_f16 = check.literal value(31744) : i32
-  %expected_e4m3 = check.literal value(126) : i32
-  %expected_e5m2 = check.literal value(124) : i32
-  check.expect.equal actual(%bf16) expected(%expected_bf16) : i32
-  check.expect.equal actual(%f16) expected(%expected_f16) : i32
-  check.expect.equal actual(%e4m3) expected(%expected_e4m3) : i32
-  check.expect.equal actual(%e5m2) expected(%expected_e5m2) : i32
-  check.return
-}
-
-check.case @narrow_f32_negative_infinity {
-  %bits = check.literal value(-8388608) : i32
-  %bf16, %f16, %e4m3, %e5m2 = func.call @narrow_f32_bits(%bits) : (i32) -> (i32, i32, i32, i32)
-  %expected_bf16 = check.literal value(65408) : i32
-  %expected_f16 = check.literal value(64512) : i32
-  %expected_e4m3 = check.literal value(254) : i32
-  %expected_e5m2 = check.literal value(252) : i32
-  check.expect.equal actual(%bf16) expected(%expected_bf16) : i32
-  check.expect.equal actual(%f16) expected(%expected_f16) : i32
-  check.expect.equal actual(%e4m3) expected(%expected_e4m3) : i32
-  check.expect.equal actual(%e5m2) expected(%expected_e5m2) : i32
-  check.return
-}
-
 // NaN payloads have no cross-target identity contract; every result must
 // remain a NaN in the destination format.
-check.case @narrow_f32_nan {
-  %input = check.literal value(nan) : f32
-  %bf16, %f16, %e4m3, %e5m2 = func.call @narrow_f32(%input) : (f32) -> (bf16, f16, f8E4M3, f8E5M2)
-  %expected_bf16 = check.literal value(nan) : bf16
-  %expected_f16 = check.literal value(nan) : f16
-  %expected_e4m3 = check.literal value(nan) : f8E4M3
-  %expected_e5m2 = check.literal value(nan) : f8E5M2
-  check.expect.close actual(%bf16) expected(%expected_bf16) atol(0.0) rtol(0.0) nan(same) : bf16
-  check.expect.close actual(%f16) expected(%expected_f16) atol(0.0) rtol(0.0) nan(same) : f16
-  check.expect.close actual(%e4m3) expected(%expected_e4m3) atol(0.0) rtol(0.0) nan(same) : f8E4M3
-  check.expect.close actual(%e5m2) expected(%expected_e5m2) atol(0.0) rtol(0.0) nan(same) : f8E5M2
-  check.return
-}
-
 func.def @narrow_f32_pairs(%input: buffer, %bf16_output: buffer, %f16_output: buffer, %e4m3_output: buffer, %e5m2_output: buffer) {
   %base = index.constant 0 : offset
   %begin = index.constant 0 : index

@@ -92,36 +92,67 @@ class LoomCorpusBuildFileFunctions:
                 source_qualifications[record] = diagnostic
         return qualifications_by_profile_and_source
 
-    def loom_corpus_manifest(self, name, package, srcs):
+    def loom_corpus_manifest(self, name, package, scenario_srcs, legacy_case_srcs):
         programs = []
-        for source in srcs:
-            source_stem = self._loom_corpus_target_stem(source.removesuffix(".loom"))
-            programs.append(
-                {
+        programs_by_harness = {"scenario": [], "legacy_case": []}
+        for harness, sources in (
+            ("scenario", scenario_srcs),
+            ("legacy_case", legacy_case_srcs),
+        ):
+            for source in sources:
+                source_stem = self._loom_corpus_target_stem(
+                    source.removesuffix(".loom")
+                )
+                program = {
+                    "harness": harness,
                     "identity": f"{name}/{source}",
                     "label": f"{package}:{source}",
                     "manifest": name,
                     "source": source,
                     "target_name": f"{name}_{source_stem}",
                 }
-            )
+                programs.append(program)
+                programs_by_harness[harness].append(program)
         return {
             "kind": "loom_corpus_manifest",
+            "legacy_case_programs": programs_by_harness["legacy_case"],
+            "legacy_case_srcs": list(legacy_case_srcs),
             "name": name,
             "package": package,
             "programs": programs,
-            "srcs": list(srcs),
+            "scenario_programs": programs_by_harness["scenario"],
+            "scenario_srcs": list(scenario_srcs),
+            "srcs": [*scenario_srcs, *legacy_case_srcs],
         }
 
-    def loom_corpus_catalog(self, manifests):
+    @staticmethod
+    def _loom_corpus_catalog(manifests, harness=None):
+        all_programs = []
         programs = []
         for manifest in manifests:
-            programs.extend(manifest["programs"])
+            all_programs.extend(manifest["programs"])
+            manifest_programs = manifest["programs"]
+            if harness == "scenario":
+                manifest_programs = manifest["scenario_programs"]
+            elif harness == "legacy_case":
+                manifest_programs = manifest["legacy_case_programs"]
+            programs.extend(manifest_programs)
         return {
+            "all_programs": all_programs,
+            "harness": harness,
             "kind": "loom_corpus_catalog",
             "manifests": list(manifests),
             "programs": programs,
         }
+
+    def loom_corpus_catalog(self, manifests):
+        return self._loom_corpus_catalog(manifests)
+
+    def loom_scenario_corpus(self, manifests):
+        return self._loom_corpus_catalog(manifests, "scenario")
+
+    def loom_legacy_case_corpus(self, manifests):
+        return self._loom_corpus_catalog(manifests, "legacy_case")
 
     def loom_corpus_sources(self, name, manifest, visibility=None, **kwargs):
         self._check_no_unhandled_kwargs("loom_corpus_sources", kwargs)
@@ -443,3 +474,76 @@ class LoomCorpusBuildFileFunctions:
                 + self._convert_string_arg_block("REQUIRES", condition)
                 + ")\n\n"
             )
+
+    @staticmethod
+    def _select_corpus_failure_qualifications(catalog, qualifications):
+        selected_sources = {program["identity"] for program in catalog["programs"]}
+        known_sources = {program["identity"] for program in catalog["all_programs"]}
+        selected_qualifications = {}
+        for profile_name, entries in (qualifications or {}).items():
+            profile_qualifications = {}
+            for identity, diagnostic in entries.items():
+                source_identity, separator, _ = identity.partition(":@")
+                if not separator:
+                    raise ValueError(
+                        "failure qualification identity must use "
+                        f"'<source>:@<record>': {identity}"
+                    )
+                if source_identity not in known_sources:
+                    raise ValueError(
+                        f"failure qualification names unknown source {source_identity}"
+                    )
+                if source_identity in selected_sources:
+                    profile_qualifications[identity] = diagnostic
+            if profile_qualifications:
+                selected_qualifications[profile_name] = profile_qualifications
+        return selected_qualifications
+
+    def loom_scenario_test(self, catalog, **kwargs):
+        if catalog.get("harness") != "scenario":
+            raise ValueError(
+                "loom_scenario_test requires a catalog created by loom_scenario_corpus"
+            )
+        kwargs["xfails"] = self._select_corpus_failure_qualifications(
+            catalog, kwargs.get("xfails")
+        )
+        kwargs["allowed_failures"] = self._select_corpus_failure_qualifications(
+            catalog, kwargs.get("allowed_failures")
+        )
+        excluded_sources = kwargs.get("excludes") or {}
+        selected_sources = [
+            program["identity"]
+            for program in catalog["programs"]
+            if program["identity"] not in excluded_sources
+        ]
+        kwargs["profile_sources"] = {
+            profile.name: selected_sources for profile in kwargs["execution_profiles"]
+        }
+        kwargs["catalog"] = catalog
+        self.loom_corpus_test(**kwargs)
+
+    def loom_legacy_case_test(self, catalog, **kwargs):
+        if catalog.get("harness") != "legacy_case":
+            raise ValueError(
+                "loom_legacy_case_test requires a catalog created by "
+                "loom_legacy_case_corpus"
+            )
+        kwargs["xfails"] = self._select_corpus_failure_qualifications(
+            catalog, kwargs.get("xfails")
+        )
+        kwargs["allowed_failures"] = self._select_corpus_failure_qualifications(
+            catalog, kwargs.get("allowed_failures")
+        )
+        if not kwargs.get("profile_sources"):
+            excluded_sources = kwargs.get("excludes") or {}
+            selected_sources = [
+                program["identity"]
+                for program in catalog["programs"]
+                if program["identity"] not in excluded_sources
+            ]
+            kwargs["profile_sources"] = {
+                profile.name: selected_sources
+                for profile in kwargs["execution_profiles"]
+            }
+        kwargs["catalog"] = catalog
+        self.loom_corpus_test(**kwargs)

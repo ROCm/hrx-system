@@ -7,12 +7,18 @@
 load(
     "//loom/build_tools/bazel:defs.bzl",
     "loom_corpus_build",
-    "loom_corpus_test",
     "loom_execution_profile",
+    "loom_legacy_case_test",
+    "loom_scenario_test",
     "loom_target_profile",
     "loom_target_set",
 )
-load("//loom/build_tools/bazel/test/testdata/corpus:catalog.bzl", "TEST_CORPUS")
+load(
+    "//loom/build_tools/bazel/test/testdata/corpus:catalog.bzl",
+    "TEST_CORPUS",
+    "TEST_LEGACY_CASES",
+    "TEST_SCENARIOS",
+)
 
 package(default_visibility = ["//visibility:public"])
 
@@ -79,39 +85,48 @@ loom_corpus_build(
     },
 )
 
-loom_corpus_test(
-    name = "execution",
+_EXECUTION_PROFILES = [
+    loom_execution_profile(
+        name = "reference",
+        executor = "reference",
+        runner_args = ["--max-samples-per-case=1"],
+        target_class = "cpu",
+        target_family = "test",
+    ),
+    loom_execution_profile(
+        name = "selected_reference",
+        executor = "reference",
+        target_class = "cpu",
+        target_family = "test",
+    ),
+]
+
+loom_scenario_test(
+    name = "scenario_execution",
+    catalog = TEST_SCENARIOS,
+    execution_profiles = _EXECUTION_PROFILES,
+    tags = ["manual"],
+    xfails = {
+        "reference": {
+            "sample/nested/fixture.loom:@fixture_scenario": "TARGET/003,EXPECT/003",
+        },
+    },
+)
+
+loom_legacy_case_test(
+    name = "legacy_execution",
     allowed_failures = {
         "reference": {
             "sample/other.loom:@other_case": "TARGET/003,EXPECT/003",
         },
     },
-    catalog = TEST_CORPUS,
+    catalog = TEST_LEGACY_CASES,
     excludes = {
         "sample/excluded.loom": "This fixture is excluded from execution as well as compilation.",
     },
-    execution_profiles = [
-        loom_execution_profile(
-            name = "reference",
-            executor = "reference",
-            runner_args = ["--max-samples-per-case=1"],
-            target_class = "cpu",
-            target_family = "test",
-        ),
-        loom_execution_profile(
-            name = "selected_reference",
-            executor = "reference",
-            target_class = "cpu",
-            target_family = "test",
-        ),
-    ],
+    execution_profiles = _EXECUTION_PROFILES,
     profile_sources = {
         "selected_reference": ["sample/other.loom"],
     },
     tags = ["manual"],
-    xfails = {
-        "reference": {
-            "sample/nested/fixture.loom:@fixture_cases": "TARGET/003,EXPECT/003",
-        },
-    },
 )

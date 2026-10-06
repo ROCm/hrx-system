@@ -433,9 +433,11 @@ check.scenario @address_cast_values {
 }
 
 func.def @scalar_i32_arithmetic_observations(%ordinal: index, %lhs_bits: i64, %rhs_bits: i64, %addend_bits: i64, %output: buffer) {
+  %c0_index = index.constant 0 : index
+  %c4_index = index.constant 4 : index
   %c32_index = index.constant 32 : index
   %base = index.constant 0 : offset
-  %results = buffer.view %output[%base] : buffer -> view<3xi32>
+  %results = buffer.view %output[%base] : buffer -> view<12xi32>
   %bounded_ordinal = index.assume %ordinal [range(%ordinal, 0, 255)] : index
   %count_index = index.rem %bounded_ordinal, %c32_index : index
   %count = index.cast %count_index : index to i32
@@ -452,11 +454,41 @@ func.def @scalar_i32_arithmetic_observations(%ordinal: index, %lhs_bits: i64, %r
   %signed_right = scalar.shrsi %left, %count : i32
   %unsigned_right = scalar.shrui %signed_right, %count : i32
   %multiply_add = scalar.addi %product, %addend : i32
-  %less = scalar.cmpi slt, %lhs, %rhs : i32
-  %less_word = scalar.extui %less : i1 to i32
-  view.store %unsigned_right, %results[0] : i32, view<3xi32>
-  view.store %multiply_add, %results[1] : i32, view<3xi32>
-  view.store %less_word, %results[2] : i32, view<3xi32>
+  %comparison_case = index.rem %bounded_ordinal, %c4_index : index
+  %compare_equal = index.cmp eq, %comparison_case, %c0_index : index
+  %compare_rhs = scf.select %compare_equal, %lhs, %rhs : i32
+  %eq = scalar.cmpi eq, %lhs, %compare_rhs : i32
+  %ne = scalar.cmpi ne, %lhs, %compare_rhs : i32
+  %slt = scalar.cmpi slt, %lhs, %compare_rhs : i32
+  %sle = scalar.cmpi sle, %lhs, %compare_rhs : i32
+  %sgt = scalar.cmpi sgt, %lhs, %compare_rhs : i32
+  %sge = scalar.cmpi sge, %lhs, %compare_rhs : i32
+  %ult = scalar.cmpi ult, %lhs, %compare_rhs : i32
+  %ule = scalar.cmpi ule, %lhs, %compare_rhs : i32
+  %ugt = scalar.cmpi ugt, %lhs, %compare_rhs : i32
+  %uge = scalar.cmpi uge, %lhs, %compare_rhs : i32
+  %eq_word = scalar.extui %eq : i1 to i32
+  %ne_word = scalar.extui %ne : i1 to i32
+  %slt_word = scalar.extui %slt : i1 to i32
+  %sle_word = scalar.extui %sle : i1 to i32
+  %sgt_word = scalar.extui %sgt : i1 to i32
+  %sge_word = scalar.extui %sge : i1 to i32
+  %ult_word = scalar.extui %ult : i1 to i32
+  %ule_word = scalar.extui %ule : i1 to i32
+  %ugt_word = scalar.extui %ugt : i1 to i32
+  %uge_word = scalar.extui %uge : i1 to i32
+  view.store %unsigned_right, %results[0] : i32, view<12xi32>
+  view.store %multiply_add, %results[1] : i32, view<12xi32>
+  view.store %eq_word, %results[2] : i32, view<12xi32>
+  view.store %ne_word, %results[3] : i32, view<12xi32>
+  view.store %slt_word, %results[4] : i32, view<12xi32>
+  view.store %sle_word, %results[5] : i32, view<12xi32>
+  view.store %sgt_word, %results[6] : i32, view<12xi32>
+  view.store %sge_word, %results[7] : i32, view<12xi32>
+  view.store %ult_word, %results[8] : i32, view<12xi32>
+  view.store %ule_word, %results[9] : i32, view<12xi32>
+  view.store %ugt_word, %results[10] : i32, view<12xi32>
+  view.store %uge_word, %results[11] : i32, view<12xi32>
   func.return
 }
 
@@ -468,9 +500,9 @@ check.scenario @scalar_i32_arithmetic_values {
     %lhs_bits = check.entropy.read %lhs_entropy[%trial] : check.entropy -> i64
     %rhs_bits = check.entropy.read %rhs_entropy[%trial] : check.entropy -> i64
     %addend_bits = check.entropy.read %addend_entropy[%trial] : check.entropy -> i64
-    %output = check.generate.fill value(0) : tensor<3xi32>
-    check.compare<@scalar_i32_arithmetic_observations>(%trial, %lhs_bits, %rhs_bits, %addend_bits, %output) : (index, i64, i64, i64, tensor<3xi32>) -> () {
-      check.expect.bitwise actual(%output) expected(%output) : tensor<3xi32>
+    %output = check.generate.fill value(0) : tensor<12xi32>
+    check.compare<@scalar_i32_arithmetic_observations>(%trial, %lhs_bits, %rhs_bits, %addend_bits, %output) : (index, i64, i64, i64, tensor<12xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<12xi32>
     }
   }
   check.return

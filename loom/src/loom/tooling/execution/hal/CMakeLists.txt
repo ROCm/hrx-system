@@ -316,6 +316,9 @@ loom_cc_library(
     ::testbench_staging
     iree::base
     iree::hal
+    loom::error::diagnostic
+    loom::error::error_defs
+    loom::error::source
     loom::ir
     loom::ops::func
     loom::ops::index

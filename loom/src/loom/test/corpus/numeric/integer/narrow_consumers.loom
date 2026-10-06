@@ -1,6 +1,5 @@
-// Narrow values retain their storage bank when uniform inputs are
-// promoted into arithmetic and comparison consumers. Per-lane values
-// cross the same sign and wrap boundaries within one wave.
+// Narrow values retain their storage bank when uniform and lane-varying inputs
+// cross sign and wrap boundaries before arithmetic and comparison consumers.
 kernel.def @narrow_integer_consumers() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -58,208 +57,84 @@ kernel.def @narrow_integer_consumers() {
   kernel.return
 }
 
-check.case public @narrow_integer_byte_sign_boundary {
-  %input = check.literal value(112) : i32
-  %output = check.generate.fill value(-7777) : tensor<416xi32>
-  kernel.launch @narrow_integer_consumers(%input, %output) : (i32, tensor<416xi32>)
-  %expected_0 = check.generate.fill value(113) : tensor<16xi32>
-  %row_0_0 = check.tensor.view %output offset(64) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_0_0) expected(%expected_0) : tensor<16xi32>
-  %row_0_1 = check.tensor.view %output offset(128) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_0_1) expected(%expected_0) : tensor<16xi32>
-  %row_1_0 = check.tensor.view %output offset(192) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_1_0) expected(%expected_0) : tensor<16xi32>
-  %row_1_1 = check.tensor.view %output offset(256) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_1_1) expected(%expected_0) : tensor<16xi32>
-  %row_2_0 = check.tensor.view %output offset(320) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_2_0) expected(%expected_0) : tensor<16xi32>
-  %row_2_1 = check.tensor.view %output offset(384) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_2_1) expected(%expected_0) : tensor<16xi32>
-  %row_3_0 = check.tensor.view %output offset(448) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_3_0) expected(%expected_0) : tensor<16xi32>
-  %row_3_1 = check.tensor.view %output offset(512) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_3_1) expected(%expected_0) : tensor<16xi32>
-  %expected_1 = check.generate.iota offset(113) step(1) : tensor<16xi32>
-  %row_4_0 = check.tensor.view %output offset(576) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_4_0) expected(%expected_1) : tensor<16xi32>
-  %expected_2 = check.generate.iota offset(129) step(1) : tensor<16xi32>
-  %row_4_1 = check.tensor.view %output offset(640) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_4_1) expected(%expected_2) : tensor<16xi32>
-  %row_5_0 = check.tensor.view %output offset(704) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_5_0) expected(%expected_1) : tensor<16xi32>
-  %expected_3 = check.generate.iota offset(-127) step(1) : tensor<16xi32>
-  %row_5_1 = check.tensor.view %output offset(768) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_5_1) expected(%expected_3) : tensor<16xi32>
-  %row_6_0 = check.tensor.view %output offset(832) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_6_0) expected(%expected_1) : tensor<16xi32>
-  %row_6_1 = check.tensor.view %output offset(896) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_6_1) expected(%expected_2) : tensor<16xi32>
-  %row_7_0 = check.tensor.view %output offset(960) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_7_0) expected(%expected_1) : tensor<16xi32>
-  %row_7_1 = check.tensor.view %output offset(1024) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_7_1) expected(%expected_2) : tensor<16xi32>
-  %expected_4 = check.generate.fill value(0) : tensor<16xi32>
-  %row_8_0 = check.tensor.view %output offset(1088) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_8_0) expected(%expected_4) : tensor<16xi32>
-  %row_8_1 = check.tensor.view %output offset(1152) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_8_1) expected(%expected_4) : tensor<16xi32>
-  %row_9_0 = check.tensor.view %output offset(1216) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_9_0) expected(%expected_4) : tensor<16xi32>
-  %row_9_1 = check.tensor.view %output offset(1280) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_9_1) expected(%expected_4) : tensor<16xi32>
-  %row_10_0 = check.tensor.view %output offset(1344) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_10_0) expected(%expected_4) : tensor<16xi32>
-  %expected_5 = check.generate.fill value(1) : tensor<16xi32>
-  %row_10_1 = check.tensor.view %output offset(1408) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_10_1) expected(%expected_5) : tensor<16xi32>
-  %row_11_0 = check.tensor.view %output offset(1472) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_11_0) expected(%expected_4) : tensor<16xi32>
-  %row_11_1 = check.tensor.view %output offset(1536) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_11_1) expected(%expected_4) : tensor<16xi32>
-  %guard = check.generate.fill value(-7777) : tensor<16xi32>
-  %prefix = check.tensor.view %output offset(0) : tensor<416xi32> -> tensor<16xi32>
-  %suffix = check.tensor.view %output offset(1600) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%prefix) expected(%guard) : tensor<16xi32>
-  check.expect.equal actual(%suffix) expected(%guard) : tensor<16xi32>
-  check.return
+func.def @narrow_integer_consumers_oracle(%input: i32, %output: buffer) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %byte_sign_boundary = scalar.constant 0 : i8
+  %halfword_sign_boundary = scalar.constant 0 : i16
+  %base = index.constant 64 : offset
+  %view = buffer.view %output[%base] : buffer -> view<12x32xi32>
+  %input_i8 = scalar.trunci %input : i32 to i8
+  %input_i8_unsigned = scalar.extui %input_i8 : i8 to i32
+  %input_i8_signed = scalar.extsi %input_i8 : i8 to i32
+  %input_i8_unsigned_sum = scalar.addi %input_i8_unsigned, %c1 : i32
+  %input_i8_signed_sum = scalar.addi %input_i8_signed, %c1 : i32
+  %input_i8_negative = scalar.cmpi slt, %input_i8, %byte_sign_boundary : i8
+  %input_i8_comparison = scf.select %input_i8_negative, %c1, %c0 : i32
+  %input_i16 = scalar.trunci %input : i32 to i16
+  %input_i16_unsigned = scalar.extui %input_i16 : i16 to i32
+  %input_i16_signed = scalar.extsi %input_i16 : i16 to i32
+  %input_i16_unsigned_sum = scalar.addi %input_i16_unsigned, %c1 : i32
+  %input_i16_signed_sum = scalar.addi %input_i16_signed, %c1 : i32
+  %input_i16_negative = scalar.cmpi slt, %input_i16, %halfword_sign_boundary : i16
+  %input_i16_comparison = scf.select %input_i16_negative, %c1, %c0 : i32
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    %lane_value = index.cast %lane : index to i32
+    %varying = scalar.addi %input, %lane_value : i32
+    %varying_i8 = scalar.trunci %varying : i32 to i8
+    %varying_i8_unsigned = scalar.extui %varying_i8 : i8 to i32
+    %varying_i8_signed = scalar.extsi %varying_i8 : i8 to i32
+    %varying_i8_unsigned_sum = scalar.addi %varying_i8_unsigned, %c1 : i32
+    %varying_i8_signed_sum = scalar.addi %varying_i8_signed, %c1 : i32
+    %varying_i8_negative = scalar.cmpi slt, %varying_i8, %byte_sign_boundary : i8
+    %varying_i8_comparison = scf.select %varying_i8_negative, %c1, %c0 : i32
+    %varying_i16 = scalar.trunci %varying : i32 to i16
+    %varying_i16_unsigned = scalar.extui %varying_i16 : i16 to i32
+    %varying_i16_signed = scalar.extsi %varying_i16 : i16 to i32
+    %varying_i16_unsigned_sum = scalar.addi %varying_i16_unsigned, %c1 : i32
+    %varying_i16_signed_sum = scalar.addi %varying_i16_signed, %c1 : i32
+    %varying_i16_negative = scalar.cmpi slt, %varying_i16, %halfword_sign_boundary : i16
+    %varying_i16_comparison = scf.select %varying_i16_negative, %c1, %c0 : i32
+    view.store %input_i8_unsigned_sum, %view[0, %lane] : i32, view<12x32xi32>
+    view.store %input_i8_signed_sum, %view[1, %lane] : i32, view<12x32xi32>
+    view.store %input_i16_unsigned_sum, %view[2, %lane] : i32, view<12x32xi32>
+    view.store %input_i16_signed_sum, %view[3, %lane] : i32, view<12x32xi32>
+    view.store %varying_i8_unsigned_sum, %view[4, %lane] : i32, view<12x32xi32>
+    view.store %varying_i8_signed_sum, %view[5, %lane] : i32, view<12x32xi32>
+    view.store %varying_i16_unsigned_sum, %view[6, %lane] : i32, view<12x32xi32>
+    view.store %varying_i16_signed_sum, %view[7, %lane] : i32, view<12x32xi32>
+    view.store %input_i8_comparison, %view[8, %lane] : i32, view<12x32xi32>
+    view.store %input_i16_comparison, %view[9, %lane] : i32, view<12x32xi32>
+    view.store %varying_i8_comparison, %view[10, %lane] : i32, view<12x32xi32>
+    view.store %varying_i16_comparison, %view[11, %lane] : i32, view<12x32xi32>
+  }
+  func.return
 }
 
-check.case public @narrow_integer_word_sign_boundary {
-  %input = check.literal value(32752) : i32
-  %output = check.generate.fill value(-7777) : tensor<416xi32>
-  kernel.launch @narrow_integer_consumers(%input, %output) : (i32, tensor<416xi32>)
-  %expected_0 = check.generate.fill value(241) : tensor<16xi32>
-  %row_0_0 = check.tensor.view %output offset(64) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_0_0) expected(%expected_0) : tensor<16xi32>
-  %row_0_1 = check.tensor.view %output offset(128) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_0_1) expected(%expected_0) : tensor<16xi32>
-  %expected_1 = check.generate.fill value(-15) : tensor<16xi32>
-  %row_1_0 = check.tensor.view %output offset(192) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_1_0) expected(%expected_1) : tensor<16xi32>
-  %row_1_1 = check.tensor.view %output offset(256) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_1_1) expected(%expected_1) : tensor<16xi32>
-  %expected_2 = check.generate.fill value(32753) : tensor<16xi32>
-  %row_2_0 = check.tensor.view %output offset(320) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_2_0) expected(%expected_2) : tensor<16xi32>
-  %row_2_1 = check.tensor.view %output offset(384) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_2_1) expected(%expected_2) : tensor<16xi32>
-  %row_3_0 = check.tensor.view %output offset(448) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_3_0) expected(%expected_2) : tensor<16xi32>
-  %row_3_1 = check.tensor.view %output offset(512) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_3_1) expected(%expected_2) : tensor<16xi32>
-  %expected_3 = check.generate.iota offset(241) step(1) : tensor<16xi32>
-  %row_4_0 = check.tensor.view %output offset(576) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_4_0) expected(%expected_3) : tensor<16xi32>
-  %expected_4 = check.generate.iota offset(1) step(1) : tensor<16xi32>
-  %row_4_1 = check.tensor.view %output offset(640) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_4_1) expected(%expected_4) : tensor<16xi32>
-  %expected_5 = check.generate.iota offset(-15) step(1) : tensor<16xi32>
-  %row_5_0 = check.tensor.view %output offset(704) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_5_0) expected(%expected_5) : tensor<16xi32>
-  %row_5_1 = check.tensor.view %output offset(768) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_5_1) expected(%expected_4) : tensor<16xi32>
-  %expected_6 = check.generate.iota offset(32753) step(1) : tensor<16xi32>
-  %row_6_0 = check.tensor.view %output offset(832) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_6_0) expected(%expected_6) : tensor<16xi32>
-  %expected_7 = check.generate.iota offset(32769) step(1) : tensor<16xi32>
-  %row_6_1 = check.tensor.view %output offset(896) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_6_1) expected(%expected_7) : tensor<16xi32>
-  %row_7_0 = check.tensor.view %output offset(960) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_7_0) expected(%expected_6) : tensor<16xi32>
-  %expected_8 = check.generate.iota offset(-32767) step(1) : tensor<16xi32>
-  %row_7_1 = check.tensor.view %output offset(1024) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_7_1) expected(%expected_8) : tensor<16xi32>
-  %expected_9 = check.generate.fill value(1) : tensor<16xi32>
-  %row_8_0 = check.tensor.view %output offset(1088) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_8_0) expected(%expected_9) : tensor<16xi32>
-  %row_8_1 = check.tensor.view %output offset(1152) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_8_1) expected(%expected_9) : tensor<16xi32>
-  %expected_10 = check.generate.fill value(0) : tensor<16xi32>
-  %row_9_0 = check.tensor.view %output offset(1216) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_9_0) expected(%expected_10) : tensor<16xi32>
-  %row_9_1 = check.tensor.view %output offset(1280) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_9_1) expected(%expected_10) : tensor<16xi32>
-  %row_10_0 = check.tensor.view %output offset(1344) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_10_0) expected(%expected_9) : tensor<16xi32>
-  %row_10_1 = check.tensor.view %output offset(1408) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_10_1) expected(%expected_10) : tensor<16xi32>
-  %row_11_0 = check.tensor.view %output offset(1472) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_11_0) expected(%expected_10) : tensor<16xi32>
-  %row_11_1 = check.tensor.view %output offset(1536) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_11_1) expected(%expected_9) : tensor<16xi32>
-  %guard = check.generate.fill value(-7777) : tensor<16xi32>
-  %prefix = check.tensor.view %output offset(0) : tensor<416xi32> -> tensor<16xi32>
-  %suffix = check.tensor.view %output offset(1600) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%prefix) expected(%guard) : tensor<16xi32>
-  check.expect.equal actual(%suffix) expected(%guard) : tensor<16xi32>
-  check.return
-}
-
-check.case public @narrow_integer_wrap_boundary {
-  %input = check.literal value(65520) : i32
-  %output = check.generate.fill value(-7777) : tensor<416xi32>
-  kernel.launch @narrow_integer_consumers(%input, %output) : (i32, tensor<416xi32>)
-  %expected_0 = check.generate.fill value(241) : tensor<16xi32>
-  %row_0_0 = check.tensor.view %output offset(64) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_0_0) expected(%expected_0) : tensor<16xi32>
-  %row_0_1 = check.tensor.view %output offset(128) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_0_1) expected(%expected_0) : tensor<16xi32>
-  %expected_1 = check.generate.fill value(-15) : tensor<16xi32>
-  %row_1_0 = check.tensor.view %output offset(192) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_1_0) expected(%expected_1) : tensor<16xi32>
-  %row_1_1 = check.tensor.view %output offset(256) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_1_1) expected(%expected_1) : tensor<16xi32>
-  %expected_2 = check.generate.fill value(65521) : tensor<16xi32>
-  %row_2_0 = check.tensor.view %output offset(320) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_2_0) expected(%expected_2) : tensor<16xi32>
-  %row_2_1 = check.tensor.view %output offset(384) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_2_1) expected(%expected_2) : tensor<16xi32>
-  %row_3_0 = check.tensor.view %output offset(448) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_3_0) expected(%expected_1) : tensor<16xi32>
-  %row_3_1 = check.tensor.view %output offset(512) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_3_1) expected(%expected_1) : tensor<16xi32>
-  %expected_3 = check.generate.iota offset(241) step(1) : tensor<16xi32>
-  %row_4_0 = check.tensor.view %output offset(576) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_4_0) expected(%expected_3) : tensor<16xi32>
-  %expected_4 = check.generate.iota offset(1) step(1) : tensor<16xi32>
-  %row_4_1 = check.tensor.view %output offset(640) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_4_1) expected(%expected_4) : tensor<16xi32>
-  %expected_5 = check.generate.iota offset(-15) step(1) : tensor<16xi32>
-  %row_5_0 = check.tensor.view %output offset(704) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_5_0) expected(%expected_5) : tensor<16xi32>
-  %row_5_1 = check.tensor.view %output offset(768) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_5_1) expected(%expected_4) : tensor<16xi32>
-  %expected_6 = check.generate.iota offset(65521) step(1) : tensor<16xi32>
-  %row_6_0 = check.tensor.view %output offset(832) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_6_0) expected(%expected_6) : tensor<16xi32>
-  %row_6_1 = check.tensor.view %output offset(896) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_6_1) expected(%expected_4) : tensor<16xi32>
-  %row_7_0 = check.tensor.view %output offset(960) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_7_0) expected(%expected_5) : tensor<16xi32>
-  %row_7_1 = check.tensor.view %output offset(1024) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_7_1) expected(%expected_4) : tensor<16xi32>
-  %expected_7 = check.generate.fill value(1) : tensor<16xi32>
-  %row_8_0 = check.tensor.view %output offset(1088) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_8_0) expected(%expected_7) : tensor<16xi32>
-  %row_8_1 = check.tensor.view %output offset(1152) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_8_1) expected(%expected_7) : tensor<16xi32>
-  %row_9_0 = check.tensor.view %output offset(1216) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_9_0) expected(%expected_7) : tensor<16xi32>
-  %row_9_1 = check.tensor.view %output offset(1280) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_9_1) expected(%expected_7) : tensor<16xi32>
-  %row_10_0 = check.tensor.view %output offset(1344) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_10_0) expected(%expected_7) : tensor<16xi32>
-  %expected_8 = check.generate.fill value(0) : tensor<16xi32>
-  %row_10_1 = check.tensor.view %output offset(1408) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_10_1) expected(%expected_8) : tensor<16xi32>
-  %row_11_0 = check.tensor.view %output offset(1472) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_11_0) expected(%expected_7) : tensor<16xi32>
-  %row_11_1 = check.tensor.view %output offset(1536) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%row_11_1) expected(%expected_8) : tensor<16xi32>
-  %guard = check.generate.fill value(-7777) : tensor<16xi32>
-  %prefix = check.tensor.view %output offset(0) : tensor<416xi32> -> tensor<16xi32>
-  %suffix = check.tensor.view %output offset(1600) : tensor<416xi32> -> tensor<16xi32>
-  check.expect.equal actual(%prefix) expected(%guard) : tensor<16xi32>
-  check.expect.equal actual(%suffix) expected(%guard) : tensor<16xi32>
+check.scenario @narrow_integer_consumer_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.literal value(112) : i32
+    %output = check.generate.fill value(-7777) : tensor<416xi32>
+    check.compare<@narrow_integer_consumers, @narrow_integer_consumers_oracle>(%input, %output) : (i32, tensor<416xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<416xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.literal value(32752) : i32
+    %output = check.generate.fill value(-7777) : tensor<416xi32>
+    check.compare<@narrow_integer_consumers, @narrow_integer_consumers_oracle>(%input, %output) : (i32, tensor<416xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<416xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.literal value(65520) : i32
+    %output = check.generate.fill value(-7777) : tensor<416xi32>
+    check.compare<@narrow_integer_consumers, @narrow_integer_consumers_oracle>(%input, %output) : (i32, tensor<416xi32>) -> () {
+      check.expect.bitwise actual(%output) expected(%output) : tensor<416xi32>
+    }
+  }
   check.return
 }

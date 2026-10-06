@@ -1,48 +1,58 @@
 // Inputs arrive as raw bits, preserving signaling NaNs and signed zeros.
 // Normalize only the NaN sign and payload; a signaling result still fails.
+func.def inline @scalar_float64_result_bits(%value: f64) -> (i64) {
+  %bits = scalar.bitcast %value : f64 to i64
+  %is_nan = scalar.cmpf uno, %value, %value : f64
+  %quiet_bit = scalar.constant 2251799813685248 : i64
+  %exponent = scalar.constant 9218868437227405312 : i64
+  %quiet = scalar.andi %bits, %quiet_bit : i64
+  %tag = scalar.ori %quiet, %exponent : i64
+  %observed = scf.select %is_nan, %tag, %bits : i64
+  func.return %observed : i64
+}
+
 func.def @scalar_float64_pair(%lhs_bits: i64, %rhs_bits: i64, %arithmetic: buffer, %predicates: buffer) {
   %base = index.constant 0 : offset
-  %numbers = buffer.view %arithmetic[%base] : buffer -> view<5xi64>
+  %numbers = buffer.view %arithmetic[%base] : buffer -> view<12xi64>
   %conditions = buffer.view %predicates[%base] : buffer -> view<14xi32>
   %lhs = scalar.bitcast %lhs_bits : i64 to f64
   %rhs = scalar.bitcast %rhs_bits : i64 to f64
-  %quiet_bit = scalar.constant 2251799813685248 : i64
-  %exponent = scalar.constant 9218868437227405312 : i64
   %addf = scalar.addf %lhs, %rhs : f64
-  %addf_bits = scalar.bitcast %addf : f64 to i64
-  %addf_nan = scalar.cmpf uno, %addf, %addf : f64
-  %addf_quiet = scalar.andi %addf_bits, %quiet_bit : i64
-  %addf_tag = scalar.ori %addf_quiet, %exponent : i64
-  %addf_observed = scf.select %addf_nan, %addf_tag, %addf_bits : i64
-  view.store %addf_observed, %numbers[0] : i64, view<5xi64>
+  %addf_bits = func.call @scalar_float64_result_bits(%addf) : (f64) -> (i64)
+  %subf = scalar.subf %lhs, %rhs : f64
+  %subf_bits = func.call @scalar_float64_result_bits(%subf) : (f64) -> (i64)
+  %mulf = scalar.mulf %lhs, %rhs : f64
+  %mulf_bits = func.call @scalar_float64_result_bits(%mulf) : (f64) -> (i64)
+  %divf = scalar.divf %lhs, %rhs : f64
+  %divf_bits = func.call @scalar_float64_result_bits(%divf) : (f64) -> (i64)
+  %remf = scalar.remf %lhs, %rhs : f64
+  %remf_bits = func.call @scalar_float64_result_bits(%remf) : (f64) -> (i64)
+  %absf = scalar.absf %lhs : f64
+  %absf_bits = func.call @scalar_float64_result_bits(%absf) : (f64) -> (i64)
+  %negf = scalar.negf %lhs : f64
+  %negf_bits = func.call @scalar_float64_result_bits(%negf) : (f64) -> (i64)
+  %copysignf = scalar.copysignf %lhs, %rhs : f64
+  %copysignf_bits = func.call @scalar_float64_result_bits(%copysignf) : (f64) -> (i64)
   %minimumf = scalar.minimumf %lhs, %rhs : f64
-  %minimumf_bits = scalar.bitcast %minimumf : f64 to i64
-  %minimumf_nan = scalar.cmpf uno, %minimumf, %minimumf : f64
-  %minimumf_quiet = scalar.andi %minimumf_bits, %quiet_bit : i64
-  %minimumf_tag = scalar.ori %minimumf_quiet, %exponent : i64
-  %minimumf_observed = scf.select %minimumf_nan, %minimumf_tag, %minimumf_bits : i64
-  view.store %minimumf_observed, %numbers[1] : i64, view<5xi64>
+  %minimumf_bits = func.call @scalar_float64_result_bits(%minimumf) : (f64) -> (i64)
   %maximumf = scalar.maximumf %lhs, %rhs : f64
-  %maximumf_bits = scalar.bitcast %maximumf : f64 to i64
-  %maximumf_nan = scalar.cmpf uno, %maximumf, %maximumf : f64
-  %maximumf_quiet = scalar.andi %maximumf_bits, %quiet_bit : i64
-  %maximumf_tag = scalar.ori %maximumf_quiet, %exponent : i64
-  %maximumf_observed = scf.select %maximumf_nan, %maximumf_tag, %maximumf_bits : i64
-  view.store %maximumf_observed, %numbers[2] : i64, view<5xi64>
+  %maximumf_bits = func.call @scalar_float64_result_bits(%maximumf) : (f64) -> (i64)
   %minnumf = scalar.minnumf %lhs, %rhs : f64
-  %minnumf_bits = scalar.bitcast %minnumf : f64 to i64
-  %minnumf_nan = scalar.cmpf uno, %minnumf, %minnumf : f64
-  %minnumf_quiet = scalar.andi %minnumf_bits, %quiet_bit : i64
-  %minnumf_tag = scalar.ori %minnumf_quiet, %exponent : i64
-  %minnumf_observed = scf.select %minnumf_nan, %minnumf_tag, %minnumf_bits : i64
-  view.store %minnumf_observed, %numbers[3] : i64, view<5xi64>
+  %minnumf_bits = func.call @scalar_float64_result_bits(%minnumf) : (f64) -> (i64)
   %maxnumf = scalar.maxnumf %lhs, %rhs : f64
-  %maxnumf_bits = scalar.bitcast %maxnumf : f64 to i64
-  %maxnumf_nan = scalar.cmpf uno, %maxnumf, %maxnumf : f64
-  %maxnumf_quiet = scalar.andi %maxnumf_bits, %quiet_bit : i64
-  %maxnumf_tag = scalar.ori %maxnumf_quiet, %exponent : i64
-  %maxnumf_observed = scf.select %maxnumf_nan, %maxnumf_tag, %maxnumf_bits : i64
-  view.store %maxnumf_observed, %numbers[4] : i64, view<5xi64>
+  %maxnumf_bits = func.call @scalar_float64_result_bits(%maxnumf) : (f64) -> (i64)
+  view.store %addf_bits, %numbers[0] : i64, view<12xi64>
+  view.store %subf_bits, %numbers[1] : i64, view<12xi64>
+  view.store %mulf_bits, %numbers[2] : i64, view<12xi64>
+  view.store %divf_bits, %numbers[3] : i64, view<12xi64>
+  view.store %remf_bits, %numbers[4] : i64, view<12xi64>
+  view.store %absf_bits, %numbers[5] : i64, view<12xi64>
+  view.store %negf_bits, %numbers[6] : i64, view<12xi64>
+  view.store %copysignf_bits, %numbers[7] : i64, view<12xi64>
+  view.store %minimumf_bits, %numbers[8] : i64, view<12xi64>
+  view.store %maximumf_bits, %numbers[9] : i64, view<12xi64>
+  view.store %minnumf_bits, %numbers[10] : i64, view<12xi64>
+  view.store %maxnumf_bits, %numbers[11] : i64, view<12xi64>
   %oeq = scalar.cmpf oeq, %lhs, %rhs : f64
   %oeq_word = scalar.extui %oeq : i1 to i32
   view.store %oeq_word, %conditions[0] : i32, view<14xi32>
@@ -92,190 +102,190 @@ check.scenario @scalar_float64_special_values {
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(-4616189618054758400) : i64
     %rhs = check.literal value(4611686018427387904) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(0) : i64
     %rhs = check.literal value(-9223372036854775808) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(-9223372036854775808) : i64
     %rhs = check.literal value(0) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(-9223372036854775808) : i64
     %rhs = check.literal value(-9223372036854775808) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(9218868437227405312) : i64
     %rhs = check.literal value(-4503599627370496) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(1) : i64
     %rhs = check.literal value(-9223372036854775807) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(4503599627370496) : i64
     %rhs = check.literal value(4503599627370495) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(4607182418800017408) : i64
     %rhs = check.literal value(4368491638549381120) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(4607182418800017409) : i64
     %rhs = check.literal value(4368491638549381120) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(9221120237041090851) : i64
     %rhs = check.literal value(4611686018427387904) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(-2251799813684138) : i64
     %rhs = check.literal value(4611686018427387904) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(9218868437227407241) : i64
     %rhs = check.literal value(4611686018427387904) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(-4503599627367748) : i64
     %rhs = check.literal value(4611686018427387904) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(4611686018427387904) : i64
     %rhs = check.literal value(9221120237041090851) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(4611686018427387904) : i64
     %rhs = check.literal value(-2251799813684138) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(4611686018427387904) : i64
     %rhs = check.literal value(9218868437227407241) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(4611686018427387904) : i64
     %rhs = check.literal value(-4503599627367748) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(9221120237041090851) : i64
     %rhs = check.literal value(9218868437227407241) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
   check.trial[1](%trial: index, %entropy: check.entropy) {
     %lhs = check.literal value(-4503599627367748) : i64
     %rhs = check.literal value(-2251799813684138) : i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }
@@ -286,10 +296,10 @@ check.scenario @scalar_float64_random_values {
   check.trial[8](%trial: index, %entropy: check.entropy) {
     %lhs = check.entropy.read %entropy[0] : check.entropy -> i64
     %rhs = check.entropy.read %entropy[1] : check.entropy -> i64
-    %numbers = check.generate.fill value(-1) : tensor<5xi64>
+    %numbers = check.generate.fill value(-1) : tensor<12xi64>
     %conditions = check.generate.fill value(-1) : tensor<14xi32>
-    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<5xi64>, tensor<14xi32>) -> () {
-      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<5xi64>
+    check.compare<@scalar_float64_pair>(%lhs, %rhs, %numbers, %conditions) : (i64, i64, tensor<12xi64>, tensor<14xi32>) -> () {
+      check.expect.bitwise actual(%numbers) expected(%numbers) : tensor<12xi64>
       check.expect.bitwise actual(%conditions) expected(%conditions) : tensor<14xi32>
     }
   }

@@ -4,8 +4,8 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_build", "loom_corpus_test")
-load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS")
+load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_build", "loom_legacy_case_test")
+load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS", "LOOM_LEGACY_CASES")
 load("//loom/target/vm:execution_profiles.bzl", "VM_REFERENCE_PROFILE")
 
 package(default_visibility = ["//visibility:public"])
@@ -91,8 +91,6 @@ _KERNEL_SOURCES = [
     "numeric/conversion/integer_floating.loom",
     "numeric/conversion/integer_widths.loom",
     "numeric/conversion/narrow_vectors.loom",
-    "numeric/conversion/packed_integer_float.loom",
-    "numeric/conversion/packed_integer_float8.loom",
     "numeric/conversion/quantization.loom",
     "numeric/float/approximate_extended.loom",
     "numeric/float/extrema.loom",
@@ -107,9 +105,88 @@ _KERNEL_SOURCES = [
     "numeric/vector/integer_widening.loom",
 ]
 
+_LEGACY_KERNEL_SOURCES = [
+    "control/branch/cfg.loom",
+    "control/branch/effects.loom",
+    "control/branch/guards.loom",
+    "control/branch/results.loom",
+    "control/branch/uniform_predicate.loom",
+    "control/loop/callable.loom",
+    "control/loop/carried_lane_liveness.loom",
+    "control/loop/condition.loom",
+    "control/loop/count.loom",
+    "control/loop/sequential_slices.loom",
+    "control/loop/termination.loom",
+    "control/loop/wide_index_recurrence.loom",
+    "control/schedule/guarded_recurrence.loom",
+    "control/schedule/ordered_read_ahead.loom",
+    "control/schedule/unroll_scope.loom",
+    "kernel/subgroup/active_predicate.loom",
+    "kernel/subgroup/ballot.loom",
+    "kernel/subgroup/shuffle_dynamic.loom",
+    "kernel/workgroup/loop_state.loom",
+    "kernel/workgroup/reduce_partial.loom",
+    "kernel/workgroup/reduce_tree.loom",
+    "memory/address/carrier_casts.loom",
+    "memory/address/carrier_loops.loom",
+    "memory/address/generic.loom",
+    "memory/address/integer_casts.loom",
+    "memory/address/integer_terms.loom",
+    "memory/address/narrow.loom",
+    "memory/address/scaling.loom",
+    "memory/address/selection.loom",
+    "memory/address/signed_terms.loom",
+    "memory/address/table_index.loom",
+    "memory/address/uniform_add.loom",
+    "memory/address/widening.loom",
+    "memory/atomic/add_f32_subnormals.loom",
+    "memory/atomic/float_bitwise.loom",
+    "memory/atomic/float_extrema.loom",
+    "memory/atomic/float64_contention.loom",
+    "memory/atomic/global_add_f32.loom",
+    "memory/atomic/i64.loom",
+    "memory/atomic/narrow/cmpxchg.loom",
+    "memory/atomic/narrow/contention.loom",
+    "memory/atomic/narrow/float.loom",
+    "memory/atomic/narrow/observations.loom",
+    "memory/atomic/narrow/scopes.loom",
+    "memory/atomic/narrow/vector.loom",
+    "memory/atomic/private.loom",
+    "memory/atomic/vector.loom",
+    "memory/atomic/workgroup/cmpxchg.loom",
+    "memory/atomic/workgroup/global.loom",
+    "memory/atomic/workgroup/observations.loom",
+    "memory/atomic/workgroup/vector.loom",
+    "memory/packed/alignment.loom",
+    "memory/packed/consumers.loom",
+    "memory/packed/lookup_widths.loom",
+    "memory/packed/tails.loom",
+    "memory/storage/byte_banks.loom",
+    "memory/storage/load_snapshot.loom",
+    "memory/storage/natural_alignment.loom",
+    "memory/storage/private.loom",
+    "memory/storage/stability/cfg.loom",
+    "memory/storage/stability/selection.loom",
+    "memory/storage/stability/switch.loom",
+    "memory/view/shrinking.loom",
+    "memory/view/strided_recurrence.loom",
+    "memory/view/subview.loom",
+    "memory/view/window_walk.loom",
+    "numeric/float/approximate_extended.loom",
+    "numeric/float/extrema.loom",
+    "numeric/float/narrow_reduction.loom",
+    "numeric/integer/bitwise_divisibility.loom",
+    "numeric/predicate/extract.loom",
+]
+
 _NO_KERNEL_ARTIFACT_EXCLUDES = {
     source: "VM has no kernel artifact format."
     for source in _KERNEL_SOURCES
+}
+
+_NO_KERNEL_CASE_EXCLUDES = {
+    source: "VM has no kernel execution model."
+    for source in _LEGACY_KERNEL_SOURCES
 }
 
 loom_corpus_build(
@@ -125,15 +202,9 @@ loom_corpus_build(
     },
 )
 
-loom_corpus_test(
+loom_legacy_case_test(
     name = "execution",
-    catalog = LOOM_CORPUS,
-    excludes = _NO_KERNEL_ARTIFACT_EXCLUDES,
+    catalog = LOOM_LEGACY_CASES,
+    excludes = _NO_KERNEL_CASE_EXCLUDES,
     execution_profiles = [VM_REFERENCE_PROFILE],
-    xfails = {
-        VM_REFERENCE_PROFILE.name: {
-            "memory/atomic/float64.loom:@atomic_f64_random_values": "TARGET/003",
-            "memory/atomic/float64.loom:@atomic_f64_special_values": "TARGET/003",
-        },
-    },
 )

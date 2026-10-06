@@ -8,12 +8,16 @@ func.def @unsupported() -> (i32) {
   func.return %value : i32
 }
 
-check.case @fixture_cases {
-  %supported = func.call @supported() : () -> (i32)
-  %supported_expected = check.literal value(42) : i32
-  check.expect.equal actual(%supported) expected(%supported_expected) : i32
-  %unsupported = func.call @unsupported() : () -> (i32)
-  %unsupported_expected = check.literal value(72) : i32
-  check.expect.equal actual(%unsupported) expected(%unsupported_expected) : i32
+check.scenario @fixture_scenario {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    check.compare<@supported>() : () -> [actual(%actual: i32), expected(%expected: i32)] {
+      check.expect.equal actual(%actual) expected(%expected) : i32
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    check.compare<@unsupported>() : () -> [actual(%actual: i32), expected(%expected: i32)] {
+      check.expect.equal actual(%actual) expected(%expected) : i32
+    }
+  }
   check.return
 }

@@ -129,8 +129,10 @@ class LoomBuildFileFunctions(
         return {
             **super()._declarative_load_bindings(),
             "loom_corpus_catalog": self.loom_corpus_catalog,
+            "loom_legacy_case_corpus": self.loom_legacy_case_corpus,
             "loom_corpus_manifest": self.loom_corpus_manifest,
             "loom_execution_profile": self.loom_execution_profile,
+            "loom_scenario_corpus": self.loom_scenario_corpus,
         }
 
     def _custom_initialize(self):

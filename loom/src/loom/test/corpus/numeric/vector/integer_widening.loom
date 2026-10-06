@@ -1,99 +1,20 @@
 // Narrow lanes widen with independent signed and unsigned interpretations.
-// Minimum, maximum and zero-crossing inputs exercise both words of each i64
-// result and neighboring packed lanes. Each vector result occupies 32 words.
-
+// Directed inputs span both endpoints; entropy supplies arbitrary lane payloads.
 kernel.def @vector_widen_i8() {
   %unit = index.constant 1 : index
   kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %signed_base = index.constant 128 : offset
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %independent = buffer.assume.noalias %aligned : buffer
-  %input_view = buffer.view %independent[%base] : buffer -> view<16xi8>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
   %unsigned_view = buffer.view %output[%base] : buffer -> view<16xi64>
   %signed_view = buffer.view %output[%signed_base] : buffer -> view<16xi64>
   %packed = vector.load %input_view[0] : view<16xi8> -> vector<16xi8>
   %unsigned = vector.extui %packed : vector<16xi8> to vector<16xi64>
-  vector.store %unsigned, %unsigned_view[0] : vector<16xi64>, view<16xi64>
   %signed = vector.extsi %packed : vector<16xi8> to vector<16xi64>
+  vector.store %unsigned, %unsigned_view[0] : vector<16xi64>, view<16xi64>
   vector.store %signed, %signed_view[0] : vector<16xi64>, view<16xi64>
   kernel.return
-}
-
-check.case public @vector_i8_widen_minimum {
-  %input = check.generate.iota offset(-128) step(1) : tensor<16xi8>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i8(%input, %output) : (tensor<16xi8>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(128) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(135) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(-128) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(-121) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
-  check.return
-}
-
-check.case public @vector_i8_widen_maximum {
-  %input = check.generate.iota offset(112) step(1) : tensor<16xi8>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i8(%input, %output) : (tensor<16xi8>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(112) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(119) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(112) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(119) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
-  check.return
-}
-
-check.case public @vector_i8_widen_zero {
-  %input = check.generate.iota offset(-7) step(1) : tensor<16xi8>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i8(%input, %output) : (tensor<16xi8>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(249) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(0) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(-7) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(0) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
-  check.return
 }
 
 kernel.def @vector_widen_i16() {
@@ -102,92 +23,15 @@ kernel.def @vector_widen_i16() {
 } launch(%input: buffer, %output: buffer) {
   %base = index.constant 0 : offset
   %signed_base = index.constant 128 : offset
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %independent = buffer.assume.noalias %aligned : buffer
-  %input_view = buffer.view %independent[%base] : buffer -> view<16xi16>
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi16>
   %unsigned_view = buffer.view %output[%base] : buffer -> view<16xi64>
   %signed_view = buffer.view %output[%signed_base] : buffer -> view<16xi64>
   %packed = vector.load %input_view[0] : view<16xi16> -> vector<16xi16>
   %unsigned = vector.extui %packed : vector<16xi16> to vector<16xi64>
-  vector.store %unsigned, %unsigned_view[0] : vector<16xi64>, view<16xi64>
   %signed = vector.extsi %packed : vector<16xi16> to vector<16xi64>
+  vector.store %unsigned, %unsigned_view[0] : vector<16xi64>, view<16xi64>
   vector.store %signed, %signed_view[0] : vector<16xi64>, view<16xi64>
   kernel.return
-}
-
-check.case public @vector_i16_widen_minimum {
-  %input = check.generate.iota offset(-32768) step(1) : tensor<16xi16>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i16(%input, %output) : (tensor<16xi16>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(32768) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(32775) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(-32768) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(-32761) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
-  check.return
-}
-
-check.case public @vector_i16_widen_maximum {
-  %input = check.generate.iota offset(32752) step(1) : tensor<16xi16>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i16(%input, %output) : (tensor<16xi16>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(32752) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(32759) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(32752) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(32759) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
-  check.return
-}
-
-check.case public @vector_i16_widen_zero {
-  %input = check.generate.iota offset(-7) step(1) : tensor<16xi16>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i16(%input, %output) : (tensor<16xi16>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(65529) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(0) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(-7) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(0) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
-  check.return
 }
 
 kernel.def @vector_widen_i32() {
@@ -201,83 +45,131 @@ kernel.def @vector_widen_i32() {
   %signed_view = buffer.view %output[%signed_base] : buffer -> view<16xi64>
   %packed = vector.load %input_view[0] : view<16xi32> -> vector<16xi32>
   %unsigned = vector.extui %packed : vector<16xi32> to vector<16xi64>
-  vector.store %unsigned, %unsigned_view[0] : vector<16xi64>, view<16xi64>
   %signed = vector.extsi %packed : vector<16xi32> to vector<16xi64>
+  vector.store %unsigned, %unsigned_view[0] : vector<16xi64>, view<16xi64>
   vector.store %signed, %signed_view[0] : vector<16xi64>, view<16xi64>
   kernel.return
 }
 
-check.case public @vector_i32_widen_minimum {
-  %input = check.generate.iota offset(-2147483648) step(1) : tensor<16xi32>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i32(%input, %output) : (tensor<16xi32>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(2147483648) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(2147483655) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(-2147483648) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(-2147483641) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
+func.def @vector_widen_i8_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi8>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    %value = view.load %input_view[%lane] : view<16xi8> -> i8
+    %unsigned = scalar.extui %value : i8 to i64
+    %signed = scalar.extsi %value : i8 to i64
+    %signed_lane = index.add %lane, %end : index
+    view.store %unsigned, %output_view[%lane] : i64, view<32xi64>
+    view.store %signed, %output_view[%signed_lane] : i64, view<32xi64>
+  }
+  func.return
+}
+
+func.def @vector_widen_i16_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi16>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    %value = view.load %input_view[%lane] : view<16xi16> -> i16
+    %unsigned = scalar.extui %value : i16 to i64
+    %signed = scalar.extsi %value : i16 to i64
+    %signed_lane = index.add %lane, %end : index
+    view.store %unsigned, %output_view[%lane] : i64, view<32xi64>
+    view.store %signed, %output_view[%signed_lane] : i64, view<32xi64>
+  }
+  func.return
+}
+
+func.def @vector_widen_i32_oracle(%input: buffer, %output: buffer) {
+  %base = index.constant 0 : offset
+  %input_view = buffer.view %input[%base] : buffer -> view<16xi32>
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi64>
+  %begin = index.constant 0 : index
+  %end = index.constant 16 : index
+  %step = index.constant 1 : index
+  scf.for %lane = [%begin to %end step %step] {
+    %value = view.load %input_view[%lane] : view<16xi32> -> i32
+    %unsigned = scalar.extui %value : i32 to i64
+    %signed = scalar.extsi %value : i32 to i64
+    %signed_lane = index.add %lane, %end : index
+    view.store %unsigned, %output_view[%lane] : i64, view<32xi64>
+    view.store %signed, %output_view[%signed_lane] : i64, view<32xi64>
+  }
+  func.return
+}
+
+check.scenario @vector_widen_i8_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-128) step(17) : tensor<16xi8>
+    %storage = check.generate.fill value(-123) : tensor<40xi64>
+    %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
+    check.compare<@vector_widen_i8, @vector_widen_i8_oracle>(%input, %output) : (tensor<16xi8>, tensor<32xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<16xi8>
+    %storage = check.generate.fill value(-123) : tensor<40xi64>
+    %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
+    check.compare<@vector_widen_i8, @vector_widen_i8_oracle>(%input, %output) : (tensor<16xi8>, tensor<32xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi8>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi64>
+    }
+  }
   check.return
 }
 
-check.case public @vector_i32_widen_maximum {
-  %input = check.generate.iota offset(2147483632) step(1) : tensor<16xi32>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i32(%input, %output) : (tensor<16xi32>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(2147483632) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(2147483639) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(2147483632) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(2147483639) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
+check.scenario @vector_widen_i16_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-32768) step(4369) : tensor<16xi16>
+    %storage = check.generate.fill value(-123) : tensor<40xi64>
+    %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
+    check.compare<@vector_widen_i16, @vector_widen_i16_oracle>(%input, %output) : (tensor<16xi16>, tensor<32xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi16>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-32768 to 32767) : tensor<16xi16>
+    %storage = check.generate.fill value(-123) : tensor<40xi64>
+    %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
+    check.compare<@vector_widen_i16, @vector_widen_i16_oracle>(%input, %output) : (tensor<16xi16>, tensor<32xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi16>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi64>
+    }
+  }
   check.return
 }
 
-check.case public @vector_i32_widen_zero {
-  %input = check.generate.iota offset(-7) step(1) : tensor<16xi32>
-  %storage = check.generate.fill value(-123) : tensor<40xi64>
-  %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
-  kernel.launch @vector_widen_i32(%input, %output) : (tensor<16xi32>, tensor<32xi64>)
-  %unsigned_head = check.tensor.view %output offset(0) : tensor<32xi64> -> tensor<7xi64>
-  %unsigned_tail = check.tensor.view %output offset(56) : tensor<32xi64> -> tensor<9xi64>
-  %signed_head = check.tensor.view %output offset(128) : tensor<32xi64> -> tensor<7xi64>
-  %signed_tail = check.tensor.view %output offset(184) : tensor<32xi64> -> tensor<9xi64>
-  %expected_unsigned_head = check.generate.iota offset(4294967289) step(1) : tensor<7xi64>
-  %expected_unsigned_tail = check.generate.iota offset(0) step(1) : tensor<9xi64>
-  %expected_signed_head = check.generate.iota offset(-7) step(1) : tensor<7xi64>
-  %expected_signed_tail = check.generate.iota offset(0) step(1) : tensor<9xi64>
-  check.expect.bitwise actual(%unsigned_head) expected(%expected_unsigned_head) : tensor<7xi64>
-  check.expect.bitwise actual(%unsigned_tail) expected(%expected_unsigned_tail) : tensor<9xi64>
-  check.expect.bitwise actual(%signed_head) expected(%expected_signed_head) : tensor<7xi64>
-  check.expect.bitwise actual(%signed_tail) expected(%expected_signed_tail) : tensor<9xi64>
-  %prefix = check.tensor.view %storage offset(0) : tensor<40xi64> -> tensor<4xi64>
-  %suffix = check.tensor.view %storage offset(288) : tensor<40xi64> -> tensor<4xi64>
-  %guard = check.generate.fill value(-123) : tensor<4xi64>
-  check.expect.bitwise actual(%prefix) expected(%guard) : tensor<4xi64>
-  check.expect.bitwise actual(%suffix) expected(%guard) : tensor<4xi64>
+check.scenario @vector_widen_i32_values {
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(-2147483648) step(286331153) : tensor<16xi32>
+    %storage = check.generate.fill value(-123) : tensor<40xi64>
+    %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
+    check.compare<@vector_widen_i32, @vector_widen_i32_oracle>(%input, %output) : (tensor<16xi32>, tensor<32xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi64>
+    }
+  }
+  check.trial[64](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input = check.generate.random.uniform seed(%seed) range(-2147483648 to 2147483647) : tensor<16xi32>
+    %storage = check.generate.fill value(-123) : tensor<40xi64>
+    %output = check.tensor.view %storage offset(32) : tensor<40xi64> -> tensor<32xi64>
+    check.compare<@vector_widen_i32, @vector_widen_i32_oracle>(%input, %output) : (tensor<16xi32>, tensor<32xi64>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<16xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi64>
+    }
+  }
   check.return
 }

@@ -41,66 +41,6 @@ kernel.def @rotate_views_d1_u1() {
   kernel.return
 }
 
-check.case public @rotate_views_d1_u1_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(0) step(0) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u1_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u1_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(67) step(3) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u1_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(262) step(6) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u1_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(5412) step(36) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u1_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(181092737) step(33153) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
 kernel.def @rotate_views_d1_u2() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -141,66 +81,6 @@ kernel.def @rotate_views_d1_u2() {
   %output_view = buffer.view %destination[%base] : buffer -> view<32xi32>
   view.store %total, %output_view[%lane] : i32, view<32xi32>
   kernel.return
-}
-
-check.case public @rotate_views_d1_u2_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(0) step(0) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u2_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u2_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(67) step(3) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u2_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(262) step(6) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u2_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(5412) step(36) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d1_u2_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(181092737) step(33153) : tensor<32xi32>
-  kernel.launch @rotate_views_d1_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
 }
 
 kernel.def @rotate_views_d2_u1() {
@@ -255,66 +135,6 @@ kernel.def @rotate_views_d2_u1() {
   kernel.return
 }
 
-check.case public @rotate_views_d2_u1_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(0) step(0) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u1_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u1_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(67) step(3) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u1_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(262) step(6) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u1_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(5412) step(36) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u1_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(181092737) step(33153) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
 kernel.def @rotate_views_d2_u2() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -365,66 +185,6 @@ kernel.def @rotate_views_d2_u2() {
   %output_view = buffer.view %destination[%base] : buffer -> view<32xi32>
   view.store %total, %output_view[%lane] : i32, view<32xi32>
   kernel.return
-}
-
-check.case public @rotate_views_d2_u2_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(0) step(0) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u2_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u2_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(67) step(3) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u2_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(262) step(6) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u2_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(5412) step(36) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d2_u2_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(181092737) step(33153) : tensor<32xi32>
-  kernel.launch @rotate_views_d2_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
 }
 
 kernel.def @rotate_views_d4_u1() {
@@ -499,66 +259,6 @@ kernel.def @rotate_views_d4_u1() {
   kernel.return
 }
 
-check.case public @rotate_views_d4_u1_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(0) step(0) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u1_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u1_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(67) step(3) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u1_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(262) step(6) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u1_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(5412) step(36) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u1_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(181092737) step(33153) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u1(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
 kernel.def @rotate_views_d4_u2() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -631,66 +331,6 @@ kernel.def @rotate_views_d4_u2() {
   kernel.return
 }
 
-check.case public @rotate_views_d4_u2_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(0) step(0) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u2_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u2_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(67) step(3) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u2_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(262) step(6) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u2_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(5412) step(36) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_views_d4_u2_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(181092737) step(33153) : tensor<32xi32>
-  kernel.launch @rotate_views_d4_u2(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
 // Replacing the oldest record and rotating leaves records N through N+D-1
 // in the returned views. Reading every result also observes the zero-trip
 // path and the original initial slot identities.
@@ -730,66 +370,6 @@ kernel.def @rotate_view_results_d1_u1() {
   kernel.return
 }
 
-check.case public @rotate_view_results_d1_u1_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u1(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u1_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(33) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u1(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u1_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(65) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u1(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u1_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(97) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u1(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u1_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(257) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u1(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u1_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(8225) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u1(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
 kernel.def @rotate_view_results_d1_u2() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -824,66 +404,6 @@ kernel.def @rotate_view_results_d1_u2() {
   %output0 = buffer.view %destination[%offset0] : buffer -> view<32xi32>
   view.store %result0, %output0[%lane] : i32, view<32xi32>
   kernel.return
-}
-
-check.case public @rotate_view_results_d1_u2_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u2(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u2_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(33) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u2(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u2_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(65) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u2(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u2_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(97) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u2(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u2_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(257) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u2(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d1_u2_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
-  %output = check.generate.fill value(-99) : tensor<32xi32>
-  %expected = check.generate.iota offset(8225) step(1) : tensor<32xi32>
-  kernel.launch @rotate_view_results_d1_u2(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<32xi32>
-  check.return
 }
 
 kernel.def @rotate_view_results_d2_u1() {
@@ -930,66 +450,6 @@ kernel.def @rotate_view_results_d2_u1() {
   kernel.return
 }
 
-check.case public @rotate_view_results_d2_u1_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u1(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u1_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(33) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u1(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u1_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(65) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u1(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u1_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(97) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u1(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u1_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(257) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u1(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u1_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(8225) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u1(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
 kernel.def @rotate_view_results_d2_u2() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -1032,66 +492,6 @@ kernel.def @rotate_view_results_d2_u2() {
   %output1 = buffer.view %destination[%offset1] : buffer -> view<32xi32>
   view.store %result1, %output1[%lane] : i32, view<32xi32>
   kernel.return
-}
-
-check.case public @rotate_view_results_d2_u2_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u2(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u2_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(33) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u2(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u2_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(65) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u2(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u2_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(97) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u2(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u2_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(257) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u2(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d2_u2_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
-  %output = check.generate.fill value(-99) : tensor<64xi32>
-  %expected = check.generate.iota offset(8225) step(1) : tensor<64xi32>
-  kernel.launch @rotate_view_results_d2_u2(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<64xi32>
-  check.return
 }
 
 kernel.def @rotate_view_results_d4_u1() {
@@ -1154,66 +554,6 @@ kernel.def @rotate_view_results_d4_u1() {
   kernel.return
 }
 
-check.case public @rotate_view_results_d4_u1_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u1(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d4_u1_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(33) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u1(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d4_u1_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(65) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u1(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d4_u1_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(97) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u1(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d4_u1_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(257) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u1(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d4_u1_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(8225) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u1(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
-}
-
 kernel.def @rotate_view_results_d4_u2() {
   %unit = index.constant 1 : index
   %width = index.constant 32 : index
@@ -1274,62 +614,299 @@ kernel.def @rotate_view_results_d4_u2() {
   kernel.return
 }
 
-check.case public @rotate_view_results_d4_u2_n0 {
-  %count = check.literal value(0) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(1) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u2(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
+func.def @rotate_views_oracle(%count0: index, %input: buffer, %output: buffer) {
+  %count = index.assume %count0 [range(%count0, 0, 257)] : index
+  %begin = index.constant 0 : index
+  %lane_end = index.constant 32 : index
+  %step = index.constant 1 : index
+  %base = index.constant 0 : offset
+  %row_stride = index.constant 128 : offset
+  %c0 = scalar.constant 0 : i32
+  %source = buffer.assume.noalias %input : buffer
+  %output_view = buffer.view %output[%base] : buffer -> view<32xi32>
+  scf.for %lane = [%begin to %lane_end step %step] {
+    %total = scf.for %record = [%begin to %count step %step](%sum = %c0 : i32) -> (i32) {
+      %row_offset = index.scale %record, %row_stride : index, offset -> offset
+      %row = buffer.view %source[%row_offset] : buffer -> view<32xi32>
+      %value = view.load %row[%lane] : view<32xi32> -> i32
+      %weight_index = index.add %record, %step : index
+      %weight = index.cast %weight_index : index to i32
+      %weighted = scalar.muli %value, %weight : i32
+      %updated = scalar.addi %sum, %weighted : i32
+      scf.yield %updated : i32
+    }
+    view.store %total, %output_view[%lane] : i32, view<32xi32>
+  }
+  func.return
 }
 
-check.case public @rotate_view_results_d4_u2_n1 {
-  %count = check.literal value(1) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(33) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u2(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
+func.def @rotate_view_results_d1_oracle(%count0: index, %input: buffer, %output: buffer) {
+  %count = index.assume %count0 [range(%count0, 0, 257)] : index
+  %stride = index.constant 128 : offset
+  %row_offset = index.scale %count, %stride : index, offset -> offset
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%row_offset] : buffer -> view<32xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<32xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 32 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %source[%position] : view<32xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<32xi32>
+  }
+  func.return
 }
 
-check.case public @rotate_view_results_d4_u2_n2 {
-  %count = check.literal value(2) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(65) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u2(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
+func.def @rotate_view_results_d2_oracle(%count0: index, %input: buffer, %output: buffer) {
+  %count = index.assume %count0 [range(%count0, 0, 257)] : index
+  %stride = index.constant 128 : offset
+  %row_offset = index.scale %count, %stride : index, offset -> offset
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%row_offset] : buffer -> view<64xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<64xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %source[%position] : view<64xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<64xi32>
+  }
+  func.return
 }
 
-check.case public @rotate_view_results_d4_u2_n3 {
-  %count = check.literal value(3) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(97) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u2(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
+func.def @rotate_view_results_d4_oracle(%count0: index, %input: buffer, %output: buffer) {
+  %count = index.assume %count0 [range(%count0, 0, 257)] : index
+  %stride = index.constant 128 : offset
+  %row_offset = index.scale %count, %stride : index, offset -> offset
+  %base = index.constant 0 : offset
+  %source = buffer.view %input[%row_offset] : buffer -> view<128xi32>
+  %destination = buffer.view %output[%base] : buffer -> view<128xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 128 : index
+  %step = index.constant 1 : index
+  scf.for %position = [%begin to %end step %step] {
+    %value = view.load %source[%position] : view<128xi32> -> i32
+    view.store %value, %destination[%position] : i32, view<128xi32>
+  }
+  func.return
 }
 
-check.case public @rotate_view_results_d4_u2_n8 {
-  %count = check.literal value(8) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(257) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u2(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
-  check.return
-}
-
-check.case public @rotate_view_results_d4_u2_n257 {
-  %count = check.literal value(257) : index
-  %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
-  %output = check.generate.fill value(-99) : tensor<128xi32>
-  %expected = check.generate.iota offset(8225) step(1) : tensor<128xi32>
-  kernel.launch @rotate_view_results_d4_u2(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>)
-  check.expect.equal actual(%output) expected(%expected) : tensor<128xi32>
+check.scenario @rotate_view_variants {
+  // rotate_views_d1_u1.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d1_u1, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d1_u1, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_views_d1_u2.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d1_u2, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d1_u2, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_views_d2_u1.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d2_u1, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d2_u1, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_views_d2_u2.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d2_u2, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d2_u2, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_views_d4_u1.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d4_u1, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d4_u1, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_views_d4_u2.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d4_u2, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8224xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_views_d4_u2, @rotate_views_oracle>(%count, %input, %output) : (index, tensor<8224xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8224xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_view_results_d1_u1.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_view_results_d1_u1, @rotate_view_results_d1_oracle>(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8256xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_view_results_d1_u1, @rotate_view_results_d1_oracle>(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8256xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_view_results_d1_u2.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_view_results_d1_u2, @rotate_view_results_d1_oracle>(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8256xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8256xi32>
+    %output = check.generate.fill value(-99) : tensor<32xi32>
+    check.compare<@rotate_view_results_d1_u2, @rotate_view_results_d1_oracle>(%count, %input, %output) : (index, tensor<8256xi32>, tensor<32xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8256xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<32xi32>
+    }
+  }
+  // rotate_view_results_d2_u1.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
+    %output = check.generate.fill value(-99) : tensor<64xi32>
+    check.compare<@rotate_view_results_d2_u1, @rotate_view_results_d2_oracle>(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8288xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
+    %output = check.generate.fill value(-99) : tensor<64xi32>
+    check.compare<@rotate_view_results_d2_u1, @rotate_view_results_d2_oracle>(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8288xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64xi32>
+    }
+  }
+  // rotate_view_results_d2_u2.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
+    %output = check.generate.fill value(-99) : tensor<64xi32>
+    check.compare<@rotate_view_results_d2_u2, @rotate_view_results_d2_oracle>(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8288xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8288xi32>
+    %output = check.generate.fill value(-99) : tensor<64xi32>
+    check.compare<@rotate_view_results_d2_u2, @rotate_view_results_d2_oracle>(%count, %input, %output) : (index, tensor<8288xi32>, tensor<64xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8288xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<64xi32>
+    }
+  }
+  // rotate_view_results_d4_u1.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
+    %output = check.generate.fill value(-99) : tensor<128xi32>
+    check.compare<@rotate_view_results_d4_u1, @rotate_view_results_d4_oracle>(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8352xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
+    %output = check.generate.fill value(-99) : tensor<128xi32>
+    check.compare<@rotate_view_results_d4_u1, @rotate_view_results_d4_oracle>(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8352xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi32>
+    }
+  }
+  // rotate_view_results_d4_u2.
+  check.trial[9](%count: index, %entropy: check.entropy) {
+    %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
+    %output = check.generate.fill value(-99) : tensor<128xi32>
+    check.compare<@rotate_view_results_d4_u2, @rotate_view_results_d4_oracle>(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8352xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %count = check.literal value(257) : index
+    %input = check.generate.iota offset(1) step(1) : tensor<8352xi32>
+    %output = check.generate.fill value(-99) : tensor<128xi32>
+    check.compare<@rotate_view_results_d4_u2, @rotate_view_results_d4_oracle>(%count, %input, %output) : (index, tensor<8352xi32>, tensor<128xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<8352xi32>
+      check.expect.bitwise actual(%output) expected(%output) : tensor<128xi32>
+    }
+  }
   check.return
 }

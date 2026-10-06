@@ -4,8 +4,18 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_build", "loom_corpus_test")
-load("//loom/src/loom/test/corpus:catalog.bzl", "LOOM_CORPUS")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_corpus_build",
+    "loom_legacy_case_test",
+    "loom_scenario_test",
+)
+load(
+    "//loom/src/loom/test/corpus:catalog.bzl",
+    "LOOM_CORPUS",
+    "LOOM_LEGACY_CASES",
+    "LOOM_SCENARIOS",
+)
 load(
     "//loom/src/loom/tooling/target/spirv:execution_profiles.bzl",
     "SPIRV_VULKAN_HARDWARE_PROFILE",
@@ -42,32 +52,12 @@ _NO_DEVICE_SUBJECTS = [
     "memory/view/rotation.loom",
     "memory/view/selected_crops.loom",
     "memory/view/selection.loom",
-    "numeric/conversion/conversion.loom",
-    "numeric/conversion/narrow.loom",
-    "numeric/conversion/paths.loom",
-    "numeric/float/arithmetic.loom",
-    "numeric/float/comparison.loom",
     "numeric/float/exponential.loom",
     "numeric/float/logarithm.loom",
     "numeric/float/roots.loom",
-    "numeric/float/rounding.loom",
-    "numeric/float/selection.loom",
     "numeric/float/selectors.loom",
     "numeric/float/turns.loom",
-    "numeric/integer/arithmetic.loom",
-    "numeric/integer/bitfield.loom",
-    "numeric/integer/boundaries.loom",
-    "numeric/integer/comparison.loom",
-    "numeric/integer/constants.loom",
-    "numeric/integer/division.loom",
-    "numeric/integer/extrema.loom",
     "numeric/predicate/scalar_logic.loom",
-    "numeric/vector/fields.loom",
-    "numeric/vector/floating.loom",
-    "numeric/vector/float_comparison.loom",
-    "numeric/vector/float_extrema.loom",
-    "numeric/vector/indexing.loom",
-    "numeric/vector/reductions.loom",
     "numeric/vector/selection.loom",
 ]
 
@@ -82,6 +72,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "memory/storage/word.loom",
     "memory/view/scalar_exchange.loom",
     "numeric/conversion/bfloat_rounding.loom",
+    "numeric/conversion/conversion.loom",
     "numeric/conversion/f32_narrowing.loom",
     "numeric/conversion/float_narrowing_matrix.loom",
     "numeric/conversion/integer_float8.loom",
@@ -89,26 +80,34 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/conversion/narrow_integer_float.loom",
     "numeric/conversion/narrow_widening.loom",
     "numeric/conversion/scalar_float.loom",
-    "numeric/float/classification.loom",
     "numeric/float/clamp.loom",
+    "numeric/float/classification.loom",
     "numeric/float/half_extrema.loom",
+    "numeric/float/rounding.loom",
     "numeric/float/scalar_f32.loom",
     "numeric/float/scalar_float64.loom",
     "numeric/float/sign.loom",
-    "numeric/integer/scalar_observations.loom",
     "numeric/integer/constant_unsigned_division.loom",
-    "numeric/integer/widening.loom",
+    "numeric/integer/arithmetic.loom",
+    "numeric/integer/bitfield.loom",
+    "numeric/integer/division.loom",
+    "numeric/integer/scalar_observations.loom",
     "numeric/integer/wide/observations.loom",
+    "numeric/integer/widening.loom",
     "numeric/predicate/extension.loom",
     "numeric/predicate/lanes.loom",
     "numeric/predicate/selection.loom",
     "numeric/predicate/truncation.loom",
     "numeric/predicate/vector_logic.loom",
     "numeric/vector/f32.loom",
+    "numeric/vector/floating.loom",
+    "numeric/vector/float_comparison.loom",
+    "numeric/vector/float_extrema.loom",
     "numeric/vector/integer_bitwise.loom",
     "numeric/vector/integer_comparison.loom",
     "numeric/vector/packed_arithmetic.loom",
     "numeric/vector/packed_selection.loom",
+    "numeric/vector/reductions.loom",
 ]
 
 _EXPLICIT_CFG_KERNELS = [
@@ -122,6 +121,16 @@ _EXPLICIT_CFG_KERNELS = [
     "memory/storage/stability/cfg.loom",
 ]
 
+_EXPLICIT_CFG_SCENARIOS = [
+    "control/branch/half.loom",
+]
+
+_LEGACY_EXPLICIT_CFG_KERNELS = [
+    source
+    for source in _EXPLICIT_CFG_KERNELS
+    if source not in _EXPLICIT_CFG_SCENARIOS
+]
+
 _NO_KERNEL_ARTIFACT_EXCLUDES = {
     source: (
         "SPIR-V requires structured control flow." if source in _EXPLICIT_CFG_KERNELS else "SPIR-V has no module artifact format."
@@ -133,7 +142,12 @@ _NO_HARDWARE_SUBJECT_EXCLUDES = {
     source: (
         "SPIR-V requires structured control flow." if source in _EXPLICIT_CFG_KERNELS else "The source has no SPIR-V device subject."
     )
-    for source in _NO_DEVICE_SUBJECTS + _EXPLICIT_CFG_KERNELS
+    for source in _NO_DEVICE_SUBJECTS + _LEGACY_EXPLICIT_CFG_KERNELS
+}
+
+_SCENARIO_EXCLUDES = {
+    source: "SPIR-V requires structured control flow."
+    for source in _EXPLICIT_CFG_SCENARIOS
 }
 
 _ALL_PROFILE_XFAILS = {
@@ -304,24 +318,6 @@ _NO_EXTENDED_TYPES_XFAILS = {
     "numeric/conversion/integer_floating.loom:@integer_floating_shapes": "TARGET/003",
     "numeric/conversion/integer_widths.loom:@integer_conversion_shapes": "TARGET/003",
     "numeric/conversion/narrow_vectors.loom:@narrow_vector_floating_shapes": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@fptosi_bf16_i16_3": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@fptosi_f16_i8_4": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@fptoui_bf16_i32_4": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@fptoui_f16_i16_1": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@sitofp_i16_f16_1": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@sitofp_i32_f16_4": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@sitofp_i8_bf16_4": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@uitofp_i16_bf16_4": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@uitofp_i32_f16_1": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@uitofp_i8_f16_3": "TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@fptosi_f8E4M3_i16_1": "TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@fptosi_f8E5M2_i32_4": "TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@fptoui_f8E4M3_i8_4": "TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@fptoui_f8E5M2_i16_1": "TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@sitofp_i32_f8E4M3_1": "TARGET/002,TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@sitofp_i8_f8E4M3_4": "TARGET/002,TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@uitofp_i16_f8E5M2_3": "TARGET/002,TARGET/003",
-    "numeric/conversion/packed_integer_float8.loom:@uitofp_i32_f8E5M2_1": "TARGET/002,TARGET/003",
     "numeric/float/narrow_reduction.loom:@narrow_reduction": "TARGET/003",
     "numeric/vector/conversion.loom:@pack_nibbles": "TARGET/003",
     "numeric/vector/conversion.loom:@truncate_halfwords": "TARGET/003",
@@ -460,6 +456,10 @@ _SPIRV_EXECUTION_XFAILS = {
     "memory/storage/word.loom:@copy_word_tail_guards": "TARGET/050",
     "memory/storage/word.loom:@copy_word_unaligned_guards": "TARGET/050",
     "memory/storage/workgroup.loom:@workgroup_packet_exchange_bits": "TARGET/003",
+    "numeric/conversion/conversion.loom:@float_to_integer_values": "TARGET/093",
+    "numeric/conversion/conversion.loom:@float_width_values": "TARGET/093",
+    "numeric/conversion/conversion.loom:@integer_to_float_values": "TARGET/093",
+    "numeric/conversion/conversion.loom:@integer_width_values": "TARGET/093",
     "numeric/conversion/float8_dequantization.loom:@float8_dequantization_values": "TARGET/002,TARGET/003",
     "numeric/conversion/quantization.loom:@approximate_quantization_values": "LOWERING/036",
     "numeric/conversion/quantization.loom:@quantization_values": "LOWERING/036",
@@ -484,8 +484,14 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/float/extrema.loom:@float_extrema_subnormals": "TARGET/003",
     "numeric/float/scalar_f32.loom:@scalar_f32_denormal_fma_values": "TARGET/001",
     "numeric/float/scalar_f32.loom:@scalar_f32_denormal_values": "EXPECT/002",
+    "numeric/float/rounding.loom:@rounding_f32_values": "TARGET/093",
+    "numeric/float/rounding.loom:@rounding_f64_values": "TARGET/093",
     "numeric/float/scalar_f32.loom:@scalar_f32_values": "LOWERING/036",
+    "numeric/integer/arithmetic.loom:@integer_arithmetic_i32_values": "TARGET/001",
+    "numeric/integer/arithmetic.loom:@integer_arithmetic_i64_values": "TARGET/001",
+    "numeric/integer/bitfield.loom:@bitfield_values": "TARGET/003",
     "numeric/integer/constant_unsigned_division.loom:@constant_index_boundary_division_values": "TARGET/005",
+    "numeric/integer/division.loom:@integer_division_values": "TARGET/093",
     "numeric/integer/wide/observations.loom:@wide_dynamic_lane_values": "TARGET/004",
     "numeric/predicate/extract.loom:@predicate_element_values": "TARGET/032",
     "numeric/predicate/extract.loom:@predicate_logic_survives_divergence": "TARGET/001",
@@ -493,9 +499,15 @@ _SPIRV_EXECUTION_XFAILS = {
     "numeric/predicate/vector_logic.loom:@predicate_bitwise_values": "TARGET/001",
     "numeric/predicate/vector_logic.loom:@predicate_select_values": "TARGET/001",
     "numeric/vector/f32.loom:@numeric_vector_f32_values": "LOWERING/036",
+    "numeric/vector/floating.loom:@vector_floating_values": "LOWERING/036",
     "numeric/vector/integer_bitwise.loom:@vector_i32_bitwise_values": "TARGET/001",
     "numeric/vector/integer_bitwise.loom:@vector_i64_bitwise_values": "TARGET/001",
     "numeric/vector/packed_selection.loom:@packed_byte_selects": "TARGET/002",
+    "numeric/vector/reductions.loom:@vector_axis_reduction_values": "TARGET/093",
+    "numeric/vector/reductions.loom:@vector_bitwise_reduction_values": "TARGET/093",
+    "numeric/vector/reductions.loom:@vector_empty_reduction_values": "TARGET/093",
+    "numeric/vector/reductions.loom:@vector_float_reductions_case": "TARGET/003",
+    "numeric/vector/reductions.loom:@vector_integer_reduction_values": "TARGET/093",
 }
 
 # The hardware-discovered profile selects descriptors from the physical device.
@@ -554,10 +566,6 @@ _SPIRV_EXECUTION_ALLOWED_FAILURES = {
     "numeric/conversion/narrow_integer_float.loom:@i8_to_float_4_values_0": "TARGET/003",
     "numeric/conversion/narrow_vectors.loom:@narrow_vector_floating_values": "TARGET/003",
     "numeric/conversion/narrow_widening.loom:@bfloat_to_f32_all_bits": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@fptosi_bf16_i16_3_values": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@fptoui_bf16_i32_4_values": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@sitofp_i8_bf16_4_values": "TARGET/003",
-    "numeric/conversion/packed_integer_float.loom:@uitofp_i16_bf16_4_values": "TARGET/003",
     "numeric/conversion/scalar_float.loom:@narrow_float_all_bits": "TARGET/003",
     "numeric/conversion/scalar_float.loom:@narrow_float_scalar_arguments": "TARGET/003",
     "numeric/conversion/scalar_float.loom:@narrow_float_scalar_bitcasts": "TARGET/003",
@@ -590,8 +598,6 @@ loom_corpus_build(
             "numeric/conversion/integer_floating.loom",
             "numeric/conversion/integer_widths.loom",
             "numeric/conversion/narrow_vectors.loom",
-            "numeric/conversion/packed_integer_float.loom",
-            "numeric/conversion/packed_integer_float8.loom",
             "numeric/float/narrow_reduction.loom",
             "numeric/integer/narrow_consumers.loom",
             "numeric/vector/conversion.loom",
@@ -613,8 +619,6 @@ loom_corpus_build(
             "numeric/conversion/integer_floating.loom",
             "numeric/conversion/integer_widths.loom",
             "numeric/conversion/narrow_vectors.loom",
-            "numeric/conversion/packed_integer_float.loom",
-            "numeric/conversion/packed_integer_float8.loom",
             "numeric/float/narrow_reduction.loom",
             "numeric/integer/narrow_consumers.loom",
             "numeric/vector/conversion.loom",
@@ -631,15 +635,36 @@ loom_corpus_build(
     },
 )
 
-loom_corpus_test(
-    name = "execution",
+loom_scenario_test(
+    name = "scenario_execution",
     allowed_failures = {
         SPIRV_VULKAN_HARDWARE_PROFILE.name: _SPIRV_EXECUTION_ALLOWED_FAILURES,
     },
-    catalog = LOOM_CORPUS,
+    catalog = LOOM_SCENARIOS,
+    excludes = _SCENARIO_EXCLUDES,
+    execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
+    xfails = {
+        SPIRV_VULKAN_HARDWARE_PROFILE.name: _SPIRV_EXECUTION_XFAILS,
+    },
+)
+
+loom_legacy_case_test(
+    name = "legacy_execution",
+    allowed_failures = {
+        SPIRV_VULKAN_HARDWARE_PROFILE.name: _SPIRV_EXECUTION_ALLOWED_FAILURES,
+    },
+    catalog = LOOM_LEGACY_CASES,
     excludes = _NO_HARDWARE_SUBJECT_EXCLUDES,
     execution_profiles = [SPIRV_VULKAN_HARDWARE_PROFILE],
     xfails = {
         SPIRV_VULKAN_HARDWARE_PROFILE.name: _SPIRV_EXECUTION_XFAILS,
     },
+)
+
+test_suite(
+    name = "execution",
+    tests = [
+        ":legacy_execution",
+        ":scenario_execution",
+    ],
 )

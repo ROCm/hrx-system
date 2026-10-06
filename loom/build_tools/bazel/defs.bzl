@@ -21,10 +21,14 @@ load(
     _loom_corpus_catalog = "loom_corpus_catalog",
     _loom_corpus_manifest = "loom_corpus_manifest",
     _loom_corpus_sources = "loom_corpus_sources",
+    _loom_legacy_case_corpus = "loom_legacy_case_corpus",
+    _loom_scenario_corpus = "loom_scenario_corpus",
 )
 load(
     ":loom_corpus_execution.bzl",
     _loom_corpus_test = "loom_corpus_test",
+    _loom_legacy_case_test = "loom_legacy_case_test",
+    _loom_scenario_test = "loom_scenario_test",
 )
 load(
     ":loom_library.bzl",
@@ -62,9 +66,13 @@ LoomTargetSetInfo = _LoomTargetSetInfo
 loom_amdgpu_target_profile = _loom_amdgpu_target_profile
 loom_corpus_build = _loom_corpus_build
 loom_corpus_catalog = _loom_corpus_catalog
+loom_legacy_case_corpus = _loom_legacy_case_corpus
 loom_corpus_manifest = _loom_corpus_manifest
 loom_corpus_sources = _loom_corpus_sources
 loom_corpus_test = _loom_corpus_test
+loom_legacy_case_test = _loom_legacy_case_test
+loom_scenario_corpus = _loom_scenario_corpus
+loom_scenario_test = _loom_scenario_test
 loom_execution_profile = _loom_execution_profile
 loom_kernel_binary = _loom_kernel_binary
 loom_kernel_library = _loom_kernel_library

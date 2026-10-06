@@ -93,7 +93,47 @@ loom_corpus_build(
 
 loom_corpus_test(
   NAME
-    "execution"
+    "scenario_execution"
+  PROFILE
+    "reference"
+  MANIFESTS
+    "sample"
+  SOURCES
+    "sample/nested/fixture.loom"
+  XFAILS
+    "sample/nested/fixture.loom"
+    "@fixture_scenario"
+    "TARGET/003,EXPECT/003"
+  RUNNER_ARGS
+    "--max-samples-per-case=1"
+  LABELS
+    "manual"
+    "loom-execution-profile=reference"
+    "loom-target-family=test"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+
+loom_corpus_test(
+  NAME
+    "scenario_execution"
+  PROFILE
+    "selected_reference"
+  MANIFESTS
+    "sample"
+  SOURCES
+    "sample/nested/fixture.loom"
+  LABELS
+    "manual"
+    "loom-execution-profile=selected_reference"
+    "loom-target-family=test"
+    "loom-target-class=cpu"
+    "loom-executor=reference"
+)
+
+loom_corpus_test(
+  NAME
+    "legacy_execution"
   PROFILE
     "reference"
   MANIFESTS
@@ -101,10 +141,6 @@ loom_corpus_test(
   EXCLUDES
     "sample/excluded.loom"
     "This fixture is excluded from execution as well as compilation."
-  XFAILS
-    "sample/nested/fixture.loom"
-    "@fixture_cases"
-    "TARGET/003,EXPECT/003"
   ALLOWED_FAILURES
     "sample/other.loom"
     "@other_case"
@@ -121,7 +157,7 @@ loom_corpus_test(
 
 loom_corpus_test(
   NAME
-    "execution"
+    "legacy_execution"
   PROFILE
     "selected_reference"
   MANIFESTS

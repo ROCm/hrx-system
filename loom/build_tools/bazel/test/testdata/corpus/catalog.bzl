@@ -6,9 +6,22 @@
 
 """Shared catalog fixture for Loom corpus rule analysis tests."""
 
-load("//loom/build_tools/bazel:defs.bzl", "loom_corpus_catalog")
+load(
+    "//loom/build_tools/bazel:defs.bzl",
+    "loom_corpus_catalog",
+    "loom_legacy_case_corpus",
+    "loom_scenario_corpus",
+)
 load("//loom/build_tools/bazel/test/testdata/corpus/source:manifest.bzl", "SAMPLE_CORPUS")
 
 TEST_CORPUS = loom_corpus_catalog([
+    SAMPLE_CORPUS,
+])
+
+TEST_SCENARIOS = loom_scenario_corpus([
+    SAMPLE_CORPUS,
+])
+
+TEST_LEGACY_CASES = loom_legacy_case_corpus([
     SAMPLE_CORPUS,
 ])
