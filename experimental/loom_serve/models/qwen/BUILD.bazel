@@ -249,10 +249,12 @@ loom_cc_test(
     args = [
         "--chat_source=$(rootpath :control.loom)",
         "--alias_source=$(rootpath :testdata/chat_alias.loom)",
+        "--portable_source=$(rootpath :testdata/portable_chat.loom)",
     ],
     data = [
         "control.loom",
         "testdata/chat_alias.loom",
+        "testdata/portable_chat.loom",
     ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",

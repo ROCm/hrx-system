@@ -87,8 +87,10 @@ output bounds and quantizer group capacity. It also owns stage selection and
 retained storage geometry. Warm descriptor packing and feedback publication also
 live in source, sharing the model's VM process with execution and canonical
 tool-call formatting, streaming text boundaries and completed checkpoints.
-Role templates, generated tool parsing and session policy remain native; these
-source-owned pieces are not yet a model-neutral text ABI.
+Role templates, public model identity, generated-tool grammar selection and
+canonical completion are also source-owned. Native code supplies a bounded
+text protocol, admission and retained-session ownership; it contains no
+model-name switch or template-family selector.
 
 Configuration is a model entry/specialization boundary. Reusable functions,
 templates, and motifs receive dimensions and layout facts as explicit SSA

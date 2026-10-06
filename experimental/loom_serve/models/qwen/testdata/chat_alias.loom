@@ -15,3 +15,9 @@ func.def public @text_end(%response: buffer, %previous: i64, %phase: i32) -> (i6
   %result = index.cast %length : offset to i64
   func.return %result : i64
 }
+
+global.rodata.def @empty_tools = bytes("5b5d")
+func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
+  %empty = global.load @empty_tools : buffer
+  func.return %empty : buffer
+}

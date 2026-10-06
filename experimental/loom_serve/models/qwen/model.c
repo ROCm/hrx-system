@@ -418,12 +418,15 @@ static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner,
   char* path = NULL;
   IREE_RETURN_IF_ERROR(iree_file_path_join(
       source_directory, IREE_SV("control.loom"), runner->allocator, &path));
-  iree_vm_module_t* libraries[] = {runner->native_module, NULL, NULL};
+  iree_vm_module_t* libraries[] = {runner->native_module, NULL, NULL, NULL};
   const iree_string_view_t roots[] = {
       IREE_SVL("step"),         IREE_SVL("epoch"),
       IREE_SVL("encode_epoch"), IREE_SVL("publish_epoch"),
       IREE_SVL("render_tool"),  IREE_SVL("prepare_input"),
-      IREE_SVL("text_end"),     IREE_SVL("complete_text")};
+      IREE_SVL("text_end"),     IREE_SVL("complete_text"),
+      IREE_SVL("model_name"),   IREE_SVL("chat_begin"),
+      IREE_SVL("chat_message"), IREE_SVL("chat_end"),
+      IREE_SVL("parse_tools")};
   status = loom_serve_input_module_create(
       runner->environment, runner->tokenizer, &libraries[1], runner->allocator);
   if (iree_status_is_ok(status)) {
@@ -431,11 +434,16 @@ static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner,
                                            runner->allocator);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_serve_qwen_chat_tools_module_create(
+        runner->environment, &libraries[3], runner->allocator);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_serve_program_create(
         runner->environment, iree_make_cstring_view(path),
         IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_from_array(libraries),
         runner->allocator, &runner->program);
   }
+  iree_vm_module_release(libraries[3]);
   iree_vm_module_release(libraries[2]);
   iree_vm_module_release(libraries[1]);
   iree_allocator_free(runner->allocator, path);
@@ -926,6 +934,7 @@ iree_status_t loom_serve_qwen_model_destroy(loom_serve_qwen_model_t* model) {
                              : iree_ok_status();
   status = iree_status_join(
       status, iree_hal_end_profiling_from_flags(model->profiling));
+  loom_serve_qwen_chat_policy_deinitialize(&model->chat_policy);
   loom_serve_program_destroy(model->program);
   iree_vm_module_release(model->native_module);
   qwen_release_initialization(model);

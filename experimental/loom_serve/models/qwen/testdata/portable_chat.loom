@@ -1,0 +1,113 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// An independent text policy: plain role labels and JSON function calls.
+// It deliberately imports no XML codec or model-native implementation.
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+global.rodata.def @overflow = bytes("696e7075742065786365656473206361706163697479")
+global.rodata.def @name = bytes("706f727461626c652d63686174")
+global.rodata.def @empty = bytes("")
+global.rodata.def @no_tools = bytes("5b5d")
+global.rodata.def @label = bytes("3a20")
+global.rodata.def @newline = bytes("0a")
+global.rodata.def @assistant = bytes("617373697374616e743a20")
+
+func.def @join(%a: buffer, %b: buffer) -> (buffer) {
+  %zero = index.constant 0 : offset
+  %a_length = buffer.length %a
+  %b_length = buffer.length %b
+  %size = index.add %a_length, %b_length : offset
+  %output = buffer.alloca<private> align(1) %size : buffer
+  buffer.copy %a[%zero], %output[%zero], %a_length
+  buffer.copy %b[%zero], %output[%a_length], %b_length
+  func.return %output : buffer
+}
+
+func.def public @model_name() -> (buffer) {
+  %name = global.load @name : buffer
+  func.return %name : buffer
+}
+
+func.def public @chat_begin(%request: buffer, %tools: buffer) -> (buffer, i64) {
+  %empty = global.load @empty : buffer
+  %zero = scalar.constant 0 : i64
+  func.return %empty, %zero : buffer, i64
+}
+
+func.def public @chat_message(%raw: buffer, %role: buffer, %content: buffer, %reasoning: buffer, %calls: buffer, %state: i64, %ordinal: i64, %fields: i64) -> (buffer, i64) {
+  %label = global.load @label : buffer
+  %newline = global.load @newline : buffer
+  %prefix = func.call @join(%role, %label) : (buffer, buffer) -> (buffer)
+  %text = func.call @join(%prefix, %content) : (buffer, buffer) -> (buffer)
+  %with_calls = func.call @join(%text, %calls) : (buffer, buffer) -> (buffer)
+  %result = func.call @join(%with_calls, %newline) : (buffer, buffer) -> (buffer)
+  %one = scalar.constant 1 : i64
+  %next = scalar.addi %state, %one : i64
+  func.return %result, %next : buffer, i64
+}
+
+func.def public @chat_end(%state: i64) -> (buffer) {
+  %prefix = global.load @assistant : buffer
+  func.return %prefix : buffer
+}
+
+func.def public @render_tool(%name: buffer, %arguments: buffer, %ordinal: i64) -> (buffer, i64) {
+  %length = buffer.length %arguments
+  %count = index.cast %length : offset to i64
+  func.return %arguments, %count : buffer, i64
+}
+
+func.def public @prepare_input(%text: buffer, %format: i32, %boundary: i32, %capacity: i64) -> (buffer, i64) {
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i64
+  %probe = scalar.addi %capacity, %one : i64
+  %tokens, %count = func.call @encode(%text, %zero, %probe) : (buffer, i32, i64) -> (buffer, i64)
+  %fits = scalar.cmpi ule, %count, %capacity : i64
+  %fits32 = scalar.extui %fits : i1 to i32
+  %diagnostic = global.load @overflow : buffer
+  func.call @require(%fits32, %diagnostic) : (i32, buffer) -> ()
+  func.return %tokens, %count : buffer, i64
+}
+
+// This deliberately conservative streaming policy publishes at completion.
+func.def public @text_end(%response: buffer, %previous: i64, %phase: i32) -> (i64) {
+  %zero = index.constant 0 : offset
+  %zero64 = scalar.constant 0 : i64
+  %zero32 = scalar.constant 0 : i32
+  %length = buffer.length %response
+  %nonempty = index.cmp ne, %length, %zero : offset
+  %json = scf.if %nonempty -> (i1) {
+    %first = buffer.load.i8.u %response[%zero]
+    %bracket = scalar.constant 91 : i32
+    %is_array = scalar.cmpi eq, %first, %bracket : i32
+    scf.yield %is_array : i1
+  } else {
+    %false = scalar.constant false : i1
+    scf.yield %false : i1
+  }
+  %streaming = scalar.cmpi eq, %phase, %zero32 : i32
+  %withhold = scalar.ori %streaming, %json : i1
+  %count = index.cast %length : offset to i64
+  %end = scf.select %withhold, %zero64, %count : i64
+  func.return %end : i64
+}
+
+func.def public @parse_tools(%schemas: buffer, %response: buffer) -> (buffer) {
+  %zero = index.constant 0 : offset
+  %length = buffer.length %response
+  %nonempty = index.cmp ne, %length, %zero : offset
+  %empty = global.load @no_tools : buffer
+  %result = scf.select %nonempty, %response, %empty : buffer
+  func.return %result : buffer
+}
+
+func.def public @complete_text(%prompt: buffer, %content: buffer, %tools: buffer) -> (buffer) {
+  %newline = global.load @newline : buffer
+  %text = func.call @join(%prompt, %content) : (buffer, buffer) -> (buffer)
+  %calls = func.call @join(%text, %tools) : (buffer, buffer) -> (buffer)
+  %result = func.call @join(%calls, %newline) : (buffer, buffer) -> (buffer)
+  func.return %result : buffer
+}

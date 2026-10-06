@@ -651,8 +651,9 @@ static iree_status_t qwen_admit_pending(qwen_service_t* service) {
     }
     if (iree_status_is_ok(status)) {
       status = loom_serve_qwen_chat_event(
-          session->serial, IREE_SV("{\"role\":\"assistant\"}"),
-          iree_string_view_empty(), &session->packet);
+          session->request.chat.policy->name, session->serial,
+          IREE_SV("{\"role\":\"assistant\"}"), iree_string_view_empty(),
+          &session->packet);
     }
     if (iree_status_is_ok(status)) {
       fprintf(stderr,
@@ -776,8 +777,9 @@ static iree_status_t qwen_emit_text(qwen_service_t* service,
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(&service->scratch, "}"));
   IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_event(
-      session->serial, iree_string_builder_view(&service->scratch),
-      iree_string_view_empty(), &session->packet));
+      session->request.chat.policy->name, session->serial,
+      iree_string_builder_view(&service->scratch), iree_string_view_empty(),
+      &session->packet));
   session->request.emitted_length = end;
   return iree_ok_status();
 }
@@ -815,20 +817,21 @@ static iree_status_t qwen_complete(qwen_service_t* service,
         (int)iree_string_builder_size(&service->tool_calls),
         iree_string_builder_buffer(&service->tool_calls)));
     IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_event(
-        session->serial, iree_string_builder_view(&service->scratch),
-        iree_string_view_empty(), &session->packet));
+        session->request.chat.policy->name, session->serial,
+        iree_string_builder_view(&service->scratch), iree_string_view_empty(),
+        &session->packet));
   }
   session->request.finish_reason = tool_count ? "tool_calls"
                                    : loom_serve_qwen_row_is_eos(session->row)
                                        ? "stop"
                                        : "length";
   IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_event(
-      session->serial, IREE_SV("{}"),
+      session->request.chat.policy->name, session->serial, IREE_SV("{}"),
       iree_make_cstring_view(session->request.finish_reason),
       &session->packet));
   if (session->request.chat.include_usage) {
     IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_usage(
-        session->serial,
+        session->request.chat.policy->name, session->serial,
         session->request.retained_count + session->request.input_count,
         session->request.retained_count, session->request.output_count,
         &session->packet));

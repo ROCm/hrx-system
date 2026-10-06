@@ -97,10 +97,25 @@ unchanged; a failed live generation invalidates the row's reusable checkpoint.
 These are host output/request operations, with no additional GPU work or VM
 process. Original selected token IDs stay separate from canonical history.
 
-The native adapter still manages page IDs, validates semantic spans, owns role
-templates, generated XML/schema interpretation and retained-session policy, and
-joins each bounded cohort before applying semantic progress. Those remaining
-contracts are not yet a model-neutral text ABI.
+`model_name` supplies the public HTTP identity. `chat_begin`, `chat_message`
+and `chat_end` own the role state machine and prompt fragments. Native code
+passes the original request/message JSON alongside decoded text and carries
+opaque source rendering state without interpreting it. `model_options` is
+an object available to source for model-specific options without native changes.
+This package rejects thinking mode in source; the transport does not impose
+that policy on other models.
+
+`parse_tools` explicitly calls the optional `tools.parse_xml` capability for
+this model's generated grammar. The native completion consumer accepts standard
+function-call records, assigns transport IDs, and uses the source formatter
+for canonical history. A different source policy can parse another grammar
+without importing the XML codec. The independent plain-text/JSON policy in
+`chat_test.cc` runs without that capability and proves retained continuation.
+
+The native adapter manages page IDs, validates semantic spans, owns retained
+session admission, and joins each bounded cohort before applying semantic
+progress. The text execution contract is bounded packed autoregression, not a
+claim that arbitrary model graphs already fit this residency.
 
 `check_tools.py` exercises real generated typed calls and client-serialized
 assistant/tool follow-ups through HTTP. A malformed intervening history must be

@@ -15,7 +15,6 @@
 extern "C" {
 #endif
 
-#define LOOM_SERVE_QWEN_CHAT_MODEL "qwen3.8-27b"
 #define LOOM_SERVE_QWEN_CHAT_TOOL_CAPACITY 16
 
 // Cold-resolved chat functions in the model's shared source VM. The model
@@ -25,6 +24,18 @@ typedef struct loom_serve_qwen_chat_policy_t {
   iree_vm_ref_types_t types;
   // Invocation borrowed from the model-wide program.
   iree_vm_invocation_t* invocation;
+  // Owned source-declared public model identity.
+  iree_vm_buffer_t* name_storage;
+  // UTF-8 identity borrowing name_storage.
+  iree_string_view_t name;
+  // Initial prompt fragment and opaque rendering state.
+  iree_vm_function_t chat_begin;
+  // Message fragment and next opaque rendering state.
+  iree_vm_function_t chat_message;
+  // Final prompt fragment and conversation validation.
+  iree_vm_function_t chat_end;
+  // Generated suffix to standard function-call records.
+  iree_vm_function_t parse_tools;
   // Canonical tool formatter shared by input history and generated output.
   iree_vm_function_t render_tool;
   // Turn framing and complete raw-token encoding shared by all text callers.
@@ -38,6 +49,21 @@ typedef struct loom_serve_qwen_chat_policy_t {
 iree_status_t loom_serve_qwen_chat_policy_initialize(
     iree_vm_environment_t* environment, loom_serve_program_t* program,
     loom_serve_qwen_chat_policy_t* out_policy);
+
+// Releases the owned identity; other fields borrow the model program.
+void loom_serve_qwen_chat_policy_deinitialize(
+    loom_serve_qwen_chat_policy_t* policy);
+
+// Creates the optional tools.parse_xml(schemas, text) -> buffer capability.
+// Both inputs are UTF-8 buffers. The result is a JSON array of standard
+// function tool calls, with JSON-encoded argument strings and no assigned IDs.
+// The codec validates declared names and scalar/container parameter types.
+// Source explicitly selects this grammar by importing it; native chat handling
+// consumes only the returned function records. The environment outlives the
+// module and every returned buffer.
+iree_status_t loom_serve_qwen_chat_tools_module_create(
+    iree_vm_environment_t* environment, iree_vm_module_t** out_module,
+    iree_allocator_t host_allocator);
 
 // Source input format. Rendered text passes through unchanged; user content
 // receives one user envelope and the assistant generation prefix.
@@ -79,17 +105,19 @@ typedef struct loom_serve_qwen_chat_tool_t {
   iree_string_view_t required;
 } loom_serve_qwen_chat_tool_t;
 
-// One validated text-only, greedy, non-thinking streaming chat request. The
+// One validated text-only, greedy streaming chat request. The
 // prompt owns its canonical rendered text; tool views borrow the HTTP body.
 typedef struct loom_serve_qwen_chat_t {
   // Source policy borrowed from the model for the request lifetime.
   const loom_serve_qwen_chat_policy_t* policy;
-  // Canonical Qwen template ending with the assistant generation prefix.
+  // Source-rendered canonical prompt ending at its generation boundary.
   iree_string_builder_t prompt;
   // Maximum selected output tokens, including a terminal EOS prediction.
   iree_host_size_t max_tokens;
   // Whether the client requested a final usage event.
   bool include_usage;
+  // Original tool declarations borrowing the HTTP body, or the literal [].
+  iree_string_view_t tool_schemas;
   // Number of populated tool descriptors.
   iree_host_size_t tool_count;
   // Validated tool descriptors in request order.
@@ -158,11 +186,13 @@ iree_status_t loom_serve_qwen_chat_complete(
 // Appends one SSE chat event. Delta is an already serialized JSON object;
 // finish_reason is empty for nonterminal events. Usage belongs to the complete
 // client transcript, with retained_tokens reported as cached input tokens.
-iree_status_t loom_serve_qwen_chat_event(uint64_t request_id,
+iree_status_t loom_serve_qwen_chat_event(iree_string_view_t model_name,
+                                         uint64_t request_id,
                                          iree_string_view_t delta,
                                          iree_string_view_t finish_reason,
                                          iree_string_builder_t* output);
-iree_status_t loom_serve_qwen_chat_usage(uint64_t request_id,
+iree_status_t loom_serve_qwen_chat_usage(iree_string_view_t model_name,
+                                         uint64_t request_id,
                                          iree_host_size_t input_tokens,
                                          iree_host_size_t retained_tokens,
                                          iree_host_size_t output_tokens,

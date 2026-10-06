@@ -268,6 +268,7 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/chat_alias.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/portable_chat.loom"
   DEPS
     ::chat
     iree::base
@@ -283,6 +284,7 @@ loom_cc_test(
   ARGS
     "--chat_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom}}"
     "--alias_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/chat_alias.loom}}"
+    "--portable_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/portable_chat.loom}}"
 )
 endif()
 
