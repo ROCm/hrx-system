@@ -733,6 +733,21 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
   return status;
 }
 
+// Source allocation slots name the same exported roots during creation,
+// maintenance and execution. Every root carries model retirement tracking.
+static iree_hal_buffer_t** text_allocation(loom_serve_text_model_t* model,
+                                           iree_host_size_t index) {
+  iree_hal_buffer_t** allocations[TEXT_ALLOCATION_COUNT] = {
+      &model->residual,         &model->row_arena,
+      &model->epoch.buffers[1], &model->epoch.buffers[2],
+      &model->epoch.buffers[4], &model->epoch.buffers[5],
+      &model->mtp.carry,        &model->mtp.committed,
+      &model->mtp.results,      &model->mtp.cache,
+      &model->mtp.row_table,
+  };
+  return allocations[index];
+}
+
 static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
   if (model->cache.capacity) {
     IREE_RETURN_IF_ERROR(loom_serve_block_pool_initialize(
@@ -762,20 +777,13 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
       model, workspace_length, workspace_alignment, &model->workspace));
   // Binding roles are the private adapter contract. Sizes, views, initial
   // contents and zero extents are produced by the model's source bootstrap.
-  iree_hal_buffer_t** allocations[TEXT_ALLOCATION_COUNT] = {
-      &model->residual,         &model->row_arena,
-      &model->epoch.buffers[1], &model->epoch.buffers[2],
-      &model->epoch.buffers[4], &model->epoch.buffers[5],
-      &model->mtp.carry,        &model->mtp.committed,
-      &model->mtp.results,      &model->mtp.cache,
-      &model->mtp.row_table,
-  };
   const uint32_t zero = 0;
   iree_hal_transfer_operation_t transfers[TEXT_ALLOCATION_COUNT + 2] = {0};
   iree_host_size_t transfer_count = 0;
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < TEXT_ALLOCATION_COUNT && iree_status_is_ok(status); ++i) {
+    iree_hal_buffer_t** allocation = text_allocation(model, i);
     const uint8_t* record =
         model->initialization.bytes[TEXT_STORAGE_ALLOCATIONS].data + i * 24;
     const uint64_t length = iree_unaligned_load_le_u64(record);
@@ -798,11 +806,11 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
             model->memory.pool, length, alignment, &model->memory.statistics,
             &model->memory.buffers[i]);
         if (iree_status_is_ok(status)) {
-          *allocations[i] =
+          *allocation =
               loom_serve_virtual_buffer_handle(model->memory.buffers[i]);
-          iree_hal_buffer_retain(*allocations[i]);
-          status = loom_serve_retirement_track(
-              &model->retirement, allocations[i], model->allocator);
+          iree_hal_buffer_retain(*allocation);
+          status = loom_serve_retirement_track(&model->retirement, allocation,
+                                               model->allocator);
           if (iree_status_is_ok(status) && clear_length && i != 1) {
             model->memory.private_lengths[i] = clear_length;
             status = loom_serve_virtual_buffer_commit(model->memory.buffers[i],
@@ -810,14 +818,14 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
           }
         }
       } else {
-        status = text_allocate_buffer(model, length, alignment, allocations[i]);
+        status = text_allocate_buffer(model, length, alignment, allocation);
       }
     }
     if (iree_status_is_ok(status) && clear_length &&
         !(i == 1 && model->memory.buffers[i])) {
       transfers[transfer_count++] = (iree_hal_transfer_operation_t){
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-          .fill = {.target_buffer = *allocations[i],
+          .fill = {.target_buffer = *allocation,
                    .length = clear_length,
                    .pattern = &zero,
                    .pattern_length = sizeof(zero)},
@@ -1149,8 +1157,8 @@ iree_status_t loom_serve_text_model_trim(
     uint64_t copied_bytes = 0;
     status = loom_serve_block_region_relocate(
         model->execution, model->memory.buffers[region->allocation],
-        &region->blocks, model->cache.pool.capacity, model->cache.destinations,
-        &copied_bytes);
+        *text_allocation(model, region->allocation), &region->blocks,
+        model->cache.pool.capacity, model->cache.destinations, &copied_bytes);
     out_result->copied_bytes += copied_bytes;
   }
   // Even a rejected later copy batch leaves earlier submissions owning their

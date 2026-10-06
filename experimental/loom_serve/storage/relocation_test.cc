@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/runtime/retirement.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -18,6 +19,7 @@ namespace {
 class RelocationTest : public ::testing::Test {
  protected:
   void SetUp() override {
+    loom_serve_retirement_initialize(&retirement);
     const loom_serve_device_options_t options = {
         .uri = IREE_SV("amdgpu"),
         .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
@@ -30,6 +32,8 @@ class RelocationTest : public ::testing::Test {
 
   void TearDown() override {
     IREE_ASSERT_OK(loom_serve_execution_drain(execution));
+    iree_hal_buffer_release(view);
+    loom_serve_retirement_deinitialize(&retirement);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(buffer));
     IREE_EXPECT_OK(loom_serve_device_destroy(device));
   }
@@ -44,6 +48,10 @@ class RelocationTest : public ::testing::Test {
   loom_serve_memory_statistics_t statistics = {};
   // Source and destination allocation with stable identity.
   loom_serve_virtual_buffer_t* buffer = nullptr;
+  // Whole exported view capturing every relocation and transfer reference.
+  iree_hal_buffer_t* view = nullptr;
+  // Actual view retirement, independent of success or failure readiness.
+  loom_serve_retirement_t retirement = {};
 };
 
 TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
@@ -58,6 +66,10 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
       region.origin + 2 * region.stride + kBlockCount * region.block_bytes, 256,
       &statistics, &buffer));
   auto* const handle = loom_serve_virtual_buffer_handle(buffer);
+  view = handle;
+  iree_hal_buffer_retain(view);
+  IREE_ASSERT_OK(
+      loom_serve_retirement_track(&retirement, &view, iree_allocator_system()));
   uint64_t completion = 0;
   for (uint32_t plane = 0; plane < region.count; ++plane) {
     for (uint32_t block = kLiveBlocks; block < kBlockCount; ++block) {
@@ -68,7 +80,7 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
       const uint32_t value = plane * 1000 + block;
       const iree_hal_transfer_operation_t fill = {
           .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-          .fill = {.target_buffer = handle,
+          .fill = {.target_buffer = view,
                    .target_offset = offset,
                    .length = region.block_bytes,
                    .pattern = &value,
@@ -84,9 +96,9 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
         block < kLiveBlocks ? UINT32_MAX : block - kLiveBlocks;
   }
   uint64_t copied_bytes = 0;
-  IREE_ASSERT_OK(
-      loom_serve_block_region_relocate(execution, buffer, &region, kBlockCount,
-                                       destinations.data(), &copied_bytes));
+  IREE_ASSERT_OK(loom_serve_block_region_relocate(
+      execution, buffer, view, &region, kBlockCount, destinations.data(),
+      &copied_bytes));
   IREE_ASSERT_OK(loom_serve_execution_drain(execution));
   EXPECT_EQ(copied_bytes, region.count * kLiveBlocks * region.block_bytes);
   EXPECT_EQ(loom_serve_virtual_buffer_handle(buffer), handle);
@@ -102,7 +114,7 @@ TEST_F(RelocationTest, RepeatedPlanesCrossBatchAndAddressBoundaries) {
   for (uint32_t plane = 0; plane < region.count; ++plane) {
     const iree_hal_transfer_operation_t download = {
         .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-        .download = {.source_buffer = handle,
+        .download = {.source_buffer = view,
                      .source_offset = region.origin + plane * region.stride,
                      .target = observed.data(),
                      .length = kLiveBlocks * region.block_bytes}};

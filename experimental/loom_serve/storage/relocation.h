@@ -34,10 +34,14 @@ typedef struct loom_serve_block_region_t {
 // excludes model work, drains accepted copies even on failure, then publishes
 // new logical maps before reclaiming old storage. Host metadata is captured
 // before return. out_copied_bytes counts successfully submitted copy bytes.
+// reservation owns physical commitment; buffer is its whole exported view,
+// including the caller's retirement tracking. Copies retain that exact view,
+// not the reservation's raw root, through terminal queue completion.
 iree_status_t loom_serve_block_region_relocate(
-    loom_serve_execution_t* execution, loom_serve_virtual_buffer_t* buffer,
-    const loom_serve_block_region_t* region, uint32_t block_count,
-    const uint32_t* destinations, uint64_t* out_copied_bytes);
+    loom_serve_execution_t* execution, loom_serve_virtual_buffer_t* reservation,
+    iree_hal_buffer_t* buffer, const loom_serve_block_region_t* region,
+    uint32_t block_count, const uint32_t* destinations,
+    uint64_t* out_copied_bytes);
 
 #ifdef __cplusplus
 }  // extern "C"
