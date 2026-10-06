@@ -46,9 +46,9 @@ iree_status_t loom_serve_krea2_model_create(
 // No generate call or borrowed RGB view may remain active. NULL is accepted.
 iree_status_t loom_serve_krea2_model_destroy(loom_serve_krea2_model_t* model);
 
-// Tokenizes once at the configured maximum, selects text128 when available and
-// the retained combined prefix+prompt count is at most 98, then materializes
-// and uploads once. Executes the selected command and waits for final RGB.
+// Tokenizes once at the configured maximum, invokes source stage selection,
+// then materializes and uploads once. Source control submits the selected
+// command and final RGB feedback; native code retires both accepted frontiers.
 // There is no warm JIT, weight load or device backing allocation. Prompt is
 // borrowed only during the call. Strength must be finite;
 // a model without an adapter requires strength one. Request errors before

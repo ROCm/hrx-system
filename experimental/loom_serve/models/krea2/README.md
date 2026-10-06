@@ -112,8 +112,17 @@ parameter bindings through the runner-private `prepare` module. That module
 copies the declarations and releases the bootstrap VM before device setup.
 The ordinary JIT and streaming loader consume the result; no native table of
 Krea command names, specialization formulas or weight filenames is involved.
-This is a cold-path boundary: request framing, input preparation and retained
-command selection still use the native request/model leaves below.
+This is a cold-path boundary; request framing and numerical input preparation
+still use the native request leaf below.
+
+[`control.loom`](control.loom) owns warm stage selection, base/adapter binding
+routing, command submission and final RGB feedback. Its selector receives the
+source-declared stage tags and retained prompt count. One source-JIT process
+serves the entire residency; requests are buffers and scalar arguments, not VM
+instances. The existing runner-private `execute_N` and `feedback` imports enqueue
+work without waiting. Native code retires both accepted queue frontiers before
+encoding the image or reusing request storage, including after partial failure.
+The VM's return is not a transfer of native storage ownership.
 
 The native request leaf is [`request.h`](request.h)/[`request.c`](request.c).
 Model-specific constants and prompt layout remain there, not in the shared

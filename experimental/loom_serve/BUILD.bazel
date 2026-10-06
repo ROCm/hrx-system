@@ -684,6 +684,24 @@ loom_cc_binary(
 )
 
 loom_cc_test(
+    name = "krea2_control_test",
+    srcs = ["models/krea2/control_test.cc"],
+    args = ["--control_source=$(rootpath :models/krea2/control.loom)"],
+    data = ["models/krea2/control.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
     name = "krea2_model_test",
     srcs = ["models/krea2/model_test.cc"],
     target_compatible_with = loom_config_compatible_with([
@@ -711,7 +729,9 @@ loom_cc_library(
         ":execution",
         ":jit",
         ":krea2_request",
+        ":module",
         ":preparation",
+        ":program",
         ":weights",
         "//loom/binding/c:loomc",
         "//loom/src/loom/target/arch/cmd:program",
@@ -719,6 +739,7 @@ loom_cc_library(
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/module/hal:types",
         "//runtime/src/iree/tokenizer",
         "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
         "//runtime/src/iree/tooling:device_util",

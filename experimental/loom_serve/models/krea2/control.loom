@@ -1,0 +1,53 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("runner") @execute_12(%stage: i32, %noise: hal.buffer, %token_ids: hal.buffer, %encoder_cosine: hal.buffer, %encoder_sine: hal.buffer, %encoder_mask: hal.buffer, %times: hal.buffer, %cosine: hal.buffer, %sine: hal.buffer, %deltas: hal.buffer, %affine: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
+func.decl import("runner") @execute_13(%stage: i32, %noise: hal.buffer, %token_ids: hal.buffer, %encoder_cosine: hal.buffer, %encoder_sine: hal.buffer, %encoder_mask: hal.buffer, %times: hal.buffer, %cosine: hal.buffer, %sine: hal.buffer, %deltas: hal.buffer, %strength: hal.buffer, %affine: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+// Tags are the immutable i64 values declared by prepare.loom, in stage order.
+// Slot zero is the maximum. Short prompts may use any retained text128 slot
+// while preserving the kernels' prompt/suffix live-key partitions.
+func.def public @select_stage(%tags: buffer, %stage_count: i32, %token_count: i32) -> (i32) {
+  %origin = index.constant 0 : offset
+  // Preparation requires a nonempty catalog addressable by signed i32 IDs.
+  %bounded = scalar.assume %stage_count [range(%stage_count, 1, 2147483647)] : i32
+  %count = index.cast %bounded : i32 to index
+  %view = buffer.view %tags[%origin] : buffer -> view<[%count]xi64>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %maximum = scalar.constant 0 : i32
+  %small = scalar.constant 128 : i64
+  %limit = scalar.constant 98 : i32
+  %fits = scalar.cmpi ule, %token_count, %limit : i32
+  %selected = scf.for %i = [%zero to %count step %one](%current = %maximum : i32) -> (i32) {
+    %tag = view.load %view[%i] : view<[%count]xi64> -> i64
+    %compact = scalar.cmpi eq, %tag, %small : i64
+    %eligible = scalar.andi %fits, %compact : i1
+    %candidate = index.cast %i : index to i32
+    %next = scf.select %eligible, %candidate, %current : i32
+    scf.yield %next : i32
+  }
+  func.return %selected : i32
+}
+
+// One invocation submits the complete image and its final readback without
+// waiting. The native image owner retires both accepted queue frontiers before
+// returning the image or reusing request storage.
+func.def public @generate(%stage: i32, %adapted: i32, %output_bytes: i64, %noise: hal.buffer, %token_ids: hal.buffer, %encoder_cosine: hal.buffer, %encoder_sine: hal.buffer, %encoder_mask: hal.buffer, %times: hal.buffer, %cosine: hal.buffer, %sine: hal.buffer, %deltas: hal.buffer, %strength: hal.buffer, %affine: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) {
+  %zero = scalar.constant 0 : i32
+  %uses_adapter = scalar.cmpi ne, %adapted, %zero : i32
+  scf.if %uses_adapter {
+    %work = func.call @execute_13(%stage, %noise, %token_ids, %encoder_cosine, %encoder_sine, %encoder_mask, %times, %cosine, %sine, %deltas, %strength, %affine, %rgb, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield
+  } else {
+    %work = func.call @execute_12(%stage, %noise, %token_ids, %encoder_cosine, %encoder_sine, %encoder_mask, %times, %cosine, %sine, %deltas, %affine, %rgb, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    scf.yield
+  }
+  %offset = scalar.constant 0 : i64
+  %completion = func.call @feedback(%zero, %rgb, %offset, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return
+}
