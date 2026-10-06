@@ -600,6 +600,26 @@ loom_cc_binary(
 )
 endif()
 
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    krea2_control_test
+  SRCS
+    "models/krea2/control_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea2/control.loom"
+  DEPS
+    ::program
+    iree::base
+    iree::base::tooling::flags
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+  ARGS
+    "--control_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea2/control.loom}}"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
@@ -627,12 +647,15 @@ loom_cc_library(
     ::execution
     ::jit
     ::krea2_request
+    ::module
     ::preparation
+    ::program
     ::weights
     iree::base
     iree::base::internal::path
     iree::hal
     iree::io::file_handle
+    iree::module::hal::types
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::tooling::device_util
