@@ -105,6 +105,16 @@ Request inputs upload once. A single source command runs all model stages;
 only completed F32 RGB comes back. Both normal completion and failure drain
 accepted work before borrowed upload/readback storage is freed.
 
+[`prepare.loom`](prepare.loom) is the source-JIT bootstrap. It receives image
+dimensions, maximum text capacity, the checkpoint directory and optional adapter
+path, then declares command roots, compiler configuration values and fixed
+parameter bindings through the runner-private `prepare` module. That module
+copies the declarations and releases the bootstrap VM before device setup.
+The ordinary JIT and streaming loader consume the result; no native table of
+Krea command names, specialization formulas or weight filenames is involved.
+This is a cold-path boundary: request framing, input preparation and retained
+command selection still use the native request/model leaves below.
+
 The native request leaf is [`request.h`](request.h)/[`request.c`](request.c).
 Model-specific constants and prompt layout remain there, not in the shared
 runner. The cold C math preserves F32-to-BF16 encoder rotary and F64-to-F32 DiT
@@ -139,8 +149,9 @@ does not batch images or use the Qwen token scheduler.
 
 [`model.h`](model.h)/[`model.c`](model.c) is the reusable native residency
 behind the CLI. Creation loads the tokenizer and specializes the bounded
-retained command set. All reflected parameter roots and tensor placements must
-match exactly before it streams each parameter domain once. Every command
+retained command set declared by the bootstrap. All checkpoint declarations,
+reflected parameter roots and tensor placements must match exactly before it
+streams each parameter domain once. Every command
 records the same immutable buffers, and allocation uses componentwise maximum
 input lengths plus maximum reflected workspace length and alignment.
 Serialized `model_generate` calls take only prompt, seed and adapter strength.

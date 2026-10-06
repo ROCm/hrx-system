@@ -12,11 +12,13 @@
 
 #include "experimental/loom_serve/device.h"
 #include "experimental/loom_serve/models/krea2/request.h"
+#include "experimental/loom_serve/preparation.h"
 #include "experimental/loom_serve/weights.h"
 #include "iree/base/internal/path.h"
 #include "iree/io/file_contents.h"
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 #include "iree/tooling/device_util.h"
+#include "iree/vm/buffer.h"
 
 typedef struct krea2_model_stage_t {
   // Retained text extent specialized into this command and its kernels.
@@ -42,12 +44,14 @@ struct loom_serve_krea2_model_t {
   iree_hal_profiling_from_flags_t* profiling;
   // Cold live-source compiler and its task pool.
   loom_serve_jit_t* jit;
+  // Owned source declarations, independent of the bootstrap VM and arguments.
+  loom_serve_preparation_t* preparation;
   // Cold retained shapes sharing one parameter and issue-time buffer bank.
   struct {
     // Number of owned slots, including partially initialized slots on failure.
     uint32_t count;
-    // Slot zero is the configured maximum; optional slot one is text128.
-    krea2_model_stage_t values[2];
+    // Owned stage array; slot zero is the configured maximum prompt extent.
+    krea2_model_stage_t* values;
   } stages;
   // Encoder, Turbo, optional adapter and VAE fixed buffers.
   iree_hal_buffer_t* weights[4];
@@ -74,6 +78,8 @@ iree_status_t loom_serve_krea2_model_destroy(loom_serve_krea2_model_t* model) {
     iree_hal_command_buffer_release(model->stages.values[i].command);
     loom_serve_jit_stage_destroy(model->stages.values[i].compiled);
   }
+  iree_allocator_free(model->allocator, model->stages.values);
+  loom_serve_preparation_destroy(model->preparation);
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->weights); ++i) {
     iree_hal_buffer_release(model->weights[i]);
   }
@@ -107,34 +113,75 @@ static iree_status_t krea2_load_tokenizer(loom_serve_krea2_model_t* model,
   return status;
 }
 
-static iree_status_t krea2_compile_stage(
+static iree_status_t krea2_prepare(
     loom_serve_krea2_model_t* model,
-    const loom_serve_krea2_model_options_t* options,
-    krea2_model_stage_t* stage) {
-  const uint32_t images = (options->height / 16) * (options->width / 16);
-  const char* keys[] = {"krea2.block_tokens",  "krea2.image_tokens",
-                        "krea2.text_tokens",   "krea2.time_count",
-                        "krea2.latent_height", "krea2.latent_width"};
-  const uint32_t values[] = {images + stage->text_tokens, images,
-                             stage->text_tokens,          8,
-                             options->height / 8,         options->width / 8};
-  char strings[IREE_ARRAYSIZE(keys)][16];
-  loomc_config_binding_t config_bindings[IREE_ARRAYSIZE(keys)];
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(keys); ++i) {
-    snprintf(strings[i], sizeof(strings[i]), "%u", values[i]);
-    config_bindings[i] = (loomc_config_binding_t){
-        loomc_make_cstring_view(keys[i]), loomc_make_cstring_view(strings[i])};
+    const loom_serve_krea2_model_options_t* options) {
+  const iree_allocator_t allocator = model->allocator;
+  char* path = NULL;
+  IREE_RETURN_IF_ERROR(iree_file_path_join(
+      options->source_directory, IREE_SV("prepare.loom"), allocator, &path));
+  iree_vm_environment_t* environment = NULL;
+  iree_status_t status = iree_vm_environment_allocate(allocator, &environment);
+  iree_vm_ref_types_t types = {0};
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_ref_types_resolve(
+        iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
+        &types);
   }
-  const loomc_config_options_t config = {
-      config_bindings,
-      IREE_ARRAYSIZE(keys),
+  iree_vm_variant_t arguments[] = {
+      iree_vm_variant_from_i64(options->height),
+      iree_vm_variant_from_i64(options->width),
+      iree_vm_variant_from_i64(options->text_tokens),
       {0},
-      LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
-  return loom_serve_jit_compile(model->jit,
-                                options->adapter_path.size
-                                    ? IREE_SV("sample_image_adapted")
-                                    : IREE_SV("sample_image"),
-                                &config, &stage->compiled);
+      {0},
+  };
+  const iree_string_view_t paths[] = {options->checkpoint_directory,
+                                      options->adapter_path};
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(paths) && iree_status_is_ok(status); ++i) {
+    iree_vm_buffer_t* buffer = NULL;
+    status = iree_vm_buffer_wrap(
+        IREE_VM_BUFFER_ACCESS_FLAG_READ,
+        iree_make_byte_span((void*)paths[i].data, paths[i].size),
+        iree_vm_buffer_release_callback_null(), allocator, &buffer);
+    if (iree_status_is_ok(status)) {
+      arguments[3 + i] = iree_vm_buffer_variant_from_ptr_move(&types, &buffer);
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_preparation_create(
+        environment, iree_make_cstring_view(path), IREE_SV("prepare"),
+        iree_vm_variant_span_from_array(arguments), &model->preparation,
+        allocator);
+  }
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_environment_free(environment);
+  iree_allocator_free(allocator, path);
+  if (iree_status_is_ok(status)) {
+    const iree_host_size_t count =
+        loom_serve_preparation_stage_count(model->preparation);
+    status = iree_allocator_malloc_array(allocator, count,
+                                         sizeof(*model->stages.values),
+                                         (void**)&model->stages.values);
+    if (iree_status_is_ok(status)) {
+      model->stages.count = (uint32_t)count;
+    }
+  }
+  for (uint32_t i = 0; i < model->stages.count && iree_status_is_ok(status);
+       ++i) {
+    const int64_t tag =
+        loom_serve_preparation_stage(model->preparation, i)->tag;
+    if (tag <= 0 || tag > UINT32_MAX ||
+        (i == 0 && tag != options->text_tokens)) {
+      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                "stage %u must name a valid text extent; "
+                                "stage zero must use the requested maximum",
+                                i);
+    } else {
+      model->stages.values[i].text_tokens = (uint32_t)tag;
+    }
+  }
+  return status;
 }
 
 // The source catalog is external. Every retained shape must describe the same
@@ -149,16 +196,37 @@ static iree_status_t krea2_check_layouts(loom_serve_krea2_model_t* model) {
     const krea2_model_stage_t* stage = &model->stages.values[i];
     const loom_cmd_program_t* program =
         loom_serve_jit_stage_program(stage->compiled);
+    const loom_serve_preparation_stage_t* declaration =
+        loom_serve_preparation_stage(model->preparation, i);
     if (program->requirements.rebindable_binding_count != binding_count ||
         program->requirements.transient.binding_index !=
             model->input_count + 1 ||
         program->requirements.fixed_buffer_count != roots ||
         program->parameter_roots.count != roots ||
+        declaration->parameter_count != roots ||
         program->requirements.launch_counts.binding_index != UINT32_MAX) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "text%u source root does not implement the Krea image ABI",
           stage->text_tokens);
+    }
+    const loom_serve_preparation_stage_t* maximum =
+        loom_serve_preparation_stage(model->preparation, 0);
+    for (uint32_t root = 0; root < roots; ++root) {
+      const loom_serve_preparation_parameter_t* parameter =
+          &declaration->parameters[root];
+      const loom_serve_preparation_parameter_t* shared =
+          &maximum->parameters[root];
+      if (parameter->binding != root ||
+          loom_cmd_program_parameter_root_at(program, root)
+                  .fixed_buffer_index != parameter->binding ||
+          !iree_string_view_equal(parameter->path, shared->path) ||
+          !iree_string_view_equal(parameter->policy, shared->policy)) {
+        return iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "text%u must declare the same ordered checkpoint domains",
+            stage->text_tokens);
+      }
     }
     if (!i) {
       continue;
@@ -218,6 +286,7 @@ static iree_status_t krea2_model_initialize(
           : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
   IREE_RETURN_IF_ERROR(
       krea2_load_tokenizer(model, options->checkpoint_directory));
+  IREE_RETURN_IF_ERROR(krea2_prepare(model, options));
   model->output.data_length =
       (iree_host_size_t)options->height * options->width * 12;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
@@ -235,7 +304,13 @@ static iree_status_t krea2_model_initialize(
   uint64_t entry_count = 0;
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     krea2_model_stage_t* stage = &model->stages.values[i];
-    IREE_RETURN_IF_ERROR(krea2_compile_stage(model, options, stage));
+    iree_host_size_t stage_sizes[LOOM_SERVE_KREA2_INPUT_COUNT];
+    IREE_RETURN_IF_ERROR(loom_serve_krea2_request_measure(
+        options->height, options->width, stage->text_tokens, stage_sizes));
+    const loom_serve_preparation_stage_t* declaration =
+        loom_serve_preparation_stage(model->preparation, i);
+    IREE_RETURN_IF_ERROR(loom_serve_jit_compile(
+        model->jit, declaration->root, &declaration->config, &stage->compiled));
     const loom_cmd_program_t* program =
         loom_serve_jit_stage_program(stage->compiled);
     workspace_length = iree_max(
@@ -244,14 +319,9 @@ static iree_status_t krea2_model_initialize(
         workspace_alignment, program->requirements.transient.minimum_alignment);
     executable_count += program->requirements.executable_count;
     entry_count += program->requirements.entry_count;
-    if (i) {
-      iree_host_size_t stage_sizes[LOOM_SERVE_KREA2_INPUT_COUNT];
-      IREE_RETURN_IF_ERROR(loom_serve_krea2_request_measure(
-          options->height, options->width, stage->text_tokens, stage_sizes));
-      for (iree_host_size_t input = 0; input < IREE_ARRAYSIZE(stage_sizes);
-           ++input) {
-        sizes[input] = iree_max(sizes[input], stage_sizes[input]);
-      }
+    for (iree_host_size_t input = 0; input < IREE_ARRAYSIZE(stage_sizes);
+         ++input) {
+      sizes[input] = iree_max(sizes[input], stage_sizes[input]);
     }
   }
   IREE_RETURN_IF_ERROR(krea2_check_layouts(model));
@@ -293,21 +363,15 @@ static iree_status_t krea2_model_initialize(
   fflush(stdout);
   IREE_RETURN_IF_ERROR(iree_hal_begin_device_group_profiling_from_flags(
       loom_serve_device_group(model->owner), allocator, &model->profiling));
-  char* policy = NULL;
-  IREE_RETURN_IF_ERROR(iree_file_path_join(
-      options->source_directory, IREE_SV("weights.loom"), allocator, &policy));
-  const char* names[] = {"text_encoder/model.safetensors", "turbo.safetensors",
-                         "vae/diffusion_pytorch_model.safetensors"};
+  const loom_serve_preparation_stage_t* declaration =
+      loom_serve_preparation_stage(model->preparation, 0);
   iree_status_t status = iree_ok_status();
   for (uint32_t i = 0; i < roots && iree_status_is_ok(status); ++i) {
-    char* path = NULL;
-    const bool adapter_root = adapted && i == 2;
-    if (!adapter_root) {
-      const uint32_t name_index = i < 2 ? i : 2;
-      status = iree_file_path_join(options->checkpoint_directory,
-                                   iree_make_cstring_view(names[name_index]),
-                                   allocator, &path);
-    }
+    const loom_serve_preparation_parameter_t* parameter =
+        &declaration->parameters[i];
+    char* policy = NULL;
+    status = iree_file_path_join(options->source_directory, parameter->policy,
+                                 allocator, &policy);
     if (iree_status_is_ok(status)) {
       const loom_cmd_program_parameter_root_t reflected =
           loom_cmd_program_parameter_root_at(program, i);
@@ -315,13 +379,11 @@ static iree_status_t krea2_model_initialize(
           program, reflected, &model->weights[reflected.fixed_buffer_index]};
       status = loom_serve_weights_load(
           device, loom_serve_device_transfer_queue(model->owner), dispatch,
-          model->jit, command_mode, 0, 1, &root,
-          adapter_root ? options->adapter_path : iree_make_cstring_view(path),
+          model->jit, command_mode, 0, 1, &root, parameter->path,
           iree_make_cstring_view(policy), allocator);
     }
-    iree_allocator_free(allocator, path);
+    iree_allocator_free(allocator, policy);
   }
-  iree_allocator_free(allocator, policy);
   IREE_RETURN_IF_ERROR(status);
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     krea2_model_stage_t* stage = &model->stages.values[i];
@@ -363,12 +425,6 @@ iree_status_t loom_serve_krea2_model_create(
   model->allocator = host_allocator;
   model->height = options->height;
   model->width = options->width;
-  model->stages.count = 1;
-  model->stages.values[0].text_tokens = options->text_tokens;
-  if (options->text_tokens > 128 && options->text_tokens % 64 == 0) {
-    model->stages.count = 2;
-    model->stages.values[1].text_tokens = 128;
-  }
   model->input_count =
       LOOM_SERVE_KREA2_INPUT_COUNT - !options->adapter_path.size;
   iree_status_t status = krea2_model_initialize(model, options, sizes);
@@ -406,8 +462,11 @@ iree_status_t loom_serve_krea2_model_generate(loom_serve_krea2_model_t* model,
   if (iree_status_is_ok(status)) {
     token_count = loom_serve_krea2_prompt_token_count(prepared);
     // This bound preserves the prompt/suffix live-key partitions in text128.
-    if (model->stages.count == 2 && token_count <= 98) {
-      stage = &model->stages.values[1];
+    for (uint32_t i = 1; i < model->stages.count; ++i) {
+      if (model->stages.values[i].text_tokens == 128 && token_count <= 98) {
+        stage = &model->stages.values[i];
+        break;
+      }
     }
     const loom_serve_krea2_request_options_t options = {
         model->height, model->width, stage->text_tokens, seed, strength};

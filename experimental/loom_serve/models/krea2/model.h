@@ -28,16 +28,16 @@ typedef struct loom_serve_krea2_model_options_t {
   uint32_t height;
   // Output image width in pixels, fixed for this residency.
   uint32_t width;
-  // Maximum retained text extent and prompt truncation capacity. A maximum
-  // above 128 and divisible by 64 also retains a text128 command for short
-  // prompts; other valid maxima retain only their configured command.
+  // Maximum retained text extent and prompt truncation capacity, passed to the
+  // source bootstrap. Its first stage must use this extent.
   uint32_t text_tokens;
 } loom_serve_krea2_model_options_t;
 
-// Loads one tokenizer and cold-JITs the bounded retained command set. Exact
-// reflected parameter placement must agree before streaming each immutable
-// domain once. All commands share one maximum-sized input/output/workspace
-// bank. Failure releases partial ownership and leaves *out_model NULL.
+// Loads one tokenizer and cold-JITs the source-declared retained commands.
+// Exact reflected parameter placement must agree before streaming each
+// immutable domain once. All commands share one maximum-sized
+// input/output/workspace bank. Failure releases partial ownership and leaves
+// *out_model NULL.
 iree_status_t loom_serve_krea2_model_create(
     const loom_serve_krea2_model_options_t* options,
     loom_serve_krea2_model_t** out_model, iree_allocator_t host_allocator);

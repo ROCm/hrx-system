@@ -397,6 +397,45 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    preparation
+  HDRS
+    "preparation.h"
+  SRCS
+    "preparation.c"
+  DEPS
+    ::program
+    iree::base
+    iree::base::internal::path
+    iree::vm
+    loom::binding::c::loomc
+  PUBLIC
+)
+
+if(LOOM_TARGET_ARCH_VM)
+loom_cc_test(
+  NAME
+    preparation_test
+  SRCS
+    "preparation_test.cc"
+  DATA
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea2/prepare.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/preparation/boundaries.loom"
+  DEPS
+    ::preparation
+    iree::base
+    iree::base::tooling::flags
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::vm
+    loom::binding::c::loomc
+  ARGS
+    "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea2/prepare.loom}}"
+    "--boundary_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/testdata/preparation/boundaries.loom}}"
+)
+endif()
+
+loom_cc_library(
+  NAME
     weights
   HDRS
     "weights.h"
@@ -588,6 +627,7 @@ loom_cc_library(
     ::execution
     ::jit
     ::krea2_request
+    ::preparation
     ::weights
     iree::base
     iree::base::internal::path
@@ -596,6 +636,7 @@ loom_cc_library(
     iree::tokenizer
     iree::tokenizer::format::huggingface::tokenizer_json
     iree::tooling::device_util
+    iree::vm
     loom::binding::c::loomc
     loom::target::arch::cmd::program
   PUBLIC

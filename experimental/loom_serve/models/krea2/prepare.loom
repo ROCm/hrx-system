@@ -1,0 +1,110 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// Cold bootstrap only declares commands and parameter domains. The runner
+// compiles the resulting configurations and streams each shared domain once.
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+// sample_image
+global.rodata.def @root_base = bytes("73616d706c655f696d616765")
+// sample_image_adapted
+global.rodata.def @root_adapted = bytes("73616d706c655f696d6167655f61646170746564")
+// krea2.block_tokens
+global.rodata.def @block_tokens = bytes("6b726561322e626c6f636b5f746f6b656e73")
+// krea2.image_tokens
+global.rodata.def @image_tokens = bytes("6b726561322e696d6167655f746f6b656e73")
+// krea2.text_tokens
+global.rodata.def @text_tokens = bytes("6b726561322e746578745f746f6b656e73")
+// krea2.time_count
+global.rodata.def @time_count = bytes("6b726561322e74696d655f636f756e74")
+// krea2.latent_height
+global.rodata.def @latent_height = bytes("6b726561322e6c6174656e745f686569676874")
+// krea2.latent_width
+global.rodata.def @latent_width = bytes("6b726561322e6c6174656e745f7769647468")
+// text_encoder/model.safetensors
+global.rodata.def @encoder = bytes("746578745f656e636f6465722f6d6f64656c2e7361666574656e736f7273")
+// turbo.safetensors
+global.rodata.def @transformer = bytes("747572626f2e7361666574656e736f7273")
+// vae/diffusion_pytorch_model.safetensors
+global.rodata.def @vae = bytes("7661652f646966667573696f6e5f7079746f7263685f6d6f64656c2e7361666574656e736f7273")
+// weights.loom
+global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
+// (empty path)
+global.rodata.def @empty = bytes("")
+
+func.def @declare_stage(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer, %adapted: i1) {
+  %root = scf.if %adapted -> (buffer) {
+    %value = global.load @root_adapted : buffer
+    scf.yield %value : buffer
+  } else {
+    %value = global.load @root_base : buffer
+    scf.yield %value : buffer
+  }
+  %stage = func.call @stage(%root, %text) : (buffer, i64) -> (i32)
+  %eight = scalar.constant 8 : i64
+  %sixteen = scalar.constant 16 : i64
+  %rows = scalar.divui %height, %sixteen : i64
+  %columns = scalar.divui %width, %sixteen : i64
+  %images = scalar.muli %rows, %columns : i64
+  %blocks = scalar.addi %images, %text : i64
+  %latent_height = scalar.divui %height, %eight : i64
+  %latent_width = scalar.divui %width, %eight : i64
+  %key_blocks = global.load @block_tokens : buffer
+  %key_images = global.load @image_tokens : buffer
+  %key_text = global.load @text_tokens : buffer
+  %key_steps = global.load @time_count : buffer
+  %key_height = global.load @latent_height : buffer
+  %key_width = global.load @latent_width : buffer
+  func.call @config_i64(%stage, %key_blocks, %blocks) : (i32, buffer, i64) -> ()
+  func.call @config_i64(%stage, %key_images, %images) : (i32, buffer, i64) -> ()
+  func.call @config_i64(%stage, %key_text, %text) : (i32, buffer, i64) -> ()
+  func.call @config_i64(%stage, %key_steps, %eight) : (i32, buffer, i64) -> ()
+  func.call @config_i64(%stage, %key_height, %latent_height) : (i32, buffer, i64) -> ()
+  func.call @config_i64(%stage, %key_width, %latent_width) : (i32, buffer, i64) -> ()
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %encoder = global.load @encoder : buffer
+  %transformer = global.load @transformer : buffer
+  %policy = global.load @policy : buffer
+  func.call @parameter(%stage, %zero, %directory, %encoder, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+  func.call @parameter(%stage, %one, %directory, %transformer, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+  %vae_binding = scf.if %adapted -> (i32) {
+    %empty = global.load @empty : buffer
+    func.call @parameter(%stage, %two, %adapter, %empty, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+    %three = scalar.constant 3 : i32
+    scf.yield %three : i32
+  } else {
+    scf.yield %two : i32
+  }
+  %vae = global.load @vae : buffer
+  func.call @parameter(%stage, %vae_binding, %directory, %vae, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+// Stage zero is the maximum prompt extent. The smaller command preserves the
+// live-key partitions used by the attention kernels when the maximum is a
+// multiple of 64; other valid extents retain only their full-size command.
+func.def public @prepare(%height: i64, %width: i64, %text: i64, %directory: buffer, %adapter: buffer) {
+  %length = buffer.length %adapter
+  %zero_offset = index.constant 0 : offset
+  %adapted = index.cmp ne, %length, %zero_offset : offset
+  func.call @declare_stage(%height, %width, %text, %directory, %adapter, %adapted) : (i64, i64, i64, buffer, buffer, i1) -> ()
+  %zero = scalar.constant 0 : i64
+  %alignment = scalar.constant 64 : i64
+  %small = scalar.constant 128 : i64
+  %larger = scalar.cmpi ugt, %text, %small : i64
+  %remainder = scalar.remui %text, %alignment : i64
+  %aligned = scalar.cmpi eq, %remainder, %zero : i64
+  %retain_small = scalar.andi %larger, %aligned : i1
+  scf.if %retain_small {
+    func.call @declare_stage(%height, %width, %small, %directory, %adapter, %adapted) : (i64, i64, i64, buffer, buffer, i1) -> ()
+    scf.yield
+  }
+  func.return
+}

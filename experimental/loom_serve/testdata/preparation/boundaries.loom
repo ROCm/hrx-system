@@ -1,0 +1,57 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
+func.decl import("prepare") @config(%stage: i32, %key: buffer, %value: buffer)
+func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
+
+// stage_root
+global.rodata.def @root = bytes("73746167655f726f6f74")
+// feature.enabled
+global.rodata.def @key = bytes("666561747572652e656e61626c6564")
+// true
+global.rodata.def @value = bytes("74727565")
+// /checkpoints
+global.rodata.def @directory = bytes("2f636865636b706f696e7473")
+// model.safetensors
+global.rodata.def @path = bytes("6d6f64656c2e7361666574656e736f7273")
+// weights.loom
+global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
+
+func.def public @text_config() {
+  %root = global.load @root : buffer
+  %tag = scalar.constant 0 : i64
+  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %key = global.load @key : buffer
+  %value = global.load @value : buffer
+  func.call @config(%stage, %key, %value) : (i32, buffer, buffer) -> ()
+  func.return
+}
+
+func.def public @missing_stage() {
+  %stage = scalar.constant 0 : i32
+  %key = global.load @key : buffer
+  %value = global.load @value : buffer
+  func.call @config(%stage, %key, %value) : (i32, buffer, buffer) -> ()
+  func.return
+}
+
+func.def public @duplicate_parameter() {
+  %root = global.load @root : buffer
+  %tag = scalar.constant 0 : i64
+  %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+  %zero = scalar.constant 0 : i32
+  %directory = global.load @directory : buffer
+  %path = global.load @path : buffer
+  %policy = global.load @policy : buffer
+  func.call @parameter(%stage, %zero, %directory, %path, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+  func.call @parameter(%stage, %zero, %directory, %path, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+  func.return
+}
+
+func.def public @no_stages() {
+  func.return
+}
