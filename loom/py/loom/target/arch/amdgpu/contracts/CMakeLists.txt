@@ -36,6 +36,7 @@ iree_py_library(
     loom::py::loom::core
     loom::py::loom::dialect::buffer::buffer
     loom::py::loom::dialect::config::config
+    loom::py::loom::dialect::globals::globals
     loom::py::loom::dialect::index::index
     loom::py::loom::dialect::kernel::kernel
     loom::py::loom::dialect::sanitizer::sanitizer

@@ -9,6 +9,71 @@
 
 iree_add_all_subdirs()
 
+loom_test_module(
+  NAME
+    immutable_storage_module
+  SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/immutable_storage.loom"
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/source_low/immutable_storage_checks.loom"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    immutable_storage_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::immutable_storage_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+loom_check_compile_tests(
+  NAME
+    "immutable_storage"
+  SRC
+    "::immutable_storage_module"
+  TARGETS
+    loom::target::amdgpu::gfx11-generic
+    loom::target::amdgpu::gfx1100
+    loom::target::amdgpu::gfx1101
+    loom::target::amdgpu::gfx1102
+    loom::target::amdgpu::gfx1103
+    loom::target::amdgpu::gfx1150
+    loom::target::amdgpu::gfx1151
+    loom::target::amdgpu::gfx1152
+    loom::target::amdgpu::gfx1153
+    loom::target::amdgpu::gfx1170
+    loom::target::amdgpu::gfx1171
+    loom::target::amdgpu::gfx1172
+    loom::target::amdgpu::gfx12-5-generic
+    loom::target::amdgpu::gfx12-generic
+    loom::target::amdgpu::gfx1200
+    loom::target::amdgpu::gfx1201
+    loom::target::amdgpu::gfx1250
+    loom::target::amdgpu::gfx1250-a0
+    loom::target::amdgpu::gfx1251
+    loom::target::amdgpu::gfx9-4-generic
+    loom::target::amdgpu::gfx940
+    loom::target::amdgpu::gfx941
+    loom::target::amdgpu::gfx942
+    loom::target::amdgpu::gfx950
+)
+
 loom_corpus_build(
   NAME
     "all"
@@ -543,18 +608,6 @@ loom_corpus_test(
     "function/call/spill.loom"
     "@spill_values"
     "LOWERING/044"
-    "function/rodata.loom"
-    "@rodata_copy_values"
-    "TARGET/001"
-    "function/rodata.loom"
-    "@rodata_extent_values"
-    "TARGET/001"
-    "function/rodata.loom"
-    "@rodata_gather_values"
-    "TARGET/001"
-    "function/rodata.loom"
-    "@rodata_values"
-    "TARGET/001"
     "function/template/library.loom"
     "@template_dead_library_values"
     "LOWERING/045"

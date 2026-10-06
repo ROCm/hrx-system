@@ -8,8 +8,11 @@
 
 #include <stdint.h>
 
+#include "loom/ir/module.h"
 #include "loom/ops/buffer/ops.h"
+#include "loom/ops/global/ops.h"
 #include "loom/target/arch/amdgpu/lower/constants.h"
+#include "loom/target/arch/amdgpu/lower/data_symbol.h"
 #include "loom/target/arch/amdgpu/lower/source_alloca_layout.h"
 #include "loom/target/arch/amdgpu/lower/types.h"
 #include "loom/util/fact_table.h"
@@ -64,6 +67,15 @@ iree_status_t loom_amdgpu_select_buffer_plan(loom_low_lower_context_t* context,
                                              loom_low_lower_plan_t* out_plan) {
   *out_plan = loom_low_lower_plan_empty();
   switch (source_op->kind) {
+    case LOOM_OP_GLOBAL_LOAD: {
+      const loom_module_t* module = loom_low_lower_context_module(context);
+      const loom_symbol_ref_t symbol = loom_global_load_global(source_op);
+      if (loom_symbol_implements(&module->symbols.entries[symbol.symbol_id],
+                                 LOOM_SYMBOL_INTERFACE_RODATA)) {
+        *out_plan = loom_low_lower_plan_make(source_op->kind, NULL);
+      }
+      return iree_ok_status();
+    }
     case LOOM_OP_BUFFER_ALLOCA: {
       loom_amdgpu_buffer_alloca_plan_t local_plan = {0};
       if (!loom_amdgpu_select_buffer_alloca_plan(context, source_op,
@@ -139,6 +151,18 @@ iree_status_t loom_amdgpu_lower_buffer_op(loom_low_lower_context_t* context,
                                           const loom_op_t* source_op,
                                           loom_low_lower_plan_t plan) {
   switch (source_op->kind) {
+    case LOOM_OP_GLOBAL_LOAD: {
+      loom_value_id_t address = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_amdgpu_build_data_symbol_address(
+          loom_low_lower_context_builder(context),
+          loom_low_lower_context_descriptor_set(context),
+          (loom_amdgpu_data_symbol_address_t){
+              .symbol = loom_global_load_global(source_op),
+          },
+          source_op->location, &address));
+      return loom_low_lower_bind_value(
+          context, loom_global_load_result(source_op).values[0], address);
+    }
     case LOOM_OP_BUFFER_ALLOCA:
       return loom_amdgpu_lower_buffer_alloca(
           context, source_op,

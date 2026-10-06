@@ -1,0 +1,73 @@
+global.rodata.def @prefix_words = align(64) bytes("070000000a0000000d000000100000001300000016000000190000001c000000")
+
+kernel.def @read_prefix() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %table = global.load @prefix_words : buffer
+  %view = buffer.view %table[%origin] : buffer -> view<8xi32>
+  %values = vector.load %view[4] : view<8xi32> -> vector<4xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<4xi32>
+  vector.store %values, %output_view[0] : vector<4xi32>, view<4xi32>
+  kernel.return
+}
+
+// ====
+global.rodata.def @words = align(64) bytes("070000000a0000000d000000100000001300000016000000190000001c0000001f0000002200000025000000280000002b0000002e0000003100000034000000")
+
+// Independent lane indices exercise relocations followed by dynamic gathers.
+kernel.def @read_words() {
+  %unit = index.constant 1 : index
+  %threads = index.constant 4 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%threads, %unit, %unit) : index
+} launch(%indices: buffer, %output: buffer) {
+  %thread = kernel.workitem.id<x> : index
+  %origin = index.constant 0 : offset
+  %indices_view = buffer.view %indices[%origin] : buffer -> view<4x4xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<4x4xi32>
+  %loaded = vector.load %indices_view[%thread, 0] : view<4x4xi32> -> vector<4xi32>
+  %mask = vector.constant 15 : vector<4xi32>
+  %bounded = vector.andi %loaded, %mask : vector<4xi32>
+  %table = global.load @words : buffer
+  %view = buffer.view %table[%origin] : buffer -> view<16xi32>
+  %values = vector.gather %view[0][%bounded] : view<16xi32>, vector<4xi32> -> vector<4xi32>
+  vector.store %values, %output_view[%thread, 0] : vector<4xi32>, view<4x4xi32>
+  kernel.return
+}
+
+// ====
+global.rodata.def @suffix = align(2) bytes("aabbcc")
+
+// The final byte of a separately aligned, non-word-sized object is live data.
+kernel.def @read_tail() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %table = global.load @suffix : buffer
+  %view = buffer.view %table[%origin] : buffer -> view<3xi8>
+  %byte = view.load %view[2] : view<3xi8> -> i8
+  %value = scalar.extui %byte : i8 to i32
+  %output_view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}
+
+// ====
+// External storage retains its symbol reference until artifact linking.
+global.rodata.decl @external_words
+
+kernel.def @read_external() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%output: buffer) {
+  %origin = index.constant 0 : offset
+  %table = global.load @external_words : buffer
+  %aligned = buffer.assume.alignment %table {minimum_alignment = 4} : buffer
+  %view = buffer.view %aligned[%origin] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  %output_view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  view.store %value, %output_view[0] : i32, view<1xi32>
+  kernel.return
+}

@@ -1,0 +1,30 @@
+kernel.decl @read_prefix() launch(%output: buffer)
+
+kernel.decl @read_words() launch(%indices: buffer, %output: buffer)
+
+kernel.decl @read_tail() launch(%output: buffer)
+
+check.case @immutable_uniform_vector {
+  %output = check.generate.fill value(-1) : tensor<4xi32>
+  %expected = check.generate.iota offset(19) step(3) : tensor<4xi32>
+  kernel.launch @read_prefix(%output) : (tensor<4xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<4xi32>
+  check.return
+}
+
+check.case @immutable_gather {
+  %indices = check.generate.iota offset(0) step(1) : tensor<4x4xi32>
+  %output = check.generate.fill value(-1) : tensor<4x4xi32>
+  %expected = check.generate.iota offset(7) step(3) : tensor<4x4xi32>
+  kernel.launch @read_words(%indices, %output) : (tensor<4x4xi32>, tensor<4x4xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<4x4xi32>
+  check.return
+}
+
+check.case @immutable_tail {
+  %output = check.generate.fill value(-1) : tensor<1xi32>
+  %expected = check.generate.fill value(204) : tensor<1xi32>
+  kernel.launch @read_tail(%output) : (tensor<1xi32>)
+  check.expect.equal actual(%output) expected(%expected) : tensor<1xi32>
+  check.return
+}

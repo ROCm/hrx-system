@@ -262,6 +262,15 @@ static const loom_amdgpu_lower_dispatch_row_t
 };
 
 static const loom_amdgpu_lower_dispatch_row_t
+    kAmdgpuGlobalDispatchRows[LOOM_OP_GLOBAL_COUNT_] = {
+        [LOOM_AMDGPU_OP_INDEX(LOOM_OP_GLOBAL_LOAD)] =
+            LOOM_AMDGPU_RECIPE_DIRECT_STORAGE_ROW(
+                LOOM_OP_GLOBAL_LOAD, loom_amdgpu_select_buffer_dispatch,
+                loom_amdgpu_emit_buffer_dispatch, NULL,
+                LOOM_AMDGPU_STORAGE_NONE),
+};
+
+static const loom_amdgpu_lower_dispatch_row_t
     kAmdgpuBufferDispatchRows[LOOM_OP_BUFFER_COUNT_] = {
         [LOOM_AMDGPU_OP_INDEX(LOOM_OP_BUFFER_FENCE)] =
             LOOM_AMDGPU_STRUCTURAL_DATA_STORAGE_ROW(

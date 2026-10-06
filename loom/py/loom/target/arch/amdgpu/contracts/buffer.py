@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from loom.dialect.buffer import ALL_BUFFER_OPS
 from loom.dialect.buffer import defs as buffer
+from loom.dialect.globals import ALL_GLOBAL_OPS
+from loom.dialect.globals import defs as globals
 from loom.error.amdgpu import ERR_AMDGPU_001
 from loom.target.arch.amdgpu.contracts.memory import BYTE_ADDRESSABLE_SCALAR_ELEMENTS
 from loom.target.arch.amdgpu.descriptors import build_amdgpu_contract_descriptor_set
@@ -17,6 +19,7 @@ from loom.target.contracts import (
     ContractFragment,
     Guard,
     GuardDiagnostic,
+    RecipeRule,
     ValueAliasRule,
     ValueRef,
     View,
@@ -41,6 +44,7 @@ _VIEW_TYPE_DIAGNOSTIC = GuardDiagnostic(
 
 AMDGPU_BUFFER_CONTRACT_DIALECT_OPS = {
     "buffer": ALL_BUFFER_OPS,
+    "global": ALL_GLOBAL_OPS,
 }
 
 AMDGPU_BUFFER_CONTRACT_FRAGMENT = ContractFragment(
@@ -48,6 +52,7 @@ AMDGPU_BUFFER_CONTRACT_FRAGMENT = ContractFragment(
     descriptor_set=_DESCRIPTOR_SET,
     public_header="loom/target/arch/amdgpu/contracts/buffer.h",
     cases=(
+        RecipeRule(source_op=globals.global_load),
         ValueAliasRule(
             source_op=buffer.buffer_view,
             source=ValueRef.operand("buffer"),
