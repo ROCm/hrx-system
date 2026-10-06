@@ -1,0 +1,300 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:private"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+filegroup(
+    name = "sources",
+    srcs = ["sources.txt"] + glob([
+        "*.loom",
+        "kernels/ggml/*.loom",
+        "kernels/qwen38/*.loom",
+        "programs/qwen38/*.loom",
+    ]),
+    visibility = ["//visibility:public"],
+)
+
+loom_cc_library(
+    name = "flags",
+    srcs = ["flags.c"],
+    hdrs = ["flags.h"],
+    deps = [
+        ":model",
+        ":schedule",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+    ],
+)
+
+loom_cc_binary(
+    name = "generate",
+    srcs = ["generate.c"],
+    data = [":sources"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":flags",
+        ":model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_test(
+    name = "weights_test",
+    srcs = ["weights_test.cc"],
+    args = ["--policy_source=$(rootpath :weights.loom)"],
+    data = ["weights.loom"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        "//experimental/loom_serve/runtime:program",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "model",
+    srcs = ["model.c"],
+    hdrs = ["model.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":schedule",
+        "//experimental/loom_serve/runtime:command",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/runtime:jit",
+        "//experimental/loom_serve/runtime:module",
+        "//experimental/loom_serve/runtime:program",
+        "//experimental/loom_serve/runtime:weights",
+        "//experimental/loom_serve/storage:block_pool",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/tooling:device_util",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_binary(
+    name = "epoch_check",
+    testonly = True,
+    srcs = ["epoch_check.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":flags",
+        ":model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_binary(
+    name = "workload",
+    testonly = True,
+    srcs = ["workload.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":flags",
+        ":model",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_binary(
+    name = "replay",
+    testonly = True,
+    srcs = ["replay.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":chat",
+        ":flags",
+        ":model",
+        ":schedule",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
+    name = "chat",
+    srcs = ["chat.c"],
+    hdrs = ["chat.h"],
+    deps = [
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_test(
+    name = "chat_test",
+    srcs = ["chat_test.cc"],
+    deps = [
+        ":chat",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "schedule",
+    srcs = ["schedule.c"],
+    hdrs = ["schedule.h"],
+    deps = ["//runtime/src/iree/base"],
+)
+
+loom_cc_test(
+    name = "schedule_test",
+    srcs = ["schedule_test.cc"],
+    deps = [
+        ":schedule",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
+    name = "service",
+    srcs = ["service.c"],
+    hdrs = ["service.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":chat",
+        ":model",
+        ":schedule",
+        "//experimental/loom_serve/http:request",
+        "//experimental/loom_serve/http:server",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_binary(
+    name = "server",
+    srcs = ["server.c"],
+    data = [":sources"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":flags",
+        ":model",
+        ":service",
+        "//experimental/loom_serve/http:server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+    ],
+)
+
+py_binary(
+    name = "benchmark_service",
+    testonly = True,
+    srcs = ["benchmark_service.py"],
+    data = ["testdata/source_review.json"],
+)
+
+py_binary(
+    name = "check_service",
+    testonly = True,
+    srcs = ["check_service.py"],
+    deps = [":benchmark_service_lib"],
+)
+
+py_library(
+    name = "check_service_lib",
+    testonly = True,
+    srcs = ["check_service.py"],
+    deps = [":benchmark_service_lib"],
+)
+
+py_binary(
+    name = "check_capacity",
+    testonly = True,
+    srcs = ["check_capacity.py"],
+    deps = [
+        ":benchmark_service_lib",
+        ":check_service_lib",
+    ],
+)
+
+py_library(
+    name = "benchmark_service_lib",
+    testonly = True,
+    srcs = ["benchmark_service.py"],
+)
+
+py_binary(
+    name = "check_rows",
+    testonly = True,
+    srcs = ["check_rows.py"],
+    deps = [
+        ":benchmark_service_lib",
+        ":check_service_lib",
+    ],
+)
+
+py_test(
+    name = "benchmark_service_test",
+    size = "small",
+    srcs = ["benchmark_service_test.py"],
+    data = ["testdata/source_review.json"],
+    deps = [":benchmark_service_lib"],
+)

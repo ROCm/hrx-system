@@ -9,7 +9,36 @@ compiler/runtime ownership, a proposed second-model port, and performance
 experiments. Its [agent entry point](docs/AGENT_START.md) gives a first assignment,
 source-reading order, observable success gates, and failure triage.
 
-`command.c` combines a parsed portable command program with loaded executable
+## Package ownership
+
+Build rules live beside their implementation and tests. Shared packages have
+model-neutral contracts; model packages own checkpoint names, graph assembly,
+configuration, numerical policy, and their remaining native adapters.
+
+| Package | Responsibility |
+| --- | --- |
+| [`runtime/`](runtime) | Source JIT, command materialization, VM imports, weight streaming and queue timelines |
+| [`http/`](http) | TCP carrier and bounded HTTP connection/request storage |
+| [`image/`](image) | Image request validation, completed-image service and output encoding; independent of diffusion architecture |
+| [`storage/`](storage) | Physical block accounting and logical page maps |
+| [`models/krea/`](models/krea) | Krea model programs, checkpoint/request policy, image adapters and reference checks |
+| [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy, text adapters and reference checks |
+| [`tools/`](tools) | Observation, recording, workload replay, simulation and component checks |
+
+The shared native headers are experimental model-author interfaces, not a
+stable ABI. Concrete model-native libraries are package-private. Only runtime
+consumes compiler-private command reflection; model callers use its serving
+interfaces. Each model's `:sources` target publishes its source-JIT catalog and
+is included in its executable's runfiles, not compiled ahead of time.
+
+For example, the image server is
+`//experimental/loom_serve/models/krea:server`; the text server is
+`//experimental/loom_serve/models/qwen:server`. Full serving coverage runs with
+`build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.
+
+## Shared execution
+
+`runtime/command.c` combines a parsed portable command program with loaded executable
 reflection. Recording retains fixed buffers and code. Rebindable slots include
 model state and explicit scratch; the materializer allocates no device backing.
 There is no semantic-resource extension to the command artifact format.
@@ -18,7 +47,7 @@ count consumers require command-processing visibility, and later producers
 wait for those reads before reusing count storage. Direct-only waves retain
 dispatch/transfer scopes; replay adds no host planning or allocation.
 
-`module.c` exposes typed `execute_N(i32 stage, N hal.buffer) -> i64` imports
+`runtime/module.c` exposes typed `execute_N(i32 stage, N hal.buffer) -> i64` imports
 over one retained command table. Model source selects the stage and buffers;
 the native call submits and returns without waiting. HAL captures bindings and
 retains their buffers independently of the VM invocation. One process can serve
@@ -26,7 +55,7 @@ many rows; its preallocated native binding scratch is reused between calls.
 The `feedback` import targets bounded host spans registered at startup. Source
 can fork feedback between commands without borrowing a VM temporary's memory.
 
-`execution.c` is the shared execution capability used by the model and host
+`runtime/execution.c` is the shared execution capability used by the model and host
 I/O. Commands and input transfers advance one timeline that serializes shared
 scratch use across exact queues. Feedback downloads wait on their producer and
 prior feedback, then advance a separate timeline without ordering later model
@@ -36,13 +65,13 @@ to its execution object and named timeline, not a global completion namespace.
 Queue rejection advances neither frontier. Final drain joins both branches and
 propagates their failures before releasing any borrowed storage.
 
-The control integration test compiles Qwen generation-state kernels, command programs,
+The control integration test compiles token-row state kernels, command programs,
 and a VM entry from source. Two retained rows share code, commands, and one VM
 process while one row pauses and resumes. Checked outputs cover token history,
 position, padding, and EOS. A rejected native binding must leave the execution
 domain usable. Feedback forks preserve the work frontier while later VM calls
 consume independent retained state. This is an ownership/control witness,
-**not a full Qwen model run or a performance result**. The test compiles its
+**not a full model run or a performance result**. The test compiles its
 portable fixtures in process for the live GPU, using the serving JIT path.
 
 A source-authored continuation command reuses one transient count tuple across
@@ -55,7 +84,7 @@ profile recording use the same emitted command artifact.
 From the worktree root:
 
 ```sh
-build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve:control_test
+build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/runtime:control_test
 ```
 
 The separate `jit_test` uses the serving compiler path itself: a source-defined
@@ -65,7 +94,7 @@ storage before executing the prepared commands and verifies the device result.
 It also checks that rejected configuration leaves the compiler reusable.
 
 ```sh
-build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve:jit_test
+build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/runtime:jit_test
 ```
 
 Weights, KV pools, model forward stages, scheduling policy, and transport are
@@ -74,16 +103,16 @@ contents or command names by the native submission code.
 
 ## Native Krea image generation
 
-The [Krea 2 Turbo guide](models/krea2/README.md#generate-an-image-natively)
+The [Krea 2 Turbo guide](models/krea/README.md#generate-an-image-natively)
 provides a second, non-autoregressive caller: prompt and seed through native
 IREE tokenization, source-JIT text encoding, conditioning, eight denoising steps
 and the complete VAE to a PPM image, with optional softwatercolor LoRA.
-[`generate.c`](models/krea2/generate.c) uses the same device, source compiler,
+[`generate.c`](models/krea/generate.c) uses the same device, source compiler,
 weight loader and execution timelines as Qwen. Its cold request leaf owns
 model-specific prompt layout and mathematical tables; the shared runner knows
 none of those semantics. All model loops and buffer lifetimes are authored in
 command programs. The separate
-[`krea2_server`](models/krea2/README.md#serve-images-over-http) returns native
+[`Krea server`](models/krea/README.md#serve-images-over-http) returns native
 PNG images over HTTP using one retained model and a bounded request queue.
 Its modality-level worker preserves input/output lifetimes while the shared TCP
 transport serves concurrent clients. It serializes images rather than batching
@@ -91,7 +120,7 @@ them; it does not put image requests through Qwen's token scheduler.
 
 ## Shared Qwen execution
 
-`qwen_model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: shared
+`models/qwen/model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: shared
 parameter storage prepared in place at startup, cached prefill/decode commands,
 model VM process, residual buffer and packed workspace. One preallocated arena
 partitions private recurrent state among up to sixteen rows. With
@@ -149,7 +178,7 @@ Editing these files changes the next process's model without rebuilding the
 server. The binary embeds the JIT; it never invokes `loom-link` or
 `loom-compile`, loads a prepared artifact directory, or falls back to stale code.
 
-`jit.c` indexes the catalog once and retains the immutable compiler, pipeline,
+`runtime/jit.c` indexes the catalog once and retains the immutable compiler, pipeline,
 and live HAL target profile across stage specializations. Its standard loomc
 task pool supplies up to eight physical-core workers, each with private reusable
 scratch. Stage calls are synchronous; their independent native requests compile
@@ -173,7 +202,7 @@ target weight views and allocates only its additional parameter groups.
 worker count, and cold compilation/load duration. Warm execution reuses commands
 and storage without compiler tasks.
 
-The [model source guide](models/qwen38/README.md) describes the math and
+The [model source guide](models/qwen/README.md) describes the math and
 differential checks. The current source and host storage envelope is 512 input
 tokens and sixteen resident rows. JIT removes offline preparation as a
 prerequisite; larger envelopes still require changing the authored bounds and backing
@@ -206,8 +235,8 @@ and input. This distinction is essential at EOS and tool-result boundaries.
 The CLI retains output tokens on the host while the fixed device ring wraps.
 
 ```sh
-build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve:qwen -- \
-  --model=experimental/loom_serve/models/qwen38 \
+build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve/models/qwen:generate -- \
+  --model=experimental/loom_serve/models/qwen \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --prompt='The secret word is MAPLE. Remember it and reply only READY.' \
@@ -263,8 +292,8 @@ local to that peer; the model scheduler chooses its safe cancellation boundary.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve:http_request_test \
-  //experimental/loom_serve:http_server_test
+  //experimental/loom_serve/http:request_test \
+  //experimental/loom_serve/http:server_test
 ```
 
 The loopback checks use real sockets/carriers and cover fragmented requests,
@@ -290,10 +319,10 @@ host submission. F16 cache math is the same in dense and pooled layouts.
 enough page-rounded capacity to complete the request, including speculative
 writes. Pages are physically assigned only as a row grows. Idle cache can yield
 to admission, but active completion guarantees are never overcommitted.
-The [model guide](models/qwen38/README.md#pooled-kv-and-reserved-admission)
+The [model guide](models/qwen/README.md#pooled-kv-and-reserved-admission)
 describes the layout, memory accounting, and real-model correctness witness.
 
-`qwen_chat.{h,c}` owns the text-only, non-thinking Qwen template and XML tool
+`models/qwen/chat.{h,c}` owns the text-only, non-thinking Qwen template and XML tool
 translation. The supported endpoint is `POST /v1/chat/completions`, with model
 `qwen3.8-27b`, `stream: true`, greedy generation and optional function tools.
 Unknown generation options, nonzero temperature and strict constrained sampling
@@ -333,8 +362,8 @@ build's instrumentation and are not automatically performance data.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
-  //experimental/loom_serve:qwen_server -- \
-  --model=experimental/loom_serve/models/qwen38 \
+  //experimental/loom_serve/models/qwen:server -- \
+  --model=experimental/loom_serve/models/qwen \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
   --mtp --mtp_depth=3 --port=8080 --max_tokens=384
@@ -396,7 +425,7 @@ and target selection; all code and weights remain shared across sessions.
 For a bounded real HTTP check and initial end-to-end measurement:
 
 ```sh
-build_tools/bin/iree-bazel-run //experimental/loom_serve:benchmark_service -- \
+build_tools/bin/iree-bazel-run //experimental/loom_serve/models/qwen:benchmark_service -- \
   --url=http://127.0.0.1:8080 --clients=4 --long-lines=128 --max-tokens=64
 ```
 
@@ -420,8 +449,8 @@ hidden reasoning. The summary records the exact corpus SHA256, and each reply
 records the submitted history hash. Preserve full replies and usage to expose
 work differences when comparing engines or kernel math.
 
-The checked-in [source-review corpus](testdata/source_review.json) freezes eight
-two-turn reviews of public compiler tests. Its [provenance](testdata/README.md)
+The checked-in [source-review corpus](models/qwen/testdata/source_review.json) freezes eight
+two-turn reviews of public compiler tests. Its [provenance](models/qwen/testdata/README.md)
 and [measurement recipe](docs/PERFORMANCE.md#retained-review-benchmark) make the
 full-model performance witness reproducible without private recordings.
 
@@ -455,9 +484,9 @@ subprocesses or OS polling enter the inference process. Build the exact server
 target first, then place the observer inside the benchmark lease when measuring:
 
 ```sh
-python -B -m experimental.loom_serve.observe --log=/private/runs/run.jsonl -- \
-  bazel-bin/experimental/loom_serve/qwen_server \
-  --model=experimental/loom_serve/models/qwen38 \
+python -B -m experimental.loom_serve.tools.observe --log=/private/runs/run.jsonl -- \
+  bazel-bin/experimental/loom_serve/models/qwen/server \
+  --model=experimental/loom_serve/models/qwen \
   --epoch=128:8 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json --rows=8
@@ -499,8 +528,8 @@ policy, requests privileged access, or substitutes an estimate for a sensor.
 completed one, or stop at a recorded elapsed time without running a model:
 
 ```sh
-python -B -m experimental.loom_serve.dashboard /private/runs/run.jsonl
-python -B -m experimental.loom_serve.dashboard /private/runs/run.jsonl \
+python -B -m experimental.loom_serve.tools.dashboard /private/runs/run.jsonl
+python -B -m experimental.loom_serve.tools.dashboard /private/runs/run.jsonl \
   --snapshot --at=16 --width=160
 ```
 
@@ -578,15 +607,15 @@ The focused host checks are:
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve:qwen_chat_test \
-  //experimental/loom_serve:http_request_test \
-  //experimental/loom_serve:http_server_test
+  //experimental/loom_serve/models/qwen:chat_test \
+  //experimental/loom_serve/http:request_test \
+  //experimental/loom_serve/http:server_test
 ```
 
 ### Kernel/scheduler handoff
 
 Kernel changes stay behind the existing stage buffers and parameter placement.
-The [model source checks](models/qwen38/README.md) cover numerical behavior with
+The [model source checks](models/qwen/README.md) cover numerical behavior with
 VM oracles. The retained CLI witness, real pi tool continuation, and cancellation
 checks cover the state those kernels mutate across stages. The server prepares
 artifacts once; restart it after recompiling stages. There is no kernel hot-swap.
@@ -612,7 +641,7 @@ same host or with synchronized wall clocks.
 After those clients finish, export their workload counts:
 
 ```sh
-build_tools/bin/iree-bazel-run //experimental/loom_serve:agent_trace -- \
+build_tools/bin/iree-bazel-run //experimental/loom_serve/tools:agent_trace -- \
   --output=/private/recordings/workload.json \
   /private/recordings/agent-0.jsonl /private/recordings/agent-1.jsonl
 ```
@@ -646,7 +675,7 @@ usage and cannot recover those boundaries on its own.
 
 ```js
 import { VERSION } from "@earendil-works/pi-coding-agent";
-import { recordPiSession } from "./experimental/loom_serve/pi_record.mjs";
+import { recordPiSession } from "./experimental/loom_serve/tools/pi_record.mjs";
 
 // session is a configured, idle SDK AgentSession with both retry layers off.
 const recorder = recordPiSession(session, "/private/agent.calls.jsonl", VERSION);
@@ -680,7 +709,7 @@ provider (no network or device). It exercises automatic/manual split-turn
 compaction, resumed context, mixed windows and failures:
 
 ```sh
-node experimental/loom_serve/pi_record_test.mjs \
+node experimental/loom_serve/tools/pi_record_test.mjs \
   /absolute/path/to/node_modules/@earendil-works/pi-coding-agent \
   /private/recordings/new-cpu-witness
 ```
@@ -728,7 +757,7 @@ Real concurrent recordings are still needed to check the model against actual
 contention, eviction and changes in agent behavior.
 
 ```sh
-build_tools/bin/iree-bazel-run //experimental/loom_serve:simulate_packing -- \
+build_tools/bin/iree-bazel-run //experimental/loom_serve/tools:simulate_packing -- \
   /private/recordings/workload.json \
   --capacities=32,64,128 --span-capacity=8 --epoch-us=100000 \
   --output=/private/recordings/packing.json \
@@ -787,6 +816,6 @@ not silently duplicate sessions or call synthetic replicas real agents.
 
 ```sh
 build_tools/bin/iree-bazel-test --config=asan \
-  //experimental/loom_serve:agent_trace_test \
-  //experimental/loom_serve:simulate_packing_test
+  //experimental/loom_serve/tools:agent_trace_test \
+  //experimental/loom_serve/tools:simulate_packing_test
 ```

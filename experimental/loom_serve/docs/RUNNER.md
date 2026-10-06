@@ -17,17 +17,17 @@ not make those model-independent.
 
 | Component | Receives and owns | Does not infer |
 | --- | --- | --- |
-| [`device`](../device.h) | HAL device URI, async I/O services, device/group, exact queues and execution timelines | Compiler target support, model resources or request lifetimes |
-| [`jit`](../jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
-| [`command`](../command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
-| [`execution`](../execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
-| [`module`](../module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
-| [`program`](../program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
-| [`qwen_model`](../qwen_model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
-| [`weights`](../weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
-| [`qwen_schedule`](../qwen_schedule.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Tokens, attention state, measured kernel cost |
-| [`qwen_service`](../qwen_service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
-| [`http_server`](../http_server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
+| [`device`](../runtime/device.h) | HAL device URI, async I/O services, device/group, exact queues and execution timelines | Compiler target support, model resources or request lifetimes |
+| [`jit`](../runtime/jit.h) | Source catalog, configuration, live device profile; compiled command images and native entries | Session identity, cache lifetime, chat semantics |
+| [`command`](../runtime/command.h) | Compiler-produced parameter/binding requirements, executable reflection; reusable HAL command recording | Model graph from buffer contents or filenames |
+| [`execution`](../runtime/execution.h) | Exact dispatch/transfer queues and explicit work/feedback timelines | Ordering from FIFO submission or alias inspection |
+| [`module`](../runtime/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
+| [`program`](../runtime/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
+| [`qwen_model`](../models/qwen/model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
+| [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
+| [`qwen_schedule`](../models/qwen/schedule.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Tokens, attention state, measured kernel cost |
+| [`qwen_service`](../models/qwen/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
+| [`http_server`](../http/server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
 
 These are runner-private seams, not a proposed public serving ABI. The
 compiler/runtime handoff is the command product: its parameter placement,
@@ -70,7 +70,7 @@ It resolves all target/MTP parameter sharing before I/O, so each unique tensor
 is loaded once. Each call selects explicit reflected roots from one checkpoint
 domain. Distinct domains, such as an immutable base and its LoRA adapter, load
 separately and cannot collide through equal tensor names. Recorded commands
-can bind roots from both domains. The model's [`weights.loom`](../models/qwen38/weights.loom)
+can bind roots from both domains. The model's [`weights.loom`](../models/qwen/weights.loom)
 export `prepare_weight(buffer key) -> (buffer command_root, i64 byte_length)`
 selects each tensor's transformation. Empty root and zero length mean unchanged
 file bytes. Otherwise the loader checks the exact reflected size and JITs each
@@ -90,7 +90,7 @@ lanes can overlap. Consecutive unchanged tensors share a readiness group;
 each transformed tensor has its own read-to-dispatch edge. The loader makes
 one terminal host join, not a wait after every tensor. Failed readiness
 abandons the model; accepted queue operations retain resources until retirement.
-The [model guide](../models/qwen38/README.md#online-weight-residency) defines
+The [model guide](../models/qwen/README.md#online-weight-residency) defines
 the layout, allocation strategy, and startup profiling recipe.
 
 ## One real packed epoch
