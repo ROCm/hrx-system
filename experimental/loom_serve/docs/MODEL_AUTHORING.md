@@ -73,18 +73,19 @@ checks the dependency contract independently of floating-point oracle error.
 
 The model's [`config.loom`](../models/qwen/config.loom) supplies fixed typed
 `config.def` values through the ordinary source catalog.
-[`qwen_compile_stage`](../models/qwen/model.c) supplies run-dependent overrides in
-`loomc_config_options_t`. Both feed the same command materialization and native
-source requests; the compiler retains the relationship between a kernel's
+The cold [`prepare.loom`](../models/qwen/prepare.loom) declares run-dependent
+overrides through `prepare.config_i64`; the native preparation owner exposes
+them as `loomc_config_options_t`. Both feed the same command materialization
+and native source requests; the compiler retains the relationship between a kernel's
 launch math and body. Kernel declarations still constrain accepted values with
 their range and multiple predicates. The small JIT caller exercises a source
 default, a different explicit override, and an invalid override followed by
 successful compiler reuse.
 
-Ten shape-dependent or derived bindings remain in the adapter, including Q8
-output bounds and quantizer group capacity. Stage selection and state geometry
-also remain native model policy; fixed source defaults alone are not a complete
-model-owned bootstrap.
+The source bootstrap owns all ten shape-dependent bindings, including Q8
+output bounds and quantizer group capacity. It also owns stage selection and
+retained storage geometry. Warm descriptor packing and chat policy remain
+native; source-owned startup is not the complete model-neutral text boundary.
 
 Configuration is a model entry/specialization boundary. Reusable functions,
 templates, and motifs receive dimensions and layout facts as explicit SSA
@@ -266,9 +267,12 @@ run-dependent specialization and checkpoint bindings through the same
 [`preparation`](../runtime/preparation.h) module used by image models. The
 returned opaque control buffer belongs to the residency, outlives the cold
 process, and is interpreted only by the warm source. Native code consumes
-declarations and command reflection instead of naming model commands. Qwen's
-row/cache geometry and chat policy still reside in its native adapter; this
-startup contract alone does not make that adapter model-neutral.
+declarations and command reflection instead of naming model commands. The
+source also returns allocation/view records and initial target/draft origin
+tables. These upload payloads remain retained until initialization retires,
+including partial failure. Native code owns physical allocation and page IDs,
+not layer/head-size formulas. Warm descriptor packing and chat policy still
+reside in the adapter; this contract alone does not make it model-neutral.
 
 [`control.loom`](../models/qwen/control.loom) is a concrete example of typed
 command selection, optional proposal, verification, and cache catch-up. Its
