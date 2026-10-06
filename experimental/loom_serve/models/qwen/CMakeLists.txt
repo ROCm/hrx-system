@@ -267,6 +267,7 @@ loom_cc_test(
     "chat_test.cc"
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom"
+    "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/chat_alias.loom"
   DEPS
     ::chat
     iree::base
@@ -281,6 +282,7 @@ loom_cc_test(
     iree::vm
   ARGS
     "--chat_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom}}"
+    "--alias_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/chat_alias.loom}}"
 )
 endif()
 

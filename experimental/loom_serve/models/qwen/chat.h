@@ -29,6 +29,10 @@ typedef struct loom_serve_qwen_chat_policy_t {
   iree_vm_function_t render_tool;
   // Turn framing and complete raw-token encoding shared by all text callers.
   iree_vm_function_t prepare_input;
+  // Safe ordinary-text extent in an accumulated generated response.
+  iree_vm_function_t text_end;
+  // Canonical completed transcript, returned as retained VM storage.
+  iree_vm_function_t complete_text;
 } loom_serve_qwen_chat_policy_t;
 
 iree_status_t loom_serve_qwen_chat_policy_initialize(
@@ -102,25 +106,54 @@ iree_status_t loom_serve_qwen_chat_initialize(
     loom_serve_qwen_chat_t* out_chat);
 void loom_serve_qwen_chat_deinitialize(loom_serve_qwen_chat_t* chat);
 
-// Finds the next safe text extent in an accumulated decoded response. An XML
-// tool marker or its incomplete suffix is withheld from ordinary text output.
-// Scan starts at the previous safe extent; no generated prefix is rescanned.
-iree_host_size_t loom_serve_qwen_chat_text_end(iree_string_view_t response,
-                                               iree_host_size_t previous_end);
+// Source output phase. Final text releases incomplete marker prefixes; complete
+// tool syntax remains withheld for structured parsing in either phase.
+typedef enum loom_serve_qwen_chat_output_phase_e {
+  LOOM_SERVE_QWEN_CHAT_OUTPUT_STREAMING = 0,
+  LOOM_SERVE_QWEN_CHAT_OUTPUT_COMPLETE = 1,
+} loom_serve_qwen_chat_output_phase_t;
+
+// Queries the next safe text extent in the shared source VM. Response is
+// borrowed synchronously. Scan starts at the previous safe extent and never
+// retracts published bytes; source failure publishes no new extent.
+iree_status_t loom_serve_qwen_chat_text_end(
+    const loom_serve_qwen_chat_policy_t* policy, iree_string_view_t response,
+    iree_host_size_t previous_end, loom_serve_qwen_chat_output_phase_t phase,
+    iree_host_size_t* out_end, iree_allocator_t host_allocator);
+
+// Completed response metadata and its canonical retained-history checkpoint.
+// The source environment outlives this value; request/body/response storage
+// need not. Original generated token IDs remain separately owned by the row.
+typedef struct loom_serve_qwen_chat_completion_t {
+  // Owned VM storage, including any backing aliased by the source result.
+  iree_vm_buffer_t* storage;
+  // Canonical transcript borrowing storage, not request or invocation memory.
+  iree_string_view_t transcript;
+  // Safe ordinary-text extent in the original generated response.
+  iree_host_size_t text_end;
+  // Number of validated structured tool calls.
+  iree_host_size_t tool_count;
+} loom_serve_qwen_chat_completion_t;
+
+// Releases a completed checkpoint; zero-initialized values are accepted.
+void loom_serve_qwen_chat_completion_deinitialize(
+    loom_serve_qwen_chat_completion_t* completion);
 
 // Parses complete generated XML calls against the indexed request schemas.
-// Appends the canonical completed transcript to checkpoint and an OpenAI
+// Returns the source-owned canonical completed transcript and appends an OpenAI
 // tool_calls delta array (including indexes and stable IDs) to tool_calls.
+// previous_end is the already published ordinary-text extent in response.
 // Plain text responses produce an empty array. Malformed/truncated XML fails;
 // it is never submitted to the agent as a partial executable call.
-// The checkpoint validates subsequent client history; it does not replace the
-// original generated tokens retained in device KV/recurrent state.
-iree_status_t loom_serve_qwen_chat_complete(const loom_serve_qwen_chat_t* chat,
-                                            iree_string_view_t response,
-                                            uint64_t request_id,
-                                            iree_string_builder_t* checkpoint,
-                                            iree_string_builder_t* tool_calls,
-                                            iree_host_size_t* out_tool_count);
+// Replaces completion only on success, releasing its prior storage. Failure
+// leaves completion unchanged and may leave partial tool_calls bytes, which
+// the caller must not publish. The checkpoint validates subsequent client
+// history; it does not replace original generated tokens in device state.
+iree_status_t loom_serve_qwen_chat_complete(
+    const loom_serve_qwen_chat_t* chat, iree_string_view_t response,
+    iree_host_size_t previous_end, uint64_t request_id,
+    iree_string_builder_t* tool_calls,
+    loom_serve_qwen_chat_completion_t* completion);
 
 // Appends one SSE chat event. Delta is an already serialized JSON object;
 // finish_reason is empty for nonterminal events. Usage belongs to the complete

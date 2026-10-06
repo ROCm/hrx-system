@@ -422,7 +422,8 @@ static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner,
   const iree_string_view_t roots[] = {
       IREE_SVL("step"),         IREE_SVL("epoch"),
       IREE_SVL("encode_epoch"), IREE_SVL("publish_epoch"),
-      IREE_SVL("render_tool"),  IREE_SVL("prepare_input")};
+      IREE_SVL("render_tool"),  IREE_SVL("prepare_input"),
+      IREE_SVL("text_end"),     IREE_SVL("complete_text")};
   status = loom_serve_input_module_create(
       runner->environment, runner->tokenizer, &libraries[1], runner->allocator);
   if (iree_status_is_ok(status)) {

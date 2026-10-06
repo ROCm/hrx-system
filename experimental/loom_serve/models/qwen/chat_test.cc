@@ -19,6 +19,7 @@
 #include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 
 IREE_FLAG(string, chat_source, "", "Production chat policy source.");
+IREE_FLAG(string, alias_source, "", "Source returning retained input aliases.");
 
 namespace {
 
@@ -36,10 +37,15 @@ std::string View(const iree_string_builder_t& builder) {
   return std::string(view.data ? view.data : "", view.size);
 }
 
+std::string View(const loom_serve_qwen_chat_completion_t& completion) {
+  return std::string(
+      completion.transcript.data ? completion.transcript.data : "",
+      completion.transcript.size);
+}
+
 class QwenChatTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_string_builder_initialize(iree_allocator_system(), &checkpoint_);
     iree_string_builder_initialize(iree_allocator_system(), &calls_);
     IREE_ASSERT_OK(
         iree_vm_environment_allocate(iree_allocator_system(), &environment_));
@@ -71,8 +77,9 @@ class QwenChatTest : public ::testing::Test {
         environment_, tokenizer_, &libraries_[0], iree_allocator_system()));
     IREE_ASSERT_OK(loom_serve_json_module_create(environment_, &libraries_[1],
                                                  iree_allocator_system()));
-    const iree_string_view_t roots[] = {IREE_SVL("render_tool"),
-                                        IREE_SVL("prepare_input")};
+    const iree_string_view_t roots[] = {
+        IREE_SVL("render_tool"), IREE_SVL("prepare_input"),
+        IREE_SVL("text_end"), IREE_SVL("complete_text")};
     IREE_ASSERT_OK(loom_serve_program_create(
         environment_, iree_make_cstring_view(FLAG_chat_source),
         IREE_ARRAYSIZE(roots), roots,
@@ -86,7 +93,7 @@ class QwenChatTest : public ::testing::Test {
       loom_serve_qwen_chat_deinitialize(&chat_);
     }
     iree_string_builder_deinitialize(&calls_);
-    iree_string_builder_deinitialize(&checkpoint_);
+    loom_serve_qwen_chat_completion_deinitialize(&checkpoint_);
     loom_serve_program_destroy(program_);
     iree_vm_module_release(libraries_[1]);
     iree_vm_module_release(libraries_[0]);
@@ -101,12 +108,12 @@ class QwenChatTest : public ::testing::Test {
     initialized_ = iree_status_is_ok(status);
     return status;
   }
-  iree_status_t Complete(const std::string& text) {
-    iree_string_builder_reset(&checkpoint_);
+  iree_status_t Complete(const std::string& text,
+                         iree_host_size_t previous_end = 0) {
     iree_string_builder_reset(&calls_);
     return loom_serve_qwen_chat_complete(
-        &chat_, iree_make_string_view(text.data(), text.size()), 7,
-        &checkpoint_, &calls_, &call_count_);
+        &chat_, iree_make_string_view(text.data(), text.size()), previous_end,
+        7, &calls_, &checkpoint_);
   }
 
   // Body storage borrowed by the initialized request.
@@ -116,11 +123,9 @@ class QwenChatTest : public ::testing::Test {
   // Whether chat owns initialized storage.
   bool initialized_ = false;
   // Completed canonical transcript.
-  iree_string_builder_t checkpoint_;
+  loom_serve_qwen_chat_completion_t checkpoint_ = {};
   // Serialized streaming tool-call delta.
   iree_string_builder_t calls_;
-  // Number of completed tool calls.
-  iree_host_size_t call_count_ = 0;
   // Environment outliving source policy and all request buffer references.
   iree_vm_environment_t* environment_ = nullptr;
   // Actual tokenizer borrowed by the native input capability.
@@ -129,7 +134,7 @@ class QwenChatTest : public ::testing::Test {
   iree_vm_module_t* libraries_[2] = {};
   // One source program shared by incoming and completed chat processing.
   loom_serve_program_t* program_ = nullptr;
-  // Cold-resolved formatter in that program.
+  // Cold-resolved text policy in that program.
   loom_serve_qwen_chat_policy_t policy_ = {};
 };
 
@@ -207,7 +212,7 @@ TEST_F(QwenChatTest, TextPartsAndNullHaveDistinctMeanings) {
             "<|im_start|>user\nnull<|im_end|>\n"
             "<|im_start|>assistant\n<think>\n\n</think>\n\n");
   IREE_ASSERT_OK(Complete("  λ\n"));
-  EXPECT_EQ(call_count_, 0u);
+  EXPECT_EQ(checkpoint_.tool_count, 0u);
   EXPECT_EQ(View(calls_), "[]");
   EXPECT_EQ(View(checkpoint_), View(chat_.prompt) + "λ<|im_end|>\n");
 }
@@ -222,7 +227,7 @@ TEST_F(QwenChatTest, GeneratedTypedCallMatchesPiToolHistoryCheckpoint) {
       "<parameter=path>\nfile λ.txt\n</parameter>"
       "<parameter=offset>7</parameter>"
       "<parameter=literal>false</parameter></function></tool_call>\n"));
-  EXPECT_EQ(call_count_, 1u);
+  EXPECT_EQ(checkpoint_.tool_count, 1u);
   EXPECT_EQ(
       View(calls_),
       "[{\"index\":0,\"id\":\"call_7_0\",\"type\":\"function\",\"function\":{"
@@ -252,7 +257,7 @@ TEST_F(QwenChatTest, MultipleGeneratedCallsHaveDistinctIdsAndCanonicalOrder) {
                "function></tool_call>\n"
                "<tool_call><function=read><parameter=path>b</parameter></"
                "function></tool_call>"));
-  EXPECT_EQ(call_count_, 2u);
+  EXPECT_EQ(checkpoint_.tool_count, 2u);
   EXPECT_NE(View(calls_).find("call_7_1"), std::string::npos);
   EXPECT_NE(View(checkpoint_).find("</tool_call>\n<tool_call>"),
             std::string::npos);
@@ -303,17 +308,115 @@ TEST_F(QwenChatTest, SourceRejectsInvalidIdentifiersThenAcceptsValidHistory) {
       std::string::npos);
 }
 
-TEST(QwenChatStreamingTest, EveryToolMarkerFragmentIsWithheld) {
+TEST_F(QwenChatTest, EveryToolMarkerFragmentIsWithheld) {
   const std::string text = "Reading now.\n<tool_call>\n<function=read>";
   iree_host_size_t safe_end = 0;
   for (size_t length = 0; length <= text.size(); ++length) {
-    safe_end = loom_serve_qwen_chat_text_end(
-        iree_make_string_view(text.data(), length), safe_end);
+    IREE_ASSERT_OK(loom_serve_qwen_chat_text_end(
+        &policy_, iree_make_string_view(text.data(), length), safe_end,
+        LOOM_SERVE_QWEN_CHAT_OUTPUT_STREAMING, &safe_end,
+        iree_allocator_system()));
     EXPECT_LE(safe_end, std::string("Reading now.\n").size());
     EXPECT_EQ(text.substr(0, safe_end).find('<'), std::string::npos);
   }
   EXPECT_EQ(safe_end, std::string("Reading now.\n").size());
-  EXPECT_EQ(loom_serve_qwen_chat_text_end(IREE_SV("A < comparison"), 2), 14u);
+  IREE_ASSERT_OK(
+      loom_serve_qwen_chat_text_end(&policy_, IREE_SV("A < comparison"), 2,
+                                    LOOM_SERVE_QWEN_CHAT_OUTPUT_STREAMING,
+                                    &safe_end, iree_allocator_system()));
+  EXPECT_EQ(safe_end, 14u);
+  IREE_ASSERT_OK(Initialize(Request(R"([{"role":"user","content":"Read."}])",
+                                    std::string(",\"tools\":") + kTools)));
+  IREE_ASSERT_OK(Complete(
+      "Reading now.\n<tool_call><function=read><parameter=path>file.txt"
+      "</parameter></function></tool_call>",
+      std::string("Reading now.\n").size()));
+  EXPECT_EQ(checkpoint_.text_end, std::string("Reading now.\n").size());
+}
+
+TEST_F(QwenChatTest, FinalTextReleasesIncompleteMarkersAndTrimsOnlyFraming) {
+  IREE_ASSERT_OK(
+      Initialize(Request(R"([{"role":"user","content":"Reply."}])")));
+  const std::string marker = "<tool_call>";
+  for (size_t length = 0; length < marker.size(); ++length) {
+    const std::string content = "λ " + marker.substr(0, length);
+    IREE_ASSERT_OK(Complete("\t\r\n\v\f " + content + "\r\n\t "));
+    EXPECT_EQ(checkpoint_.tool_count, 0u);
+    EXPECT_EQ(View(checkpoint_),
+              View(chat_.prompt) + (length ? content : "λ") + "<|im_end|>\n");
+    EXPECT_EQ(checkpoint_.text_end, content.size() + 10);
+  }
+  for (const auto& content : {std::string(), std::string("\t \r\n")}) {
+    IREE_ASSERT_OK(Complete(content));
+    EXPECT_EQ(View(checkpoint_), View(chat_.prompt) + "<|im_end|>\n");
+    EXPECT_EQ(checkpoint_.text_end, content.size());
+  }
+  IREE_ASSERT_OK(Complete(" \u00a0λ\u00a0 "));
+  EXPECT_EQ(View(checkpoint_),
+            View(chat_.prompt) + "\u00a0λ\u00a0<|im_end|>\n");
+}
+
+TEST_F(QwenChatTest, CheckpointSurvivesRequestReleaseAndRejectedReplacement) {
+  IREE_ASSERT_OK(Initialize(Request(R"([{"role":"user","content":"Read."}])",
+                                    std::string(",\"tools\":") + kTools)));
+  const std::string prompt = View(chat_.prompt);
+  {
+    const std::string response =
+        "Ready.\n<tool_call><function=read><parameter=path>file λ.txt"
+        "</parameter></function></tool_call>";
+    IREE_ASSERT_OK(Complete(response));
+    EXPECT_EQ(checkpoint_.text_end, 7u);
+  }
+  const std::string retained = View(checkpoint_);
+  iree_vm_buffer_t* retained_storage = checkpoint_.storage;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        Complete("<tool_call><function=read>"));
+  EXPECT_EQ(checkpoint_.storage, retained_storage);
+  EXPECT_EQ(View(checkpoint_), retained);
+  EXPECT_EQ(checkpoint_.tool_count, 1u);
+  loom_serve_qwen_chat_deinitialize(&chat_);
+  initialized_ = false;
+  std::string().swap(body_);
+  iree_string_builder_reset(&calls_);
+  EXPECT_EQ(View(checkpoint_), retained);
+  EXPECT_EQ(retained, prompt +
+                          "Ready.\n\n<tool_call>\n<function=read>\n"
+                          "<parameter=path>\nfile λ.txt\n</parameter>\n"
+                          "</function>\n</tool_call><|im_end|>\n");
+}
+
+TEST_F(QwenChatTest, SourceMayReturnAnInputAliasAsTheCheckpoint) {
+  const iree_string_view_t roots[] = {IREE_SVL("text_end"),
+                                      IREE_SVL("complete_text")};
+  loom_serve_program_t* program = nullptr;
+  IREE_ASSERT_OK(loom_serve_program_create(
+      environment_, iree_make_cstring_view(FLAG_alias_source),
+      IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(),
+      iree_allocator_system(), &program));
+  auto policy = policy_;
+  policy.invocation = loom_serve_program_invocation(program);
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      loom_serve_program_process(program), IREE_SV("model"),
+      IREE_SV("text_end"), &policy.text_end));
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      loom_serve_program_process(program), IREE_SV("model"),
+      IREE_SV("complete_text"), &policy.complete_text));
+  IREE_ASSERT_OK(
+      Initialize(Request(R"([{"role":"user","content":"Reply."}])")));
+  chat_.policy = &policy;
+  const std::string expected(8192, 'a');
+  {
+    std::string response = expected;
+    IREE_ASSERT_OK(Complete(response));
+    // The source returned its content argument. The invocation released its
+    // argument references; this completed record still owns the actual bytes.
+    response.assign(response.size(), 'x');
+  }
+  loom_serve_qwen_chat_deinitialize(&chat_);
+  initialized_ = false;
+  std::string().swap(body_);
+  loom_serve_program_destroy(program);
+  EXPECT_EQ(View(checkpoint_), expected);
 }
 
 TEST_F(QwenChatTest, UnsupportedOptionsFailAtTheBoundary) {
@@ -386,7 +489,7 @@ TEST_F(QwenChatTest, InvalidGeneratedSyntaxHasABoundedPrintableDiagnostic) {
     EXPECT_NE(
         status.ToString().find("expected '<function='; got '" + preview + "'"),
         std::string::npos);
-    EXPECT_EQ(call_count_, 0u);
+    EXPECT_EQ(checkpoint_.tool_count, 0u);
   }
 }
 

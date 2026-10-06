@@ -123,12 +123,10 @@ static iree_status_t qwen_replay_append(
   return iree_ok_status();
 }
 
-static iree_status_t qwen_replay_prepare_turn(loom_serve_qwen_model_t* model,
-                                              iree_string_view_t fixture,
-                                              qwen_replay_row_t* row,
-                                              qwen_replay_turn_t* turn,
-                                              iree_string_builder_t* checkpoint,
-                                              iree_allocator_t allocator) {
+static iree_status_t qwen_replay_prepare_turn(
+    loom_serve_qwen_model_t* model, iree_string_view_t fixture,
+    qwen_replay_row_t* row, qwen_replay_turn_t* turn,
+    loom_serve_qwen_chat_completion_t* completion, iree_allocator_t allocator) {
   iree_string_view_t request, response;
   IREE_RETURN_IF_ERROR(
       iree_json_lookup_object_value(fixture, IREE_SV("request"), &request));
@@ -155,7 +153,7 @@ static iree_status_t qwen_replay_prepare_turn(loom_serve_qwen_model_t* model,
   iree_string_builder_initialize(allocator, &text);
   iree_string_builder_initialize(allocator, &tool_calls);
   const iree_string_view_t prompt = iree_string_builder_view(&chat.prompt);
-  const iree_string_view_t prior = iree_string_builder_view(checkpoint);
+  const iree_string_view_t prior = completion->transcript;
   iree_status_t status = iree_ok_status();
   iree_string_view_t input = prompt;
   loom_serve_qwen_chat_boundary_t boundary =
@@ -203,11 +201,8 @@ static iree_status_t qwen_replay_prepare_turn(loom_serve_qwen_model_t* model,
   }
   if (iree_status_is_ok(status)) {
     turn->end = row->token_count - 1;
-    iree_string_builder_reset(checkpoint);
-    iree_host_size_t tool_count = 0;
-    status =
-        loom_serve_qwen_chat_complete(&chat, iree_string_builder_view(&text), 0,
-                                      checkpoint, &tool_calls, &tool_count);
+    status = loom_serve_qwen_chat_complete(
+        &chat, iree_string_builder_view(&text), 0, 0, &tool_calls, completion);
   }
   iree_string_builder_deinitialize(&tool_calls);
   iree_string_builder_deinitialize(&text);
@@ -252,18 +247,17 @@ static iree_status_t qwen_replay_prepare(loom_serve_qwen_model_t* model,
       status = iree_allocator_malloc(allocator, capacity * sizeof(int32_t),
                                      (void**)&row->reference);
     }
-    iree_string_builder_t checkpoint;
-    iree_string_builder_initialize(allocator, &checkpoint);
+    loom_serve_qwen_chat_completion_t completion = {0};
     for (iree_host_size_t j = 0;
          j < row->turn_count && iree_status_is_ok(status); ++j) {
       iree_string_view_t turn;
       status = iree_json_array_get(turns, j, &turn);
       if (iree_status_is_ok(status)) {
         status = qwen_replay_prepare_turn(model, turn, row, &row->turns[j],
-                                          &checkpoint, allocator);
+                                          &completion, allocator);
       }
     }
-    iree_string_builder_deinitialize(&checkpoint);
+    loom_serve_qwen_chat_completion_deinitialize(&completion);
     if (iree_status_is_ok(status)) {
       printf("{\"event\":\"trajectory\",\"row\":%zu,\"turns\":[", i);
       for (iree_host_size_t j = 0; j < row->turn_count; ++j) {
