@@ -1,4 +1,4 @@
-// RUN: with-checks emit low-schedule-json @observations strategy=resource-stall
+// RUN: emit low-schedule-query @observations kind=effect strategy=resource-stall consumer=* timing=0:1
 
 // Independently observable reads retain their completion ordering even when
 // their addresses and unused results create no SSA dependency between them.
@@ -11,11 +11,11 @@ low.func.def target<test.low.core>(@target) @observations(%first_address: reg<te
 }
 
 // ----
-CHECK: *"dependency_count":1,*
-CHECK: *"from":0,"to":1,"kind":"effect",*"producer_event":"test.memory.read",*"consumer_event":"test.memory.read","minimum_issue_separation_cycles":4,*
+node 1 <- 0
+timing 0 -> 1: separation=4 source=schedule-class quality=fallback
 
 // ====
-// RUN: with-checks emit low-schedule-json @ordinary_reads strategy=resource-stall
+// RUN: emit low-schedule-query @ordinary_reads kind=effect strategy=resource-stall consumer=*
 
 // Identical descriptors without access modifiers remain independent reads.
 test.target<low_core> @target
@@ -27,11 +27,10 @@ low.func.def target<test.low.core>(@target) @ordinary_reads(%first_address: reg<
 }
 
 // ----
-CHECK: *"dependency_count":0,*
-CHECK: *"dependencies":[],*
+none
 
 // ====
-// RUN: with-checks emit low-schedule-json @ordered_read_completion strategy=source
+// RUN: emit low-schedule-query @ordered_read_completion kind=effect strategy=source consumer=2
 
 // Source ordering through a barrier does not complete an asynchronous read.
 // Its memory dependency must still reach the later write directly.
@@ -45,10 +44,10 @@ low.func.def target<test.low.core>(@target) @ordered_read_completion(%address: r
 }
 
 // ----
-CHECK: *"from":0,"to":2,"kind":"effect",*"producer_event":"test.memory.read",*"consumer_event":"test.memory.write",*
+node 2 <- 0, 1
 
 // ====
-// RUN: with-checks emit low-schedule-json @ordered_write_completion strategy=source
+// RUN: emit low-schedule-query @ordered_write_completion kind=effect strategy=source consumer=2
 
 // The scheduler preserves the memory producer across an ordered instruction;
 // completion planning decides which counters that instruction actually drains.
@@ -62,4 +61,4 @@ low.func.def target<test.low.core>(@target) @ordered_write_completion(%address: 
 }
 
 // ----
-CHECK: *"from":0,"to":2,"kind":"effect",*"producer_event":"test.memory.write",*"consumer_event":"test.memory.read",*
+node 2 <- 0, 1
