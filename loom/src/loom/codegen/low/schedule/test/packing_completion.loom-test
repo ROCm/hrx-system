@@ -126,7 +126,7 @@ low.func.def target<test.low.core>(@test_target) @register_packing_excludes_prio
 // Live-ins can fill a packing resource without establishing a producer-owned
 // completion sink. Advance the config that exposes their continuation before
 // unrelated pressure relief.
-// RUN: with-checks emit low-schedule-json @register_packing_advances_live_in_continuations strategy=resource-stall
+// RUN: emit low-schedule-query @register_packing_advances_live_in_continuations strategy=resource-stall order=0,1,2,3,4
 
 test.target<low_core> @test_target
 
@@ -139,7 +139,7 @@ low.func.def target<test.low.core>(@test_target) @register_packing_advances_live
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[1,0,2,3,4]*
+block 0 order: 1, 0, 2, 3, 4
 
 // ====
 
@@ -148,7 +148,7 @@ CHECK: *"scheduled_node_indices":[1,0,2,3,4]*
 // producer would open a different transaction in the same full resource. One
 // live narrow and one live wide value fill the aggregate without filling
 // either underlying register class.
-// RUN: with-checks emit low-schedule-json @register_packing_tracks_operand_bearing_continuations strategy=resource-stall
+// RUN: emit low-schedule-query @register_packing_tracks_operand_bearing_continuations strategy=resource-stall order=0,1,2,3,4,5,6,7,8,9,10
 
 test.target<low_core> @test_target
 
@@ -167,13 +167,13 @@ low.func.def target<test.low.core>(@test_target) @register_packing_tracks_operan
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[0,2,1,3,5,4,6,8,7,9,10]*
+block 0 order: 0, 2, 1, 3, 5, 4, 6, 8, 7, 9, 10
 
 // ====
 
 // The peer remains owned by the successor, but each temporary really retires.
 // Finish the first temporary before opening the second packed transaction.
-// RUN: with-checks emit low-schedule-json @register_packing_forwarded_peer strategy=resource-stall
+// RUN: emit low-schedule-query @register_packing_forwarded_peer strategy=resource-stall order=0,1,2,3,4,5,6,7
 
 test.target<low_core> @target
 
@@ -190,14 +190,15 @@ low.func.def target<test.low.core>(@target) @register_packing_forwarded_peer(%ca
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[0,1,4,2,3,5,6,7]*
+block 0 order: 0, 1, 4, 2, 3, 5, 6
+block 1 order: 7
 
 // ====
 
 // Retiring a derived value cannot release its forwarded source. The independent
 // transaction completes while that source stays live; the derived value then
 // retains its own genuine local completion.
-// RUN: with-checks emit low-schedule-json @register_packing_forwarded_source_derived_release strategy=resource-stall
+// RUN: emit low-schedule-query @register_packing_forwarded_source_derived_release strategy=resource-stall order=0,1,2,3,4,5,6,7
 
 test.target<low_core> @target
 
@@ -214,7 +215,8 @@ low.func.def target<test.low.core>(@target) @register_packing_forwarded_source_d
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[0,2,3,5,1,4,6,7]*
+block 0 order: 0, 2, 3, 5, 1, 4, 6
+block 1 order: 7
 
 // ====
 
@@ -272,7 +274,7 @@ low.func.def target<test.low.core>(@target) @register_packing_early_overlap(%sou
 
 // One producer publishes a temporary and a forwarded sibling in the same
 // packing resource. The temporary's completion is not the sibling's release.
-// RUN: with-checks emit low-schedule-json @register_packing_forwarded_sibling strategy=resource-stall
+// RUN: emit low-schedule-query @register_packing_forwarded_sibling strategy=resource-stall order=0,1,2,3,4,5,6,7
 
 test.target<low_core> @target
 
@@ -289,13 +291,14 @@ low.func.def target<test.low.core>(@target) @register_packing_forwarded_sibling(
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[0,1,4,2,3,5,6,7]*
+block 0 order: 0, 1, 4, 2, 3, 5, 6
+block 1 order: 7
 
 // ====
 
 // Repeated branch payloads establish one source ownership fact. They preserve
 // the same temporary-release order as a single forwarded occurrence.
-// RUN: with-checks emit low-schedule-json @register_packing_duplicate_forwarding strategy=resource-stall
+// RUN: emit low-schedule-query @register_packing_duplicate_forwarding strategy=resource-stall order=0,1,2,3,4,5,6,7
 
 test.target<low_core> @target
 
@@ -312,7 +315,8 @@ low.func.def target<test.low.core>(@target) @register_packing_duplicate_forwardi
 }
 
 // ----
-CHECK: *"scheduled_node_indices":[0,2,3,5,1,4,6,7]*
+block 0 order: 0, 2, 3, 5, 1, 4, 6
+block 1 order: 7
 
 // ====
 

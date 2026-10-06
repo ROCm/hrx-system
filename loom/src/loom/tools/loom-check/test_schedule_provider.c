@@ -9,7 +9,9 @@
 #include <inttypes.h>
 
 #include "loom/codegen/low/descriptors.h"
+#include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/schedule/dependencies.h"
+#include "loom/codegen/low/schedule/run.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/low_emit.h"
 
@@ -549,6 +551,57 @@ static iree_status_t loom_check_test_schedule_append_timing(
       separation_source.data, (int)model_quality.size, model_quality.data);
 }
 
+static iree_status_t loom_check_test_schedule_build(
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_test_schedule_options_t* options,
+    loom_low_schedule_table_t* out_schedule, bool* out_accepted) {
+  *out_accepted = false;
+  loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
+      .diagnostic_collector = request->diagnostic_collector,
+      .module = request->module,
+      .source_resolver = request->source_resolver,
+      .emitter = LOOM_EMITTER_PASS,
+  };
+  iree_diagnostic_emitter_t emitter = {0};
+  if (request->diagnostic_collector != NULL) {
+    emitter = (iree_diagnostic_emitter_t){
+        .fn = loom_check_diagnostic_emitter_capture_emit,
+        .user_data = &diagnostic_capture,
+    };
+  }
+  loom_op_t* low_function = NULL;
+  IREE_RETURN_IF_ERROR(loom_check_low_emit_find_low_function_def(
+      request->module, options->function_symbol_name, request->test_case,
+      request->filename, request->diagnostic_collector, emitter,
+      &low_function));
+  if (low_function == NULL) {
+    return iree_ok_status();
+  }
+
+  const loom_low_schedule_options_t schedule_options = {
+      .allocation_budgets = options->allocation_budgets,
+      .allocation_budget_count = options->allocation_budget_count,
+      .emitter = emitter,
+      .flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS |
+               LOOM_LOW_SCHEDULE_FLAG_RETAIN_PRESSURE_STEPS,
+      .strategy = options->schedule_strategy,
+  };
+  loom_low_function_model_t model = {0};
+  iree_status_t status = loom_low_function_model_initialize(
+      request->module, low_function,
+      /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
+      /*flags=*/0, request->case_arena, &model);
+  if (iree_status_is_ok(status)) {
+    status = loom_low_schedule_function(&model, &schedule_options,
+                                        request->case_arena, out_schedule);
+  }
+  if (iree_status_is_ok(status)) {
+    *out_accepted = out_schedule->error_count == 0;
+  }
+  loom_low_function_model_deinitialize(&model);
+  return status;
+}
+
 static iree_status_t loom_check_test_schedule_execute(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request) {
@@ -557,49 +610,39 @@ static iree_status_t loom_check_test_schedule_execute(
   IREE_RETURN_IF_ERROR(
       loom_check_test_schedule_parse_options(request, &options));
 
-  const loom_low_emission_frame_options_t frame_options = {
-      .schedule_strategy = options.schedule_strategy,
-      .allocation_budgets = options.allocation_budgets,
-      .allocation_budget_count = options.allocation_budget_count,
-  };
-  loom_low_emission_frame_t frame = {0};
-  bool frame_accepted = false;
-  IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, &frame_options,
-      /*allocation_fixed_specs=*/NULL,
-      /*allocation_fixed_spec_count=*/0,
-      /*spill_free_options=*/NULL, &frame, &frame_accepted));
+  loom_low_schedule_table_t schedule = {0};
+  bool schedule_accepted = false;
+  IREE_RETURN_IF_ERROR(loom_check_test_schedule_build(
+      request, &options, &schedule, &schedule_accepted));
   if (request->diagnostic_collector != NULL &&
       loom_check_diagnostic_collector_has_error(
           request->diagnostic_collector)) {
     return iree_ok_status();
   }
-  if (!frame_accepted) {
+  if (!schedule_accepted) {
     return iree_ok_status();
   }
 
   IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_order(
-      &frame.schedule, options.order_nodes, &request->result->actual_output));
+      &schedule, options.order_nodes, &request->result->actual_output));
   IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_issue_cycles(
-      &frame.schedule, options.issue_nodes, &request->result->actual_output));
+      &schedule, options.issue_nodes, &request->result->actual_output));
   IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_descriptors(
-      &frame.schedule, options.descriptor_nodes,
-      &request->result->actual_output));
+      &schedule, options.descriptor_nodes, &request->result->actual_output));
   if (iree_string_view_equal(options.consumer_nodes, IREE_SV("*"))) {
     IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_all_predecessors(
-        &frame.schedule, &options.dependency_query,
-        &request->result->actual_output));
+        &schedule, &options.dependency_query, &request->result->actual_output));
   } else {
     iree_string_view_t consumers = options.consumer_nodes;
     uint32_t consumer_node = 0;
     while (loom_check_test_schedule_consume_node(&consumers, &consumer_node)) {
       IREE_RETURN_IF_ERROR(loom_check_test_schedule_append_predecessors(
-          &frame.schedule, &options.dependency_query, consumer_node,
+          &schedule, &options.dependency_query, consumer_node,
           &request->result->actual_output));
     }
   }
   return loom_check_test_schedule_append_timing(
-      &frame.schedule, &options, &request->result->actual_output);
+      &schedule, &options, &request->result->actual_output);
 }
 
 static iree_status_t loom_check_test_schedule_append_names(
