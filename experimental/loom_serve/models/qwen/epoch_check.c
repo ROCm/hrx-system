@@ -69,7 +69,7 @@ static iree_status_t qwen_check_prediction(loom_serve_qwen_model_t* model,
 // fixture span fits the smallest accepted token capacity. Partitioning changes
 // compact slots without changing any resident row history.
 static iree_host_size_t qwen_check_batch_count(
-    loom_serve_qwen_shape_t shape, iree_host_size_t count,
+    loom_serve_packing_shape_t shape, iree_host_size_t count,
     const loom_serve_qwen_span_t* spans) {
   iree_host_size_t batch_count = 0;
   iree_host_size_t remaining = shape.token_capacity;
@@ -432,7 +432,7 @@ static iree_status_t qwen_check_run(loom_serve_qwen_model_t* model,
   iree_host_size_t widest_shape = 0;
   for (iree_host_size_t i = 0; i < loom_serve_qwen_model_shape_count(model);
        ++i) {
-    const loom_serve_qwen_shape_t shape =
+    const loom_serve_packing_shape_t shape =
         loom_serve_qwen_model_shapes(model)[i];
     if (shape.token_capacity < 5) {
       return iree_make_status(

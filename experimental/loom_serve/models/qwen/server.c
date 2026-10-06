@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
     iree_host_size_t capacity = loom_serve_qwen_model_prefill_capacity(model);
     if (schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED) {
       capacity = 0;
-      const loom_serve_qwen_shape_t* shapes =
+      const loom_serve_packing_shape_t* shapes =
           loom_serve_qwen_model_shapes(model);
       for (iree_host_size_t i = 0; i < epoch_count; ++i) {
         capacity = iree_max(capacity, shapes[i].token_capacity);

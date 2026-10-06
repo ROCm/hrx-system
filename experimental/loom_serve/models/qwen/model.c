@@ -87,7 +87,7 @@ struct loom_serve_qwen_model_t {
   // Number of target packed shapes, independent of auxiliary MTP stages.
   iree_host_size_t shape_count;
   // Immutable prepared shape capacities, owned in epoch option order.
-  loom_serve_qwen_shape_t* shapes;
+  loom_serve_packing_shape_t* shapes;
   // Context specialization shared by every compiled stage.
   iree_host_size_t context_capacity;
   // Maximum active input chunk accepted by the selected row-prefill path.
@@ -532,7 +532,7 @@ static iree_status_t qwen_allocate_mtp(loom_serve_qwen_model_t* model) {
 // native entry mapping. Applied values travel with the kernel source requests.
 static iree_status_t qwen_compile_stage(loom_serve_qwen_model_t* model,
                                         iree_string_view_t root,
-                                        loom_serve_qwen_shape_t shape,
+                                        loom_serve_packing_shape_t shape,
                                         iree_host_size_t token_capacity,
                                         iree_host_size_t q8_capacity,
                                         qwen_stage_t* stage) {
@@ -627,8 +627,8 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
       model->device, model->dispatch, options->source_directory,
       &options->kernel_sanitizer, model->allocator, &model->jit));
   IREE_RETURN_IF_ERROR(qwen_load_tokenizer(model, options->tokenizer_path));
-  const loom_serve_qwen_shape_t isolated = {options->prefill_capacity,
-                                            model->row_count};
+  const loom_serve_packing_shape_t isolated = {options->prefill_capacity,
+                                               model->row_count};
   IREE_RETURN_IF_ERROR(qwen_compile_stage(model, IREE_SV("qwen38_prefill"),
                                           isolated, QWEN_TOKEN_CAPACITY, 1,
                                           &model->stages[0]));
@@ -650,8 +650,8 @@ static iree_status_t qwen_initialize(loom_serve_qwen_model_t* model,
     const bool verifies = ordinal >= 1 + model->shape_count;
     const iree_host_size_t shape_index =
         ordinal == 0 ? 0 : (ordinal - 1) % model->shape_count;
-    const loom_serve_qwen_shape_t shape =
-        ordinal == 0 ? (loom_serve_qwen_shape_t){32, model->row_count}
+    const loom_serve_packing_shape_t shape =
+        ordinal == 0 ? (loom_serve_packing_shape_t){32, model->row_count}
                      : model->shapes[shape_index];
     const iree_string_view_t root = ordinal == 0 ? IREE_SV("qwen38_mtp_propose")
                                     : verifies   ? IREE_SV("qwen38_mtp_verify")
@@ -715,7 +715,7 @@ iree_status_t loom_serve_qwen_model_create(
         "invalid model capacities; pooled KV and MTP require epoch shapes");
   }
   for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
-    const loom_serve_qwen_shape_t shape = options->epoch_shapes[i];
+    const loom_serve_packing_shape_t shape = options->epoch_shapes[i];
     if (shape.token_capacity < 1 ||
         shape.token_capacity > QWEN_TOKEN_CAPACITY ||
         shape.token_capacity > options->context_capacity ||
@@ -830,7 +830,7 @@ iree_host_size_t loom_serve_qwen_model_shape_count(
   return model->shape_count;
 }
 
-const loom_serve_qwen_shape_t* loom_serve_qwen_model_shapes(
+const loom_serve_packing_shape_t* loom_serve_qwen_model_shapes(
     const loom_serve_qwen_model_t* model) {
   return model->shapes;
 }
@@ -990,7 +990,7 @@ static iree_status_t qwen_epoch(loom_serve_qwen_model_t* model,
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "packed Qwen shape index is not loaded");
   }
-  const loom_serve_qwen_shape_t shape = model->shapes[shape_index];
+  const loom_serve_packing_shape_t shape = model->shapes[shape_index];
   if (!span_count || span_count > shape.span_capacity) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "epoch span count exceeds stage capacity");

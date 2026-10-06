@@ -94,7 +94,6 @@ loom_cc_library(
   SRCS
     "model.c"
   DEPS
-    ::schedule
     iree::base
     iree::base::internal::path
     iree::experimental::loom_serve::runtime::command
@@ -104,6 +103,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::module
     iree::experimental::loom_serve::runtime::program
     iree::experimental::loom_serve::runtime::weights
+    iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::storage::block_pool
     iree::hal
     iree::io::file_handle
@@ -161,10 +161,10 @@ loom_cc_binary(
     ::chat
     ::flags
     ::model
-    ::schedule
     iree::base
     iree::base::internal::json
     iree::base::tooling::flags
+    iree::experimental::loom_serve::scheduling::packing
     iree::io::file_handle
     iree::tokenizer
   TESTONLY
@@ -208,6 +208,7 @@ loom_cc_library(
     "schedule.c"
   DEPS
     iree::base
+    iree::experimental::loom_serve::scheduling::packing
   PUBLIC
 )
 
@@ -218,6 +219,7 @@ loom_cc_test(
     "schedule_test.cc"
   DEPS
     ::schedule
+    iree::experimental::loom_serve::scheduling::packing
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -239,6 +241,7 @@ loom_cc_library(
     iree::base::threading::thread
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::scheduling::packing
     iree::tokenizer
     loom::util::json
     loom::util::stream
