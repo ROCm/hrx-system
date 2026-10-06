@@ -156,3 +156,27 @@ loom_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+loom_cc_binary(
+    name = "request_check",
+    testonly = True,
+    srcs = ["request_check.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+    deps = [
+        ":chat",
+        "//experimental/loom_serve/runtime:input",
+        "//experimental/loom_serve/runtime:json",
+        "//experimental/loom_serve/runtime:program",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+        "//runtime/src/iree/tokenizer",
+        "//runtime/src/iree/tokenizer/format/huggingface:tokenizer_json",
+        "//runtime/src/iree/vm",
+    ],
+)

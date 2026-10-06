@@ -211,6 +211,31 @@ replacement and shutdown release the retained result. No session owns a VM.
 
 ## Checks that matter for a port
 
+The CPU-only request inspector JITs the actual chat/input/completion entries
+without loading model weights or creating a device:
+
+```sh
+build_tools/bin/iree-bazel-run --config=asan \
+  //experimental/loom_serve/text:request_check -- \
+  --model=/path/to/source/package --tokenizer=/path/to/tokenizer.json \
+  --request=/path/to/request.json --capacity=8192
+```
+
+The request file uses the same body as the HTTP endpoint, for example
+`{"model":"qwen3.8-27b","stream":true,"messages":[{"role":"user","content":"Hello."}]}`
+with the package's actual public name. Standard output is one JSON record with
+`model`, the complete rendered `prompt`, and its `tokens`. These can be compared
+directly with the model's reference tokenizer/template before any numerical
+work. An input exceeding capacity fails, rather than returning a truncated
+prompt as success.
+
+Adding `--response=/path/to/raw-generated-text.txt` also reports `text_end`,
+the canonical `checkpoint`, and the structured `tool_calls` delta. The file is
+raw model text, not a serialized OpenAI response. This exercises the same source
+completion and tool parsing used by HTTP; the observer neither generates tokens
+nor claims to test GPU cache retention. Invalid input produces a nonzero exit
+with diagnostics on stderr and no successful JSON record.
+
 ```sh
 build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...
 ```

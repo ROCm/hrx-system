@@ -198,6 +198,21 @@ py_binary(
     data = ["testdata/source_review.json"],
 )
 
+py_test(
+    name = "request_check_test",
+    size = "small",
+    srcs = ["request_check_test.py"],
+    args = ["$(rootpath //experimental/loom_serve/text:request_check)"],
+    data = [
+        "control.loom",
+        "testdata/portable_chat.loom",
+        "//experimental/loom_serve/text:request_check",
+    ],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+    ]),
+)
+
 py_binary(
     name = "check_service",
     testonly = True,

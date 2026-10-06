@@ -28,6 +28,10 @@ For an already assigned text model, the same sequence applies to that model's
 pinned artifacts. The [text contract](../text/README.md) is the implementation
 map: source bootstrap, warm numerical entries, semantic spans and chat policy.
 There is no C model adapter to copy and no native model registry to extend.
+The [CPU request inspector](../text/README.md#checks-that-matter-for-a-port)
+exposes the real source-rendered prompt, token IDs and completed transcript
+before checkpoint loading. This makes tokenizer/template differences visible
+without conflating them with a numerical kernel failure.
 
 For image or audio work, the
 [tensor-in/tensor-out ownership flow](MODEL_AUTHORING.md#image-and-audio-entry-points)
