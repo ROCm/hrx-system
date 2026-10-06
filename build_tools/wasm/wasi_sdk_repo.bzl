@@ -113,6 +113,7 @@ def _wasi_sdk_repo_impl(repository_ctx):
     )
     build_content = build_content.replace("__SOURCE_SUFFIX__", repr(source_suffix))
     repository_ctx.file("BUILD.bazel", build_content)
+    return repository_ctx.repo_metadata(reproducible = True)
 
 wasi_sdk_repo = repository_rule(
     implementation = _wasi_sdk_repo_impl,
