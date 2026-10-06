@@ -35,7 +35,7 @@ kernel.def export("qwen38_mtp_proposal_prepare") @qwen38_mtp_proposal_prepare() 
   }
   %span_word = view.load %header[1] : view<3xi32> -> i32
   %span_value = index.cast %span_word : i32 to index
-  %span_count = index.assume %span_value [range(%span_value, 1, 16)] : index
+  %span_count = index.assume %span_value [range(%span_value, 0, 16)] : index
   %count = scf.for %span = [%zero to %span_count step %one](%count = %zero : index) -> (index) {
     %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
     %generated = scalar.cmpi eq, %flag, %generated_word : i32
@@ -90,7 +90,7 @@ kernel.def export("qwen38_mtp_proposal_advance") @qwen38_mtp_proposal_advance(%r
   %relative = index.add %round, %one : index
   %count_word = view.load %header[1] : view<3xi32> -> i32
   %count_value = index.cast %count_word : i32 to index
-  %count = index.assume %count_value [range(%count_value, 1, 16)] : index
+  %count = index.assume %count_value [range(%count_value, 0, 16)] : index
   scf.for %slot = [%zero to %count step %one] {
     %prediction = view.load %outputs[%slot] : view<16xi32> -> i32
     %begin_word = view.load %mapping[%slot] : view<16xi32> -> i32

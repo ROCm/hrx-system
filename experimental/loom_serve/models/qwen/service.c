@@ -180,6 +180,8 @@ typedef struct qwen_service_t {
   loom_serve_qwen_packing_mode_t packing_mode;
   // Fixed proposal depth: zero for target-only, three for whole verifiers.
   iree_host_size_t mtp_depth;
+  // Maximum epochs submitted before checking transport and new arrivals.
+  iree_host_size_t continuation_epochs;
   // Borrowed model shapes, or the one isolated control shape.
   const loom_serve_packing_shape_t* shapes;
   // Number of candidate shapes evaluated against each ready cohort.
@@ -1014,9 +1016,9 @@ static iree_status_t qwen_execute_epoch(
       decode_tokens[i] = loom_serve_qwen_row_token(session->row);
       if (scheduled[i].token_count == 4) {
         ++proposal_count;
-        output_limits[i] =
-            (uint32_t)iree_min(4, session->request.chat.max_tokens -
-                                      session->request.output_count);
+        output_limits[i] = (uint32_t)iree_min(
+            4 * service->continuation_epochs,
+            session->request.chat.max_tokens - session->request.output_count);
       }
     }
     spans[i] = (loom_serve_qwen_span_t){
@@ -1031,6 +1033,9 @@ static iree_status_t qwen_execute_epoch(
     input_count += spans[i].token_count;
   }
   const bool packed = service->schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_PACKED;
+  const iree_host_size_t device_epochs =
+      proposal_count ? service->continuation_epochs : 1;
+  iree_host_size_t verification_count = 0;
   const char* mode =
       packed                                                       ? "packed"
       : service->schedule_mode == LOOM_SERVE_QWEN_SCHEDULE_MATCHED ? "matched"
@@ -1039,7 +1044,8 @@ static iree_status_t qwen_execute_epoch(
   const iree_time_t start = iree_time_now();
   iree_slim_mutex_lock(&service->heartbeat.mutex);
   qwen_heartbeat_snapshot_t* state = &service->heartbeat.snapshot;
-  const uint64_t epoch = ++state->issued_epochs;
+  const uint64_t epoch = state->issued_epochs + 1;
+  state->issued_epochs += device_epochs;
   state->phase_start = start;
   state->epoch_spans = count;
   state->epoch_tokens = input_count;
@@ -1047,8 +1053,8 @@ static iree_status_t qwen_execute_epoch(
   iree_status_t status = iree_ok_status();
   if (packed) {
     status = proposal_count ? loom_serve_qwen_model_verify(
-                                  service->model, shape_index, count, spans,
-                                  output_limits, results)
+                                  service->model, shape_index, device_epochs,
+                                  count, spans, output_limits, results)
                             : loom_serve_qwen_model_epoch(
                                   service->model, shape_index, count, spans);
   } else {
@@ -1082,28 +1088,33 @@ static iree_status_t qwen_execute_epoch(
     }
     decode_count += prefill ? 0 : results[i].consumed_count;
     output_count += results[i].output_count;
-    accepted_drafts += output_limits[i] ? results[i].consumed_count - 1 : 0;
+    verification_count += results[i].verification_count;
+    accepted_drafts += output_limits[i] ? results[i].consumed_count -
+                                              results[i].verification_count
+                                        : 0;
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
         &service->scratch,
         "%s{\"row\":%zu,\"request\":%" PRIu64
         ",\"kind\":\"%s\",\"position\":%zu,\"tokens\":%zu,\"select\":%s,"
-        "\"consumed_tokens\":%zu,\"output_tokens\":%zu,\"output_limit\":%u}",
+        "\"consumed_tokens\":%zu,\"output_tokens\":%zu,\"output_limit\":%u,"
+        "\"verification_epochs\":%zu}",
         i ? "," : "", spans[i].row_index, session->serial,
         prefill            ? "prefill"
         : output_limits[i] ? "verify"
                            : "decode",
         positions[i], spans[i].token_count, select ? "true" : "false",
-        results[i].consumed_count, results[i].output_count, output_limits[i]));
+        results[i].consumed_count, results[i].output_count, output_limits[i],
+        results[i].verification_count));
   }
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(&service->scratch, "]"));
   iree_slim_mutex_lock(&service->heartbeat.mutex);
-  ++state->completed_epochs;
-  state->traversals += packed ? 1 : count;
+  state->completed_epochs += device_epochs;
+  state->traversals += packed ? device_epochs : count;
   state->prefill_tokens += prefill_count;
   state->decode_tokens += decode_count;
   state->model_duration += completed - start;
-  state->mtp.proposed_tokens += proposal_count * 3;
+  state->mtp.proposed_tokens += verification_count * 3;
   state->mtp.accepted_inputs += accepted_drafts;
   state->last_completion = completed;
   iree_slim_mutex_unlock(&service->heartbeat.mutex);
@@ -1114,8 +1125,8 @@ static iree_status_t qwen_execute_epoch(
           "\"packing\":\"%s\","
           "\"prefill_tokens\":%zu,\"decode_tokens\":%zu,"
           "\"selected_tokens_including_eos\":%zu,\"traversals\":%zu,"
-          "\"model_ms\":%.3f,"
-          "\"mtp\":{\"rows\":%zu,\"proposed_tokens\":%zu,"
+          "\"model_ms\":%.3f,\"device_epochs\":%zu,"
+          "\"mtp\":{\"rows\":%zu,\"verifications\":%zu,\"proposed_tokens\":%zu,"
           "\"accepted_draft_inputs\":%zu},\"rows\":%.*s}\n",
           epoch, mode, count, shape_index,
           service->shapes[shape_index].token_capacity,
@@ -1123,8 +1134,9 @@ static iree_status_t qwen_execute_epoch(
           service->packing_mode == LOOM_SERVE_QWEN_PACKING_SEPARATE ? "separate"
                                                                     : "mixed",
           prefill_count, decode_count, output_count,
-          packed ? (iree_host_size_t)1 : count, (completed - start) / 1e6,
-          proposal_count, proposal_count * 3, accepted_drafts,
+          packed ? device_epochs : count, (completed - start) / 1e6,
+          device_epochs, proposal_count, verification_count,
+          verification_count * 3, accepted_drafts,
           (int)iree_string_builder_size(&service->scratch),
           iree_string_builder_buffer(&service->scratch));
   qwen_observe(service, "output");
@@ -1202,6 +1214,7 @@ iree_status_t loom_serve_qwen_service_run(
       .schedule_mode = options->schedule_mode,
       .packing_mode = options->packing_mode,
       .mtp_depth = options->mtp_depth,
+      .continuation_epochs = options->continuation_epochs,
       .shapes = loom_serve_qwen_model_shapes(model),
       .shape_count = loom_serve_qwen_model_shape_count(model),
       .heartbeat = {.interval = options->heartbeat_interval}};

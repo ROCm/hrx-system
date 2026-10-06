@@ -1,0 +1,120 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// The first result bank is immutable through feedback retirement. The second
+// bank contains sixteen six-word results followed by original-span tags. Only
+// live speculative spans continue; known input is never consumed twice.
+func.def public @qwen38_continue_spans(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer) {
+  %origin = index.constant 0 : offset
+  %descriptor_origin = index.constant 12 : offset
+  %selection_origin = index.constant 1292 : offset
+  %options_origin = index.constant 1548 : offset
+  %eos_origin = index.constant 2060 : offset
+  %next_origin = index.constant 384 : offset
+  %tags_origin = index.constant 768 : offset
+  %header = buffer.view %epoch[%origin] : buffer -> view<3xi32>
+  %spans = buffer.view %epoch[%descriptor_origin] : buffer -> view<64x5xi32>
+  %selections = buffer.view %epoch[%selection_origin] : buffer -> view<64xi32>
+  %options = buffer.view %epoch[%options_origin] : buffer -> view<64x2xi32>
+  %terminal = buffer.view %epoch[%eos_origin] : buffer -> view<1xi32>
+  %inputs = buffer.view %tokens[%origin] : buffer -> view<512xi32>
+  %prior = buffer.view %results[%origin] : buffer -> view<16x6xi32>
+  %next = buffer.view %results[%next_origin] : buffer -> view<96xi32>
+  %tags = buffer.view %results[%tags_origin] : buffer -> view<16xi32>
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four = index.constant 4 : index
+  %sixteen = index.constant 16 : index
+  %ninety_six = index.constant 96 : index
+  %capacity = index.constant 512 : index
+  %zero_word = scalar.constant 0 : i32
+  %two_word = scalar.constant 2 : i32
+  %four_word = scalar.constant 4 : i32
+  %none = scalar.constant -1 : i32
+  %zeros = vector.constant 0 : vector<4xi32>
+  scf.for %i = [%zero to %capacity step %four] {
+    vector.store %zeros, %inputs[%i] : vector<4xi32>, view<512xi32>
+  }
+  scf.for %i = [%zero to %ninety_six step %four] {
+    vector.store %zeros, %next[%i] : vector<4xi32>, view<96xi32>
+  }
+  scf.for %i = [%zero to %sixteen step %one] {
+    view.store %none, %tags[%i] : i32, view<16xi32>
+  }
+  %eos = view.load %terminal[0] : view<1xi32> -> i32
+  %context_word = index.cast %context : index to i32
+  %count_word = view.load %header[1] : view<3xi32> -> i32
+  %count_value = index.cast %count_word : i32 to index
+  %count = index.assume %count_value [range(%count_value, 0, 16)] : index
+  %live_count = scf.for %span = [%zero to %count step %one](%live = %zero : index) -> (index) {
+    %flag = view.load %options[%span, 0] : view<64x2xi32> -> i32
+    %speculative = scalar.cmpi ne, %flag, %zero_word : i32
+    %next_live = scf.if %speculative -> (index) {
+      %consumed = view.load %prior[%span, 0] : view<16x6xi32> -> i32
+      %emitted = view.load %prior[%span, 1] : view<16x6xi32> -> i32
+      %last_word = scalar.addi %emitted, %two_word : i32
+      %last_index = index.cast %last_word : i32 to index
+      %last_value = index.sub %last_index, %one : index
+      %last = index.assume %last_value [range(%last_value, 2, 5)] : index
+      %prediction = view.load %prior[%span, %last] : view<16x6xi32> -> i32
+      %position = view.load %spans[%span, 1] : view<64x5xi32> -> i32
+      %row = view.load %spans[%span, 3] : view<64x5xi32> -> i32
+      %credit = view.load %options[%span, 1] : view<64x2xi32> -> i32
+      %remaining = scalar.subi %credit, %emitted : i32
+      %advanced = scalar.addi %position, %consumed : i32
+      %extent = scalar.addi %advanced, %four_word : i32
+      %fits = scalar.cmpi ule, %extent, %context_word : i32
+      %credited = scalar.cmpi sgt, %remaining, %zero_word : i32
+      %not_eos = scalar.cmpi ne, %prediction, %eos : i32
+      %ready = scalar.andi %fits, %credited : i1
+      %continues = scalar.andi %ready, %not_eos : i1
+      %incremented = scf.if %continues -> (index) {
+        %slot = index.assume %live [range(%live, 0, 15)] : index
+        %begin = index.mul %slot, %four : index
+        %begin_word = index.cast %begin : index to i32
+        %tag = index.cast %span : index to i32
+        view.store %four_word, %spans[%slot, 0] : i32, view<64x5xi32>
+        view.store %advanced, %spans[%slot, 1] : i32, view<64x5xi32>
+        view.store %begin_word, %spans[%slot, 2] : i32, view<64x5xi32>
+        view.store %row, %spans[%slot, 3] : i32, view<64x5xi32>
+        view.store %begin_word, %spans[%slot, 4] : i32, view<64x5xi32>
+        view.store %two_word, %options[%slot, 0] : i32, view<64x2xi32>
+        view.store %remaining, %options[%slot, 1] : i32, view<64x2xi32>
+        view.store %prediction, %inputs[%begin] : i32, view<512xi32>
+        view.store %tag, %tags[%slot] : i32, view<16xi32>
+        scf.for %token = [%zero to %four step %one] {
+          %selection_value = index.add %begin, %token : index
+          %selection = index.assume %selection_value [range(%selection_value, 0, 63)] : index
+          %word = index.cast %selection : index to i32
+          view.store %word, %selections[%selection] : i32, view<64xi32>
+        }
+        %incremented = index.add %slot, %one : index
+        scf.yield %incremented : index
+      } else {
+        scf.yield %live : index
+      }
+      scf.yield %incremented : index
+    } else {
+      scf.yield %live : index
+    }
+    scf.yield %next_live : index
+  }
+  %total = index.mul %live_count, %four : index
+  %total_word = index.cast %total : index to i32
+  %live_word = index.cast %live_count : index to i32
+  view.store %total_word, %header[0] : i32, view<3xi32>
+  view.store %live_word, %header[1] : i32, view<3xi32>
+  view.store %total_word, %header[2] : i32, view<3xi32>
+  func.return
+}
+
+kernel.def @qwen38_continue_dispatch() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer) {
+  func.call @qwen38_continue_spans(%context, %epoch, %tokens, %results) : (index, buffer, buffer, buffer) -> ()
+  kernel.return
+}

@@ -20,6 +20,8 @@ global.rodata.def @proposal_root = bytes("7177656e33385f6d74705f70726f706f7365")
 global.rodata.def @warm_root = bytes("7177656e33385f6d74705f7761726d")
 // qwen38_mtp_verify
 global.rodata.def @verify_root = bytes("7177656e33385f6d74705f766572696679")
+// qwen38_continue
+global.rodata.def @continue_root = bytes("7177656e33385f636f6e74696e7565")
 // weights.loom
 global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
 // <|im_end|>
@@ -78,7 +80,7 @@ func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %capacity: i64
   func.call @config_i64(%stage, %pool_key, %pool) : (i32, buffer, i64) -> ()
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
-  %bounded_roots = scalar.assume %roots [range(%roots, 1, 7)] : i32
+  %bounded_roots = scalar.assume %roots [range(%roots, 0, 7)] : i32
   %root_count = index.cast %bounded_roots : i32 to index
   %empty = global.load @empty : buffer
   %policy = global.load @policy : buffer
@@ -149,7 +151,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   %metadata_bytes = scalar.constant 2064 : i64
   %committed_bytes = scalar.constant 1548 : i64
   %output_bytes = scalar.constant 64 : i64
-  %result_bytes = scalar.constant 384 : i64
+  %result_bytes = scalar.constant 832 : i64
   %pooled = scalar.cmpi ne, %pool, %zero64 : i64
   %dense_attention_bytes = scalar.muli %context, %target_token_bytes : i64
   %attention_bytes = scf.select %pooled, %zero64, %dense_attention_bytes : i64
@@ -289,6 +291,8 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
       %verify = func.call @declare_stage(%verify_root, %tokens, %spans, %capacity, %capacity, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
       scf.yield
     }
+    %continue_root = global.load @continue_root : buffer
+    %continuation = func.call @declare_stage(%continue_root, %one64, %rows, %capacity, %one64, %context, %pool, %zero32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
     scf.yield %proposal : i32
   } else {
     scf.yield %zero32 : i32

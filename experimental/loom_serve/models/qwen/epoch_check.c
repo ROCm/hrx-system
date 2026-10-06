@@ -15,6 +15,8 @@
 IREE_FLAG(string, compare, "",
           "Optional completed-work ABABA comparison: single, mixed, full or "
           "decode. Empty runs the correctness witness.");
+IREE_FLAG(int32_t, continuation_epochs, 1,
+          "One or two device-fed epochs in the mixed MTP witness.");
 
 typedef struct qwen_check_row_t {
   // Nonzero, permuted resident row used by packed invocations.
@@ -155,18 +157,18 @@ static iree_status_t qwen_check_error(iree_status_t actual,
 
 static iree_status_t qwen_check_verified_epoch(
     loom_serve_qwen_model_t* model, iree_host_size_t shape_index,
-    qwen_check_row_t rows[4], const iree_host_size_t order[4],
-    const loom_serve_qwen_span_t spans[4], const uint32_t limits[4],
-    const iree_host_size_t* expected_counts) {
+    iree_host_size_t epoch_count, qwen_check_row_t rows[4],
+    const iree_host_size_t order[4], const loom_serve_qwen_span_t spans[4],
+    const uint32_t limits[4], const iree_host_size_t* expected_counts) {
   loom_serve_qwen_result_t results[4];
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t offset = 0; offset < 4 && iree_status_is_ok(status);) {
     const iree_host_size_t batch_count =
         qwen_check_batch_count(loom_serve_qwen_model_shapes(model)[shape_index],
                                4 - offset, spans + offset);
-    status = loom_serve_qwen_model_verify(model, shape_index, batch_count,
-                                          spans + offset, limits + offset,
-                                          results + offset);
+    status = loom_serve_qwen_model_verify(model, shape_index, epoch_count,
+                                          batch_count, spans + offset,
+                                          limits + offset, results + offset);
     offset += batch_count;
   }
   for (iree_host_size_t i = 0; i < 4 && iree_status_is_ok(status); ++i) {
@@ -367,11 +369,11 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
   uint32_t invalid_limits[] = {5, 4, 2, 4};
   loom_serve_qwen_result_t rejected[4];
   IREE_RETURN_IF_ERROR(
-      qwen_check_error(loom_serve_qwen_model_verify(model, 0, 1, spans,
+      qwen_check_error(loom_serve_qwen_model_verify(model, 0, 1, 1, spans,
                                                     invalid_limits, rejected),
                        IREE_STATUS_INVALID_ARGUMENT));
-  IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(model, 0, rows, order, spans,
-                                                 limits, expected));
+  IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(model, 0, 1, rows, order,
+                                                 spans, limits, expected));
 
   // Natural proposals share the next epoch with an intermediate prompt and a
   // known decode. Captured/replayed slots now contain holes and reordered rows.
@@ -388,11 +390,13 @@ static iree_status_t qwen_check_mtp_verification(loom_serve_qwen_model_t* model,
        LOOM_SERVE_QWEN_SPAN_FLAG_SELECT | LOOM_SERVE_QWEN_SPAN_FLAG_PROPOSE},
       {rows[1].packed, 1, inputs[1], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT},
   };
-  const uint32_t mixed_limits[] = {4, 0, 4, 0};
+  const uint32_t mixed_limits[] = {(uint32_t)FLAG_continuation_epochs * 4, 0,
+                                   (uint32_t)FLAG_continuation_epochs * 4, 0};
   const iree_host_size_t mixed_shape =
       loom_serve_qwen_model_shape_count(model) - 1;
-  IREE_RETURN_IF_ERROR(qwen_check_verified_epoch(
-      model, mixed_shape, rows, mixed_order, mixed, mixed_limits, NULL));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_verified_epoch(model, mixed_shape, FLAG_continuation_epochs,
+                                rows, mixed_order, mixed, mixed_limits, NULL));
   IREE_RETURN_IF_ERROR(
       qwen_check_error(loom_serve_qwen_row_decode(
                            loom_serve_qwen_model_row(model, rows[0].packed)),
@@ -731,6 +735,10 @@ static iree_status_t qwen_check_compare(loom_serve_qwen_model_t* model,
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
+  if (FLAG_continuation_epochs < 1 || FLAG_continuation_epochs > 2) {
+    fprintf(stderr, "continuation_epochs must be one or two.\n");
+    return EXIT_FAILURE;
+  }
   const iree_host_size_t epoch_count =
       loom_serve_qwen_explicit_shape_count_from_flags();
   if (!epoch_count) {

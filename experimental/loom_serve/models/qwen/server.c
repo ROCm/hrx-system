@@ -18,6 +18,9 @@ IREE_FLAG(
     "Proposal depth: 0 or 3. Depth 0 with --mtp measures warm target-only.");
 IREE_FLAG(string, scheduler, "packed",
           "packed, isolated, or matched (isolated with prefill decode math).");
+IREE_FLAG(
+    int32_t, continuation_epochs, 1,
+    "One or two device-fed epochs per cohort; two requires --mtp_depth=3.");
 IREE_FLAG(string, packing, "mixed",
           "mixed or separate prompt/decode cohorts, with the same kernels.");
 IREE_FLAG(int32_t, port, 8080,
@@ -59,13 +62,16 @@ int main(int argc, char** argv) {
     fprintf(stderr, "scheduler must be packed, isolated, or matched.\n");
     return EXIT_FAILURE;
   }
-  if ((FLAG_mtp_depth != 0 && FLAG_mtp_depth != 3) ||
+  if (FLAG_continuation_epochs < 1 || FLAG_continuation_epochs > 2 ||
+      (FLAG_continuation_epochs == 2 && FLAG_mtp_depth != 3) ||
+      (FLAG_mtp_depth != 0 && FLAG_mtp_depth != 3) ||
       (FLAG_mtp_depth && !loom_serve_qwen_mtp_from_flags()) ||
       (loom_serve_qwen_mtp_from_flags() &&
        schedule_mode != LOOM_SERVE_QWEN_SCHEDULE_PACKED)) {
     fprintf(stderr,
             "mtp_depth must be 0 or 3; MTP requires --mtp and packed "
-            "scheduling.\n");
+            "scheduling; continuation_epochs must be 1 or 2, and 2 requires "
+            "mtp_depth=3.\n");
     return EXIT_FAILURE;
   }
   loom_serve_qwen_packing_mode_t packing_mode;
@@ -136,11 +142,12 @@ int main(int argc, char** argv) {
       fprintf(stderr,
               "{\"event\":\"ready\",\"address\":\"%.*s\",\"rows\":%d,\"chunk_"
               "size\":%zu,\"scheduler\":\"%s\",\"shape_count\":%zu,"
-              "\"packing\":\"%s\",\"mtp_warm\":%s,\"mtp_depth\":%d}\n",
+              "\"packing\":\"%s\",\"mtp_warm\":%s,\"mtp_depth\":%d,"
+              "\"continuation_epochs\":%d}\n",
               (int)address.size, address.data, FLAG_rows, chunk_size,
               FLAG_scheduler, epoch_count, FLAG_packing,
               loom_serve_qwen_mtp_from_flags() ? "true" : "false",
-              FLAG_mtp_depth);
+              FLAG_mtp_depth, FLAG_continuation_epochs);
       const loom_serve_qwen_service_options_t service_options = {
           .row_count = (iree_host_size_t)FLAG_rows,
           .chunk_size = chunk_size,
@@ -150,6 +157,7 @@ int main(int argc, char** argv) {
           .schedule_mode = schedule_mode,
           .packing_mode = packing_mode,
           .mtp_depth = (iree_host_size_t)FLAG_mtp_depth,
+          .continuation_epochs = (iree_host_size_t)FLAG_continuation_epochs,
       };
       status = loom_serve_qwen_service_run(model, server, &service_options,
                                            allocator);

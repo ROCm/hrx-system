@@ -1,0 +1,14 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @qwen38.attention.cache_capacity : %value: index where [range(%value, 1, 262144)]
+kernel.decl @qwen38_continue_dispatch() launch(%context: index, %epoch: buffer, %tokens: buffer, %results: buffer)
+
+command.program.def public @qwen38_continue() launch(%epoch: buffer, %tokens: buffer, %results: buffer) {
+  %context = config.get @qwen38.attention.cache_capacity : index
+  kernel.launch @qwen38_continue_dispatch(%context, %epoch, %tokens, %results) : (index, buffer, buffer, buffer)
+  command.return
+}

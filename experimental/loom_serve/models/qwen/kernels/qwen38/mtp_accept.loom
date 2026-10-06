@@ -45,7 +45,7 @@ kernel.def export("qwen38_mtp_accept_spans") @qwen38_mtp_accept_spans() {
   %total = view.load %header[0] : view<3xi32> -> i32
   %span_word = view.load %header[1] : view<3xi32> -> i32
   %span_value = index.cast %span_word : i32 to index
-  %spans = index.assume %span_value [range(%span_value, 1, 16)] : index
+  %spans = index.assume %span_value [range(%span_value, 0, 16)] : index
   view.store %total, %accepted_header[0] : i32, view<3xi32>
   view.store %span_word, %accepted_header[1] : i32, view<3xi32>
   view.store %zero_word, %accepted_header[2] : i32, view<3xi32>

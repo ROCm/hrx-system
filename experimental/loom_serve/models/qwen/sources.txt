@@ -4,6 +4,7 @@ weights_prepare.loom
 epoch.loom
 mtp.loom
 verify.loom
+continue.loom
 ../../motifs/ggml/linear_q4k_q8_1_x4.loom
 ../../motifs/ggml/linear_q5k_q8_1_x4.loom
 ../../motifs/ggml/linear_q6k_f32_decode.loom
@@ -12,6 +13,7 @@ verify.loom
 ../../motifs/ggml/linear_qk_common.loom
 ../../motifs/ggml/quantize_q8_1_x4.loom
 kernels/qwen38/attention_common.loom
+kernels/qwen38/continuation.loom
 kernels/qwen38/attention_decode.loom
 kernels/qwen38/attention_decode_split.loom
 kernels/qwen38/attention_prefill.loom

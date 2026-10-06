@@ -176,6 +176,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("server", "model", "weights", "tokenizer", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
+    parser.add_argument("--continuation-epochs", type=int, choices=(1, 2), default=1)
     arguments = parser.parse_args()
     arguments.output.mkdir(parents=True, exist_ok=False)
     command = [str(arguments.server.resolve())] + [
@@ -199,8 +200,15 @@ def main():
     for capacity in (0, 320):
         events = Events()
         log_path = arguments.output / f"pool-{capacity}.log"
+        continuation_epochs = arguments.continuation_epochs if capacity else 1
         with check_service.running_server(
-            command + [f"--pool_capacity={capacity}"], log_path, events.record
+            command
+            + [
+                f"--pool_capacity={capacity}",
+                f"--continuation_epochs={continuation_epochs}",
+            ],
+            log_path,
+            events.record,
         ) as (_, endpoint):
             if endpoint is None:
                 raise RuntimeError(f"server did not become ready: {log_path}")
@@ -221,6 +229,13 @@ def main():
                 "pooled concurrent output differs from sequential dense output"
             )
         if capacity:
+            if arguments.continuation_epochs == 2 and not any(
+                row["verification_epochs"] == 2
+                for event in events.values
+                if event.get("event") == "epoch"
+                for row in event["rows"]
+            ):
+                raise RuntimeError("workload did not exercise device continuation")
             admissions = [e for e in events.values if e.get("event") == "admit"]
             if any(e["pool_reserved_tokens"] > capacity for e in admissions):
                 raise RuntimeError("completion reservations exceeded physical capacity")

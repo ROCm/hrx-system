@@ -54,9 +54,39 @@ progress order. Two initial origin payloads and a page-size/map-origin/carry-
 stride record complete the cold result. These roles remain a private adapter
 contract, not a universal storage language.
 
-The native adapter still manages page IDs, packs warm transfer records, owns
-chat policy, and joins each epoch before publishing host row progress. Those
-remaining contracts are not a model-neutral text ABI.
+The native adapter still manages page IDs, packs incoming transfer records,
+owns chat policy, and joins each bounded cohort before publishing host progress.
+Those remaining contracts are not a model-neutral text ABI.
+
+## Bounded device-fed continuation
+
+`--mtp --mtp_depth=3 --continuation_epochs=2` lets the source VM enqueue two
+target/MTP epochs before returning to admission and transport. The default is
+one. The first epoch accepts mixed prompt/known and speculative spans normally.
+After catch-up, `continue.loom` compacts only live speculative spans, advances
+their positions by the accepted counts, and publishes their last selected
+tokens directly into the next input buffer. Known spans are not replayed. The
+next verifier uses a cached shape sized to the maximum continuing cohort.
+There is no intermediate host wait, accepted-token download dependency or
+token re-upload between those epochs.
+
+EOS, exhausted output credit and insufficient context remove a span before
+the second epoch can mutate its state. Two result banks and original-span tags
+keep feedback immutable while later work proceeds. The result payload grows
+by 448 bytes. The host provisions the speculative high-water mark against
+reserved capacity before submission and releases rejected pages
+only after both work and feedback retire. At most eight outputs per original
+span return in generation order. Cancellation and new arrivals are observed
+at the next cohort boundary, not delayed behind an unbounded queue.
+
+An empty second cohort still runs padded stateless math in the current fixed
+commands; it mutates no retained state. This explicit experiment is not a
+resident worker or a claim of zero idle weight traffic. The default remains
+one epoch until controlled endpoint evidence supports a scheduling policy.
+JSONL distinguishes `device_epochs`/`traversals` from host scheduling events;
+per-row `verification_epochs` records actual advances and keeps draft acceptance
+accounting correct. The HTTP comparison tools accept `--continuation-epochs=2`
+to compare device-fed pooled execution against one-epoch dense output.
 
 ## Pooled KV and reserved admission
 
