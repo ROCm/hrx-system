@@ -1287,10 +1287,6 @@ int iree_test_loom_main(int argc, char** argv,
         !iree_string_view_is_empty(hal_context.driver_name)) {
       status = loom_run_hal_testbench_context_ensure_runtime(&hal_context);
       if (iree_status_is_ok(status)) {
-        execution_options.materializer.device_allocator =
-            iree_hal_device_allocator(hal_context.runtime.device);
-        execution_options.materializer.buffer_params =
-            loom_run_hal_testbench_host_visible_buffer_params();
         const iree_string_view_t target = iree_make_cstring_view(FLAG_target);
         const loom_run_hal_testbench_actual_provider_options_t
             provider_options = {
@@ -1317,6 +1313,8 @@ int iree_test_loom_main(int argc, char** argv,
     }
     if (iree_status_is_ok(status) && selected_scenario_count != 0 &&
         execution_options.materializer.device_allocator == NULL) {
+      // Scenario values are shared with host oracles. Each execution profile
+      // stages those values into its own device storage as needed.
       status =
           iree_hal_allocator_create_heap(IREE_SV("iree-test-loom"), allocator,
                                          allocator, &host_device_allocator);

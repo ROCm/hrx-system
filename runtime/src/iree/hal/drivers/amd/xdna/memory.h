@@ -41,11 +41,11 @@ iree_status_t iree_hal_amd_xdna_memory_allocate(
 void iree_hal_amd_xdna_memory_deinitialize(iree_hal_amd_xdna_context_t* context,
                                            iree_hal_amd_xdna_memory_t* memory);
 
-// Creates the allocation facade used by direct HAL callers. The context is
-// borrowed and must outlive the allocator and buffers allocated through it.
+// Creates the allocation facade used by direct HAL callers. The device and
+// context are borrowed and outlive the allocator and its buffers.
 iree_status_t iree_hal_amd_xdna_allocator_create(
-    iree_hal_amd_xdna_context_t* context, iree_allocator_t host_allocator,
-    iree_hal_allocator_t** out_allocator);
+    iree_hal_device_t* device, iree_hal_amd_xdna_context_t* context,
+    iree_allocator_t host_allocator, iree_hal_allocator_t** out_allocator);
 
 // Resolves a public logical binding to already-prepared native storage. Foreign
 // allocations are rejected; submission performs no implicit registration.

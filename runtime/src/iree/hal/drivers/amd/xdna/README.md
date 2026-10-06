@@ -1,0 +1,81 @@
+# XDNA HAL
+
+The `xdna` driver runs native Loom array programs through libamdf. It owns
+device discovery, native contexts, executable storage, buffers, direct queue
+operations, and completion. The [image loader](image/README.md) admits `.xdna`
+ELFs and applies their declared storage and binding contracts.
+
+## Running a Loom scenario
+
+Enable the native provider, HAL registration, and Loom XDNA emitter:
+
+```sh
+iree-bazel-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_XDNA=ON \
+  -DLOOM_TARGET_XDNA=ON -DLOOM_EMIT_XDNA=ON
+iree-bazel-run //loom/src/loom/tools/iree-test-loom -- \
+  loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom --device=xdna
+```
+
+The scenario compiles a finite multiply pipeline for the selected device and
+compares its outputs with an independent VM implementation. Trial inputs vary;
+tensor views exercise nonzero binding offsets, shared input storage, and output
+guards. The device's exact target profile selects the compiler's array profile.
+
+`xdna://0?columns=1` selects discovery ordinal zero and a one-column native
+context. The default is one column. The context width must equal the compiled
+array's width; a wider context does not implicitly pad the program. Endpoint
+identity, firmware ABI, and geometry are checked when an executable is loaded.
+
+The normal tool accepts finite `pipeline.def<kernel>` subjects with buffer
+launch bindings and no leading specialization arguments. Specialization
+arguments need a compiler preparation step that binds the scenario's
+configuration values before emission; the adapter reports `UNIMPLEMENTED` for
+that form. Runtime scalar bindings and invocation results are absent from the
+current native image ABI.
+
+## Execution and ownership
+
+A device provisions one dispatch/transfer queue and one time-sliced native
+context. Each accepted operation captures its transient arguments and retains
+its resources. Semaphore dependencies express ordering. A consumer submitted
+before its producer waits without occupying the native execution slot.
+
+The shared proactor admits ready operations and observes native completion.
+Only one native invocation reads executable storage at a time. Its successor
+can patch bindings after checked retirement. Every dispatch executes invocation
+zero to establish the array state; time slicing does not promise resident tile
+state across submissions. This permits ordinary direct dispatch without a
+resident-program scheduler or reusable command buffer implementation.
+
+Direct fill, update, copy, upload, download, and barriers are supported. Transfers
+use mapped native storage with the required cache operations. Allocated buffers
+report the provider's actual coherence properties. Loom correctness scenarios
+keep canonical host data in coherent heap storage and stage device copies;
+buffer offsets and aliases survive upload and readback.
+
+Queue notifications are wake hints. Completion refreshes the native queue's
+checked retirement and terminal outcome before publishing HAL semaphores.
+Ordinary retired work releases its references before signaling completion.
+If observation fails without proving retirement, the queue reports the error,
+fails completion edges, and retains the unsafe-to-release ownership graph.
+Teardown failures similarly report and retain ownership without aborting the
+application or maintaining a live-object registry.
+
+Reusable command buffers, device memory pools, external memory import/export,
+file operations, host calls, and atomic queue operations return explicit
+unsupported statuses. The direct path has no dependency on those mechanisms.
+
+## Verification
+
+Native correctness suites declare an XDNA hardware requirement:
+
+```sh
+iree-bazel-test --config=asan \
+  //runtime/src/iree/hal/drivers/amd/xdna/cts:native_test \
+  //loom/src/loom/tooling/target/amd/xdna:hal_execution_test
+```
+
+The native suite exercises submission capture, rebinding, guarded buffer views,
+consumer-before-producer dependencies, direct transfers, failure propagation,
+and allocation properties. The Loom suite exercises the public tool, compiler,
+HAL, physical execution, readback, and numerical oracle together.

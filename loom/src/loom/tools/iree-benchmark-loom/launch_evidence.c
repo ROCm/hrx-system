@@ -66,7 +66,7 @@ void iree_benchmark_loom_launch_evidence_capture(
   iree_benchmark_loom_launch_record_t* record =
       &evidence->records[record_ordinal];
 
-  const loom_testbench_invocation_plan_t* invocation = provider->kernel_launch;
+  const loom_testbench_invocation_plan_t* invocation = provider->invocation;
   IREE_ASSERT(workload_value_ordinal <= evidence->workload_value_count);
   IREE_ASSERT(invocation->workload_count <=
               evidence->workload_value_count - workload_value_ordinal);

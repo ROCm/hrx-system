@@ -281,7 +281,7 @@ static void iree_benchmark_loom_capture_case_sample_launches(
           provider, case_sample_ordinal, i, capture->next_record_ordinal++,
           capture->next_workload_value_ordinal, capture->evidence);
       capture->next_workload_value_ordinal +=
-          provider->kernel_launch->workload_count;
+          provider->invocation->workload_count;
     }
   } else {
     const loom_run_hal_testbench_actual_provider_t* provider =
@@ -291,7 +291,7 @@ static void iree_benchmark_loom_capture_case_sample_launches(
         /*sequence_step_ordinal=*/0, capture->next_record_ordinal++,
         capture->next_workload_value_ordinal, capture->evidence);
     capture->next_workload_value_ordinal +=
-        provider->kernel_launch->workload_count;
+        provider->invocation->workload_count;
   }
 }
 
@@ -373,7 +373,7 @@ iree_status_t iree_benchmark_loom_prepare_hal_work_item(
          i < compile_context->hal_sequence.provider_count; ++i) {
       const iree_host_size_t workload_count =
           compile_context->hal_sequence.providers[i]
-              .execution.kernel_launch->workload_count;
+              .execution.invocation->workload_count;
       if (!iree_host_size_checked_add(workload_values_per_sample,
                                       workload_count,
                                       &workload_values_per_sample)) {
@@ -383,7 +383,7 @@ iree_status_t iree_benchmark_loom_prepare_hal_work_item(
     }
   } else {
     workload_values_per_sample =
-        compile_context->hal_provider.execution.kernel_launch->workload_count;
+        compile_context->hal_provider.execution.invocation->workload_count;
   }
   iree_host_size_t launch_record_count = 0;
   iree_host_size_t workload_value_count = 0;

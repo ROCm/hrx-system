@@ -76,3 +76,13 @@ selects.config_setting_group(
         "//loom/config/emit:spirv",
     ],
 )
+
+selects.config_setting_group(
+    name = "xdna_hal",
+    match_all = [
+        ":iree_hal",
+        "//runtime/config/hal:driver_xdna",
+        "//loom/config/target/arch:xdna",
+        "//loom/config/emit:xdna",
+    ],
+)

@@ -314,6 +314,7 @@ TEST_F(XdnaNativeTest, AllocationPublishesItsActualMemoryProperties) {
   IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
       iree_hal_device_allocator(device_), params, kBytes, &buffer));
   buffers_.push_back(buffer);
+  EXPECT_EQ(iree_hal_buffer_allocation_placement(buffer).device, device_);
   EXPECT_TRUE(iree_all_bits_set(
       iree_hal_buffer_memory_type(buffer),
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL));

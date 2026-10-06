@@ -191,6 +191,7 @@ class XdnaArtifactTest : public ::testing::Test {
 
   void TearDown() override {
     iree_hal_amd_xdna_image_destroy(image_);
+    loom_target_emit_artifact_release(&artifact_);
     iree_byte_sequence_release(contents_);
     loom_target_compile_report_deinitialize(&compile_report_);
     loom_context_deinitialize(&context_);
@@ -220,6 +221,7 @@ class XdnaArtifactTest : public ::testing::Test {
   loom_context_t context_ = {};
   loom_target_low_descriptor_registry_t low_registry_ = {};
   loom_target_compile_report_t compile_report_ = {};
+  loom_target_emit_artifact_t artifact_ = {};
   iree_byte_sequence_t* contents_ = nullptr;
   iree_hal_amd_xdna_image_t* image_ = nullptr;
 };
@@ -402,6 +404,37 @@ TEST_F(XdnaArtifactTest, RejectsAggregateBindingCountBeforeResidentCompile) {
   EXPECT_EQ(capture.emissions[0].u64_params[1], 65535u);
   EXPECT_EQ(compile_report_.entry_rows.count, 0u);
   EXPECT_EQ(compile_report_.pipeline_plans.count, 0u);
+}
+
+TEST_F(XdnaArtifactTest, RetainsArrayTargetBundleForHalExecution) {
+  ModulePtr module;
+  IREE_ASSERT_OK(ParseModule(IREE_SV(kResidentNeighborSource), &module));
+
+  const loom_target_emit_request_t request = {
+      /*.target_environment=*/nullptr,
+      /*.low_descriptor_registry=*/&low_registry_.registry,
+      /*.module=*/module.get(),
+      /*.function_versions=*/nullptr,
+      /*.option_chain=*/nullptr,
+      /*.identifier=*/IREE_SV("module.xdna"),
+      /*.artifact_manifest=*/{},
+      /*.flags=*/LOOM_TARGET_EMIT_REQUEST_FLAG_RETAIN_TARGET_BUNDLE,
+      /*.compile_report=*/nullptr,
+      /*.diagnostic_emitter=*/{},
+      /*.max_errors=*/0,
+      /*.scratch_arena=*/&scratch_arena_,
+      /*.allocator=*/iree_allocator_system(),
+  };
+  bool emitted = false;
+  IREE_ASSERT_OK(
+      loom_aie2p_xdna_artifact_emitter.emit(&request, &emitted, &artifact_));
+  ASSERT_TRUE(emitted);
+  ASSERT_NE(artifact_.target_bundle, nullptr);
+  ASSERT_NE(artifact_.target_bundle->export_plan, nullptr);
+  EXPECT_EQ(artifact_.target_bundle->export_plan->abi_kind,
+            LOOM_TARGET_ABI_ARRAY_PROGRAM);
+  EXPECT_EQ(artifact_.target_artifact_format, LOOM_TARGET_ARTIFACT_FORMAT_ELF);
+  EXPECT_NE(artifact_.contents, nullptr);
 }
 
 }  // namespace

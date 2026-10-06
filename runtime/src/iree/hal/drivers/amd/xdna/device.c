@@ -142,8 +142,9 @@ iree_status_t iree_hal_amd_xdna_device_create(
         create_params->proactor_pool, UINT32_MAX, &device->proactor_entry);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_hal_amd_xdna_allocator_create(context, host_allocator,
-                                                &device->allocator);
+    status =
+        iree_hal_amd_xdna_allocator_create((iree_hal_device_t*)device, context,
+                                           host_allocator, &device->allocator);
   }
   if (iree_status_is_ok(status)) {
     iree_hal_queue_family_initialize(

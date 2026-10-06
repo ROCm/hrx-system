@@ -1218,6 +1218,7 @@ loom_cc_library(
     ::provider
     ::target_facts
     ::target_profile
+    ::target_records
     ::tile_link
     ::xdna_product
     iree::base

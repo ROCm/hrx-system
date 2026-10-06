@@ -29,7 +29,7 @@ typedef struct loom_run_hal_testbench_scenario_product_t {
   loomc_module_t* adapted_module;
   // Synthetic kernel invocation owned with |adapted_module|.
   loom_testbench_invocation_plan_t adapted_invocation;
-  // Eagerly compiled ordinary HAL kernel product.
+  // Eagerly compiled HAL dispatch product.
   loom_run_hal_testbench_actual_provider_t provider;
 } loom_run_hal_testbench_scenario_product_t;
 
@@ -173,7 +173,7 @@ static iree_status_t loom_run_hal_testbench_scenario_product_validate(
         IREE_STATUS_FAILED_PRECONDITION,
         "HAL scenario product received an unexpected invocation");
   }
-  IREE_ASSERT(provider->kernel_launch != NULL);
+  IREE_ASSERT(provider->invocation != NULL);
   return iree_ok_status();
 }
 
@@ -182,11 +182,9 @@ static iree_status_t loom_run_hal_testbench_scenario_batch_prepare(
     iree_host_size_t call_count, loom_testbench_product_call_t* calls,
     loom_run_hal_testbench_scenario_batch_t* out_batch) {
   loom_run_hal_testbench_actual_provider_t* provider = &product->provider;
-  const loom_testbench_invocation_plan_t* kernel_launch =
-      provider->kernel_launch;
+  const loom_testbench_invocation_plan_t* invocation = provider->invocation;
   iree_status_t status = loom_run_hal_testbench_scenario_batch_initialize(
-      call_count, kernel_launch->input_count, product->host_allocator,
-      out_batch);
+      call_count, invocation->input_count, product->host_allocator, out_batch);
   iree_host_size_t binding_count = 0;
   for (iree_host_size_t call_index = 0;
        iree_status_is_ok(status) && call_index < call_count; ++call_index) {
@@ -196,8 +194,8 @@ static iree_status_t loom_run_hal_testbench_scenario_batch_prepare(
     out_batch->initialized_binding_list_count = call_index + 1;
     loom_run_hal_invocation_options_t invocation_options = {0};
     status = loom_run_hal_testbench_actual_provider_materialize_invocation(
-        provider, kernel_launch->workload_count, call->call_parameters,
-        kernel_launch->input_count, call->arguments, &invocation_options,
+        provider, invocation->workload_count, call->call_parameters,
+        invocation->input_count, call->arguments, &invocation_options,
         bindings);
     if (!iree_status_is_ok(status)) {
       status = iree_status_annotate_f(
@@ -279,21 +277,17 @@ static iree_status_t loom_run_hal_testbench_scenario_product_execute(
     return iree_ok_status();
   }
 
-  loom_run_hal_testbench_scenario_batch_t batch = {0};
-  iree_status_t status = loom_run_hal_testbench_scenario_batch_prepare(
-      product, call_count, calls, &batch);
-  loom_run_hal_testbench_scenario_batch_execution_t context = {
-      .product = product,
-      .batch = &batch,
-  };
-  if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_scenario_batch_execute(&context);
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < call_count && iree_status_is_ok(status);
+       ++i) {
+    loom_testbench_product_call_t* call = &calls[i];
+    const loom_testbench_invocation_plan_t* dispatch =
+        product->provider.invocation;
+    status = loom_run_hal_testbench_actual_invoke(
+        &product->provider, dispatch, dispatch->workload_count,
+        call->call_parameters, dispatch->input_count, call->arguments,
+        dispatch->result_count, call->results);
   }
-  if (iree_status_is_ok(status)) {
-    status = loom_run_hal_testbench_staging_readback(
-        &product->provider.context->runtime, &batch.staging);
-  }
-  loom_run_hal_testbench_scenario_batch_deinitialize(&batch);
   return status;
 }
 
@@ -600,10 +594,17 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
   loom_run_hal_testbench_scenario_profile_t* profile =
       (loom_run_hal_testbench_scenario_profile_t*)user_data;
   if (invocation->kind != LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH &&
-      invocation->kind != LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL) {
+      invocation->kind != LOOM_TESTBENCH_INVOCATION_FUNCTION_CALL &&
+      invocation->kind != LOOM_TESTBENCH_INVOCATION_PIPELINE) {
     return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                            "HAL scenario profile requires a kernel or "
-                            "function subject");
+                            "HAL scenario profile requires a kernel, function, "
+                            "or finite pipeline subject");
+  }
+  if (invocation->kind == LOOM_TESTBENCH_INVOCATION_PIPELINE &&
+      invocation->workload_count != 0) {
+    return iree_make_status(
+        IREE_STATUS_UNIMPLEMENTED,
+        "HAL pipeline specialization arguments are not implemented");
   }
   if (invocation->result_count != 0) {
     return loom_run_hal_testbench_scenario_emit_unsupported_results(profile,
@@ -633,10 +634,10 @@ static iree_status_t loom_run_hal_testbench_scenario_product_prepare(
     if (iree_status_is_ok(status)) {
       provider_options.module = product->adapted_module;
       provider_options.native_module = product->adapted_invocation.module;
-      provider_options.kernel_launch = &product->adapted_invocation;
+      provider_options.invocation = &product->adapted_invocation;
     }
   } else {
-    provider_options.kernel_launch = invocation;
+    provider_options.invocation = invocation;
   }
   if (!iree_status_is_ok(status)) {
     loom_run_hal_testbench_scenario_product_destroy(product);
@@ -679,7 +680,7 @@ void loom_run_hal_testbench_scenario_profile_initialize(
       .source_table = source_table,
       .diagnostic_sink = diagnostic_sink,
   };
-  out_profile->provider_options.kernel_launch = NULL;
+  out_profile->provider_options.invocation = NULL;
 }
 
 loom_testbench_execution_profile_t
