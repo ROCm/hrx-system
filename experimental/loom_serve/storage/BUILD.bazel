@@ -30,6 +30,18 @@ loom_cc_library(
     deps = ["//runtime/src/iree/base"],
 )
 
+loom_cc_library(
+    name = "relocation",
+    srcs = ["relocation.c"],
+    hdrs = ["relocation.h"],
+    deps = [
+        ":memory",
+        "//experimental/loom_serve/runtime:execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
 loom_cc_test(
     name = "memory_test",
     srcs = ["memory_test.cc"],
@@ -55,6 +67,26 @@ loom_cc_test(
     deps = [
         ":block_pool",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "relocation_test",
+    srcs = ["relocation_test.cc"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":memory",
+        ":relocation",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:execution",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

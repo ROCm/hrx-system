@@ -52,6 +52,7 @@ loom_cc_library(
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::storage::block_pool
     iree::experimental::loom_serve::storage::memory
+    iree::experimental::loom_serve::storage::relocation
     iree::hal
     iree::io::file_handle
     iree::module::hal::types

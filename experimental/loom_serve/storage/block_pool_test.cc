@@ -70,4 +70,51 @@ TEST(BlockPoolTest, WarmReuseKeepsBackingAndHandlesEmptyExtents) {
   loom_serve_block_pool_deinitialize(&pool);
 }
 
+TEST(BlockPoolTest, CompactionMovesOnlyIntoDisjointFreeSlots) {
+  // Exhaust every ownership pattern in a small pool, including all-live and
+  // all-free. This checks the actual planning and commit contract, not a
+  // second implementation of the planner.
+  for (uint32_t mask = 0; mask < 256; ++mask) {
+    SCOPED_TRACE(mask);
+    loom_serve_block_pool_t pool;
+    IREE_ASSERT_OK(
+        loom_serve_block_pool_initialize(8, iree_allocator_system(), &pool));
+    std::array<uint32_t, 8> blocks;
+    loom_serve_block_pool_acquire(&pool, blocks.size(), blocks.data());
+    std::set<uint32_t> occupied;
+    for (uint32_t i = 0; i < blocks.size(); ++i) {
+      if (mask & (1u << i)) {
+        occupied.insert(i);
+      } else {
+        loom_serve_block_pool_release(&pool, 1, &blocks[i]);
+      }
+    }
+    std::array<uint32_t, 8> destinations;
+    const uint32_t moved =
+        loom_serve_block_pool_plan_compaction(&pool, destinations.data());
+    uint32_t observed_moves = 0;
+    std::set<uint32_t> compacted;
+    for (uint32_t i = 0; i < blocks.size(); ++i) {
+      if (!occupied.count(i)) {
+        EXPECT_EQ(destinations[i], UINT32_MAX);
+        continue;
+      }
+      EXPECT_LT(destinations[i], occupied.size());
+      EXPECT_TRUE(compacted.insert(destinations[i]).second);
+      if (destinations[i] != i) {
+        ++observed_moves;
+        EXPECT_EQ(occupied.count(destinations[i]), 0u);
+      }
+    }
+    EXPECT_EQ(moved, observed_moves);
+    loom_serve_block_pool_commit_compaction(&pool);
+    const uint32_t available = pool.available;
+    loom_serve_block_pool_acquire(&pool, available, blocks.data());
+    for (uint32_t i = 0; i < available; ++i) {
+      EXPECT_EQ(blocks[i], occupied.size() + i);
+    }
+    loom_serve_block_pool_deinitialize(&pool);
+  }
+}
+
 }  // namespace

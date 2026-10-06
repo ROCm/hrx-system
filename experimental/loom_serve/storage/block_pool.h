@@ -46,6 +46,18 @@ void loom_serve_block_pool_acquire(loom_serve_block_pool_t* pool,
 void loom_serve_block_pool_release(loom_serve_block_pool_t* pool,
                                    uint32_t count, const uint32_t* blocks);
 
+// Builds a cold maintenance map of capacity entries: UINT32_MAX for originally
+// free IDs, otherwise the ID's destination in a compact live prefix. Every
+// moved destination is originally free and disjoint from all sources, so the
+// copies may execute concurrently. Returns the number of moved blocks without
+// changing ownership. The caller excludes acquisitions/releases until commit.
+uint32_t loom_serve_block_pool_plan_compaction(
+    const loom_serve_block_pool_t* pool, uint32_t* destinations);
+
+// Publishes the compact live prefix after copies retire and every logical map
+// has been rewritten using the plan. No old-address consumers may remain.
+void loom_serve_block_pool_commit_compaction(loom_serve_block_pool_t* pool);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
