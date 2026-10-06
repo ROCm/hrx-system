@@ -6,6 +6,7 @@
 
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 func.decl import("prepare") @config(%stage: i32, %key: buffer, %value: buffer)
+func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
 // stage_root
@@ -53,5 +54,46 @@ func.def public @duplicate_parameter() {
 }
 
 func.def public @no_stages() {
+  func.return
+}
+
+// Crosses multiple growth boundaries on each independently owned array.
+// The key buffer is reused; every declaration must own its copied spelling.
+func.def public @large_catalog() {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %count = index.constant 33 : index
+  %ten = index.constant 10 : index
+  %digit_zero = scalar.constant 48 : i8
+  %letter_k = scalar.constant 107 : i8
+  %origin = index.constant 0 : offset
+  %key_bytes = index.constant 3 : offset
+  %key = buffer.alloca<private> align(1) %key_bytes : buffer
+  %key_view = buffer.view %key[%origin] : buffer -> view<3xi8>
+  view.store %letter_k, %key_view[0] : i8, view<3xi8>
+  %root = global.load @root : buffer
+  %directory = global.load @directory : buffer
+  %path = global.load @path : buffer
+  %policy = global.load @policy : buffer
+  scf.for %i = [%zero to %count step %one] {
+    %tag = index.cast %i : index to i64
+    %stage = func.call @stage(%root, %tag) : (buffer, i64) -> (i32)
+    scf.for %j = [%zero to %count step %one] {
+      %tens = index.div %j, %ten : index
+      %ones = index.rem %j, %ten : index
+      %tens_byte = index.cast %tens : index to i8
+      %ones_byte = index.cast %ones : index to i8
+      %first = scalar.addi %tens_byte, %digit_zero : i8
+      %second = scalar.addi %ones_byte, %digit_zero : i8
+      view.store %first, %key_view[1] : i8, view<3xi8>
+      view.store %second, %key_view[2] : i8, view<3xi8>
+      %value = index.cast %j : index to i64
+      %binding = index.cast %j : index to i32
+      func.call @config_i64(%stage, %key, %value) : (i32, buffer, i64) -> ()
+      func.call @parameter(%stage, %binding, %directory, %path, %policy) : (i32, i32, buffer, buffer, buffer) -> ()
+      scf.yield
+    }
+    scf.yield
+  }
   func.return
 }

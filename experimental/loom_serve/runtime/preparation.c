@@ -111,10 +111,12 @@ static iree_status_t preparation_add_stage(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "preparation requires a named, addressable stage");
   }
-  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-      preparation->allocator, preparation->stage_count + 1,
-      sizeof(*preparation->stages), &preparation->stage_capacity,
-      (void**)&preparation->stages));
+  if (preparation->stage_count == preparation->stage_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        preparation->allocator, preparation->stage_count + 1,
+        sizeof(*preparation->stages), &preparation->stage_capacity,
+        (void**)&preparation->stages));
+  }
   const iree_host_size_t index = preparation->stage_count++;
   preparation_stage_t* stage = &preparation->stages[index];
   *stage = (preparation_stage_t){0};
@@ -133,9 +135,12 @@ static iree_status_t preparation_add_config(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "preparation configuration key is empty");
   }
-  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-      preparation->allocator, stage->declaration.config.binding_count + 1,
-      sizeof(*stage->config), &stage->config_capacity, (void**)&stage->config));
+  if (stage->declaration.config.binding_count == stage->config_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        preparation->allocator, stage->declaration.config.binding_count + 1,
+        sizeof(*stage->config), &stage->config_capacity,
+        (void**)&stage->config));
+  }
   stage->declaration.config.bindings = stage->config;
   loomc_config_binding_t* binding =
       &stage->config[stage->declaration.config.binding_count++];
@@ -171,10 +176,12 @@ static iree_status_t preparation_add_parameter(
                               "parameter binding %u declared twice", binding);
     }
   }
-  IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
-      preparation->allocator, stage->declaration.parameter_count + 1,
-      sizeof(*stage->parameters), &stage->parameter_capacity,
-      (void**)&stage->parameters));
+  if (stage->declaration.parameter_count == stage->parameter_capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_grow_array(
+        preparation->allocator, stage->declaration.parameter_count + 1,
+        sizeof(*stage->parameters), &stage->parameter_capacity,
+        (void**)&stage->parameters));
+  }
   stage->declaration.parameters = stage->parameters;
   loom_serve_preparation_parameter_t* parameter =
       &stage->parameters[stage->declaration.parameter_count++];
