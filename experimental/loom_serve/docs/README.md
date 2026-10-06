@@ -55,7 +55,10 @@ Admission reserves each request's complete high-water credit and queues excess
 work. The real HTTP differential covers single, odd, and sixteen-row cohorts;
 the [model guide](../models/qwen/README.md#pooled-kv-and-reserved-admission)
 describes those checks and capacity-pressure/reuse coverage. Recurrent state
-remains private, and this pool does not yet share prefixes or page to storage.
+remains private. Explicit [row suspension](RUNNER.md#retained-state-and-physical-capacity)
+can retain target/draft/recurrent state in DRAM while releasing device backing;
+HTTP admission does not yet choose sessions for this transition. Shared prefixes
+and disk paging are separate from that private-row mechanism.
 The host still schedules and reads completion records between epochs.
 The [runner guide](RUNNER.md#extension-boundaries) identifies the exact changes
 needed to move those boundaries. The intended 20–40-agent deployment, NPU
