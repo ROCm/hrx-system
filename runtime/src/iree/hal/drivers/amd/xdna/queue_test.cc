@@ -130,6 +130,13 @@ struct NativeProvider {
     auto* self = reinterpret_cast<NativeProvider*>(queue);
     ++self->submission_count;
     EXPECT_EQ(info->command_count, 1u);
+    if (self->preceding_completion && self->submission_count == 2) {
+      uint64_t value = 0;
+      IREE_EXPECT_OK(
+          iree_hal_semaphore_query(self->preceding_completion, &value));
+      EXPECT_EQ(value, 1u);
+      EXPECT_EQ(self->live_memories, 3u);
+    }
     if (self->outcome == Outcome::kRejectSubmission) {
       return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
     }
@@ -198,6 +205,8 @@ struct NativeProvider {
   Outcome outcome = Outcome::kSuccess;
   // Native queue teardown result, including its handle-consumption semantics.
   amdf_status_t destroy_status = AMDF_STATUS_OK;
+  // Borrowed timeline that must be published before the second native submit.
+  iree_hal_semaphore_t* preceding_completion = nullptr;
   // Next native allocation address, aligned for instruction storage.
   uint64_t next_address = 0x1000000;
   // Number of native memory resources not yet destroyed.
@@ -282,19 +291,25 @@ class QueueHarness {
                                   IREE_HAL_SEMAPHORE_FLAG_NONE, &done));
   }
 
-  void Submit() {
-    completion_timepoint.callback =
-        +[](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
-            iree_status_t status) {
-          auto* self = static_cast<QueueHarness*>(user_data);
-          self->live_memories_at_completion = self->native.live_memories;
-          self->completion_status = iree_status_code(status);
-          iree_status_free(status);
-        };
-    completion_timepoint.user_data = this;
-    IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
-        reinterpret_cast<iree_async_semaphore_t*>(done), 1,
-        &completion_timepoint));
+  void Submit(iree_hal_semaphore_t* completion = nullptr) {
+    if (!completion) {
+      completion = done;
+    }
+    if (completion == done) {
+      completion_timepoint.callback =
+          +[](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+              iree_status_t status) {
+            auto* self = static_cast<QueueHarness*>(user_data);
+            self->live_memories_at_completion = self->native.live_memories;
+            self->completion_status = iree_status_code(status);
+            iree_status_free(status);
+          };
+      completion_timepoint.user_data = this;
+      IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+          reinterpret_cast<iree_async_semaphore_t*>(done), 1,
+          &completion_timepoint));
+    }
+    const size_t previous_live_memories = native.live_memories;
     auto bytes = iree::hal::amd::xdna::testing::ImageFixture().Build();
     const auto* targets =
         iree_hal_device_spec_executables(iree_hal_device_spec(device));
@@ -317,19 +332,25 @@ class QueueHarness {
     auto binding = iree_hal_make_buffer_ref(buffer, 0, 64);
     uint64_t value = 1;
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
-        queue, {}, {1, &done, &value}, executable, function,
+        queue, {}, {1, &completion, &value}, executable, function,
         iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding}, 0));
     iree_hal_executable_release(executable);
     iree_hal_buffer_release(buffer);
-    EXPECT_EQ(native.live_memories, 3u);
+    EXPECT_EQ(native.live_memories, previous_live_memories + 3);
   }
 
-  void PollUntilDone(iree_status_code_t expected) {
+  void PollUntilDone(iree_status_code_t expected,
+                     iree_hal_semaphore_t* completion = nullptr) {
+    if (!completion) {
+      completion = done;
+    }
     while (true) {
       uint64_t value = 0;
-      iree_status_t status = iree_hal_semaphore_query(done, &value);
+      iree_status_t status = iree_hal_semaphore_query(completion, &value);
       if (!iree_status_is_ok(status) || value == 1) {
-        EXPECT_EQ(expected, completion_status);
+        if (completion == done) {
+          EXPECT_EQ(expected, completion_status);
+        }
         IREE_EXPECT_STATUS_IS(expected, status);
         break;
       }
@@ -400,6 +421,52 @@ TEST(XdnaQueueTest, EarlyWakeRearmsUntilCheckedRetirement) {
   EXPECT_EQ(harness.native.live_memories, 0u);
   EXPECT_EQ(harness.native.notification_count, 2u);
   EXPECT_EQ(harness.native.refresh_count, 2u);
+}
+
+TEST(XdnaQueueTest, PublishesRetirementBeforeFollowingNativeSubmit) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_hal_semaphore_t* following_completion = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &following_completion));
+  harness.native.preceding_completion = harness.done;
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(following_completion));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
+  ASSERT_NO_FATAL_FAILURE(
+      harness.PollUntilDone(IREE_STATUS_OK, following_completion));
+  EXPECT_EQ(harness.native.submission_count, 2u);
+  EXPECT_EQ(harness.live_memories_at_completion, 3u);
+  EXPECT_EQ(harness.native.live_memories, 0u);
+  iree_hal_semaphore_release(following_completion);
+}
+
+TEST(XdnaQueueTest, FinalPublicationAllowsImmediateDeviceRelease) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  iree_async_semaphore_timepoint_t release_timepoint = {};
+  release_timepoint.callback =
+      +[](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+          iree_status_t status) {
+        IREE_EXPECT_OK(status);
+        static_cast<QueueHarness*>(user_data)->ReleaseDevice();
+      };
+  release_timepoint.user_data = &harness;
+  IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
+      reinterpret_cast<iree_async_semaphore_t*>(harness.done), 1,
+      &release_timepoint));
+  while (harness.device) {
+    IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                            iree_infinite_timeout(), nullptr));
+  }
+  EXPECT_EQ(harness.completion_status, IREE_STATUS_OK);
+  EXPECT_EQ(harness.live_memories_at_completion, 0u);
+  EXPECT_EQ(harness.native.live_memories, 0u);
+  EXPECT_EQ(harness.native.queue_destroy_count, 1u);
+  EXPECT_EQ(harness.native.context_destroy_count, 1u);
+  EXPECT_EQ(harness.diagnostic_count, 0u);
 }
 
 TEST(XdnaQueueTest, ConsumingCleanupFailureReleasesParent) {
