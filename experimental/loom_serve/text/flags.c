@@ -6,8 +6,6 @@
 
 #include "experimental/loom_serve/text/flags.h"
 
-#include <string.h>
-
 #include "experimental/loom_serve/text/schedule.h"
 #include "iree/base/tooling/flags.h"
 
@@ -26,11 +24,6 @@ IREE_FLAG_LIST(
     string, epoch,
     "Packed JIT shape as tokens:spans; repeated flags replace the automatic "
     "catalog bounded by prefill_capacity and resident rows.");
-IREE_FLAG(string, pool_backing, "elastic",
-          "Pooled state backing: elastic demand-commits physical slabs; fixed "
-          "backs all storage at startup and supports device sanitization.");
-IREE_FLAG(int64_t, slab_bytes, 2097152,
-          "Elastic physical slab size; zero selects allocator recommendation.");
 IREE_FLAG(bool, mtp, false, "JIT MTP proposal, catch-up, and verifier stages.");
 IREE_FLAG(string, weights, "", "Parameter file selected by the model source.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
@@ -91,6 +84,7 @@ iree_host_size_t loom_serve_text_explicit_shape_count_from_flags(void) {
 bool loom_serve_text_mtp_from_flags(void) { return FLAG_mtp; }
 
 iree_status_t loom_serve_text_model_create_from_flags(
+    loom_serve_device_t* device,
     const loom_serve_text_flag_defaults_t* defaults,
     loom_serve_text_model_t** out_model, iree_allocator_t host_allocator) {
   *out_model = NULL;
@@ -110,13 +104,6 @@ iree_status_t loom_serve_text_model_create_from_flags(
   const iree_host_size_t pool_capacity =
       FLAG_pool_capacity < 0 ? defaults->pool_capacity
                              : (iree_host_size_t)FLAG_pool_capacity;
-  if ((strcmp(FLAG_pool_backing, "elastic") &&
-       strcmp(FLAG_pool_backing, "fixed")) ||
-      FLAG_slab_bytes < 0) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "pool_backing must be elastic or fixed, and "
-                            "slab_bytes must be nonnegative");
-  }
   loom_serve_packing_shape_t automatic[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY];
   iree_host_size_t automatic_count = 0;
   if (!epochs.count &&
@@ -150,10 +137,6 @@ iree_status_t loom_serve_text_model_create_from_flags(
       .prefill_capacity = (iree_host_size_t)FLAG_prefill_capacity,
       .context_capacity = (iree_host_size_t)FLAG_context_capacity,
       .pool_capacity = pool_capacity,
-      .backing = pool_capacity && !strcmp(FLAG_pool_backing, "elastic")
-                     ? LOOM_SERVE_TEXT_BACKING_ELASTIC
-                     : LOOM_SERVE_TEXT_BACKING_FIXED,
-      .slab_size = (iree_device_size_t)FLAG_slab_bytes,
       .epoch_count = epochs.count ? epochs.count : automatic_count,
       .epoch_shapes = epochs.count ? shapes : automatic,
       .enable_mtp = FLAG_mtp,
@@ -163,7 +146,8 @@ iree_status_t loom_serve_text_model_create_from_flags(
       .row_count = defaults->row_count,
   };
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_model_create(&options, host_allocator, out_model);
+    status = loom_serve_text_model_create(device, &options, out_model,
+                                          host_allocator);
   }
   iree_allocator_free(host_allocator, shapes);
   return status;

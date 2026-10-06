@@ -116,6 +116,7 @@ loom_cc_binary(
     ]),
     deps = [
         ":model",
+        "//experimental/loom_serve/runtime:device_flags",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
         "//runtime/src/iree/base/tooling:flags",
@@ -162,6 +163,7 @@ loom_cc_binary(
     ]),
     deps = [
         ":model",
+        "//experimental/loom_serve/runtime:device_flags",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/internal:json",
@@ -182,6 +184,7 @@ loom_cc_binary(
         ":request",
         ":service",
         "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/runtime:device_flags",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",

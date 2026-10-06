@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -374,9 +375,14 @@ int main(int argc, char** argv) {
   const iree_allocator_t allocator = iree_allocator_system();
   const loom_serve_text_flag_defaults_t defaults = {.row_count = row_count};
   loom_serve_text_model_t* model = NULL;
+  loom_serve_device_t* device = NULL;
   qwen_workload_row_t rows[QWEN_WORKLOAD_ROWS] = {0};
   iree_status_t status =
-      loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
+      loom_serve_device_create_from_flags(&device, allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
+                                                     allocator);
+  }
   if (iree_status_is_ok(status) &&
       (loom_serve_text_model_shapes(model)[0].span_capacity < row_count ||
        loom_serve_text_model_shapes(model)[0].token_capacity < row_count ||
@@ -416,6 +422,7 @@ int main(int argc, char** argv) {
     }
   }
   status = iree_status_join(status, loom_serve_text_model_destroy(model));
+  status = iree_status_join(status, loom_serve_device_destroy(device));
   for (iree_host_size_t i = 0; i < row_count; ++i) {
     iree_allocator_free(allocator, rows[i].input);
     iree_allocator_free(allocator, rows[i].output);

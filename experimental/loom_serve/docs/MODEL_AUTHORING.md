@@ -418,20 +418,24 @@ need their own real ownership contracts rather than disguised payload meanings.
 
 A first adapter outside that diffusion contract has this ownership flow:
 
-1. It creates a [`loom_serve_device_t`](../runtime/device.h), which owns the device,
-   asynchronous services, exact queues, and execution timelines. Borrowed
+1. It borrows the caller's [`loom_serve_device_t`](../runtime/device.h), which owns
+   the device, asynchronous services, exact queues, execution timelines and
+   optional shared physical pool. Borrowed
    device/queue handles create a source catalog with `loom_serve_jit_create`
    and specialize named roots with `loom_serve_jit_compile`. Source owns tensor
    names, shapes, arithmetic, and fixed configuration; the caller supplies
    run-dependent specialization.
 2. It passes the stages' reflected parameter roots to
-   `loom_serve_weights_load`, with its own source weight policy. The adapter
+   `loom_serve_weights_create`, with its own source weight policy and the device's
+   physical pool (or NULL for explicit fixed backing). The adapter
    establishes identical parameter placement for the shared-root prefix;
    equal allocation sizes alone do not establish that contract. An unchanged
-   checkpoint layout uses the empty preparation root shown above. Each load
+   checkpoint layout uses the empty preparation root shown above. Each plan
    selects explicit roots from one checkpoint domain; base and adapter files
-   load their own roots before the composed command is recorded. Equal tensor
+   reserve their own roots before the composed command is recorded. Equal tensor
    keys across different domains never imply shared residency.
+   Activation streams/prepares payloads before consumption. Deactivation at a
+   retired cut releases physical backing without invalidating recorded roots.
 3. It allocates model input, output and persistent-state buffers. Reflected
    transient requirements supply workspace size and alignment. It records the
    stages with `loom_serve_jit_stage_record`; recorded commands retain their

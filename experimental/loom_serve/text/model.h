@@ -7,6 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 
+#include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/chat.h"
@@ -32,14 +33,6 @@ typedef struct loom_serve_text_row_t loom_serve_text_row_t;
 // Retained arenas are sized to row_count, not this control-payload bound.
 enum { LOOM_SERVE_TEXT_ROW_CAPACITY = 16 };
 
-typedef enum loom_serve_text_backing_e {
-  // Entire source state allocation backed at startup; also supports device
-  // address sanitization, whose shadow allocator excludes user VMM.
-  LOOM_SERVE_TEXT_BACKING_FIXED = 0,
-  // Stable virtual reservations with demand-committed physical cache slabs.
-  LOOM_SERVE_TEXT_BACKING_ELASTIC = 1,
-} loom_serve_text_backing_t;
-
 typedef struct loom_serve_text_options_t {
   // Portable source directory containing prepare.loom, control.loom and the
   // sources.txt command/kernel catalog.
@@ -52,10 +45,6 @@ typedef struct loom_serve_text_options_t {
   // size. Nonzero selects paged packed execution; zero uses dense addressing.
   // This is independent of the logical context ceiling and requires epochs.
   iree_host_size_t pool_capacity;
-  // Physical state backing strategy, independent of logical cache indexing.
-  loom_serve_text_backing_t backing;
-  // Physical slab bytes for elastic backing; zero uses allocator granularity.
-  iree_device_size_t slab_size;
   // Number of cached packed-epoch stages; zero selects isolated execution.
   iree_host_size_t epoch_count;
   // Borrowed shapes specialized from the shared catalog during creation.
@@ -65,7 +54,7 @@ typedef struct loom_serve_text_options_t {
   bool enable_mtp;
   // Device assertion classes/reporting applied to every JIT kernel pipeline.
   loomc_sanitizer_options_t kernel_sanitizer;
-  // Parameter file loaded once according to the source weight policy.
+  // Parameter file indexed here and streamed on activation.
   iree_string_view_t weights_path;
   // Hugging Face tokenizer.json loaded once during creation.
   iree_string_view_t tokenizer_path;
@@ -174,12 +163,14 @@ typedef struct loom_serve_text_trim_result_t {
 iree_status_t loom_serve_text_model_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result);
 
-// Cold setup reserves state and prepares immutable stages. Elastic state is
-// backed on row/page activation; fixed state is fully backed here. Options
-// strings are borrowed only for this call. Failure releases partial ownership.
+// Cold setup compiles stages, records commands and indexes parameters without
+// loading weight payloads. The shared device owner outlives the model and
+// serializes model calls; its pool supplies elastic backing or explicit fixed
+// allocations. Pooled state grows on row/page activation. Options strings are
+// borrowed only for this call. Failure releases partial ownership.
 iree_status_t loom_serve_text_model_create(
-    const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
-    loom_serve_text_model_t** out_model);
+    loom_serve_device_t* device, const loom_serve_text_options_t* options,
+    loom_serve_text_model_t** out_model, iree_allocator_t host_allocator);
 
 // Drains accepted work, releases all residency, and reports terminal failure.
 // Null is accepted. All borrowed row/tokenizer pointers become invalid.

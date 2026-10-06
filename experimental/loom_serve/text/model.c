@@ -84,7 +84,7 @@ typedef struct text_cache_region_t {
 struct loom_serve_text_model_t {
   // Host allocation policy used for all owned resources.
   iree_allocator_t allocator;
-  // Shared runtime owner outliving every model resource and host I/O payload.
+  // Borrowed shared owner outliving every model resource and host I/O payload.
   loom_serve_device_t* device_owner;
   // GPU device and allocation domain borrowed from device_owner.
   iree_hal_device_t* device;
@@ -96,8 +96,6 @@ struct loom_serve_text_model_t {
   iree_hal_queue_t* transfer;
   // Borrowed stage/input timelines with independently retired feedback.
   loom_serve_execution_t* execution;
-  // Optional flag-selected profiling session, ended after accepted work drains.
-  iree_hal_profiling_from_flags_t* profiling;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
   // Shared source index and compiler for this model residency.
@@ -152,7 +150,7 @@ struct loom_serve_text_model_t {
   } cache;
   // Elastic physical backing, separate from logical row/block ownership.
   struct {
-    // Physical allocation domain; virtual buffers borrow this owner.
+    // Physical allocation domain borrowed from the shared device owner.
     loom_serve_memory_pool_t* pool;
     // Mutable state accounting, excluding parameters sharing the same pool.
     loom_serve_memory_statistics_t statistics;
@@ -345,8 +343,8 @@ static iree_status_t text_allocate_buffer(loom_serve_text_model_t* runner,
 
 // Weight placement and preparation are cold model-wide work. Session rows
 // never own weights and every compiled shape retains views of this residency.
-static iree_status_t text_load_weights(loom_serve_text_model_t* model,
-                                       iree_string_view_t source_directory) {
+static iree_status_t text_prepare_weights(loom_serve_text_model_t* model,
+                                          iree_string_view_t source_directory) {
   iree_host_size_t root_count = 0;
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
     root_count += model->stages[i].program.parameter_roots.count;
@@ -378,9 +376,6 @@ static iree_status_t text_load_weights(loom_serve_text_model_t* model,
         model->jit, model->command_mode, model->shared_stage_count, root_count,
         roots, checkpoint->path, iree_make_cstring_view(policy_path),
         &model->weights, model->allocator);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_weights_activate(model->weights);
   }
   iree_allocator_free(model->allocator, policy_path);
   iree_allocator_free(model->allocator, roots);
@@ -789,7 +784,7 @@ static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
       for (iree_host_size_t j = 0; j < model->memory.region_count; ++j) {
         elastic |= model->memory.regions[j].allocation == i;
       }
-      if (model->memory.pool && elastic) {
+      if (model->memory.pool && model->cache.capacity && elastic) {
         status = loom_serve_virtual_buffer_create(
             model->memory.pool, length, alignment, &model->memory.statistics,
             &model->memory.buffers[i]);
@@ -931,19 +926,12 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
       model->allocator, stage_count, sizeof(*model->stages),
       (void**)&model->stages));
   model->stage_count = stage_count;
-  IREE_RETURN_IF_ERROR(loom_serve_device_create(
-      IREE_SV("amdgpu"), model->allocator, &model->device_owner));
   model->device = loom_serve_device_handle(model->device_owner);
   model->group = loom_serve_device_group(model->device_owner);
   model->dispatch = loom_serve_device_dispatch_queue(model->device_owner);
   model->transfer = loom_serve_device_transfer_queue(model->device_owner);
   model->execution = loom_serve_device_execution(model->device_owner);
-  if (options->backing == LOOM_SERVE_TEXT_BACKING_ELASTIC) {
-    IREE_RETURN_IF_ERROR(loom_serve_memory_pool_create(
-        iree_hal_device_allocator(model->device),
-        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, options->slab_size, 0,
-        &model->memory.pool, model->allocator));
-  }
+  model->memory.pool = loom_serve_device_memory_pool(model->device_owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       model->device, model->dispatch, options->source_directory,
       &options->kernel_sanitizer, model->allocator, &model->jit));
@@ -971,9 +959,7 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(text_check_layouts(model));
-  IREE_RETURN_IF_ERROR(iree_hal_begin_device_group_profiling_from_flags(
-      model->group, model->allocator, &model->profiling));
-  IREE_RETURN_IF_ERROR(text_load_weights(model, options->source_directory));
+  IREE_RETURN_IF_ERROR(text_prepare_weights(model, options->source_directory));
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {
     text_stage_t* stage = &model->stages[i];
@@ -989,8 +975,8 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
 }
 
 iree_status_t loom_serve_text_model_create(
-    const loom_serve_text_options_t* options, iree_allocator_t host_allocator,
-    loom_serve_text_model_t** out_model) {
+    loom_serve_device_t* device, const loom_serve_text_options_t* options,
+    loom_serve_text_model_t** out_model, iree_allocator_t host_allocator) {
   *out_model = NULL;
   if (options->row_count < 1 || options->row_count > TEXT_ROW_CAPACITY) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1003,11 +989,7 @@ iree_status_t loom_serve_text_model_create(
       options->epoch_count > SIZE_MAX / (2 * sizeof(int64_t)) ||
       (options->enable_mtp && !options->epoch_count) ||
       options->pool_capacity > 4194304 ||
-      (options->pool_capacity && !options->epoch_count) ||
-      (options->backing != LOOM_SERVE_TEXT_BACKING_FIXED &&
-       options->backing != LOOM_SERVE_TEXT_BACKING_ELASTIC) ||
-      (options->backing == LOOM_SERVE_TEXT_BACKING_ELASTIC &&
-       !options->pool_capacity)) {
+      (options->pool_capacity && !options->epoch_count)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "invalid model capacities; pooled KV and MTP require epoch shapes");
@@ -1026,6 +1008,7 @@ iree_status_t loom_serve_text_model_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*model), (void**)&model));
   model->allocator = host_allocator;
+  model->device_owner = device;
   model->row_count = options->row_count;
   iree_status_t status = text_initialize(model, options);
   if (iree_status_is_ok(status)) {
@@ -1043,8 +1026,6 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_status_t status = model->execution
                              ? loom_serve_execution_drain(model->execution)
                              : iree_ok_status();
-  status = iree_status_join(
-      status, iree_hal_end_profiling_from_flags(model->profiling));
   loom_serve_text_chat_policy_deinitialize(&model->chat_policy);
   loom_serve_program_destroy(model->program);
   iree_vm_module_release(model->native_module);
@@ -1103,8 +1084,6 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   if (!iree_status_is_ok(memory_status)) {
     return iree_status_join(status, memory_status);
   }
-  loom_serve_memory_pool_destroy(model->memory.pool);
-  loom_serve_device_destroy(model->device_owner);
   iree_tokenizer_free(model->tokenizer);
   iree_allocator_free(model->allocator, model);
   return status;

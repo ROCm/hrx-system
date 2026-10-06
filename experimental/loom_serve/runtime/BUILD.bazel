@@ -77,12 +77,25 @@ loom_cc_library(
     hdrs = ["device.h"],
     deps = [
         ":execution",
+        "//experimental/loom_serve/storage:memory",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers",
+        "//runtime/src/iree/tooling:device_util",
+    ],
+)
+
+loom_cc_library(
+    name = "device_flags",
+    srcs = ["device_flags.c"],
+    hdrs = ["device_flags.h"],
+    deps = [
+        ":device",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
     ],
 )
 

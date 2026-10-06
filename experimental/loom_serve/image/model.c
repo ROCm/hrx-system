@@ -38,10 +38,8 @@ struct loom_serve_image_model_t {
   iree_host_size_t input_capacity;
   // Immutable tokenizer reused by each independent request encoder.
   iree_tokenizer_t* tokenizer;
-  // Shared device/timeline ownership, outliving all accepted work.
+  // Borrowed shared device/timeline owner, outliving the model.
   loom_serve_device_t* owner;
-  // Optional profiling session, ended after accepted work drains.
-  iree_hal_profiling_from_flags_t* profiling;
   // Cold live-source compiler and its task pool.
   loom_serve_jit_t* jit;
   // Owned source declarations, independent of the bootstrap VM and arguments.
@@ -96,8 +94,6 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
     status =
         loom_serve_execution_drain(loom_serve_device_execution(model->owner));
   }
-  status = iree_status_join(
-      status, iree_hal_end_profiling_from_flags(model->profiling));
   loom_serve_program_destroy(model->control.program);
   iree_vm_buffer_release(model->control.tags);
   iree_vm_buffer_release(model->control.state);
@@ -124,7 +120,6 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
   loom_serve_jit_destroy(model->jit);
   iree_tokenizer_free(model->tokenizer);
   iree_allocator_free(model->allocator, model->output.data);
-  loom_serve_device_destroy(model->owner);
   iree_allocator_free(model->allocator, model);
   return status;
 }
@@ -433,8 +428,6 @@ static iree_status_t image_model_initialize(
       (iree_host_size_t)options->height * options->width * 12;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(
       allocator, model->output.data_length, (void**)&model->output.data));
-  IREE_RETURN_IF_ERROR(
-      loom_serve_device_create(IREE_SV("amdgpu"), allocator, &model->owner));
   iree_hal_device_t* device = loom_serve_device_handle(model->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(model->owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(device, dispatch,
@@ -500,8 +493,6 @@ static iree_status_t image_model_initialize(
   }
   printf("]}\n");
   fflush(stdout);
-  IREE_RETURN_IF_ERROR(iree_hal_begin_device_group_profiling_from_flags(
-      loom_serve_device_group(model->owner), allocator, &model->profiling));
   const loom_serve_preparation_stage_t* declaration =
       loom_serve_preparation_stage(model->preparation, 0);
   iree_status_t status = iree_ok_status();
@@ -519,11 +510,9 @@ static iree_status_t image_model_initialize(
           &model->weights.values[reflected.fixed_buffer_index]};
       status = loom_serve_weights_create(
           device, loom_serve_device_transfer_queue(model->owner), dispatch,
-          NULL, model->jit, command_mode, 0, 1, &root, parameter->path,
-          iree_make_cstring_view(policy), &model->weights.plans[i], allocator);
-    }
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_weights_activate(model->weights.plans[i]);
+          loom_serve_device_memory_pool(model->owner), model->jit, command_mode,
+          0, 1, &root, parameter->path, iree_make_cstring_view(policy),
+          &model->weights.plans[i], allocator);
     }
     iree_allocator_free(allocator, policy);
   }
@@ -555,6 +544,7 @@ static iree_status_t image_model_initialize(
 }
 
 iree_status_t loom_serve_image_model_create(
+    loom_serve_device_t* device,
     const loom_serve_image_model_options_t* options,
     loom_serve_image_model_t** out_model, iree_allocator_t host_allocator) {
   *out_model = NULL;
@@ -567,6 +557,7 @@ iree_status_t loom_serve_image_model_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*model), (void**)&model));
   model->allocator = host_allocator;
+  model->owner = device;
   iree_status_t status = image_model_initialize(model, options);
   if (iree_status_is_ok(status)) {
     *out_model = model;
@@ -655,6 +646,41 @@ static iree_status_t image_submit(loom_serve_image_model_t* model,
   return status;
 }
 
+iree_status_t loom_serve_image_model_activate(loom_serve_image_model_t* model) {
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < model->weights.count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_serve_weights_activate(model->weights.plans[i]);
+  }
+  return status;
+}
+
+iree_status_t loom_serve_image_model_deactivate(
+    loom_serve_image_model_t* model) {
+  IREE_RETURN_IF_ERROR(
+      loom_serve_execution_drain(loom_serve_device_execution(model->owner)));
+  iree_status_t status = iree_ok_status();
+  for (uint32_t i = 0; i < model->weights.count && iree_status_is_ok(status);
+       ++i) {
+    status = loom_serve_weights_deactivate(model->weights.plans[i]);
+  }
+  return status;
+}
+
+loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
+    const loom_serve_image_model_t* model) {
+  loom_serve_memory_statistics_t total = {0};
+  for (uint32_t i = 0; i < model->weights.count; ++i) {
+    const loom_serve_memory_statistics_t domain =
+        loom_serve_weights_statistics(model->weights.plans[i]);
+    total.reserved_bytes += domain.reserved_bytes;
+    total.committed_bytes += domain.committed_bytes;
+    total.peak_bytes += domain.peak_bytes;
+    total.released_bytes += domain.released_bytes;
+  }
+  return total;
+}
+
 iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
                                               iree_string_view_t prompt,
                                               uint64_t seed, float strength,
@@ -667,9 +693,12 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
   iree_status_t status = image_prepare_request(model, prompt, seed, strength,
                                                &stage_index, &payload);
   IREE_RETURN_IF_ERROR(status);
+  status = loom_serve_image_model_activate(model);
   iree_const_byte_span_t input = iree_const_byte_span_empty();
-  status = iree_vm_buffer_map_read(payload, 0, iree_vm_buffer_length(payload),
-                                   &input);
+  if (iree_status_is_ok(status)) {
+    status = iree_vm_buffer_map_read(payload, 0, iree_vm_buffer_length(payload),
+                                     &input);
+  }
   const iree_time_t prepare_end = iree_time_now();
   fprintf(stderr,
           "{\"event\":\"image_prepared\",\"prepare_ns\":%" PRId64

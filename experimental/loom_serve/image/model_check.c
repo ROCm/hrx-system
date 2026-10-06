@@ -11,6 +11,7 @@
 #include <stdlib.h>
 
 #include "experimental/loom_serve/image/model.h"
+#include "experimental/loom_serve/runtime/device_flags.h"
 #include "iree/base/internal/path.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -20,6 +21,8 @@ IREE_FLAG(string, checkpoint, "", "Official checkpoint directory.");
 IREE_FLAG(string, adapter, "", "Optional model-specific adapter asset.");
 IREE_FLAG(string, output, "",
           "Existing directory for completed F32 RGB files.");
+IREE_FLAG(bool, reload_weights, false,
+          "Deactivate after each image and reactivate on the next request.");
 
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
@@ -37,8 +40,12 @@ int main(int argc, char** argv) {
       .text_tokens = 512,
   };
   loom_serve_image_model_t* model = NULL;
+  loom_serve_device_t* device = NULL;
   iree_status_t status =
-      loom_serve_image_model_create(&options, &model, allocator);
+      loom_serve_device_create_from_flags(&device, allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_image_model_create(device, &options, &model, allocator);
+  }
   const char* prompts[] = {
       "a red fox in the snow",
       "red"
@@ -84,9 +91,18 @@ int main(int argc, char** argv) {
       status = iree_io_file_contents_write(iree_make_cstring_view(path), rgb,
                                            allocator);
     }
+    if (iree_status_is_ok(status) && FLAG_reload_weights) {
+      status = loom_serve_image_model_deactivate(model);
+      if (iree_status_is_ok(status) &&
+          loom_serve_image_model_weight_statistics(model).committed_bytes) {
+        status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "image deactivation retained weight backing");
+      }
+    }
     iree_allocator_free(allocator, path);
   }
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
+  status = iree_status_join(status, loom_serve_device_destroy(device));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);
