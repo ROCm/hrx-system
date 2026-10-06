@@ -10,9 +10,10 @@ prefill/decode selection and the proposal, target/verify, feedback, and catch-up
 sequence. The native model adapter publishes validated descriptors, invokes
 that program once per epoch, joins both timelines, and commits host progress.
 Cold stage selection and dynamic configuration come from `prepare.loom` through
-the shared declaration module. State geometry and descriptor construction still
-live in the Qwen adapter; source-owned startup does not make those remaining
-contracts model-independent.
+the shared declaration module. Source also produces retained storage geometry
+and initial row tables; the native materializer owns their allocation and
+retirement. Warm descriptor construction and chat policy still live in the
+Qwen adapter; those remaining contracts are not model-independent.
 
 ## Boundaries and the information each owns
 
@@ -25,7 +26,7 @@ contracts model-independent.
 | [`module`](../runtime/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
 | [`program`](../runtime/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
 | [`preparation`](../runtime/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
-| [`qwen_model`](../models/qwen/model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
+| [`qwen_model`](../models/qwen/model.h) | Source-declared storage materialization, physical page ownership, scratch, warm descriptor construction, numerical progress | HTTP or tool semantics |
 | [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
 | [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
 | [`qwen_schedule`](../models/qwen/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
@@ -46,6 +47,13 @@ layout agreement, loads shared weights, records commands, creates the warm VM
 program/native capabilities, and allocates retained rows and MTP state. Each
 stage can have different kernel choices while binding the same model storage.
 No session gets another copy of the weights or code.
+
+Allocation lengths, initial zero extents, arena views and target/draft origins
+come from the cold source result. Native code retains those result buffers after
+the bootstrap process is gone and through the initialization frontier. Successful
+initialization releases them after one join; partial failure leaves them owned
+until teardown drains accepted work. Workspace extent/alignment comes directly
+from compiler reflection, not a model formula or a source-side estimate.
 
 `loom_serve_device_create` establishes one runtime domain from a HAL device
 URI. Model components borrow its device, group, exact queues and execution

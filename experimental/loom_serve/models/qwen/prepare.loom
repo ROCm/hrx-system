@@ -90,11 +90,160 @@ func.def @declare_stage(%root: buffer, %tokens: i64, %spans: i64, %capacity: i64
   func.return %stage : i32
 }
 
+// Cold allocation records contain {bytes, alignment, initial_zero_bytes}.
+// The materializer owns the allocations and their completion frontiers;
+// model geometry and initialization extents belong to this source program.
+func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
+  %origin = index.constant 0 : offset
+  %bounded_slot = index.assume %slot [range(%slot, 0, 10)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<11x3xi64>
+  %alignment = scalar.constant 256 : i64
+  view.store %bytes, %view[%bounded_slot, 0] : i64, view<11x3xi64>
+  view.store %alignment, %view[%bounded_slot, 1] : i64, view<11x3xi64>
+  view.store %clear, %view[%bounded_slot, 2] : i64, view<11x3xi64>
+  func.return
+}
+
+// Private arena views are {byte_offset, byte_length}, in control/recurrent/
+// attention/input/progress binding order. A zero length leaves a slot unbound.
+func.def @row_view(%records: buffer, %row_count: index, %row: index, %slot: index, %offset: i64, %length: i64) {
+  %origin = index.constant 0 : offset
+  %bounded_row = index.assume %row [range(%row, 0, 15), lt(%row, %row_count)] : index
+  %bounded_slot = index.assume %slot [range(%slot, 0, 4)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<[%row_count]x5x2xi64>
+  view.store %offset, %view[%bounded_row, %bounded_slot, 0] : i64, view<[%row_count]x5x2xi64>
+  view.store %length, %view[%bounded_row, %bounded_slot, 1] : i64, view<[%row_count]x5x2xi64>
+  func.return
+}
+
+func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) -> (buffer, buffer, buffer, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %five = index.constant 5 : index
+  %six = index.constant 6 : index
+  %seven = index.constant 7 : index
+  %eight = index.constant 8 : index
+  %nine = index.constant 9 : index
+  %ten = index.constant 10 : index
+  %zero64 = scalar.constant 0 : i64
+  %word_bytes = scalar.constant 4 : i64
+  %sixty_three = scalar.constant 63 : i64
+  %block_tokens = scalar.constant 64 : i64
+  %map_origin = scalar.constant 1024 : i64
+  %origin_bytes = scalar.constant 256 : i64
+  %target_token_bytes = scalar.constant 65536 : i64
+  %draft_token_bytes = scalar.constant 4096 : i64
+  %carry_stride = scalar.constant 20480 : i64
+  %residual_bytes = scalar.constant 10485760 : i64
+  %control_bytes = scalar.constant 12 : i64
+  %gdn_bytes = scalar.constant 156893184 : i64
+  %gdn_offset = scalar.constant 256 : i64
+  %attention_offset = scalar.addi %gdn_offset, %gdn_bytes : i64
+  %token_bytes = scalar.constant 2048 : i64
+  %progress_bytes = scalar.constant 32 : i64
+  %progress_extent = scalar.constant 256 : i64
+  %metadata_bytes = scalar.constant 2064 : i64
+  %committed_bytes = scalar.constant 1548 : i64
+  %output_bytes = scalar.constant 64 : i64
+  %result_bytes = scalar.constant 384 : i64
+  %pooled = scalar.cmpi ne, %pool, %zero64 : i64
+  %dense_attention_bytes = scalar.muli %context, %target_token_bytes : i64
+  %attention_bytes = scf.select %pooled, %zero64, %dense_attention_bytes : i64
+  %tokens_offset = scalar.addi %attention_offset, %attention_bytes : i64
+  %progress_offset = scalar.addi %tokens_offset, %token_bytes : i64
+  %row_stride = scalar.addi %progress_offset, %progress_extent : i64
+  %row_bytes = scalar.muli %row_stride, %rows : i64
+  %pool_bytes = scalar.muli %pool, %target_token_bytes : i64
+  %arena_bytes = scalar.addi %row_bytes, %pool_bytes : i64
+  %padded_context = scalar.addi %context, %sixty_three : i64
+  %blocks_per_row = scalar.divui %padded_context, %block_tokens : i64
+  %map_entries = scalar.muli %blocks_per_row, %rows : i64
+  %map_bytes = scalar.muli %map_entries, %word_bytes : i64
+  %pooled_table_bytes = scalar.addi %map_origin, %map_bytes : i64
+  %table_bytes = scf.select %pooled, %pooled_table_bytes, %origin_bytes : i64
+  %carry_bytes = scalar.muli %carry_stride, %rows : i64
+  %draft_row_bytes = scalar.muli %context, %draft_token_bytes : i64
+  %dense_draft_bytes = scalar.muli %rows, %draft_row_bytes : i64
+  %pooled_draft_bytes = scalar.muli %pool, %draft_token_bytes : i64
+  %draft_bytes = scf.select %pooled, %pooled_draft_bytes, %dense_draft_bytes : i64
+  %allocation_bytes = index.constant 264 : offset
+  %allocations = buffer.alloca<private> align(8) %allocation_bytes : buffer
+  func.call @allocation(%allocations, %zero, %residual_bytes, %residual_bytes) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %one, %arena_bytes, %row_bytes) : (buffer, index, i64, i64) -> ()
+  %packed_metadata = scf.select %packed, %metadata_bytes, %zero64 : i64
+  %packed_table = scf.select %packed, %table_bytes, %zero64 : i64
+  %packed_tokens = scf.select %packed, %token_bytes, %zero64 : i64
+  %packed_outputs = scf.select %packed, %output_bytes, %zero64 : i64
+  func.call @allocation(%allocations, %two, %packed_metadata, %zero64) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %three, %packed_table, %zero64) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %four, %packed_tokens, %zero64) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %five, %packed_outputs, %zero64) : (buffer, index, i64, i64) -> ()
+  %mtp_carry = scf.select %mtp, %carry_bytes, %zero64 : i64
+  %mtp_committed = scf.select %mtp, %committed_bytes, %zero64 : i64
+  %mtp_results = scf.select %mtp, %result_bytes, %zero64 : i64
+  %mtp_cache = scf.select %mtp, %draft_bytes, %zero64 : i64
+  %mtp_table = scf.select %mtp, %table_bytes, %zero64 : i64
+  func.call @allocation(%allocations, %six, %mtp_carry, %mtp_carry) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %seven, %mtp_committed, %zero64) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %eight, %mtp_results, %zero64) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %nine, %mtp_cache, %zero64) : (buffer, index, i64, i64) -> ()
+  func.call @allocation(%allocations, %ten, %mtp_table, %zero64) : (buffer, index, i64, i64) -> ()
+  %bounded_rows = scalar.assume %rows [range(%rows, 1, 16)] : i64
+  %row_count = index.cast %bounded_rows : i64 to index
+  %view_stride = index.constant 80 : offset
+  %view_bytes = index.scale %row_count, %view_stride : index, offset -> offset
+  %views = buffer.alloca<private> align(8) %view_bytes : buffer
+  %table_payload_bytes = index.constant 256 : offset
+  %target_origins = buffer.alloca<private> align(8) %table_payload_bytes : buffer
+  %draft_origins = buffer.alloca<private> align(8) %table_payload_bytes : buffer
+  %target = buffer.view %target_origins[%origin] : buffer -> view<16x2xi64>
+  %draft = buffer.view %draft_origins[%origin] : buffer -> view<16x2xi64>
+  %origin_capacity = index.constant 16 : index
+  scf.for %i = [%zero to %origin_capacity step %one] {
+    view.store %zero64, %target[%i, 0] : i64, view<16x2xi64>
+    view.store %zero64, %target[%i, 1] : i64, view<16x2xi64>
+    view.store %zero64, %draft[%i, 0] : i64, view<16x2xi64>
+    view.store %zero64, %draft[%i, 1] : i64, view<16x2xi64>
+    scf.yield
+  }
+  scf.for %i = [%zero to %row_count step %one] {
+    %row = index.cast %i : index to i64
+    %base = scalar.muli %row, %row_stride : i64
+    %gdn_base = scalar.addi %base, %gdn_offset : i64
+    %attention_base = scalar.addi %base, %attention_offset : i64
+    %tokens_base = scalar.addi %base, %tokens_offset : i64
+    %progress_base = scalar.addi %base, %progress_offset : i64
+    func.call @row_view(%views, %row_count, %i, %zero, %base, %control_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    func.call @row_view(%views, %row_count, %i, %one, %gdn_base, %gdn_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    func.call @row_view(%views, %row_count, %i, %two, %attention_base, %attention_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    func.call @row_view(%views, %row_count, %i, %three, %tokens_base, %token_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    func.call @row_view(%views, %row_count, %i, %four, %progress_base, %progress_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    %kv_base = scf.select %pooled, %row_bytes, %attention_base : i64
+    view.store %gdn_base, %target[%i, 0] : i64, view<16x2xi64>
+    view.store %kv_base, %target[%i, 1] : i64, view<16x2xi64>
+    %dense_draft_base = scalar.muli %row, %draft_row_bytes : i64
+    %draft_base = scf.select %pooled, %zero64, %dense_draft_base : i64
+    view.store %draft_base, %draft[%i, 1] : i64, view<16x2xi64>
+    scf.yield
+  }
+  %geometry_bytes = index.constant 24 : offset
+  %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer
+  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<3xi64>
+  view.store %block_tokens, %geometry_view[0] : i64, view<3xi64>
+  view.store %map_origin, %geometry_view[1] : i64, view<3xi64>
+  view.store %carry_stride, %geometry_view[2] : i64, view<3xi64>
+  func.return %allocations, %views, %target_origins, %draft_origins, %geometry : buffer, buffer, buffer, buffer, buffer
+}
+
 // The caller supplies validated native payload capacities. Shape pairs are
 // little-endian i64 {tokens, spans}; no C struct layout crosses this boundary.
 // Commands, specialization and their shared checkpoint identity are source
 // policy. Returned state is interpreted only by control.loom.
-func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %mtp: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer) {
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %mtp: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -161,5 +310,7 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   view.store %count32, %state_view[2] : i32, view<4xi32>
   view.store %proposal_stage, %state_view[3] : i32, view<4xi32>
   %terminal = global.load @terminal : buffer
-  func.return %effective_prefill, %shared, %state, %terminal : i64, i32, buffer, buffer
+  %packed = scalar.cmpi ne, %shape_count, %zero64 : i64
+  %allocations, %views, %target_origins, %draft_origins, %geometry = func.call @storage(%context, %pool, %rows, %packed, %enabled) : (i64, i64, i64, i1, i1) -> (buffer, buffer, buffer, buffer, buffer)
+  func.return %effective_prefill, %shared, %state, %terminal, %allocations, %views, %target_origins, %draft_origins, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
 }

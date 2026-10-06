@@ -30,16 +30,33 @@ path. Shapes cross as little-endian i64 token/span pairs, not a native struct.
 The source declares stages through `prepare.stage`, `prepare.config_i64` and
 `prepare.parameter`. It returns the effective prefill capacity, the number of
 leading stages sharing target parameter placement, an opaque control buffer,
-and the terminal token spelling. The constructor JITs those declarations and
-checks shared placement before streaming one parameter bank.
+the terminal token spelling, and storage descriptors. The constructor JITs
+those declarations and checks shared placement before streaming one parameter
+bank.
 
 The temporary startup process is destroyed before device setup. Its returned
 control buffer survives in the residency's VM environment and is passed to
 both warm entries; only source interprets its stage indices. There is no native
-command-name/configuration table or per-row VM. The native adapter still owns
-row arenas, KV map geometry, transfer records and chat policy, and still joins
-each epoch before publishing host row progress. These remain concrete Qwen
-contracts, not a model-neutral text ABI.
+command-name/configuration table or per-row VM. Source computes retained buffer
+sizes, arena views, initial target/draft row tables, page size and map origin.
+Native allocation consumes those records without reconstructing model geometry;
+workspace size/alignment comes from command reflection. Initial table payloads
+survive cold VM teardown and accepted uploads, including failed construction.
+One initialization join retires them before their references are released.
+
+The storage result uses little-endian i64 records, not native structs. Its
+eleven allocation records are residual, arena, packed metadata, target origins,
+inputs, selected outputs, draft carry, committed metadata, verification results,
+draft cache and draft origins. Each contains byte length, alignment and initial
+zero extent. Zero length omits an inactive packed/MTP resource. Row views contain
+five offset/length pairs per row in control, recurrent, attention, input and
+progress order. Two initial origin payloads and a page-size/map-origin/carry-
+stride record complete the cold result. These roles remain a private adapter
+contract, not a universal storage language.
+
+The native adapter still manages page IDs, packs warm transfer records, owns
+chat policy, and joins each epoch before publishing host row progress. Those
+remaining contracts are not a model-neutral text ABI.
 
 ## Pooled KV and reserved admission
 
