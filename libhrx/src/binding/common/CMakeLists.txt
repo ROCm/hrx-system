@@ -291,7 +291,6 @@ iree_cc_test(
     ::common
     iree::async::util::proactor_pool
     iree::hal
-    iree::hal::drivers::task::semaphore
     iree::testing::gtest
     iree::testing::gtest_main
     libhrx::src::libhrx::hrx_static

@@ -205,7 +205,7 @@ loom_cc_test(
         "//runtime/src/iree/async:platform",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
-        "//runtime/src/iree/hal/drivers/task:semaphore",
+        "//runtime/src/iree/hal/utils:host_semaphore",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

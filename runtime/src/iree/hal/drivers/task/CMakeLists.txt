@@ -114,20 +114,6 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
-    semaphore
-  HDRS
-    "semaphore.h"
-  SRCS
-    "semaphore.c"
-  DEPS
-    iree::async
-    iree::base
-    iree::hal
-  PUBLIC
-)
-
-iree_cc_library(
-  NAME
     profile
   HDRS
     "profile.h"
@@ -167,7 +153,6 @@ iree_cc_library(
     ::atomic
     ::device_spec_builder
     ::profile
-    ::semaphore
     ::transient_buffer
     iree::async
     iree::async::util::proactor_pool
@@ -186,6 +171,7 @@ iree_cc_library(
     iree::hal::memory::maintenance
     iree::hal::memory::maintenance_thread
     iree::hal::utils::files
+    iree::hal::utils::host_semaphore
     iree::task
   PUBLIC
 )
