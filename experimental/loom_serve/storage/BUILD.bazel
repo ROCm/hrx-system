@@ -85,6 +85,7 @@ loom_cc_test(
         ":relocation",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/runtime:retirement",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",

@@ -94,6 +94,7 @@ loom_cc_test(
     iree::base
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::retirement
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
