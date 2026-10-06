@@ -30,7 +30,7 @@ typedef struct qwen_session_t {
   // Last admitted request serial, also the idle-row LRU ordering key.
   uint64_t serial;
   // Canonical completed client history validating the retained raw state.
-  iree_string_builder_t checkpoint;
+  loom_serve_qwen_chat_completion_t completion;
   // Preallocated streaming decoder storage reused between requests.
   iree_byte_span_t decoder_storage;
   // Active decoder within decoder_storage, or null between requests.
@@ -390,7 +390,7 @@ static void qwen_request_cancel(qwen_service_t* service,
           session->serial, session->name,
           loom_serve_qwen_row_position(session->row));
   loom_serve_http_connection_abort(session->request.connection);
-  iree_string_builder_reset(&session->checkpoint);
+  loom_serve_qwen_chat_completion_deinitialize(&session->completion);
   qwen_request_release(service, session);
 }
 
@@ -460,8 +460,7 @@ static iree_status_t qwen_prepare_input(qwen_service_t* service,
                                         iree_host_size_t* out_count,
                                         iree_host_size_t* out_retained) {
   const iree_string_view_t prompt = iree_string_builder_view(&chat->prompt);
-  const iree_string_view_t checkpoint =
-      iree_string_builder_view(&session->checkpoint);
+  const iree_string_view_t checkpoint = session->completion.transcript;
   const bool retained =
       name.size && checkpoint.size &&
       iree_string_view_equal(name, iree_make_cstring_view(session->name)) &&
@@ -533,7 +532,7 @@ static iree_status_t qwen_evict(qwen_session_t* session) {
   IREE_RETURN_IF_ERROR(loom_serve_qwen_row_reset(session->row));
   session->name[0] = 0;
   session->serial = 0;
-  iree_string_builder_reset(&session->checkpoint);
+  loom_serve_qwen_chat_completion_deinitialize(&session->completion);
   return iree_ok_status();
 }
 
@@ -638,7 +637,7 @@ static iree_status_t qwen_admit_pending(qwen_service_t* service) {
     session->request.reserved_tokens = reservation;
     service->pool.reserved += reservation;
     iree_string_builder_reset(&session->response);
-    iree_string_builder_reset(&session->checkpoint);
+    loom_serve_qwen_chat_completion_deinitialize(&session->completion);
     status = iree_tokenizer_decode_state_initialize(
         loom_serve_qwen_model_tokenizer(service->model),
         IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
@@ -802,18 +801,13 @@ static iree_status_t qwen_complete(qwen_service_t* service,
   IREE_RETURN_IF_ERROR(
       qwen_append_response(session, iree_make_string_view(text, length)));
   iree_string_builder_reset(&service->tool_calls);
-  iree_host_size_t tool_count = 0;
   IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_complete(
       &session->request.chat, iree_string_builder_view(&session->response),
-      session->serial, &session->checkpoint, &service->tool_calls,
-      &tool_count));
-  const iree_string_view_t response =
-      iree_string_builder_view(&session->response);
-  const iree_host_size_t text_end =
-      tool_count ? iree_string_view_find(response, IREE_SV("<tool_call>"),
-                                         session->request.emitted_length)
-                 : response.size;
-  IREE_RETURN_IF_ERROR(qwen_emit_text(service, session, text_end));
+      session->request.emitted_length, session->serial, &service->tool_calls,
+      &session->completion));
+  IREE_RETURN_IF_ERROR(
+      qwen_emit_text(service, session, session->completion.text_end));
+  const iree_host_size_t tool_count = session->completion.tool_count;
   if (tool_count) {
     iree_string_builder_reset(&service->scratch);
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -877,17 +871,24 @@ static iree_status_t qwen_selected_tokens(qwen_service_t* service,
     const bool complete =
         loom_serve_qwen_row_is_eos(session->row) ||
         session->request.output_count == session->request.chat.max_tokens;
-    status = complete ? qwen_complete(service, session)
-                      : qwen_emit_text(
-                            service, session,
-                            loom_serve_qwen_chat_text_end(
-                                iree_string_builder_view(&session->response),
-                                session->request.emitted_length));
+    if (complete) {
+      status = qwen_complete(service, session);
+    } else {
+      iree_host_size_t text_end = 0;
+      status = loom_serve_qwen_chat_text_end(
+          session->request.chat.policy,
+          iree_string_builder_view(&session->response),
+          session->request.emitted_length,
+          LOOM_SERVE_QWEN_CHAT_OUTPUT_STREAMING, &text_end, service->allocator);
+      if (iree_status_is_ok(status)) {
+        status = qwen_emit_text(service, session, text_end);
+      }
+    }
   }
   if (!iree_status_is_ok(status)) {
     // Device work completed, but translation cannot establish a client history.
     // Preserve prior streamed text and terminate with a real SSE error.
-    iree_string_builder_reset(&session->checkpoint);
+    loom_serve_qwen_chat_completion_deinitialize(&session->completion);
     iree_string_builder_reset(&session->packet);
     iree_status_t packet_status =
         iree_string_builder_append_cstring(&session->packet, "data: ");
@@ -1338,8 +1339,6 @@ iree_status_t loom_serve_qwen_service_run(
   iree_string_builder_initialize(host_allocator, &service.tool_calls);
   for (iree_host_size_t i = 0; i < service.row_count; ++i) {
     iree_string_builder_initialize(host_allocator,
-                                   &service.sessions[i].checkpoint);
-    iree_string_builder_initialize(host_allocator,
                                    &service.sessions[i].response);
     iree_string_builder_initialize(host_allocator, &service.sessions[i].packet);
   }
@@ -1417,7 +1416,7 @@ iree_status_t loom_serve_qwen_service_run(
     iree_allocator_free(host_allocator, session->tokens);
     iree_string_builder_deinitialize(&session->packet);
     iree_string_builder_deinitialize(&session->response);
-    iree_string_builder_deinitialize(&session->checkpoint);
+    loom_serve_qwen_chat_completion_deinitialize(&session->completion);
   }
   qwen_observe(&service, iree_status_is_ok(status) ? "stopped" : "failed");
   iree_slim_mutex_lock(&service.heartbeat.mutex);

@@ -86,6 +86,17 @@ the exact selected-but-unconsumed token separately, copies complete returned IDs
 into request storage and releases all VM references before admission. Rendered
 fresh input passes to the tokenizer without an intermediate text copy.
 
+`text_end` owns incremental visibility of generated text, including partial
+tool markers. Both streaming and final completion use its established extent;
+the service does not inspect model syntax. `complete_text` trims canonical
+content and returns the retained transcript as an owned VM buffer. Completion
+arguments own their backing, so even a source result aliasing an input survives
+request cleanup. The session releases that reference on replacement,
+cancellation, eviction or shutdown. A failed completion leaves its destination
+unchanged; a failed live generation invalidates the row's reusable checkpoint.
+These are host output/request operations, with no additional GPU work or VM
+process. Original selected token IDs stay separate from canonical history.
+
 The native adapter still manages page IDs, validates semantic spans, owns role
 templates, generated XML/schema interpretation and retained-session policy, and
 joins each bounded cohort before applying semantic progress. Those remaining

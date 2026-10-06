@@ -479,6 +479,121 @@ func.def public @render_tool(%name: buffer, %arguments: buffer) -> (buffer, i64)
   func.return %output, %length : buffer, i64
 }
 
+// Generated text is published only up to a complete tool marker or a matching
+// trailing fragment. Final output releases a fragment that never became a tag.
+global.rodata.def @text_tool_marker = bytes("3c746f6f6c5f63616c6c3e")
+global.rodata.def @text_tool_separator = bytes("0a0a")
+
+func.def public @text_end(%response: buffer, %previous: i64, %phase: i32) -> (i64) {
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : offset
+  %zero32 = scalar.constant 0 : i32
+  %false = scalar.constant false : i1
+  %length = buffer.length %response
+  %marker = global.load @text_tool_marker : buffer
+  %marker_length = buffer.length %marker
+  // The owner supplies the last extent returned for this growing response.
+  %previous_value = scalar.assume %previous [range(%previous, 0, 9223372036854775807)] : i64
+  %start = index.cast %previous_value : i64 to offset
+  %streaming = scalar.cmpi eq, %phase, %zero32 : i32
+  %end = scf.while(%position = %start : offset) -> (offset) {
+    %has_bytes = index.cmp ult, %position, %length : offset
+    %advance = scf.if %has_bytes -> (i1) {
+      %remaining = index.sub %length, %position : offset
+      %short = index.cmp ult, %remaining, %marker_length : offset
+      %count = scf.select %short, %remaining, %marker_length : offset
+      %comparison = buffer.compare %response[%position], %marker[%zero], %count
+      %mismatch = scalar.cmpi ne, %comparison, %zero32 : i32
+      %complete_marker = index.cmp uge, %remaining, %marker_length : offset
+      %withhold = scalar.ori %streaming, %complete_marker : i1
+      %release_fragment = scalar.cmpi eq, %withhold, %false : i1
+      %advance = scalar.ori %mismatch, %release_fragment : i1
+      scf.yield %advance : i1
+    } else {
+      scf.yield %false : i1
+    }
+    scf.condition %advance, %position : i1, offset
+  } do(%position: offset) {
+    %next = index.add %position, %one : offset
+    scf.yield %next : offset
+  }
+  %result = index.cast %end : offset to i64
+  func.return %result : i64
+}
+
+// Canonical history trims ASCII framing whitespace, not Unicode content.
+func.def @text_is_space(%text: buffer, %position: offset) -> (i1) {
+  %byte = buffer.load.i8.u %text[%position]
+  %space = scalar.constant 32 : i32
+  %tab = scalar.constant 9 : i32
+  %carriage_return = scalar.constant 13 : i32
+  %is_space = scalar.cmpi eq, %byte, %space : i32
+  %after_tab = scalar.cmpi uge, %byte, %tab : i32
+  %before_return = scalar.cmpi ule, %byte, %carriage_return : i32
+  %control = scalar.andi %after_tab, %before_return : i1
+  %result = scalar.ori %is_space, %control : i1
+  func.return %result : i1
+}
+
+// Arguments have owned VM backing: a source result can retain them or allocate
+// its own buffer without borrowing request, decoder or invocation storage.
+func.def public @complete_text(%prompt: buffer, %content: buffer, %tools: buffer) -> (buffer) {
+  %zero = index.constant 0 : offset
+  %one = index.constant 1 : offset
+  %false = scalar.constant false : i1
+  %content_length = buffer.length %content
+  %begin = scf.while(%position = %zero : offset) -> (offset) {
+    %has_bytes = index.cmp ult, %position, %content_length : offset
+    %advance = scf.if %has_bytes -> (i1) {
+      %space = func.call @text_is_space(%content, %position) : (buffer, offset) -> (i1)
+      scf.yield %space : i1
+    } else {
+      scf.yield %false : i1
+    }
+    scf.condition %advance, %position : i1, offset
+  } do(%position: offset) {
+    %next = index.add %position, %one : offset
+    scf.yield %next : offset
+  }
+  %end = scf.while(%position = %content_length : offset) -> (offset) {
+    %has_bytes = index.cmp ugt, %position, %begin : offset
+    %retreat = scf.if %has_bytes -> (i1) {
+      %last = index.sub %position, %one : offset
+      %space = func.call @text_is_space(%content, %last) : (buffer, offset) -> (i1)
+      scf.yield %space : i1
+    } else {
+      scf.yield %false : i1
+    }
+    scf.condition %retreat, %position : i1, offset
+  } do(%position: offset) {
+    %next = index.sub %position, %one : offset
+    scf.yield %next : offset
+  }
+  %trimmed_length = index.sub %end, %begin : offset
+  %tools_length = buffer.length %tools
+  %has_content = index.cmp ne, %trimmed_length, %zero : offset
+  %has_tools = index.cmp ne, %tools_length, %zero : offset
+  %separate = scalar.andi %has_content, %has_tools : i1
+  %separator = global.load @text_tool_separator : buffer
+  %empty = global.load @input_empty_boundary : buffer
+  %between = scf.select %separate, %separator, %empty : buffer
+  %between_length = buffer.length %between
+  %close = global.load @input_open_boundary : buffer
+  %close_length = buffer.length %close
+  %prompt_length = buffer.length %prompt
+  %content_end = index.add %prompt_length, %trimmed_length : offset
+  %tools_begin = index.add %content_end, %between_length : offset
+  %tools_end = index.add %tools_begin, %tools_length : offset
+  %length = index.add %tools_end, %close_length : offset
+  %output = buffer.alloca<private> align(1) %length : buffer
+  buffer.copy %prompt[%zero], %output[%zero], %prompt_length
+  buffer.copy %content[%begin], %output[%prompt_length], %trimmed_length
+  buffer.copy %between[%zero], %output[%content_end], %between_length
+  buffer.copy %tools[%zero], %output[%tools_begin], %tools_length
+  buffer.copy %close[%zero], %output[%tools_end], %close_length
+  func.return %output : buffer
+}
+
 // The program is shared; all request state arrives as buffer bindings.
 func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
   %origin = index.constant 0 : offset

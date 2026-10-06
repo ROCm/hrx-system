@@ -246,8 +246,14 @@ loom_cc_library(
 loom_cc_test(
     name = "chat_test",
     srcs = ["chat_test.cc"],
-    args = ["--chat_source=$(rootpath :control.loom)"],
-    data = ["control.loom"],
+    args = [
+        "--chat_source=$(rootpath :control.loom)",
+        "--alias_source=$(rootpath :testdata/chat_alias.loom)",
+    ],
+    data = [
+        "control.loom",
+        "testdata/chat_alias.loom",
+    ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
     ]),

@@ -86,8 +86,9 @@ The source bootstrap owns all ten shape-dependent bindings, including Q8
 output bounds and quantizer group capacity. It also owns stage selection and
 retained storage geometry. Warm descriptor packing and feedback publication also
 live in source, sharing the model's VM process with execution and canonical
-tool-call formatting. Role templates, generated tool parsing and session policy
-remain native; these source-owned pieces are not yet a model-neutral text ABI.
+tool-call formatting, streaming text boundaries and completed checkpoints.
+Role templates, generated tool parsing and session policy remain native; these
+source-owned pieces are not yet a model-neutral text ABI.
 
 Configuration is a model entry/specialization boundary. Reusable functions,
 templates, and motifs receive dimensions and layout facts as explicit SSA
@@ -273,8 +274,9 @@ declarations and command reflection instead of naming model commands. The
 source also returns allocation/view records and initial target/draft origin
 tables. These upload payloads remain retained until initialization retires,
 including partial failure. Native code owns physical allocation and page IDs,
-not layer/head-size formulas. Warm descriptor packing and chat policy still
-reside in the adapter; this contract alone does not make it model-neutral.
+not layer/head-size formulas. Source also owns warm descriptor packing and
+feedback publication. Native role/history rendering, generated tool parsing
+and retained admission still prevent a model-neutral text adapter.
 
 [`control.loom`](../models/qwen/control.loom) is a concrete example of typed
 command selection, optional proposal, verification, and cache catch-up. Its
@@ -382,6 +384,18 @@ buffer remains owned until accepted uploads, commands and feedback have drained.
 Cold result references outlive the temporary bootstrap program, but not their
 VM environment. Internal VM helpers are private; public functions are the
 entry points specialized by the caller.
+
+Returned references require owned backing throughout their lifetime. Wrapping
+HTTP body bytes in a VM buffer does not retain the HTTP allocation. The Qwen
+completion bridge clones its prompt, content and canonical tool text into
+owned VM buffers before calling `complete_text`; the returned checkpoint can
+therefore alias an argument safely. The native session retains that result
+after request/decoder scratch is released, without retaining a VM invocation
+or creating a per-session process. `chat_test.cc` exercises both a newly built
+checkpoint and a source result that directly returns an argument. Synchronous
+scalar-only queries such as `text_end` can instead borrow request bytes for the
+duration of the call. Its monotonic result is checked once at the source/native
+boundary and passed to the transport without rediscovering model markers.
 
 For a new port, the first useful witness is one actual prompt reaching a final
 HTTP PNG through `//experimental/loom_serve/image:server --model=...`, followed
