@@ -101,7 +101,8 @@ iree_status_t iree_json_consume_value(iree_string_view_t* str,
 iree_status_t iree_json_consume_insignificant(iree_string_view_t* str);
 
 // Consumes the literal |keyword| from |str|.
-// Returns the keyword in |out_value| on success.
+// Returns the consumed input span in |out_value| on success. The returned view
+// borrows the input storage, not the |keyword| argument.
 iree_status_t iree_json_consume_keyword(iree_string_view_t* str,
                                         iree_string_view_t keyword,
                                         iree_string_view_t* out_value);

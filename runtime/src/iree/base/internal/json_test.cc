@@ -6,6 +6,7 @@
 
 #include "iree/base/internal/json.h"
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -209,6 +210,54 @@ TEST(JsonConsumeKeywordTest, Null) {
   iree_string_view_t value;
   IREE_ASSERT_OK(iree_json_consume_keyword(&str, IREE_SV("null"), &value));
   EXPECT_SV_EQ(value, IREE_SV("null"));
+}
+
+TEST(JsonConsumeKeywordTest, ValuesBorrowTheirConsumedInput) {
+  for (const char* keyword : {"true", "false", "null"}) {
+    SCOPED_TRACE(keyword);
+    const std::string input = std::string(keyword) + ", remaining";
+    iree_string_view_t cursor =
+        iree_make_string_view(input.data(), input.size());
+    iree_string_view_t value;
+    IREE_ASSERT_OK(iree_json_consume_keyword(
+        &cursor, iree_make_cstring_view(keyword), &value));
+    EXPECT_EQ(value.data, input.data());
+    EXPECT_EQ(value.size, strlen(keyword));
+    EXPECT_SV_EQ(cursor, IREE_SV(", remaining"));
+    cursor = iree_make_string_view(input.data(), input.size());
+    IREE_ASSERT_OK(iree_json_consume_value(&cursor, &value));
+    EXPECT_EQ(value.data, input.data());
+
+    const std::string array = std::string("[") + keyword + "]";
+    iree_string_view_t expected =
+        iree_make_string_view(array.data() + 1, strlen(keyword));
+    IREE_ASSERT_OK(iree_json_enumerate_array_typed(
+        iree_make_string_view(array.data(), array.size()),
+        [](void* user_data, iree_host_size_t index, iree_json_value_type_t type,
+           iree_string_view_t value) {
+          const auto* expected = static_cast<iree_string_view_t*>(user_data);
+          EXPECT_EQ(index, 0u);
+          EXPECT_EQ(type, iree_json_infer_value_type(expected->data[0]));
+          EXPECT_EQ(value.data, expected->data);
+          EXPECT_EQ(value.size, expected->size);
+          return iree_ok_status();
+        },
+        &expected));
+    const std::string object = std::string("{\"flag\":") + keyword + "}";
+    expected = iree_make_string_view(object.data() + 8, strlen(keyword));
+    IREE_ASSERT_OK(iree_json_enumerate_object_typed(
+        iree_make_string_view(object.data(), object.size()),
+        [](void* user_data, iree_string_view_t key, iree_json_value_type_t type,
+           iree_string_view_t value) {
+          const auto* expected = static_cast<iree_string_view_t*>(user_data);
+          EXPECT_SV_EQ(key, IREE_SV("flag"));
+          EXPECT_EQ(type, iree_json_infer_value_type(expected->data[0]));
+          EXPECT_EQ(value.data, expected->data);
+          EXPECT_EQ(value.size, expected->size);
+          return iree_ok_status();
+        },
+        &expected));
+  }
 }
 
 TEST(JsonConsumeKeywordTest, WrongKeyword) {
