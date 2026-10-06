@@ -670,3 +670,22 @@ low.func.def target<amd.xdna.aie2p.core> @simultaneous_indices() -> (reg<aie2p.e
   %index8 = mov.address-index %offset8
   return %index0, %index1, %index2, %index3, %index4, %index5, %index6, %index7, %index8
 }
+
+// ====
+
+// Leaf compilation cannot synthesize over a retained authored assignment.
+// RUN: emit aie2p-leaf @assigned_input
+
+// ERROR@+1: BACKEND/051 {function_name="assigned_input", allocation_mode="assigned"}
+low.func.def allocation(assigned) target<amd.xdna.aie2p.core> @assigned_input() asm {
+  return
+}
+
+// ====
+
+// RUN: emit aie2p-leaf @fixed_input
+
+// ERROR@+1: BACKEND/051 {function_name="fixed_input", allocation_mode="fixed"}
+low.func.def allocation(fixed) target<amd.xdna.aie2p.core> @fixed_input() asm {
+  return
+}

@@ -24,6 +24,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low:allocation_live_range_splitting",
         "//loom/src/loom/codegen/low:allocation_materialization",
         "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:diagnostics",
         "//loom/src/loom/codegen/low:function",
         "//loom/src/loom/codegen/low:function_model",
         "//loom/src/loom/codegen/low:rematerialization",

@@ -11,6 +11,7 @@
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation_live_range_splitting.h"
 #include "loom/codegen/low/allocation_materialization.h"
+#include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/function_model.h"
 #include "loom/codegen/low/pipeline/pass_environment.h"
@@ -394,6 +395,13 @@ iree_status_t loom_low_materialize_allocation_run(loom_pass_t* pass,
                                                   loom_module_t* module,
                                                   loom_func_like_t function) {
   if (!loom_low_function_def_isa(function.op)) {
+    return iree_ok_status();
+  }
+
+  bool synthesis_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_low_diagnostic_admit_allocation_synthesis(
+      module, function.op, pass->diagnostic_emitter, &synthesis_admitted));
+  if (!synthesis_admitted) {
     return iree_ok_status();
   }
 

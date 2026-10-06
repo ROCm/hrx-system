@@ -81,7 +81,9 @@ typedef struct loom_low_allocation_options_t {
 // this function returns. The allocator performs deterministic per-class
 // interval assignment and records failures/spills as table facts without
 // mutating IR. The caller publishes terminal planning diagnostics by calling
-// loom_low_allocation_diagnostics_emit on the accepted table.
+// loom_low_allocation_diagnostics_emit on the accepted table. The caller must
+// first admit an absent or virtual function allocation mode; assigned and fixed
+// modes require a retained allocation table instead of synthesis.
 iree_status_t loom_low_allocate_function(
     const loom_low_function_model_t* model,
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,

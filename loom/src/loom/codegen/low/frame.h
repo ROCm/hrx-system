@@ -176,11 +176,14 @@ typedef struct loom_low_emission_frame_spill_free_options_t {
 } loom_low_emission_frame_spill_free_options_t;
 
 // Schedules, allocates, and validates one target-low function for target
-// emitters. |arena| must outlive |out_frame|. Schedule or allocation
-// diagnostics return a partial frame with the corresponding table |error_count|
-// set and |out_accepted| false; later emission stages have not consumed that
-// frame. Infrastructure failures return a status and also leave
-// |out_accepted| false.
+// emitters. This path synthesizes a physical allocation and therefore admits
+// only functions with an absent or virtual allocation mode. Assigned or fixed
+// modes emit a semantic diagnostic and return OK with |out_accepted| false;
+// a caller accepting those modes must carry their retained allocation table.
+// |arena| must outlive |out_frame|. Schedule or allocation diagnostics return a
+// partial frame with the corresponding table |error_count| set and
+// |out_accepted| false; later emission stages have not consumed that frame.
+// Infrastructure failures return a status and also leave |out_accepted| false.
 iree_status_t loom_low_emission_frame_build(
     loom_module_t* module, loom_op_t* low_func_op,
     const loom_low_emission_frame_options_t* options,
@@ -195,6 +198,10 @@ iree_status_t loom_low_emission_frame_build(
 // Individual plan traffic is recomputed from the current IR while consuming
 // that batch because earlier spill rewrites can make later allocation-time
 // traffic predictions stale.
+//
+// Like loom_low_emission_frame_build, this path synthesizes allocation and
+// admits only absent or virtual allocation modes. It rejects assigned or fixed
+// modes before spill lowering or other IR mutation.
 // Materialization, final addressability, and final-frame validation diagnostics
 // return OK with |out_accepted| false. Allocation diagnostics may return a
 // partial frame containing the schedule and allocation failure table for

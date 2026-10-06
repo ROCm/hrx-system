@@ -23,6 +23,7 @@ loom_cc_library(
     loom::codegen::low::allocation_live_range_splitting
     loom::codegen::low::allocation_materialization
     loom::codegen::low::descriptors
+    loom::codegen::low::diagnostics
     loom::codegen::low::function
     loom::codegen::low::function_model
     loom::codegen::low::pipeline::pass_environment

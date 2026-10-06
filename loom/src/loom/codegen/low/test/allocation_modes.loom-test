@@ -1,0 +1,67 @@
+// Explicit virtual mode remains an allocation-synthesis input.
+// RUN: emit low-allocation @explicit_virtual
+
+test.target<low_core> @target
+
+low.func.def allocation(virtual) target<test.low.core>(@target) @explicit_virtual(%value: reg<test.i32>) -> (reg<test.i32>) asm {
+  return %value
+}
+
+// ----
+low-allocation @explicit_virtual
+target: target
+descriptor_set: test.low.core
+mode: virtual
+assignments: 1
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+classes:
+  test.i32: assignments=1 units=1 target_ids=1 physical=0 spill_slots=0 unassigned=0
+
+// ====
+
+// Direct allocation rejects an authored assignment when it receives no
+// retained allocation table.
+// RUN: emit low-allocation-json @assigned_direct output=none
+
+test.target<low_core> @target
+
+// ERROR@+1: BACKEND/051 {function_name="assigned_direct", allocation_mode="assigned"}
+low.func.def allocation(assigned) target<test.low.core>(@target) @assigned_direct() asm {
+  return
+}
+
+// ====
+
+// Complete frame synthesis applies the same contract before scheduling.
+// RUN: emit low-packet-json @assigned_frame output=none
+
+test.target<low_core> @target
+
+// ERROR@+1: BACKEND/051 {function_name="assigned_frame", allocation_mode="assigned"}
+low.func.def allocation(assigned) target<test.low.core>(@target) @assigned_frame() asm {
+  return
+}
+
+// ====
+
+// RUN: emit low-allocation-json @fixed_direct output=none
+
+test.target<low_core> @target
+
+// ERROR@+1: BACKEND/051 {function_name="fixed_direct", allocation_mode="fixed"}
+low.func.def allocation(fixed) target<test.low.core>(@target) @fixed_direct() asm {
+  return
+}
+
+// ====
+
+// RUN: emit low-packet-json @fixed_frame output=none
+
+test.target<low_core> @target
+
+// ERROR@+1: BACKEND/051 {function_name="fixed_frame", allocation_mode="fixed"}
+low.func.def allocation(fixed) target<test.low.core>(@target) @fixed_frame() asm {
+  return
+}

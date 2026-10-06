@@ -546,7 +546,6 @@ loom_cc_library(
     hdrs = ["allocation.h"],
     deps = [
         ":descriptors",
-        ":diagnostics",
         ":function",
         ":function_model",
         ":placement",

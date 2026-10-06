@@ -564,7 +564,6 @@ loom_cc_library(
     "allocation.c"
   DEPS
     ::descriptors
-    ::diagnostics
     ::function
     ::function_model
     ::placement

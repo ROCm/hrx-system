@@ -45,6 +45,14 @@ iree_string_view_t loom_low_diagnostic_config_key(
 iree_string_view_t loom_low_diagnostic_function_name(
     const loom_module_t* module, const loom_op_t* function_op);
 
+// Admits |function_op| to an allocation-synthesis path. Functions with an
+// absent or virtual allocation mode set |out_admitted| true. Other modes emit
+// LOOM_ERR_BACKEND_051 and leave it false because synthesis has no retained
+// physical assignment to consume.
+iree_status_t loom_low_diagnostic_admit_allocation_synthesis(
+    const loom_module_t* module, const loom_op_t* function_op,
+    iree_diagnostic_emitter_t emitter, bool* out_admitted);
+
 // Emits LOOM_ERR_TARGET_026 for a target-dependent use of |function_op|.
 iree_status_t loom_low_diagnostic_emit_missing_target(
     const loom_module_t* module, const loom_op_t* function_op,

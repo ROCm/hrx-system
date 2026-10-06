@@ -21,3 +21,28 @@ wasm.target<simd128> @target
 low.func.def public schedule(phased) target<wasm.core.simd128>(@target) abi(wasm_function) @required_function_order() asm {
   return
 }
+
+// ====
+
+// Wasm emission cannot synthesize over a retained authored assignment.
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// ERROR@+1: BACKEND/051 {function_name="assigned_input", allocation_mode="assigned"}
+low.func.def public allocation(assigned) target<wasm.core.simd128>(@target) abi(wasm_function) @assigned_input() asm {
+  return
+}
+
+// ====
+
+// RUN: emit wasm-dis
+// REQUIRES: wasm-objdump
+
+wasm.target<simd128> @target
+
+// ERROR@+1: BACKEND/051 {function_name="fixed_input", allocation_mode="fixed"}
+low.func.def public allocation(fixed) target<wasm.core.simd128>(@target) abi(wasm_function) @fixed_input() asm {
+  return
+}

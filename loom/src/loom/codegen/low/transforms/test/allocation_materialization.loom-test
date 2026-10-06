@@ -901,3 +901,27 @@ low.func.def target<test.low.core>(@target) @cross_block_constants() -> (reg<tes
   %result = test.add.i32 %abcd, %e
   return %result
 }
+
+// ====
+
+// Materialization cannot replace an authored assignment without receiving the
+// retained allocation table that defines it.
+// RUN: pass low-materialize-allocation
+
+test.target<low_core> @target
+
+// ERROR@+1: BACKEND/051 {function_name="assigned_input", allocation_mode="assigned"}
+low.func.def allocation(assigned) target<test.low.core>(@target) @assigned_input() asm {
+  return
+}
+
+// ====
+
+// RUN: pass low-materialize-allocation
+
+test.target<low_core> @target
+
+// ERROR@+1: BACKEND/051 {function_name="fixed_input", allocation_mode="fixed"}
+low.func.def allocation(fixed) target<test.low.core>(@target) @fixed_input() asm {
+  return
+}

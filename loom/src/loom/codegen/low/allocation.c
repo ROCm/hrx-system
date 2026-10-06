@@ -21,7 +21,6 @@
 #include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/codegen/low/allocation/write_interference.h"
-#include "loom/codegen/low/diagnostics.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/ir/local_value_domain.h"
@@ -67,37 +66,6 @@ typedef struct loom_low_allocation_build_state_t {
   // Mutable assignment-backed storage leases and release actions being built.
   loom_low_allocation_storage_lease_state_t storage_leases;
 } loom_low_allocation_build_state_t;
-
-static bool loom_low_allocation_mode_can_synthesize(uint8_t allocation_mode) {
-  return allocation_mode == 0 || allocation_mode == LOOM_LOW_ALLOCATION_VIRTUAL;
-}
-
-static const char* loom_low_allocation_mode_name(uint8_t allocation_mode) {
-  switch (allocation_mode) {
-    case 0:
-    case LOOM_LOW_ALLOCATION_VIRTUAL:
-      return "virtual";
-    case LOOM_LOW_ALLOCATION_ASSIGNED:
-      return "assigned";
-    case LOOM_LOW_ALLOCATION_FIXED:
-      return "fixed";
-    default:
-      return "unknown";
-  }
-}
-
-static iree_status_t loom_low_allocation_validate_synthesis_mode(
-    const loom_op_t* low_func_op) {
-  uint8_t allocation_mode = loom_low_function_allocation(low_func_op);
-  if (loom_low_allocation_mode_can_synthesize(allocation_mode)) {
-    return iree_ok_status();
-  }
-  return iree_make_status(
-      IREE_STATUS_FAILED_PRECONDITION,
-      "low allocation synthesis requires allocation(virtual), but function has "
-      "allocation(%s)",
-      loom_low_allocation_mode_name(allocation_mode));
-}
 
 static loom_low_allocation_interval_assignment_context_t
 loom_low_allocation_make_interval_assignment_context(
@@ -333,6 +301,11 @@ iree_status_t loom_low_allocate_function(
       .error_count = model->error_count,
       .cfg_graph = model->cfg_graph,
   };
+  const uint8_t allocation_mode =
+      loom_low_function_allocation(model->function_op);
+  IREE_ASSERT(
+      allocation_mode == 0 || allocation_mode == LOOM_LOW_ALLOCATION_VIRTUAL,
+      "allocation synthesis requires an admitted virtual function");
   if (model->error_count != 0) {
     return iree_ok_status();
   }
@@ -348,8 +321,6 @@ iree_status_t loom_low_allocate_function(
       .function_op = model->function_op,
       .target = model->target,
   };
-  IREE_RETURN_IF_ERROR(
-      loom_low_allocation_validate_synthesis_mode(model->function_op));
   iree_arena_allocator_t decision_arena;
   iree_arena_initialize(arena->block_pool, &decision_arena);
   iree_status_t status = loom_low_allocation_target_constraints_initialize(

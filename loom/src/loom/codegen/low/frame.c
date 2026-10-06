@@ -612,10 +612,17 @@ iree_status_t loom_low_emission_frame_build(
     const loom_low_emission_frame_options_t* options,
     iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
     bool* out_accepted) {
+  *out_frame = (loom_low_emission_frame_t){0};
   *out_accepted = false;
   loom_low_planning_statistics_t* statistics = options->statistics;
   if (statistics != NULL) {
     *statistics = (loom_low_planning_statistics_t){0};
+  }
+  bool synthesis_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_low_diagnostic_admit_allocation_synthesis(
+      module, low_func_op, options->emitter, &synthesis_admitted));
+  if (!synthesis_admitted) {
+    return iree_ok_status();
   }
   const iree_arena_checkpoint_t frame_checkpoint =
       iree_arena_checkpoint_save(arena);
@@ -761,12 +768,6 @@ static iree_status_t loom_low_emission_frame_build_spill_free_impl(
     iree_arena_allocator_t* arena, loom_low_planning_statistics_t* statistics,
     loom_low_emission_frame_t* out_frame, bool* out_accepted) {
   *out_frame = (loom_low_emission_frame_t){0};
-  if (spill_free_options == NULL) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "spill-free low emission frame construction requires spill-free "
-        "options");
-  }
   IREE_RETURN_IF_ERROR(loom_low_storage_layout_hoist_reservations(
       module, loom_low_function_body(low_func_op), scratch_arena));
 
@@ -1017,10 +1018,23 @@ iree_status_t loom_low_emission_frame_build_spill_free(
     iree_arena_allocator_t* arena, loom_low_emission_frame_t* out_frame,
     bool* out_accepted) {
   IREE_ASSERT_ARGUMENT(frame_options);
+  *out_frame = (loom_low_emission_frame_t){0};
   *out_accepted = false;
+  if (spill_free_options == NULL) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "spill-free low emission frame construction requires spill-free "
+        "options");
+  }
   loom_low_planning_statistics_t* statistics = frame_options->statistics;
   if (statistics != NULL) {
     *statistics = (loom_low_planning_statistics_t){0};
+  }
+  bool synthesis_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_low_diagnostic_admit_allocation_synthesis(
+      module, low_func_op, frame_options->emitter, &synthesis_admitted));
+  if (!synthesis_admitted) {
+    return iree_ok_status();
   }
 #if IREE_STATISTICS_ENABLE
   iree_arena_block_pool_statistics_t pool_statistics_before = {0};

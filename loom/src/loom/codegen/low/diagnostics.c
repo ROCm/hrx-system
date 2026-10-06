@@ -77,6 +77,45 @@ iree_string_view_t loom_low_diagnostic_function_name(
   return IREE_SV("<unnamed>");
 }
 
+static iree_string_view_t loom_low_diagnostic_allocation_mode_name(
+    uint8_t allocation_mode) {
+  switch (allocation_mode) {
+    case 0:
+    case LOOM_LOW_ALLOCATION_VIRTUAL:
+      return IREE_SV("virtual");
+    case LOOM_LOW_ALLOCATION_ASSIGNED:
+      return IREE_SV("assigned");
+    case LOOM_LOW_ALLOCATION_FIXED:
+      return IREE_SV("fixed");
+    default:
+      return IREE_SV("<unknown>");
+  }
+}
+
+iree_status_t loom_low_diagnostic_admit_allocation_synthesis(
+    const loom_module_t* module, const loom_op_t* function_op,
+    iree_diagnostic_emitter_t emitter, bool* out_admitted) {
+  *out_admitted = false;
+  const uint8_t allocation_mode = loom_low_function_allocation(function_op);
+  if (allocation_mode == 0 || allocation_mode == LOOM_LOW_ALLOCATION_VIRTUAL) {
+    *out_admitted = true;
+    return iree_ok_status();
+  }
+
+  const loom_diagnostic_param_t params[] = {
+      loom_param_string(loom_low_diagnostic_function_name(module, function_op)),
+      loom_param_string(
+          loom_low_diagnostic_allocation_mode_name(allocation_mode)),
+  };
+  const loom_diagnostic_emission_t emission = {
+      .op = function_op,
+      .error = LOOM_ERR_BACKEND_051,
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+  };
+  return iree_diagnostic_emit(emitter, &emission);
+}
+
 iree_status_t loom_low_diagnostic_emit_missing_target(
     const loom_module_t* module, const loom_op_t* function_op,
     iree_diagnostic_emitter_t emitter) {

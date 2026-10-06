@@ -1201,6 +1201,12 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
   if (!low_function) {
     return iree_ok_status();
   }
+  bool synthesis_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_low_diagnostic_admit_allocation_synthesis(
+      module, low_function, emitter, &synthesis_admitted));
+  if (!synthesis_admitted) {
+    return iree_ok_status();
+  }
   const loom_low_allocation_fixed_value_t* fixed_values = NULL;
   iree_host_size_t fixed_value_count = 0;
   bool fixed_values_resolved = false;

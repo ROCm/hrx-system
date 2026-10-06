@@ -131,6 +131,7 @@ loom_cc_library(
     iree::base::internal::arena
     loom::codegen::low::allocation
     loom::codegen::low::descriptors
+    loom::codegen::low::diagnostics
     loom::codegen::low::function_model
     loom::error::emitter
     loom::ir

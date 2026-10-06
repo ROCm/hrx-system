@@ -1277,6 +1277,26 @@ ERR_BACKEND_050 = ErrorDef(
     fix_hint="Choose a nonconflicting location or remove the fixed binding",
 )
 
+# ERR_BACKEND_051: Allocation synthesis received a retained assignment mode.
+ERR_BACKEND_051 = ErrorDef(
+    domain=ErrorDomain.BACKEND,
+    code=51,
+    severity=Severity.ERROR,
+    summary="Allocation synthesis requires virtual registers.",
+    message=(
+        "cannot synthesize physical allocation for '@{function_name}': "
+        "allocation({allocation_mode}) is not a virtual-allocation contract, "
+        "and this compiler entry has no retained allocation table"
+    ),
+    params=(
+        ErrorParam("function_name", ParamKind.STRING),
+        ErrorParam("allocation_mode", ParamKind.STRING),
+    ),
+    fix_hint=(
+        "Use allocation(virtual) when asking the compiler to assign physical registers"
+    ),
+)
+
 ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_003,
     ERR_BACKEND_005,
@@ -1322,4 +1342,5 @@ ALL_BACKEND_ERRORS: tuple[ErrorDef, ...] = (
     ERR_BACKEND_048,
     ERR_BACKEND_049,
     ERR_BACKEND_050,
+    ERR_BACKEND_051,
 )
