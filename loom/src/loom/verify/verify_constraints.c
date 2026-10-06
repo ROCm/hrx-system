@@ -1768,8 +1768,8 @@ static bool loom_verify_region_block_yield(
       loom_verify_lookup_vtable(state, terminator->kind);
   if (terminator_vtable == NULL ||
       !iree_any_bit_set(terminator_vtable->traits, LOOM_TRAIT_TERMINATOR) ||
-      (region_descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
-       terminator->kind != region_descriptor->terminator)) {
+      !loom_region_descriptor_matches_terminator(region_descriptor,
+                                                 terminator->kind)) {
     return false;
   }
   *out_yield_count = terminator->operand_count;

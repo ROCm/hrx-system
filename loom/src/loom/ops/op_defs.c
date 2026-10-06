@@ -1267,18 +1267,6 @@ loom_region_t* loom_region_branch_region(const loom_module_t* module,
   return loom_op_regions(branch.op)[region_index];
 }
 
-static bool loom_region_branch_terminator_matches(
-    const loom_region_descriptor_t* region_descriptor,
-    const loom_op_t* terminator) {
-  if (!terminator) {
-    return false;
-  }
-  if (region_descriptor->terminator == LOOM_OP_KIND_UNKNOWN) {
-    return true;
-  }
-  return terminator->kind == region_descriptor->terminator;
-}
-
 loom_op_t* loom_region_branch_region_terminator(const loom_module_t* module,
                                                 loom_region_branch_t branch,
                                                 uint8_t region_index) {
@@ -1301,8 +1289,8 @@ loom_op_t* loom_region_branch_region_terminator(const loom_module_t* module,
   if (!block || !block->last_op) {
     return NULL;
   }
-  return loom_region_branch_terminator_matches(region_descriptor,
-                                               block->last_op)
+  return loom_region_descriptor_matches_terminator(region_descriptor,
+                                                   block->last_op->kind)
              ? block->last_op
              : NULL;
 }

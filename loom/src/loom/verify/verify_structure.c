@@ -2222,18 +2222,6 @@ static bool loom_verify_op_is_terminator(loom_verify_state_t* state,
   return vtable && iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR);
 }
 
-static bool loom_verify_region_terminator_matches(
-    const loom_region_descriptor_t* region_descriptor,
-    const loom_op_t* terminator) {
-  if (!terminator) {
-    return false;
-  }
-  if (region_descriptor->terminator == LOOM_OP_KIND_UNKNOWN) {
-    return true;
-  }
-  return terminator->kind == region_descriptor->terminator;
-}
-
 bool loom_verify_region_entry_yield(
     loom_verify_state_t* state, const loom_op_t* op,
     const loom_op_vtable_t* vtable, uint8_t region_index,
@@ -2258,7 +2246,8 @@ bool loom_verify_region_entry_yield(
   const loom_block_t* entry = loom_region_const_entry_block(region);
   const loom_op_t* terminator = loom_verify_block_last_live_op(entry);
   if (terminator && loom_verify_op_is_terminator(state, terminator) &&
-      loom_verify_region_terminator_matches(region_descriptor, terminator)) {
+      loom_region_descriptor_matches_terminator(region_descriptor,
+                                                terminator->kind)) {
     *out_yield_count = terminator->operand_count;
     if (out_yield_operands) {
       *out_yield_operands = loom_op_const_operands(terminator);

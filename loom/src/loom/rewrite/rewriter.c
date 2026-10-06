@@ -63,8 +63,8 @@ static bool loom_rewriter_summary_region_is_ready(
   if (!terminator) {
     return false;
   }
-  return descriptor->terminator == LOOM_OP_KIND_UNKNOWN ||
-         terminator->kind == descriptor->terminator;
+  return loom_region_descriptor_matches_terminator(descriptor,
+                                                   terminator->kind);
 }
 
 static bool loom_rewriter_nested_region_summary_is_ready(

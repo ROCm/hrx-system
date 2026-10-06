@@ -34,11 +34,9 @@ func.def @optional_branch_owner(%condition: i1, %resource: pool<16>) {
   test.optional_region %condition {
     %left = test.resource.move %resource : pool<16> -> pool<16>
     test.resource.borrow %left : pool<16>
-    test.yield
   } else {
     %right = test.resource.move %resource : pool<16> -> pool<16>
     test.resource.borrow %right : pool<16>
-    test.yield
   }
   func.return
 }

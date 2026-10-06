@@ -560,6 +560,35 @@ TEST_F(InterfaceTest, RegionBranchYieldOnlyRejectsBranchBody) {
       module_, branch, 0, 1, &yielded_values));
 }
 
+TEST_F(InterfaceTest, RegionBranchImplicitTerminatorYieldsEmptyTuple) {
+  loom_op_t* condition = build_i1(false);
+  loom_op_t* branch_op = nullptr;
+  IREE_ASSERT_OK(
+      loom_test_branch_build(&builder_, loom_op_results(condition)[0], nullptr,
+                             0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &branch_op));
+  loom_region_branch_t branch = loom_region_branch_cast(module_, branch_op);
+  for (uint8_t region_index = 0; region_index < 2; ++region_index) {
+    loom_region_t* region =
+        loom_region_branch_region(module_, branch, region_index);
+    loom_builder_ip_t saved_ip =
+        loom_builder_enter_region(&builder_, branch_op, region);
+    loom_op_t* terminator = nullptr;
+    IREE_ASSERT_OK(loom_test_implicit_yield_build(
+        &builder_, LOOM_LOCATION_UNKNOWN, &terminator));
+    loom_builder_restore(&builder_, saved_ip);
+
+    EXPECT_EQ(
+        loom_region_branch_region_terminator(module_, branch, region_index),
+        terminator);
+    loom_value_slice_t yielded_values = {};
+    EXPECT_TRUE(loom_region_branch_region_yield_only_operands(
+        module_, branch, region_index, 0, &yielded_values));
+    EXPECT_EQ(yielded_values.count, 0);
+    EXPECT_FALSE(loom_region_branch_region_yield_only_operands(
+        module_, branch, region_index, 1, &yielded_values));
+  }
+}
+
 TEST_F(InterfaceTest, RegionBranchRegionsForRegionTable) {
   loom_op_t* selector = build_index(1);
   int64_t case_keys[2] = {0, 1};

@@ -1,0 +1,105 @@
+// A missing terminator materializes the declared implicit kind in both branches.
+// RUN: verify
+test.func @implicit_branches(%condition: i1) {
+  test.optional_region %condition {
+  } else {
+  }
+  test.yield
+}
+
+// ====
+// Omitted optional regions have no terminator obligation.
+test.func @absent_optional_branch(%condition: i1) {
+  test.optional_region %condition {
+  }
+  test.yield
+}
+
+// ====
+// Explicit and implicit terminators can appear in sibling regions.
+test.func @mixed_branch_terminators(%condition: i1) {
+  test.optional_region %condition {
+  } else {
+    test.yield
+  }
+  test.yield
+}
+
+// ====
+// The same descriptor contract applies to required branch pairs.
+test.func @required_branches(%condition: i1) {
+  test.branch %condition {
+  } else {
+  }
+  test.yield
+}
+
+// ====
+// Loops without carried results can synthesize the zero-operand terminator.
+test.func @implicit_loop(%lower: index, %upper: index, %step: index) {
+  test.loop %iteration = %lower to %upper step %step {
+  }
+  test.yield
+}
+
+// ====
+// Accepting the implicit kind must not skip the loop's result-count contract.
+test.func @missing_loop_result(%lower: index, %upper: index, %step: index, %initial: f32) {
+  // ERROR@+1: STRUCTURE/008 {actual_count="0", expected_count="1"}
+  %result = test.loop %iteration = %lower to %upper step %step iter_args(%carried = %initial : f32) -> (f32) {
+  }
+  test.yield
+}
+
+// ====
+test.func @explicit_missing_loop_result(%lower: index, %upper: index, %step: index, %initial: f32) {
+  // ERROR@+1: STRUCTURE/008 {actual_count="0", expected_count="1"}
+  %result = test.loop %iteration = %lower to %upper step %step iter_args(%carried = %initial : f32) -> (f32) {
+    test.implicit_yield
+  }
+  test.yield
+}
+
+// ====
+// An explicit yield still checks the result's type.
+test.func @wrong_loop_result_type(%lower: index, %upper: index, %step: index, %initial: f32) {
+  // ERROR@+1: TYPE/009 {yield_type="index", expected_type="f32"}
+  %result = test.loop %iteration = %lower to %upper step %step iter_args(%carried = %initial : f32) -> (f32) {
+    test.yield %iteration : index
+  }
+  test.yield
+}
+
+// ====
+// Elementwise bodies still have to produce their result element.
+test.func @missing_map_result(%input: tile<4xf32>) {
+  // ERROR@+1: STRUCTURE/008 {actual_count="0", expected_count="1"}
+  %result = test.map(%element = %input : tile<4xf32>) {
+  } -> (tile<4xf32>)
+  test.yield
+}
+
+// ====
+test.func @implicit_block_arguments(%input: i32) {
+  test.block_args %input : i32 do(%argument: i32) {
+    test.use %argument : i32
+  }
+  test.block_arg_groups actual(%actual: f32) expected(%expected: f32) {
+    test.use %actual, %expected : f32, f32
+  }
+  test.yield
+}
+
+// ====
+test.func @alternate_region_syntax() {
+  test.region_syntax do {
+  }
+  test.yield
+}
+
+// ====
+// An implicit kind is allowed only by a region that declares it.
+// ERROR@+1: STRUCTURE/018 {expected_terminator="test.yield", actual_terminator="test.implicit_yield"}
+test.func @undeclared_implicit_terminator() {
+  test.implicit_yield
+}

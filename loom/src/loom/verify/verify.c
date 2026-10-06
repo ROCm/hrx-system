@@ -391,8 +391,8 @@ static iree_status_t loom_verify_region(
       if (!terminator_op && requires_declared_terminator) {
         status = loom_verify_emit_missing_terminator(state, contract);
       } else if (terminator_op && requires_declared_terminator &&
-                 contract->descriptor->terminator != LOOM_OP_KIND_UNKNOWN &&
-                 terminator_op->kind != contract->descriptor->terminator) {
+                 !loom_region_descriptor_matches_terminator(
+                     contract->descriptor, terminator_op->kind)) {
         status =
             loom_verify_emit_wrong_terminator(state, contract, terminator_op);
       }

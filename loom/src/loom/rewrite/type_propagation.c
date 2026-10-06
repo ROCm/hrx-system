@@ -943,17 +943,6 @@ static bool loom_type_propagator_op_is_terminator(
   return vtable && iree_any_bit_set(vtable->traits, LOOM_TRAIT_TERMINATOR);
 }
 
-static bool loom_type_propagator_terminator_matches(
-    const loom_region_descriptor_t* descriptor, const loom_op_t* terminator) {
-  if (!terminator || !descriptor) {
-    return false;
-  }
-  if (descriptor->terminator == LOOM_OP_KIND_UNKNOWN) {
-    return true;
-  }
-  return terminator->kind == descriptor->terminator;
-}
-
 static bool loom_type_propagator_region_yield_operands(
     const loom_type_propagator_t* propagator, loom_op_t* op,
     const loom_op_vtable_t* vtable, loom_field_ref_t field_ref,
@@ -984,7 +973,8 @@ static bool loom_type_propagator_region_yield_operands(
   if (!loom_type_propagator_op_is_terminator(propagator, terminator)) {
     return false;
   }
-  if (!loom_type_propagator_terminator_matches(descriptor, terminator)) {
+  if (!loom_region_descriptor_matches_terminator(descriptor,
+                                                 terminator->kind)) {
     return false;
   }
   out_span->values = loom_op_const_operands(terminator);
@@ -1591,11 +1581,14 @@ static iree_status_t loom_type_propagator_process_value_adjacency(
         iree_any_bit_set(user_vtable->traits, LOOM_TRAIT_TERMINATOR)) {
       const loom_op_vtable_t* parent_vtable =
           loom_op_vtable(propagator->module, user->parent_op);
-      if (parent_vtable->func_like &&
-          loom_type_propagator_terminator_matches(
-              loom_op_vtable_region_descriptor(
-                  parent_vtable, parent_vtable->func_like->body_region_index),
-              user) &&
+      const loom_region_descriptor_t* body_descriptor =
+          parent_vtable->func_like
+              ? loom_op_vtable_region_descriptor(
+                    parent_vtable, parent_vtable->func_like->body_region_index)
+              : NULL;
+      if (body_descriptor &&
+          loom_region_descriptor_matches_terminator(body_descriptor,
+                                                    user->kind) &&
           loom_type_propagator_boundary_is_fixed(propagator, user->parent_op)) {
         propagator->conflict = true;
         return iree_ok_status();
