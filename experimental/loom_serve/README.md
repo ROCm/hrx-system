@@ -1,7 +1,8 @@
 # Loom model runner experiment
 
 This branch-local runner JIT-compiles portable model source into VM control,
-command programs, and GPU executables using the public Loom C API. Its private interfaces are intended to change with real models.
+command programs, and GPU executables using the public Loom C API. Its private
+interfaces are intended to change with real models.
 It is not a general HAL VM module or a serving framework.
 
 The [model-authoring packet](docs/README.md) walks through reproduction,
@@ -13,33 +14,34 @@ source-reading order, observable success gates, and failure triage.
 
 Build rules live beside their implementation and tests. Shared packages have
 model-neutral contracts; model packages own checkpoint names, graph assembly,
-configuration, numerical policy, and their remaining native adapters.
+configuration, numerical policy, and model-specific reference checks.
 
 | Package | Responsibility |
 | --- | --- |
 | [`runtime/`](runtime) | Source JIT, command materialization, VM imports, weight streaming and queue timelines |
 | [`http/`](http) | TCP carrier and bounded HTTP connection/request storage |
+| [`text/`](text) | Source-defined packed autoregressive residency, chat protocol, admission and retained token scheduling |
 | [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |
 | [`storage/`](storage) | Physical block accounting and logical page maps |
 | [`scheduling/`](scheduling) | Allocation-free ready-span packing and token/span shape selection |
 | [`motifs/`](motifs) | Reusable tensor math and GGML format kernels, specialized by model source |
 | [`models/krea/`](models/krea) | Krea source programs, checkpoint/request policy and model-specific reference checks |
-| [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy, text adapters and reference checks |
+| [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy and reference checks |
 | [`tools/`](tools) | Observation, recording, workload replay, simulation and component checks |
 
 The shared native headers are experimental model-author interfaces, not a
-stable ABI. Concrete model-native libraries are package-private. Only runtime
-consumes compiler-private command reflection; model callers use its serving
+stable ABI. Production text and image binaries have no model package dependency.
+Only runtime consumes compiler-private command reflection; model callers use its serving
 interfaces. Each model's `:sources` target publishes its source-JIT catalog and
-shared motifs, not compiled artifacts. The generic image binaries have no model
-dependency: `--model` selects an external source catalog. The catalog resolves
+shared motifs, not compiled artifacts. Both generic modality binaries require
+an explicit `--model` selecting an external source catalog. The catalog resolves
 paths relative to its model directory; copying that directory alone is not a
 complete source package.
 The [motif guide](motifs/README.md) describes composition and shape contracts.
 
 For example, the image server is
 `//experimental/loom_serve/image:server`; the text server is
-`//experimental/loom_serve/models/qwen:server`. Full serving coverage runs with
+`//experimental/loom_serve/text:server`. Full serving coverage runs with
 `build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.
 
 ## Shared execution
@@ -127,9 +129,9 @@ Its modality-level worker preserves input/output lifetimes while the shared TCP
 transport serves concurrent clients. It serializes images rather than batching
 them; it does not put image requests through Qwen's token scheduler.
 
-## Shared Qwen execution
+## Shared text execution
 
-`models/qwen/model.{h,c}` owns a concrete Qwen3.8-27B UD-Q5_K_XL residency: shared
+[`text/model.{h,c}`](text/model.h) owns a source-defined text residency: shared
 parameter storage prepared in place at startup, cached prefill/decode commands,
 model VM process, residual buffer and packed workspace. One preallocated arena
 partitions private recurrent state among up to sixteen rows. With
@@ -146,7 +148,7 @@ accepted predictions into the next verifier without an intermediate host wait.
 Admission and transport are observed between these bounded cohorts; continuous
 device admission/output rings are not implemented.
 
-The Qwen tools use IREE's standard device profiling flags. Profiling begins
+The text tools use IREE's standard device profiling flags. Profiling begins
 after command specialization and before weight loading, so it includes startup
 transfers and preparation as well as inference. Shutdown drains accepted work
 before ending the session and propagates profiling failures. For aggregate
@@ -174,13 +176,13 @@ then smaller capacities. This occupancy policy is intentionally distinct from
 measured cost-based selection.
 Supplying one shape gives a fixed-shape control; `--chunk_size` independently
 limits each row's prompt contribution. Readiness, cache reservation, and the
-default shape catalog remain model policy; the packer has no model identity or
+default shape catalog remain text-runner policy; the packer has no model identity or
 fixed row limit. Epoch records report the selected shape index and both
-capacities. `qwen_epoch_check` also accepts repeated `--epoch`
+capacities. The model-local `epoch_check` also accepts repeated `--epoch`
 options to cycle commands while comparing retained continuations with isolated
 execution in the same residency.
 
-`qwen` is the CLI caller, not an HTTP service. It round-robins active input
+`text:generate` is the CLI caller, not an HTTP service. It round-robins active input
 chunks and decode steps, supports retained follow-up turns, and can reset/reuse
 the same rows for repeated runs without reloading weights. This is stage-level
 interleaving, not batched model math. Greedy selection and device position/history
@@ -207,8 +209,8 @@ recorded commands have independent ownership. VM control is also compiled at
 startup and transferred directly into the VM's trusted in-process loading path.
 A compile error terminates preparation with its source diagnostics.
 
-The model's `config.loom` supplies fixed specialization defaults; the adapter
-supplies run-dependent bounds. Command products supply parameter placement,
+The model's `config.loom` supplies fixed specialization defaults; its source
+bootstrap declares run-dependent overrides. Command products supply parameter placement,
 launch counts, buffer requirements, and entry mapping.
 All target stages must place the shared weights identically; model preparation
 checks this before allocating the one weight slab. MTP references existing
@@ -225,7 +227,10 @@ together, then qualifying the resulting kernels. Shapes are prepared at startup,
 not inserted into the fixed command table during a running session.
 These are explicit properties of this adapter, not restrictions of the JIT.
 
-The seven rebindable slots are:
+The [text package contract](text/README.md) specifies bootstrap results, dynamic
+bindings, semantic plans, feedback and chat policy for new models. Neither the
+server nor CLI depends on a built-in model package; both require `--model`.
+Qwen's isolated commands give the following concrete seven-binding example:
 
 | Slot | Buffer contract |
 | --- | --- |
@@ -250,7 +255,7 @@ and input. This distinction is essential at EOS and tool-result boundaries.
 The CLI retains output tokens on the host while the fixed device ring wraps.
 
 ```sh
-build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve/models/qwen:generate -- \
+build_tools/bin/iree-bazel-run --config=asan //experimental/loom_serve/text:generate -- \
   --model=experimental/loom_serve/models/qwen \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
@@ -318,7 +323,7 @@ not a working chat endpoint or a pi session.
 
 ## Retained chat service
 
-`qwen_server` serves the shared model through the TCP transport. The main
+`text_server` serves the shared model through the TCP transport. The main
 application thread owns model state and packs ready prompt chunks and pending
 decode tokens into one model epoch. Every admitted row receives its minimum
 span before remaining capacity is filled from prompt input: one token for known
@@ -337,12 +342,17 @@ to admission, but active completion guarantees are never overcommitted.
 The [model guide](models/qwen/README.md#pooled-kv-and-reserved-admission)
 describes the layout, memory accounting, and real-model correctness witness.
 
-`models/qwen/chat.{h,c}` owns the text-only, non-thinking Qwen template and XML tool
-translation. The supported endpoint is `POST /v1/chat/completions`, with model
-`qwen3.8-27b`, `stream: true`, greedy generation and optional function tools.
+[`text/chat.{h,c}`](text/chat.h) owns bounded OpenAI request decoding, canonical
+history retention and SSE serialization. The source program owns model identity,
+role templates, tool grammar selection and completion text. The supported
+endpoint is `POST /v1/chat/completions`, with `stream: true`, greedy generation
+and optional function tools. The Qwen source publishes `qwen3.8-27b` and its
+non-thinking policy.
 Unknown generation options, nonzero temperature and strict constrained sampling
-are rejected. The model emits XML parameters; tool schemas recover JSON value
-types before a complete call is streamed to the client. Tool execution and full
+are rejected. Qwen emits XML parameters and explicitly selects a reusable codec
+to recover JSON value types from tool schemas. Another source policy can parse
+its own grammar and return standard function-call records without that codec.
+Complete calls are streamed to the client. Tool execution and full
 schema validation remain in the agent. Incomplete or malformed calls produce
 an error, never an executable partial call. `GET /healthz` reports readiness.
 
@@ -377,7 +387,7 @@ build's instrumentation and are not automatically performance data.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
-  //experimental/loom_serve/models/qwen:server -- \
+  //experimental/loom_serve/text:server -- \
   --model=experimental/loom_serve/models/qwen \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
   --tokenizer=/path/to/tokenizer.json \
@@ -500,7 +510,7 @@ target first, then place the observer inside the benchmark lease when measuring:
 
 ```sh
 python -B -m experimental.loom_serve.tools.observe --log=/private/runs/run.jsonl -- \
-  bazel-bin/experimental/loom_serve/models/qwen/server \
+  bazel-bin/experimental/loom_serve/text/server \
   --model=experimental/loom_serve/models/qwen \
   --epoch=128:8 \
   --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \

@@ -12,8 +12,9 @@ that program once per epoch, joins both timelines, and commits host progress.
 Cold stage selection and dynamic configuration come from `prepare.loom` through
 the shared declaration module. Source also produces retained storage geometry
 and initial row tables; the native materializer owns their allocation and
-retirement. Warm descriptor construction and chat policy still live in the
-Qwen adapter; those remaining contracts are not model-independent.
+retirement. Source also constructs device descriptors, publishes feedback and
+owns chat policy. The shared text adapter carries semantic spans, opaque source
+state and canonical checkpoints without naming a model.
 
 ## Boundaries and the information each owns
 
@@ -26,11 +27,11 @@ Qwen adapter; those remaining contracts are not model-independent.
 | [`module`](../runtime/module.h) | Indexed prepared commands, typed execute imports and registered host feedback spans | Per-session VM state, model stages, or a general HAL instruction set |
 | [`program`](../runtime/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
 | [`preparation`](../runtime/preparation.h) | Cold source declarations of commands, configuration and checkpoint domains, copied independently of the bootstrap process | Model geometry, stage semantics, or GPU allocation |
-| [`qwen_model`](../models/qwen/model.h) | Source-declared storage materialization, physical page ownership, scratch, warm descriptor construction, numerical progress | HTTP or tool semantics |
+| [`text_model`](../text/model.h) | Source-declared storage materialization, physical page ownership, scratch, source packet invocation, numerical progress | HTTP or tool semantics |
 | [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
 | [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
-| [`qwen_schedule`](../models/qwen/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
-| [`qwen_service`](../models/qwen/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
+| [`text_schedule`](../text/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
+| [`text_service`](../text/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
 | [`http_server`](../http/server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
 
 These are runner-private seams, not a proposed public serving ABI. The
@@ -40,7 +41,7 @@ directly, rather than reconstructed in host code.
 
 ## Cold residency
 
-`qwen_initialize` first invokes the source bootstrap, retains its opaque control
+`text_initialize` first invokes the source bootstrap, retains its opaque control
 state, and loads the tokenizer with the source-declared terminal marker. It then
 creates a shared device owner and JIT, compiles the declared stages, checks their
 layout agreement, loads shared weights, records commands, creates the warm VM
@@ -78,7 +79,7 @@ maximum workspace; proposal storage follows resident count and verification
 capture follows each compiled span capacity. Neither a shape change nor a row's
 page growth allocates more device backing during steady-state execution.
 
-`qwen_load_weights` delegates cold residency to `loom_serve_weights_load`.
+`text_load_weights` delegates cold residency to `loom_serve_weights_load`.
 It resolves all target/MTP parameter sharing before I/O, so each unique tensor
 is loaded once. Each call selects explicit reflected roots from one checkpoint
 domain. Distinct domains, such as an immutable base and its LoRA adapter, load
@@ -108,8 +109,8 @@ the layout, allocation strategy, and startup profiling recipe.
 
 ## One real packed epoch
 
-Before scheduling, `qwen_enqueue` validates a bounded request without assigning
-a device row. `qwen_admit_pending` selects an idle row for the oldest request,
+Before scheduling, `text_enqueue` validates a bounded request without assigning
+a device row. `text_admit_pending` selects an idle row for the oldest request,
 prepares its actual retained append, and reserves page-rounded completion and
 speculative capacity. Active guarantees must fit before any idle cache is
 displaced. Physical pages are assigned as epochs grow; idle rows are reclaimed
@@ -122,7 +123,7 @@ request count belongs to the service. A queued request has no recurrent slot,
 page map, or VM instance. Admission is retried on credit/row changes, not on
 every decode step. Current policy reserves rather than overcommits capacity.
 
-`qwen_prepare_ready` first resolves output backpressure and cancellation. A
+`text_prepare_ready` first resolves output backpressure and cancellation. A
 prompt row contributes its remaining known tokens with minimum one. A decoding
 row contributes one pending token, or four reserved inputs for an indivisible
 MTP verifier when context and output credit permit it.
@@ -133,19 +134,19 @@ capacity from longer spans, and advances rotating priority only for the winning
 plan. The objective currently maximizes useful tokens, then participating
 spans, then prefers smaller token/span capacities. It is not a latency-constrained
 cost model. The packer allocates nothing, has no fixed row count, and receives
-no model configuration. The Qwen adapter owns its catalog bounds and computes
-indivisible verifier lengths before calling it; other sequence models can
-reuse packing without adopting those Qwen constraints.
+no model configuration. The bounded text adapter owns its catalog bounds and computes indivisible
+verifier lengths before calling it. Model programs implement that semantic
+contract with their own numerical layout and stage composition.
 
-`qwen_execute_epoch` constructs spans with stable resident row indices. Packed
+`text_execute_epoch` constructs spans with stable resident row indices. Packed
 activation offsets are temporary; a row's KV and recurrent state do not move
 when its position in the batch changes. Prompt chunks request an output only
 at their final input token. Ordinary decode consumes the previously selected
 token and selects its successor. A selected token is not yet part of retained
 model state until a subsequent invocation consumes it.
 
-`loom_serve_qwen_model_epoch` validates the whole external span request before
-submission, builds the immutable device descriptors, uploads input/control,
+`loom_serve_text_model_epoch` validates the whole external span request before
+submission, asks source to build immutable device descriptors, uploads input/control,
 calls the source VM sequence, and obtains completed output records. Dense
 projections share a flat token matrix; attention and recurrent kernels use
 span boundaries and row origins to preserve independent histories. The output

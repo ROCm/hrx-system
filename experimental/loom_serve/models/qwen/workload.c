@@ -9,7 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "experimental/loom_serve/models/qwen/flags.h"
+#include "experimental/loom_serve/text/flags.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
 
@@ -28,11 +28,11 @@ IREE_FLAG(string, baseline, "practical",
           "practical uses ordinary decode; matched uses the prefill math for "
           "length-one inputs and requires identical outputs.");
 
-enum { QWEN_WORKLOAD_ROWS = LOOM_SERVE_QWEN_ROW_CAPACITY };
+enum { QWEN_WORKLOAD_ROWS = LOOM_SERVE_TEXT_ROW_CAPACITY };
 
 typedef struct qwen_workload_row_t {
   // Borrowed device residency, shared across every replay window.
-  loom_serve_qwen_row_t* device_row;
+  loom_serve_text_row_t* device_row;
   // Owned encoded prompt storage, allocated to context capacity.
   int32_t* input;
   // Actual encoded prompt count.
@@ -55,18 +55,18 @@ typedef struct qwen_workload_row_t {
   bool finished;
 } qwen_workload_row_t;
 
-static iree_status_t qwen_workload_prepare(loom_serve_qwen_model_t* model,
+static iree_status_t qwen_workload_prepare(loom_serve_text_model_t* model,
                                            iree_host_size_t row_count,
                                            qwen_workload_row_t* rows,
                                            iree_allocator_t allocator) {
   const iree_flag_string_list_t paths = FLAG_prompt_file_list();
   const iree_host_size_t capacity =
-      loom_serve_qwen_model_context_capacity(model);
+      loom_serve_text_model_context_capacity(model);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
        ++i) {
     qwen_workload_row_t* row = &rows[i];
-    row->device_row = loom_serve_qwen_model_row(model, i);
+    row->device_row = loom_serve_text_model_row(model, i);
     status = iree_allocator_malloc(allocator, capacity * sizeof(int32_t),
                                    (void**)&row->input);
     if (iree_status_is_ok(status)) {
@@ -85,7 +85,7 @@ static iree_status_t qwen_workload_prepare(loom_serve_qwen_model_t* model,
     }
     if (iree_status_is_ok(status)) {
       status = iree_tokenizer_encode(
-          loom_serve_qwen_model_tokenizer(model),
+          loom_serve_text_model_tokenizer(model),
           iree_make_string_view((const char*)contents->const_buffer.data,
                                 contents->const_buffer.data_length),
           IREE_TOKENIZER_ENCODE_FLAG_NONE,
@@ -109,16 +109,16 @@ static iree_status_t qwen_workload_prepare(loom_serve_qwen_model_t* model,
   return status;
 }
 
-static iree_status_t qwen_workload_seed(loom_serve_qwen_model_t* model,
+static iree_status_t qwen_workload_seed(loom_serve_text_model_t* model,
                                         iree_host_size_t row_count,
                                         qwen_workload_row_t* rows) {
   const iree_host_size_t capacity =
-      loom_serve_qwen_model_prefill_capacity(model);
+      loom_serve_text_model_prefill_capacity(model);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < row_count && iree_status_is_ok(status);
        ++i) {
     qwen_workload_row_t* row = &rows[i];
-    status = loom_serve_qwen_row_reset(row->device_row);
+    status = loom_serve_text_row_reset(row->device_row);
     row->consumed_count = 0;
     row->output_count = 0;
     row->finished = false;
@@ -127,13 +127,13 @@ static iree_status_t qwen_workload_seed(loom_serve_qwen_model_t* model,
            iree_status_is_ok(status)) {
       const iree_host_size_t count =
           iree_min(capacity, row->prefix_count - row->consumed_count);
-      status = loom_serve_qwen_row_prefill(row->device_row, count,
+      status = loom_serve_text_row_prefill(row->device_row, count,
                                            row->input + row->consumed_count);
       row->consumed_count += count;
     }
     if (iree_status_is_ok(status) && row->prefix_count == row->input_count) {
-      row->initial_prediction = loom_serve_qwen_row_token(row->device_row);
-      row->finished = loom_serve_qwen_row_is_eos(row->device_row);
+      row->initial_prediction = loom_serve_text_row_token(row->device_row);
+      row->finished = loom_serve_text_row_is_eos(row->device_row);
     }
   }
   return status;
@@ -143,15 +143,15 @@ static iree_status_t qwen_workload_seed(loom_serve_qwen_model_t* model,
 // one token each, and ready prefill rows split the remaining capacity. Both
 // execution arms receive the same partition at each identical logical state.
 static iree_host_size_t qwen_workload_plan(
-    loom_serve_qwen_model_t* model, iree_host_size_t row_count,
-    qwen_workload_row_t* rows, loom_serve_qwen_span_t spans[QWEN_WORKLOAD_ROWS],
+    loom_serve_text_model_t* model, iree_host_size_t row_count,
+    qwen_workload_row_t* rows, loom_serve_text_span_t spans[QWEN_WORKLOAD_ROWS],
     bool prefills[QWEN_WORKLOAD_ROWS],
     iree_host_size_t positions[QWEN_WORKLOAD_ROWS],
     int32_t decode_tokens[QWEN_WORKLOAD_ROWS]) {
   iree_host_size_t span_count = 0;
   iree_host_size_t prefill_count = 0;
   iree_host_size_t remaining =
-      loom_serve_qwen_model_shapes(model)[0].token_capacity;
+      loom_serve_text_model_shapes(model)[0].token_capacity;
   for (iree_host_size_t i = 0; i < row_count; ++i) {
     qwen_workload_row_t* row = &rows[i];
     if (row->finished) {
@@ -160,11 +160,11 @@ static iree_host_size_t qwen_workload_plan(
     if (row->consumed_count < row->input_count) {
       ++prefill_count;
     } else {
-      decode_tokens[i] = loom_serve_qwen_row_token(row->device_row);
-      positions[span_count] = loom_serve_qwen_row_position(row->device_row);
+      decode_tokens[i] = loom_serve_text_row_token(row->device_row);
+      positions[span_count] = loom_serve_text_row_position(row->device_row);
       prefills[span_count] = false;
-      spans[span_count++] = (loom_serve_qwen_span_t){
-          i, 1, &decode_tokens[i], LOOM_SERVE_QWEN_SPAN_FLAG_SELECT};
+      spans[span_count++] = (loom_serve_text_span_t){
+          i, 1, &decode_tokens[i], LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
       --remaining;
     }
   }
@@ -175,12 +175,12 @@ static iree_host_size_t qwen_workload_plan(
     }
     const iree_host_size_t count = iree_min(
         row->input_count - row->consumed_count, remaining / prefill_count);
-    positions[span_count] = loom_serve_qwen_row_position(row->device_row);
+    positions[span_count] = loom_serve_text_row_position(row->device_row);
     prefills[span_count] = true;
     spans[span_count++] =
-        (loom_serve_qwen_span_t){i, count, row->input + row->consumed_count,
+        (loom_serve_text_span_t){i, count, row->input + row->consumed_count,
                                  row->consumed_count + count == row->input_count
-                                     ? LOOM_SERVE_QWEN_SPAN_FLAG_SELECT
+                                     ? LOOM_SERVE_TEXT_SPAN_FLAG_SELECT
                                      : 0};
     remaining -= count;
     --prefill_count;
@@ -188,7 +188,7 @@ static iree_host_size_t qwen_workload_plan(
   return span_count;
 }
 
-static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
+static iree_status_t qwen_workload_window(loom_serve_text_model_t* model,
                                           iree_host_size_t row_count,
                                           qwen_workload_row_t* rows,
                                           iree_host_size_t window) {
@@ -201,7 +201,7 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
   iree_status_t status = iree_ok_status();
   const iree_time_t start = iree_time_now();
   while (iree_status_is_ok(status)) {
-    loom_serve_qwen_span_t spans[QWEN_WORKLOAD_ROWS];
+    loom_serve_text_span_t spans[QWEN_WORKLOAD_ROWS];
     bool prefills[QWEN_WORKLOAD_ROWS];
     iree_host_size_t positions[QWEN_WORKLOAD_ROWS];
     int32_t inputs[QWEN_WORKLOAD_ROWS];
@@ -212,16 +212,16 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
     }
     const iree_time_t issue_start = iree_time_now();
     if (arm == 'B') {
-      status = loom_serve_qwen_model_epoch(model, 0, span_count, spans);
+      status = loom_serve_text_model_epoch(model, 0, span_count, spans);
     } else {
       for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
            ++i) {
-        const loom_serve_qwen_span_t* span = &spans[i];
-        loom_serve_qwen_row_t* row = rows[span->row_index].device_row;
+        const loom_serve_text_span_t* span = &spans[i];
+        loom_serve_text_row_t* row = rows[span->row_index].device_row;
         status = prefills[i] || strcmp(FLAG_baseline, "matched") == 0
-                     ? loom_serve_qwen_row_prefill(row, span->token_count,
+                     ? loom_serve_text_row_prefill(row, span->token_count,
                                                    span->token_ids)
-                     : loom_serve_qwen_row_decode(row);
+                     : loom_serve_text_row_decode(row);
       }
     }
     const iree_duration_t duration = iree_time_now() - issue_start;
@@ -235,7 +235,7 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
         window, arm, epochs++, duration);
     for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
          ++i) {
-      const loom_serve_qwen_span_t* span = &spans[i];
+      const loom_serve_text_span_t* span = &spans[i];
       qwen_workload_row_t* row = &rows[span->row_index];
       if (prefills[i]) {
         row->consumed_count += span->token_count;
@@ -244,11 +244,11 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
         decode_tokens += span->token_count;
       }
       const bool selected =
-          iree_any_bit_set(span->flags, LOOM_SERVE_QWEN_SPAN_FLAG_SELECT);
+          iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT);
       if (selected) {
         row->output[row->output_count++] =
-            loom_serve_qwen_row_token(row->device_row);
-        row->finished = loom_serve_qwen_row_is_eos(row->device_row) ||
+            loom_serve_text_row_token(row->device_row);
+        row->finished = loom_serve_text_row_is_eos(row->device_row) ||
                         row->output_count == (iree_host_size_t)FLAG_max_tokens;
         ++selected_tokens;
       }
@@ -258,7 +258,7 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
           i ? "," : "", span->row_index, positions[i],
           prefills[i] ? span->token_count : 0,
           prefills[i] ? 0 : span->token_count, selected ? 1 : 0);
-      if (loom_serve_qwen_row_position(row->device_row) !=
+      if (loom_serve_text_row_position(row->device_row) !=
           positions[i] + span->token_count) {
         status = iree_make_status(IREE_STATUS_DATA_LOSS,
                                   "row %zu did not consume its span",
@@ -305,8 +305,8 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
     printf(
         "%s{\"row\":%zu,\"consumed_position\":%zu,\"eos\":%s,"
         "\"initial_prediction\":%d,\"selected_ids\":[",
-        i ? "," : "", i, loom_serve_qwen_row_position(row->device_row),
-        loom_serve_qwen_row_is_eos(row->device_row) ? "true" : "false",
+        i ? "," : "", i, loom_serve_text_row_position(row->device_row),
+        loom_serve_text_row_is_eos(row->device_row) ? "true" : "false",
         row->initial_prediction);
     for (iree_host_size_t j = 0; j < row->output_count; ++j) {
       printf("%s%d", j ? "," : "", row->output[j]);
@@ -324,7 +324,7 @@ static iree_status_t qwen_workload_window(loom_serve_qwen_model_t* model,
   return iree_ok_status();
 }
 
-static iree_status_t qwen_workload_print(loom_serve_qwen_model_t* model,
+static iree_status_t qwen_workload_print(loom_serve_text_model_t* model,
                                          iree_host_size_t row_count,
                                          const qwen_workload_row_t* rows,
                                          iree_host_size_t window,
@@ -342,7 +342,7 @@ static iree_status_t qwen_workload_print(loom_serve_qwen_model_t* model,
     char text[65536];
     iree_host_size_t length = 0;
     IREE_RETURN_IF_ERROR(iree_tokenizer_decode(
-        loom_serve_qwen_model_tokenizer(model),
+        loom_serve_text_model_tokenizer(model),
         iree_tokenizer_make_token_id_list(tokens, token_count),
         IREE_TOKENIZER_DECODE_FLAG_SKIP_SPECIAL_TOKENS,
         iree_make_mutable_string_view(text, sizeof(text)), allocator, &length));
@@ -360,7 +360,7 @@ static iree_status_t qwen_workload_print(loom_serve_qwen_model_t* model,
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   const iree_host_size_t row_count = FLAG_prompt_file_list().count;
-  if (loom_serve_qwen_explicit_shape_count_from_flags() != 1 || row_count < 1 ||
+  if (loom_serve_text_explicit_shape_count_from_flags() != 1 || row_count < 1 ||
       row_count > QWEN_WORKLOAD_ROWS || FLAG_retained_tokens < 0 ||
       FLAG_prefill_rows < 0 ||
       (iree_host_size_t)FLAG_prefill_rows > row_count || FLAG_max_tokens < 1 ||
@@ -372,16 +372,16 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   const iree_allocator_t allocator = iree_allocator_system();
-  const loom_serve_qwen_flag_defaults_t defaults = {.row_count = row_count};
-  loom_serve_qwen_model_t* model = NULL;
+  const loom_serve_text_flag_defaults_t defaults = {.row_count = row_count};
+  loom_serve_text_model_t* model = NULL;
   qwen_workload_row_t rows[QWEN_WORKLOAD_ROWS] = {0};
   iree_status_t status =
-      loom_serve_qwen_model_create_from_flags(&defaults, &model, allocator);
+      loom_serve_text_model_create_from_flags(&defaults, &model, allocator);
   if (iree_status_is_ok(status) &&
-      (loom_serve_qwen_model_shapes(model)[0].span_capacity < row_count ||
-       loom_serve_qwen_model_shapes(model)[0].token_capacity < row_count ||
-       loom_serve_qwen_model_shapes(model)[0].token_capacity !=
-           loom_serve_qwen_model_prefill_capacity(model))) {
+      (loom_serve_text_model_shapes(model)[0].span_capacity < row_count ||
+       loom_serve_text_model_shapes(model)[0].token_capacity < row_count ||
+       loom_serve_text_model_shapes(model)[0].token_capacity !=
+           loom_serve_text_model_prefill_capacity(model))) {
     status = iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "workload requires covering span capacity and equal token capacities");
@@ -397,7 +397,7 @@ int main(int argc, char** argv) {
       printf("{\"event\":\"seed\",\"window\":%zu,\"completed_ns\":%" PRId64
              ",\"token_capacity\":%zu,\"rows\":[",
              window, iree_time_now() - start,
-             loom_serve_qwen_model_shapes(model)[0].token_capacity);
+             loom_serve_text_model_shapes(model)[0].token_capacity);
       for (iree_host_size_t i = 0; i < row_count; ++i) {
         printf("%s{\"row\":%zu,\"prompt_tokens\":%zu,\"retained_tokens\":%zu}",
                i ? "," : "", i, rows[i].input_count, rows[i].prefix_count);
@@ -415,7 +415,7 @@ int main(int argc, char** argv) {
       status = qwen_workload_print(model, row_count, rows, window, allocator);
     }
   }
-  status = iree_status_join(status, loom_serve_qwen_model_destroy(model));
+  status = iree_status_join(status, loom_serve_text_model_destroy(model));
   for (iree_host_size_t i = 0; i < row_count; ++i) {
     iree_allocator_free(allocator, rows[i].input);
     iree_allocator_free(allocator, rows[i].output);

@@ -8,9 +8,9 @@
 #include <string>
 #include <vector>
 
-#include "experimental/loom_serve/models/qwen/model.h"
-#include "experimental/loom_serve/models/qwen/schedule.h"
 #include "experimental/loom_serve/runtime/preparation.h"
+#include "experimental/loom_serve/text/model.h"
+#include "experimental/loom_serve/text/schedule.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -180,8 +180,8 @@ TEST_F(PrepareTest, DeclaresCompleteProductionCatalogAndOpaqueState) {
               ? std::vector<loom_serve_packing_shape_t>{}
               : std::vector<loom_serve_packing_shape_t>{{32, 1}, {128, rows}};
       if (mode >= 5) {
-        shapes.resize(LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY);
-        shapes.resize(loom_serve_qwen_default_shapes(rows, 512, shapes.data()));
+        shapes.resize(LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY);
+        shapes.resize(loom_serve_text_default_shapes(rows, 512, shapes.data()));
       }
       ASSERT_NO_FATAL_FAILURE(Prepare(rows, pool, mtp, shapes));
       ASSERT_NE(preparation, nullptr);
@@ -293,7 +293,7 @@ TEST(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
   const std::string source = FLAG_prepare_source;
   const std::string directory = source.substr(0, source.find_last_of('/'));
   const loom_serve_packing_shape_t shapes[] = {{32, 1}, {128, 3}};
-  const loom_serve_qwen_options_t options = {
+  const loom_serve_text_options_t options = {
       .source_directory = iree_make_cstring_view(directory.c_str()),
       .prefill_capacity = 512,
       .context_capacity = 16384,
@@ -305,16 +305,16 @@ TEST(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
       .tokenizer_path = IREE_SV("missing-qwen-tokenizer.json"),
       .row_count = 3,
   };
-  loom_serve_qwen_model_t* model = nullptr;
+  loom_serve_text_model_t* model = nullptr;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_NOT_FOUND,
-      loom_serve_qwen_model_create(&options, iree_allocator_system(), &model));
+      loom_serve_text_model_create(&options, iree_allocator_system(), &model));
   EXPECT_EQ(model, nullptr);
   auto invalid = options;
   invalid.pool_capacity = 65;
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_qwen_model_create(&invalid, iree_allocator_system(), &model));
+      loom_serve_text_model_create(&invalid, iree_allocator_system(), &model));
   EXPECT_EQ(model, nullptr);
 }
 

@@ -31,41 +31,6 @@ iree_register_generated_compile_input(${_FILEGROUP_TARGET}
     "${CMAKE_CURRENT_BINARY_DIR}/sources.stamp"
 )
 
-loom_cc_library(
-  NAME
-    flags
-  HDRS
-    "flags.h"
-  SRCS
-    "flags.c"
-  DEPS
-    ::model
-    ::schedule
-    iree::base
-    iree::base::tooling::flags
-    loom::binding::c::loomc
-  PUBLIC
-)
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_binary(
-  NAME
-    generate
-  SRCS
-    "generate.c"
-  DATA
-    ::sources
-  DEPS
-    ::chat
-    ::flags
-    ::model
-    iree::base
-    iree::base::tooling::flags
-    iree::io::file_handle
-    iree::tokenizer
-)
-endif()
-
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME
@@ -87,43 +52,6 @@ loom_cc_test(
 endif()
 
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_library(
-  NAME
-    model
-  HDRS
-    "model.h"
-  SRCS
-    "model.c"
-  DEPS
-    ::chat
-    iree::base
-    iree::base::internal::path
-    iree::experimental::loom_serve::runtime::command
-    iree::experimental::loom_serve::runtime::device
-    iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::input
-    iree::experimental::loom_serve::runtime::jit
-    iree::experimental::loom_serve::runtime::json
-    iree::experimental::loom_serve::runtime::module
-    iree::experimental::loom_serve::runtime::preparation
-    iree::experimental::loom_serve::runtime::program
-    iree::experimental::loom_serve::runtime::weights
-    iree::experimental::loom_serve::scheduling::packing
-    iree::experimental::loom_serve::storage::block_pool
-    iree::hal
-    iree::io::file_handle
-    iree::module::hal::types
-    iree::tokenizer
-    iree::tokenizer::format::huggingface::tokenizer_json
-    iree::tokenizer::vocab
-    iree::tooling::device_util
-    iree::vm
-    loom::binding::c::loomc
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
     prepare_test
@@ -132,12 +60,12 @@ loom_cc_test(
   DATA
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/prepare.loom"
   DEPS
-    ::model
-    ::schedule
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::scheduling::packing
+    iree::experimental::loom_serve::text::model
+    iree::experimental::loom_serve::text::schedule
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm
@@ -195,10 +123,10 @@ loom_cc_binary(
   SRCS
     "epoch_check.c"
   DEPS
-    ::flags
-    ::model
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::text::flags
+    iree::experimental::loom_serve::text::model
     iree::tokenizer
   TESTONLY
 )
@@ -211,10 +139,10 @@ loom_cc_binary(
   SRCS
     "workload.c"
   DEPS
-    ::flags
-    ::model
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::text::flags
+    iree::experimental::loom_serve::text::model
     iree::io::file_handle
     iree::tokenizer
   TESTONLY
@@ -228,36 +156,18 @@ loom_cc_binary(
   SRCS
     "replay.c"
   DEPS
-    ::chat
-    ::flags
-    ::model
     iree::base
     iree::base::internal::json
     iree::base::tooling::flags
     iree::experimental::loom_serve::scheduling::packing
+    iree::experimental::loom_serve::text::chat
+    iree::experimental::loom_serve::text::flags
+    iree::experimental::loom_serve::text::model
     iree::io::file_handle
     iree::tokenizer
   TESTONLY
 )
 endif()
-
-loom_cc_library(
-  NAME
-    chat
-  HDRS
-    "chat.h"
-  SRCS
-    "chat.c"
-  DEPS
-    iree::base
-    iree::base::internal::json
-    iree::base::internal::unicode
-    iree::experimental::loom_serve::runtime::program
-    iree::vm
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
 
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
@@ -270,12 +180,12 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/chat_alias.loom"
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/portable_chat.loom"
   DEPS
-    ::chat
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::json
     iree::experimental::loom_serve::runtime::program
+    iree::experimental::loom_serve::text::chat
     iree::testing::gtest
     iree::testing::gtest_main
     iree::tokenizer
@@ -285,75 +195,6 @@ loom_cc_test(
     "--chat_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/control.loom}}"
     "--alias_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/chat_alias.loom}}"
     "--portable_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/qwen/testdata/portable_chat.loom}}"
-)
-endif()
-
-loom_cc_library(
-  NAME
-    schedule
-  HDRS
-    "schedule.h"
-  SRCS
-    "schedule.c"
-  DEPS
-    iree::base
-    iree::experimental::loom_serve::scheduling::packing
-  PUBLIC
-)
-
-loom_cc_test(
-  NAME
-    schedule_test
-  SRCS
-    "schedule_test.cc"
-  DEPS
-    ::schedule
-    iree::experimental::loom_serve::scheduling::packing
-    iree::testing::gtest
-    iree::testing::gtest_main
-)
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_library(
-  NAME
-    service
-  HDRS
-    "service.h"
-  SRCS
-    "service.c"
-  DEPS
-    ::chat
-    ::model
-    ::schedule
-    iree::base
-    iree::base::threading
-    iree::base::threading::thread
-    iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::scheduling::packing
-    iree::tokenizer
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-endif()
-
-if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
-loom_cc_binary(
-  NAME
-    server
-  SRCS
-    "server.c"
-  DATA
-    ::sources
-  DEPS
-    ::flags
-    ::model
-    ::service
-    iree::async
-    iree::base
-    iree::base::tooling::flags
-    iree::experimental::loom_serve::http::server
 )
 endif()
 
