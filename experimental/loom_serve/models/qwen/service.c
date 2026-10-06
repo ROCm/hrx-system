@@ -11,6 +11,7 @@
 
 #include "experimental/loom_serve/models/qwen/chat.h"
 #include "experimental/loom_serve/models/qwen/schedule.h"
+#include "experimental/loom_serve/scheduling/packing.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/thread.h"
 #include "loom/util/json.h"
@@ -180,7 +181,7 @@ typedef struct qwen_service_t {
   // Fixed proposal depth: zero for target-only, three for whole verifiers.
   iree_host_size_t mtp_depth;
   // Borrowed model shapes, or the one isolated control shape.
-  const loom_serve_qwen_shape_t* shapes;
+  const loom_serve_packing_shape_t* shapes;
   // Number of candidate shapes evaluated against each ready cohort.
   iree_host_size_t shape_count;
   // Rotating admission priority, independent of row or request identity.
@@ -923,8 +924,8 @@ static iree_status_t qwen_selected_tokens(qwen_service_t* service,
 // packet behind a busy carrier pauses only that row.
 static void qwen_prepare_ready(qwen_service_t* service, qwen_session_t* session,
                                bool* out_progress,
-                               loom_serve_qwen_ready_span_t* out_ready) {
-  *out_ready = (loom_serve_qwen_ready_span_t){0};
+                               loom_serve_ready_span_t* out_ready) {
+  *out_ready = (loom_serve_ready_span_t){0};
   if (!session->request.connection) {
     return;
   }
@@ -953,7 +954,7 @@ static void qwen_prepare_ready(qwen_service_t* service, qwen_session_t* session,
     }
   }
   if (session->request.phase == QWEN_REQUEST_PREFILL) {
-    *out_ready = (loom_serve_qwen_ready_span_t){
+    *out_ready = (loom_serve_ready_span_t){
         session->request.input_count - session->request.input_offset, 1};
   } else {
     // A final single output cannot amortize drafting. Near the context limit,
@@ -964,8 +965,8 @@ static void qwen_prepare_ready(qwen_service_t* service, qwen_session_t* session,
         service->context_capacity -
                 loom_serve_qwen_row_position(session->row) >=
             4;
-    *out_ready = verify ? (loom_serve_qwen_ready_span_t){4, 4}
-                        : (loom_serve_qwen_ready_span_t){1, 1};
+    *out_ready = verify ? (loom_serve_ready_span_t){4, 4}
+                        : (loom_serve_ready_span_t){1, 1};
   }
 }
 
@@ -974,7 +975,7 @@ static void qwen_prepare_ready(qwen_service_t* service, qwen_session_t* session,
 // tail is not a decode. Credit and cancellation were settled before this
 // filter.
 static void qwen_separate_ready(const qwen_service_t* service,
-                                loom_serve_qwen_ready_span_t* ready) {
+                                loom_serve_ready_span_t* ready) {
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     const iree_host_size_t first = (service->cursor + i) % service->row_count;
     if (!ready[first].token_count) {
@@ -983,7 +984,7 @@ static void qwen_separate_ready(const qwen_service_t* service,
     const qwen_request_phase_t phase = service->sessions[first].request.phase;
     for (iree_host_size_t row = 0; row < service->row_count; ++row) {
       if (service->sessions[row].request.phase != phase) {
-        ready[row] = (loom_serve_qwen_ready_span_t){0};
+        ready[row] = (loom_serve_ready_span_t){0};
       }
     }
     return;
@@ -992,7 +993,7 @@ static void qwen_separate_ready(const qwen_service_t* service,
 
 static iree_status_t qwen_execute_epoch(
     qwen_service_t* service, iree_host_size_t shape_index,
-    iree_host_size_t count, const loom_serve_qwen_scheduled_span_t* scheduled) {
+    iree_host_size_t count, const loom_serve_packed_span_t* scheduled) {
   loom_serve_qwen_span_t spans[LOOM_SERVE_QWEN_ROW_CAPACITY];
   loom_serve_qwen_result_t results[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
   int32_t decode_tokens[LOOM_SERVE_QWEN_ROW_CAPACITY];
@@ -1186,7 +1187,7 @@ iree_status_t loom_serve_qwen_service_run(
     loom_serve_qwen_model_t* model, loom_serve_http_server_t* server,
     const loom_serve_qwen_service_options_t* options,
     iree_allocator_t host_allocator) {
-  const loom_serve_qwen_shape_t isolated_shape = {
+  const loom_serve_packing_shape_t isolated_shape = {
       loom_serve_qwen_model_prefill_capacity(model), options->row_count};
   qwen_service_t service = {
       .allocator = host_allocator,
@@ -1259,7 +1260,7 @@ iree_status_t loom_serve_qwen_service_run(
       }
       progress = true;
     }
-    loom_serve_qwen_ready_span_t ready[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
+    loom_serve_ready_span_t ready[LOOM_SERVE_QWEN_ROW_CAPACITY] = {0};
     for (iree_host_size_t i = 0;
          i < service.row_count && iree_status_is_ok(status); ++i) {
       qwen_prepare_ready(&service, &service.sessions[i], &progress, &ready[i]);
@@ -1269,10 +1270,10 @@ iree_status_t loom_serve_qwen_service_run(
       if (service.packing_mode == LOOM_SERVE_QWEN_PACKING_SEPARATE) {
         qwen_separate_ready(&service, ready);
       }
-      loom_serve_qwen_scheduled_span_t spans[LOOM_SERVE_QWEN_ROW_CAPACITY];
-      loom_serve_qwen_scheduled_span_t scratch[LOOM_SERVE_QWEN_ROW_CAPACITY];
+      loom_serve_packed_span_t spans[LOOM_SERVE_QWEN_ROW_CAPACITY];
+      loom_serve_packed_span_t scratch[LOOM_SERVE_QWEN_ROW_CAPACITY];
       iree_host_size_t shape_index = 0;
-      const iree_host_size_t count = loom_serve_qwen_schedule_shapes(
+      const iree_host_size_t count = loom_serve_pack_shapes(
           service.row_count, ready, service.shape_count, service.shapes,
           service.chunk_size, &service.cursor, spans, scratch, &shape_index);
       if (count) {

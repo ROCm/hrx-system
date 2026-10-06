@@ -21,6 +21,7 @@ configuration, numerical policy, and their remaining native adapters.
 | [`http/`](http) | TCP carrier and bounded HTTP connection/request storage |
 | [`image/`](image) | Image request validation, completed-image service and output encoding; independent of diffusion architecture |
 | [`storage/`](storage) | Physical block accounting and logical page maps |
+| [`scheduling/`](scheduling) | Allocation-free ready-span packing and token/span shape selection |
 | [`motifs/`](motifs) | Reusable tensor math and GGML format kernels, specialized by model source |
 | [`models/krea/`](models/krea) | Krea model programs, checkpoint/request policy, image adapters and reference checks |
 | [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy, text adapters and reference checks |
@@ -160,12 +161,15 @@ and caches these shapes from the same source and live device profile. Cached
 commands share the same weights, retained rows, residual storage, maximum-sized
 workspace, and VM process. Each occupies one immutable command-table slot;
 selecting another shape allocates no device backing and copies no retained
-state. The scheduler evaluates ready spans against each shape and chooses the
-most input tokens, then the most participating spans, then smaller capacities. This
-occupancy policy is intentionally distinct from measured cost-based selection.
+state. The shared [packer](scheduling/packing.h) evaluates ready spans against
+each shape and chooses the most input tokens, then the most participating spans,
+then smaller capacities. This occupancy policy is intentionally distinct from
+measured cost-based selection.
 Supplying one shape gives a fixed-shape control; `--chunk_size` independently
-limits each row's prompt contribution. Epoch records report the selected shape
-index and both capacities. `qwen_epoch_check` also accepts repeated `--epoch`
+limits each row's prompt contribution. Readiness, cache reservation, and the
+default shape catalog remain model policy; the packer has no model identity or
+fixed row limit. Epoch records report the selected shape index and both
+capacities. `qwen_epoch_check` also accepts repeated `--epoch`
 options to cycle commands while comparing retained continuations with isolated
 execution in the same residency.
 

@@ -7,7 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_MODELS_QWEN_MODEL_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_MODELS_QWEN_MODEL_H_
 
-#include "experimental/loom_serve/models/qwen/schedule.h"
+#include "experimental/loom_serve/scheduling/packing.h"
 #include "iree/base/api.h"
 #include "iree/tokenizer/tokenizer.h"
 #include "loomc/sanitizer.h"
@@ -43,7 +43,7 @@ typedef struct loom_serve_qwen_options_t {
   // Number of cached packed-epoch stages; zero selects isolated execution.
   iree_host_size_t epoch_count;
   // Borrowed shapes specialized from the shared catalog during creation.
-  const loom_serve_qwen_shape_t* epoch_shapes;
+  const loom_serve_packing_shape_t* epoch_shapes;
   // Prepare MTP proposal, catch-up, and verification using shared target
   // weights.
   bool enable_mtp;
@@ -152,7 +152,7 @@ iree_host_size_t loom_serve_qwen_model_prefill_capacity(
 // Zero means no packed-epoch stages were prepared.
 iree_host_size_t loom_serve_qwen_model_shape_count(
     const loom_serve_qwen_model_t* model);
-const loom_serve_qwen_shape_t* loom_serve_qwen_model_shapes(
+const loom_serve_packing_shape_t* loom_serve_qwen_model_shapes(
     const loom_serve_qwen_model_t* model);
 
 // Advances distinct resident rows in one packed model traversal. The nonempty

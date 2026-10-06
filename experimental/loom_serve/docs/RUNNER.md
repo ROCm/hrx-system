@@ -25,7 +25,8 @@ not make those model-independent.
 | [`program`](../runtime/program.h) | Source-JIT bytecode, linked libraries, one process and serialized invocation | Model geometry or the lifetime of asynchronously borrowed host payloads |
 | [`qwen_model`](../models/qwen/model.h) | Weight interpretation, row/state layout, scratch, descriptor construction, numerical progress | HTTP or tool semantics |
 | [`weights`](../runtime/weights.h) | Shared parameter residency, source policy queries, cached preparers, file-read/preparation readiness | Tensor naming rules, model geometry, or ordering from submission order |
-| [`qwen_schedule`](../models/qwen/schedule.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Tokens, attention state, measured kernel cost |
+| [`packing`](../scheduling/packing.h) | Trusted ready span lengths, indivisible minima, shapes, rotating priority | Token values, model identity, attention state, measured kernel cost |
+| [`qwen_schedule`](../models/qwen/schedule.h) | Default model shape catalog and completion-reservation extent | HTTP output credit or committed model progress |
 | [`qwen_service`](../models/qwen/service.h) | Validated chat, session keys, canonical history, output credit, scheduling policy | Kernel layout decisions |
 | [`http_server`](../http/server.h) | Bounded HTTP framing and copied response bytes over IREE TCP carriers | Model sessions or sampling |
 
@@ -114,12 +115,15 @@ prompt row contributes its remaining known tokens with minimum one. A decoding
 row contributes one pending token, or four reserved inputs for an indivisible
 MTP verifier when context and output credit permit it.
 
-`loom_serve_qwen_schedule_shapes` evaluates the same readiness against each
+The shared `loom_serve_pack_shapes` evaluates the same readiness against each
 cached shape. It admits each selected row's minimum, fills remaining token
 capacity from longer spans, and advances rotating priority only for the winning
 plan. The objective currently maximizes useful tokens, then participating
 spans, then prefers smaller token/span capacities. It is not a latency-constrained
-cost model.
+cost model. The packer allocates nothing, has no fixed row count, and receives
+no model configuration. The Qwen adapter owns its catalog bounds and computes
+indivisible verifier lengths before calling it; other sequence models can
+reuse packing without adopting those Qwen constraints.
 
 `qwen_execute_epoch` constructs spans with stable resident row indices. Packed
 activation offsets are temporary; a row's KV and recurrent state do not move

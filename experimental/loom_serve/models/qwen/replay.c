@@ -14,7 +14,7 @@
 
 #include "experimental/loom_serve/models/qwen/chat.h"
 #include "experimental/loom_serve/models/qwen/flags.h"
-#include "experimental/loom_serve/models/qwen/schedule.h"
+#include "experimental/loom_serve/scheduling/packing.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/io/file_contents.h"
@@ -62,7 +62,7 @@ typedef struct qwen_replay_row_t {
 
 typedef struct qwen_replay_window_t {
   // Allowed shapes copied from the model's immutable directory inventory.
-  loom_serve_qwen_shape_t shapes[QWEN_REPLAY_SHAPES];
+  loom_serve_packing_shape_t shapes[QWEN_REPLAY_SHAPES];
   // Model-stage index corresponding to each allowed shape.
   iree_host_size_t indexes[QWEN_REPLAY_SHAPES];
   // Number of populated choices.
@@ -76,7 +76,8 @@ static iree_status_t qwen_replay_window_parse(
     qwen_replay_window_t* out_window) {
   memset(out_window, 0, sizeof(*out_window));
   const iree_host_size_t shape_count = loom_serve_qwen_model_shape_count(model);
-  const loom_serve_qwen_shape_t* shapes = loom_serve_qwen_model_shapes(model);
+  const loom_serve_packing_shape_t* shapes =
+      loom_serve_qwen_model_shapes(model);
   iree_string_view_t remaining = text;
   do {
     iree_string_view_t value;
@@ -304,7 +305,7 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
   iree_duration_t model_duration = 0;
   const iree_time_t start = iree_time_now();
   while (iree_status_is_ok(status) && !qwen_replay_interrupted) {
-    loom_serve_qwen_ready_span_t ready[QWEN_REPLAY_ROWS] = {0};
+    loom_serve_ready_span_t ready[QWEN_REPLAY_ROWS] = {0};
     for (iree_host_size_t i = 0; i < row_count; ++i) {
       const qwen_replay_row_t* row = &rows[i];
       if (row->turn < row->turn_count) {
@@ -315,10 +316,10 @@ static iree_status_t qwen_replay_run(loom_serve_qwen_model_t* model,
         ready[i].minimum_count = 1;
       }
     }
-    loom_serve_qwen_scheduled_span_t scheduled[QWEN_REPLAY_ROWS];
-    loom_serve_qwen_scheduled_span_t scratch[QWEN_REPLAY_ROWS];
+    loom_serve_packed_span_t scheduled[QWEN_REPLAY_ROWS];
+    loom_serve_packed_span_t scratch[QWEN_REPLAY_ROWS];
     iree_host_size_t choice = 0;
-    const iree_host_size_t count = loom_serve_qwen_schedule_shapes(
+    const iree_host_size_t count = loom_serve_pack_shapes(
         row_count, ready, policy->count, policy->shapes, policy->chunk_size,
         &cursor, scheduled, scratch, &choice);
     if (!count) {

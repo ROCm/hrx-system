@@ -6,6 +6,7 @@
 
 #include "experimental/loom_serve/models/qwen/flags.h"
 
+#include "experimental/loom_serve/models/qwen/schedule.h"
 #include "iree/base/tooling/flags.h"
 
 IREE_FLAG(string, model, "experimental/loom_serve/models/qwen",
@@ -101,7 +102,7 @@ iree_status_t loom_serve_qwen_model_create_from_flags(
   const iree_host_size_t pool_capacity =
       FLAG_pool_capacity < 0 ? defaults->pool_capacity
                              : (iree_host_size_t)FLAG_pool_capacity;
-  loom_serve_qwen_shape_t automatic[LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY];
+  loom_serve_packing_shape_t automatic[LOOM_SERVE_QWEN_DEFAULT_SHAPE_CAPACITY];
   iree_host_size_t automatic_count = 0;
   if (!epochs.count &&
       (defaults->automatic_shapes || pool_capacity || FLAG_mtp)) {
@@ -109,7 +110,7 @@ iree_status_t loom_serve_qwen_model_create_from_flags(
         defaults->row_count, (iree_host_size_t)FLAG_prefill_capacity,
         automatic);
   }
-  loom_serve_qwen_shape_t* shapes = NULL;
+  loom_serve_packing_shape_t* shapes = NULL;
   if (epochs.count) {
     IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
         host_allocator, epochs.count, sizeof(*shapes), (void**)&shapes));
@@ -127,7 +128,7 @@ iree_status_t loom_serve_qwen_model_create_from_flags(
                            "epoch must be tokens:spans, got '%.*s'",
                            (int)epochs.values[i].size, epochs.values[i].data);
     }
-    shapes[i] = (loom_serve_qwen_shape_t){token_count, span_count};
+    shapes[i] = (loom_serve_packing_shape_t){token_count, span_count};
   }
   const loom_serve_qwen_options_t options = {
       .source_directory = iree_make_cstring_view(FLAG_model),
