@@ -20,17 +20,36 @@ IREE_FLAG(string, input_source, "", "Source input capability callers.");
 
 namespace {
 
-class InputTest : public ::testing::Test {
+class InputTest : public ::testing::TestWithParam<bool> {
  protected:
   void SetUp() override {
     IREE_ASSERT_OK(iree_vm_environment_allocate(allocator, &environment));
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
         &types));
+    std::string configuration = R"({
+          "model":{"type":"BPE","vocab":{
+            "a":0,"b":1,"z":2,"zz":3,"<bos>":4,"<eos>":5},"merges":[]},
+          "added_tokens":[
+            {"id":3,"content":"zz","single_word":false,"lstrip":false,
+             "rstrip":false,"normalized":false,"special":true},
+            {"id":4,"content":"<bos>","single_word":false,"lstrip":false,
+             "rstrip":false,"normalized":false,"special":true},
+            {"id":5,"content":"<eos>","single_word":false,"lstrip":false,
+             "rstrip":false,"normalized":false,"special":true}])";
+    if (GetParam()) {
+      configuration += R"(,
+          "post_processor":{"type":"TemplateProcessing","single":[
+            {"SpecialToken":{"id":"<bos>","type_id":0}},
+            {"Sequence":{"id":"A","type_id":0}},
+            {"SpecialToken":{"id":"<eos>","type_id":0}}],"pair":[],
+            "special_tokens":{
+              "<bos>":{"id":"<bos>","ids":[4],"tokens":["<bos>"]},
+              "<eos>":{"id":"<eos>","ids":[5],"tokens":["<eos>"]}}})";
+    }
+    configuration += "}";
     IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
-        IREE_SV(
-            R"({"model":{"type":"BPE","vocab":{"a":0,"b":1},"merges":[]}})"),
-        allocator, &tokenizer));
+        iree_make_cstring_view(configuration.c_str()), allocator, &tokenizer));
     IREE_ASSERT_OK(loom_serve_input_module_create(environment, tokenizer,
                                                   &module, allocator));
     const iree_string_view_t roots[] = {IREE_SVL("tokens"), IREE_SVL("find"),
@@ -78,10 +97,11 @@ class InputTest : public ::testing::Test {
   loom_serve_program_t* program = nullptr;
 };
 
-TEST_F(InputTest, BoundedTokensAndZeroPadding) {
+TEST_P(InputTest, BoundedTokensAndZeroPadding) {
   const uint32_t expected[] = {0, 1, 0, 0, 0};
   for (int64_t capacity : {0, 1, 3, 5, 9}) {
     iree_vm_variant_t arguments[] = {Text(IREE_SV("abaaa")),
+                                     iree_vm_variant_from_i32(0),
                                      iree_vm_variant_from_i64(capacity)};
     iree_vm_variant_t results[2] = {};
     IREE_ASSERT_OK(Invoke(IREE_SV("tokens"),
@@ -106,7 +126,54 @@ TEST_F(InputTest, BoundedTokensAndZeroPadding) {
   }
 }
 
-TEST_F(InputTest, VocabularyLookupDoesNotInventMissingTokens) {
+TEST_P(InputTest, BoundedModesMatchCompleteTokenizer) {
+  const iree_tokenizer_encode_flags_t modes[] = {
+      IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
+      IREE_TOKENIZER_ENCODE_FLAG_NO_SPECIAL_TOKEN_MATCHING,
+      IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS |
+          IREE_TOKENIZER_ENCODE_FLAG_NO_SPECIAL_TOKEN_MATCHING};
+  for (iree_tokenizer_encode_flags_t flags : modes) {
+    for (const char* text : {"", "ab", "azzb"}) {
+      int32_t expected[16] = {};
+      iree_host_size_t expected_count = 0;
+      IREE_ASSERT_OK(iree_tokenizer_encode(
+          tokenizer, iree_make_cstring_view(text), flags,
+          iree_tokenizer_make_token_output(expected, nullptr, nullptr,
+                                           IREE_ARRAYSIZE(expected)),
+          allocator, &expected_count));
+      for (int64_t capacity : {0, 1, 3, 4, 8}) {
+        SCOPED_TRACE(::testing::Message() << "flags=" << flags << " text="
+                                          << text << " capacity=" << capacity);
+        iree_vm_variant_t arguments[] = {Text(iree_make_cstring_view(text)),
+                                         iree_vm_variant_from_i32(flags),
+                                         iree_vm_variant_from_i64(capacity)};
+        iree_vm_variant_t results[2] = {};
+        IREE_ASSERT_OK(Invoke(IREE_SV("tokens"),
+                              iree_vm_variant_span_from_array(arguments),
+                              iree_vm_variant_span_from_array(results)));
+        int64_t count = 0;
+        IREE_ASSERT_OK(iree_vm_i64_from_variant(results[1], &count));
+        EXPECT_EQ(count, iree_min(capacity, (int64_t)expected_count));
+        iree_vm_buffer_t* buffer = nullptr;
+        IREE_ASSERT_OK(iree_vm_buffer_ptr_from_variant_borrowed(
+            &types, results[0], &buffer));
+        iree_const_byte_span_t bytes = {};
+        IREE_ASSERT_OK(iree_vm_buffer_map_read(
+            buffer, 0, iree_vm_buffer_length(buffer), &bytes));
+        ASSERT_EQ(bytes.data_length, capacity * 4);
+        for (int64_t i = 0; i < capacity; ++i) {
+          EXPECT_EQ(iree_unaligned_load_le_u32(bytes.data + i * 4),
+                    i < count ? (uint32_t)expected[i] : 0u);
+        }
+        iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+        iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+      }
+    }
+  }
+}
+
+TEST_P(InputTest, VocabularyLookupDoesNotInventMissingTokens) {
   for (const auto& text : {"a", "b", "missing"}) {
     iree_vm_variant_t argument = Text(iree_make_cstring_view(text));
     iree_vm_variant_t result = {};
@@ -121,7 +188,7 @@ TEST_F(InputTest, VocabularyLookupDoesNotInventMissingTokens) {
   }
 }
 
-TEST_F(InputTest, InputRejectionLeavesInvocationReusable) {
+TEST_P(InputTest, InputRejectionLeavesInvocationReusable) {
   for (int32_t condition : {0, 1, 0, 1}) {
     iree_vm_variant_t arguments[] = {iree_vm_variant_from_i32(condition),
                                      Text(IREE_SV("model input rejected"))};
@@ -133,6 +200,7 @@ TEST_F(InputTest, InputRejectionLeavesInvocationReusable) {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   }
   iree_vm_variant_t arguments[] = {Text(IREE_SV("a")),
+                                   iree_vm_variant_from_i32(0),
                                    iree_vm_variant_from_i64(-1)};
   iree_vm_variant_t results[2] = {};
   IREE_EXPECT_STATUS_IS(
@@ -142,5 +210,22 @@ TEST_F(InputTest, InputRejectionLeavesInvocationReusable) {
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
 }
+
+TEST_P(InputTest, UnsupportedFlagsLeaveInvocationReusable) {
+  for (int32_t flags : {1, 2, 6, -1, 0}) {
+    iree_vm_variant_t arguments[] = {Text(IREE_SV("a")),
+                                     iree_vm_variant_from_i32(flags),
+                                     iree_vm_variant_from_i64(4)};
+    iree_vm_variant_t results[2] = {};
+    IREE_EXPECT_STATUS_IS(
+        flags ? IREE_STATUS_INVALID_ARGUMENT : IREE_STATUS_OK,
+        Invoke(IREE_SV("tokens"), iree_vm_variant_span_from_array(arguments),
+               iree_vm_variant_span_from_array(results)));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(FramingModes, InputTest, ::testing::Bool());
 
 }  // namespace

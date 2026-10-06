@@ -8,7 +8,7 @@ func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %rgb: h
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
-func.decl import("input") @encode(%text: buffer, %capacity: i64) -> (buffer, i64)
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
 func.decl import("input") @lookup(%token: buffer) -> (i32)
 
 // <|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n
@@ -96,8 +96,10 @@ func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i3
   %suffix = global.load @suffix : buffer
   %prefix_limit = scalar.constant 35 : i64
   %suffix_limit = scalar.constant 6 : i64
-  %prefix_ids, %prefix_count = func.call @encode(%prefix, %prefix_limit) : (buffer, i64) -> (buffer, i64)
-  %suffix_ids, %suffix_count = func.call @encode(%suffix, %suffix_limit) : (buffer, i64) -> (buffer, i64)
+  // IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS preserves encoder framing.
+  %encoding_flags = scalar.constant 4 : i32
+  %prefix_ids, %prefix_count = func.call @encode(%prefix, %encoding_flags, %prefix_limit) : (buffer, i32, i64) -> (buffer, i64)
+  %suffix_ids, %suffix_count = func.call @encode(%suffix, %encoding_flags, %suffix_limit) : (buffer, i32, i64) -> (buffer, i64)
   %expected_prefix = scalar.constant 34 : i64
   %expected_suffix = scalar.constant 5 : i64
   %prefix_matches = scalar.cmpi eq, %prefix_count, %expected_prefix : i64
@@ -125,7 +127,7 @@ func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i3
   %maximum = scalar.assume %maximum_value [range(%maximum_value, 16, 65536)] : i64
   %overhead = scalar.constant 29 : i64
   %capacity = scalar.addi %maximum, %overhead : i64
-  %ids, %live = func.call @encode(%framed, %capacity) : (buffer, i64) -> (buffer, i64)
+  %ids, %live = func.call @encode(%framed, %encoding_flags, %capacity) : (buffer, i32, i64) -> (buffer, i64)
   func.call @check_ids(%ids, %live) : (buffer, i64) -> ()
   func.call @check_ids(%suffix_ids, %suffix_count) : (buffer, i64) -> ()
   %live32 = scalar.trunci %live : i64 to i32

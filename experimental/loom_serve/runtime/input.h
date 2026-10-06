@@ -18,10 +18,18 @@ extern "C" {
 // Synchronous model-input capabilities, with no model policy or device access.
 // The "input" module exports:
 //   require(i32 condition, buffer diagnostic)
-//   encode(buffer text, i64 capacity) -> (buffer little_endian_ids, i64 count)
+//   encode(buffer text, i32 flags, i64 capacity)
+//       -> (buffer little_endian_ids, i64 count)
 //   lookup(buffer token) -> i32 id
-// encode retains at most capacity IDs, including tokenizer-defined special
-// tokens, and returns a zero-padded capacity*4 byte buffer plus its live count.
+// encode retains at most capacity IDs and returns a zero-padded capacity*4 byte
+// buffer plus its live count. Flags use iree_tokenizer_encode_flags_t:
+// ADD_SPECIAL_TOKENS (4) enables tokenizer-defined framing, and
+// NO_SPECIAL_TOKEN_MATCHING (8) encodes literal special-token spellings as
+// ordinary text. Zero selects raw encoding with special-token matching. Every
+// call starts a fresh input; AT_INPUT_START is implicit and TRACK_OFFSETS has
+// no result channel in this ID-only capability. Other flag bits are rejected.
+// A caller requiring the entire text requests one more ID than its limit and
+// rejects a returned count above that limit instead of accepting truncation.
 // Missing vocabulary tokens return -1. require propagates INVALID_ARGUMENT
 // with the source diagnostic when condition is zero.
 // The environment and optional tokenizer are borrowed for the module lifetime.

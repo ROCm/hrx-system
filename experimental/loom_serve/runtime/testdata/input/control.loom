@@ -4,12 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-func.decl import("input") @encode(%text: buffer, %capacity: i64) -> (buffer, i64)
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
 func.decl import("input") @lookup(%token: buffer) -> (i32)
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 
-func.def public @tokens(%text: buffer, %capacity: i64) -> (buffer, i64) {
-  %ids, %count = func.call @encode(%text, %capacity) : (buffer, i64) -> (buffer, i64)
+func.def public @tokens(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64) {
+  %ids, %count = func.call @encode(%text, %flags, %capacity) : (buffer, i32, i64) -> (buffer, i64)
   func.return %ids, %count : buffer, i64
 }
 func.def public @find(%token: buffer) -> (i32) {

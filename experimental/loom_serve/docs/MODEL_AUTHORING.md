@@ -364,8 +364,14 @@ composition and temporary lifetimes. Adding a postprocessing kernel is a source
 composition; it does not require a native callback or a rebuilt image binary.
 
 `prepare_request` receives the retained opaque state, stage tags, prompt, seed
-and strength. Its `input.encode` capability returns bounded little-endian i32
-tokens plus their live count; `input.lookup` supplies vocabulary IDs. Source
+and strength. Its `input.encode(text, flags, capacity)` capability returns
+bounded little-endian i32 tokens plus their live count. Source chooses raw
+encoding, tokenizer-defined special-token insertion, literal special-token
+spelling, or their combination using the flags documented in
+[`input.h`](../runtime/input.h). Krea explicitly selects special-token insertion.
+A text policy requiring the complete input can request one token beyond its
+limit and reject an excess count; a bounded prefix alone cannot establish that
+the entire prompt fit. `input.lookup` supplies vocabulary IDs. Source
 chooses framing and validation, then returns one ordinal and byte buffer. That
 buffer remains owned until accepted uploads, commands and feedback have drained.
 Cold result references outlive the temporary bootstrap program, but not their
