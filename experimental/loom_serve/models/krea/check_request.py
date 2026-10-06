@@ -4,17 +4,19 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Qualify native request construction against the actual model tokenizer/math.
+"""Check compact native requests and source-JIT device preparation.
 
-No model weights or device are loaded. NumPy, the installed Transformers
-tokenizer and Diffusers scheduler/rotary provide the independent reference.
-The native producer is the same C request leaf used by krea2_generate. Retain
-request-sized inputs and commands below 64 MiB; no checkpoint copies.
+The actual tokenizer, Diffusers scheduler/rotary and independent Philox equations
+are the references. Kernels run through the serving JIT without model weights.
+Each component executes twice. Retain request-sized tensors below 64 MiB; final
+image composition is checked separately by check_generate.py.
 """
 
 import argparse
 import json
 import math
+import os
+import struct
 import subprocess
 from pathlib import Path
 
@@ -71,10 +73,86 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--native", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--encoder_reference", type=Path, required=True)
+    parser.add_argument("--checker", type=Path, required=True)
+    parser.add_argument("--loom_checker", type=Path, required=True)
+    parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=False)
+    model = args.model.resolve()
+    catalog = args.output / "catalog"
+    catalog.mkdir()
+    sources = [
+        model / line
+        for line in (model / "sources.txt").read_text().splitlines()
+        if line
+    ] + [model / "tests/request.loom"]
+    (catalog / "sources.txt").write_text(
+        "".join(os.path.relpath(path, catalog) + "\n" for path in sources)
+    )
+    motifs = model.parent.parent / "motifs/tensor"
+    integer_check = subprocess.run(
+        [
+            str(args.loom_checker),
+            str(motifs / "tests/random.loom"),
+            f"--library={motifs / 'random.loom'}",
+            "--device=amdgpu",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    (args.output / "philox.json").write_text(integer_check.stdout)
+    (args.output / "philox.log").write_text(integer_check.stderr)
+    print(integer_check.stdout + integer_check.stderr, end="", flush=True)
+    integer_check.check_returncode()
+    report = json.loads(integer_check.stdout)
+    assert report["sample_count"] == 3 and report["failed_sample_count"] == 0
+    assert report["skipped_case_count"] == report["planning_issue_count"] == 0
+    assert all(sample["passed"] for sample in report["samples"])
+
+    def check_tensor(
+        directory,
+        root,
+        reference,
+        output_type,
+        inputs,
+        config,
+        atol=0,
+        rtol=0,
+        actual_name=None,
+    ):
+        expected = directory / (root + ".expected")
+        expected.write_bytes(encode(reference))
+        actual = directory / (actual_name or root + ".actual")
+        command = [
+            str(args.checker),
+            f"--model={catalog}",
+            f"--root={root}",
+            *[f"--input={path}" for path in inputs],
+            *[f"--config=krea2.{key}={value}" for key, value in config.items()],
+            f"--expected={expected}",
+            f"--actual={actual}",
+            f"--output_type={output_type}",
+            f"--atol={atol}",
+            f"--rtol={rtol}",
+        ]
+        result = subprocess.run(command, capture_output=True, text=True)
+        (directory / (root + ".log")).write_text(result.stdout + result.stderr)
+        print(
+            json.dumps(dict(event="tensor", case=directory.name, root=root)), flush=True
+        )
+        print(result.stdout + result.stderr, end="", flush=True)
+        result.check_returncode()
+        records = [
+            json.loads(line)
+            for line in result.stdout.splitlines()
+            if line.startswith('{"iteration"')
+        ]
+        assert [row["iteration"] for row in records] == [0, 1]
+        assert all(
+            row["nonfinite"] == row["outside_element_envelope"] == 0 for row in records
+        )
+
     tokenizer = AutoTokenizer.from_pretrained(
         args.checkpoint / "tokenizer", local_files_only=True
     )
@@ -106,7 +184,7 @@ def main():
         )
         assert result.returncode and diagnostic in result.stderr, result.stderr
         print(json.dumps(dict(seed=seed, rejected=True)), flush=True)
-    # Published integer KATs anchor the noise oracle before it checks C output.
+    # Published integer KATs anchor the independent device-noise reference.
     for counter, key, expected in (
         ([0] * 4, [0] * 2, [0x6627E8D5, 0xE169C58D, 0xBC57AC4C, 0x9B00DBD8]),
         (
@@ -169,12 +247,10 @@ def main():
             if result.stdout or result.stderr:
                 print(result.stdout + result.stderr, end="", flush=True)
             result.check_returncode()
-            actual = [(directory / f"input-{i}").read_bytes() for i in range(11)]
+            actual = [(directory / f"input-{i}").read_bytes() for i in range(2)]
             # Same production preparation must be deterministic, not just close.
             subprocess.run(command, check=True)
-            assert actual == [
-                (directory / f"input-{i}").read_bytes() for i in range(11)
-            ]
+            assert actual == [(directory / f"input-{i}").read_bytes() for i in range(2)]
             framed = tokenizer(
                 PREFIX + prompt,
                 truncation=True,
@@ -218,79 +294,62 @@ def main():
                 for index in range(2)
             )
             normal = noise(images * 64, seed)
-            expected = [
+            retained = int(sum(framed["attention_mask"]))
+            assert actual[0] == struct.pack("<QIf", seed, retained, 1.0)
+            compact = torch.zeros(texts + 34, dtype=torch.int32)
+            compact[:retained] = ids[:retained]
+            compact[retained : retained + 5] = torch.tensor(suffix)
+            assert actual[1] == encode(compact)
+            inputs = [directory / "input-0", directory / "input-1"]
+            config = dict(
+                text_tokens=texts, image_tokens=images, latent_width=width // 8
+            )
+            check_tensor(
+                directory,
+                "check_request_prompt",
+                torch.cat((ids.float(), mask.float())),
+                "f32",
+                inputs,
+                config,
+            )
+            check_tensor(
+                directory,
+                "prepare_noise",
                 normal,
-                ids,
-                encoder_cosine,
-                encoder_sine,
-                mask,
-                times,
-                cosine,
-                sine,
-                deltas,
-                torch.tensor([1.0]),
-                affine,
-            ]
-            for index, tensor in enumerate(expected):
-                reference = encode(tensor)
-                assert len(actual[index]) == len(reference), (
-                    name,
-                    texts,
-                    index,
-                    "size",
+                "bf16",
+                inputs[:1],
+                config,
+                2**-16,
+                2**-7,
+                "noise.bf16",
+            )
+            for root, tensor in (
+                ("check_encoder_cosine", encoder_cosine),
+                ("check_encoder_sine", encoder_sine),
+            ):
+                check_tensor(
+                    directory, root, tensor, "bf16", inputs[:1], config, 2**-13, 2**-7
                 )
-                if index in (2, 3):
-                    # F32 libm versus PyTorch math can choose a neighboring
-                    # BF16 rounding. Use the established primitive envelope.
-                    native = torch.frombuffer(
-                        bytearray(actual[index]), dtype=torch.bfloat16
-                    ).reshape(tensor.shape)
-                    torch.testing.assert_close(
-                        native.float(), tensor.float(), atol=2**-13, rtol=2**-7
-                    )
-                    different = int(
-                        (native.view(torch.uint16) != tensor.view(torch.uint16)).sum()
-                    )
-                else:
-                    if actual[index] != reference:
-                        dtype = {0: "<u2", 1: "<i4", 4: "u1", 5: "<u2"}.get(
-                            index, "<f4"
-                        )
-                        a, b = (
-                            np.frombuffer(actual[index], dtype=dtype),
-                            np.frombuffer(reference, dtype=dtype),
-                        )
-                        mismatches = np.flatnonzero(a != b)
-                        raise AssertionError(
-                            (
-                                name,
-                                texts,
-                                index,
-                                [
-                                    (int(i), float(a[i]), float(b[i]))
-                                    for i in mismatches[:8]
-                                ],
-                            )
-                        )
-                    different = 0
-                print(
-                    json.dumps(
-                        dict(
-                            case=name,
-                            text_tokens=texts,
-                            input=index,
-                            elements=tensor.numel(),
-                            different=different,
-                            accepted=True,
-                        )
-                    ),
-                    flush=True,
+            for root, tensor in (
+                ("check_dit_cosine", cosine),
+                ("check_dit_sine", sine),
+            ):
+                check_tensor(
+                    directory, root, tensor, "f32", inputs[:1], config, 8e-5, 0
                 )
-            if name == "canonical" and texts == 512:
-                assert actual[1] == (args.encoder_reference / "tokens.i32").read_bytes()
-                assert (
-                    actual[4][:-14] == (args.encoder_reference / "mask.u8").read_bytes()
-                )
+            constants = torch.cat(
+                (times.float(), deltas, torch.tensor([1.0]), affine.flatten())
+            )
+            check_tensor(
+                directory,
+                "check_request_constants",
+                constants,
+                "f32",
+                inputs[:1],
+                config,
+                2e-7,
+                0,
+            )
             print(
                 json.dumps(
                     dict(
@@ -306,7 +365,7 @@ def main():
                 flush=True,
             )
     print(
-        "PASS: native request tokenization, tables, noise and repeated preparation.",
+        "PASS: compact native requests and source-generated tensors against independent references.",
         flush=True,
     )
 

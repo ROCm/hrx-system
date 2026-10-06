@@ -4,7 +4,7 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-"""Independent fresh-prompt image reference, consuming only native initial noise.
+"""Independent fresh-prompt image reference, consuming only source-generated noise.
 
 The encoder, denoiser and request math are canonical Transformers/Diffusers;
 VAE decoding uses the previously qualified CPU/F32 reference path. Retains
@@ -101,7 +101,7 @@ def main():
         )
         noise = (
             torch.frombuffer(
-                bytearray((directory / "input-0").read_bytes()), dtype=torch.bfloat16
+                bytearray((directory / "noise.bf16").read_bytes()), dtype=torch.bfloat16
             )
             .reshape(1, -1, 64)
             .to("cuda")

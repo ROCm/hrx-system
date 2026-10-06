@@ -1,14 +1,15 @@
 # Krea 2 Turbo source-JIT image generator
 
 This includes a native prompt-to-image CLI and a retained HTTP image server.
-The `sample_image` and `sample_image_adapted` roots run through Loom's live
+The `generate_image` and `generate_image_adapted` roots run through Loom's live
 source JIT, queued safetensors loading, command programs and shared device
-ownership. Their caller supplies validated token IDs, initial packed noise,
-timesteps, encoder/DiT rotary tables, the encoder key mask, Euler deltas and
-the VAE affine table. The command computes its own Qwen3-VL taps and derives
-the combined text/image key mask on-device. The native
+ownership. Their caller supplies a 16-byte seed/count/strength header and
+validated, unpadded token IDs. Source kernels generate initial packed noise,
+timesteps, encoder/DiT rotary tables, padding/masks, Euler deltas and VAE affine
+directly in the command workspace. The command computes its own Qwen3-VL taps
+and derives the combined text/image key mask on-device. The native
 [`krea2_generate`](generate.c) and [`krea2_server`](server.c) callers use IREE
-tokenization and construct the small request tables and initial noise, then
+tokenization and pack the compact request inputs, then
 return the final image. The server shares one residency across requests.
 No captured tensors, Python inference library or compiled model artifact is
 required by that path. The independent reference libraries below are used
@@ -112,11 +113,12 @@ parameter bindings through the runner-private `prepare` module. That module
 copies the declarations and releases the bootstrap VM before device setup.
 The ordinary JIT and streaming loader consume the result; no native table of
 Krea command names, specialization formulas or weight filenames is involved.
-This is a cold-path boundary; request framing and numerical input preparation
-still use the native request leaf below.
+This is a cold-path boundary. Request framing still uses the native request
+leaf below; numerical preparation is source-owned device work.
 
-[`control.loom`](control.loom) owns warm stage selection, base/adapter binding
-routing, command submission and final RGB feedback. Its selector receives the
+[`control.loom`](control.loom) owns warm stage selection, command submission
+and final RGB feedback. Both base and adapted commands use the same request
+bindings. Its selector receives the
 source-declared stage tags and retained prompt count. One source-JIT process
 serves the entire residency; requests are buffers and scalar arguments, not VM
 instances. The existing runner-private `execute_N` and `feedback` imports enqueue
@@ -125,18 +127,20 @@ encoding the image or reusing request storage, including after partial failure.
 The VM's return is not a transfer of native storage ownership.
 
 The native request leaf is [`request.h`](request.h)/[`request.c`](request.c).
-Model-specific constants and prompt layout remain there, not in the shared
-runner. The cold C math preserves F32-to-BF16 encoder rotary and F64-to-F32 DiT
-rotary. It does not silently substitute the current VM's F32-only approximate
-transcendentals for the canonical F64 path. Device model control remains in
-the `.loom` command program; this finite transform needs no host step loop or
-per-request VM instance.
+Prompt framing, token validation and compact header packing remain there,
+not in the shared runner. [`request.loom`](request.loom) owns numerical request
+preparation, composed by [`generate.loom`](generate.loom) with the independently
+callable `sample_image` components. Its F32 device transcendental approximations
+are checked against independent BF16/F64 references; bit identity with host
+libm is not the numerical contract. The complete request needs no host step
+loop or per-request VM instance. At 1024 square and text512, the compact inputs
+total 2,200 bytes instead of the former 5.53 MB of host-generated tensors.
 
-`--seed` is an unsigned decimal 64-bit key for Philox4x32-10 followed by a
-double-precision Box-Muller transform, rounded through F32 to BF16 in packed
-order. It defines this runner's sequence, not PyTorch's CPU generator sequence.
-Same-request repetition is checked; cross-platform libm differences are not
-promised to yield identical random floating-point bits. Comparisons with other
+`--seed` is an unsigned decimal 64-bit key for Philox4x32-10 followed by an
+F32 device Box-Muller transform, rounded to BF16 in packed order. It defines
+this runner's counter/key convention, not PyTorch's CPU generator sequence.
+Same-request repetition is checked; different target math approximations are
+not promised to yield identical floating-point bits. Comparisons with other
 implementations consume the same initial noise.
 
 Pixel dimensions are multiples of 16, and their patch-grid area must be a
@@ -2241,15 +2245,17 @@ canonical images and 9.6886/9.5391 against the previous native images using
 external encoder taps. These are observations for one prompt, not a general
 image-quality or performance claim. Retained output occupies 45 MiB.
 
-### Native prompt/seed qualification
+### Prompt/seed and source preparation checks
 
-[`check_request.py`](check_request.py) invokes the actual C request producer
-without loading model weights or a GPU. It compares fourteen prompt/shape cases
-against the real Hugging Face tokenizer, Diffusers rotary and scheduler, VAE
-configuration and an independently implemented Philox/Box-Muller sequence.
+[`check_request.py`](check_request.py) invokes the actual compact C request
+producer and JITs the source preparation kernels without loading model weights.
+It compares fourteen prompt/shape cases against the real Hugging Face tokenizer,
+Diffusers rotary and scheduler, VAE configuration and an independently
+implemented Philox/Box-Muller sequence.
 The integer noise oracle first passes the published
 [Random123 known answers](https://github.com/DEShawResearch/random123/blob/main/tests/kat_vectors).
-Every request is prepared twice. Cases include empty input, Unicode, embedded
+Every native request is prepared twice and every GPU component executes twice.
+Cases include empty input, Unicode, embedded
 and terminal special tokens, long/truncated text, three seeds including all-one
 bits, and 32/512 retained text rows at 256×384/384×384 pixels.
 
@@ -2257,13 +2263,16 @@ bits, and 32/512 retained text rows at 256×384/384×384 pixels.
 build_tools/bin/iree-bazel-build --config=asan \
   //experimental/loom_serve/models/krea:request_check \
   //experimental/loom_serve/models/krea:generate \
-  //experimental/loom_serve/tools:component_check
+  //experimental/loom_serve/tools:component_check \
+  //loom/src/loom/tools/iree-test-loom:iree-test-loom
 build_tools/bin/iree-bazel-test --config=asan \
   //experimental/loom_serve/models/krea:request_test
 python -B experimental/loom_serve/models/krea/check_request.py \
   --native=bazel-bin/experimental/loom_serve/models/krea/request_check \
+  --checker=bazel-bin/experimental/loom_serve/tools/component_check \
+  --loom_checker=bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom \
+  --model=experimental/loom_serve/models/krea \
   --checkpoint="$krea_weights" \
-  --encoder_reference=/path/to/new-encoder-reference \
   --output=/path/to/new-request-results
 python -B experimental/loom_serve/models/krea/check_generate.py \
   --native bazel-bin/experimental/loom_serve/models/krea/generate \
@@ -2274,14 +2283,13 @@ python -B experimental/loom_serve/models/krea/check_generate.py \
   --output=/path/to/new-generation-results
 ```
 
-The request matrix passed 154 input comparisons with zero differing bits,
-including both rotary formats, shifted schedule and BF16 normal noise.
-All 28 preparations were deterministic; output occupies 13.35 MiB. Empty,
-negative, trailing-junk, fractional and overflowing seeds are rejected before
-checkpoint access. Encoder trig uses the established BF16 primitive envelope
-for cross-library math, although no value required it in this run. The C tests
-additionally exercise admission and failed-allocation ownership without
-accessing a tokenizer or device.
+Token IDs, masks and compact headers have exact comparisons. BF16 noise and
+encoder rotary permit neighboring rounding; F32 DiT rotary has an absolute
+error bound against F64 trigonometry. The scheduler and VAE constants have a
+separate F32 envelope. Empty, negative, trailing-junk, fractional and overflowing
+seeds are rejected before checkpoint access. Native tests additionally exercise
+admission and failed-allocation ownership without a tokenizer or device. The
+driver retains the actual GPU noise for the independent final-image reference.
 
 The generation driver tests the actual prompt/seed CLI at two image/text shapes,
 repeated base output, zero-strength identity and active adaptation. A separate

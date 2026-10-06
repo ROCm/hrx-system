@@ -1,0 +1,67 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
+template.decl @random.normal_pair(%radius_word: i32, %angle_word: i32) -> (f32, f32)
+
+// Stateless Philox4x32-10. Counter and key words are bit patterns; arithmetic
+// wraps modulo 2^32. Callers choose the counter partition, independently of
+// launch shape, workgroup order, or device.
+template.def<@random.philox4x32> @random_philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32) {
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %ten = index.constant 10 : index
+  %left_multiplier = scalar.constant 3528531795 : i64
+  %right_multiplier = scalar.constant 3449720151 : i64
+  %shift = scalar.constant 32 : i64
+  %key_step0 = scalar.constant -1640531527 : i32
+  %key_step1 = scalar.constant -1150833019 : i32
+  %a, %b, %c, %d, %key0, %key1 = scf.for %round = [%zero to %ten step %one](%a = %counter0 : i32, %b = %counter1 : i32, %c = %counter2 : i32, %d = %counter3 : i32, %key0 = %seed0 : i32, %key1 = %seed1 : i32) -> (i32, i32, i32, i32, i32, i32) {
+    %wide_a = scalar.extui %a : i32 to i64
+    %wide_c = scalar.extui %c : i32 to i64
+    %left = scalar.muli %wide_a, %left_multiplier : i64
+    %right = scalar.muli %wide_c, %right_multiplier : i64
+    %left_high = scalar.shrui %left, %shift : i64
+    %right_high = scalar.shrui %right, %shift : i64
+    %left_high32 = scalar.trunci %left_high : i64 to i32
+    %right_high32 = scalar.trunci %right_high : i64 to i32
+    %left_low = scalar.trunci %left : i64 to i32
+    %right_low = scalar.trunci %right : i64 to i32
+    %mixed_a = scalar.xori %right_high32, %b : i32
+    %next_a = scalar.xori %mixed_a, %key0 : i32
+    %mixed_c = scalar.xori %left_high32, %d : i32
+    %next_c = scalar.xori %mixed_c, %key1 : i32
+    %next_key0 = scalar.addi %key0, %key_step0 : i32
+    %next_key1 = scalar.addi %key1, %key_step1 : i32
+    scf.yield %next_a, %right_low, %next_c, %left_low, %next_key0, %next_key1 : i32, i32, i32, i32, i32, i32
+  }
+  template.return %a, %b, %c, %d : i32, i32, i32, i32
+}
+
+// Box-Muller in F32. Radial uniforms are clamped to the nearest finite open
+// endpoint after conversion; zero words retain the half-bin offset. Angular
+// uniforms use turns directly, avoiding a multiply/divide by 2*pi.
+template.def<@random.normal_pair> @random_normal_pair(%radius_word: i32, %angle_word: i32) -> (f32, f32) {
+  %scale = scalar.constant 2.3283064365386963e-10 : f32
+  %half = scalar.constant 0.5 : f32
+  %upper = scalar.constant 0.9999999403953552 : f32
+  %negative_two = scalar.constant -2.0 : f32
+  %radial = scalar.uitofp %radius_word : i32 to f32
+  %angular = scalar.uitofp %angle_word : i32 to f32
+  %radial_offset = scalar.addf %radial, %half : f32
+  %angular_offset = scalar.addf %angular, %half : f32
+  %radial_unit = scalar.mulf %radial_offset, %scale : f32
+  %angle = scalar.mulf %angular_offset, %scale : f32
+  %uniform = scalar.minnumf %radial_unit, %upper : f32
+  %logarithm = scalar.logf<afn> %uniform : f32
+  %squared = scalar.mulf %logarithm, %negative_two : f32
+  %radius = scalar.sqrtf %squared : f32
+  %cosine = scalar.costurnsf<afn> %angle : f32
+  %sine = scalar.sinturnsf<afn> %angle : f32
+  %a = scalar.mulf %radius, %cosine : f32
+  %b = scalar.mulf %radius, %sine : f32
+  template.return %a, %b : f32, f32
+}

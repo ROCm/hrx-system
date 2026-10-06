@@ -1,0 +1,82 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+kernel.decl @request_noise() launch(%request: buffer, %output: buffer)
+kernel.decl @request_prompt() launch(%request: buffer, %prompt: buffer, %tokens: buffer, %mask: buffer)
+kernel.decl @request_encoder_rotary() launch(%request: buffer, %cosine: buffer, %sine: buffer)
+kernel.decl @request_rotary() launch(%cosine: buffer, %sine: buffer)
+kernel.decl @request_constants() launch(%request: buffer, %times: buffer, %deltas: buffer, %strength: buffer, %affine: buffer)
+command.program.decl @sample_image() launch(%encoder_parameters: buffer, %parameters: buffer, %vae_parameters: buffer, %sample: buffer, %token_ids: buffer, %encoder_cosine: buffer, %encoder_sine: buffer, %encoder_mask: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %deltas: buffer, %affine: buffer, %output: buffer)
+command.program.decl @sample_image_adapted() launch(%encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %token_ids: buffer, %encoder_cosine: buffer, %encoder_sine: buffer, %encoder_mask: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer)
+template.decl @krea2.generate_image(%images: index, %texts: index, %adapted: i1, %encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer)
+
+// Request-derived tensors live in the reflected command workspace. Only the
+// compact seed/count/strength header and unpadded prompt IDs cross from the host.
+// Preparation has no mutable RNG, checkpoint access or host completion boundary.
+template.def<@krea2.generate_image> @krea2_generate_image(%images: index, %texts: index, %adapted: i1, %encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer) {
+  %framing = index.constant 34 : index
+  %padding = index.constant 48 : index
+  %ids = index.add %texts, %framing : index
+  %encoder_rows = index.add %texts, %padding : index
+  %tokens = index.add %texts, %images : index
+  %one = index.constant 1 : offset
+  %four = index.constant 4 : offset
+  %latent_stride = index.constant 128 : offset
+  %encoder_stride = index.constant 256 : offset
+  %rotary_stride = index.constant 512 : offset
+  %noise_bytes = index.scale %images, %latent_stride : index, offset -> offset
+  %id_bytes = index.scale %ids, %four : index, offset -> offset
+  %mask_bytes = index.scale %encoder_rows, %one : index, offset -> offset
+  %encoder_bytes = index.scale %encoder_rows, %encoder_stride : index, offset -> offset
+  %rotary_bytes = index.scale %tokens, %rotary_stride : index, offset -> offset
+  %time_bytes = index.constant 16 : offset
+  %delta_bytes = index.constant 32 : offset
+  %affine_bytes = index.constant 128 : offset
+  %noise = buffer.alloca<global> align(256) %noise_bytes : buffer
+  %token_ids = buffer.alloca<global> align(256) %id_bytes : buffer
+  %mask = buffer.alloca<global> align(256) %mask_bytes : buffer
+  %encoder_cosine = buffer.alloca<global> align(256) %encoder_bytes : buffer
+  %encoder_sine = buffer.alloca<global> align(256) %encoder_bytes : buffer
+  %cosine = buffer.alloca<global> align(256) %rotary_bytes : buffer
+  %sine = buffer.alloca<global> align(256) %rotary_bytes : buffer
+  %times = buffer.alloca<global> align(256) %time_bytes : buffer
+  %deltas = buffer.alloca<global> align(256) %delta_bytes : buffer
+  %strength = buffer.alloca<global> align(256) %four : buffer
+  %affine = buffer.alloca<global> align(256) %affine_bytes : buffer
+  command.concurrent {
+    kernel.launch @request_noise(%request, %noise) : (buffer, buffer)
+    kernel.launch @request_prompt(%request, %prompt, %token_ids, %mask) : (buffer, buffer, buffer, buffer)
+    kernel.launch @request_encoder_rotary(%request, %encoder_cosine, %encoder_sine) : (buffer, buffer, buffer)
+    kernel.launch @request_rotary(%cosine, %sine) : (buffer, buffer)
+    kernel.launch @request_constants(%request, %times, %deltas, %strength, %affine) : (buffer, buffer, buffer, buffer, buffer)
+  }
+  scf.if %adapted {
+    command.program.launch @sample_image_adapted(%encoder_parameters, %parameters, %adapter, %vae_parameters, %noise, %token_ids, %encoder_cosine, %encoder_sine, %mask, %times, %cosine, %sine, %deltas, %strength, %affine, %output) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    scf.yield
+  } else {
+    command.program.launch @sample_image(%encoder_parameters, %parameters, %vae_parameters, %noise, %token_ids, %encoder_cosine, %encoder_sine, %mask, %times, %cosine, %sine, %deltas, %affine, %output) : (buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+    scf.yield
+  }
+  template.return
+}
+
+command.program.def public @generate_image() launch(%encoder_parameters: buffer, %parameters: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer) {
+  %images = config.get @krea2.image_tokens : index
+  %texts = config.get @krea2.text_tokens : index
+  %adapted = scalar.constant false : i1
+  template.apply<@krea2.generate_image>(%images, %texts, %adapted, %encoder_parameters, %parameters, %parameters, %vae_parameters, %request, %prompt, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @generate_image_adapted() launch(%encoder_parameters: buffer, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %request: buffer, %prompt: buffer, %output: buffer) {
+  %images = config.get @krea2.image_tokens : index
+  %texts = config.get @krea2.text_tokens : index
+  %adapted = scalar.constant true : i1
+  template.apply<@krea2.generate_image>(%images, %texts, %adapted, %encoder_parameters, %parameters, %adapter, %vae_parameters, %request, %prompt, %output) : (index, index, i1, buffer, buffer, buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

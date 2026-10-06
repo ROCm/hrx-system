@@ -1,0 +1,186 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+kernel.decl @request_rotary() launch(%cosine: buffer, %sine: buffer)
+kernel.decl @request_encoder_rotary() launch(%request: buffer, %cosine: buffer, %sine: buffer)
+kernel.decl @request_constants() launch(%request: buffer, %times: buffer, %deltas: buffer, %strength: buffer, %affine: buffer)
+kernel.decl @request_prompt() launch(%request: buffer, %prompt: buffer, %tokens: buffer, %mask: buffer)
+
+command.program.def public @check_encoder_cosine() launch(%request: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %stride = index.constant 256 : offset
+  %bytes = index.scale %rows, %stride : index, offset -> offset
+  %scratch = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @request_encoder_rotary(%request, %output, %scratch) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @check_encoder_sine() launch(%request: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %stride = index.constant 256 : offset
+  %bytes = index.scale %rows, %stride : index, offset -> offset
+  %scratch = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @request_encoder_rotary(%request, %scratch, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+command.program.def public @check_dit_cosine() launch(%request: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %rows = index.add %texts, %images : index
+  %stride = index.constant 512 : offset
+  %bytes = index.scale %rows, %stride : index, offset -> offset
+  %scratch = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @request_rotary(%output, %scratch) : (buffer, buffer)
+  command.return
+}
+
+command.program.def public @check_dit_sine() launch(%request: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %rows = index.add %texts, %images : index
+  %stride = index.constant 512 : offset
+  %bytes = index.scale %rows, %stride : index, offset -> offset
+  %scratch = buffer.alloca<global> align(256) %bytes : buffer
+  kernel.launch @request_rotary(%scratch, %output) : (buffer, buffer)
+  command.return
+}
+
+amdgpu.target<gfx11-generic> @request_check_wave32 {subgroup_size = 32}
+// IDs in this vocabulary and mask bytes are represented exactly in F32, so a
+// single tensor comparison covers both outputs of the real padding kernel.
+kernel.def target(@request_check_wave32) @request_prompt_collect() {
+  %texts = config.get @krea2.text_tokens : index
+  %two = index.constant 2 : index
+  %padding = index.constant 82 : index
+  %count = index.madd %texts, %two, %padding : index
+  %threads = index.constant 256 : index
+  %extra = index.constant 255 : index
+  %padded = index.add %count, %extra : index
+  %groups = index.div %padded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%tokens: buffer, %mask: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %framing = index.constant 34 : index
+  %padding = index.constant 48 : index
+  %ids = index.add %texts, %framing : index
+  %rows = index.add %texts, %padding : index
+  %count = index.add %ids, %rows : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %index = index.madd %group, %threads, %lane : index
+  %valid = index.cmp ult, %index, %count : index
+  %origin = index.constant 0 : offset
+  scf.if %valid {
+    %token = index.cmp ult, %index, %ids : index
+    %value = scf.if %token -> (f32) {
+      %view = buffer.view %tokens[%origin] : buffer -> view<[%ids]xi32>
+      %value = view.load %view[%index] : view<[%ids]xi32> -> i32
+      %float = scalar.sitofp %value : i32 to f32
+      scf.yield %float : f32
+    } else {
+      %row = index.sub %index, %ids : index
+      %view = buffer.view %mask[%origin] : buffer -> view<[%rows]xi8>
+      %value = view.load %view[%row] : view<[%rows]xi8> -> i8
+      %wide = scalar.extui %value : i8 to i32
+      %float = scalar.uitofp %wide : i32 to f32
+      scf.yield %float : f32
+    }
+    %view = buffer.view %output[%origin] : buffer -> view<[%count]xf32>
+    view.store %value, %view[%index] : f32, view<[%count]xf32>
+    scf.yield
+  }
+  kernel.return
+}
+
+command.program.def public @check_request_prompt() launch(%request: buffer, %prompt: buffer, %output: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %framing = index.constant 34 : index
+  %padding = index.constant 48 : index
+  %ids = index.add %texts, %framing : index
+  %rows = index.add %texts, %padding : index
+  %four = index.constant 4 : offset
+  %one = index.constant 1 : offset
+  %id_bytes = index.scale %ids, %four : index, offset -> offset
+  %mask_bytes = index.scale %rows, %one : index, offset -> offset
+  %tokens = buffer.alloca<global> align(256) %id_bytes : buffer
+  %mask = buffer.alloca<global> align(256) %mask_bytes : buffer
+  kernel.launch @request_prompt(%request, %prompt, %tokens, %mask) : (buffer, buffer, buffer, buffer)
+  kernel.launch @request_prompt_collect(%tokens, %mask, %output) : (buffer, buffer, buffer)
+  command.return
+}
+
+kernel.def target(@request_check_wave32) @request_constants_collect() {
+  %one = index.constant 1 : index
+  %threads = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%times: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %count = index.constant 49 : index
+  %eight = index.constant 8 : index
+  %sixteen = index.constant 16 : index
+  %seventeen = index.constant 17 : index
+  %origin = index.constant 0 : offset
+  %valid = index.cmp ult, %lane, %count : index
+  scf.if %valid {
+    %time = index.cmp ult, %lane, %eight : index
+    %value = scf.if %time -> (f32) {
+      %view = buffer.view %times[%origin] : buffer -> view<8xbf16>
+      %value = view.load %view[%lane] : view<8xbf16> -> bf16
+      %wide = scalar.extf %value : bf16 to f32
+      scf.yield %wide : f32
+    } else {
+      %delta = index.cmp ult, %lane, %sixteen : index
+      %value = scf.if %delta -> (f32) {
+        %index = index.sub %lane, %eight : index
+        %view = buffer.view %deltas[%origin] : buffer -> view<8xf32>
+        %value = view.load %view[%index] : view<8xf32> -> f32
+        scf.yield %value : f32
+      } else {
+        %strength_slot = index.cmp eq, %lane, %sixteen : index
+        %value = scf.if %strength_slot -> (f32) {
+          %zero = index.constant 0 : index
+          %view = buffer.view %strength[%origin] : buffer -> view<1xf32>
+          %value = view.load %view[%zero] : view<1xf32> -> f32
+          scf.yield %value : f32
+        } else {
+          %index = index.sub %lane, %seventeen : index
+          %view = buffer.view %affine[%origin] : buffer -> view<32xf32>
+          %value = view.load %view[%index] : view<32xf32> -> f32
+          scf.yield %value : f32
+        }
+        scf.yield %value : f32
+      }
+      scf.yield %value : f32
+    }
+    %view = buffer.view %output[%origin] : buffer -> view<49xf32>
+    view.store %value, %view[%lane] : f32, view<49xf32>
+    scf.yield
+  }
+  kernel.return
+}
+
+command.program.def public @check_request_constants() launch(%request: buffer, %output: buffer) {
+  %time_bytes = index.constant 16 : offset
+  %delta_bytes = index.constant 32 : offset
+  %strength_bytes = index.constant 4 : offset
+  %affine_bytes = index.constant 128 : offset
+  %times = buffer.alloca<global> align(256) %time_bytes : buffer
+  %deltas = buffer.alloca<global> align(256) %delta_bytes : buffer
+  %strength = buffer.alloca<global> align(256) %strength_bytes : buffer
+  %affine = buffer.alloca<global> align(256) %affine_bytes : buffer
+  kernel.launch @request_constants(%request, %times, %deltas, %strength, %affine) : (buffer, buffer, buffer, buffer, buffer)
+  kernel.launch @request_constants_collect(%times, %deltas, %strength, %affine, %output) : (buffer, buffer, buffer, buffer, buffer)
+  command.return
+}

@@ -1,0 +1,449 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+amdgpu.target<gfx11-generic> @request_wave32 {subgroup_size = 32}
+template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
+template.decl @random.normal_pair(%radius_word: i32, %angle_word: i32) -> (f32, f32)
+
+// The compact request header is seed:u64, retained-prefix-count:u32,
+// adapter-strength:f32, all little endian. Each counter produces four packed
+// latent BF16 values; no host-generated noise or mutable RNG state is consumed.
+kernel.def target(@request_wave32) @request_noise() {
+  %images = config.get @krea2.image_tokens : index
+  %sixteen = index.constant 16 : index
+  %count = index.mul %images, %sixteen : index
+  %threads = index.constant 256 : index
+  %padding = index.constant 255 : index
+  %padded = index.add %count, %padding : index
+  %groups = index.div %padded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%request: buffer, %output: buffer) {
+  %images = config.get @krea2.image_tokens : index
+  %sixteen = index.constant 16 : index
+  %sixty_four = index.constant 64 : index
+  %count = index.mul %images, %sixteen : index
+  %elements = index.mul %images, %sixty_four : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %counter = index.madd %group, %threads, %lane : index
+  %valid = index.cmp ult, %counter, %count : index
+  scf.if %valid {
+    %origin = index.constant 0 : offset
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %two = index.constant 2 : index
+    %three = index.constant 3 : index
+    %four = index.constant 4 : index
+    %header = buffer.view %request[%origin] : buffer -> view<4xi32>
+    %seed0 = view.load %header[%zero] : view<4xi32> -> i32
+    %seed1 = view.load %header[%one] : view<4xi32> -> i32
+    %counter32 = index.cast %counter : index to i32
+    %zero32 = scalar.constant 0 : i32
+    %a, %b, %c, %d = template.apply<@random.philox4x32>(%counter32, %zero32, %zero32, %zero32, %seed0, %seed1) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+    %n0, %n1 = template.apply<@random.normal_pair>(%a, %b) : (i32, i32) -> (f32, f32)
+    %n2, %n3 = template.apply<@random.normal_pair>(%c, %d) : (i32, i32) -> (f32, f32)
+    %v0 = scalar.fptrunc %n0 : f32 to bf16
+    %v1 = scalar.fptrunc %n1 : f32 to bf16
+    %v2 = scalar.fptrunc %n2 : f32 to bf16
+    %v3 = scalar.fptrunc %n3 : f32 to bf16
+    %out = buffer.view %output[%origin] : buffer -> view<[%elements]xbf16>
+    %i0 = index.mul %counter, %four : index
+    %i1 = index.add %i0, %one : index
+    %i2 = index.add %i0, %two : index
+    %i3 = index.add %i0, %three : index
+    view.store %v0, %out[%i0] : bf16, view<[%elements]xbf16>
+    view.store %v1, %out[%i1] : bf16, view<[%elements]xbf16>
+    view.store %v2, %out[%i2] : bf16, view<[%elements]xbf16>
+    view.store %v3, %out[%i3] : bf16, view<[%elements]xbf16>
+    scf.yield
+  }
+  kernel.return
+}
+
+command.program.def public @prepare_noise() launch(%request: buffer, %output: buffer) {
+  kernel.launch @request_noise(%request, %output) : (buffer, buffer)
+  command.return
+}
+
+kernel.def target(@request_wave32) @request_constants() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%request: buffer, %times: buffer, %deltas: buffer, %strength: buffer, %affine: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %three = index.constant 3 : index
+  %eight = index.constant 8 : index
+  %one_f32 = scalar.constant 1.0 : f32
+  %eight_f32 = scalar.constant 8.0 : f32
+  %zero_f32 = scalar.constant 0.0 : f32
+  %thousand = scalar.constant 1000.0 : f32
+  %shift = scalar.constant 3.1581928730010986 : f32
+  %time_view = buffer.view %times[%origin] : buffer -> view<8xbf16>
+  %delta_view = buffer.view %deltas[%origin] : buffer -> view<8xf32>
+  scf.for %step = [%zero to %eight step %one] {
+    %remaining = index.sub %eight, %step : index
+    %remaining32 = index.cast %remaining : index to i32
+    %remaining_f32 = scalar.uitofp %remaining32 : i32 to f32
+    %ratio = scalar.divf %eight_f32, %remaining_f32 : f32
+    %shifted = scalar.subf %ratio, %one_f32 : f32
+    %denominator = scalar.addf %shift, %shifted : f32
+    %sigma = scalar.divf %shift, %denominator : f32
+    %last = index.cmp eq, %remaining, %one : index
+    %next = scf.if %last -> (f32) {
+      scf.yield %zero_f32 : f32
+    } else {
+      %next_count = scalar.subf %remaining_f32, %one_f32 : f32
+      %next_ratio = scalar.divf %eight_f32, %next_count : f32
+      %next_shifted = scalar.subf %next_ratio, %one_f32 : f32
+      %next_denominator = scalar.addf %shift, %next_shifted : f32
+      %next_sigma = scalar.divf %shift, %next_denominator : f32
+      scf.yield %next_sigma : f32
+    }
+    %time_scaled = scalar.mulf %sigma, %thousand : f32
+    %time = scalar.divf %time_scaled, %thousand : f32
+    %rounded = scalar.fptrunc %time : f32 to bf16
+    %delta = scalar.subf %next, %sigma : f32
+    view.store %rounded, %time_view[%step] : bf16, view<8xbf16>
+    view.store %delta, %delta_view[%step] : f32, view<8xf32>
+    scf.yield
+  }
+  %header = buffer.view %request[%origin] : buffer -> view<4xf32>
+  %requested_strength = view.load %header[%three] : view<4xf32> -> f32
+  %strength_view = buffer.view %strength[%origin] : buffer -> view<1xf32>
+  view.store %requested_strength, %strength_view[%zero] : f32, view<1xf32>
+  %affine_view = buffer.view %affine[%origin] : buffer -> view<32xf32>
+  %scale_index0 = index.constant 0 : index
+  %mean_index0 = index.constant 16 : index
+  %deviation0 = scalar.constant 2.8184 : f32
+  %scale0 = scalar.divf %one_f32, %deviation0 : f32
+  %mean0 = scalar.constant -0.7571 : f32
+  view.store %scale0, %affine_view[%scale_index0] : f32, view<32xf32>
+  view.store %mean0, %affine_view[%mean_index0] : f32, view<32xf32>
+  %scale_index1 = index.constant 1 : index
+  %mean_index1 = index.constant 17 : index
+  %deviation1 = scalar.constant 1.4541 : f32
+  %scale1 = scalar.divf %one_f32, %deviation1 : f32
+  %mean1 = scalar.constant -0.7089 : f32
+  view.store %scale1, %affine_view[%scale_index1] : f32, view<32xf32>
+  view.store %mean1, %affine_view[%mean_index1] : f32, view<32xf32>
+  %scale_index2 = index.constant 2 : index
+  %mean_index2 = index.constant 18 : index
+  %deviation2 = scalar.constant 2.3275 : f32
+  %scale2 = scalar.divf %one_f32, %deviation2 : f32
+  %mean2 = scalar.constant -0.9113 : f32
+  view.store %scale2, %affine_view[%scale_index2] : f32, view<32xf32>
+  view.store %mean2, %affine_view[%mean_index2] : f32, view<32xf32>
+  %scale_index3 = index.constant 3 : index
+  %mean_index3 = index.constant 19 : index
+  %deviation3 = scalar.constant 2.6558 : f32
+  %scale3 = scalar.divf %one_f32, %deviation3 : f32
+  %mean3 = scalar.constant 0.1075 : f32
+  view.store %scale3, %affine_view[%scale_index3] : f32, view<32xf32>
+  view.store %mean3, %affine_view[%mean_index3] : f32, view<32xf32>
+  %scale_index4 = index.constant 4 : index
+  %mean_index4 = index.constant 20 : index
+  %deviation4 = scalar.constant 1.2196 : f32
+  %scale4 = scalar.divf %one_f32, %deviation4 : f32
+  %mean4 = scalar.constant -0.1745 : f32
+  view.store %scale4, %affine_view[%scale_index4] : f32, view<32xf32>
+  view.store %mean4, %affine_view[%mean_index4] : f32, view<32xf32>
+  %scale_index5 = index.constant 5 : index
+  %mean_index5 = index.constant 21 : index
+  %deviation5 = scalar.constant 1.7708 : f32
+  %scale5 = scalar.divf %one_f32, %deviation5 : f32
+  %mean5 = scalar.constant 0.9653 : f32
+  view.store %scale5, %affine_view[%scale_index5] : f32, view<32xf32>
+  view.store %mean5, %affine_view[%mean_index5] : f32, view<32xf32>
+  %scale_index6 = index.constant 6 : index
+  %mean_index6 = index.constant 22 : index
+  %deviation6 = scalar.constant 2.6052 : f32
+  %scale6 = scalar.divf %one_f32, %deviation6 : f32
+  %mean6 = scalar.constant -0.1517 : f32
+  view.store %scale6, %affine_view[%scale_index6] : f32, view<32xf32>
+  view.store %mean6, %affine_view[%mean_index6] : f32, view<32xf32>
+  %scale_index7 = index.constant 7 : index
+  %mean_index7 = index.constant 23 : index
+  %deviation7 = scalar.constant 2.0743 : f32
+  %scale7 = scalar.divf %one_f32, %deviation7 : f32
+  %mean7 = scalar.constant 1.5508 : f32
+  view.store %scale7, %affine_view[%scale_index7] : f32, view<32xf32>
+  view.store %mean7, %affine_view[%mean_index7] : f32, view<32xf32>
+  %scale_index8 = index.constant 8 : index
+  %mean_index8 = index.constant 24 : index
+  %deviation8 = scalar.constant 3.2687 : f32
+  %scale8 = scalar.divf %one_f32, %deviation8 : f32
+  %mean8 = scalar.constant 0.4134 : f32
+  view.store %scale8, %affine_view[%scale_index8] : f32, view<32xf32>
+  view.store %mean8, %affine_view[%mean_index8] : f32, view<32xf32>
+  %scale_index9 = index.constant 9 : index
+  %mean_index9 = index.constant 25 : index
+  %deviation9 = scalar.constant 2.1526 : f32
+  %scale9 = scalar.divf %one_f32, %deviation9 : f32
+  %mean9 = scalar.constant -0.0715 : f32
+  view.store %scale9, %affine_view[%scale_index9] : f32, view<32xf32>
+  view.store %mean9, %affine_view[%mean_index9] : f32, view<32xf32>
+  %scale_index10 = index.constant 10 : index
+  %mean_index10 = index.constant 26 : index
+  %deviation10 = scalar.constant 2.8652 : f32
+  %scale10 = scalar.divf %one_f32, %deviation10 : f32
+  %mean10 = scalar.constant 0.5517 : f32
+  view.store %scale10, %affine_view[%scale_index10] : f32, view<32xf32>
+  view.store %mean10, %affine_view[%mean_index10] : f32, view<32xf32>
+  %scale_index11 = index.constant 11 : index
+  %mean_index11 = index.constant 27 : index
+  %deviation11 = scalar.constant 1.5579 : f32
+  %scale11 = scalar.divf %one_f32, %deviation11 : f32
+  %mean11 = scalar.constant -0.3632 : f32
+  view.store %scale11, %affine_view[%scale_index11] : f32, view<32xf32>
+  view.store %mean11, %affine_view[%mean_index11] : f32, view<32xf32>
+  %scale_index12 = index.constant 12 : index
+  %mean_index12 = index.constant 28 : index
+  %deviation12 = scalar.constant 1.6382 : f32
+  %scale12 = scalar.divf %one_f32, %deviation12 : f32
+  %mean12 = scalar.constant -0.1922 : f32
+  view.store %scale12, %affine_view[%scale_index12] : f32, view<32xf32>
+  view.store %mean12, %affine_view[%mean_index12] : f32, view<32xf32>
+  %scale_index13 = index.constant 13 : index
+  %mean_index13 = index.constant 29 : index
+  %deviation13 = scalar.constant 1.1253 : f32
+  %scale13 = scalar.divf %one_f32, %deviation13 : f32
+  %mean13 = scalar.constant -0.9497 : f32
+  view.store %scale13, %affine_view[%scale_index13] : f32, view<32xf32>
+  view.store %mean13, %affine_view[%mean_index13] : f32, view<32xf32>
+  %scale_index14 = index.constant 14 : index
+  %mean_index14 = index.constant 30 : index
+  %deviation14 = scalar.constant 2.8251 : f32
+  %scale14 = scalar.divf %one_f32, %deviation14 : f32
+  %mean14 = scalar.constant 0.2503 : f32
+  view.store %scale14, %affine_view[%scale_index14] : f32, view<32xf32>
+  view.store %mean14, %affine_view[%mean_index14] : f32, view<32xf32>
+  %scale_index15 = index.constant 15 : index
+  %mean_index15 = index.constant 31 : index
+  %deviation15 = scalar.constant 1.916 : f32
+  %scale15 = scalar.divf %one_f32, %deviation15 : f32
+  %mean15 = scalar.constant -0.2921 : f32
+  view.store %scale15, %affine_view[%scale_index15] : f32, view<32xf32>
+  view.store %mean15, %affine_view[%mean_index15] : f32, view<32xf32>
+  kernel.return
+}
+
+kernel.def target(@request_wave32) @request_prompt() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %threads = index.constant 256 : index
+  %extra = index.constant 255 : index
+  %padded = index.add %rows, %extra : index
+  %groups = index.div %padded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%request: buffer, %prompt: buffer, %tokens: buffer, %mask: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %suffix_offset = index.constant 29 : index
+  %framing = index.constant 34 : index
+  %rows = index.add %texts, %padding : index
+  %suffix_begin = index.add %texts, %suffix_offset : index
+  %end = index.add %texts, %framing : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %row = index.madd %group, %threads, %lane : index
+  %valid = index.cmp ult, %row, %rows : index
+  scf.if %valid {
+    %origin = index.constant 0 : offset
+    %two = index.constant 2 : index
+    %header = buffer.view %request[%origin] : buffer -> view<4xi32>
+    %retained32 = view.load %header[%two] : view<4xi32> -> i32
+    %retained_value = index.cast %retained32 : i32 to index
+    // The request boundary admits only prompts fitting this selected stage.
+    %retained = index.assume %retained_value [range(%retained_value, 0, %suffix_begin)] : index
+    %prefix = index.cmp ult, %row, %retained : index
+    %suffix = index.cmp uge, %row, %suffix_begin : index
+    %inside = index.cmp ult, %row, %end : index
+    %suffix_live = scalar.andi %suffix, %inside : i1
+    %live = scalar.ori %prefix, %suffix_live : i1
+    %yes = scalar.constant 1 : i8
+    %no = scalar.constant 0 : i8
+    %visible = scf.select %live, %yes, %no : i8
+    %mask_view = buffer.view %mask[%origin] : buffer -> view<[%rows]xi8>
+    view.store %visible, %mask_view[%row] : i8, view<[%rows]xi8>
+    scf.if %inside {
+      %source = buffer.view %prompt[%origin] : buffer -> view<[%end]xi32>
+      %id = scf.if %prefix -> (i32) {
+        %token = view.load %source[%row] : view<[%end]xi32> -> i32
+        scf.yield %token : i32
+      } else {
+        %token = scf.if %suffix -> (i32) {
+          %suffix_offset = index.sub %row, %suffix_begin : index
+          // This branch is inside the five live suffix positions.
+          %suffix_index = index.assume %suffix_offset [range(%suffix_offset, 0, 4)] : index
+          %source_index = index.add %retained, %suffix_index : index
+          %token = view.load %source[%source_index] : view<[%end]xi32> -> i32
+          scf.yield %token : i32
+        } else {
+          %padding_token = scalar.constant 151643 : i32
+          scf.yield %padding_token : i32
+        }
+        scf.yield %token : i32
+      }
+      %target = buffer.view %tokens[%origin] : buffer -> view<[%end]xi32>
+      view.store %id, %target[%row] : i32, view<[%end]xi32>
+      scf.yield
+    }
+    scf.yield
+  }
+  kernel.return
+}
+
+kernel.def target(@request_wave32) @request_encoder_rotary() {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %channels = index.constant 64 : index
+  %count = index.mul %rows, %channels : index
+  %threads = index.constant 256 : index
+  %extra = index.constant 255 : index
+  %padded = index.add %count, %extra : index
+  %groups = index.div %padded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%request: buffer, %cosine: buffer, %sine: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %padding = index.constant 48 : index
+  %rows = index.add %texts, %padding : index
+  %channels = index.constant 64 : index
+  %count = index.mul %rows, %channels : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %valid = index.cmp ult, %element, %count : index
+  scf.if %valid {
+    %row = index.div %element, %channels : index
+    %channel = index.rem %element, %channels : index
+    %origin = index.constant 0 : offset
+    %two = index.constant 2 : index
+    %header = buffer.view %request[%origin] : buffer -> view<4xi32>
+    %retained = view.load %header[%two] : view<4xi32> -> i32
+    %row32 = index.cast %row : index to i32
+    %texts32 = index.cast %texts : index to i32
+    %twenty_nine = scalar.constant 29 : i32
+    %thirty_four = scalar.constant 34 : i32
+    %one = scalar.constant 1 : i32
+    %zero = scalar.constant 0 : i32
+    %suffix = scalar.addi %texts32, %twenty_nine : i32
+    %end = scalar.addi %texts32, %thirty_four : i32
+    %before = scalar.cmpi ult, %row32, %retained : i32
+    %in_suffix = scalar.cmpi uge, %row32, %suffix : i32
+    %inside = scalar.cmpi ult, %row32, %end : i32
+    %previous = scalar.subi %retained, %one : i32
+    %suffix_index = scalar.subi %row32, %suffix : i32
+    %suffix_position = scalar.addi %retained, %suffix_index : i32
+    %after = scf.select %in_suffix, %suffix_position, %previous : i32
+    %position_unpadded = scf.select %before, %row32, %after : i32
+    %position = scf.select %inside, %position_unpadded, %zero : i32
+    %position_f32 = scalar.sitofp %position : i32 to f32
+    %channel32 = index.cast %channel : index to i32
+    %channel_f32 = scalar.uitofp %channel32 : i32 to f32
+    %exponent_scale = scalar.constant -0.347710885694722 : f32
+    %exponent = scalar.mulf %channel_f32, %exponent_scale : f32
+    %frequency = scalar.exp2f<afn> %exponent : f32
+    %phase = scalar.mulf %position_f32, %frequency : f32
+    %c32 = scalar.cosf<afn> %phase : f32
+    %s32 = scalar.sinf<afn> %phase : f32
+    %c = scalar.fptrunc %c32 : f32 to bf16
+    %s = scalar.fptrunc %s32 : f32 to bf16
+    %width = index.constant 128 : index
+    %first = index.madd %row, %width, %channel : index
+    %second = index.add %first, %channels : index
+    %extent = index.mul %rows, %width : index
+    %cv = buffer.view %cosine[%origin] : buffer -> view<[%extent]xbf16>
+    %sv = buffer.view %sine[%origin] : buffer -> view<[%extent]xbf16>
+    view.store %c, %cv[%first] : bf16, view<[%extent]xbf16>
+    view.store %c, %cv[%second] : bf16, view<[%extent]xbf16>
+    view.store %s, %sv[%first] : bf16, view<[%extent]xbf16>
+    view.store %s, %sv[%second] : bf16, view<[%extent]xbf16>
+    scf.yield
+  }
+  kernel.return
+}
+
+kernel.def target(@request_wave32) @request_rotary() {
+  %texts = config.get @krea2.text_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %tokens = index.add %texts, %images : index
+  %channels = index.constant 64 : index
+  %count = index.mul %tokens, %channels : index
+  %threads = index.constant 256 : index
+  %extra = index.constant 255 : index
+  %padded = index.add %count, %extra : index
+  %groups = index.div %padded, %threads : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%groups, %one, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%cosine: buffer, %sine: buffer) {
+  %texts = config.get @krea2.text_tokens : index
+  %images = config.get @krea2.image_tokens : index
+  %width = config.get @krea2.latent_width : index
+  %two = index.constant 2 : index
+  %columns = index.div %width, %two : index
+  %tokens = index.add %texts, %images : index
+  %pairs = index.constant 64 : index
+  %count = index.mul %tokens, %pairs : index
+  %threads = index.constant 256 : index
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %element = index.madd %group, %threads, %lane : index
+  %valid = index.cmp ult, %element, %count : index
+  scf.if %valid {
+    %token = index.div %element, %pairs : index
+    %pair = index.rem %element, %pairs : index
+    %zero = index.constant 0 : index
+    %sixteen = index.constant 16 : index
+    %forty = index.constant 40 : index
+    %temporal = index.cmp ult, %pair, %sixteen : index
+    %vertical = index.cmp ult, %pair, %forty : index
+    %text = index.cmp ult, %token, %texts : index
+    %image_index = index.sub %token, %texts : index
+    %image = scf.select %text, %zero, %image_index : index
+    %y = index.div %image, %columns : index
+    %x = index.rem %image, %columns : index
+    %spatial_position = scf.select %vertical, %y, %x : index
+    %position = scf.select %temporal, %zero, %spatial_position : index
+    %axis_begin = scf.select %vertical, %sixteen, %forty : index
+    %spatial_pair = index.sub %pair, %axis_begin : index
+    %frequency_index = scf.select %temporal, %zero, %spatial_pair : index
+    %frequency32 = index.cast %frequency_index : index to i32
+    %frequency_f32 = scalar.uitofp %frequency32 : i32 to f32
+    %exponent_scale = scalar.constant -0.4152410118609203 : f32
+    %exponent = scalar.mulf %frequency_f32, %exponent_scale : f32
+    %frequency = scalar.exp2f<afn> %exponent : f32
+    %position32 = index.cast %position : index to i32
+    %position_f32 = scalar.uitofp %position32 : i32 to f32
+    %phase = scalar.mulf %position_f32, %frequency : f32
+    %c = scalar.cosf<afn> %phase : f32
+    %s = scalar.sinf<afn> %phase : f32
+    %first = index.mul %element, %two : index
+    %one = index.constant 1 : index
+    %second = index.add %first, %one : index
+    %extent = index.mul %count, %two : index
+    %origin = index.constant 0 : offset
+    %cv = buffer.view %cosine[%origin] : buffer -> view<[%extent]xf32>
+    %sv = buffer.view %sine[%origin] : buffer -> view<[%extent]xf32>
+    view.store %c, %cv[%first] : f32, view<[%extent]xf32>
+    view.store %c, %cv[%second] : f32, view<[%extent]xf32>
+    view.store %s, %sv[%first] : f32, view<[%extent]xf32>
+    view.store %s, %sv[%second] : f32, view<[%extent]xf32>
+    scf.yield
+  }
+  kernel.return
+}

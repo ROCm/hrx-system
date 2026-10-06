@@ -16,14 +16,12 @@ namespace {
 TEST(Krea2RequestTest, MeasuresProductionInputLayouts) {
   iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT];
   IREE_ASSERT_OK(loom_serve_krea2_request_measure(384, 384, 512, sizes));
-  const iree_host_size_t full[] = {73728,  2184,   143360, 143360, 560, 16,
-                                   557056, 557056, 32,     4,      128};
+  const iree_host_size_t full[] = {16, 2184};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(full); ++i) {
     EXPECT_EQ(sizes[i], full[i]) << i;
   }
   IREE_ASSERT_OK(loom_serve_krea2_request_measure(256, 384, 32, sizes));
-  const iree_host_size_t small[] = {49152,  264,    20480, 20480, 80, 16,
-                                    212992, 212992, 32,    4,     128};
+  const iree_host_size_t small[] = {16, 264};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(small); ++i) {
     EXPECT_EQ(sizes[i], small[i]) << i;
   }

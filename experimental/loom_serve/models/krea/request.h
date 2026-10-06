@@ -14,7 +14,7 @@
 extern "C" {
 #endif
 
-// Cold request preparation for the distilled eight-step still-image model.
+// Per-image options for the distilled eight-step still-image model.
 // These are image/model options, not shared serving configuration.
 typedef struct loom_serve_krea2_request_options_t {
   // Output pixel height, divisible by 16.
@@ -29,27 +29,20 @@ typedef struct loom_serve_krea2_request_options_t {
   float strength;
 } loom_serve_krea2_request_options_t;
 
-// Immutable input spans in sample_image_adapted binding order. The base command
-// omits STRENGTH. Output and reflected workspace are separate device
-// allocations.
+// Immutable inputs shared by generate_image and generate_image_adapted. The
+// source generates noise/tables/padding in its reflected workspace. Output and
+// workspace are separate retained device allocations.
 enum loom_serve_krea2_input_e {
-  LOOM_SERVE_KREA2_INPUT_NOISE,
+  // Little-endian seed:u64, retained-prefix-count:u32, strength:f32.
+  LOOM_SERVE_KREA2_INPUT_HEADER,
+  // Prefix+prompt immediately followed by five suffix IDs, then unused zeros.
   LOOM_SERVE_KREA2_INPUT_TOKEN_IDS,
-  LOOM_SERVE_KREA2_INPUT_ENCODER_COSINE,
-  LOOM_SERVE_KREA2_INPUT_ENCODER_SINE,
-  LOOM_SERVE_KREA2_INPUT_ENCODER_MASK,
-  LOOM_SERVE_KREA2_INPUT_TIMES,
-  LOOM_SERVE_KREA2_INPUT_COSINE,
-  LOOM_SERVE_KREA2_INPUT_SINE,
-  LOOM_SERVE_KREA2_INPUT_DELTAS,
-  LOOM_SERVE_KREA2_INPUT_STRENGTH,
-  LOOM_SERVE_KREA2_INPUT_AFFINE,
   LOOM_SERVE_KREA2_INPUT_COUNT,
 };
 typedef enum loom_serve_krea2_input_e loom_serve_krea2_input_t;
 
-// Immutable bounded prefix+prompt IDs with the model's live suffix and padding
-// token. Preparation has no image geometry, checkpoint or device ownership.
+// Immutable bounded prefix+prompt IDs with the model's live suffix.
+// Preparation has no image geometry, checkpoint or device ownership.
 typedef struct loom_serve_krea2_prompt_t loom_serve_krea2_prompt_t;
 
 typedef struct loom_serve_krea2_request_t loom_serve_krea2_request_t;
@@ -82,12 +75,11 @@ iree_status_t loom_serve_krea2_request_measure(
     uint32_t height, uint32_t width, uint32_t text_tokens,
     iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT]);
 
-// Validates geometry/strength and materializes the prepared IDs with middle
-// padding and a live suffix at the selected text extent. The IDs must fit
-// within text_tokens+29; materialization never truncates them further. The
-// prepared prompt is borrowed only for this call. Builds the encoder/DiT
-// rotary, shifted Euler schedule, packed BF16 normal noise and VAE affine in
-// one owned slab. No tokenizer, checkpoint or device access. On failure
+// Validates geometry/strength and packs the header and unpadded IDs. IDs must
+// fit within text_tokens+29; materialization never truncates them further. The
+// prepared prompt is borrowed only for this call. The command generates all
+// numerical inputs and places the suffix after the middle padding on device.
+// One owned slab, with no tokenizer, checkpoint or device access. On failure
 // *out_request is NULL and partial ownership is released.
 iree_status_t loom_serve_krea2_request_create(
     const loom_serve_krea2_prompt_t* prompt,

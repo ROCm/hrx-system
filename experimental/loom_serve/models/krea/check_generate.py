@@ -134,7 +134,7 @@ def main():
                 [
                     *args.checker,
                     f"--model={args.model}",
-                    f"--root={'sample_image_adapted' if adapted else 'sample_image'}",
+                    f"--root={'generate_image_adapted' if adapted else 'generate_image'}",
                     f"--weight_policy={args.model / 'weights.loom'}",
                     *[f"--weights={path}" for path in weights],
                     *[
@@ -150,8 +150,7 @@ def main():
                     ],
                     *[
                         f"--input={args.requests / name / ('input-' + str(i))}"
-                        for i in range(11)
-                        if adapted or i != 9
+                        for i in range(2)
                     ],
                     f"--expected={reference / (name + '-' + phase + '.f32')}",
                     f"--actual={actual}",

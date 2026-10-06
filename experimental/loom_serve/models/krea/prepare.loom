@@ -10,10 +10,10 @@ func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
 
-// sample_image
-global.rodata.def @root_base = bytes("73616d706c655f696d616765")
-// sample_image_adapted
-global.rodata.def @root_adapted = bytes("73616d706c655f696d6167655f61646170746564")
+// generate_image
+global.rodata.def @root_base = bytes("67656e65726174655f696d616765")
+// generate_image_adapted
+global.rodata.def @root_adapted = bytes("67656e65726174655f696d6167655f61646170746564")
 // krea2.block_tokens
 global.rodata.def @block_tokens = bytes("6b726561322e626c6f636b5f746f6b656e73")
 // krea2.image_tokens

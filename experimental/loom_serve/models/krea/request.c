@@ -18,8 +18,6 @@ struct loom_serve_krea2_prompt_t {
   iree_allocator_t allocator;
   // Actual retained count of the combined framing prefix and prompt.
   uint32_t token_count;
-  // Validated token filling the gap between retained IDs and the suffix.
-  int32_t padding;
   // Validated live suffix IDs, placed at the end of the selected text extent.
   int32_t suffix[5];
   // Retained prefix+prompt IDs in native byte order, without padding or suffix.
@@ -161,7 +159,6 @@ static iree_status_t krea2_encode_prompt(const iree_tokenizer_t* tokenizer,
     }
   }
   prompt->token_count = (uint32_t)count;
-  prompt->padding = padding;
   memcpy(prompt->suffix, suffix, sizeof(prompt->suffix));
   return iree_ok_status();
 }
@@ -203,123 +200,6 @@ void loom_serve_krea2_prompt_destroy(loom_serve_krea2_prompt_t* prompt) {
   }
 }
 
-static void krea2_materialize_prompt(const loom_serve_krea2_prompt_t* prompt,
-                                     uint32_t texts,
-                                     loom_serve_krea2_request_t* request) {
-  const uint32_t capacity = texts + 29;
-  uint8_t* ids =
-      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_TOKEN_IDS].data;
-  uint8_t* mask =
-      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_MASK].data;
-  for (uint32_t i = 0; i < prompt->token_count; ++i) {
-    iree_unaligned_store_le_u32(ids + i * 4, (uint32_t)prompt->token_ids[i]);
-  }
-  memset(mask, 1, prompt->token_count);
-  for (uint32_t i = prompt->token_count; i < capacity; ++i) {
-    iree_unaligned_store_le_u32(ids + i * 4, (uint32_t)prompt->padding);
-  }
-  for (uint32_t i = 0; i < IREE_ARRAYSIZE(prompt->suffix); ++i) {
-    iree_unaligned_store_le_u32(ids + (capacity + i) * 4,
-                                (uint32_t)prompt->suffix[i]);
-  }
-  memset(mask + capacity, 1, IREE_ARRAYSIZE(prompt->suffix));
-}
-
-// Philox4x32-10's counter is the packed four-element group index and its key
-// is the seed. Two open-interval uniform pairs produce four Box-Muller normals.
-// The convention is independent of thread count and does not emulate PyTorch.
-static void krea2_noise(uint64_t seed, uint32_t count, uint8_t* output) {
-  for (uint32_t group = 0; group < count / 4; ++group) {
-    uint32_t words[4] = {group, 0, 0, 0};
-    uint32_t key0 = (uint32_t)seed;
-    uint32_t key1 = (uint32_t)(seed >> 32);
-    for (int round = 0; round < 10; ++round) {
-      const uint64_t left = UINT64_C(0xd2511f53) * words[0];
-      const uint64_t right = UINT64_C(0xcd9e8d57) * words[2];
-      const uint32_t next0 = (uint32_t)(right >> 32) ^ words[1] ^ key0;
-      const uint32_t next2 = (uint32_t)(left >> 32) ^ words[3] ^ key1;
-      words[0] = next0;
-      words[1] = (uint32_t)right;
-      words[2] = next2;
-      words[3] = (uint32_t)left;
-      key0 += UINT32_C(0x9e3779b9);
-      key1 += UINT32_C(0xbb67ae85);
-    }
-    for (int pair = 0; pair < 2; ++pair) {
-      const double radius =
-          sqrt(-2.0 * log(((double)words[pair * 2] + 0.5) * 0x1p-32));
-      const double angle = 6.283185307179586476925286766559 *
-                           (((double)words[pair * 2 + 1] + 0.5) * 0x1p-32);
-      const uint32_t offset = group * 8 + (uint32_t)pair * 4;
-      iree_unaligned_store_le_u16(
-          output + offset, iree_math_f32_to_bf16((float)(radius * cos(angle))));
-      iree_unaligned_store_le_u16(
-          output + offset + 2,
-          iree_math_f32_to_bf16((float)(radius * sin(angle))));
-    }
-  }
-}
-
-static void krea2_encoder_rotary(uint32_t texts, const uint8_t* mask,
-                                 uint8_t* cosine, uint8_t* sine) {
-  float frequencies[64];
-  for (uint32_t channel = 0; channel < 64; ++channel) {
-    frequencies[channel] = 1.0f / powf(5000000.0f, (float)channel / 64.0f);
-  }
-  uint32_t live = 0;
-  for (uint32_t row = 0; row < texts + 48; ++row) {
-    live += mask[row];
-    const float position = row < texts + 34 ? (float)(live - 1) : 0.0f;
-    for (uint32_t channel = 0; channel < 128; ++channel) {
-      const float phase = position * frequencies[channel % 64];
-      const uint32_t offset = (row * 128 + channel) * 2;
-      iree_unaligned_store_le_u16(cosine + offset,
-                                  iree_math_f32_to_bf16(cosf(phase)));
-      iree_unaligned_store_le_u16(sine + offset,
-                                  iree_math_f32_to_bf16(sinf(phase)));
-    }
-  }
-}
-
-static void krea2_rotary(uint32_t texts, uint32_t rows, uint32_t columns,
-                         uint8_t* cosine, uint8_t* sine) {
-  const uint32_t widths[] = {32, 48, 48};
-  for (uint32_t token = 0; token < texts + rows * columns; ++token) {
-    const uint32_t image = token < texts ? 0 : token - texts;
-    const uint32_t positions[] = {0, image / columns, image % columns};
-    uint32_t channel = 0;
-    for (int axis = 0; axis < 3; ++axis) {
-      for (uint32_t pair = 0; pair < widths[axis] / 2; ++pair) {
-        const double frequency =
-            1.0 / pow(1000.0, (double)(pair * 2) / widths[axis]);
-        const double phase = (double)positions[axis] * frequency;
-        const float c = (float)cos(phase), s = (float)sin(phase);
-        for (int repeat = 0; repeat < 2; ++repeat, ++channel) {
-          const uint32_t offset = (token * 128 + channel) * 4;
-          iree_unaligned_store_le_f32(cosine + offset, c);
-          iree_unaligned_store_le_f32(sine + offset, s);
-        }
-      }
-    }
-  }
-}
-
-static void krea2_schedule(uint8_t* times, uint8_t* deltas) {
-  float sigmas[9] = {0};
-  const float shift = (float)exp(1.15);
-  for (int step = 0; step < 8; ++step) {
-    const float initial = (float)(8 - step) / 8.0f;
-    sigmas[step] = shift / (shift + (1.0f / initial - 1.0f));
-    const float timestep = (sigmas[step] * 1000.0f) / 1000.0f;
-    iree_unaligned_store_le_u16(times + step * 2,
-                                iree_math_f32_to_bf16(timestep));
-  }
-  for (int step = 0; step < 8; ++step) {
-    iree_unaligned_store_le_f32(deltas + step * 4,
-                                sigmas[step + 1] - sigmas[step]);
-  }
-}
-
 iree_status_t loom_serve_krea2_request_measure(
     uint32_t height, uint32_t width, uint32_t text_tokens,
     iree_host_size_t sizes[LOOM_SERVE_KREA2_INPUT_COUNT]) {
@@ -337,17 +217,7 @@ iree_status_t loom_serve_krea2_request_measure(
                             "text/image extent must fit 65536 tokens");
   }
   const iree_host_size_t lengths[LOOM_SERVE_KREA2_INPUT_COUNT] = {
-      images * 64 * 2,
-      (texts + 34) * 4,
-      (texts + 48) * 128 * 2,
-      (texts + 48) * 128 * 2,
-      texts + 48,
-      8 * 2,
-      tokens * 128 * 4,
-      tokens * 128 * 4,
-      8 * 4,
-      4,
-      2 * 16 * 4};
+      16, (texts + 34) * 4};
   memcpy(sizes, lengths, sizeof(lengths));
   return iree_ok_status();
 }
@@ -371,8 +241,6 @@ iree_status_t loom_serve_krea2_request_create(
                             prompt->token_count, options.text_tokens,
                             options.text_tokens + 29);
   }
-  const uint32_t images = (options.height / 16) * (options.width / 16);
-  const uint32_t texts = options.text_tokens;
   iree_host_size_t total =
       iree_host_align(sizeof(loom_serve_krea2_request_t), 16);
   for (int i = 0; i < LOOM_SERVE_KREA2_INPUT_COUNT; ++i) {
@@ -388,33 +256,19 @@ iree_status_t loom_serve_krea2_request_create(
     request->inputs[i] = iree_make_const_byte_span(storage, sizes[i]);
     storage += iree_host_align(sizes[i], 16);
   }
-  krea2_materialize_prompt(prompt, texts, request);
-  krea2_noise(options.seed, images * 64,
-              (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_NOISE].data);
-  krea2_encoder_rotary(
-      texts, request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_MASK].data,
-      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_COSINE].data,
-      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_ENCODER_SINE].data);
-  krea2_rotary(texts, options.height / 16, options.width / 16,
-               (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_COSINE].data,
-               (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_SINE].data);
-  krea2_schedule((uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_TIMES].data,
-                 (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_DELTAS].data);
-  iree_unaligned_store_le_f32(
-      (void*)request->inputs[LOOM_SERVE_KREA2_INPUT_STRENGTH].data,
-      options.strength);
-  const float means[16] = {-.7571f, -.7089f, -.9113f, .1075f,  -.1745f, .9653f,
-                           -.1517f, 1.5508f, .4134f,  -.0715f, .5517f,  -.3632f,
-                           -.1922f, -.9497f, .2503f,  -.2921f};
-  const float deviations[16] = {
-      2.8184f, 1.4541f, 2.3275f, 2.6558f, 1.2196f, 1.7708f, 2.6052f, 2.0743f,
-      3.2687f, 2.1526f, 2.8652f, 1.5579f, 1.6382f, 1.1253f, 2.8251f, 1.916f};
-  uint8_t* affine =
-      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_AFFINE].data;
-  for (int channel = 0; channel < 16; ++channel) {
-    iree_unaligned_store_le_f32(affine + channel * 4,
-                                1.0f / deviations[channel]);
-    iree_unaligned_store_le_f32(affine + (channel + 16) * 4, means[channel]);
+  uint8_t* header =
+      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_HEADER].data;
+  iree_unaligned_store_le_u64(header, options.seed);
+  iree_unaligned_store_le_u32(header + 8, prompt->token_count);
+  iree_unaligned_store_le_f32(header + 12, options.strength);
+  uint8_t* ids =
+      (uint8_t*)request->inputs[LOOM_SERVE_KREA2_INPUT_TOKEN_IDS].data;
+  for (uint32_t i = 0; i < prompt->token_count; ++i) {
+    iree_unaligned_store_le_u32(ids + i * 4, (uint32_t)prompt->token_ids[i]);
+  }
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(prompt->suffix); ++i) {
+    iree_unaligned_store_le_u32(ids + (prompt->token_count + i) * 4,
+                                (uint32_t)prompt->suffix[i]);
   }
   *out_request = request;
   return iree_ok_status();

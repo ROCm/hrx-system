@@ -1,0 +1,70 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
+
+func.def public @philox(%a: i32, %b: i32, %c: i32, %d: i32, %key0: i32, %key1: i32) -> (i32, i32, i32, i32) {
+  %w, %x, %y, %z = template.apply<@random.philox4x32>(%a, %b, %c, %d, %key0, %key1) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  func.return %w, %x, %y, %z : i32, i32, i32, i32
+}
+
+// Published Random123 Philox4x32-10 known answers exercise all counter/key words.
+check.case @philox_zero {
+  %i0 = check.literal value(0) : i32
+  %i1 = check.literal value(0) : i32
+  %i2 = check.literal value(0) : i32
+  %i3 = check.literal value(0) : i32
+  %i4 = check.literal value(0) : i32
+  %i5 = check.literal value(0) : i32
+  %a0, %a1, %a2, %a3 = func.call @philox(%i0, %i1, %i2, %i3, %i4, %i5) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %e0 = check.literal value(1713891541) : i32
+  check.expect.equal actual(%a0) expected(%e0) : i32
+  %e1 = check.literal value(-513161843) : i32
+  check.expect.equal actual(%a1) expected(%e1) : i32
+  %e2 = check.literal value(-1135104948) : i32
+  check.expect.equal actual(%a2) expected(%e2) : i32
+  %e3 = check.literal value(-1694442536) : i32
+  check.expect.equal actual(%a3) expected(%e3) : i32
+  check.return
+}
+
+check.case @philox_ones {
+  %i0 = check.literal value(-1) : i32
+  %i1 = check.literal value(-1) : i32
+  %i2 = check.literal value(-1) : i32
+  %i3 = check.literal value(-1) : i32
+  %i4 = check.literal value(-1) : i32
+  %i5 = check.literal value(-1) : i32
+  %a0, %a1, %a2, %a3 = func.call @philox(%i0, %i1, %i2, %i3, %i4, %i5) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %e0 = check.literal value(1083123565) : i32
+  check.expect.equal actual(%a0) expected(%e0) : i32
+  %e1 = check.literal value(1103641358) : i32
+  check.expect.equal actual(%a1) expected(%e1) : i32
+  %e2 = check.literal value(-1576286266) : i32
+  check.expect.equal actual(%a2) expected(%e2) : i32
+  %e3 = check.literal value(1834242557) : i32
+  check.expect.equal actual(%a3) expected(%e3) : i32
+  check.return
+}
+
+check.case @philox_mixed {
+  %i0 = check.literal value(608135816) : i32
+  %i1 = check.literal value(-2052912941) : i32
+  %i2 = check.literal value(320440878) : i32
+  %i3 = check.literal value(57701188) : i32
+  %i4 = check.literal value(-1542899678) : i32
+  %i5 = check.literal value(698298832) : i32
+  %a0, %a1, %a2, %a3 = func.call @philox(%i0, %i1, %i2, %i3, %i4, %i5) : (i32, i32, i32, i32, i32, i32) -> (i32, i32, i32, i32)
+  %e0 = check.literal value(-781386231) : i32
+  check.expect.equal actual(%a0) expected(%e0) : i32
+  %e1 = check.literal value(-1795306261) : i32
+  check.expect.equal actual(%a1) expected(%e1) : i32
+  %e2 = check.literal value(1342301216) : i32
+  check.expect.equal actual(%a2) expected(%e2) : i32
+  %e3 = check.literal value(605187745) : i32
+  check.expect.equal actual(%a3) expected(%e3) : i32
+  check.return
+}
