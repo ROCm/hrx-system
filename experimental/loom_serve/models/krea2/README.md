@@ -744,10 +744,12 @@ it is not bit-identical to K16 on arbitrary inputs.
 K32 retains 32 query channels in registers and stages the remaining 96 in
 wave-owned LDS planes. K16 splits those channels evenly. Loop-carried K/V
 packets read ahead while the current tile is consumed; workgroup barriers
-publish and retire shared storage. Clamping the final prefetch to the last
-complete tile avoids padded reads and extra global storage. At 4608 rows the
-gfx1151 K32 code uses 32,256 bytes of workgroup storage and 248 vector
-registers, with no spills; K16 uses 19,712 bytes and 232 registers.
+publish and retire shared storage. Current mask reads precede future K/V
+reads, allowing the mask's completion wait to leave the next tile's data in
+flight. Clamping the final prefetch to the last complete tile avoids padded
+reads and extra global storage. At 4608 rows the gfx1151 K32 code uses
+32,256 bytes of workgroup storage and 240 vector registers, with no spills;
+K16 uses 19,712 bytes and 232 registers.
 
 The explicit `attention.expanded_masked_gqa_128_bf16` variant retains
 centered two-term QK and three-term probabilities for the text encoder and

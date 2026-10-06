@@ -137,6 +137,17 @@ template.def<@attention.shared_four_head_k32_bf16> device @shared_four_head_k32_
     vector.store %value_packet0, %value_stage[%workitem, %zero] : vector<16xbf16>, view<128x40xbf16>
     vector.store %value_packet1, %value_stage[%workitem, %tile] : vector<16xbf16>, view<128x40xbf16>
     kernel.barrier<workgroup> scope(workgroup) ordering(acq_rel)
+    // Issue current masks before future K/V packets so mask readiness does not
+    // drain the next tile's prefetch through the ordered VMEM completion count.
+    %unset = scalar.constant 0 : i8
+    %key_token0 = index.add %key_origin, %lane_column : index
+    %mask_byte0 = view.load %mask_view[%key_token0] : view<[%tokens]xi8> -> i8
+    %enabled0 = scalar.cmpi ne, %mask_byte0, %unset : i8
+    %valid0 = vector.splat %enabled0 : vector<8xi1>
+    %key_token1 = index.add %key_origin, %upper_lane_column : index
+    %mask_byte1 = view.load %mask_view[%key_token1] : view<[%tokens]xi8> -> i8
+    %enabled1 = scalar.cmpi ne, %mask_byte1, %unset : i8
+    %valid1 = vector.splat %enabled1 : vector<8xi1>
     %unclamped_next = index.add %key_origin, %key_tile : index
     %before_last = index.cmp ult, %unclamped_next, %last_origin : index
     %selected_next = scf.select %before_last, %unclamped_next, %last_origin : index
@@ -209,16 +220,7 @@ template.def<@attention.shared_four_head_k32_bf16> device @shared_four_head_k32_
     %key_values1_7 = vector.load %key_stage[%upper_lane_column, %channel7] : view<32x136xbf16> -> vector<16xbf16>
     %rhs1_7 = vector.fragment<rhs> %key_values1_7 shape [%tile, %tile] : vector<16xbf16>
     %dot1_7 = vector.mma %lhs7, %rhs1_7, %dot1_6 : vector<16xbf16>, vector<16xbf16>, vector<8xf32>
-    %unset = scalar.constant 0 : i8
-    %key_token0 = index.add %key_origin, %lane_column : index
-    %mask_byte0 = view.load %mask_view[%key_token0] : view<[%tokens]xi8> -> i8
-    %enabled0 = scalar.cmpi ne, %mask_byte0, %unset : i8
-    %valid0 = vector.splat %enabled0 : vector<8xi1>
     %masked_scores0 = vector.select %valid0, %dot0_7, %lowest : vector<8xf32>
-    %key_token1 = index.add %key_origin, %upper_lane_column : index
-    %mask_byte1 = view.load %mask_view[%key_token1] : view<[%tokens]xi8> -> i8
-    %enabled1 = scalar.cmpi ne, %mask_byte1, %unset : i8
-    %valid1 = vector.splat %enabled1 : vector<8xi1>
     %masked_scores1 = vector.select %valid1, %dot1_7, %lowest : vector<8xf32>
     %pair_max = vector.maxnumf %masked_scores0, %masked_scores1 : vector<8xf32>
     %max_offset8 = scalar.constant 8 : i32
