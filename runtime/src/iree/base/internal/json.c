@@ -118,8 +118,9 @@ iree_status_t iree_json_consume_insignificant(iree_string_view_t* str) {
 iree_status_t iree_json_consume_keyword(iree_string_view_t* str,
                                         iree_string_view_t keyword,
                                         iree_string_view_t* out_value) {
+  const char* start = str->data;
   if (iree_string_view_consume_prefix(str, keyword)) {
-    *out_value = keyword;
+    *out_value = iree_make_string_view(start, keyword.size);
     return iree_ok_status();
   }
   return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
