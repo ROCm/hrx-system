@@ -112,6 +112,9 @@ static void iree_hal_amd_xdna_device_destroy(iree_hal_device_t* base) {
         "ownership");
     return;
   }
+  if (device->queue && !iree_hal_amd_xdna_queue_shutdown(device->queue)) {
+    return;
+  }
   iree_hal_queue_release(device->queue);
   iree_hal_allocator_release(device->allocator);
   iree_hal_device_spec_release(device->spec);

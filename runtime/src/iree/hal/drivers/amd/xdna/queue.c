@@ -641,7 +641,7 @@ iree_status_t iree_hal_amd_xdna_queue_assign_frontier(
   return iree_ok_status();
 }
 
-static void iree_hal_amd_xdna_queue_destroy(iree_hal_queue_t* base) {
+bool iree_hal_amd_xdna_queue_shutdown(iree_hal_queue_t* base) {
   iree_hal_amd_xdna_queue_t* queue = (iree_hal_amd_xdna_queue_t*)base;
   if (queue->handle) {
     amdf_status_t status =
@@ -651,9 +651,18 @@ static void iree_hal_amd_xdna_queue_destroy(iree_hal_queue_t* base) {
                                        "kernel_queue_destroy");
       // BUSY preserves the native queue and its borrowed notification target.
       if (status == amdf_make_api_status(AMDF_STATUS_CODE_BUSY)) {
-        return;
+        return false;
       }
     }
+    queue->handle = NULL;
+  }
+  return true;
+}
+
+static void iree_hal_amd_xdna_queue_destroy(iree_hal_queue_t* base) {
+  iree_hal_amd_xdna_queue_t* queue = (iree_hal_amd_xdna_queue_t*)base;
+  if (!iree_hal_amd_xdna_queue_shutdown(base)) {
+    return;
   }
   if (queue->tracker) {
     iree_async_frontier_tracker_retire_axis(

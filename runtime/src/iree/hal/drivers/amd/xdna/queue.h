@@ -29,6 +29,14 @@ iree_status_t iree_hal_amd_xdna_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,
     iree_async_axis_t axis);
 
+// Releases native queue ownership before the parent releases its proactor and
+// context. Called with exclusive access after all HAL queue users retire.
+// Returns false only when native BUSY preserves the queue; the diagnosed
+// failure requires keeping its complete parent graph live. Every other native
+// result consumes the handle. Repeated calls after consumption do no native
+// work.
+bool iree_hal_amd_xdna_queue_shutdown(iree_hal_queue_t* queue);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
