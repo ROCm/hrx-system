@@ -14,8 +14,8 @@ function(loom_kernel_binary)
   cmake_parse_arguments(
     _RULE
     "TESTONLY"
-    "NAME;COMPONENT;TARGET;OUTPUT"
-    "SRCS;LIBRARIES;ROOTS;CONFIGS"
+    "NAME;COMPONENT;TARGET;OUTPUT;INPUT_FORMAT"
+    "SRCS;LIBRARIES;DATA;INPUTOPTS;ROOTS;CONFIGS"
     ${ARGN}
   )
   if(_RULE_TESTONLY AND NOT IREE_BUILD_TESTS)
@@ -30,6 +30,11 @@ function(loom_kernel_binary)
   endif()
   if(NOT _RULE_SRCS AND NOT _RULE_LIBRARIES)
     message(FATAL_ERROR "loom_kernel_binary requires SRCS or LIBRARIES")
+  endif()
+  if(NOT _RULE_SRCS AND
+     (_RULE_DATA OR _RULE_INPUT_FORMAT OR _RULE_INPUTOPTS))
+    message(FATAL_ERROR
+      "loom_kernel_binary source admission options require SRCS")
   endif()
   if(NOT _RULE_OUTPUT)
     set(_RULE_OUTPUT "${_RULE_NAME}")
@@ -73,8 +78,14 @@ function(loom_kernel_binary)
       "--dependency-report=${_DEPENDENCY_REPORT}"
       "--to=bc"
       "--output=${_SOURCE_MODULE}"
-      ${_SOURCES}
     )
+    if(_RULE_INPUT_FORMAT)
+      list(APPEND _ARGS "--input-format=${_RULE_INPUT_FORMAT}")
+    endif()
+    foreach(_OPTIONS IN LISTS _RULE_INPUTOPTS)
+      list(APPEND _ARGS "--input-options=${_OPTIONS}")
+    endforeach()
+    list(APPEND _ARGS ${_SOURCES})
     foreach(_LIBRARY IN LISTS _LIBRARIES)
       list(APPEND _ARGS "--library=${_LIBRARY}")
     endforeach()
@@ -82,7 +93,12 @@ function(loom_kernel_binary)
     add_custom_command(
       OUTPUT "${_SOURCE_MODULE}" "${_DEPENDENCY_REPORT}"
       COMMAND "${_LINK_TOOL}" "${_ARGS}"
-      DEPENDS "${_LINK_TOOL}" ${_SOURCES} "${_LIBRARIES}" "${_TRANSITIVE_LIBRARIES}"
+      DEPENDS
+        "${_LINK_TOOL}"
+        ${_SOURCES}
+        "${_LIBRARIES}"
+        "${_TRANSITIVE_LIBRARIES}"
+        ${_RULE_DATA}
       WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
       COMMENT "Assembling Loom sources for ${_RULE_NAME}"
       VERBATIM COMMAND_EXPAND_LISTS
@@ -143,7 +159,7 @@ function(loom_kernel_binary)
   foreach(_INPUT_TARGET IN LISTS _SOURCE_TARGETS _LIBRARY_TARGETS)
     iree_register_target_dependency(TARGET "${_TARGET}" DEPENDENCY "${_INPUT_TARGET}")
   endforeach()
-  foreach(_INPUT IN LISTS _SOURCES _LIBRARIES)
+  foreach(_INPUT IN LISTS _SOURCES _LIBRARIES _RULE_DATA)
     iree_generated_output_add_consumer("${_INPUT}" "${_TARGET}")
   endforeach()
   iree_register_generated_output_producer("${_TARGET}"

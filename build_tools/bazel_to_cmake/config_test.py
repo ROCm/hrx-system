@@ -58,6 +58,9 @@ class ConfigTest(unittest.TestCase):
             name="mul",
             srcs=["z.loom", "a.loom"],
             deps=[":z_library", ":a_library"],
+            data=["kernel.h"],
+            input_format="fixture",
+            inputopts=["fixture:include=$(location kernel.h)", "fixture:root=mul"],
             roots=["@second", "@first"],
             configs={"z.limit": "16", "a.value": "3"},
             target=":npu4",
@@ -77,6 +80,13 @@ class ConfigTest(unittest.TestCase):
         )
         self.assertIn('COMPONENT\n    "//programs:mul"', converter.body)
         self.assertIn('SRCS\n    "z.loom"\n    "a.loom"', converter.body)
+        self.assertIn('DATA\n    "kernel.h"', converter.body)
+        self.assertIn('INPUT_FORMAT\n    "fixture"', converter.body)
+        self.assertIn(
+            '"fixture:include=${PROJECT_SOURCE_DIR}/programs/kernel.h"',
+            converter.body,
+        )
+        self.assertIn('"fixture:root=mul"', converter.body)
         self.assertIn("LIBRARIES\n    ::z_library\n    ::a_library", converter.body)
         self.assertIn('ROOTS\n    "@second"\n    "@first"', converter.body)
         self.assertIn('CONFIGS\n    "a.value=3"\n    "z.limit=16"', converter.body)

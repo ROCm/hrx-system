@@ -33,6 +33,12 @@ LoomBinaryInfo = provider(
 def _require_binary_inputs(ctx):
     if not ctx.files.srcs and not ctx.attr.deps:
         fail("%s requires at least one source across srcs and deps" % ctx.label)
+    if not ctx.files.srcs and (
+        ctx.files.data or
+        ctx.attr.input_format or
+        ctx.attr.inputopts
+    ):
+        fail("%s source admission options require srcs" % ctx.label)
 
 def _declare_binary_linked_module(ctx, target_profile):
     dependency_infos = [dep[LoomLibraryInfo] for dep in ctx.attr.deps]
@@ -43,6 +49,12 @@ def _declare_binary_linked_module(ctx, target_profile):
         source_library = loom_linking.declare_relocatable_module(
             ctx = ctx,
             sources = ctx.files.srcs,
+            data = ctx.files.data,
+            input_format = ctx.attr.input_format,
+            inputopts = [
+                ctx.expand_location(option, targets = ctx.attr.srcs + ctx.attr.data)
+                for option in ctx.attr.inputopts
+            ],
             dependency_infos = dependency_infos,
             output_stem = ctx.label.name + ".sources",
             mnemonic = "LoomBinarySources",
@@ -138,16 +150,26 @@ def _binary_link_attrs():
         "configs": attr.string_dict(
             doc = "Compile-time config symbol values keyed by declaration name.",
         ),
+        "data": attr.label_list(
+            allow_files = True,
+            doc = "Declared source-admission inputs, such as included headers.",
+        ),
         "deps": attr.label_list(
             providers = [LoomLibraryInfo],
             doc = "Direct Loom libraries contributing exported roots and closure.",
+        ),
+        "input_format": attr.string(
+            doc = "Direct source provider override; empty selects each source by filename.",
+        ),
+        "inputopts": attr.string_list(
+            doc = "Provider-scoped direct source options, with location expansion.",
         ),
         "roots": attr.string_list(
             doc = "Optional explicit roots replacing exports from direct inputs.",
         ),
         "srcs": attr.label_list(
-            allow_files = [".loom", ".loombc"],
-            doc = "Direct sources assembled as an implicit relocatable library.",
+            allow_files = True,
+            doc = "Direct provider-owned sources assembled as an implicit relocatable library.",
         ),
     }
 

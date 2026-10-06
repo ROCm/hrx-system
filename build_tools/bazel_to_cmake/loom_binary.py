@@ -30,6 +30,9 @@ class LoomBinaryBuildFileFunctions:
         target,
         srcs=None,
         deps=None,
+        data=None,
+        input_format="",
+        inputopts=None,
         roots=None,
         configs=None,
         out=None,
@@ -57,6 +60,11 @@ class LoomBinaryBuildFileFunctions:
             ),
             self._convert_string_arg_block("OUTPUT", output),
             self._convert_data_srcs_block(srcs, sort=False),
+            self._convert_data_srcs_block(data, block_name="DATA", sort=False),
+            self._convert_string_arg_block("INPUT_FORMAT", input_format or None),
+            self._convert_string_list_block(
+                "INPUTOPTS", self._convert_location_args(inputopts), sort=False
+            ),
             self._convert_string_list_block(
                 "LIBRARIES",
                 [self._convert_single_target(dependency) for dependency in deps]

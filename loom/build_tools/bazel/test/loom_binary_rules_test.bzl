@@ -133,6 +133,16 @@ def _test_kernel_binary_sources_are_an_implicit_library(name, **kwargs):
 def _test_kernel_binary_sources_are_an_implicit_library_impl(env, target):
     actions = target[TestingAspectInfo].actions
     source_action = _find_action(env, actions, "LoomBinarySources")
+    if "--input-format=fixture" not in source_action.argv:
+        env.fail("expected source format in %r" % source_action.argv)
+    if "--input-options=fixture:root=scale" not in source_action.argv:
+        env.fail("expected source option in %r" % source_action.argv)
+    _expect_arg_with_suffix(
+        env,
+        source_action.argv,
+        "--input-options=fixture:header=",
+        "dependency_checks.loom",
+    )
     _expect_arg_with_suffix(
         env,
         source_action.argv,
@@ -145,6 +155,9 @@ def _test_kernel_binary_sources_are_an_implicit_library_impl(env, target):
         "--library=",
         "library_dependency.loombc",
     )
+    source_inputs = source_action.inputs.to_list()
+    _expect_basename(env, source_inputs, "dependency_checks.loom")
+    _expect_basename(env, source_inputs, "link_checks.loom")
 
     link_action = _find_action(env, actions, "LoomBinaryLink")
     if "--target=amdgpu:gfx11-generic" not in link_action.argv:

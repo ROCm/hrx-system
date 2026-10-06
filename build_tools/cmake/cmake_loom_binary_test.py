@@ -27,6 +27,7 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             shutil.copytree(FIXTURE, source)
             for name in ("direct", "library", "leaf"):
                 (source / f"{name}.loom").write_text(f"{name} original\n")
+            (source / "direct.h").write_text("header original\n")
             configure_project(source, build)
             build_project(build, "kernel_consumer", "fixture_exported")
             output = build / "explicit.xdna"
@@ -37,6 +38,9 @@ class CMakeLoomBinaryTest(unittest.TestCase):
                 "--mode=link",
                 "--strip-check",
                 "--require-resolved-config",
+                "--input-format=fixture",
+                "--input-options=fixture:include=direct.h",
+                "--input-options=fixture:root=direct",
                 "--config=a.value=3",
                 "--config=z.limit=16",
                 "--target=amd.xdna.aie2p:amd.xdna.strix.17f0_10",
@@ -55,6 +59,10 @@ class CMakeLoomBinaryTest(unittest.TestCase):
             build_project(build, "kernel_consumer")
             self.assertIn("leaf changed", output.read_text())
             self.assertNotIn("leaf original", output.read_text())
+            timestamp = output.stat().st_mtime_ns
+            (source / "direct.h").write_text("header changed\n")
+            build_project(build, "kernel_consumer")
+            self.assertGreater(output.stat().st_mtime_ns, timestamp)
 
             host_tools = root / "host tools"
             host_tools.mkdir()

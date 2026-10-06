@@ -28,6 +28,8 @@ endif()
 loom_target_profile(NAME npu4 FAMILY amd.xdna.aie2p SELECTOR amd.xdna.strix.17f0_10)
 loom_kernel_binary(NAME explicit
   TARGET ::npu4 OUTPUT explicit.xdna SRCS direct.loom
+  DATA direct.h INPUT_FORMAT fixture
+  INPUTOPTS fixture:include=direct.h fixture:root=direct
   LIBRARIES ::library ROOTS @second @first CONFIGS a.value=3 z.limit=16 TESTONLY)
 loom_kernel_binary(NAME exported
   TARGET ::npu4 OUTPUT exported.xdna LIBRARIES ::library TESTONLY)

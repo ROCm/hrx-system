@@ -119,6 +119,12 @@ loom_kernel_binary(
         "a.value": "1",
         "z.value": "2",
     },
+    data = ["dependency_checks.loom"],
+    input_format = "fixture",
+    inputopts = [
+        "fixture:header=$(location dependency_checks.loom)",
+        "fixture:root=scale",
+    ],
     tags = ["manual"],
     target = "//loom/target/amdgpu:gfx11-generic",
     deps = [":library_dependency"],
