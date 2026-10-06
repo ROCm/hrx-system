@@ -54,7 +54,7 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_6144() {
   %short_text_rows = index.constant 4224 : index
   %temporal = index.cmp eq, %rows, %short_text_rows : index
   scf.if %temporal {
-    %group_size = index.constant 4 : index
+    %group_size = index.constant 8 : index
     template.apply<@projection.linear_temporal_bf16>(%rows, %width, %width, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
     scf.yield
   } else {
@@ -141,7 +141,9 @@ kernel.def target(@block_projection_wave32) @block_linear_6144_16384() {
   %full_text = index.cmp eq, %rows, %image_full_text : index
   %temporal = scalar.ori %short_text, %full_text : i1
   scf.if %temporal {
-    %group_size = index.constant 4 : index
+    %short_text_group = index.constant 8 : index
+    %full_text_group = index.constant 4 : index
+    %group_size = scf.select %short_text, %short_text_group, %full_text_group : index
     template.apply<@projection.linear_temporal_bf16>(%rows, %inputs, %outputs, %group_size, %input, %weight, %output) : (index, index, index, index, buffer, buffer, buffer)
     scf.yield
   } else {

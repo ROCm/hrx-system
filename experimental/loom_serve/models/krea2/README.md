@@ -584,8 +584,15 @@ with current-tile WMMA. The steady loop only acquires valid future K64 tiles.
 A peeled penultimate tile publishes the final queued tile without acquiring
 an unused successor, followed by a final drain. This keeps a bounds-check
 zero merge from forcing future loads to finish before current-tile arithmetic.
-Four 128-row tiles form each traversal panel. Other projection shapes retain
-the baseline motif.
+At 4,224 rows, up/gate and square projections group eight 128-row tiles per
+traversal panel; down and the 4,608-row up/gate projections retain four.
+For the 6,144-wide inputs, those policies revisit logical input panels of
+12 MiB and 6 MiB respectively. This changes cache locality, not the issued
+operand bytes or arithmetic. The larger panel reduced measured up/gate time
+by about 5% and square time by 6–7%; sixteen tiles slowed up/gate and gave a
+smaller square gain. These are measured shape selections, not a cache-capacity
+guarantee or a general rule that larger panels are better. Other projection
+shapes retain the baseline motif.
 
 A workgroup-uniform branch separates full output tiles from the final partial
 tile around the entire contraction. The interior path carries an explicit
