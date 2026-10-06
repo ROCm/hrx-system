@@ -78,6 +78,17 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "host_semaphore",
+    srcs = ["host_semaphore.c"],
+    hdrs = ["host_semaphore.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "libmpi",
     srcs = ["libmpi.c"],
     hdrs = [

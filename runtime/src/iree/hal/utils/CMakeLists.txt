@@ -83,6 +83,20 @@ iree_cc_library(
 
 iree_cc_library(
   NAME
+    host_semaphore
+  HDRS
+    "host_semaphore.h"
+  SRCS
+    "host_semaphore.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::hal
+  PUBLIC
+)
+
+iree_cc_library(
+  NAME
     libmpi
   HDRS
     "libmpi.h"
