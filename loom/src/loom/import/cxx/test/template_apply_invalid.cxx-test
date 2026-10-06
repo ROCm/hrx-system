@@ -1,0 +1,25 @@
+// RUN: verify
+#include <loomcxx/kernel.h>
+
+// ERROR@+1: LOWERING/059 "template.apply requires one valid family symbol"
+LOOM_TEMPLATE("") unsigned invalid_family();
+
+// ====
+#include <loomcxx/kernel.h>
+
+// ERROR@+1: LOWERING/059 "template.apply declarations cannot be variadic"
+LOOM_TEMPLATE("test.variadic") unsigned variadic(unsigned first, ...);
+
+// ====
+#include <loomcxx/kernel.h>
+
+template <class T>
+// ERROR@+1: LOWERING/059 "template.apply requires an ordinary function"
+LOOM_TEMPLATE("test.generic") T generic(T value);
+
+// ====
+#include <loomcxx/kernel.h>
+
+LOOM_TEMPLATE("test.overloaded") unsigned overloaded();
+// ERROR@+1: LOWERING/059 "template family cannot name multiple C++ functions"
+LOOM_TEMPLATE("test.overloaded") unsigned overloaded(unsigned value);

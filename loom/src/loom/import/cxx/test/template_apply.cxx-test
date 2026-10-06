@@ -1,0 +1,47 @@
+// RUN: roundtrip
+#include <loomcxx/kernel.h>
+
+LOOM_TEMPLATE("test.tick") unsigned tick();
+LOOM_TEMPLATE("test.consume") void consume(unsigned value);
+LOOM_TEMPLATE("test.transform") unsigned transform(unsigned value);
+
+struct Pair {
+  // Integer component transported independently through High IR.
+  unsigned count;
+  // Floating-point component transported independently through High IR.
+  float scale;
+};
+
+LOOM_TEMPLATE("test.pair") Pair transform_pair(Pair value);
+
+unsigned linked_pipeline(unsigned value) {
+  unsigned before = tick();
+  consume(value++);
+  return before + transform(value);
+}
+
+Pair linked_record(Pair value) { return transform_pair(value); }
+
+// ----
+func.def public @linked_pipeline(%value$0: i32) -> (i32) {
+  %before = template.apply<@test.tick>() : () -> (i32)
+  %4 = scalar.constant 1 : i32
+  %value$5 = scalar.addi %value$0, %4 : i32
+  template.apply<@test.consume>(%value$0) : (i32)
+  %9 = template.apply<@test.transform>(%value$5) : (i32) -> (i32)
+  %10 = scalar.addi %before, %9 : i32
+  func.return %10 : i32
+}
+
+template.decl @test.tick() -> (i32)
+
+template.decl @test.consume(%6: i32)
+
+template.decl @test.transform(%7: i32) -> (i32)
+
+func.def public @linked_record(%value_count: i32, %value_scale: f32) -> (i32, f32) {
+  %19, %20 = template.apply<@test.pair>(%value_count, %value_scale) : (i32, f32) -> (i32, f32)
+  func.return %19, %20 : i32, f32
+}
+
+template.decl @test.pair(%15: i32, %16: f32) -> (i32, f32)

@@ -40,11 +40,12 @@ TEST_F(FunctionsTest, RootsQueueEachConcreteHelperOnceWithPrivateVisibility) {
                 IREE_SV("functions.cxx"), options());
   Types types(source.unit(), source.diagnostics());
   Locations locations(source.unit(), source.diagnostics(), module_);
-  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, module_);
+  SymbolNames names(source.unit(), source.diagnostics());
+  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, locations,
+                        names, module_);
   LaunchContracts launches(source.unit(), source.diagnostics());
   Scalars scalars(source.unit(), source.diagnostics(), types, locations,
                   builder_);
-  SymbolNames names(source.unit(), source.diagnostics());
   Configs configs(source.unit(), source.diagnostics(), types, scalars,
                   locations, names);
   Functions functions(source.unit(), source.diagnostics(), module_, intrinsics,
@@ -85,11 +86,12 @@ TEST_F(FunctionsTest,
                 IREE_SV("visibility.cpp"), options());
   Types types(source.unit(), source.diagnostics());
   Locations locations(source.unit(), source.diagnostics(), module_);
-  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, module_);
+  SymbolNames names(source.unit(), source.diagnostics());
+  Intrinsics intrinsics(source.unit(), source.diagnostics(), types, locations,
+                        names, module_);
   LaunchContracts launches(source.unit(), source.diagnostics());
   Scalars scalars(source.unit(), source.diagnostics(), types, locations,
                   builder_);
-  SymbolNames names(source.unit(), source.diagnostics());
   Configs configs(source.unit(), source.diagnostics(), types, scalars,
                   locations, names);
   Functions functions(source.unit(), source.diagnostics(), module_, intrinsics,

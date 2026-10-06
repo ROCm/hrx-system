@@ -32,6 +32,10 @@
 // by every invocation in the enclosing kernel workgroup.
 #define LOOM_WORKGROUP [[loom::workgroup]]
 #define LOOM_FORCE_INLINE [[loom::force_inline]] inline
+// Declares an ordinary C++ function whose calls apply the named link-selected
+// Loom template family. The declaration has no C++ definition; its parameters
+// and result define the semantic family signature at each call site.
+#define LOOM_TEMPLATE(FAMILY) [[loom::op("template.apply", FAMILY)]]
 
 namespace loom {
 

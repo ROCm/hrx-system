@@ -116,6 +116,8 @@ loom_check_test_suite(
     "symbols_invalid.cxx-test"
     "template_addresses.cxx-test"
     "template_addresses_invalid.cxx-test"
+    "template_apply.cxx-test"
+    "template_apply_invalid.cxx-test"
     "template_calls.cxx-test"
     "template_conversions.cxx-test"
     "template_conversions_invalid.cxx-test"

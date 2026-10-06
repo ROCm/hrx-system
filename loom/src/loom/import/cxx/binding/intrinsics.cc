@@ -19,6 +19,9 @@
 
 #include "loom/import/cxx/source/attributes.h"
 #include "loom/import/cxx/source/error.h"
+#include "loom/import/cxx/source/locations.h"
+#include "loom/import/cxx/symbol/names.h"
+#include "loom/ir/module.h"
 
 namespace loom::cxx_import {
 namespace {
@@ -121,6 +124,10 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
     } else if (auto encoding = EncodingIntrinsic::admit(
                    unit_, diagnostics_, module_->context, *selected, owner)) {
       binding.operation = *encoding;
+    } else if (TemplateApplyIntrinsic::admit(unit_, diagnostics_, *selected,
+                                             owner)) {
+      diagnostics_.reject(unit_, owner,
+                          "template.apply requires an ordinary function");
     } else if (selected->arguments.size() != 1 ||
                (!ViewIntrinsic::supports(selected->arguments[0]->name()) &&
                 !DecodeIntrinsic::supports(selected->arguments[0]->name()) &&
@@ -130,7 +137,9 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
                 !BarrierIntrinsic::supports(selected->arguments[0]->name()) &&
                 !CheckIntrinsic::parse_operation(
                     selected->arguments[0]->name()) &&
-                !AssemblyIntrinsic::supports(selected->arguments[0]->name()))) {
+                !AssemblyIntrinsic::supports(selected->arguments[0]->name()) &&
+                !TemplateApplyIntrinsic::supports(
+                    selected->arguments[0]->name()))) {
       diagnostics_.reject(unit_, owner,
                           "function template operation has no C++ projection");
     }
@@ -162,6 +171,12 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
                                         const cxx::Attribute& attribute,
                                         cxx::AST* owner) {
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  if (auto family = TemplateApplyIntrinsic::admit(unit_, diagnostics_,
+                                                  attribute, owner)) {
+    return TemplateApplyIntrinsic::resolve(
+        unit_, diagnostics_, types_, function, template_family(*family, owner),
+        locations_.get(owner), owner);
+  }
   if (auto decode = DecodeIntrinsic::resolve(
           unit_, diagnostics_, types_, signature, attribute, module_, owner)) {
     return *decode;
@@ -260,6 +275,23 @@ Intrinsics::ScalarBinding Intrinsics::resolve_scalar(
   return {operation, types_.get(return_type, owner)};
 }
 
+TemplateApplyIntrinsic::Family* Intrinsics::template_family(
+    std::string_view spelling, cxx::AST* owner) {
+  if (auto found = template_families_.find(std::string(spelling));
+      found != template_families_.end()) {
+    return &found->second;
+  }
+  names_.reserve(spelling, owner);
+  loom_string_id_t name;
+  check(loom_module_intern_string(module_, view(spelling), &name));
+  TemplateApplyIntrinsic::Family family = {};
+  check(loom_module_add_symbol(module_, name, &family.reference.symbol_id));
+  auto [entry, inserted] =
+      template_families_.emplace(std::string(spelling), family);
+  (void)inserted;
+  return &entry->second;
+}
+
 Intrinsics::Binding* Intrinsics::concrete_binding(cxx::FunctionSymbol* function,
                                                   cxx::AST* owner) {
   auto entry = bindings_.find(function->canonical());
@@ -345,6 +377,10 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
   if (auto* barrier = std::get_if<BarrierIntrinsic>(binding)) {
     barrier->call(builder, location);
     return {std::nullopt};
+  }
+  if (auto* application = std::get_if<TemplateApplyIntrinsic>(binding)) {
+    return {
+        application->call(arguments, types_, arena, owner, builder, location)};
   }
   std::array<loom_value_id_t, 8> inline_values;
   std::vector<loom_value_id_t> overflow;

@@ -145,6 +145,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "template_apply",
+    srcs = ["template_apply.cc"],
+    hdrs = ["template_apply.h"],
+    cxx_features = CXX_COMPILER_OPTIONS["cxx_features"],
+    cxx_standard = CXX_COMPILER_OPTIONS["cxx_standard"],
+    deps = [
+        "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/symbol:names",
+        "//loom/src/loom/import/cxx/value:representation",
+        "//loom/src/loom/import/cxx/value:signature",
+        "//loom/src/loom/import/cxx/value:types",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/ops:op_defs",
+        "//loom/src/loom/ops/template",
+        "//third_party:cxx_parser",
+    ],
+)
+
+loom_cc_library(
     name = "view",
     srcs = ["view.cc"],
     hdrs = ["view.h"],
@@ -212,11 +231,15 @@ loom_cc_library(
         ":kernel",
         ":scalar_bindings",
         ":shaped",
+        ":template_apply",
         ":view",
         "//loom/src/loom/import/cxx/source",
         "//loom/src/loom/import/cxx/source:attributes",
         "//loom/src/loom/import/cxx/source:error",
+        "//loom/src/loom/import/cxx/source:locations",
+        "//loom/src/loom/import/cxx/symbol:names",
         "//loom/src/loom/import/cxx/value:types",
+        "//loom/src/loom/ir",
         "//third_party:cxx_parser",
     ],
 )

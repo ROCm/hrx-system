@@ -12,6 +12,7 @@
 
 #include <optional>
 #include <span>
+#include <string>
 #include <unordered_map>
 #include <variant>
 
@@ -23,11 +24,15 @@
 #include "loom/import/cxx/binding/kernel.h"
 #include "loom/import/cxx/binding/scalar_bindings.h"
 #include "loom/import/cxx/binding/shaped.h"
+#include "loom/import/cxx/binding/template_apply.h"
 #include "loom/import/cxx/binding/view.h"
 #include "loom/import/cxx/source/source.h"
 #include "loom/import/cxx/value/types.h"
 
 namespace loom::cxx_import {
+
+class SymbolNames;
+class Locations;
 
 // Result of one operation binding that has already claimed a source call.
 // Void intrinsics have no value; absence never means that the call was missed.
@@ -63,13 +68,15 @@ class Intrinsics {
       std::variant<ScalarBinding, ShapedIntrinsic, EncodingIntrinsic,
                    DecodeIntrinsic, ViewIntrinsic, AtomicIntrinsic,
                    FenceIntrinsic, SubgroupIntrinsic, BarrierIntrinsic,
-                   AssemblyIntrinsic, CheckIntrinsic>;
+                   AssemblyIntrinsic, TemplateApplyIntrinsic, CheckIntrinsic>;
 
   Intrinsics(cxx::TranslationUnit& unit, Diagnostics& diagnostics, Types& types,
-             loom_module_t* module)
+             Locations& locations, SymbolNames& names, loom_module_t* module)
       : unit_(unit),
         diagnostics_(diagnostics),
         types_(types),
+        locations_(locations),
+        names_(names),
         module_(module) {}
 
   // Admits raw attribute arguments before the frontend's string-only semantic
@@ -116,6 +123,8 @@ class Intrinsics {
   ScalarBinding resolve_scalar(ScalarOperation operation,
                                const cxx::FunctionType* signature,
                                cxx::AST* owner);
+  TemplateApplyIntrinsic::Family* template_family(std::string_view spelling,
+                                                  cxx::AST* owner);
   Binding* concrete_binding(cxx::FunctionSymbol* function, cxx::AST* owner);
 
   // Invocation-owned frontend supplying canonical semantic types.
@@ -124,12 +133,19 @@ class Intrinsics {
   Diagnostics& diagnostics_;
   // Invocation-owned source type projection shared with ordinary translation.
   Types& types_;
+  // Invocation-owned source provenance retained by family declarations.
+  Locations& locations_;
+  // Shared output namespace preventing external-family/callable collisions.
+  SymbolNames& names_;
   // Invocation-owned output module interning static source specifications.
   loom_module_t* module_;
   // Validated bindings indexed by canonical semantic function symbol.
   std::unordered_map<cxx::FunctionSymbol*, Binding> bindings_;
   // Template source contracts indexed by admitted primary declaration.
   std::unordered_map<cxx::FunctionSymbol*, TemplateBinding> template_bindings_;
+  // Distinct linked family names interned once in the output symbol table.
+  std::unordered_map<std::string, TemplateApplyIntrinsic::Family>
+      template_families_;
 };
 
 }  // namespace loom::cxx_import
