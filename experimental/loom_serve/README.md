@@ -21,6 +21,7 @@ configuration, numerical policy, and their remaining native adapters.
 | [`http/`](http) | TCP carrier and bounded HTTP connection/request storage |
 | [`image/`](image) | Image request validation, completed-image service and output encoding; independent of diffusion architecture |
 | [`storage/`](storage) | Physical block accounting and logical page maps |
+| [`motifs/`](motifs) | Reusable tensor math and GGML format kernels, specialized by model source |
 | [`models/krea/`](models/krea) | Krea model programs, checkpoint/request policy, image adapters and reference checks |
 | [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy, text adapters and reference checks |
 | [`tools/`](tools) | Observation, recording, workload replay, simulation and component checks |
@@ -29,7 +30,10 @@ The shared native headers are experimental model-author interfaces, not a
 stable ABI. Concrete model-native libraries are package-private. Only runtime
 consumes compiler-private command reflection; model callers use its serving
 interfaces. Each model's `:sources` target publishes its source-JIT catalog and
-is included in its executable's runfiles, not compiled ahead of time.
+is included in its executable's runfiles together with its shared motifs, not
+compiled ahead of time. The source catalog resolves paths relative to its model
+directory; copying that directory alone is not a complete source package.
+The [motif guide](motifs/README.md) describes composition and shape contracts.
 
 For example, the image server is
 `//experimental/loom_serve/models/krea:server`; the text server is

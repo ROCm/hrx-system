@@ -6,7 +6,7 @@
 
 // check_linear_tiled.py binds each shape's compiler configuration and selects
 // the corresponding sample. Kernel workloads are not device ABI constants.
-// Link kernels/linear.loom and kernels/linear_tiled.loom with --library.
+// Link ../linear.loom and ../linear_tiled.loom with --library.
 // The single-wave helper is an exact arithmetic reference for the cooperative
 // helper: both retain four K16 chains and the same K256 combination order.
 // Cases cover each 16-row tail within a 64-row workgroup, every remainder of

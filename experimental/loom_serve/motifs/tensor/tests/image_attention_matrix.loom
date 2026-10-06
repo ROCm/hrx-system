@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Link kernels/image_attention_matrix.loom with --library. Two key tiles and
+// Link ../image_attention_matrix.loom with --library. Two key tiles and
 // two query tiles exercise the shared full-head reduction and online rescale.
 // The independent scalar oracle uses logical indexing, rounds Q/K/V and each
 // unnormalized probability to BF16. Dot/value accumulation uses F64; the

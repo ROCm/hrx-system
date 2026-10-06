@@ -167,9 +167,9 @@ for case in narrow narrow_zero generic_1_1 generic_4_4 generic_8_8 \
     --library="$model/prepare.loom" \
     --library="$model/kernels/qwen38/linear_q5k_f16_wmma.loom" \
     --library="$model/kernels/qwen38/ffn_gate_up_prefetch.loom" \
-    --library="$model/kernels/ggml/linear_q5k_q8_1_x4.loom" \
-    --library="$model/kernels/ggml/linear_qk_common.loom" \
-    --library="$model/kernels/ggml/quantize_q8_1_x4.loom" \
+    --library="experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom" \
+    --library="experimental/loom_serve/motifs/ggml/linear_qk_common.loom" \
+    --library="experimental/loom_serve/motifs/ggml/quantize_q8_1_x4.loom" \
     --config=qwen38.ffn.input_size=5120 --config=qwen38.ffn.output_size=17408 \
     --config=ggml.linear_q5k_q8_1_x4.token_capacity=4 \
     --config=ggml.linear_q5k_q8_1_x4.output_capacity=17408 \
@@ -371,7 +371,7 @@ for shape in 128_1 128_128 256_129 256_256 512_511 512_512 0_1; do
     --library=experimental/loom_serve/models/qwen/kernels/qwen38/ffn_gate_up_prefetch.loom \
     --library=experimental/loom_serve/models/qwen/kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom \
     --library=experimental/loom_serve/models/qwen/kernels/qwen38/linear_q5k_f16_wmma.loom \
-    --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom \
+    --library=experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom \
     --config=qwen38.ffn.input_size=5120 --config=qwen38.ffn.output_size=17408 \
     --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
     --case="@ffn_prefetch_${shape}_case" || exit
@@ -390,7 +390,7 @@ build_tools/bin/iree-bazel-run --config=asan \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/ffn_gate_up_prefetch.loom \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/linear_q5k_f16_wmma.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom \
   --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
   --case=@ffn_independent_specializations
 ```
@@ -415,7 +415,7 @@ build_tools/bin/iree-bazel-run --config=asan \
   experimental/loom_serve/models/qwen/tests/ffn_gate_up.loom \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/ffn_gate_up_q5k_f16_wmma_wave32.loom \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/linear_q5k_f16_wmma.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom \
   --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
 ```
 
@@ -439,8 +439,8 @@ for case in qwen38_narrow_q5_block_staging qwen38_narrow_q5_zero_grid; do
     //loom/src/loom/tools/iree-test-loom -- \
     experimental/loom_serve/models/qwen/tests/linear_q5k_f16_wmma.loom \
     --library=experimental/loom_serve/models/qwen/kernels/qwen38/linear_q5k_f16_wmma.loom \
-    --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom \
-    --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_qk_common.loom \
+    --library=experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom \
+    --library=experimental/loom_serve/motifs/ggml/linear_qk_common.loom \
     --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
     --case="@$case" || exit
 done
@@ -490,10 +490,10 @@ build_tools/bin/iree-bazel-run --config=asan \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/linear_q6k_f16_wmma_metadata.loom \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/linear_q6k_f16_wmma.loom \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/layer_prefill.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q6k_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q8_0_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/quantize_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_qk_common.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_q6k_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_q8_0_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/quantize_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_qk_common.loom \
   --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access
 ```
 
@@ -518,9 +518,9 @@ build_tools/bin/iree-bazel-run --config=asan \
   //loom/src/loom/tools/iree-test-loom -- \
   experimental/loom_serve/models/qwen/tests/output_projection.loom \
   --library=experimental/loom_serve/models/qwen/kernels/qwen38/output_projection.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q6k_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/quantize_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_qk_common.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_q6k_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/quantize_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_qk_common.loom \
   --device=amdgpu --target=amdgpu:gfx1151 \
   --config=ggml.linear_q6k_q8_1_x4.token_capacity=512 \
   --config=ggml.linear_q6k_q8_1_x4.output_capacity=248320 \
@@ -784,8 +784,8 @@ build_tools/bin/iree-bazel-run --config=asan \
 build_tools/bin/iree-bazel-run --config=asan \
   //loom/src/loom/tools/iree-test-loom -- \
   experimental/loom_serve/models/qwen/tests/output_spans.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_q6k_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/quantize_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_q6k_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/quantize_q8_1_x4.loom \
   --device=amdgpu --target=amdgpu:gfx1151 --case=@selected_output_projection \
   --config=ggml.linear_q6k_q8_1_x4.token_capacity=4 \
   --config=ggml.linear_q6k_q8_1_x4.output_capacity=9 \
@@ -799,18 +799,18 @@ Both Q5 body templates receive token/output capacity as explicit operands,
 separately from live token count and K/N. The four concrete kernels resolve
 configuration for the single/four-row schedules and canonical/channel8 layouts.
 Neither reusable body reads config or adds capacity arguments to the dispatch
-ABI. `tests/q5_specialization.loom` applies both bodies at capacity pairs 4/65
+ABI. The shared [composition test](../../motifs/ggml/tests/q5_specialization.loom)
+applies both bodies at capacity pairs 4/65
 and 32/96 in one composition without config bindings. It checks one/odd block
 depths, a 65-channel tail, and an untouched fifth output row:
 
 ```sh
-model=experimental/loom_serve/models/qwen
 build_tools/bin/iree-bazel-run --config=asan \
   //loom/src/loom/tools/iree-test-loom -- \
-  "$model/tests/q5_specialization.loom" \
-  --library="$model/kernels/ggml/linear_q5k_q8_1_x4.loom" \
-  --library="$model/kernels/ggml/linear_qk_common.loom" \
-  --library="$model/kernels/ggml/quantize_q8_1_x4.loom" \
+  "experimental/loom_serve/motifs/ggml/tests/q5_specialization.loom" \
+  --library="experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom" \
+  --library="experimental/loom_serve/motifs/ggml/linear_qk_common.loom" \
+  --library="experimental/loom_serve/motifs/ggml/quantize_q8_1_x4.loom" \
   --device=amdgpu --target=amdgpu:gfx1151 --sanitizer=access \
   --case=@q5_independent_specializations
 ```
@@ -824,9 +824,9 @@ packed computation under both schedules, not an independent accuracy oracle.
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
   //loom/src/loom/tools/iree-test-loom -- \
-  experimental/loom_serve/models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/linear_qk_common.loom \
-  --library=experimental/loom_serve/models/qwen/kernels/ggml/quantize_q8_1_x4.loom \
+  experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom \
+  --library=experimental/loom_serve/motifs/ggml/linear_qk_common.loom \
+  --library=experimental/loom_serve/motifs/ggml/quantize_q8_1_x4.loom \
   --device=amdgpu --target=amdgpu:gfx1151 \
   --case=@ggml_linear_q5k_q8_1_x4_m4_differential_case \
   --config=ggml.linear_q5k_q8_1_x4.token_capacity=4 \
@@ -855,9 +855,9 @@ The benchmark consumes one module, so merge the source and providers first:
 
 ```sh
 bazel-bin/loom/src/loom/tools/loom-link/loom-link \
-  experimental/loom_serve/models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom \
-  experimental/loom_serve/models/qwen/kernels/ggml/linear_qk_common.loom \
-  experimental/loom_serve/models/qwen/kernels/ggml/quantize_q8_1_x4.loom \
+  experimental/loom_serve/motifs/ggml/linear_q5k_q8_1_x4.loom \
+  experimental/loom_serve/motifs/ggml/linear_qk_common.loom \
+  experimental/loom_serve/motifs/ggml/quantize_q8_1_x4.loom \
   --mode=merge --to=bc --output=/path/to/q5-linked.loombc
 ```
 

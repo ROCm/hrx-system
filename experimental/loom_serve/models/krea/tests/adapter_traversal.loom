@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Link block_adapters.loom and kernels/linear.loom with --library and bind
+// Link ../block_adapters.loom and ../../../motifs/tensor/linear.loom with --library and bind
 // krea2.block_tokens=80. The production wide row-major writers visit output
 // tiles first. Five row tiles expose grid/origin swaps beyond one tile.
 // Rank-32 X=1/8, W=1/4 gives delta=1 exactly; the scalar oracle preserves

@@ -447,7 +447,7 @@ executable rebuild is needed to change a source kernel or specialization.
 ## Source and ownership boundary
 
 [`projection.loom`](projection.loom) owns model names, dimensions, and concrete
-wrappers. [`kernels/linear.loom`](kernels/linear.loom) receives dimensions and
+wrappers. The shared [`linear.loom`](../../motifs/tensor/linear.loom) motif receives dimensions and
 output encodings as explicit SSA operands in templates. The wrappers fix those
 operands during JIT specialization; shapes and layouts are not carried in the
 device launch ABI.
@@ -562,7 +562,7 @@ shapes instead retain a full-K recurrence. Neither strategy allocates global
 partial sums or copies/expands the weight matrices.
 
 The baseline for the four DiT shapes is the cooperative
-[`linear_tiled_bf16`](kernels/linear_tiled.loom) motif. Eight wave32s share a
+[`linear_tiled_bf16`](../../motifs/tensor/linear_tiled.loom) motif. Eight wave32s share a
 64x64 output tile, acquiring K64 operand tiles into 18 KiB of padded LDS.
 The loop pipeline overlaps next-tile acquisition with current WMMA work while
 retaining the same four-chain/K256 arithmetic and final BF16 rounding. A last
@@ -586,7 +586,7 @@ no padded workgroups or duplicate stores. This is a cache-locality policy, not
 a guarantee of physical workgroup execution order. Tile traversal and tile
 geometry are independent tuning dimensions.
 
-[`linear_tiled_wide_bf16`](kernels/linear_wide.loom) is an alternative full-K
+[`linear_tiled_wide_bf16`](../../motifs/tensor/linear_wide.loom) is an alternative full-K
 motif. The same eight wave32s own a 64x128 output tile: each wave carries
 four ascending-K16 accumulator
 chains, reusing each input fragment across twice as many output columns.
@@ -596,7 +596,7 @@ overlap next-tile acquisition without double-buffering LDS. Tile selection
 belongs to model wrappers, not the configuration-free motifs.
 
 At 4,224 rows, the 6,144-wide query/gate/output projections select
-[`linear_temporal_bf16`](kernels/linear_temporal.loom), as do FFN up/gate
+[`linear_temporal_bf16`](../../motifs/tensor/linear_temporal.loom), as do FFN up/gate
 and down at 4,224 and 4,608 rows. Four wave32s own a 128x96 output tile with
 twelve full-K result fragments per wave. Two temporal
 LDS banks occupy 65,024 bytes; an explicit packet queue overlaps global reads
@@ -651,7 +651,7 @@ not a universal cache-size rule or an optimality claim for every intervening
 shape. Selection happens during JIT specialization; it adds no device decision,
 weight residency, workspace, or command dispatch.
 
-[`tests/linear_tiled.loom`](tests/linear_tiled.loom) compares the baseline motif bitwise
+[`tests/linear_tiled.loom`](../../motifs/tensor/tests/linear_tiled.loom) compares the baseline motif bitwise
 against the original single-wave motif at all four widths, covering
 16/32/48/64/80/512/528/544/560/640/704/768/832/896/960/1088/2048/2560/3072/4608
 rows. Group-eight cases cover each traversal-group remainder and each 16-row
@@ -662,11 +662,11 @@ sources instead of copying their implementations.
 The checkpoint comparisons below independently exercise the actual command
 wrappers and numerical error envelope.
 
-[`tests/linear_wide.loom`](tests/linear_wide.loom) checks the real wide helper
+[`tests/linear_wide.loom`](../../motifs/tensor/tests/linear_wide.loom) checks the real wide helper
 against the full-K64 helper with nonuniform BF16 inputs. Its `exact_short`
 case binds `wide_test.rows=16`, `wide_test.inputs=6144` and
 `wide_test.outputs=16384`; `exact_tail` binds 528, 6144 and 256 respectively.
-[`tests/linear_temporal.loom`](tests/linear_temporal.loom) compares the real
+[`tests/linear_temporal.loom`](../../motifs/tensor/tests/linear_temporal.loom) compares the real
 temporal helper's two RHS schedules with full-K64 at 528x256x320. This exercises
 the shortest supported K, both matrix tails, the interior/tail split and a
 partial traversal group without external weights or stored expected tensors.
@@ -677,7 +677,7 @@ reduction.
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
   //loom/src/loom/tools/iree-test-loom:iree-test-loom
-python -B experimental/loom_serve/models/krea/tests/check_linear_tiled.py \
+python -B experimental/loom_serve/motifs/tensor/tests/check_linear_tiled.py \
   --checker=bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom
 ```
 
@@ -755,9 +755,9 @@ per block. This is traffic accounting, not a measured throughput improvement.
 
 [`block_attention.loom`](block_attention.loom) exposes ungated attention and
 attention with its sigmoid output gate. Both select the config-free,
-128-channel [K32 template](kernels/attention_shared_k32.loom) when the token
+128-channel [K32 template](../../motifs/tensor/attention_shared_k32.loom) when the token
 count is divisible by 32. Other positive multiples of 16 use the
-[K16 template](kernels/attention_shared.loom). Each
+[K16 template](../../motifs/tensor/attention_shared.loom). Each
 128-thread workgroup owns four query heads sharing one KV head. Its four
 wave32 subgroups process the same 16 query positions while cooperatively
 loading successive key tiles into LDS. This shares K/V reads across the
@@ -853,8 +853,8 @@ without a copied device implementation or baked output tensor:
 ```sh
 iree-test-loom experimental/loom_serve/models/krea/tests/attention_shared_k32.loom \
   --library=experimental/loom_serve/models/krea/block_attention.loom \
-  --library=experimental/loom_serve/models/krea/kernels/attention_shared.loom \
-  --library=experimental/loom_serve/models/krea/kernels/attention_shared_k32.loom \
+  --library=experimental/loom_serve/motifs/tensor/attention_shared.loom \
+  --library=experimental/loom_serve/motifs/tensor/attention_shared_k32.loom \
   --config=krea2.block_tokens=64 \
   --device=amdgpu --target=amdgpu:gfx1151
 ```
@@ -992,7 +992,7 @@ for rows in 16 80; do
   bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom \
     experimental/loom_serve/models/krea/tests/value_adapter.loom \
     --library=experimental/loom_serve/models/krea/block_adapters.loom \
-    --library=experimental/loom_serve/models/krea/kernels/linear.loom \
+    --library=experimental/loom_serve/motifs/tensor/linear.loom \
     --target=amdgpu:gfx1151 --device=amdgpu \
     --config=krea2.block_tokens="$rows" --case="@value_adapter_$rows"
 done
@@ -1405,7 +1405,7 @@ table contains inverse standard deviations followed by means from the pinned
 VAE configuration. `krea2.latent_height` and `krea2.latent_width` specialize
 even spatial dimensions; their defaults are 48 for a 384x384 image.
 
-The config-free [convolution helper](kernels/convolution.loom) consumes NCHW
+The config-free [convolution helper](../../motifs/tensor/convolution.loom) consumes NCHW
 activations and original F32 OI(T)HW weights. A fresh causal frame selects the
 last temporal weight plane; this is not a video-history implementation.
 Nearest-neighbor upsampling can be folded into its input indexing without an
@@ -1484,7 +1484,7 @@ from the retained input results.
 [`vae_attention.loom`](vae_attention.loom) composes channel normalization,
 QKV projection, single-head noncausal spatial attention, and a fused output
 projection/skip. For 384 channels and token counts divisible by 16, the
-[matrix attention helper](kernels/image_attention_matrix.loom) processes 16
+[matrix attention helper](../../motifs/tensor/image_attention_matrix.loom) processes 16
 queries per 128-thread workgroup. Four waves partition the full head into
 96-channel QK partial sums, combine those sums before softmax, then each own
 96 output channels. They are not separate attention heads. Q/K/V and each
@@ -1493,7 +1493,7 @@ the unrounded probability denominator and output remain F32. Padded operand
 and partial-score planes use 55,552 bytes of LDS, with no global score tensor.
 
 Irregular token counts use the unchanged F32
-[online attention helper](kernels/image_attention.loom), which handles 1–512
+[online attention helper](../../motifs/tensor/image_attention.loom), which handles 1–512
 channels with 128-key tiles. Each workgroup retains one query's output
 accumulators and a 512-byte probability tile, plus reduction storage. Neither
 path materializes the 20.25 MiB score matrix for a 48x48 latent grid.
@@ -1531,7 +1531,7 @@ with staged native results bit-for-bit.
 The oracle operates on logical Q/K/V tensors independently of the physical
 packing; the QKV producer is checked before its packed output feeds attention.
 
-The focused [matrix attention scenario](tests/image_attention_matrix.loom)
+The focused [matrix attention scenario](../../motifs/tensor/tests/image_attention_matrix.loom)
 compares the real helper against an independent scalar VM oracle on signed,
 nonuniform data, with F64 contractions and an explicit F32 exponential. Two
 query/key tiles exercise channel ownership and online rescaling without model
@@ -1557,7 +1557,7 @@ source-owned features in place. Spatial nearest-neighbor expansion is part of
 convolution indexing and never materializes an enlarged input image.
 
 The middle residuals and all four upsampling stages use the config-free
-[`convolution_3x3_matrix_f32`](kernels/convolution_matrix.loom) helper for
+[`convolution_3x3_matrix_f32`](../../motifs/tensor/convolution_matrix.loom) helper for
 plain and residual 3x3 convolutions, including the 192-to-384 channel expansion.
 All three resize leaves use the same helper with nearest-neighbor expansion
 and 384-to-192 / 192-to-96 channel reduction. A workgroup owns 32 output
@@ -1590,7 +1590,7 @@ still participate in tile publication and retirement. Geometry enters as SSA
 specialization operands; the helper contains no model configuration or runtime
 scalar ABI.
 
-[`tests/convolution_matrix.loom`](tests/convolution_matrix.loom) compares the
+[`tests/convolution_matrix.loom`](../../motifs/tensor/tests/convolution_matrix.loom) compares the
 actual helper with an independent scalar VM function that rounds operands to
 BF16, accumulates in F64, and rounds the final result to F32.
 The two scenarios use physical 1x1 and 3x11 inputs at full 96/192/384-channel
@@ -1608,15 +1608,15 @@ the unused output/state suffix:
 
 ```bash
 while read -r inputs outputs planes upsample; do
-  iree-test-loom experimental/loom_serve/models/krea/tests/convolution_matrix.loom \
-    --library=experimental/loom_serve/models/krea/kernels/convolution_matrix.loom \
+  iree-test-loom experimental/loom_serve/motifs/tensor/tests/convolution_matrix.loom \
+    --library=experimental/loom_serve/motifs/tensor/convolution_matrix.loom \
     --device=amdgpu --target=amdgpu:gfx1151 \
     --case=@convolution_single_pixel \
     --config=matrix_test.height=1 --config=matrix_test.width=1 \
     --config=matrix_test.inputs="$inputs" --config=matrix_test.outputs="$outputs" \
     --config=matrix_test.planes="$planes" --config=matrix_test.upsample="$upsample"
-  iree-test-loom experimental/loom_serve/models/krea/tests/convolution_matrix.loom \
-    --library=experimental/loom_serve/models/krea/kernels/convolution_matrix.loom \
+  iree-test-loom experimental/loom_serve/motifs/tensor/tests/convolution_matrix.loom \
+    --library=experimental/loom_serve/motifs/tensor/convolution_matrix.loom \
     --device=amdgpu --target=amdgpu:gfx1151 \
     --case=@convolution_spatial_tail \
     --config=matrix_test.height=3 --config=matrix_test.width=11 \
@@ -1637,7 +1637,7 @@ and aliasing. Complete real-latent decoder comparisons separately report
 numerical distance and final RGB differences against the independent CPU/F32
 model. Preserving that model's exact arithmetic is not the image-quality goal.
 
-[`tests/convolution_tiled.loom`](tests/convolution_tiled.loom) links the actual
+[`tests/convolution_tiled.loom`](../../motifs/tensor/tests/convolution_tiled.loom) links the actual
 scalar and cooperative helpers at full 96/192/384-channel reduction depths.
 Four small spatial shapes (1x1, 1x2, 1x33 and 17x19) cover borders, row crossings
 and partial spatial tiles; 17x19 also exercises both wider channel counts.
@@ -1648,7 +1648,7 @@ The driver binds tensor samples and JIT geometry together:
 ```sh
 build_tools/bin/iree-bazel-build --config=asan \
   //loom/src/loom/tools/iree-test-loom:iree-test-loom
-python -B experimental/loom_serve/models/krea/tests/check_convolution_tiled.py \
+python -B experimental/loom_serve/motifs/tensor/tests/check_convolution_tiled.py \
   --checker=bazel-bin/loom/src/loom/tools/iree-test-loom/iree-test-loom
 ```
 
@@ -1867,7 +1867,7 @@ gate, ungated residuals and a 6,912-wide SwiGLU. All eight projections support
 the official rank-32 LoRA with immutable base and adapter parameter roots.
 
 Dense layerwise work flattens `[token,12,2560]` without padding the layer axis.
-The [short-attention motif](kernels/segmented_attention.loom) gives one wave32
+The [short-attention motif](../../motifs/tensor/segmented_attention.loom) gives one wave32
 one query/head, retaining four channels per lane and accumulating twelve keys
 with F32 online softmax. Every query stays inside its own twelve-row segment;
 there is no global score matrix or LDS tile. The refiner reuses the masked
@@ -1931,7 +1931,7 @@ unchanged; one source-owned tap buffer advances through the layerwise blocks,
 and the refiners advance the reduced output in place. Explicit command edges
 order every transition without intermediate host readbacks.
 
-The [layer-mixing motif](kernels/layer_mix.loom) retains twelve layer values
+The [layer-mixing motif](../../motifs/tensor/layer_mix.loom) retains twelve layer values
 per lane and evaluates rank-32 A/B in registers. Adjacent
 lanes own adjacent channels, preserving coalesced input access without a
 transpose. A, B, scaling and base addition retain their BF16 rounding boundaries.

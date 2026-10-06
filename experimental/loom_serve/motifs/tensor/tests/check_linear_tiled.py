@@ -23,7 +23,7 @@ parser.add_argument("--target", default="amdgpu:gfx1151")
 args = parser.parse_args()
 
 fixture = pathlib.Path(__file__).with_name("linear_tiled.loom")
-model = fixture.parent.parent
+motifs = fixture.parent.parent
 
 
 def check_shape(inputs, outputs, sample, rows, group_size, *, column_major=False):
@@ -43,8 +43,8 @@ def check_shape(inputs, outputs, sample, rows, group_size, *, column_major=False
         [
             str(args.checker),
             str(fixture),
-            "--library=" + str(model / "kernels/linear.loom"),
-            "--library=" + str(model / "kernels/linear_tiled.loom"),
+            "--library=" + str(motifs / "linear.loom"),
+            "--library=" + str(motifs / "linear_tiled.loom"),
             "--device=" + args.device,
             "--target=" + args.target,
             f"--case=@linear_bf16_{inputs}_{outputs}",

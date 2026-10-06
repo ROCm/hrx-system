@@ -660,7 +660,7 @@ the experiment interpretable.
 
 The [agent authoring workflow](../../../loom/docs/src/workflows/agent-driven-kernel-development.md#workgroup-traversal-is-a-schedule)
 separates lane coalescing, workgroup-local reuse, and reuse between workgroups.
-An experiment around Krea's [dense projection motif](../models/krea/kernels/linear_tiled.loom)
+An experiment around Krea's [dense projection motif](../motifs/tensor/linear_tiled.loom)
 compared ordinary traversal with a bijection grouping eight 64-row tiles
 while keeping the 64x64 output tile, eight wave32s, K64 read-ahead, four-chain
 F32 accumulation, BF16 storage, and 18 KiB LDS unchanged.

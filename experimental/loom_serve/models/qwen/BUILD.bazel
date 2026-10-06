@@ -15,9 +15,11 @@ package(
 
 filegroup(
     name = "sources",
-    srcs = ["sources.txt"] + glob([
+    srcs = [
+        "sources.txt",
+        "//experimental/loom_serve/motifs/ggml:sources",
+    ] + glob([
         "*.loom",
-        "kernels/ggml/*.loom",
         "kernels/qwen38/*.loom",
         "programs/qwen38/*.loom",
     ]),
