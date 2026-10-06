@@ -1294,10 +1294,10 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
         !loom_low_allocation_live_range_interval_is_allocatable(interval)) {
       continue;
     }
-    if (interval->unit_count > IREE_HOST_SIZE_MAX - unit_point_count) {
+    if (interval->unit_count > UINT32_MAX - unit_point_count) {
       return iree_make_status(
           IREE_STATUS_OUT_OF_RANGE,
-          "low allocation unit liveness count exceeds host size");
+          "low allocation unit liveness count exceeds u32 index capacity");
     }
     unit_point_count += interval->unit_count;
     multi_unit_value_count += interval->unit_count > 1;
@@ -1322,11 +1322,6 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
     if (!interval ||
         !loom_low_allocation_live_range_interval_is_allocatable(interval)) {
       continue;
-    }
-    if (unit_point_start > UINT32_MAX) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "low allocation unit liveness start exceeds u32 range");
     }
     out_unit_liveness->values[i] = (loom_low_allocation_unit_liveness_value_t){
         .unit_point_start = (uint32_t)unit_point_start,

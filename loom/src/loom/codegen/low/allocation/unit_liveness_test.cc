@@ -6,6 +6,8 @@
 
 #include "loom/codegen/low/allocation/unit_liveness.h"
 
+#include <array>
+
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -125,6 +127,96 @@ loom_liveness_analysis_t Liveness(const loom_value_id_t* value_ids,
   liveness.block_count = block_count;
   return liveness;
 }
+
+class LowAllocationUnitLivenessExtentTest
+    : public LowAllocationUnitLivenessTest,
+      public ::testing::WithParamInterface<std::array<uint32_t, 2>> {};
+
+TEST_P(LowAllocationUnitLivenessExtentTest, BoundsExtentBeforePointAllocation) {
+  auto* module = AllocateModule();
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  loom_type_id_t source_type = LOOM_TYPE_ID_INVALID;
+  IREE_ASSERT_OK(
+      loom_module_intern_type_id(module, loom_type_buffer(), &source_type));
+  for (uint32_t i = 0; i < GetParam().size(); ++i) {
+    // Distinct resource definitions have disjoint unused lifetimes. Their
+    // total unit extent can exceed u32 while pressure remains representable.
+    loom_op_t* resource = nullptr;
+    IREE_ASSERT_OK(loom_low_resource_build(
+        &builder, 0, LOOM_LOW_RESOURCE_IMPORT_KIND_NATIVE_POINTER,
+        LOOM_VALUE_ID_INVALID, i, source_type, 0, 0,
+        loom_low_register_type(1, 0, GetParam()[i]), LOOM_LOCATION_UNKNOWN,
+        &resource));
+  }
+  loom_local_value_domain_t domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module, module->body, &arena_, &domain));
+  loom_liveness_analysis_t liveness = {};
+  IREE_ASSERT_OK(loom_liveness_analyze_local_value_domain(
+      &domain, loom_liveness_order_empty(), &arena_, &liveness));
+  ASSERT_EQ(liveness.interval_count, GetParam().size());
+  for (uint32_t i = 0; i < GetParam().size(); ++i) {
+    EXPECT_EQ(
+        loom_liveness_interval_for_value_ordinal(&liveness, i)->unit_count,
+        GetParam()[i]);
+  }
+  loom_cfg_graph_t graph = {};
+  IREE_ASSERT_OK(loom_cfg_graph_build(module, module->body, &arena_, &graph));
+
+  // Reject every backing allocation before reaching the OS, even if the
+  // producer incorrectly attempts to allocate an unrepresentable point array.
+  iree_host_size_t allocation_count = 0;
+  const iree_allocator_t rejecting_allocator = {
+      &allocation_count,
+      [](void* self, iree_allocator_command_t, const void*,
+         void**) -> iree_status_t {
+        ++*static_cast<iree_host_size_t*>(self);
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "point allocation rejected by test allocator");
+      }};
+  iree_arena_block_pool_t result_pool;
+  iree_arena_block_pool_initialize(4096, rejecting_allocator, &result_pool);
+  iree_arena_allocator_t result_arena;
+  iree_arena_initialize(&result_pool, &result_arena);
+  loom_low_reg_class_t register_class = {};
+  register_class.alloc_unit_bits = 32;
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.stable_id = 1;
+  descriptors.reg_classes = &register_class;
+  descriptors.reg_class_count = 1;
+  loom_low_resolved_target_t target = {};
+  target.descriptor_set = &descriptors;
+  loom_low_placement_table_t placement = {};
+  loom_low_allocation_unit_liveness_t result = {};
+  const uint64_t total = (uint64_t)GetParam()[0] + GetParam()[1];
+  const bool fits = total <= UINT32_MAX;
+  IREE_EXPECT_STATUS_IS(
+      fits ? IREE_STATUS_RESOURCE_EXHAUSTED : IREE_STATUS_OUT_OF_RANGE,
+      loom_low_allocation_unit_liveness_initialize(
+          &target, &placement, &domain, &liveness, &graph, &result_arena,
+          &decision_arena_, &result));
+  // On a 32-bit host, a legal index extent may still overflow the byte size;
+  // arena allocation rejects that before asking its backing allocator.
+  EXPECT_EQ(allocation_count,
+            fits && total <= IREE_HOST_SIZE_MAX / sizeof(uint32_t) ? 1u : 0u);
+  EXPECT_EQ(result.start_points, nullptr);
+  EXPECT_EQ(result.end_points, nullptr);
+  iree_arena_deinitialize(&result_arena);
+  iree_arena_block_pool_deinitialize(&result_pool);
+  loom_local_value_domain_release(&domain);
+  loom_module_free(module);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    UnitExtent, LowAllocationUnitLivenessExtentTest,
+    ::testing::Values(std::array<uint32_t, 2>{1, 1},
+                      std::array<uint32_t, 2>{UINT32_MAX - 2, 1},
+                      std::array<uint32_t, 2>{UINT32_MAX - 1, 1},
+                      std::array<uint32_t, 2>{UINT32_MAX, 1},
+                      std::array<uint32_t, 2>{UINT32_MAX - 1, 2},
+                      std::array<uint32_t, 2>{1u << 31, 1u << 31}));
 
 TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
   loom_low_reg_class_t classes[2] = {};

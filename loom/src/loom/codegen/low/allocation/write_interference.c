@@ -155,15 +155,16 @@ struct loom_low_allocation_write_interference_t {
   loom_low_write_access_t* accesses;
   // Number of initialized accesses.
   iree_host_size_t access_count;
-  // Capacity of |accesses| during collection.
+  // Logical capacity of |accesses|, at most UINT32_MAX.
   iree_host_size_t access_capacity;
-  // Number of bits in the compact retained allocation-unit domain.
+  // Number of bits in the compact retained allocation-unit domain, a subset
+  // of the producer-bounded unit-liveness domain.
   uint32_t retained_unit_count;
   // Immutable retained-range snapshots shared by events with unchanged state.
   loom_low_write_retained_t* retained;
   // Number of initialized retained ranges.
   iree_host_size_t retained_count;
-  // Capacity of |retained| during finalization.
+  // Logical capacity of |retained|, at most UINT32_MAX.
   iree_host_size_t retained_capacity;
   // Stable bounded segments of final conditional physical-write exclusions.
   loom_segmented_storage_t constraints;
@@ -202,6 +203,12 @@ iree_status_t loom_low_allocation_write_interference_create(
       liveness->operation_count == 0) {
     return iree_ok_status();
   }
+  const uint32_t end_point =
+      liveness->blocks[liveness->block_count - 1].end_point;
+  if (end_point == UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "retained-write events exceed u32 index capacity");
+  }
   loom_low_allocation_write_interference_t* table = NULL;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate(arena, sizeof(*table), (void**)&table));
@@ -209,7 +216,7 @@ iree_status_t loom_low_allocation_write_interference_create(
       .rule = rule,
       .register_class = LOOM_LOW_REGISTER_CLASS_ID_INVALID,
       .value_count = liveness->value_count,
-      .point_count = liveness->blocks[liveness->block_count - 1].end_point + 1,
+      .point_count = end_point + 1,
   };
   const loom_low_descriptor_set_t* descriptors = target->descriptor_set;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
@@ -258,14 +265,30 @@ iree_status_t loom_low_allocation_write_interference_create(
   return iree_ok_status();
 }
 
+// Called only for full construction arrays. Limiting logical capacity makes
+// the next growth fail before an append can use UINT32_MAX as a row index.
+static iree_status_t loom_low_write_grow_array(iree_arena_allocator_t* arena,
+                                               iree_host_size_t count,
+                                               iree_host_size_t element_size,
+                                               iree_host_size_t* inout_capacity,
+                                               void** inout_values) {
+  if (count == UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "retained-write rows exceed u32 index capacity");
+  }
+  IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+      arena, count, count + 1, element_size, inout_capacity, inout_values));
+  *inout_capacity = iree_min(*inout_capacity, UINT32_MAX);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_write_append_access(
     loom_low_allocation_write_interference_t* table, uint32_t point,
     loom_low_write_access_t access, iree_arena_allocator_t* arena) {
   if (table->access_count == table->access_capacity) {
-    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-        arena, table->access_count, table->access_count + 1,
-        sizeof(*table->accesses), &table->access_capacity,
-        (void**)&table->accesses));
+    IREE_RETURN_IF_ERROR(loom_low_write_grow_array(
+        arena, table->access_count, sizeof(*table->accesses),
+        &table->access_capacity, (void**)&table->accesses));
   }
   access.next = table->events[point].access;
   table->events[point].access = (uint32_t)table->access_count;
@@ -449,10 +472,9 @@ static iree_status_t loom_low_write_snapshot(
       ++bit;
     }
     if (table->retained_count == table->retained_capacity) {
-      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
-          arena, table->retained_count, table->retained_count + 1,
-          sizeof(*table->retained), &table->retained_capacity,
-          (void**)&table->retained));
+      IREE_RETURN_IF_ERROR(loom_low_write_grow_array(
+          arena, table->retained_count, sizeof(*table->retained),
+          &table->retained_capacity, (void**)&table->retained));
     }
     table->retained[table->retained_count++] = range;
     ++out_snapshot->count;
