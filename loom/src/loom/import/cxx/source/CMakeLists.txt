@@ -14,6 +14,7 @@ iree_c_embed_data(
   NAME
     embedded_standard_headers
   SRCS
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/include/initializer_list"
     "${PROJECT_SOURCE_DIR}/loom/src/loom/import/cxx/include/stdfloat"
   C_FILE_OUTPUT
     "embedded_standard_headers.c"

@@ -1,0 +1,19 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+#ifndef LOOMCXX_INITIALIZER_LIST_
+#define LOOMCXX_INITIALIZER_LIST_
+
+namespace std {
+
+// Braced initializer lists use frontend-owned storage. The declaration supplies
+// the standard type identity without introducing a library object ABI.
+template <typename Element>
+class initializer_list;
+
+}  // namespace std
+
+#endif  // LOOMCXX_INITIALIZER_LIST_

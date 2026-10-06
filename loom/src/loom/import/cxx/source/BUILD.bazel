@@ -21,7 +21,10 @@ _EMBED_COMPATIBLE_WITH = loom_config_compatible_with([
 
 iree_c_embed_data(
     name = "embedded_standard_headers",
-    srcs = ["//loom/src/loom/import/cxx:include/stdfloat"],
+    srcs = [
+        "//loom/src/loom/import/cxx:include/initializer_list",
+        "//loom/src/loom/import/cxx:include/stdfloat",
+    ],
     c_file_output = "embedded_standard_headers.c",
     flatten = True,
     h_file_output = "embedded_standard_headers.h",

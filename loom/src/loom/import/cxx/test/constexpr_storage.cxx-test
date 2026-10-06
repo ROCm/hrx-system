@@ -1,0 +1,215 @@
+// RUN: verify
+// Recursive calls keep automatic scalar and array storage distinct while
+// references into the caller remain live.
+static constexpr unsigned recursive_scalar(unsigned depth,
+                                           const unsigned* outer) {
+  unsigned value = depth + 7;
+  if (!depth) return *outer;
+  return recursive_scalar(depth - 1, &value);
+}
+static constexpr char recursive_array(unsigned depth, const char* outer) {
+  char values[] = {static_cast<char>('a' + depth), 0};
+  if (!depth) return *outer;
+  return recursive_array(depth - 1, values);
+}
+static constexpr bool recursive_identity(unsigned depth,
+                                         const unsigned* outer) {
+  unsigned value = depth + 7;
+  if (!depth) return &value != outer;
+  return recursive_identity(depth - 1, &value);
+}
+static constexpr unsigned recursive_reference(unsigned depth,
+                                              const unsigned& outer) {
+  unsigned value = depth + 7;
+  if (!depth) return outer;
+  return recursive_reference(depth - 1, value);
+}
+static_assert(recursive_scalar(1, nullptr) == 8);
+static_assert(recursive_array(1, nullptr) == 'b');
+static_assert(recursive_identity(1, nullptr));
+static_assert(recursive_reference(1, 0) == 8);
+
+// ====
+// Addressing an outer declaration from an inner block retains the declaration
+// lifetime rather than the address-expression lifetime.
+static constexpr unsigned inner_address() {
+  unsigned value = 9;
+  const unsigned* address = nullptr;
+  { address = &value; }
+  return *address;
+}
+static_assert(inner_address() == 9);
+
+// ====
+// Scalar and array storage expires at the end of the declaring block.
+static constexpr unsigned expired_scalar() {
+  const unsigned* address = nullptr;
+  {
+    unsigned value = 9;
+    address = &value;
+  }
+  return *address;
+}
+static constexpr char expired_array() {
+  const char* address = nullptr;
+  {
+    char values[] = {'a', 0};
+    address = values;
+  }
+  return *address;
+}
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(expired_scalar() == 9);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(expired_array() == 'a');
+
+// ====
+// A conventional for initializer lives for the whole loop.
+static constexpr unsigned for_initializer() {
+  const unsigned* address = nullptr;
+  for (unsigned value = 9, index = 0; index < 2; ++index) {
+    if (!index)
+      address = &value;
+    else
+      return *address;
+  }
+  return 0;
+}
+static_assert(for_initializer() == 9);
+
+// ====
+// A condition declaration is recreated for every iteration.
+static constexpr unsigned expired_for_condition() {
+  const unsigned* address = nullptr;
+  unsigned index = 0;
+  for (; unsigned value = index < 2 ? index + 1 : 0; ++index) {
+    if (!index)
+      address = &value;
+    else
+      return *address;
+  }
+  return 0;
+}
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(expired_for_condition() == 1);
+
+// ====
+// A by-value range binding is live within its iteration and expires before the
+// next one begins.
+static constexpr unsigned live_range_values() {
+  unsigned values[] = {7, 9};
+  unsigned result = 0;
+  for (unsigned value : values) result += *(&value);
+  return result;
+}
+static constexpr unsigned expired_range_value() {
+  unsigned values[] = {7, 9};
+  const unsigned* address = nullptr;
+  unsigned index = 0;
+  for (unsigned value : values) {
+    if (!index++)
+      address = &value;
+    else
+      return *address;
+  }
+  return 0;
+}
+static_assert(live_range_values() == 16);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(expired_range_value() == 7);
+
+// ====
+// A range reference retains the underlying array element, while an alias to a
+// by-value binding shares that binding's per-iteration lifetime.
+static constexpr unsigned live_range_reference() {
+  unsigned values[] = {7, 9};
+  const unsigned* address = nullptr;
+  unsigned index = 0;
+  for (unsigned& value : values) {
+    unsigned& reference = value;
+    if (!index++)
+      address = &reference;
+    else
+      return *address;
+  }
+  return 0;
+}
+static constexpr unsigned expired_range_reference() {
+  unsigned values[] = {7, 9};
+  const unsigned* address = nullptr;
+  unsigned index = 0;
+  for (unsigned value : values) {
+    unsigned& reference = value;
+    if (!index++)
+      address = &reference;
+    else
+      return *address;
+  }
+  return 0;
+}
+static_assert(live_range_reference() == 7);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(expired_range_reference() == 7);
+
+// ====
+// A reference has its referent's identity and propagates its lifetime.
+static constexpr unsigned reference_identity() {
+  unsigned value = 9;
+  unsigned& reference = value;
+  return &reference == &value ? reference : 0;
+}
+static constexpr unsigned expired_reference() {
+  const unsigned* address = nullptr;
+  {
+    unsigned value = 9;
+    unsigned& reference = value;
+    address = &reference;
+  }
+  return *address;
+}
+static_assert(reference_identity() == 9);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(expired_reference() == 9);
+
+// ====
+// Initializer-list elements remain live for the complete range statement.
+#include <initializer_list>
+static constexpr unsigned initializer_list_reference() {
+  const unsigned* address = nullptr;
+  unsigned index = 0;
+  for (const unsigned& value : {7u, 9u}) {
+    if (!index++)
+      address = &value;
+    else
+      return *address;
+  }
+  return 0;
+}
+static_assert(initializer_list_reference() == 7);
+
+// ====
+// Escaped parameter storage and a reference returned from a completed call are
+// no longer readable.
+static constexpr const unsigned* escaped_parameter(unsigned value) {
+  return &value;
+}
+static constexpr const unsigned& escaped_reference() {
+  unsigned value = 9;
+  return value;
+}
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(*escaped_parameter(9) == 9);
+// ERROR@+1: PARSE/036 "static assertion expression is not an integral constant expression"
+static_assert(escaped_reference() == 9);
+
+// ====
+// A returned reference to caller-owned storage preserves identity and mutation.
+static constexpr unsigned& identity(unsigned& value) { return value; }
+static constexpr void add(unsigned& value) { value += 3; }
+static constexpr unsigned mutate_references() {
+  unsigned value = 4;
+  identity(value) += 5;
+  add(value);
+  return identity(value);
+}
+static_assert(mutate_references() == 12);

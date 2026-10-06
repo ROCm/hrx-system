@@ -14,6 +14,7 @@
 #include <cxx/views/symbols.h>
 
 #include <array>
+#include <memory>
 #include <vector>
 
 #include "iree/testing/gtest.h"
@@ -63,6 +64,34 @@ bool hasBasePath(const std::vector<std::vector<cxx::Symbol*>>& paths,
     }
   }
   return false;
+}
+
+TEST(ConstantArchiveTest, RejectsAutomaticInvocationStorage) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV("constexpr unsigned value = 9;"),
+                IREE_SV("automatic_storage.cxx"), options);
+
+  auto symbols = source.unit().globalScope()->find("value");
+  ASSERT_FALSE(symbols.begin() == symbols.end());
+  auto* variable = cxx::symbol_cast<cxx::VariableSymbol>(*symbols.begin());
+  ASSERT_NE(variable, nullptr);
+
+  cxx::ConstValue slot{std::intmax_t{9}};
+  auto storage = std::make_shared<cxx::ConstStorage>(&slot);
+  auto address = std::make_shared<cxx::ConstAddress>(variable);
+  address->setStorage(std::move(storage));
+  variable->setConstValue(cxx::ConstValue{std::move(address)});
+
+  cxx::ArchiveWriter writer;
+  cxx::SemanticArchiveRoots roots;
+  roots.ast = source.unit().ast();
+  roots.globalScope = source.unit().globalScope();
+  cxx::SemanticEncoder encoder(&source.unit());
+  EXPECT_FALSE(encoder(roots, writer));
+  ASSERT_EQ(encoder.errors().size(), 1u);
+  EXPECT_EQ(encoder.errors().front(),
+            "constant address refers to automatic invocation storage");
 }
 
 TEST(ConstantArchiveTest, PreservesComplexAndIndeterminateValues) {

@@ -28,6 +28,7 @@ exports_files([
     "include/loomcxx/scalar.h",
     "include/loomcxx/vector.h",
     "include/loomcxx/view.h",
+    "include/initializer_list",
     "include/stdfloat",
 ])
 
