@@ -132,8 +132,19 @@ allocator recommendation), independent of logical token-page size. The explicit
 `--pool_backing=fixed` comparison path backs all source state at startup and
 supports device address sanitization, which excludes user VMM. Unsupported VMM
 is an error, not a silent change of storage policy. Host ASAN remains usable.
-Heartbeat `elastic_state` accounting covers only virtual mutable-state
-reservations; weights and transient workspace are separate allocations.
+Elastic backing also reserves stable parameter roots in the same physical
+allocation domain. Heartbeat `elastic_state` and `elastic_parameters` account
+mutable state and weights independently; transient workspace is separate.
+
+`loom_serve_text_model_deactivate` retires consuming work and releases parameter
+backing without discarding retained rows or rebuilding commands. The next
+inference call activates on demand; `loom_serve_text_model_activate` can warm
+explicitly before admission. Activation reuses the checkpoint provider and
+preparation commands, streaming original file bytes into the same final roots
+and preparing them in place. It neither JITs nor holds a second weight copy.
+An already active model does no loading/preparation. Fixed backing rejects
+deactivation explicitly. The `models/qwen:epoch_check --reload_weights` witness
+checks real target/MTP continuation across compaction and parameter eviction.
 
 `loom_serve_text_model_trim` compacts owned blocks into a live ID prefix and
 returns empty physical slabs. Source regions drive bounded device-copy batches;

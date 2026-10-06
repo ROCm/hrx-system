@@ -114,6 +114,8 @@ typedef struct text_heartbeat_snapshot_t {
   // Elastic mutable-state backing; weights and transient workspace are
   // separate.
   loom_serve_memory_statistics_t state_memory;
+  // Prepared parameters, independently reclaimable from retained state.
+  loom_serve_memory_statistics_t weight_memory;
   // Active requests still consuming prompt input.
   iree_host_size_t prefill_rows;
   // Active requests generating output.
@@ -247,6 +249,10 @@ static int text_heartbeat_main(void* argument) {
         ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
         ",\"released_bytes\":%" PRIu64
         "},"
+        "\"elastic_parameters\":{\"reserved_bytes\":%" PRIu64
+        ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
+        ",\"released_bytes\":%" PRIu64
+        "},"
         "\"prefill_rows\":%zu,\"decode_rows\":%zu,"
         "\"backpressured_rows\":%zu,\"issued_epochs\":%" PRIu64
         ",\"completed_epochs\":%" PRIu64 ",\"traversals\":%" PRIu64
@@ -263,7 +269,9 @@ static int text_heartbeat_main(void* argument) {
         state.queued_requests, state.pool.capacity, state.pool.reserved,
         state.pool.resident, state.state_memory.reserved_bytes,
         state.state_memory.committed_bytes, state.state_memory.peak_bytes,
-        state.state_memory.released_bytes, state.prefill_rows,
+        state.state_memory.released_bytes, state.weight_memory.reserved_bytes,
+        state.weight_memory.committed_bytes, state.weight_memory.peak_bytes,
+        state.weight_memory.released_bytes, state.prefill_rows,
         state.decode_rows, state.backpressured_rows, state.issued_epochs,
         state.completed_epochs, state.traversals, state.prefill_tokens,
         state.decode_tokens, state.output_tokens, state.model_duration / 1e6,
@@ -312,6 +320,8 @@ static void text_observe(text_service_t* service, const char* phase) {
   state->pool.reserved = service->pool.reserved;
   state->pool.resident = pool.capacity - pool.available;
   state->state_memory = loom_serve_text_model_memory_statistics(service->model);
+  state->weight_memory =
+      loom_serve_text_model_weight_statistics(service->model);
   state->prefill_rows = prefill;
   state->decode_rows = decode;
   state->backpressured_rows = backpressured;

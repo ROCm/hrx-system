@@ -307,6 +307,8 @@ loom_cc_library(
     ::jit
     ::program
     iree::base
+    iree::base::threading
+    iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::io::parameter_index
     iree::io::parameter_index_provider
@@ -334,6 +336,7 @@ loom_cc_test(
     ::weights
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::storage::memory
     iree::hal
     iree::testing::gtest
     iree::testing::gtest_main

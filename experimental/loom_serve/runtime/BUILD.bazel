@@ -272,8 +272,10 @@ loom_cc_library(
     deps = [
         ":jit",
         ":program",
+        "//experimental/loom_serve/storage:memory",
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:parameter_index",
         "//runtime/src/iree/io:parameter_index_provider",
@@ -303,6 +305,7 @@ loom_cc_test(
         ":execution",
         ":jit",
         ":weights",
+        "//experimental/loom_serve/storage:memory",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/tooling:flags",

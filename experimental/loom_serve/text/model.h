@@ -185,6 +185,18 @@ iree_status_t loom_serve_text_model_create(
 // Null is accepted. All borrowed row/tokenizer pointers become invalid.
 iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model);
 
+// At a serialized model boundary, release/reload parameter backing while
+// preserving compiled commands and all retained row state. Deactivation joins
+// accepted model work first and requires elastic backing. Inference activates
+// on demand; explicit activation allows warming before admission. A failed
+// activation is terminal. Neither operation discards session state.
+iree_status_t loom_serve_text_model_activate(loom_serve_text_model_t* model);
+iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model);
+
+// Parameter-only virtual/physical statistics, excluding mutable state.
+loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
+    const loom_serve_text_model_t* model);
+
 // Queries return borrowed state owned by model. The row index is below the
 // configured row count. The tokenizer can be shared by independent encoders.
 loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,

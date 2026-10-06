@@ -20,7 +20,7 @@ IREE_FLAG(string, weight_sources, "", "Weight loader source catalog.");
 
 namespace {
 
-class WeightsTest : public ::testing::Test {
+class WeightsTest : public ::testing::TestWithParam<bool> {
  protected:
   void WriteCheckpoint(const std::string& path, int32_t offset) {
     // Actual safetensors input exercises file indexing and queued reads. Each
@@ -53,6 +53,12 @@ class WeightsTest : public ::testing::Test {
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     transfer_ = loom_serve_device_transfer_queue(device_owner_);
     execution_ = loom_serve_device_execution(device_owner_);
+    if (GetParam()) {
+      IREE_ASSERT_OK(loom_serve_memory_pool_create(
+          iree_hal_device_allocator(device_),
+          IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, kSlabBytes, 2 * kSlabBytes,
+          &pool_, allocator_));
+    }
     directory_ =
         std::filesystem::path(FLAG_weight_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
@@ -83,6 +89,10 @@ class WeightsTest : public ::testing::Test {
         iree_hal_buffer_release(buffer);
       }
     }
+    for (auto* plan : plans_) {
+      IREE_EXPECT_OK(loom_serve_weights_destroy(plan));
+    }
+    loom_serve_memory_pool_destroy(pool_);
     iree_hal_buffer_release(output_buffer_);
     loom_serve_jit_destroy(jit_);
     loom_serve_device_destroy(device_owner_);
@@ -115,11 +125,16 @@ class WeightsTest : public ::testing::Test {
                           const loom_serve_weight_root_t* roots,
                           const std::string& path) {
     const std::string policy = directory_ + "/policy.loom";
-    return loom_serve_weights_load(
-        device_, transfer_, dispatch_, jit_,
+    auto** plan = &plans_[plan_count_++];
+    iree_status_t status = loom_serve_weights_create(
+        device_, transfer_, dispatch_, pool_, jit_,
         IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, shared_count, root_count, roots,
         iree_make_cstring_view(path.c_str()),
-        iree_make_cstring_view(policy.c_str()), allocator_);
+        iree_make_cstring_view(policy.c_str()), plan, allocator_);
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_weights_activate(*plan);
+    }
+    return status;
   }
 
   iree_status_t Load(iree_host_size_t shared_count, iree_host_size_t count) {
@@ -172,6 +187,14 @@ class WeightsTest : public ::testing::Test {
   iree_hal_queue_t* transfer_ = nullptr;
   // Timelines borrowed from device_owner_ and used by consuming commands.
   loom_serve_execution_t* execution_ = nullptr;
+  // Explicitly elastic backing or NULL for the fixed comparison arm.
+  loom_serve_memory_pool_t* pool_ = nullptr;
+  // Physical slab size; the shared budget holds two unique roots.
+  static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
+  // Owned checkpoint plans, including partially failed construction.
+  std::array<loom_serve_weights_t*, 3> plans_ = {};
+  // Number of plan slots initialized by the loading helper.
+  size_t plan_count_ = 0;
   // Source catalog compiler shared across all stages and preparers.
   loom_serve_jit_t* jit_ = nullptr;
   // Source directory from runfiles.
@@ -192,7 +215,7 @@ class WeightsTest : public ::testing::Test {
   std::array<int32_t, 8> output_ = {};
 };
 
-TEST_F(WeightsTest, MultiplePreparersAndSharedRootsPrepareEachTensorOnce) {
+TEST_P(WeightsTest, MultiplePreparersAndSharedRootsPrepareEachTensorOnce) {
   IREE_ASSERT_OK(Compile(0, "target"));
   IREE_ASSERT_OK(Compile(1, "target"));
   IREE_ASSERT_OK(Compile(2, "auxiliary"));
@@ -203,13 +226,13 @@ TEST_F(WeightsTest, MultiplePreparersAndSharedRootsPrepareEachTensorOnce) {
   Run(2, 93);
 }
 
-TEST_F(WeightsTest, CanonicalWeightsNeedNoPreparationOrLeadingSharedGroup) {
+TEST_P(WeightsTest, CanonicalWeightsNeedNoPreparationOrLeadingSharedGroup) {
   IREE_ASSERT_OK(Compile(0, "raw"));
   IREE_ASSERT_OK(Load(0, 1));
   Run(0, 90);
 }
 
-TEST_F(WeightsTest, SeparateCheckpointDomainsRetainSharedBaseStorage) {
+TEST_P(WeightsTest, SeparateCheckpointDomainsRetainSharedBaseStorage) {
   WriteCheckpoint(adapter_path_.path(), 100);
   IREE_ASSERT_OK(Compile(0, "raw"));
   IREE_ASSERT_OK(Compile(1, "domains"));
@@ -227,19 +250,84 @@ TEST_F(WeightsTest, SeparateCheckpointDomainsRetainSharedBaseStorage) {
   Run(0, 90);
 }
 
-TEST_F(WeightsTest, PolicySizeMismatchRejectsBeforeFileSubmission) {
+TEST_P(WeightsTest, PolicySizeMismatchRejectsBeforeFileSubmission) {
   IREE_ASSERT_OK(Compile(0, "size"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Load(0, 1));
 }
 
-TEST_F(WeightsTest, MissingPreparationRootFailsCompilation) {
+TEST_P(WeightsTest, MissingPreparationRootFailsCompilation) {
   IREE_ASSERT_OK(Compile(0, "missing"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
 }
 
-TEST_F(WeightsTest, MissingFileParameterFailsTheLoad) {
+TEST_P(WeightsTest, MissingFileParameterFailsTheLoad) {
   IREE_ASSERT_OK(Compile(0, "unavailable"));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
 }
+
+TEST_P(WeightsTest, LateMissingParameterRetiresEarlierAcceptedReads) {
+  // The provider accepts separate prepared read groups for a/b before looking
+  // up the absent third key. No preparation is submitted after that rejection.
+  IREE_ASSERT_OK(Compile(0, "partial"));
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, Load(0, 1));
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  IREE_ASSERT_OK(loom_serve_weights_destroy(plans_[0]));
+  plans_[0] = nullptr;
+  if (GetParam()) {
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+  }
+}
+
+TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  IREE_ASSERT_OK(Compile(1, "target"));
+  IREE_ASSERT_OK(Compile(2, "auxiliary"));
+  IREE_ASSERT_OK(Load(2, 3));
+  Run(0, 70);
+  Run(2, 93);
+  auto* const root = buffers_[0][0];
+  auto* const command = commands_[0];
+  if (!GetParam()) {
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
+                          loom_serve_weights_deactivate(plans_[0]));
+    Run(0, 70);
+    return;
+  }
+  IREE_ASSERT_OK(loom_serve_weights_deactivate(plans_[0]));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+  loom_serve_virtual_buffer_t* other = nullptr;
+  loom_serve_memory_statistics_t other_statistics = {};
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_create(pool_, 2 * kSlabBytes, 256,
+                                                  &other_statistics, &other));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(other, 0, 2 * kSlabBytes));
+  // Another allocation consumes every physical byte the model gave up.
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
+            2 * kSlabBytes);
+  const uint32_t poison = 0xDEADBEEF;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill = {.target_buffer = loom_serve_virtual_buffer_handle(other),
+               .length = 2 * kSlabBytes,
+               .pattern = &poison,
+               .pattern_length = sizeof(poison)}};
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution_, 1, &fill, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
+  IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(other));
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+  EXPECT_EQ(buffers_[0][0], root);
+  EXPECT_EQ(commands_[0], command);
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            2 * kSlabBytes);
+  Run(0, 70);
+  Run(1, 70);
+  Run(2, 93);
+}
+
+INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));
 
 }  // namespace

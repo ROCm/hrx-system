@@ -35,6 +35,8 @@ typedef struct memory_slab_t {
 struct loom_serve_virtual_buffer_t {
   // Borrowed physical owner outliving this reservation.
   loom_serve_memory_pool_t* pool;
+  // Borrowed caller accounting group, independent of the shared pool budget.
+  loom_serve_memory_statistics_t* statistics;
   // Owned stable virtual reservation, independent of physical commitment.
   iree_hal_buffer_t* handle;
   // Number of equally sized slots spanning the reservation.
@@ -98,7 +100,8 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 
 iree_status_t loom_serve_virtual_buffer_create(
     loom_serve_memory_pool_t* pool, iree_device_size_t length,
-    iree_device_size_t alignment, loom_serve_virtual_buffer_t** out_buffer) {
+    iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
+    loom_serve_virtual_buffer_t** out_buffer) {
   *out_buffer = NULL;
   if (!length || length > INT64_MAX - pool->slab_size) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
@@ -120,12 +123,14 @@ iree_status_t loom_serve_virtual_buffer_create(
       pool->host_allocator, sizeof(*buffer) + count * sizeof(memory_slab_t),
       (void**)&buffer));
   buffer->pool = pool;
+  buffer->statistics = statistics;
   buffer->slab_count = (iree_host_size_t)count;
   iree_status_t status = iree_hal_allocator_virtual_memory_reserve(
       pool->device_allocator, pool->queue_affinity, count * pool->slab_size,
       &buffer->handle);
   if (iree_status_is_ok(status)) {
     pool->statistics.reserved_bytes += count * pool->slab_size;
+    statistics->reserved_bytes += count * pool->slab_size;
     *out_buffer = buffer;
   } else {
     iree_allocator_free(pool->host_allocator, buffer);
@@ -154,6 +159,8 @@ static iree_status_t memory_slab_release(loom_serve_virtual_buffer_t* buffer,
     slab->physical = NULL;
     pool->statistics.committed_bytes -= pool->slab_size;
     pool->statistics.released_bytes += pool->slab_size;
+    buffer->statistics->committed_bytes -= pool->slab_size;
+    buffer->statistics->released_bytes += pool->slab_size;
   }
   return iree_ok_status();
 }
@@ -183,6 +190,9 @@ iree_status_t loom_serve_virtual_buffer_commit(
       pool->statistics.committed_bytes += pool->slab_size;
       pool->statistics.peak_bytes = iree_max(pool->statistics.peak_bytes,
                                              pool->statistics.committed_bytes);
+      buffer->statistics->committed_bytes += pool->slab_size;
+      buffer->statistics->peak_bytes = iree_max(
+          buffer->statistics->peak_bytes, buffer->statistics->committed_bytes);
       status = iree_hal_allocator_virtual_memory_map(
           pool->device_allocator, buffer->handle, i * pool->slab_size,
           slab->physical, 0, pool->slab_size);
@@ -241,6 +251,7 @@ iree_status_t loom_serve_virtual_buffer_destroy(
   IREE_RETURN_IF_ERROR(iree_hal_allocator_virtual_memory_release(
       pool->device_allocator, buffer->handle));
   pool->statistics.reserved_bytes -= buffer->slab_count * pool->slab_size;
+  buffer->statistics->reserved_bytes -= buffer->slab_count * pool->slab_size;
   iree_allocator_free(pool->host_allocator, buffer);
   return iree_ok_status();
 }

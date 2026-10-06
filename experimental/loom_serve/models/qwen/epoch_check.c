@@ -20,6 +20,9 @@ IREE_FLAG(int32_t, continuation_epochs, 1,
 IREE_FLAG(bool, trim, false,
           "Also compare live compaction, physical trim and regrowth with an "
           "uncompacted continuation; requires pooled state and context >=512.");
+IREE_FLAG(bool, reload_weights, false,
+          "Run the trim witness with weight eviction/reload before target/MTP "
+          "continuation; requires elastic backing.");
 
 typedef struct qwen_check_row_t {
   // Nonzero, permuted resident row used by packed invocations.
@@ -702,6 +705,28 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
           ",\"committed_bytes\":%" PRIu64 "}\n",
           trimmed.moved_blocks, trimmed.copied_bytes, trimmed.released_bytes,
           after.committed_bytes);
+  if (FLAG_reload_weights) {
+    const loom_serve_memory_statistics_t resident =
+        loom_serve_text_model_weight_statistics(model);
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_deactivate(model));
+    const loom_serve_memory_statistics_t inactive =
+        loom_serve_text_model_weight_statistics(model);
+    const loom_serve_memory_statistics_t state =
+        loom_serve_text_model_memory_statistics(model);
+    if (!resident.committed_bytes || inactive.committed_bytes ||
+        inactive.reserved_bytes != resident.reserved_bytes ||
+        state.committed_bytes != after.committed_bytes) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "parameter eviction changed retained state or "
+                              "failed to release physical weights");
+    }
+    fprintf(stderr,
+            "{\"event\":\"weights_deactivated\",\"released_bytes\":%" PRIu64
+            ",\"state_bytes\":%" PRIu64 "}\n",
+            resident.committed_bytes, state.committed_bytes);
+    // The next decode activates on demand through the existing model API.
+    // Its commands, target KV, recurrent state and draft cache are unchanged.
+  }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(expected); ++i) {
     if (loom_serve_text_row_token(survivor) != expected[i]) {
       return iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -731,6 +756,12 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
   if (loom_serve_text_row_position(survivor) != expected_position) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "compaction changed frontier");
+  }
+  if (FLAG_reload_weights) {
+    fprintf(stderr,
+            "{\"event\":\"weights_reactivated\",\"committed_bytes\":%" PRIu64
+            "}\n",
+            loom_serve_text_model_weight_statistics(model).committed_bytes);
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(survivor));
   IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
@@ -940,7 +971,7 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status) && !FLAG_compare[0]) {
     status = qwen_check_mtp_verification(model, allocator);
   }
-  if (iree_status_is_ok(status) && FLAG_trim) {
+  if (iree_status_is_ok(status) && (FLAG_trim || FLAG_reload_weights)) {
     status = qwen_check_trim(model, allocator);
   }
   if (iree_status_is_ok(status)) {

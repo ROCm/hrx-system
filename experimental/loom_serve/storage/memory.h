@@ -49,9 +49,13 @@ loom_serve_memory_statistics_t loom_serve_memory_pool_statistics(
 
 // Reserves stable device addresses without committing physical storage.
 // The borrowed HAL buffer remains identical across commit/trim operations.
+// statistics is a caller-owned, initially zeroed accounting group shared by
+// related reservations. It outlives every reservation using it. The pool also
+// accounts all reservations independently, enforcing their common budget.
 iree_status_t loom_serve_virtual_buffer_create(
     loom_serve_memory_pool_t* pool, iree_device_size_t length,
-    iree_device_size_t alignment, loom_serve_virtual_buffer_t** out_buffer);
+    iree_device_size_t alignment, loom_serve_memory_statistics_t* statistics,
+    loom_serve_virtual_buffer_t** out_buffer);
 iree_hal_buffer_t* loom_serve_virtual_buffer_handle(
     const loom_serve_virtual_buffer_t* buffer);
 

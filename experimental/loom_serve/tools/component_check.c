@@ -53,6 +53,8 @@ typedef struct component_check_t {
   iree_hal_command_buffer_t* command;
   // Owned fixed-root references, populated even on partial loading failure.
   iree_hal_buffer_t** weights;
+  // Retained plans for each checkpoint domain, including partial creation.
+  loom_serve_weights_t** weight_plans;
   // Number of fixed-root slots allocated in weights.
   iree_host_size_t weight_count;
   // Input files followed by the reference output; retained through transfers.
@@ -194,6 +196,9 @@ static iree_status_t component_initialize(component_check_t* check,
         allocator, program->requirements.fixed_buffer_count,
         sizeof(*check->weights), (void**)&check->weights));
     check->weight_count = program->requirements.fixed_buffer_count;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        allocator, check->weight_count, sizeof(*check->weight_plans),
+        (void**)&check->weight_plans));
     for (uint32_t r = 0;
          r < program->parameter_roots.count && iree_status_is_ok(status); ++r) {
       const loom_cmd_program_parameter_root_t parameter_root =
@@ -201,11 +206,14 @@ static iree_status_t component_initialize(component_check_t* check,
       const loom_serve_weight_root_t root = {
           program, parameter_root,
           &check->weights[parameter_root.fixed_buffer_index]};
-      status = loom_serve_weights_load(
+      status = loom_serve_weights_create(
           device, loom_serve_device_transfer_queue(check->owner), dispatch,
-          check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
+          NULL, check->jit, IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, 0, 1, &root,
           checkpoints.values[r], iree_make_cstring_view(FLAG_weight_policy),
-          allocator);
+          &check->weight_plans[r], allocator);
+      if (iree_status_is_ok(status)) {
+        status = loom_serve_weights_activate(check->weight_plans[r]);
+      }
     }
     IREE_RETURN_IF_ERROR(status);
   }
@@ -428,6 +436,10 @@ int main(int argc, char** argv) {
   loom_serve_jit_stage_destroy(check.stage);
   for (iree_host_size_t i = 0; i < check.weight_count; ++i) {
     iree_hal_buffer_release(check.weights[i]);
+    if (check.weight_plans) {
+      status = iree_status_join(
+          status, loom_serve_weights_destroy(check.weight_plans[i]));
+    }
   }
   for (iree_host_size_t i = 0; i < check.binding_count; ++i) {
     iree_hal_buffer_release(check.bindings[i].buffer);
@@ -436,6 +448,7 @@ int main(int argc, char** argv) {
     iree_io_file_contents_free(check.files[i]);
   }
   iree_allocator_free(allocator, check.weights);
+  iree_allocator_free(allocator, check.weight_plans);
   iree_allocator_free(allocator, check.bindings);
   iree_allocator_free(allocator, check.uploads);
   iree_allocator_free(allocator, check.files);

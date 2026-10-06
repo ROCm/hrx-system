@@ -6,8 +6,11 @@
 #include "experimental/loom_serve/runtime/weights.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "experimental/loom_serve/runtime/program.h"
+#include "iree/base/threading/mutex.h"
+#include "iree/base/threading/notification.h"
 #include "iree/io/parameter_index_provider.h"
 #include "iree/tooling/parameter_util.h"
 #include "iree/vm/buffer.h"
@@ -20,6 +23,8 @@ typedef struct weight_span_t {
   loom_cmd_program_parameter_t parameter;
   // Borrowed final allocation or root view receiving the file bytes.
   iree_hal_buffer_t* buffer;
+  // Unique final storage index, resolved once before any queue work.
+  iree_host_size_t storage_index;
   // Owned cached in-place preparation command, or null for unchanged bytes.
   iree_hal_command_buffer_t* prepare;
 } weight_span_t;
@@ -28,6 +33,9 @@ typedef struct weight_group_t {
   // Borrowed consecutive spans in one final allocation. Prepared groups own
   // exactly one tensor; consecutive canonical spans share one readiness edge.
   weight_span_t* spans;
+  // Transaction-local view retained by all reads and preparations of this
+  // group.
+  iree_hal_buffer_t* buffer;
   // Number of spans exposed to the parameter provider.
   iree_host_size_t count;
   // Previous preparation frontier on this group's lane.
@@ -35,6 +43,42 @@ typedef struct weight_group_t {
   // Read and preparation frontier established by this group.
   uint64_t signal_value;
 } weight_group_t;
+
+typedef struct weight_storage_t {
+  // Borrowed final root retained by the caller's output slot.
+  iree_hal_buffer_t* buffer;
+  // Owned virtual reservation, or NULL for explicitly fixed backing.
+  loom_serve_virtual_buffer_t* reservation;
+} weight_storage_t;
+
+struct loom_serve_weights_t {
+  // Allocator owning the plan and cold activation metadata.
+  iree_allocator_t allocator;
+  // Borrowed device enclosing the complete plan lifetime.
+  iree_hal_device_t* device;
+  // Borrowed exact file transfer queue.
+  iree_hal_queue_t* transfer;
+  // Borrowed exact in-place preparation queue.
+  iree_hal_queue_t* dispatch;
+  // Borrowed shared physical budget, or NULL for fixed backing.
+  loom_serve_memory_pool_t* pool;
+  // Parameter-only accounting across all unique roots.
+  loom_serve_memory_statistics_t statistics;
+  // Owned original checkpoint provider and imported-file cache.
+  iree_io_parameter_provider_t* provider;
+  // Owned placement/preparation records, with keys in the owned key storage.
+  weight_span_t* spans;
+  // Owned parameter key bytes, independent of source/JIT lifetime.
+  char* keys;
+  // Number of initialized placement records, including partial creation.
+  iree_host_size_t span_count;
+  // Owned unique root records; aliasing output slots do not duplicate these.
+  weight_storage_t* storages;
+  // Number of initialized unique roots, including partial creation.
+  iree_host_size_t storage_count;
+  // All parameter bytes are ready for consumption after successful activation.
+  bool active;
+};
 
 static iree_status_t weight_allocate(iree_hal_device_t* device,
                                      iree_device_size_t length,
@@ -62,7 +106,7 @@ static const weight_span_t* weight_find(iree_host_size_t count,
 // Resolves root sharing before submitting any I/O. Only newly allocated roots
 // append spans, so tensors shared by multiple stages are read and prepared
 // exactly once.
-static iree_status_t weight_resolve_root(iree_hal_device_t* device,
+static iree_status_t weight_resolve_root(loom_serve_weights_t* weights,
                                          const loom_cmd_program_t* program,
                                          loom_cmd_program_parameter_root_t root,
                                          iree_host_size_t* span_count,
@@ -110,8 +154,20 @@ static iree_status_t weight_resolve_root(iree_hal_device_t* device,
                                    root.required_byte_length, allocator,
                                    out_buffer);
   }
-  IREE_RETURN_IF_ERROR(weight_allocate(device, root.required_byte_length,
-                                       root.minimum_alignment, out_buffer));
+  weight_storage_t* storage = &weights->storages[weights->storage_count];
+  if (weights->pool) {
+    IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_create(
+        weights->pool, root.required_byte_length, root.minimum_alignment,
+        &weights->statistics, &storage->reservation));
+    *out_buffer = loom_serve_virtual_buffer_handle(storage->reservation);
+    iree_hal_buffer_retain(*out_buffer);
+  } else {
+    IREE_RETURN_IF_ERROR(weight_allocate(weights->device,
+                                         root.required_byte_length,
+                                         root.minimum_alignment, out_buffer));
+  }
+  storage->buffer = *out_buffer;
+  const iree_host_size_t storage_index = weights->storage_count++;
   for (uint32_t i = 0; i < program->parameters.count; ++i) {
     const loom_cmd_program_parameter_t parameter =
         loom_cmd_program_parameter_at(program, i);
@@ -121,6 +177,7 @@ static iree_status_t weight_resolve_root(iree_hal_device_t* device,
     spans[(*span_count)++] = (weight_span_t){
         .parameter = parameter,
         .buffer = *out_buffer,
+        .storage_index = storage_index,
     };
   }
   return iree_ok_status();
@@ -295,19 +352,65 @@ static iree_status_t weight_enumerate(void* user_data, iree_host_size_t i,
   return iree_ok_status();
 }
 
-static iree_status_t weight_stream(iree_hal_device_t* device,
-                                   iree_hal_queue_t* transfer,
-                                   iree_hal_queue_t* dispatch,
-                                   iree_io_parameter_provider_t* provider,
-                                   iree_host_size_t span_count,
-                                   weight_span_t* spans,
-                                   iree_allocator_t allocator) {
+// Readiness failure can precede retirement of an earlier file transfer. Each
+// activation lends views to queues and joins their final ownership release,
+// independently of the semaphores that cancel dependent work on failure.
+typedef struct weight_retirement_t {
+  // Serializes final notification with observation of zero outstanding views.
+  iree_slim_mutex_t mutex;
+  // Wakes the cold activation owner after a view's final queue release.
+  iree_notification_t notification;
+  // Views not yet released by all accepted read/preparation operations.
+  iree_host_size_t count;
+} weight_retirement_t;
+
+static void weight_retire_view(void* user_data, iree_hal_buffer_t* buffer) {
+  weight_retirement_t* retirement = user_data;
+  iree_slim_mutex_lock(&retirement->mutex);
+  --retirement->count;
+  iree_notification_post(&retirement->notification, IREE_ALL_WAITERS);
+  iree_slim_mutex_unlock(&retirement->mutex);
+}
+
+static bool weight_views_retired(void* user_data) {
+  weight_retirement_t* retirement = user_data;
+  iree_slim_mutex_lock(&retirement->mutex);
+  const bool retired = retirement->count == 0;
+  iree_slim_mutex_unlock(&retirement->mutex);
+  return retired;
+}
+
+static iree_status_t weight_stream(loom_serve_weights_t* weights) {
+  const iree_allocator_t allocator = weights->allocator;
+  const iree_host_size_t span_count = weights->span_count;
+  weight_span_t* spans = weights->spans;
+  iree_hal_device_t* device = weights->device;
   weight_group_t* groups = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       allocator, span_count, sizeof(*groups), (void**)&groups));
   iree_io_parameter_gather_t* gathers = NULL;
   iree_status_t status = iree_allocator_malloc_array(
       allocator, span_count, sizeof(*gathers), (void**)&gathers);
+  iree_hal_buffer_t** views = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(allocator, weights->storage_count,
+                                         sizeof(*views), (void**)&views);
+  }
+  weight_retirement_t retirement = {0};
+  iree_slim_mutex_initialize(&retirement.mutex);
+  iree_notification_initialize(&retirement.notification);
+  for (iree_host_size_t i = 0;
+       i < weights->storage_count && iree_status_is_ok(status); ++i) {
+    iree_hal_buffer_t* buffer = weights->storages[i].buffer;
+    status = iree_hal_subspan_buffer_create_with_callback(
+        buffer, iree_hal_buffer_byte_offset(buffer),
+        iree_hal_buffer_byte_length(buffer),
+        (iree_hal_buffer_release_callback_t){weight_retire_view, &retirement},
+        allocator, &views[i]);
+    if (iree_status_is_ok(status)) {
+      ++retirement.count;
+    }
+  }
   iree_hal_semaphore_t* reads[WEIGHT_LANES] = {0};
   iree_hal_semaphore_t* ready[WEIGHT_LANES] = {0};
   uint64_t frontiers[WEIGHT_LANES] = {0};
@@ -330,7 +433,9 @@ static iree_status_t weight_stream(iree_hal_device_t* device,
       const weight_span_t* span = &spans[i];
       if (!i || span->prepare || spans[i - 1].prepare ||
           span->buffer != spans[i - 1].buffer) {
-        groups[group_count++].spans = &spans[i];
+        weight_group_t* group = &groups[group_count++];
+        group->spans = &spans[i];
+        group->buffer = views[span->storage_index];
       }
       ++groups[group_count - 1].count;
       loaded_bytes += span->parameter.byte_length;
@@ -344,7 +449,7 @@ static iree_status_t weight_stream(iree_hal_device_t* device,
       group->wait_value = frontiers[lane];
       group->signal_value = ++frontiers[lane];
       gathers[i] = (iree_io_parameter_gather_t){
-          .target_buffer = group->spans[0].buffer,
+          .target_buffer = group->buffer,
           .count = group->count,
           .enumerator = {weight_enumerate, group},
           .wait_semaphore_list = {1, &ready[lane], &group->wait_value},
@@ -359,8 +464,8 @@ static iree_status_t weight_stream(iree_hal_device_t* device,
             "place across %zu groups and %u lanes...\n",
             loaded_bytes / 1073741824.0, prepared_bytes / 1073741824.0,
             group_count, WEIGHT_LANES);
-    status = iree_io_parameter_provider_gather_batch(provider, device, transfer,
-                                                     group_count, gathers);
+    status = iree_io_parameter_provider_gather_batch(
+        weights->provider, device, weights->transfer, group_count, gathers);
   }
   for (iree_host_size_t i = 0; i < group_count && iree_status_is_ok(status);
        ++i) {
@@ -370,10 +475,11 @@ static iree_status_t weight_stream(iree_hal_device_t* device,
       continue;
     }
     const iree_host_size_t lane = i % WEIGHT_LANES;
-    const iree_hal_buffer_binding_t binding = {
-        span->buffer, span->parameter.byte_offset, span->parameter.byte_length};
+    const iree_hal_buffer_binding_t binding = {group->buffer,
+                                               span->parameter.byte_offset,
+                                               span->parameter.byte_length};
     status = iree_hal_queue_execute(
-        dispatch,
+        weights->dispatch,
         (iree_hal_semaphore_list_t){1, &reads[lane], &group->signal_value},
         (iree_hal_semaphore_list_t){1, &ready[lane], &group->signal_value},
         span->prepare, (iree_hal_buffer_binding_table_t){1, &binding},
@@ -401,28 +507,53 @@ static iree_status_t weight_stream(iree_hal_device_t* device,
     iree_hal_semaphore_release(reads[i]);
     iree_hal_semaphore_release(ready[i]);
   }
+  if (views) {
+    for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
+      iree_hal_buffer_release(views[i]);
+    }
+  }
+  iree_notification_await(&retirement.notification, weight_views_retired,
+                          &retirement, iree_infinite_timeout());
+  iree_notification_deinitialize(&retirement.notification);
+  iree_slim_mutex_deinitialize(&retirement.mutex);
+  iree_allocator_free(allocator, views);
   iree_allocator_free(allocator, gathers);
   iree_allocator_free(allocator, groups);
   return status;
 }
 
-iree_status_t loom_serve_weights_load(
+iree_status_t loom_serve_weights_create(
     iree_hal_device_t* device, iree_hal_queue_t* transfer,
-    iree_hal_queue_t* dispatch, loom_serve_jit_t* jit,
-    iree_hal_command_buffer_mode_t command_mode,
+    iree_hal_queue_t* dispatch, loom_serve_memory_pool_t* pool,
+    loom_serve_jit_t* jit, iree_hal_command_buffer_mode_t command_mode,
     iree_host_size_t shared_root_count, iree_host_size_t root_count,
     const loom_serve_weight_root_t* roots, iree_string_view_t weights_path,
-    iree_string_view_t policy_path, iree_allocator_t host_allocator) {
+    iree_string_view_t policy_path, loom_serve_weights_t** out_weights,
+    iree_allocator_t host_allocator) {
+  *out_weights = NULL;
+  loom_serve_weights_t* weights = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc(host_allocator, sizeof(*weights),
+                                             (void**)&weights));
+  weights->allocator = host_allocator;
+  weights->device = device;
+  weights->transfer = transfer;
+  weights->dispatch = dispatch;
+  weights->pool = pool;
+  *out_weights = weights;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_host_size_t capacity =
       shared_root_count ? roots[0].program->parameters.count : 0;
   for (iree_host_size_t i = shared_root_count; i < root_count; ++i) {
     capacity += roots[i].program->parameters.count;
   }
-  weight_span_t* spans = NULL;
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, capacity, sizeof(*spans), (void**)&spans);
-  iree_host_size_t span_count = 0;
+  iree_status_t status = iree_allocator_malloc_array(host_allocator, capacity,
+                                                     sizeof(*weights->spans),
+                                                     (void**)&weights->spans);
+  if (iree_status_is_ok(status)) {
+    status = iree_allocator_malloc_array(host_allocator, root_count,
+                                         sizeof(*weights->storages),
+                                         (void**)&weights->storages);
+  }
   if (shared_root_count && iree_status_is_ok(status)) {
     loom_cmd_program_parameter_root_t root = roots[0].root;
     for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
@@ -432,8 +563,9 @@ iree_status_t loom_serve_weights_load(
       root.minimum_alignment =
           iree_max(root.minimum_alignment, other.minimum_alignment);
     }
-    status = weight_resolve_root(device, roots[0].program, root, &span_count,
-                                 spans, host_allocator, roots[0].buffer);
+    status = weight_resolve_root(weights, roots[0].program, root,
+                                 &weights->span_count, weights->spans,
+                                 host_allocator, roots[0].buffer);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 1; i < shared_root_count; ++i) {
@@ -443,14 +575,32 @@ iree_status_t loom_serve_weights_load(
   }
   for (iree_host_size_t i = shared_root_count;
        i < root_count && iree_status_is_ok(status); ++i) {
-    status = weight_resolve_root(device, roots[i].program, roots[i].root,
-                                 &span_count, spans, host_allocator,
-                                 roots[i].buffer);
+    status = weight_resolve_root(weights, roots[i].program, roots[i].root,
+                                 &weights->span_count, weights->spans,
+                                 host_allocator, roots[i].buffer);
   }
   iree_io_parameter_index_t* index = NULL;
   if (iree_status_is_ok(status)) {
+    iree_host_size_t key_bytes = 0;
+    for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
+      key_bytes += weights->spans[i].parameter.key.size;
+    }
+    status = iree_allocator_malloc(host_allocator, key_bytes,
+                                   (void**)&weights->keys);
+    if (iree_status_is_ok(status)) {
+      char* target = weights->keys;
+      for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
+        iree_string_view_t* key = &weights->spans[i].parameter.key;
+        memcpy(target, key->data, key->size);
+        key->data = target;
+        target += key->size;
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
     status = weight_prepare_spans(jit, dispatch, command_mode, policy_path,
-                                  span_count, spans, host_allocator);
+                                  weights->span_count, weights->spans,
+                                  host_allocator);
   }
   if (iree_status_is_ok(status)) {
     status = iree_io_parameter_index_create(host_allocator, &index);
@@ -459,22 +609,84 @@ iree_status_t loom_serve_weights_load(
     status = iree_tooling_append_parameter_file_to_index(weights_path, index,
                                                          host_allocator);
   }
-  iree_io_parameter_provider_t* provider = NULL;
   if (iree_status_is_ok(status)) {
-    status = iree_io_parameter_index_provider_create(iree_string_view_empty(),
-                                                     index, WEIGHT_LANES,
-                                                     host_allocator, &provider);
+    status = iree_io_parameter_index_provider_create(
+        iree_string_view_empty(), index, WEIGHT_LANES, host_allocator,
+        &weights->provider);
   }
-  if (iree_status_is_ok(status)) {
-    status = weight_stream(device, transfer, dispatch, provider, span_count,
-                           spans, host_allocator);
-  }
-  iree_io_parameter_provider_release(provider);
   iree_io_parameter_index_release(index);
-  for (iree_host_size_t i = 0; i < span_count; ++i) {
-    iree_hal_command_buffer_release(spans[i].prepare);
-  }
-  iree_allocator_free(host_allocator, spans);
   IREE_TRACE_ZONE_END(z0);
+  return status;
+}
+
+iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights) {
+  if (weights->active) {
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < weights->storage_count && iree_status_is_ok(status); ++i) {
+    weight_storage_t* storage = &weights->storages[i];
+    if (storage->reservation) {
+      status = loom_serve_virtual_buffer_commit(
+          storage->reservation, 0,
+          iree_hal_buffer_byte_length(storage->buffer));
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = weight_stream(weights);
+  }
+  if (iree_status_is_ok(status)) {
+    weights->active = true;
+  }
+  return status;
+}
+
+iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights) {
+  if (!weights->pool) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "fixed parameter backing cannot deactivate");
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < weights->storage_count && iree_status_is_ok(status); ++i) {
+    loom_serve_virtual_buffer_t* reservation = weights->storages[i].reservation;
+    loom_serve_virtual_buffer_begin_trim(reservation);
+    status = loom_serve_virtual_buffer_trim(reservation);
+  }
+  if (iree_status_is_ok(status)) {
+    weights->active = false;
+  }
+  return status;
+}
+
+loom_serve_memory_statistics_t loom_serve_weights_statistics(
+    const loom_serve_weights_t* weights) {
+  return weights->statistics;
+}
+
+iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights) {
+  if (!weights) {
+    return iree_ok_status();
+  }
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0;
+       i < weights->storage_count && iree_status_is_ok(status); ++i) {
+    status =
+        loom_serve_virtual_buffer_destroy(weights->storages[i].reservation);
+    if (iree_status_is_ok(status)) {
+      weights->storages[i].reservation = NULL;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
+      iree_hal_command_buffer_release(weights->spans[i].prepare);
+    }
+    iree_io_parameter_provider_release(weights->provider);
+    iree_allocator_free(weights->allocator, weights->storages);
+    iree_allocator_free(weights->allocator, weights->keys);
+    iree_allocator_free(weights->allocator, weights->spans);
+    iree_allocator_free(weights->allocator, weights);
+  }
   return status;
 }
