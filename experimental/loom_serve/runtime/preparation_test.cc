@@ -47,6 +47,50 @@ TEST_F(PreparationTest, TextConfigurationCopiesValueSpelling) {
   EXPECT_EQ(std::string(value.data, value.size), "true");
 }
 
+TEST_F(PreparationTest, CatalogGrowthPreservesEveryDeclaration) {
+  // Bound the regression's failure mode: unconditional doubling would ask for
+  // gigabytes before reporting a catalog that only needs kilobytes.
+  const iree_allocator_t bounded_allocator = {
+      nullptr,
+      +[](void*, iree_allocator_command_t command, const void* params,
+          void** inout_pointer) -> iree_status_t {
+        if (command != IREE_ALLOCATOR_COMMAND_FREE &&
+            static_cast<const iree_allocator_alloc_params_t*>(params)
+                    ->byte_length > 64 * 1024 * 1024) {
+          return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                  "catalog allocation exceeded 64 MiB");
+        }
+        const auto system = iree_allocator_system();
+        return system.ctl(system.self, command, params, inout_pointer);
+      }};
+  IREE_ASSERT_OK(loom_serve_preparation_create(
+      environment, iree_make_cstring_view(FLAG_boundary_source),
+      IREE_SV("large_catalog"), iree_vm_variant_span_empty(),
+      iree_vm_variant_span_empty(), iree_vm_module_span_empty(), &preparation,
+      bounded_allocator));
+  ASSERT_EQ(loom_serve_preparation_stage_count(preparation), 33);
+  for (size_t i = 0; i < 33; ++i) {
+    const auto* stage = loom_serve_preparation_stage(preparation, i);
+    EXPECT_EQ(std::string(stage->root.data, stage->root.size), "stage_root");
+    EXPECT_EQ(stage->tag, i);
+    ASSERT_EQ(stage->config.binding_count, 33);
+    ASSERT_EQ(stage->parameter_count, 33);
+    for (size_t j = 0; j < 33; ++j) {
+      const auto& binding = stage->config.bindings[j];
+      EXPECT_EQ(std::string(binding.key.data, binding.key.size),
+                std::string(j < 10 ? "k0" : "k") + std::to_string(j));
+      EXPECT_EQ(std::string(binding.value.data, binding.value.size),
+                std::to_string(j));
+      const auto& parameter = stage->parameters[j];
+      EXPECT_EQ(parameter.binding, j);
+      EXPECT_EQ(std::string(parameter.path.data, parameter.path.size),
+                "/checkpoints/model.safetensors");
+      EXPECT_EQ(std::string(parameter.policy.data, parameter.policy.size),
+                "weights.loom");
+    }
+  }
+}
+
 TEST_F(PreparationTest, InvalidDeclarationsReleasePartialOwnership) {
   struct Case {
     // Source entry that reaches a public declaration failure.
