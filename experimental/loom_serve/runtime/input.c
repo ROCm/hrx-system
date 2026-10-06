@@ -30,12 +30,10 @@ typedef struct input_module_t {
 // destructive, so its independent pending bound, not the remaining destination
 // capacity, determines scratch size when the entire text fits in the input
 // feed.
-static iree_status_t input_encode_prefix(const iree_tokenizer_t* tokenizer,
-                                         iree_string_view_t text,
-                                         iree_host_size_t capacity,
-                                         int32_t* output,
-                                         iree_host_size_t* out_count,
-                                         iree_allocator_t allocator) {
+static iree_status_t input_encode_prefix(
+    const iree_tokenizer_t* tokenizer, iree_string_view_t text,
+    iree_tokenizer_encode_flags_t flags, iree_host_size_t capacity,
+    int32_t* output, iree_host_size_t* out_count, iree_allocator_t allocator) {
   *out_count = 0;
   iree_host_size_t state_size = 0;
   IREE_RETURN_IF_ERROR(
@@ -54,9 +52,7 @@ static iree_status_t input_encode_prefix(const iree_tokenizer_t* tokenizer,
       tokenizer, iree_make_byte_span(storage, state_size),
       iree_make_byte_span(storage + state_size, transform_size),
       (iree_tokenizer_offset_run_list_t){0},
-      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START |
-          IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
-      &state);
+      IREE_TOKENIZER_ENCODE_FLAG_AT_INPUT_START | flags, &state);
   iree_host_size_t count = 0;
   while (iree_status_is_ok(status) && text.size && count < capacity) {
     iree_host_size_t consumed = 0;
@@ -139,7 +135,14 @@ static iree_status_t input_module_start(
     *out_outcome = IREE_VM_EXECUTION_OUTCOME_COMPLETED;
     return iree_ok_status();
   }
-  const uint64_t capacity = iree_vm_call_value_argument_load(call, 0);
+  const iree_tokenizer_encode_flags_t flags =
+      (iree_tokenizer_encode_flags_t)iree_vm_call_value_argument_load(call, 0);
+  if (flags & ~(IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS |
+                IREE_TOKENIZER_ENCODE_FLAG_NO_SPECIAL_TOKEN_MATCHING)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "unsupported input encoding flags 0x%08x", flags);
+  }
+  const uint64_t capacity = iree_vm_call_value_argument_load(call, 1);
   if (capacity > SIZE_MAX / sizeof(int32_t)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "token output byte capacity overflow");
@@ -153,9 +156,9 @@ static iree_status_t input_module_start(
       output, 0, iree_vm_buffer_length(output), &storage);
   iree_host_size_t count = 0;
   if (iree_status_is_ok(status) && capacity) {
-    status =
-        input_encode_prefix(module->tokenizer, text, (iree_host_size_t)capacity,
-                            (int32_t*)storage.data, &count, module->allocator);
+    status = input_encode_prefix(
+        module->tokenizer, text, flags, (iree_host_size_t)capacity,
+        (int32_t*)storage.data, &count, module->allocator);
   }
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < count; ++i) {
@@ -173,7 +176,9 @@ static iree_status_t input_module_start(
 }
 
 static const iree_vm_module_signature_type_t input_encode_arguments[] = {
-    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
+    {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0},
+    {IREE_VM_SCALAR_TYPE_I32, 0},
+    {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t input_encode_results[] = {
     {IREE_VM_MODULE_SIGNATURE_TYPE_KIND_REF, 0}, {IREE_VM_SCALAR_TYPE_I64, 0}};
 static const iree_vm_module_signature_type_t input_lookup_arguments[] = {
@@ -187,7 +192,7 @@ static const iree_vm_module_callable_type_declaration_t input_callables[] = {
     {.signature = {.arguments = {input_lookup_arguments, 1, 0, 1, 0},
                    .results = {input_lookup_results, 1, 1, 0, 0}}},
     {.signature = {.arguments = {input_require_arguments, 2, 1, 1, 0}}},
-    {.signature = {.arguments = {input_encode_arguments, 2, 1, 1, 0},
+    {.signature = {.arguments = {input_encode_arguments, 3, 2, 1, 0},
                    .results = {input_encode_results, 2, 1, 1, 0}}},
 };
 static const iree_vm_module_export_declaration_t input_exports[] = {
@@ -262,7 +267,7 @@ iree_status_t loom_serve_input_module_create(iree_vm_environment_t* environment,
       .counts = {.function_count = 3,
                  .callable_type_count = 3,
                  .export_count = 3,
-                 .callable_fields = {.value_count = 4, .ref_count = 4}},
+                 .callable_fields = {.value_count = 5, .ref_count = 4}},
   };
   iree_status_t status = iree_vm_module_initialize(
       &input_module_vtable, &module->descriptor, &module->base);
