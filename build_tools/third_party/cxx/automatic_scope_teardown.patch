@@ -1,0 +1,62 @@
+diff --git a/src/parser/cxx/ast_interpreter.cc b/src/parser/cxx/ast_interpreter.cc
+--- a/src/parser/cxx/ast_interpreter.cc
++++ b/src/parser/cxx/ast_interpreter.cc
+@@ -831,10 +831,10 @@ void ASTInterpreter::registerAutomaticObject(VariableSymbol* variable) {
+ auto ASTInterpreter::endAutomaticScope(std::size_t mark) -> bool {
+   if (frames_.empty()) return true;
+-  auto& objects = frames_.back().automaticObjects;
+-  if (mark > objects.size()) return false;
+-  while (objects.size() > mark) {
+-    auto variable = objects.back();
+-    objects.pop_back();
++  const auto frameIndex = frames_.size() - 1;
++  if (mark > frames_[frameIndex].automaticObjects.size()) return false;
++  while (frames_[frameIndex].automaticObjects.size() > mark) {
++    auto variable = frames_[frameIndex].automaticObjects.back();
++    frames_[frameIndex].automaticObjects.pop_back();
+     auto value = lookupLocalSlot(variable);
+     if (!value) continue;
+     if (destroyValue(variable->type(), *value)) continue;
+diff --git a/tests/unit_tests/sema/constant_scope_teardown_01.cc b/tests/unit_tests/sema/constant_scope_teardown_01.cc
+new file mode 100644
+--- /dev/null
++++ b/tests/unit_tests/sema/constant_scope_teardown_01.cc
+@@ -0,0 +1,38 @@
++// RUN: %cxx -verify -fsyntax-only %s
++
++namespace constant_scope_teardown {
++constexpr void append_digit(unsigned* output, unsigned digit) {
++  *output = *output * 10 + digit;
++}
++
++struct Guard {
++  unsigned* output;
++  unsigned digit;
++  constexpr ~Guard() { append_digit(output, digit); }
++};
++
++constexpr unsigned nested_blocks() {
++  unsigned output = 1;
++  {
++    Guard outer{&output, 2};
++    {
++      Guard inner{&output, 3};
++    }
++  }
++  return output;
++}
++static_assert(nested_blocks() == 132);
++
++constexpr unsigned early_exit() {
++  unsigned output = 4;
++  while (true) {
++    Guard outer{&output, 5};
++    {
++      Guard inner{&output, 6};
++      break;
++    }
++  }
++  return output;
++}
++static_assert(early_exit() == 465);
++}  // namespace constant_scope_teardown

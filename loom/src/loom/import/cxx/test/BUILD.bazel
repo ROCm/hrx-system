@@ -63,6 +63,7 @@ loom_check_test_suite(
         "constexpr_bitcast.cxx-test",
         "constexpr_bitcast_cleanup.cxx-test",
         "constexpr_bitcast_invalid.cxx-test",
+        "constexpr_destruction.cxx-test",
         "constexpr_semantics.cxx-test",
         "control_invalid.cxx-test",
         "data_models.cxx-test",

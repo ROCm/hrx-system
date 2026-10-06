@@ -11,6 +11,7 @@ exports_files([
     "aggregate_member_defaults.patch",
     "aligned_records.patch",
     "auto_deduction.patch",
+    "automatic_scope_teardown.patch",
     "bfloat16_semantics.patch",
     "bitfield_attributes.patch",
     "braced_vector_initialization.patch",

@@ -1,0 +1,50 @@
+// RUN: roundtrip
+static constexpr void append_digit(unsigned* output, unsigned digit) {
+  *output = *output * 10 + digit;
+}
+
+struct Guard {
+  unsigned* output;
+  unsigned digit;
+  constexpr ~Guard() { append_digit(output, digit); }
+};
+
+static constexpr unsigned nested_blocks() {
+  unsigned output = 1;
+  {
+    Guard outer{&output, 2};
+    {
+      Guard inner{&output, 3};
+    }
+  }
+  return output;
+}
+
+static constexpr unsigned early_exit() {
+  unsigned output = 4;
+  while (true) {
+    Guard outer{&output, 5};
+    {
+      Guard inner{&output, 6};
+      break;
+    }
+  }
+  return output;
+}
+
+constexpr unsigned nested_result_value = nested_blocks();
+constexpr unsigned early_result_value = early_exit();
+
+unsigned nested_result() { return nested_result_value; }
+unsigned early_result() { return early_result_value; }
+
+// ----
+func.def public @nested_result() -> (i32) {
+  %nested_result_value = scalar.constant 132 : i32
+  func.return %nested_result_value : i32
+}
+
+func.def public @early_result() -> (i32) {
+  %early_result_value = scalar.constant 465 : i32
+  func.return %early_result_value : i32
+}

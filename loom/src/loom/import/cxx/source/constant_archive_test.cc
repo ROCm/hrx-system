@@ -627,5 +627,59 @@ TEST(ConstantArchiveTest, PreservesTypedAggregateReadsAfterDecoderDestruction) {
   }
 }
 
+TEST(ConstantArchiveTest, ExecutesDestructorsAfterDecoderDestruction) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  std::vector<std::uint8_t> bytes;
+  {
+    Source source(
+        IREE_SV(
+            "constexpr void append_digit(unsigned* output, unsigned digit) {"
+            "  *output = *output * 10 + digit;"
+            "}"
+            "struct Guard {"
+            "  unsigned* output;"
+            "  unsigned digit;"
+            "  constexpr ~Guard() { append_digit(output, digit); }"
+            "};"
+            "constexpr unsigned evaluate(unsigned seed) {"
+            "  unsigned output = seed;"
+            "  {"
+            "    Guard outer{&output, 2};"
+            "    { Guard inner{&output, 3}; }"
+            "  }"
+            "  return output;"
+            "}"),
+        IREE_SV("destructors.cxx"), options);
+    cxx::ArchiveWriter writer;
+    cxx::SemanticArchiveRoots roots;
+    roots.ast = source.unit().ast();
+    roots.globalScope = source.unit().globalScope();
+    cxx::SemanticEncoder encoder(&source.unit());
+    ASSERT_TRUE(encoder(roots, writer));
+    bytes = writer();
+  }
+
+  Source destination(IREE_SV(""), IREE_SV("restored.cxx"), options);
+  cxx::SemanticArchiveRoots restored;
+  {
+    cxx::ArchiveReader reader;
+    ASSERT_TRUE(reader(bytes)) << reader.error();
+    cxx::SemanticDecoder decoder(&destination.unit());
+    ASSERT_TRUE(decoder(reader, restored)) << decoder.error();
+  }
+  auto symbols = restored.globalScope->find("evaluate");
+  ASSERT_FALSE(symbols.begin() == symbols.end());
+  auto functions = cxx::views::each_function(*symbols.begin());
+  ASSERT_EQ(std::ranges::distance(functions), 1);
+  for (std::intmax_t input : {1, 4, 7}) {
+    SCOPED_TRACE(input);
+    cxx::ASTInterpreter interpreter(&destination.unit());
+    auto value = interpreter.evaluateCall(*functions.begin(), {input});
+    ASSERT_TRUE(value);
+    EXPECT_EQ(std::get<std::intmax_t>(*value), input * 100 + 32);
+  }
+}
+
 }  // namespace
 }  // namespace loom::cxx_import

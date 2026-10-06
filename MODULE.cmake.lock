@@ -183,6 +183,7 @@ set(IREE_DEP_CXX_PATCHES
   "//build_tools/third_party/cxx:const_default_initialization.patch"
   "//build_tools/third_party/cxx:structural_template_values.patch"
   "//build_tools/third_party/cxx:constant_aggregate_loads.patch"
+  "//build_tools/third_party/cxx:automatic_scope_teardown.patch"
 )
 set(IREE_DEP_CXX_PATCH_ARGS
   "-p1"
