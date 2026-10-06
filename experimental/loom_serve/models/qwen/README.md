@@ -70,9 +70,32 @@ once; opaque upload/readback sizes come from source-declared device storage.
 Encoding, submission and publication share one process and invocation. The
 native owner retains all backing through partial submission failure and teardown.
 
-The native adapter still manages page IDs, validates semantic spans, owns chat
-policy, and joins each bounded cohort before applying semantic progress. Those
-remaining contracts are not yet a model-neutral text ABI.
+`render_tool` in that same source program owns canonical tool-call framing and
+literal identifier rules. Incoming assistant history and generated tool results
+use this one formatter, preserving the checkpoint spelling independently of the
+original generated token sequence in device state. Native `json.members` returns
+typed offsets into an input buffer, and `json.unescape` decodes into source-owned
+storage. Those utilities contain no chat-template or model policy. Formatting is
+request-scoped; it creates no additional VM process, JIT compilation or GPU work.
+
+The native adapter still manages page IDs, validates semantic spans, owns role
+templates, generated XML/schema interpretation and retained-session policy, and
+joins each bounded cohort before applying semantic progress. Those remaining
+contracts are not yet a model-neutral text ABI.
+
+`check_tools.py` exercises real generated typed calls and client-serialized
+assistant/tool follow-ups through HTTP. A malformed intervening history must be
+rejected without losing the completed session, and the valid follow-up must
+answer from its tool result with nonzero retained-cache usage. The harness
+returns deterministic text; it does not execute model-selected code. Client
+transcripts and server heartbeats are recorded as JSONL:
+
+```sh
+python -B -m experimental.loom_serve.models.qwen.check_tools \
+  --server=/path/to/qwen_server --model=experimental/loom_serve/models/qwen \
+  --weights=/path/to/Qwen3.8-27B-UD-Q5_K_XL.gguf \
+  --tokenizer=/path/to/tokenizer.json --output=/path/to/new-results --clients=3
+```
 
 ## Bounded device-fed continuation
 

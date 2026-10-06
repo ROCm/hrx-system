@@ -24,28 +24,30 @@ from urllib.parse import urlsplit
 WORDS = ("MAPLE", "COBALT", "CEDAR", "QUARTZ", "AMBER", "CORAL", "JADE", "ONYX")
 
 
-def request(address, session, messages, maximum):
+def request(address, session, messages, maximum, *, tools=None):
     connection = http.client.HTTPConnection(address.hostname, address.port)
     start = time.monotonic_ns()
     first = None
     text = []
+    tool_calls = {}
     usage = None
     reason = None
     done = False
     try:
+        body = {
+            "model": "qwen3.8-27b",
+            "messages": messages,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+            "temperature": 0,
+            "max_tokens": maximum,
+        }
+        if tools is not None:
+            body["tools"] = tools
         connection.request(
             "POST",
             "/v1/chat/completions",
-            json.dumps(
-                {
-                    "model": "qwen3.8-27b",
-                    "messages": messages,
-                    "stream": True,
-                    "stream_options": {"include_usage": True},
-                    "temperature": 0,
-                    "max_tokens": maximum,
-                }
-            ),
+            json.dumps(body),
             {"Content-Type": "application/json", "X-Loom-Session": session},
         )
         response = connection.getresponse()
@@ -66,18 +68,40 @@ def request(address, session, messages, maximum):
             for choice in event.get("choices", []):
                 if choice.get("finish_reason"):
                     reason = choice["finish_reason"]
-                content = choice.get("delta", {}).get("content", "")
+                delta = choice.get("delta", {})
+                content = delta.get("content", "")
                 if content:
                     if first is None:
                         first = time.monotonic_ns()
                     text.append(content)
-        if not done or usage is None or reason not in ("stop", "length"):
+                for fragment in delta.get("tool_calls", []):
+                    call = tool_calls.setdefault(
+                        fragment["index"],
+                        {
+                            "id": "",
+                            "type": "",
+                            "function": {"name": "", "arguments": ""},
+                        },
+                    )
+                    for field in ("id", "type"):
+                        if field in fragment:
+                            call[field] += fragment[field]
+                    for field in ("name", "arguments"):
+                        call["function"][field] += fragment.get("function", {}).get(
+                            field, ""
+                        )
+        if not done or usage is None or reason not in ("stop", "length", "tool_calls"):
             raise RuntimeError(
                 f"Incomplete successful SSE: {done=}, {usage=}, {reason=}"
             )
+        if bool(tool_calls) != (reason == "tool_calls"):
+            raise RuntimeError("Tool deltas and terminal finish reason disagree")
+        if sorted(tool_calls) != list(range(len(tool_calls))):
+            raise RuntimeError("Tool delta indexes are not contiguous")
         end = time.monotonic_ns()
         return {
             "text": "".join(text),
+            "tool_calls": [tool_calls[index] for index in sorted(tool_calls)],
             "usage": usage,
             "finish_reason": reason,
             "request_ms": (end - start) / 1e6,

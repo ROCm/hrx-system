@@ -745,7 +745,8 @@ static iree_status_t qwen_enqueue(qwen_service_t* service,
   }
   loom_serve_qwen_chat_t chat;
   iree_status_t status = loom_serve_qwen_chat_initialize(
-      request->body, service->default_max_tokens, service->allocator, &chat);
+      loom_serve_qwen_model_chat_policy(service->model), request->body,
+      service->default_max_tokens, service->allocator, &chat);
   if (!iree_status_is_ok(status)) {
     return qwen_reject(service, connection, 400, "Bad Request", status);
   }

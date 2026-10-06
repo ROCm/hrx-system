@@ -177,6 +177,18 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "json",
+    srcs = ["json.c"],
+    hdrs = ["json.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "input",
     srcs = ["input.c"],
     hdrs = ["input.h"],
@@ -184,6 +196,18 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
         "//runtime/src/iree/tokenizer/vocab",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_test(
+    name = "json_test",
+    srcs = ["json_test.cc"],
+    deps = [
+        ":json",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",
     ],
 )

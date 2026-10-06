@@ -15,7 +15,9 @@
 #include "experimental/loom_serve/runtime/command.h"
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/jit.h"
+#include "experimental/loom_serve/runtime/json.h"
 #include "experimental/loom_serve/runtime/module.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/runtime/program.h"
@@ -160,6 +162,8 @@ struct loom_serve_qwen_model_t {
   iree_vm_function_t encode_epoch;
   // Source-owned conversion of retired feedback to semantic row progress.
   iree_vm_function_t publish_epoch;
+  // Chat formatting functions borrowing the same model-wide VM process.
+  loom_serve_qwen_chat_policy_t chat_policy;
   // Cold retained packet and feedback storage, reused by the single owner.
   struct {
     // Owned VM buffers retained through all accepted work and feedback.
@@ -414,16 +418,28 @@ static iree_status_t qwen_create_program(loom_serve_qwen_model_t* runner,
   char* path = NULL;
   IREE_RETURN_IF_ERROR(iree_file_path_join(
       source_directory, IREE_SV("control.loom"), runner->allocator, &path));
-  iree_vm_module_t* libraries[] = {runner->native_module};
-  const iree_string_view_t roots[] = {IREE_SVL("step"), IREE_SVL("epoch"),
-                                      IREE_SVL("encode_epoch"),
-                                      IREE_SVL("publish_epoch")};
-  status = loom_serve_program_create(
-      runner->environment, iree_make_cstring_view(path), IREE_ARRAYSIZE(roots),
-      roots, iree_vm_module_span_from_array(libraries), runner->allocator,
-      &runner->program);
+  iree_vm_module_t* libraries[] = {runner->native_module, NULL, NULL};
+  const iree_string_view_t roots[] = {
+      IREE_SVL("step"), IREE_SVL("epoch"), IREE_SVL("encode_epoch"),
+      IREE_SVL("publish_epoch"), IREE_SVL("render_tool")};
+  status = loom_serve_input_module_create(
+      runner->environment, runner->tokenizer, &libraries[1], runner->allocator);
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_json_module_create(runner->environment, &libraries[2],
+                                           runner->allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_program_create(
+        runner->environment, iree_make_cstring_view(path),
+        IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_from_array(libraries),
+        runner->allocator, &runner->program);
+  }
+  iree_vm_module_release(libraries[2]);
+  iree_vm_module_release(libraries[1]);
   iree_allocator_free(runner->allocator, path);
   IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(loom_serve_qwen_chat_policy_initialize(
+      runner->environment, runner->program, &runner->chat_policy));
   iree_vm_process_t* process = loom_serve_program_process(runner->program);
   IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
       process, IREE_SV("model"), IREE_SV("step"), &runner->step));
@@ -966,6 +982,11 @@ loom_serve_qwen_row_t* loom_serve_qwen_model_row(loom_serve_qwen_model_t* model,
 iree_tokenizer_t* loom_serve_qwen_model_tokenizer(
     loom_serve_qwen_model_t* model) {
   return model->tokenizer;
+}
+
+const loom_serve_qwen_chat_policy_t* loom_serve_qwen_model_chat_policy(
+    const loom_serve_qwen_model_t* model) {
+  return &model->chat_policy;
 }
 
 iree_host_size_t loom_serve_qwen_model_context_capacity(

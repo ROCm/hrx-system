@@ -242,6 +242,163 @@ func.def public @publish_epoch(%plan: buffer, %count: i32, %verified: i32, %cont
   func.return
 }
 
+func.decl import("json") @members(%text: buffer) -> (buffer, i32, i64)
+func.decl import("json") @unescape(%source: buffer, %offset: i64, %length: i64, %target: buffer, %target_offset: i64) -> (i64)
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+
+global.rodata.def @tool_open = bytes("3c746f6f6c5f63616c6c3e0a3c66756e6374696f6e3d")
+global.rodata.def @tag_end = bytes("3e0a")
+global.rodata.def @parameter_open = bytes("3c706172616d657465723d")
+global.rodata.def @parameter_end = bytes("0a3c2f706172616d657465723e0a")
+global.rodata.def @tool_close = bytes("3c2f66756e6374696f6e3e0a3c2f746f6f6c5f63616c6c3e")
+global.rodata.def @tool_identifier_error = bytes("746f6f6c206e616d6573206d757374206265206c69746572616c204153434949206964656e74696669657273206f66203120746f20313238206279746573")
+global.rodata.def @tool_object_error = bytes("746f6f6c20617267756d656e7473206d757374206265206f6e65204a534f4e206f626a656374")
+global.rodata.def @tool_size_error = bytes("746f6f6c20617267756d656e74732065786365656420666f726d617474696e67206361706163697479")
+
+// Names become literal tag contents; escaped JSON keys are not identifiers.
+func.def @tool_identifier(%text: buffer, %begin: i64, %length: i64) {
+  %zero64 = scalar.constant 0 : i64
+  %limit = scalar.constant 128 : i64
+  %nonempty = scalar.cmpi ugt, %length, %zero64 : i64
+  %bounded = scalar.cmpi ule, %length, %limit : i64
+  %valid_length = scalar.andi %nonempty, %bounded : i1
+  %valid_length32 = scalar.extui %valid_length : i1 to i32
+  %diagnostic = global.load @tool_identifier_error : buffer
+  func.call @require(%valid_length32, %diagnostic) : (i32, buffer) -> ()
+  %count_value = scalar.assume %length [range(%length, 1, 128)] : i64
+  %count = index.cast %count_value : i64 to index
+  // begin is zero or an offset produced by json.members for this buffer.
+  %begin_value = scalar.assume %begin [range(%begin, 0, 9223372036854775807)] : i64
+  %start = index.cast %begin_value : i64 to offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %true = scalar.constant 1 : i1
+  %case_bit = scalar.constant 32 : i32
+  %a = scalar.constant 97 : i32
+  %z = scalar.constant 122 : i32
+  %digit_zero = scalar.constant 48 : i32
+  %digit_nine = scalar.constant 57 : i32
+  %underscore = scalar.constant 95 : i32
+  %dash = scalar.constant 45 : i32
+  %dot = scalar.constant 46 : i32
+  %valid = scf.for %i = [%zero to %count step %one](%prior = %true : i1) -> (i1) {
+    %relative = index.cast %i : index to offset
+    %offset = index.add %start, %relative : offset
+    %byte = buffer.load.i8.u %text[%offset]
+    %lower = scalar.ori %byte, %case_bit : i32
+    %after_a = scalar.cmpi uge, %lower, %a : i32
+    %before_z = scalar.cmpi ule, %lower, %z : i32
+    %letter = scalar.andi %after_a, %before_z : i1
+    %after_zero = scalar.cmpi uge, %byte, %digit_zero : i32
+    %before_nine = scalar.cmpi ule, %byte, %digit_nine : i32
+    %digit = scalar.andi %after_zero, %before_nine : i1
+    %under = scalar.cmpi eq, %byte, %underscore : i32
+    %hyphen = scalar.cmpi eq, %byte, %dash : i32
+    %period = scalar.cmpi eq, %byte, %dot : i32
+    %punctuation_a = scalar.ori %under, %hyphen : i1
+    %punctuation = scalar.ori %punctuation_a, %period : i1
+    %alphanumeric = scalar.ori %letter, %digit : i1
+    %allowed = scalar.ori %alphanumeric, %punctuation : i1
+    %next = scalar.andi %prior, %allowed : i1
+    scf.yield %next : i1
+  }
+  %valid32 = scalar.extui %valid : i1 to i32
+  func.call @require(%valid32, %diagnostic) : (i32, buffer) -> ()
+  func.return
+}
+
+func.def @tool_append(%output: buffer, %position: offset, %text: buffer) -> (offset) {
+  %zero = index.constant 0 : offset
+  %length = buffer.length %text
+  buffer.copy %text[%zero], %output[%position], %length
+  %end = index.add %position, %length : offset
+  func.return %end : offset
+}
+
+// Both client history and generated calls use this canonical spelling. JSON
+// syntax and unescaping are utilities; model framing and tag policy live here.
+func.def public @render_tool(%name: buffer, %arguments: buffer) -> (buffer, i64) {
+  %zero64 = scalar.constant 0 : i64
+  %name_bytes = buffer.length %name
+  %name_length = index.cast %name_bytes : offset to i64
+  func.call @tool_identifier(%name, %zero64, %name_length) : (buffer, i64, i64) -> ()
+  %members, %type, %count = func.call @members(%arguments) : (buffer) -> (buffer, i32, i64)
+  %object = scalar.constant 2 : i32
+  %is_object = scalar.cmpi eq, %type, %object : i32
+  %is_object32 = scalar.extui %is_object : i1 to i32
+  %object_error = global.load @tool_object_error : buffer
+  func.call @require(%is_object32, %object_error) : (i32, buffer) -> ()
+  %argument_bytes = buffer.length %arguments
+  %argument_length = index.cast %argument_bytes : offset to i64
+  %byte_limit = scalar.constant 2147483647 : i64
+  %member_limit = scalar.constant 33554431 : i64
+  %fits_bytes = scalar.cmpi ule, %argument_length, %byte_limit : i64
+  %fits_members = scalar.cmpi ule, %count, %member_limit : i64
+  %fits = scalar.andi %fits_bytes, %fits_members : i1
+  %fits32 = scalar.extui %fits : i1 to i32
+  %size_error = global.load @tool_size_error : buffer
+  func.call @require(%fits32, %size_error) : (i32, buffer) -> ()
+  %bounded_count = scalar.assume %count [range(%count, 0, 33554431)] : i64
+  %extent = index.cast %bounded_count : i64 to index
+  %sixty_four = index.constant 64 : offset
+  %overhead = index.scale %extent, %sixty_four : index, offset -> offset
+  %framing = index.add %overhead, %sixty_four : offset
+  %with_name = index.add %framing, %name_bytes : offset
+  %capacity = index.add %with_name, %argument_bytes : offset
+  %output = buffer.alloca<private> align(1) %capacity : buffer
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %fields = buffer.view %members[%origin] : buffer -> view<[%extent]x5xi64>
+  %prefix = global.load @tool_open : buffer
+  %tag_end = global.load @tag_end : buffer
+  %parameter_open = global.load @parameter_open : buffer
+  %parameter_end = global.load @parameter_end : buffer
+  %close = global.load @tool_close : buffer
+  %after_prefix = func.call @tool_append(%output, %origin, %prefix) : (buffer, offset, buffer) -> (offset)
+  %after_name = func.call @tool_append(%output, %after_prefix, %name) : (buffer, offset, buffer) -> (offset)
+  %start = func.call @tool_append(%output, %after_name, %tag_end) : (buffer, offset, buffer) -> (offset)
+  %after_parameters = scf.for %i = [%zero to %extent step %one](%position = %start : offset) -> (offset) {
+    // json.members produces nonnegative ranges within the input document.
+    %key_begin_value = view.load %fields[%i, 0] : view<[%extent]x5xi64> -> i64
+    %key_begin = scalar.assume %key_begin_value [range(%key_begin_value, 0, 9223372036854775807)] : i64
+    %key_length_value = view.load %fields[%i, 1] : view<[%extent]x5xi64> -> i64
+    %key_length = scalar.assume %key_length_value [range(%key_length_value, 0, 9223372036854775807)] : i64
+    %value_begin_value = view.load %fields[%i, 2] : view<[%extent]x5xi64> -> i64
+    %value_begin = scalar.assume %value_begin_value [range(%value_begin_value, 0, 9223372036854775807)] : i64
+    %value_length_value = view.load %fields[%i, 3] : view<[%extent]x5xi64> -> i64
+    %value_length = scalar.assume %value_length_value [range(%value_length_value, 0, 9223372036854775807)] : i64
+    %value_type = view.load %fields[%i, 4] : view<[%extent]x5xi64> -> i64
+    func.call @tool_identifier(%arguments, %key_begin, %key_length) : (buffer, i64, i64) -> ()
+    %after_open = func.call @tool_append(%output, %position, %parameter_open) : (buffer, offset, buffer) -> (offset)
+    %key_offset = index.cast %key_begin : i64 to offset
+    %key_bytes = index.cast %key_length : i64 to offset
+    buffer.copy %arguments[%key_offset], %output[%after_open], %key_bytes
+    %after_key = index.add %after_open, %key_bytes : offset
+    %value_position = func.call @tool_append(%output, %after_key, %tag_end) : (buffer, offset, buffer) -> (offset)
+    %is_string = scalar.cmpi eq, %value_type, %zero64 : i64
+    %written = scf.if %is_string -> (i64) {
+      %target_offset = index.cast %value_position : offset to i64
+      %decoded = func.call @unescape(%arguments, %value_begin, %value_length, %output, %target_offset) : (buffer, i64, i64, buffer, i64) -> (i64)
+      scf.yield %decoded : i64
+    } else {
+      %value_offset = index.cast %value_begin : i64 to offset
+      %value_bytes = index.cast %value_length : i64 to offset
+      buffer.copy %arguments[%value_offset], %output[%value_position], %value_bytes
+      scf.yield %value_length : i64
+    }
+    // Unescaping cannot expand the raw UTF-8 string range.
+    %written_value = scalar.assume %written [range(%written, 0, 9223372036854775807)] : i64
+    %written_bytes = index.cast %written_value : i64 to offset
+    %after_value = index.add %value_position, %written_bytes : offset
+    %next = func.call @tool_append(%output, %after_value, %parameter_end) : (buffer, offset, buffer) -> (offset)
+    scf.yield %next : offset
+  }
+  %end = func.call @tool_append(%output, %after_parameters, %close) : (buffer, offset, buffer) -> (offset)
+  %length = index.cast %end : offset to i64
+  func.return %output, %length : buffer, i64
+}
+
 // The program is shared; all request state arrives as buffer bindings.
 func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
   %origin = index.constant 0 : offset
