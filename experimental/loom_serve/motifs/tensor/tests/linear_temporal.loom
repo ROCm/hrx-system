@@ -1,4 +1,4 @@
-// Link kernels/linear_tiled.loom and kernels/linear_temporal.loom with --library.
+// Link ../linear_tiled.loom and ../linear_temporal.loom with --library.
 // The 528x256x320 shape covers the shortest K recurrence, M128/N96 tails and
 // the partial final traversal group. Both interior and partial-output paths run.
 // Both RHS acquisition schedules compare nonuniform BF16 operands against

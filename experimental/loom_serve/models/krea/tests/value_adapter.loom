@@ -1,4 +1,4 @@
-// Link block_adapters.loom and kernels/linear.loom with --library, selecting
+// Link ../block_adapters.loom and ../../../motifs/tensor/linear.loom with --library, selecting
 // krea2.block_tokens=16 or 80 for the matching case. These use the production
 // column-major final writer, not a copied epilogue. Physical storage is
 // [1536,rows]; nonuniform base words expose row/column ownership changes.

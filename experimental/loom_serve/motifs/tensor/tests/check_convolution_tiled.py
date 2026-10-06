@@ -24,7 +24,7 @@ parser.add_argument("--target", default="amdgpu:gfx1151")
 args = parser.parse_args()
 
 fixture = pathlib.Path(__file__).with_name("convolution_tiled.loom")
-model = fixture.parent.parent
+motifs = fixture.parent.parent
 
 for case, shapes in (
     ("single_row", ((1, 1, 96), (1, 2, 96), (1, 33, 96))),
@@ -47,8 +47,8 @@ for case, shapes in (
                 [
                     str(args.checker),
                     str(fixture),
-                    "--library=" + str(model / "kernels/convolution.loom"),
-                    "--library=" + str(model / "kernels/convolution_tiled.loom"),
+                    "--library=" + str(motifs / "convolution.loom"),
+                    "--library=" + str(motifs / "convolution_tiled.loom"),
                     "--device=" + args.device,
                     "--target=" + args.target,
                     f"--case=@convolution_f32_{case}",

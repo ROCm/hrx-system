@@ -10,12 +10,11 @@
 iree_add_all_subdirs()
 
 file(GLOB _GLOB_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS *.loom)
-file(GLOB _GLOB_KERNELS_X_LOOM LIST_DIRECTORIES false RELATIVE ${CMAKE_CURRENT_SOURCE_DIR} CONFIGURE_DEPENDS kernels/*.loom)
 iree_package_target_name(_FILEGROUP_TARGET "::sources")
 add_custom_command(OUTPUT sources.stamp
     COMMAND ${CMAKE_COMMAND} -E touch sources.stamp
   DEPENDS
-    "${_GLOB_KERNELS_X_LOOM}"
+    "${IREE_BINARY_DIR}/experimental/loom_serve/motifs/tensor/sources.stamp"
     "${_GLOB_X_LOOM}"
     "sources.txt"
 )

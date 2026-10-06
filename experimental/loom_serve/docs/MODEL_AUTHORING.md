@@ -135,11 +135,11 @@ map strides, scattered pages, complete cache contents, and masked output tails.
 These motifs still implement Qwen's fixed head geometry and RoPE; explicit
 cache operands alone do not make them arbitrary-model attention.
 
-The [packed Q5 contraction bodies](../models/qwen/kernels/ggml/linear_q5k_q8_1_x4.loom)
+The [packed Q5 contraction bodies](../motifs/ggml/linear_q5k_q8_1_x4.loom)
 take token/output capacity independently of live token count and K/N. Their
 single-row and four-row schedules accept the same explicit bounds and weight
 ordering; canonical and channel-interleaved wrappers resolve the configuration.
-The [reuse case](../models/qwen/tests/q5_specialization.loom) instantiates both
+The [reuse case](../motifs/ggml/tests/q5_specialization.loom) instantiates both
 schedules at two capacity pairs in one module without config bindings, including
 an odd channel tail and an untouched output row. Capacity constrains the body;
 it does not become the amount of work executed.

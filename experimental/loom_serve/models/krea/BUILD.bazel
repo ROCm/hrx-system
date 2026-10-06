@@ -14,10 +14,10 @@ package(
 
 filegroup(
     name = "sources",
-    srcs = ["sources.txt"] + glob([
-        "*.loom",
-        "kernels/*.loom",
-    ]),
+    srcs = [
+        "sources.txt",
+        "//experimental/loom_serve/motifs/tensor:sources",
+    ] + glob(["*.loom"]),
     visibility = ["//visibility:public"],
 )
 
