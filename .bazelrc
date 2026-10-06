@@ -52,6 +52,18 @@ build --enable_runfiles
 # runfiles trees, which is brittle around symlinked source runfiles.
 build --incompatible_default_to_explicit_init_py
 
+# Ordinary developer commands intentionally retain Bazel's fastbuild mode and
+# do not pay for link-time optimization. This is the one reproducible optimized
+# profile used for release artifacts and performance work. Destination CPU
+# selection belongs to the target platform/toolchain; host-dependent flags such
+# as -march=native are deliberately not part of this fleet-cacheable profile.
+build:opt --compilation_mode=opt
+build:opt --features=thin_lto
+build:opt --copt=-O3
+build:opt --cxxopt=-O3
+build:opt --host_copt=-O3
+build:opt --host_cxxopt=-O3
+
 # Windows compiler presets select one compiler policy; registered toolchains
 # match it to the host and destination. Native Windows defaults to clang-cl.
 build:windows-clang-cl --//build_tools/windows:compiler=clang-cl
