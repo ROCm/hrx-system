@@ -70,6 +70,10 @@ typedef struct loom_serve_text_service_options_t {
 // an explicit pinned endpoint only after full canonical-history validation.
 // POST/DELETE /v1/checkpoints/NAME pin an idle completed X-Loom-Session or
 // release that pin. Deletion refuses while queued requests borrow the endpoint.
+// POST /v1/checkpoints/NAME/suspend explicitly parks the pin in DRAM on elastic
+// backing without changing live branches or queued identity. Wake admission
+// includes missing prefix pages and preserves the selected row until its
+// replacement fits. Host image bytes are reported separately from device pages.
 // Untagged requests without an explicit pin always replay. Peer cancellation
 // discards its live row, not independently pinned endpoints, at a completed
 // stage boundary. Return relinquishes every connection view before the caller

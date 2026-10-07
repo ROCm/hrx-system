@@ -148,6 +148,9 @@ def queued_pin(address, events, base):
                 },
             )
             events.wait("enqueue", "pin-queued")
+            parked = control(address, "POST", "/v1/checkpoints/base/suspend", 200)
+            if not parked["host_snapshot_bytes"]:
+                raise RuntimeError("queued endpoint did not retain a cold image")
             control(address, "DELETE", "/v1/checkpoints/base", 409)
             queued.sock.setsockopt(
                 socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0)
@@ -165,6 +168,113 @@ def queued_pin(address, events, base):
         ),
         flush=True,
     )
+
+
+def cold_endpoint(address, events, messages, base, receipt):
+    for method, target, expected, body in (
+        ("POST", "absent/suspend", 404, None),
+        ("DELETE", "base/suspend", 400, None),
+        ("POST", "base/suspend", 400, "not empty"),
+        ("POST", "base/suspend/suspend", 400, None),
+    ):
+        control(address, method, f"/v1/checkpoints/{target}", expected, body=body)
+    parked = control(address, "POST", "/v1/checkpoints/base/suspend", 200)
+    if (
+        not parked["pinned"]
+        or not parked["host_snapshot_bytes"]
+        or parked["position"] != receipt["position"]
+        or receipt["position"] <= 512
+        or receipt["position"] % 64 == 0
+    ):
+        raise RuntimeError(f"cold fixture needs a large partial prefix: {parked}")
+    if control(address, "POST", "/v1/checkpoints/base/suspend", 200) != parked:
+        raise RuntimeError("repeated suspension changed the endpoint")
+
+    # A different complete history must reuse the old prefix storage. Waking
+    # into this selected row cannot free it before admitting the replacement.
+    competing = [dict(message) for message in messages]
+    competing[0]["content"] = competing[0]["content"].replace("MAPLE", "CEDAR")
+    selected = request(address, "cold-selected", competing, 12)
+    frontier = events.wait("complete", "cold-selected")["position"]
+    history = base + [
+        {"role": "user", "content": "Reply with only the project codeword."}
+    ]
+    control(
+        address,
+        "POST",
+        "/v1/chat/completions",
+        503,
+        session="cold-selected",
+        body=json.dumps(
+            {
+                "model": "qwen3.8-27b",
+                "messages": history,
+                "stream": True,
+                "max_tokens": 16,
+                "temperature": 0,
+            }
+        ),
+        headers={"Content-Type": "application/json", "X-Loom-Checkpoint": "base"},
+    )
+    if control(address, "POST", "/v1/checkpoints/base/suspend", 200) != parked:
+        raise RuntimeError("refused wake changed the cold image")
+    selected_history = competing + [
+        {"role": "assistant", "content": selected["text"]},
+        {"role": "user", "content": "Reply with only the project codeword."},
+    ]
+    kept = request(address, "cold-selected", selected_history, 16)
+    if kept["usage"]["prompt_tokens_details"]["cached_tokens"] != frontier:
+        raise RuntimeError("refused cold wake replaced the selected continuation")
+
+    # With a fresh destination, the competing idle row can yield its pages.
+    restored = request(address, "cold-restored", history, 16, checkpoint="base")
+    admitted = events.wait("admit", "cold-restored")
+    if (
+        restored["usage"]["prompt_tokens_details"]["cached_tokens"]
+        != receipt["position"]
+        or admitted["restored_bytes"] != parked["host_snapshot_bytes"]
+    ):
+        raise RuntimeError(f"cold endpoint was not restored exactly: {admitted}")
+    if control(address, "POST", "/v1/checkpoints/base/suspend", 200) != parked:
+        raise RuntimeError("resident/cold transition changed the immutable endpoint")
+    print(
+        json.dumps({"event": "cold_resume", "parked": parked, "admit": admitted}),
+        flush=True,
+    )
+    return [(restored, history), (kept, selected_history)]
+
+
+def fixed_suspension(command, log):
+    fixed = [
+        "--pool_backing=fixed" if flag == "--pool_backing=elastic" else flag
+        for flag in command
+        if not flag.startswith("--memory_bytes=")
+    ]
+    with running_server(fixed, log) as (_, endpoint):
+        if endpoint is None:
+            raise RuntimeError(f"fixed server did not become ready: {log}")
+        address = urlsplit(f"http://{endpoint}")
+        history = [{"role": "user", "content": "Reply with only READY."}]
+        first = request(address, "fixed", history, 8)
+        receipt = control(
+            address, "POST", "/v1/checkpoints/fixed", 201, session="fixed"
+        )
+        rejected = control(address, "POST", "/v1/checkpoints/fixed/suspend", 400)
+        if "requires elastic backing" not in rejected["error"]["message"]:
+            raise RuntimeError(f"fixed suspension rejected incorrectly: {rejected}")
+        history += [
+            {"role": "assistant", "content": first["text"]},
+            {"role": "user", "content": "Reply with only OK."},
+        ]
+        restored = request(address, "fixed-fork", history, 8, checkpoint="fixed")
+        if (
+            restored["usage"]["prompt_tokens_details"]["cached_tokens"]
+            != receipt["position"]
+        ):
+            raise RuntimeError("fixed rejection changed the endpoint")
+        control(address, "DELETE", "/v1/checkpoints/fixed", 200)
+        same_output(restored, request(address, "", history, 8))
+    print(json.dumps({"event": "fixed_suspend_rejected"}), flush=True)
 
 
 def main():
@@ -328,13 +438,18 @@ def main():
             ):
                 raise RuntimeError("fork replayed instead of sharing its endpoint")
         queued_pin(address, events, base)
-        control(address, "DELETE", "/v1/checkpoints/base", 200)
+        cold_results = cold_endpoint(address, events, messages, base, receipt)
+        released = control(address, "DELETE", "/v1/checkpoints/base", 200)
+        if released["pinned"] or released["host_snapshot_bytes"]:
+            raise RuntimeError("cold release retained its image")
         # The tight pool cannot hold the pin plus an independent full prefix.
         # Drop the explicit pin before running fresh replays of every output.
         same_output(rewound, request(address, "", revised, 16))
         for index, result in enumerate(branches):
             history = base + [{"role": "user", "content": suffixes[index]}]
             same_output(result, request(address, "", history, 32))
+        for result, history in cold_results:
+            same_output(result, request(address, "", history, 16))
         control(address, "DELETE", "/v1/checkpoints/base", 404)
         control(
             address,
@@ -348,6 +463,7 @@ def main():
 
         tool_rewind(address)
 
+    fixed_suspension(command, arguments.output / "fixed.log")
     events = events.values
     admits = [
         event
@@ -380,6 +496,11 @@ def main():
             event["pool_reserved_tokens"] + event["pool_resident_tokens"] > 1024
         ):
             raise RuntimeError(f"shared admission overcommitted: {event}")
+    heartbeats = [event for event in events if event["event"] == "heartbeat"]
+    if not any(event["checkpoint_host_bytes"] for event in heartbeats):
+        raise RuntimeError("cold payload was not visible in heartbeat accounting")
+    if heartbeats[-1]["checkpoint_host_bytes"]:
+        raise RuntimeError("endpoint release leaked host accounting")
     print(
         json.dumps({"event": "pass", "branches": branches, "admissions": admits}),
         flush=True,

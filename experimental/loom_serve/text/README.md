@@ -244,8 +244,9 @@ selected row, so denial preserves the old continuation and the cold image.
 warm restore or release frees it. The real-model `epoch_check
 --suspend_checkpoints --checkpoint_capacity=1 --pool_capacity=2048` witness
 covers row/ID reuse, live readers, denied restore, target/MTP continuation and
-zero final mutable commitment. It requires elastic backing. These are explicit
-native operations, not an automatic HTTP eviction policy or disk image format.
+zero final mutable commitment. It requires elastic backing. The HTTP controls
+below expose explicit suspension; no automatic eviction policy or disk image
+format is implied.
 
 A restored branch initially owns no private recurrent destination. Its first
 advance acquires one and the model kernels read the anchor directly. The source
@@ -292,6 +293,17 @@ the same session rewinds it. An unknown explicit name returns `404`, never a
 silently fabricated cache hit. Omitting the header retains normal best-effort
 session reuse and full replay on a miss.
 
+With elastic backing, `POST /v1/checkpoints/NAME/suspend` and an empty body
+parks that endpoint in DRAM. The `200` receipt reports `host_snapshot_bytes`;
+repeating the operation retains the same image. Live branches keep their
+device references, and the originating session is not reset. Once those rows
+yield to idle eviction, their pages can be physically trimmed while the
+independent endpoint remains resumable. The next `X-Loom-Checkpoint` request
+warms it into new pool IDs and frees the image. Queued requests retain the same
+canonical endpoint through this transition. Fixed backing rejects suspension
+with `400`; unknown names return `404`. These are process-local, opt-in images,
+not durable storage, and on UMA their DRAM payload is not additional RAM.
+
 `DELETE /v1/checkpoints/NAME` releases the explicit pin and returns `200`.
 Queued admissions borrow the record, so deletion returns `409` until they are
 admitted or cancelled. Active branches already own independent references and
@@ -310,11 +322,18 @@ with a release/increase-capacity diagnostic instead of waiting indefinitely.
 Rejected replacement preserves the selected continuation. Other idle session
 caches may be reclaimed while admission evaluates a request, even if it cannot
 ultimately fit; their independent explicit pins remain usable.
+Cold restore charges the missing prefix pages as well as future growth and
+the shared partial tail. Free IDs must fit that prefix before the selected
+row can be replaced; its later reclamation cannot fund unsafe early reuse.
 Physical restore refusal also returns `503` without replacing the destination
-continuation. Native metadata does not constitute disk persistence.
+continuation. Heartbeat `checkpoint_host_bytes` accounts for cold payloads
+separately from the device pool. Admission events report `restored_bytes` when
+a cold endpoint is warmed. Native metadata does not constitute disk persistence.
 
-`models/qwen:check_checkpoints` exercises the actual HTTP summary/rewind and
-concurrent shared-prefix flow, comparing output with independent full replay.
+`models/qwen:check_checkpoints` exercises the actual HTTP summary/rewind,
+concurrent shared-prefix and cold suspend/reuse/resume flows, comparing output
+with independent full replay. It also checks preservation after a refused wake,
+queued borrowing, host-image accounting and fixed-backing rejection.
 It accepts the built `--server`, external `--model`, `--weights`, `--tokenizer`
 and a new `--output` evidence directory. It runs on a separately excluded GPU;
 it is not a synthetic model test or a performance benchmark.
