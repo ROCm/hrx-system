@@ -986,10 +986,17 @@ typedef struct iree_hal_buffer_memory_view_t {
 IREE_API_EXPORT iree_hal_buffer_memory_view_t
 iree_hal_buffer_memory_view(const iree_hal_buffer_t* buffer);
 
+// Loads a trusted contract-compatible slot and translates it to the prepared
+// memory view's byte zero. Allocation commitment and retirement are
+// caller-ordered. No mapping, registration, retain, parent traversal or
+// topology query occurs.
+IREE_API_EXPORT iree_hal_buffer_native_binding_t
+iree_hal_buffer_memory_native_binding(
+    const iree_hal_buffer_memory_view_t* memory,
+    iree_hal_buffer_native_binding_slot_t slot);
+
 // Loads a trusted contract-compatible slot and translates it to the buffer's
-// byte zero. Allocation commitment and retirement are caller-ordered. Prepared
-// views use direct fields, including views made before commitment. No mapping,
-// registration, retain, parent traversal or topology query occurs.
+// byte zero. Prepared buffer views carry their native facts directly.
 IREE_API_EXPORT iree_hal_buffer_native_binding_t
 iree_hal_buffer_native_binding(const iree_hal_buffer_t* buffer,
                                iree_hal_buffer_native_binding_slot_t slot);
@@ -999,8 +1006,8 @@ iree_hal_buffer_native_binding(const iree_hal_buffer_t* buffer,
 // source byte zero; absent optional addresses stay absent. The layout and
 // source are trusted producer state. The caller orders publication before
 // native reads and retains source backing throughout the copied table's use.
-IREE_API_EXPORT void iree_hal_buffer_copy_bindings(
-    const iree_hal_buffer_t* source,
+IREE_API_EXPORT void iree_hal_buffer_memory_copy_bindings(
+    const iree_hal_buffer_memory_view_t* source,
     const iree_hal_buffer_binding_layout_t* layout,
     iree_hal_buffer_native_binding_t* target);
 

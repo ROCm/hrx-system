@@ -189,8 +189,8 @@ void iree_hal_task_transient_buffer_commit(iree_hal_buffer_t* base_buffer) {
   IREE_ASSERT_TRUE(buffer->committed_backing == NULL);
   buffer->committed_backing = buffer->staged_backing;
   if (buffer->source_pool->memory_contract) {
-    iree_hal_buffer_copy_bindings(
-        buffer->committed_backing,
+    iree_hal_buffer_memory_copy_bindings(
+        &buffer->committed_backing->memory,
         &buffer->source_pool->memory_contract->binding_layout,
         buffer->bindings);
   } else {
