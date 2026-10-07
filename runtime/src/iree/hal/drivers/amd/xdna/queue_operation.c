@@ -493,7 +493,6 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
     iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     iree_hal_buffer_t** out_buffers) {
-  memset(out_buffers, 0, request_count * sizeof(*out_buffers));
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(pool, &capabilities);
 
@@ -507,6 +506,20 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
   operation->alloca.pool = pool;
   operation->alloca.request_count = request_count;
 
+  // Hold the references intended for the caller outside the captured
+  // operation. Submission consumes the operation on both success and failure,
+  // while the public contract requires every output entry to remain untouched
+  // on synchronous failure.
+  iree_arena_allocator_t output_arena;
+  iree_arena_initialize(operation->metadata_block_pool, &output_arena);
+  iree_hal_buffer_t** captured_outputs = NULL;
+  status = iree_arena_allocate_array(&output_arena, request_count,
+                                     sizeof(*captured_outputs),
+                                     (void**)&captured_outputs);
+  if (iree_status_is_ok(status)) {
+    memset(captured_outputs, 0, request_count * sizeof(*captured_outputs));
+  }
+
   iree_host_size_t storage_size = 0;
   iree_host_size_t requests_offset = 0;
   iree_host_size_t buffers_offset = 0;
@@ -514,19 +527,21 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
   iree_host_size_t infos_offset = 0;
   iree_host_size_t views_offset = 0;
   iree_host_size_t materialized_offset = 0;
-  status = IREE_STRUCT_LAYOUT(
-      0, &storage_size,
-      IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_request_t,
-                        &requests_offset),
-      IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*, &buffers_offset),
-      IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_t,
-                        &reservations_offset),
-      IREE_STRUCT_FIELD(request_count, iree_hal_pool_acquire_info_t,
-                        &infos_offset),
-      IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_view_t,
-                        &views_offset),
-      IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*,
-                        &materialized_offset));
+  if (iree_status_is_ok(status)) {
+    status = IREE_STRUCT_LAYOUT(
+        0, &storage_size,
+        IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_request_t,
+                          &requests_offset),
+        IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*, &buffers_offset),
+        IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_t,
+                          &reservations_offset),
+        IREE_STRUCT_FIELD(request_count, iree_hal_pool_acquire_info_t,
+                          &infos_offset),
+        IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_view_t,
+                          &views_offset),
+        IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*,
+                          &materialized_offset));
+  }
   uint8_t* storage = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_xdna_queue_capture_allocate_metadata(
@@ -592,7 +607,7 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
         request->allocation_size, pool, operation->metadata_block_pool,
         &operation->alloca.transient_buffers[i]);
     if (iree_status_is_ok(status)) {
-      out_buffers[i] = operation->alloca.transient_buffers[i];
+      captured_outputs[i] = operation->alloca.transient_buffers[i];
       // One reference is returned to the caller and one keeps the wrapper live
       // until terminal operation completion.
       iree_hal_buffer_retain(operation->alloca.transient_buffers[i]);
@@ -603,15 +618,18 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
     status = iree_hal_amd_xdna_operation_submit(operation);
     operation = NULL;
   }
-  if (!iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status)) {
+    memcpy(out_buffers, captured_outputs,
+           request_count * sizeof(*captured_outputs));
+  } else if (captured_outputs) {
     for (iree_host_size_t i = 0; i < request_count; ++i) {
-      iree_hal_buffer_release(out_buffers[i]);
-      out_buffers[i] = NULL;
-    }
-    if (operation) {
-      iree_hal_amd_xdna_operation_discard(operation);
+      iree_hal_buffer_release(captured_outputs[i]);
     }
   }
+  if (operation) {
+    iree_hal_amd_xdna_operation_discard(operation);
+  }
+  iree_arena_deinitialize(&output_arena);
   return status;
 }
 
