@@ -25,6 +25,8 @@ enum iree_async_io_uring_event_source_flag_bits_e {
   IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_CANCEL_PENDING = 1u << 2,
   // A prepared or submitted cancellation owns its key until its receipt.
   IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_CANCEL_IN_FLIGHT = 1u << 3,
+  // Native cleanup failed and the source/proactor graph must be retained.
+  IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_RETAINED = 1u << 4,
 };
 typedef uint32_t iree_async_io_uring_event_source_flags_t;
 

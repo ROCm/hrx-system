@@ -287,8 +287,13 @@ static void iree_net_rdma_connection_try_finish(
   }
 }
 
-static void iree_net_rdma_connection_control_drained(void* user_data) {
+static void iree_net_rdma_connection_control_drained(void* user_data,
+                                                     iree_status_t status) {
   iree_net_rdma_connection_t* connection = user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_net_rdma_connection_fail(connection, status);
+    return;
+  }
   iree_slim_mutex_lock(&connection->mutex);
   connection->flags |= IREE_NET_RDMA_CONNECTION_CONTROL_DRAINED;
   iree_slim_mutex_unlock(&connection->mutex);
@@ -415,7 +420,7 @@ static void iree_net_rdma_connection_retire(
           (iree_async_event_source_unregistered_callback_t){
               iree_net_rdma_connection_control_drained, connection});
     } else {
-      iree_net_rdma_connection_control_drained(connection);
+      iree_net_rdma_connection_control_drained(connection, iree_ok_status());
     }
   }
 }

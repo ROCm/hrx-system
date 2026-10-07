@@ -57,14 +57,20 @@ struct iree_net_rdma_device_failure_t {
   iree_async_event_source_unregistered_callback_t deactivated_callback;
 };
 
-static void iree_net_rdma_device_failure_joined(void* user_data) {
+static void iree_net_rdma_device_failure_joined(void* user_data,
+                                                iree_status_t status) {
   iree_net_rdma_device_failure_t* failure = user_data;
+  if (!iree_status_is_ok(status)) {
+    failure->on_failure(failure->user_data, status);
+    return;
+  }
   if (--failure->pending_joins != 0) {
     return;
   }
   failure->flags |= IREE_NET_RDMA_DEVICE_FAILURE_FLAG_STOPPED;
   if (failure->deactivated_callback.fn) {
-    failure->deactivated_callback.fn(failure->deactivated_callback.user_data);
+    failure->deactivated_callback.fn(failure->deactivated_callback.user_data,
+                                     iree_ok_status());
   }
 }
 
@@ -81,7 +87,7 @@ static void iree_net_rdma_device_failure_deliver(
   failure->on_failure(failure->user_data, status);
   if (iree_any_bit_set(failure->flags,
                        IREE_NET_RDMA_DEVICE_FAILURE_FLAG_STOPPING)) {
-    iree_net_rdma_device_failure_joined(failure);
+    iree_net_rdma_device_failure_joined(failure, iree_ok_status());
   }
 }
 

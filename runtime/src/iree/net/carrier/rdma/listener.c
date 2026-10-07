@@ -243,8 +243,13 @@ static void iree_net_rdma_listener_event(void* user_data,
   }
 }
 
-static void iree_net_rdma_listener_events_drained(void* user_data) {
+static void iree_net_rdma_listener_events_drained(void* user_data,
+                                                  iree_status_t status) {
   iree_net_rdma_listener_t* listener = user_data;
+  if (!iree_status_is_ok(status)) {
+    iree_net_rdma_listener_failed(listener, status);
+    return;
+  }
   iree_slim_mutex_lock(&listener->mutex);
   listener->flags |= IREE_NET_RDMA_LISTENER_EVENTS_DRAINED;
   iree_slim_mutex_unlock(&listener->mutex);

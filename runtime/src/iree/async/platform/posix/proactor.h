@@ -61,8 +61,10 @@ extern "C" {
 // poll cycle where the fd is ready. Doubly-linked list node; proactor owns the
 // list.
 struct iree_async_event_source_t {
-  // Intrusive doubly-linked list for efficient removal.
+  // Next source in the proactor-owned list.
   struct iree_async_event_source_t* next;
+
+  // Previous source in the proactor-owned list.
   struct iree_async_event_source_t* prev;
 
   // Owning proactor (for vtable access in callbacks).

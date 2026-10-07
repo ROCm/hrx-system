@@ -55,6 +55,11 @@ struct RetirementWitness {
     EXPECT_EQ(witness->ring_closes, 0);
     ++witness->unregistered;
   }
+
+  static void EventSourceUnregistered(void* user_data, iree_status_t status) {
+    IREE_EXPECT_OK(status);
+    Unregistered(user_data);
+  }
 };
 
 // Tests and native dispatch run on one thread; other rings are not intercepted.
@@ -135,6 +140,48 @@ extern "C" iree_host_size_t __wrap_iree_async_proactor_io_uring_process_cqe(
   completed += __real_iree_async_proactor_io_uring_process_cqe(proactor, second,
                                                                inout_status);
   return completed;
+}
+
+TEST(IoUringEventSourceTest, CancellationFailureRetainsSourceAndProactor) {
+  iree_async_proactor_io_uring_t proactor = {};
+  iree_async_event_source_t source = {};
+  source.flags = IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_POLL_IN_FLIGHT |
+                 IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_CANCEL_IN_FLIGHT;
+  proactor.event_sources = &source;
+  struct TerminalResult {
+    int callback_count = 0;
+    iree_status_code_t code = IREE_STATUS_OK;
+  } result;
+  source.unregistered_callback = {
+      +[](void* user_data, iree_status_t status) {
+        auto* result = static_cast<TerminalResult*>(user_data);
+        result->code = iree_status_code(status);
+        iree_status_free(status);
+        ++result->callback_count;
+      },
+      &result,
+  };
+  iree_io_uring_cqe_t cqe = {};
+  cqe.user_data = iree_io_uring_internal_encode(
+      IREE_IO_URING_TAG_EVENT_SOURCE_CANCEL, (uintptr_t)&source);
+  cqe.res = -EINVAL;
+
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_async_io_uring_event_source_complete_cancel(&proactor, &cqe));
+
+  EXPECT_EQ(result.callback_count, 1);
+  EXPECT_EQ(result.code, IREE_STATUS_INVALID_ARGUMENT);
+  EXPECT_EQ(proactor.event_sources, &source);
+  EXPECT_TRUE(iree_any_bit_set(source.flags,
+                               IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_RETAINED));
+  EXPECT_FALSE(iree_any_bit_set(
+      source.flags, IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_CANCEL_IN_FLIGHT));
+
+  // Final release cannot wait for a poll whose cancellation already failed.
+  // Destruction diagnoses the retained source and leaves the graph intact.
+  iree_async_proactor_io_uring_destroy(&proactor.base);
+  EXPECT_EQ(proactor.event_sources, &source);
 }
 
 extern "C" void __real_iree_io_uring_ring_deinitialize(
@@ -253,7 +300,8 @@ TEST_P(ProactorShutdownTest, JoinsNativeReceiptsBeforeOwnershipReturn) {
   retirement_witness = &witness;
   if (event_source_) {
     iree_async_proactor_unregister_event_source(
-        proactor_, event_source_, {RetirementWitness::Unregistered, &witness});
+        proactor_, event_source_,
+        {RetirementWitness::EventSourceUnregistered, &witness});
     event_source_ = nullptr;
   } else {
     iree_async_proactor_unregister_relay(

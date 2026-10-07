@@ -19,6 +19,14 @@ struct iree_async_proactor_iocp_t;
 // overlapped value carries the iree_async_event_source_t pointer.
 #define IREE_ASYNC_IOCP_EVENT_SOURCE_COMPLETION_KEY ((uintptr_t)3)
 
+enum iree_async_iocp_event_source_flag_bits_e {
+  // A native association may still publish one completion packet.
+  IREE_ASYNC_IOCP_EVENT_SOURCE_FLAG_ARMED = 1u << 0,
+  // Cleanup failed and the complete source/proactor graph must be retained.
+  IREE_ASYNC_IOCP_EVENT_SOURCE_FLAG_RETAINED = 1u << 1,
+};
+typedef uint32_t iree_async_iocp_event_source_flags_t;
+
 // Tracks a wait completion packet monitoring a caller-owned HANDLE.
 struct iree_async_event_source_t {
   // Next source in the proactor-owned list.
@@ -32,6 +40,9 @@ struct iree_async_event_source_t {
 
   // Wait completion packet HANDLE owned by this source.
   uintptr_t wait_packet_handle;
+
+  // Native association and terminal-retention state.
+  iree_async_iocp_event_source_flags_t flags;
 
   // User callback dispatched by the polling thread; cleared on unregistration.
   iree_async_event_source_callback_t callback;
@@ -54,12 +65,14 @@ void iree_async_iocp_event_source_unregister(
     iree_async_event_source_unregistered_callback_t callback);
 
 // Dispatches one event source completion and re-arms its wait packet.
-void iree_async_iocp_event_source_dispatch(
+// Returns an operational rearm failure through the owning poll call.
+iree_status_t iree_async_iocp_event_source_dispatch(
     struct iree_async_proactor_iocp_t* proactor,
     iree_async_event_source_t* event_source);
 
 // Cancels all sources and drains admitted retirements during owner destruction.
-void iree_async_iocp_event_source_deinitialize_all(
+// Failure retains the proactor because native callback reachability remains.
+iree_status_t iree_async_iocp_event_source_deinitialize_all(
     struct iree_async_proactor_iocp_t* proactor);
 
 #ifdef __cplusplus

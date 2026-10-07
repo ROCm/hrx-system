@@ -31,7 +31,23 @@ static void iree_async_io_uring_event_source_destroy(
       source->unregistered_callback;
   iree_allocator_free(proactor->base.allocator, source);
   if (callback.fn) {
-    callback.fn(callback.user_data);
+    callback.fn(callback.user_data, iree_ok_status());
+  }
+}
+
+// Reports terminal cancellation failure without returning borrowed ownership.
+// The retained flag keeps both the native source key and owning proactor live.
+static void iree_async_io_uring_event_source_fail(
+    iree_async_event_source_t* source, iree_status_t status) {
+  source->flags |= IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_RETAINED;
+  iree_async_event_source_unregistered_callback_t callback =
+      source->unregistered_callback;
+  source->unregistered_callback =
+      iree_async_event_source_unregistered_callback_none();
+  if (callback.fn) {
+    callback.fn(callback.user_data, status);
+  } else {
+    iree_status_free(status);
   }
 }
 
@@ -179,13 +195,10 @@ iree_status_t iree_async_io_uring_event_source_complete_cancel(
     status = iree_make_status(iree_status_code_from_errno(-cqe->res),
                               "io_uring event source cancellation failed: %d",
                               -cqe->res);
-    // Preserve the admitted retirement and report the native failure through
-    // poll(). A subsequent poll can retry if the target is still active.
-    if (iree_any_bit_set(
-            source->flags,
-            IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_POLL_IN_FLIGHT)) {
-      source->flags |= IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_CANCEL_PENDING;
-    }
+    // The standard proactor thread stops on poll failure, so retry cannot be
+    // an ownership proof. Publish a terminal failure and retain the native key
+    // plus every owner it may still reach.
+    iree_async_io_uring_event_source_fail(source, iree_status_clone(status));
   }
   if (!source->flags) {
     iree_async_io_uring_event_source_destroy(proactor, source);
