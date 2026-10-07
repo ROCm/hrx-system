@@ -32,6 +32,7 @@ struct HostAllocationCounters {
   std::atomic<uint64_t> allocations{0};
   std::atomic<uint64_t> reallocations{0};
   std::atomic<uint64_t> frees{0};
+  std::atomic<int64_t> live_allocations{0};
 };
 
 struct HostAllocationSnapshot {
@@ -45,6 +46,7 @@ iree_status_t TrackingAllocatorControl(void* self,
                                        const void* params,
                                        void** inout_pointer) {
   auto* counters = static_cast<HostAllocationCounters*>(self);
+  const bool had_pointer = inout_pointer && *inout_pointer;
   if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
       command == IREE_ALLOCATOR_COMMAND_CALLOC) {
     ++counters->allocations;
@@ -54,8 +56,18 @@ iree_status_t TrackingAllocatorControl(void* self,
     ++counters->frees;
   }
   iree_allocator_t system_allocator = iree_allocator_system();
-  return system_allocator.ctl(system_allocator.self, command, params,
-                              inout_pointer);
+  iree_status_t status = system_allocator.ctl(system_allocator.self, command,
+                                              params, inout_pointer);
+  if (iree_status_is_ok(status)) {
+    if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+        command == IREE_ALLOCATOR_COMMAND_CALLOC ||
+        (command == IREE_ALLOCATOR_COMMAND_REALLOC && !had_pointer)) {
+      ++counters->live_allocations;
+    } else if (command == IREE_ALLOCATOR_COMMAND_FREE && had_pointer) {
+      --counters->live_allocations;
+    }
+  }
+  return status;
 }
 
 iree_allocator_t TrackingAllocator(HostAllocationCounters* counters) {
@@ -226,7 +238,8 @@ struct NativeProvider {
          uint64_t* out_submission) {
     auto* self = reinterpret_cast<NativeProvider*>(queue);
     const uint64_t submission_ordinal =
-        self->submission_count.fetch_add(1, std::memory_order_acq_rel) + 1;
+        self->submission_attempt_count.fetch_add(1, std::memory_order_acq_rel) +
+        1;
     EXPECT_EQ(info->command_count, 1u);
     if (self->block_submission.load(std::memory_order_acquire)) {
       self->submission_entered.store(true, std::memory_order_release);
@@ -256,6 +269,9 @@ struct NativeProvider {
                                     command.byte_length)});
     }
     *out_submission = submission_ordinal * self->point_stride;
+    self->last_accepted_submission.store(*out_submission,
+                                         std::memory_order_release);
+    self->submission_count.fetch_add(1, std::memory_order_release);
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL Notify(amdf_kernel_queue_t* queue,
@@ -310,8 +326,8 @@ struct NativeProvider {
                 (self->outcome == Outcome::kEarlyWake &&
                  self->refresh_count == 1)
             ? 0
-            : std::min(self->submission_count.load(std::memory_order_acquire) *
-                           self->point_stride,
+            : std::min(self->last_accepted_submission.load(
+                           std::memory_order_acquire),
                        self->retirement_limit);
     {
       std::lock_guard<std::mutex> lock(self->mutex);
@@ -336,7 +352,9 @@ struct NativeProvider {
     return self->destroy_status;
   }
   static amdf_status_t AMDF_CALL ContextDestroy(amdf_xdna_context_t* context) {
-    ++reinterpret_cast<NativeProvider*>(context)->context_destroy_count;
+    auto* self = reinterpret_cast<NativeProvider*>(context);
+    self->context_destroy_saw_queue = self->queue_destroy_count == 1;
+    ++self->context_destroy_count;
     return AMDF_STATUS_OK;
   }
 
@@ -399,8 +417,12 @@ struct NativeProvider {
   uint64_t next_address = 0x1000000;
   // Number of native memory resources not yet destroyed.
   size_t live_memories = 0;
-  // Number of native submission calls.
+  // Number of native submissions fully accepted by the controlled provider.
   std::atomic<uint64_t> submission_count{0};
+  // Number of native submission attempts used to assign opaque points.
+  std::atomic<uint64_t> submission_attempt_count{0};
+  // Highest opaque native point accepted by the controlled provider.
+  std::atomic<uint64_t> last_accepted_submission{0};
   // Number of one-shot wake requests.
   size_t notification_count = 0;
   // Number of checked native observation calls.
@@ -409,13 +431,18 @@ struct NativeProvider {
   size_t queue_destroy_count = 0;
   // Number of parent context destruction attempts.
   size_t context_destroy_count = 0;
+  // True when parent destruction observed terminal native queue destruction.
+  bool context_destroy_saw_queue = false;
 };
 
 class QueueHarness {
  public:
   ~QueueHarness() {
     ReleaseDevice();
-    iree_async_proactor_pool_release(pool);
+    if (device_release_requested) {
+      PollUntilDeviceDestroyed();
+    }
+    ReleasePool();
   }
 
   void Initialize(iree_allocator_t allocator = iree_allocator_system()) {
@@ -592,10 +619,34 @@ class QueueHarness {
   }
 
   void ReleaseDevice() {
+    if (!device) {
+      return;
+    }
     iree_hal_semaphore_release(done);
     done = nullptr;
     iree_hal_device_release(device);
     device = nullptr;
+    device_release_requested = true;
+  }
+
+  void PollUntilDeviceDestroyed() {
+    while (!native.context_destroy_count) {
+      IREE_ASSERT_OK(
+          iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr));
+    }
+  }
+
+  void PollUntilQueueDestroyAttempted() {
+    while (!native.queue_destroy_count) {
+      IREE_ASSERT_OK(
+          iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr));
+    }
+  }
+
+  void ReleasePool() {
+    iree_async_proactor_pool_release(pool);
+    pool = nullptr;
+    proactor = nullptr;
   }
 
   // Mocked native dependency; all access runs on this test's polling thread.
@@ -620,6 +671,8 @@ class QueueHarness {
   size_t live_memories_at_completion = SIZE_MAX;
   // Number of published driver failure diagnostics.
   size_t diagnostic_count = 0;
+  // True after the public device reference has entered terminal shutdown.
+  bool device_release_requested = false;
 };
 
 TEST(XdnaQueueTest, DeviceCreatesOwnedDeviceCompatibleSemaphores) {
@@ -1267,9 +1320,11 @@ TEST(XdnaQueueTest, PublishesRetirementBeforeFollowingNativeSubmit) {
 }
 
 TEST(XdnaQueueTest, FinalPublicationAllowsImmediateDeviceRelease) {
+  HostAllocationCounters allocation_counters;
   QueueHarness harness;
   harness.native.pending_capacity = 2;
-  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(
+      harness.Initialize(TrackingAllocator(&allocation_counters)));
   iree_hal_semaphore_t* first = nullptr;
   IREE_ASSERT_OK(iree_hal_semaphore_create(
       harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
@@ -1287,17 +1342,17 @@ TEST(XdnaQueueTest, FinalPublicationAllowsImmediateDeviceRelease) {
   IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
       reinterpret_cast<iree_async_semaphore_t*>(harness.done), 1,
       &release_timepoint));
-  while (harness.device) {
-    IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
-                                            iree_infinite_timeout(), nullptr));
-  }
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDeviceDestroyed());
   EXPECT_EQ(harness.completion_status, IREE_STATUS_OK);
   EXPECT_EQ(harness.live_memories_at_completion, 0u);
   EXPECT_EQ(harness.native.live_memories, 0u);
   EXPECT_EQ(harness.native.queue_destroy_count, 1u);
   EXPECT_EQ(harness.native.context_destroy_count, 1u);
+  EXPECT_TRUE(harness.native.context_destroy_saw_queue);
   EXPECT_EQ(harness.diagnostic_count, 0u);
   iree_hal_semaphore_release(first);
+  harness.ReleasePool();
+  EXPECT_EQ(allocation_counters.live_allocations.load(), 0);
 }
 
 TEST(XdnaQueueTest, ConsumingCleanupFailureReleasesParent) {
@@ -1306,8 +1361,10 @@ TEST(XdnaQueueTest, ConsumingCleanupFailureReleasesParent) {
   harness.native.destroy_status =
       amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
   harness.ReleaseDevice();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDeviceDestroyed());
   EXPECT_EQ(harness.native.queue_destroy_count, 1u);
   EXPECT_EQ(harness.native.context_destroy_count, 1u);
+  EXPECT_TRUE(harness.native.context_destroy_saw_queue);
   EXPECT_EQ(harness.diagnostic_count, 1u);
 }
 
@@ -1378,6 +1435,7 @@ TEST(XdnaQueueDeathTest, BusyNativeDestroyPreservesParent) {
         harness.native.destroy_status =
             amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
         harness.ReleaseDevice();
+        ASSERT_NO_FATAL_FAILURE(harness.PollUntilQueueDestroyAttempted());
         EXPECT_EQ(harness.native.queue_destroy_count, 1u);
         EXPECT_EQ(harness.native.context_destroy_count, 0u);
         EXPECT_EQ(harness.diagnostic_count, 1u);

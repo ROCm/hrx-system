@@ -102,6 +102,20 @@ static iree_status_t iree_hal_amd_xdna_device_build_spec(
   return status;
 }
 
+// Runs from the queue's second placed finalization callback, after the queue no
+// longer borrows the native context or proactor.
+static void iree_hal_amd_xdna_device_finalize(void* user_data) {
+  iree_hal_amd_xdna_device_t* device = user_data;
+  iree_hal_queue_t* queue = device->queue;
+  device->queue = NULL;
+  iree_hal_queue_release(queue);
+  iree_hal_allocator_release(device->allocator);
+  iree_hal_device_spec_release(device->spec);
+  iree_hal_amd_xdna_context_destroy(device->context);
+  iree_async_proactor_pool_entry_release(device->proactor_entry);
+  iree_allocator_free(device->host_allocator, device);
+}
+
 static void iree_hal_amd_xdna_device_destroy(iree_hal_device_t* base) {
   iree_hal_amd_xdna_device_t* device = (iree_hal_amd_xdna_device_t*)base;
   if (device->queue &&
@@ -112,15 +126,9 @@ static void iree_hal_amd_xdna_device_destroy(iree_hal_device_t* base) {
         "ownership");
     return;
   }
-  if (device->queue && !iree_hal_amd_xdna_queue_shutdown(device->queue)) {
-    return;
-  }
-  iree_hal_queue_release(device->queue);
-  iree_hal_allocator_release(device->allocator);
-  iree_hal_device_spec_release(device->spec);
-  iree_hal_amd_xdna_context_destroy(device->context);
-  iree_async_proactor_pool_entry_release(device->proactor_entry);
-  iree_allocator_free(device->host_allocator, device);
+  iree_hal_amd_xdna_queue_begin_shutdown(
+      device->queue, (iree_hal_amd_xdna_queue_shutdown_callback_t){
+                         iree_hal_amd_xdna_device_finalize, device});
 }
 
 iree_status_t iree_hal_amd_xdna_device_create(
@@ -163,7 +171,11 @@ iree_status_t iree_hal_amd_xdna_device_create(
     device->context = context;
     *out_device = (iree_hal_device_t*)device;
   } else {
-    iree_hal_device_release((iree_hal_device_t*)device);
+    iree_hal_queue_release(device->queue);
+    iree_hal_allocator_release(device->allocator);
+    iree_hal_device_spec_release(device->spec);
+    iree_async_proactor_pool_entry_release(device->proactor_entry);
+    iree_allocator_free(host_allocator, device);
   }
   return status;
 }

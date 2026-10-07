@@ -71,12 +71,19 @@ report the provider's actual coherence properties. Loom correctness scenarios
 keep canonical host data in coherent heap storage and stage device copies;
 buffer offsets and aliases survive upload and readback.
 
-Queue notifications are wake hints. Completion refreshes the native queue's
-checked retirement and terminal outcome before publishing HAL semaphores.
-Ordinary retired work releases payload resources before signaling completion.
-An operation-held device reference keeps the queue's capture pools alive
-through inline signal callbacks, then the arenas are returned before the final
-device release.
+Queue notifications are wake hints. One cold-registered persistent proactor
+source consumes each event, refreshes the native queue's checked retirement and
+terminal outcome, and requests a new one-shot native notification for the
+oldest remaining point. No per-completion wait operation or source registration
+is required. Ordinary retired work releases payload resources before signaling
+HAL semaphores. An operation-held device reference keeps the queue's capture
+pools alive through inline signal callbacks, then the arenas are returned before
+the final device release.
+
+Final device release places shutdown on the proactor owner. It joins the two
+idle services, destroys the native queue, and begins terminal source
+unregistration outside the source callback. The unregistration receipt places a
+second operation before releasing the event, queue, context, and proactor entry.
 If observation fails without proving retirement, the queue reports the error,
 fails completion edges, and retains the unsafe-to-release ownership graph.
 Teardown failures similarly report and retain ownership without aborting the

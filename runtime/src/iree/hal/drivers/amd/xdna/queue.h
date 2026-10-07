@@ -33,13 +33,33 @@ iree_status_t iree_hal_amd_xdna_queue_assign_frontier(
 // Releases currently unused operation and payload capture blocks.
 void iree_hal_amd_xdna_queue_trim(iree_hal_queue_t* queue);
 
-// Releases native queue ownership before the parent releases its proactor and
-// context. Called with exclusive access after all HAL queue users retire.
-// Returns false only when native BUSY preserves the queue; the diagnosed
-// failure requires keeping its complete parent graph live. Every other native
-// result consumes the handle. Repeated calls after consumption do no native
-// work.
-bool iree_hal_amd_xdna_queue_shutdown(iree_hal_queue_t* queue);
+// Completion invoked after the queue no longer borrows its native context or
+// proactor. The callback runs from a placed proactor operation and may release
+// the queue and the proactor-owning device. It must not access the queue after
+// releasing either owner.
+typedef void (*iree_hal_amd_xdna_queue_shutdown_fn_t)(void* user_data);
+
+// Callback receiving successful terminal queue shutdown.
+typedef struct iree_hal_amd_xdna_queue_shutdown_callback_t {
+  // Function invoked after native and observer ownership has retired.
+  iree_hal_amd_xdna_queue_shutdown_fn_t fn;
+  // Borrowed callback context retained by the queue until invocation.
+  void* user_data;
+} iree_hal_amd_xdna_queue_shutdown_callback_t;
+
+// Transfers an idle queue into poll-owned terminal shutdown. The caller has
+// exclusive access after all public queue users and operation-held device
+// references retire. A placed operation stops and joins both progress services,
+// destroys the native queue, and unregisters the persistent event source. The
+// terminal unregistration callback schedules a second placed operation before
+// invoking |callback| so no proactor-owning storage is released inline.
+//
+// Any handoff, native BUSY, or observer retirement failure is diagnosed and
+// retains the complete reachable ownership graph. In those cases |callback|
+// does not fire.
+void iree_hal_amd_xdna_queue_begin_shutdown(
+    iree_hal_queue_t* queue,
+    iree_hal_amd_xdna_queue_shutdown_callback_t callback);
 
 #ifdef __cplusplus
 }  // extern "C"
