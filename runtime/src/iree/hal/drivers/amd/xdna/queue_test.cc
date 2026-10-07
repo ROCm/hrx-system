@@ -165,6 +165,17 @@ struct NativeProvider {
     iree_notification_post(&submission_notification, IREE_ALL_WAITERS);
   }
 
+  void ReturnBusyOnNextSubmission() {
+    busy_submission_attempt.store(
+        submission_attempt_count.load(std::memory_order_acquire) + 1,
+        std::memory_order_release);
+  }
+
+  size_t FlushCount() {
+    std::lock_guard<std::mutex> lock(mutex);
+    return flushes.size();
+  }
+
   static amdf_status_t AMDF_CALL MemoryCreate(
       amdf_memory_scope_t* scope, const amdf_memory_create_info_t* info,
       amdf_memory_t** out_memory) {
@@ -255,6 +266,10 @@ struct NativeProvider {
           iree_hal_semaphore_query(self->preceding_completion, &value));
       EXPECT_EQ(value, 1u);
       EXPECT_EQ(self->live_memories, 3u);
+    }
+    if (submission_ordinal ==
+        self->busy_submission_attempt.load(std::memory_order_acquire)) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_BUSY);
     }
     if (self->outcome == Outcome::kRejectSubmission) {
       return amdf_make_api_status(AMDF_STATUS_CODE_RESOURCE_EXHAUSTED);
@@ -422,6 +437,8 @@ struct NativeProvider {
   std::atomic<uint64_t> submission_count{0};
   // Number of native submission attempts used to assign opaque points.
   std::atomic<uint64_t> submission_attempt_count{0};
+  // Exact attempt on which the provider returns one transient API BUSY result.
+  std::atomic<uint64_t> busy_submission_attempt{0};
   // Highest opaque native point accepted by the controlled provider.
   std::atomic<uint64_t> last_accepted_submission{0};
   // Number of one-shot wake requests.
@@ -584,6 +601,13 @@ class QueueHarness {
 
   void PollUntilSubmitted(uint64_t count) {
     while (native.submission_count < count) {
+      IREE_ASSERT_OK(
+          iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr));
+    }
+  }
+
+  void PollUntilNotificationCount(size_t count) {
+    while (native.notification_count < count) {
       IREE_ASSERT_OK(
           iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr));
     }
@@ -854,6 +878,122 @@ TEST(XdnaQueueTest, FullNativeCapacityUsesQueuedPublication) {
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, following));
   EXPECT_EQ(harness.native.submission_count, 2u);
   iree_hal_semaphore_release(following);
+}
+
+TEST(XdnaQueueTest, NativeBusyWithoutPendingWorkFailsQueueInvariant) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+  harness.native.ReturnBusyOnNextSubmission();
+
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_INTERNAL));
+  EXPECT_EQ(harness.native.submission_attempt_count, 1u);
+  EXPECT_EQ(harness.native.submission_count, 0u);
+  EXPECT_GE(harness.diagnostic_count, 1u);
+}
+
+TEST(XdnaQueueTest, NativeBusyRetainsDirectPublicationUntilCheckedProgress) {
+  QueueHarness harness;
+  harness.native.pending_capacity = 2;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_async_frontier_tracker_t* tracker = nullptr;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+      &tracker));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_queue_assign_frontier(
+      harness.queue, tracker, iree_async_axis_make_queue(1, 0, 0, 0, 0)));
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+  iree_hal_semaphore_t* first = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &first));
+
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(first));
+  EXPECT_EQ(harness.native.submission_count, 1u);
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(1));
+
+  harness.native.ReturnBusyOnNextSubmission();
+  ASSERT_NO_FATAL_FAILURE(harness.Submit());
+  EXPECT_EQ(harness.native.submission_attempt_count, 2u);
+  EXPECT_EQ(harness.native.submission_count, 1u);
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  const size_t flush_count_after_busy = harness.native.FlushCount();
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
+  EXPECT_EQ(value, 0u);
+
+  harness.native.retirement_limit =
+      harness.native.last_accepted_submission.load(std::memory_order_acquire);
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
+  EXPECT_EQ(harness.native.submission_attempt_count, 3u);
+  EXPECT_EQ(harness.native.FlushCount(), flush_count_after_busy);
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(2));
+
+  harness.native.retirement_limit = UINT64_MAX;
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, first));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
+  EXPECT_EQ(harness.diagnostic_count, 0u);
+  iree_hal_semaphore_release(first);
+  iree_async_frontier_tracker_release(tracker);
+}
+
+TEST(XdnaQueueTest, NativeBusyRetainsQueuedPublicationUntilCheckedProgress) {
+  QueueHarness harness;
+  harness.native.pending_capacity = 2;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+  iree_hal_semaphore_t* first = nullptr;
+  iree_hal_semaphore_t* gate = nullptr;
+  for (auto** semaphore : {&first, &gate}) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
+  }
+
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(first));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(1));
+  iree_async_single_frontier_t host_frontier;
+  iree_async_single_frontier_initialize(
+      &host_frontier, iree_async_axis_make_queue(1, 1, 0, 0, 0), 1);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(
+      gate, 1, iree_async_single_frontier_as_const_frontier(&host_frontier)));
+
+  harness.native.ReturnBusyOnNextSubmission();
+  harness.native.BlockSubmission();
+  ASSERT_NO_FATAL_FAILURE(harness.SubmitAfter(gate, 1));
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  harness.native.AwaitBlockedSubmission();
+  EXPECT_EQ(harness.native.submission_attempt_count, 2u);
+  harness.native.retirement_limit =
+      harness.native.last_accepted_submission.load(std::memory_order_acquire);
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, first));
+  EXPECT_EQ(harness.native.submission_count, 1u);
+  const size_t flush_count_after_prepare = harness.native.FlushCount();
+
+  harness.native.ReleaseSubmission();
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
+  EXPECT_EQ(harness.native.submission_attempt_count, 3u);
+  EXPECT_EQ(harness.native.FlushCount(), flush_count_after_prepare);
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(2));
+
+  harness.native.retirement_limit = UINT64_MAX;
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
+  EXPECT_EQ(harness.diagnostic_count, 0u);
+  iree_hal_semaphore_release(gate);
+  iree_hal_semaphore_release(first);
 }
 
 TEST(XdnaQueueTest, PublicationClaimContentionUsesQueuedPublication) {
@@ -1285,6 +1425,17 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   }
   check_steady_state("unsatisfied wait", before, native_allocations_before);
 
+  // The preceding host-signaled waits deliberately made the accepted frontier
+  // inexact. Restore the production topology assignment at this quiescent point
+  // so the capacity and BUSY rows exercise direct publication.
+  iree_async_frontier_tracker_t* tracker = nullptr;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+      &tracker));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_queue_assign_frontier(
+      harness.queue, tracker, iree_async_axis_make_queue(1, 0, 0, 0, 0)));
+  iree_async_frontier_tracker_release(tracker);
+
   for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
     if (iteration == kWarmupIterations + 1) {
       before = SnapshotHostAllocations(allocation_counters);
@@ -1306,6 +1457,42 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
     }
   }
   check_steady_state("native capacity", before, native_allocations_before);
+
+  before = SnapshotHostAllocations(allocation_counters);
+  native_allocations_before = harness.native.memory_create_count;
+  harness.native.hold_retirement = true;
+  uint64_t retry_value = kTotalIterations + 1;
+  const uint64_t submission_count = harness.native.submission_count;
+  const size_t notification_count = harness.native.notification_count;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      harness.queue, {}, {1, &capacity_completions[0], &retry_value},
+      executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 1));
+  ASSERT_NO_FATAL_FAILURE(
+      harness.PollUntilNotificationCount(notification_count + 1));
+  harness.native.ReturnBusyOnNextSubmission();
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      harness.queue, {}, {1, &capacity_completions[1], &retry_value},
+      executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  EXPECT_EQ(harness.native.submission_count, submission_count + 1);
+  const size_t flush_count_after_busy = harness.native.FlushCount();
+  harness.native.retirement_limit =
+      harness.native.last_accepted_submission.load(std::memory_order_acquire);
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 2));
+  EXPECT_EQ(harness.native.FlushCount(), flush_count_after_busy);
+  ASSERT_NO_FATAL_FAILURE(
+      harness.PollUntilNotificationCount(notification_count + 2));
+  harness.native.retirement_limit = UINT64_MAX;
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  harness.PollUntilValue(capacity_completions[0], retry_value);
+  harness.PollUntilValue(capacity_completions[1], retry_value);
+  check_steady_state("native BUSY retry", before, native_allocations_before);
 
   constexpr iree_host_size_t kLargeUpdateLength = 128 * 1024;
   iree_hal_buffer_params_t buffer_params = {};

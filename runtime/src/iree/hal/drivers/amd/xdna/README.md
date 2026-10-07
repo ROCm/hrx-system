@@ -52,9 +52,11 @@ proved by an exact accepted frontier, the calling thread prepares and submits
 the command directly. A placed proactor receipt commits the accepted point and
 transfers the claim to older deferred work before releasing it. Full capacity,
 unsatisfied waits, inexact causal state, and claim contention use the private
-publisher instead. libamdf has no nonblocking native try-submit contract, so a
-direct caller can still pay device-wake or native-credit latency; the private
-publisher isolates that cost on every queued route.
+publisher instead. libamdf reports its own full publication window as `BUSY`;
+the HAL retains the prepared invocation and retries only after checked native
+progress. The underlying OS submission can still wait for device wake or native
+credits, so a direct caller can pay that latency. The private publisher isolates
+that cost on every queued route.
 
 The shared proactor owns queued causal admission, native acceptance commits,
 and checked retirement. Accepted invocations occupy a bounded ring sized to the
