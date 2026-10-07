@@ -137,6 +137,24 @@ iree_cc_library(
 endif()
 
 if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue_service
+  HDRS
+    "queue_service.h"
+  SRCS
+    "queue_service.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::base::threading::thread
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     queue_storage_test
@@ -164,6 +182,7 @@ iree_cc_library(
     ::context
     ::executable
     ::queue_frontier
+    ::queue_service
     ::queue_storage
     ::semaphore
     amdf::headers
