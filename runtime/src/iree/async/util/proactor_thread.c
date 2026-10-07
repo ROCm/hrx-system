@@ -42,7 +42,31 @@ struct iree_async_proactor_thread_t {
   // writes this before signaling |exited|, and consume_status() is only valid
   // after join() returns OK.
   iree_status_t fatal_status;
+
+  // True when the polling thread dropped the final external reference and
+  // must destroy itself after returning from poll(). Only accessed by the
+  // polling thread.
+  bool destroy_on_exit;
 };
+
+// Runner currently executing on this native thread, if any. Final release from
+// a completion callback uses this to defer destruction until poll() returns.
+static IREE_THREAD_LOCAL iree_async_proactor_thread_t*
+    iree_async_proactor_current_thread = NULL;
+
+// Destroys a stopped thread after its native entry point no longer needs any
+// state owned by |thread|.
+static void iree_async_proactor_thread_destroy(
+    iree_async_proactor_thread_t* thread) {
+  iree_allocator_t allocator = thread->allocator;
+  // Releasing the OS thread joins it when called externally and detaches it
+  // when the polling thread is destroying itself.
+  iree_thread_release(thread->thread);
+  iree_status_free(thread->fatal_status);
+  iree_notification_deinitialize(&thread->exited);
+  iree_async_proactor_release(thread->proactor);
+  iree_allocator_free(allocator, thread);
+}
 
 static bool iree_async_proactor_thread_has_exited(void* user_data) {
   iree_async_proactor_thread_t* thread =
@@ -64,6 +88,7 @@ static int iree_async_proactor_thread_main(void* entry_arg) {
   iree_async_proactor_thread_t* thread =
       (iree_async_proactor_thread_t*)entry_arg;
   IREE_TRACE_ZONE_BEGIN(z0);
+  iree_async_proactor_current_thread = thread;
 
   iree_status_t status = iree_ok_status();
   while (
@@ -106,6 +131,10 @@ static int iree_async_proactor_thread_main(void* entry_arg) {
   iree_notification_post(&thread->exited, IREE_ALL_WAITERS);
 
   IREE_TRACE_ZONE_END(z0);
+  iree_async_proactor_current_thread = NULL;
+  if (thread->destroy_on_exit) {
+    iree_async_proactor_thread_destroy(thread);
+  }
   return 0;
 }
 
@@ -131,6 +160,7 @@ iree_status_t iree_async_proactor_thread_create(
   thread->poll_timeout = options.poll_timeout;
   thread->error_callback = options.error_callback;
   thread->fatal_status = iree_ok_status();
+  thread->destroy_on_exit = false;
 
   iree_thread_create_params_t params;
   memset(&params, 0, sizeof(params));
@@ -161,14 +191,14 @@ void iree_async_proactor_thread_retain(iree_async_proactor_thread_t* thread) {
 void iree_async_proactor_thread_release(iree_async_proactor_thread_t* thread) {
   if (IREE_LIKELY(thread) &&
       iree_atomic_ref_count_dec(&thread->ref_count) == 1) {
-    iree_allocator_t allocator = thread->allocator;
-    // Releasing the OS thread joins it before destroying the notification; the
-    // thread may still be inside iree_notification_post when it signals exit.
-    iree_thread_release(thread->thread);
-    iree_status_free(thread->fatal_status);
-    iree_notification_deinitialize(&thread->exited);
-    iree_async_proactor_release(thread->proactor);
-    iree_allocator_free(allocator, thread);
+    if (thread == iree_async_proactor_current_thread) {
+      // A completion may own the final external reference. Keep the runner and
+      // its retained proactor alive until the current poll call has unwound.
+      thread->destroy_on_exit = true;
+      iree_async_proactor_thread_request_stop(thread);
+      return;
+    }
+    iree_async_proactor_thread_destroy(thread);
   }
 }
 

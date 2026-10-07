@@ -202,7 +202,9 @@ void iree_async_proactor_pool_entry_retain(
     iree_async_proactor_pool_entry_t* entry);
 
 // Releases an entry reference. The final release requests its runner to stop,
-// waits for runner teardown, releases the proactor, and frees the entry.
+// relinquishes runner ownership, releases the proactor, and frees the entry.
+// An external caller waits for runner teardown. A final release from a runner
+// callback defers runner teardown until the callback and poll call return.
 void iree_async_proactor_pool_entry_release(
     iree_async_proactor_pool_entry_t* entry);
 
