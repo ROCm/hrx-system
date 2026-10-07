@@ -2054,6 +2054,11 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   iree_hal_executable_function_t function;
   ASSERT_NO_FATAL_FAILURE(harness.LoadExecutable(
       iree::hal::amd::xdna::testing::ImageFixture(), &executable, &function));
+  iree_hal_executable_t* switching_executable = nullptr;
+  iree_hal_executable_function_t switching_function;
+  ASSERT_NO_FATAL_FAILURE(
+      harness.LoadExecutable(iree::hal::amd::xdna::testing::ImageFixture(),
+                             &switching_executable, &switching_function));
   iree_hal_buffer_t* dispatch_buffer = nullptr;
   ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&dispatch_buffer));
   const iree_hal_buffer_ref_t binding =
@@ -2063,6 +2068,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   iree_hal_semaphore_t* reached_gate = nullptr;
   iree_hal_semaphore_t* wait_gate = nullptr;
   iree_hal_semaphore_t* wait_completion = nullptr;
+  iree_hal_semaphore_t* switching_completion = nullptr;
   std::array<iree_hal_semaphore_t*, 3> capacity_completions = {};
   iree_hal_semaphore_t* small_update_completion = nullptr;
   iree_hal_semaphore_t* large_update_completion = nullptr;
@@ -2075,6 +2081,9 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   create_semaphore(&reached_gate);
   create_semaphore(&wait_gate);
   create_semaphore(&wait_completion);
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_SINGLE_PRODUCER, &switching_completion));
   for (iree_hal_semaphore_t** semaphore :
        {&capacity_completions[0], &capacity_completions[1],
         &capacity_completions[2]}) {
@@ -2105,6 +2114,46 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
     harness.PollUntilValue(ready_completion, iteration);
   }
   check_steady_state("ready dispatch", before, native_allocations_before);
+
+  iree_async_frontier_tracker_t* switching_tracker = nullptr;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+      &switching_tracker));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_queue_assign_frontier(
+      harness.queue, switching_tracker,
+      iree_async_axis_make_queue(1, 0, 0, 0, 0)));
+  iree_async_frontier_tracker_release(switching_tracker);
+
+  uint64_t switching_value = 0;
+  for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
+    if (iteration == kWarmupIterations + 1) {
+      before = SnapshotHostAllocations(allocation_counters);
+      native_allocations_before = harness.native.memory_create_count;
+    }
+    harness.native.hold_retirement = true;
+    const size_t submission_count = harness.native.submission_count;
+    uint64_t preceding_value = switching_value;
+    uint64_t first_value = ++switching_value;
+    uint64_t second_value = ++switching_value;
+    const iree_hal_semaphore_list_t preceding_wait =
+        preceding_value ? iree_hal_semaphore_list_t{1, &switching_completion,
+                                                    &preceding_value}
+                        : iree_hal_semaphore_list_t{};
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        harness.queue, preceding_wait, {1, &switching_completion, &first_value},
+        executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+        {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        harness.queue, {1, &switching_completion, &first_value},
+        {1, &switching_completion, &second_value}, switching_executable,
+        switching_function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+        {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+    ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 2));
+    harness.native.hold_retirement = false;
+    harness.native.Wake();
+    harness.PollUntilValue(switching_completion, second_value);
+  }
+  check_steady_state("executable switching", before, native_allocations_before);
 
   IREE_ASSERT_OK(iree_hal_semaphore_signal(reached_gate, 1, nullptr));
   for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
@@ -2246,10 +2295,12 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
     iree_hal_semaphore_release(completion);
   }
   iree_hal_semaphore_release(wait_completion);
+  iree_hal_semaphore_release(switching_completion);
   iree_hal_semaphore_release(wait_gate);
   iree_hal_semaphore_release(reached_gate);
   iree_hal_semaphore_release(ready_completion);
   iree_hal_buffer_release(dispatch_buffer);
+  iree_hal_executable_release(switching_executable);
   iree_hal_executable_release(executable);
 }
 
