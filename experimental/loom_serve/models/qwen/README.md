@@ -49,10 +49,18 @@ eleven allocation records are residual, arena, packed metadata, target origins,
 inputs, selected outputs, draft carry, committed metadata, verification results,
 draft cache and draft origins. Each contains byte length, alignment and initial
 zero extent. Zero length omits an inactive packed/MTP resource. Row views contain
-five offset/length pairs per row in control, recurrent, attention, input and
-progress order. Two initial origin payloads and a page-size/map-origin/carry-
-stride/feedback-split record complete the cold result. These roles remain a
-private adapter contract, not a universal storage language.
+four offset/length pairs per row in control, attention, input and progress
+order. Recurrent slot origin, stride, length and count are declared separately
+in the geometry header after page size, map origin, carry stride and feedback
+split. Two initial origin payloads complete the cold result. These roles remain
+a private adapter contract, not a universal storage language.
+
+Recurrent slots are acquired independently of session row identity, initialized
+on activation, and returned after reset or successful suspension. Restore may
+use a different slot. `encode_state` maps native ownership records into the
+source-owned target origin payload before work; ordinary epochs reuse it
+unchanged. These bindings preserve the arena extent and math while allowing
+retained state and active row lifetimes to differ.
 
 The packed row table uses four I64 words per row: recurrent read byte origin,
 recurrent write byte origin, attention byte origin, and fork position. The

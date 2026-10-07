@@ -43,7 +43,9 @@ enum {
   TEXT_HOST_RESULTS = 5,
   TEXT_HOST_NEXT_RESULTS = 6,
   TEXT_HOST_PROGRESS = 7,
-  TEXT_HOST_BUFFER_COUNT = 8,
+  TEXT_HOST_STATE_BINDINGS = 8,
+  TEXT_HOST_STATE_ORIGINS = 9,
+  TEXT_HOST_BUFFER_COUNT = 10,
 };
 
 typedef struct text_stage_t {
@@ -124,6 +126,8 @@ struct loom_serve_text_model_t {
   iree_vm_function_t encode_epoch;
   // Source-owned conversion of retired feedback to semantic row progress.
   iree_vm_function_t publish_epoch;
+  // Source-owned row-table encoding after recurrent slot ownership changes.
+  iree_vm_function_t encode_state;
   // Chat formatting functions borrowing the same model-wide VM process.
   loom_serve_text_chat_policy_t chat_policy;
   // Cold retained packet and feedback storage, reused by the single owner.
@@ -299,6 +303,11 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
           ? iree_hal_buffer_byte_length(runner->state.mtp.next_results)
           : 0,
       TEXT_ROW_CAPACITY * 12 * sizeof(int32_t),
+      TEXT_ROW_CAPACITY * 4 * sizeof(int64_t),
+      runner->shape_count
+          ? runner->state.storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]
+                .data_length
+          : 0,
   };
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -311,6 +320,12 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
     }
   }
   IREE_RETURN_IF_ERROR(status);
+  if (lengths[TEXT_HOST_STATE_ORIGINS]) {
+    memcpy(runner->host.bytes[TEXT_HOST_STATE_ORIGINS].data,
+           runner->state.storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]
+               .data,
+           lengths[TEXT_HOST_STATE_ORIGINS]);
+  }
   loom_serve_stage_t* stages = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(runner->allocator, runner->stage_count,
@@ -339,13 +354,13 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
       source_directory, IREE_SV("control.loom"), runner->allocator, &path));
   iree_vm_module_t* libraries[] = {runner->native_module, NULL, NULL, NULL};
   const iree_string_view_t roots[] = {
-      IREE_SVL("step"),         IREE_SVL("epoch"),
-      IREE_SVL("encode_epoch"), IREE_SVL("publish_epoch"),
-      IREE_SVL("render_tool"),  IREE_SVL("prepare_input"),
-      IREE_SVL("text_end"),     IREE_SVL("complete_text"),
-      IREE_SVL("model_name"),   IREE_SVL("chat_begin"),
-      IREE_SVL("chat_message"), IREE_SVL("chat_end"),
-      IREE_SVL("parse_tools")};
+      IREE_SVL("step"),          IREE_SVL("epoch"),
+      IREE_SVL("encode_epoch"),  IREE_SVL("publish_epoch"),
+      IREE_SVL("encode_state"),  IREE_SVL("render_tool"),
+      IREE_SVL("prepare_input"), IREE_SVL("text_end"),
+      IREE_SVL("complete_text"), IREE_SVL("model_name"),
+      IREE_SVL("chat_begin"),    IREE_SVL("chat_message"),
+      IREE_SVL("chat_end"),      IREE_SVL("parse_tools")};
   status = loom_serve_input_module_create(
       runner->environment, runner->tokenizer, &libraries[1], runner->allocator);
   if (iree_status_is_ok(status)) {
@@ -378,6 +393,9 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
   IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
       process, IREE_SV("model"), IREE_SV("publish_epoch"),
       &runner->publish_epoch));
+  IREE_RETURN_IF_ERROR(iree_vm_process_lookup_function(
+      process, IREE_SV("model"), IREE_SV("encode_state"),
+      &runner->encode_state));
   return iree_vm_process_lookup_function(process, IREE_SV("model"),
                                          IREE_SV("epoch"), &runner->epoch_step);
 }
@@ -860,6 +878,54 @@ static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
   return loom_serve_residency_finish(model->residency, status);
 }
 
+// Only ownership changes visit this path. The source encoder owns device
+// record offsets; native state contributes its already validated byte ranges.
+static iree_status_t text_publish_state_bindings(
+    loom_serve_text_model_t* model) {
+  if (!model->state.recurrent.dirty_rows) {
+    return iree_ok_status();
+  }
+  uint32_t count = 0;
+  for (iree_host_size_t i = 0; i < model->row_count; ++i) {
+    if (!(model->state.recurrent.dirty_rows & (1u << i))) {
+      continue;
+    }
+    const loom_serve_text_state_row_t* row = &model->state.rows[i];
+    const uint64_t origin =
+        iree_hal_buffer_byte_offset(row->buffers[TEXT_RECURRENT]);
+    uint8_t* record =
+        model->host.bytes[TEXT_HOST_STATE_BINDINGS].data + count++ * 32;
+    iree_unaligned_store_le_u64(record, i);
+    iree_unaligned_store_le_u64(record + 8, origin);
+    iree_unaligned_store_le_u64(record + 16, origin);
+    iree_unaligned_store_le_u64(record + 24, row->position);
+  }
+  iree_vm_variant_t arguments[] = {
+      iree_vm_buffer_variant_from_ptr_borrowed(
+          &model->vm_types, model->host.buffers[TEXT_HOST_STATE_BINDINGS]),
+      iree_vm_variant_from_i32((int32_t)count),
+      iree_vm_buffer_variant_from_ptr_borrowed(
+          &model->vm_types, model->host.buffers[TEXT_HOST_STATE_ORIGINS]),
+  };
+  IREE_RETURN_IF_ERROR(text_invoke(model, model->encode_state,
+                                   iree_vm_variant_span_from_array(arguments),
+                                   iree_vm_variant_span_empty()));
+  const iree_byte_span_t origins = model->host.bytes[TEXT_HOST_STATE_ORIGINS];
+  if (origins.data_length) {
+    const iree_hal_transfer_operation_t upload = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+        .upload = {.source = origins.data,
+                   .target_buffer = model->state.epoch.buffers[2],
+                   .length = origins.data_length},
+    };
+    uint64_t completion = 0;
+    IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(model->execution, 1,
+                                                       &upload, &completion));
+  }
+  model->state.recurrent.dirty_rows = 0;
+  return iree_ok_status();
+}
+
 // The semantic host record is {length, position, row, input_begin, input_count,
 // flags, output_credit, first_span}. Known IDs are copied once into a
 // contiguous host stream. Source owns all device packet offsets and selection
@@ -1064,6 +1130,9 @@ static iree_status_t text_epoch(
   IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
   iree_status_t status =
       loom_serve_text_state_grow(&model->state, span_count, spans, extents);
+  if (iree_status_is_ok(status)) {
+    status = text_publish_state_bindings(model);
+  }
 
   const iree_host_size_t input_count =
       text_prepare_plan(model, span_count, spans, output_limits, NULL, 0, 0);
@@ -1252,6 +1321,7 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
     row->metrics.prefill_duration += iree_time_now() - start;
     return iree_ok_status();
   }
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_activate(row->state));
   memset(row->transfer.tokens, 0, sizeof(row->transfer.tokens));
   memcpy(row->transfer.tokens, token_ids, count * sizeof(int32_t));
   row->transfer.control[0] = (int32_t)count;

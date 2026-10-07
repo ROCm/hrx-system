@@ -106,15 +106,15 @@ func.def @allocation(%records: buffer, %slot: index, %bytes: i64, %clear: i64) {
   func.return
 }
 
-// Private arena views are {byte_offset, byte_length}, in control/recurrent/
-// attention/input/progress binding order. A zero length leaves a slot unbound.
+// Private arena views are {byte_offset, byte_length}, in control/attention/
+// input/progress order. Recurrent slots have an independent geometry record.
 func.def @row_view(%records: buffer, %row_count: index, %row: index, %slot: index, %offset: i64, %length: i64) {
   %origin = index.constant 0 : offset
   %bounded_row = index.assume %row [range(%row, 0, 15), lt(%row, %row_count)] : index
-  %bounded_slot = index.assume %slot [range(%slot, 0, 4)] : index
-  %view = buffer.view %records[%origin] : buffer -> view<[%row_count]x5x2xi64>
-  view.store %offset, %view[%bounded_row, %bounded_slot, 0] : i64, view<[%row_count]x5x2xi64>
-  view.store %length, %view[%bounded_row, %bounded_slot, 1] : i64, view<[%row_count]x5x2xi64>
+  %bounded_slot = index.assume %slot [range(%slot, 0, 3)] : index
+  %view = buffer.view %records[%origin] : buffer -> view<[%row_count]x4x2xi64>
+  view.store %offset, %view[%bounded_row, %bounded_slot, 0] : i64, view<[%row_count]x4x2xi64>
+  view.store %length, %view[%bounded_row, %bounded_slot, 1] : i64, view<[%row_count]x4x2xi64>
   func.return
 }
 
@@ -197,7 +197,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   func.call @allocation(%allocations, %ten, %mtp_table, %zero64) : (buffer, index, i64, i64) -> ()
   %bounded_rows = scalar.assume %rows [range(%rows, 1, 16)] : i64
   %row_count = index.cast %bounded_rows : i64 to index
-  %view_stride = index.constant 80 : offset
+  %view_stride = index.constant 64 : offset
   %view_bytes = index.scale %row_count, %view_stride : index, offset -> offset
   %views = buffer.alloca<private> align(8) %view_bytes : buffer
   %table_payload_bytes = index.constant 512 : offset
@@ -225,10 +225,9 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
     %tokens_base = scalar.addi %base, %tokens_offset : i64
     %progress_base = scalar.addi %base, %progress_offset : i64
     func.call @row_view(%views, %row_count, %i, %zero, %base, %control_bytes) : (buffer, index, index, index, i64, i64) -> ()
-    func.call @row_view(%views, %row_count, %i, %one, %gdn_base, %gdn_bytes) : (buffer, index, index, index, i64, i64) -> ()
-    func.call @row_view(%views, %row_count, %i, %two, %attention_base, %attention_bytes) : (buffer, index, index, index, i64, i64) -> ()
-    func.call @row_view(%views, %row_count, %i, %three, %tokens_base, %token_bytes) : (buffer, index, index, index, i64, i64) -> ()
-    func.call @row_view(%views, %row_count, %i, %four, %progress_base, %progress_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    func.call @row_view(%views, %row_count, %i, %one, %attention_base, %attention_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    func.call @row_view(%views, %row_count, %i, %two, %tokens_base, %token_bytes) : (buffer, index, index, index, i64, i64) -> ()
+    func.call @row_view(%views, %row_count, %i, %three, %progress_base, %progress_bytes) : (buffer, index, index, index, i64, i64) -> ()
     %kv_base = scf.select %pooled, %row_bytes, %attention_base : i64
     view.store %gdn_base, %target[%i, 0] : i64, view<16x4xi64>
     view.store %gdn_base, %target[%i, 1] : i64, view<16x4xi64>
@@ -241,18 +240,22 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   // Cache regions are {allocation, origin, plane_count, plane_stride,
   // block_bytes}. Model geometry stays here; physical slabs may cut across
   // logical block boundaries and are chosen by the live allocator.
-  %header_bytes = index.constant 32 : offset
-  %target_geometry_bytes = index.constant 72 : offset
-  %draft_geometry_bytes = index.constant 112 : offset
+  %header_bytes = index.constant 64 : offset
+  %target_geometry_bytes = index.constant 104 : offset
+  %draft_geometry_bytes = index.constant 144 : offset
   %pooled_geometry_bytes = scf.select %mtp, %draft_geometry_bytes, %target_geometry_bytes : offset
   %geometry_bytes = scf.select %pooled, %pooled_geometry_bytes, %header_bytes : offset
   %geometry = buffer.alloca<private> align(8) %geometry_bytes : buffer
-  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<4xi64>
-  view.store %block_tokens, %geometry_view[0] : i64, view<4xi64>
-  view.store %map_origin, %geometry_view[1] : i64, view<4xi64>
-  view.store %carry_stride, %geometry_view[2] : i64, view<4xi64>
+  %geometry_view = buffer.view %geometry[%origin] : buffer -> view<8xi64>
+  view.store %block_tokens, %geometry_view[0] : i64, view<8xi64>
+  view.store %map_origin, %geometry_view[1] : i64, view<8xi64>
+  view.store %carry_stride, %geometry_view[2] : i64, view<8xi64>
   %feedback_split = scalar.constant 384 : i64
-  view.store %feedback_split, %geometry_view[3] : i64, view<4xi64>
+  view.store %feedback_split, %geometry_view[3] : i64, view<8xi64>
+  view.store %gdn_offset, %geometry_view[4] : i64, view<8xi64>
+  view.store %row_stride, %geometry_view[5] : i64, view<8xi64>
+  view.store %gdn_bytes, %geometry_view[6] : i64, view<8xi64>
+  view.store %rows, %geometry_view[7] : i64, view<8xi64>
   scf.if %pooled {
     %regions = buffer.view %geometry[%header_bytes] : buffer -> view<5xi64>
     %one64 = scalar.constant 1 : i64

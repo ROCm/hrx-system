@@ -20,8 +20,8 @@ class TextStorageTest : public ::testing::Test {
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
         &types));
     // Origin payloads have model-private layouts, including non-word extents.
-    const iree_host_size_t lengths[] = {11 * 24, 3 * 5 * 16, 73, 129,
-                                        32 + 2 * 40};
+    const iree_host_size_t lengths[] = {11 * 24, 3 * 4 * 16, 73, 129,
+                                        64 + 2 * 40};
     for (size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
       iree_vm_buffer_t* buffer = nullptr;
       IREE_ASSERT_OK(iree_vm_buffer_create(lengths[i], 8, allocator, &buffer));
@@ -38,8 +38,16 @@ class TextStorageTest : public ::testing::Test {
       iree_unaligned_store_le_u64(bytes[0].data + slot * 24, 512);
       iree_unaligned_store_le_u64(bytes[0].data + slot * 24 + 8, 256);
     }
+    for (size_t row = 0; row < 3; ++row) {
+      const uint64_t views[] = {row * 64,      8, 0, 0, row * 64 + 40, 8,
+                                row * 64 + 48, 8};
+      for (size_t i = 0; i < IREE_ARRAYSIZE(views); ++i) {
+        iree_unaligned_store_le_u64(bytes[1].data + row * 64 + i * 8, views[i]);
+      }
+    }
     const uint64_t geometry[] = {
-        4, 256, 128, 256, 1, 256, 2, 4096, 128, 9, 512, 1, 8192, 64,
+        4,   256, 128,  256, 8, 64,  32, 3,    1,
+        256, 2,   4096, 128, 9, 512, 1,  8192, 64,
     };
     for (size_t i = 0; i < IREE_ARRAYSIZE(geometry); ++i) {
       iree_unaligned_store_le_u64(bytes[4].data + i * 8, geometry[i]);
@@ -72,6 +80,10 @@ TEST_F(TextStorageTest, LogicalOrderAndCarrySurviveBootstrapPayloadRelease) {
   EXPECT_EQ(storage.blocks_per_row, 5u);
   EXPECT_EQ(storage.block_size, 4u);
   EXPECT_EQ(storage.region_count, 2u);
+  EXPECT_EQ(storage.recurrent.origin, 8u);
+  EXPECT_EQ(storage.recurrent.stride, 64u);
+  EXPECT_EQ(storage.recurrent.length, 32u);
+  EXPECT_EQ(storage.recurrent.capacity, 3u);
   EXPECT_EQ(storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS].data_length,
             73u);
   EXPECT_EQ(storage.bytes[LOOM_SERVE_TEXT_STORAGE_DRAFT_ORIGINS].data_length,
@@ -112,7 +124,44 @@ TEST_F(TextStorageTest, RejectsUnrepresentablePoolGeometry) {
 }
 
 TEST_F(TextStorageTest, RejectsPlanesOverlappingPrivateStorage) {
-  iree_unaligned_store_le_u64(bytes[4].data + 40, 128);
+  iree_unaligned_store_le_u64(bytes[4].data + 72, 128);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsOverlappingRecurrentSlots) {
+  iree_unaligned_store_le_u64(bytes[4].data + 40, 31);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsRecurrentSlotsBeyondPrivateStorage) {
+  iree_unaligned_store_le_u64(bytes[4].data + 56, 5);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsMissingRecurrentHeadroom) {
+  iree_unaligned_store_le_u64(bytes[4].data + 56, 2);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsPrivateViewInsideRecurrentSlot) {
+  iree_unaligned_store_le_u64(bytes[1].data, 8);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsPrivateViewCrossingNextRecurrentSlot) {
+  // The view starts in a valid gap but crosses the next slot at byte 72.
+  iree_unaligned_store_le_u64(bytes[1].data, 40);
+  iree_unaligned_store_le_u64(bytes[1].data + 8, 33);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_serve_text_storage_initialize(
                             &types, results, 3, 17, 32, &storage, allocator));

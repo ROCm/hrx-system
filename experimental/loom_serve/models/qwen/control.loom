@@ -10,6 +10,31 @@ func.decl import("runner") @execute_7(%stage: i32, %b0: hal.buffer, %b1: hal.buf
 func.decl import("runner") @execute_8(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer, %b6: hal.buffer, %b7: hal.buffer) -> (i64)
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
+// Ownership events provide {row, read_origin, write_origin, fork_position}.
+// The retained payload is source-owned; KV origins and unchanged rows survive.
+func.def public @encode_state(%bindings: buffer, %count: i32, %origins: buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %bounded_count = scalar.assume %count [range(%count, 1, 16)] : i32
+  %length = index.cast %bounded_count : i32 to index
+  %records = buffer.view %bindings[%origin] : buffer -> view<16x4xi64>
+  %rows = buffer.view %origins[%origin] : buffer -> view<16x4xi64>
+  scf.for %i = [%zero to %length step %one] {
+    %row_word = view.load %records[%i, 0] : view<16x4xi64> -> i64
+    %bounded_row = scalar.assume %row_word [range(%row_word, 0, 15)] : i64
+    %row = index.cast %bounded_row : i64 to index
+    %read = view.load %records[%i, 1] : view<16x4xi64> -> i64
+    %write = view.load %records[%i, 2] : view<16x4xi64> -> i64
+    %position = view.load %records[%i, 3] : view<16x4xi64> -> i64
+    view.store %read, %rows[%row, 0] : i64, view<16x4xi64>
+    view.store %write, %rows[%row, 1] : i64, view<16x4xi64>
+    view.store %position, %rows[%row, 3] : i64, view<16x4xi64>
+    scf.yield
+  }
+  func.return
+}
+
 // Host plans carry {length, position, row, input_begin, input_count, flags,
 // output_credit, first_span}. Flags are SELECT=1 and PROPOSE=2. The second
 // plan starts at record sixteen; known IDs form one contiguous host stream.

@@ -33,10 +33,10 @@ iree_status_t loom_serve_text_storage_initialize(
   *storage = (loom_serve_text_storage_t){.allocator = allocator};
   const iree_host_size_t lengths[] = {
       LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT * 3 * sizeof(int64_t),
-      row_count * 5 * 2 * sizeof(int64_t),
+      row_count * 4 * 2 * sizeof(int64_t),
       0,
       0,
-      4 * sizeof(int64_t),
+      8 * sizeof(int64_t),
   };
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
@@ -82,6 +82,51 @@ iree_status_t loom_serve_text_storage_initialize(
   storage->blocks_per_row = (context_capacity + block_size - 1) / block_size;
   storage->carry_stride = carry_stride;
   storage->feedback_split = feedback_split;
+  const uint64_t slot_origin = iree_unaligned_load_le_u64(geometry + 32);
+  const uint64_t slot_stride = iree_unaligned_load_le_u64(geometry + 40);
+  const uint64_t slot_length = iree_unaligned_load_le_u64(geometry + 48);
+  const uint64_t slot_count = iree_unaligned_load_le_u64(geometry + 56);
+  const uint8_t* arena =
+      storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 24;
+  const uint64_t arena_length = iree_unaligned_load_le_u64(arena);
+  const uint64_t private_length = iree_unaligned_load_le_u64(arena + 16);
+  if (!slot_length || slot_stride < slot_length || slot_count < row_count ||
+      slot_count > UINT32_MAX || private_length > arena_length ||
+      private_length > INT64_MAX || slot_origin > private_length ||
+      slot_length > private_length - slot_origin ||
+      slot_count - 1 >
+          (private_length - slot_origin - slot_length) / slot_stride) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "source recurrent slots exceed private storage");
+  }
+  storage->recurrent.origin = slot_origin;
+  storage->recurrent.stride = slot_stride;
+  storage->recurrent.length = slot_length;
+  storage->recurrent.capacity = (uint32_t)slot_count;
+  // Row-private views must not alias any independently reusable state slot.
+  for (iree_host_size_t i = 0; i < row_count * 4; ++i) {
+    const uint8_t* view =
+        storage->bytes[LOOM_SERVE_TEXT_STORAGE_VIEWS].data + i * 16;
+    const uint64_t origin = iree_unaligned_load_le_u64(view);
+    const uint64_t length = iree_unaligned_load_le_u64(view + 8);
+    const bool required = i % 4 != 1 || !pool_capacity;
+    if ((length != 0) != required || origin > private_length ||
+        length > private_length - origin) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source private view %zu exceeds storage", i);
+    }
+    uint64_t slot = 0;
+    if (origin >= slot_origin) {
+      slot = (origin - slot_origin) / slot_stride;
+      slot += (origin - slot_origin) % slot_stride >= slot_length;
+    }
+    if (length && slot < slot_count &&
+        slot_origin + slot * slot_stride < origin + length) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source private view %zu aliases recurrent state",
+                              i);
+    }
+  }
   // The native owner interprets page maps, not the model's preceding origin
   // records. Optional unallocated tables have no upload or map consumers.
   const iree_host_size_t table_allocations[] = {3, 10};
@@ -106,7 +151,7 @@ iree_status_t loom_serve_text_storage_initialize(
     }
   }
   storage->region_count =
-      (storage->bytes[LOOM_SERVE_TEXT_STORAGE_GEOMETRY].data_length - 32) / 40;
+      (storage->bytes[LOOM_SERVE_TEXT_STORAGE_GEOMETRY].data_length - 64) / 40;
   if ((storage->region_count != 0) != (pool_capacity != 0)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "pooled state requires source cache regions");
@@ -118,7 +163,7 @@ iree_status_t loom_serve_text_storage_initialize(
       allocator, storage->region_count, sizeof(*storage->regions),
       (void**)&storage->regions));
   for (iree_host_size_t i = 0; i < storage->region_count; ++i) {
-    const uint8_t* record = geometry + 32 + i * 40;
+    const uint8_t* record = geometry + 64 + i * 40;
     const uint64_t allocation = iree_unaligned_load_le_u64(record);
     const uint64_t origin = iree_unaligned_load_le_u64(record + 8);
     const uint64_t count = iree_unaligned_load_le_u64(record + 16);

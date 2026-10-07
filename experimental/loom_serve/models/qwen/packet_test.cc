@@ -28,16 +28,21 @@ class PacketTest : public ::testing::Test {
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
         &types));
     const iree_string_view_t roots[] = {IREE_SVL("encode_epoch"),
-                                        IREE_SVL("publish_epoch")};
+                                        IREE_SVL("publish_epoch"),
+                                        IREE_SVL("encode_state")};
     IREE_ASSERT_OK(loom_serve_program_create(
-        environment, iree_make_cstring_view(FLAG_control_source), 2, roots,
-        iree_vm_module_span_empty(), allocator, &program));
+        environment, iree_make_cstring_view(FLAG_control_source),
+        IREE_ARRAYSIZE(roots), roots, iree_vm_module_span_empty(), allocator,
+        &program));
     IREE_ASSERT_OK(
         iree_vm_process_lookup_function(loom_serve_program_process(program),
                                         IREE_SV("model"), roots[0], &encode));
     IREE_ASSERT_OK(
         iree_vm_process_lookup_function(loom_serve_program_process(program),
                                         IREE_SV("model"), roots[1], &publish));
+    IREE_ASSERT_OK(iree_vm_process_lookup_function(
+        loom_serve_program_process(program), IREE_SV("model"), roots[2],
+        &bind_state));
   }
 
   void ReleaseBuffers() {
@@ -264,8 +269,14 @@ class PacketTest : public ::testing::Test {
   iree_vm_function_t encode = {};
   // Production completed-feedback publisher.
   iree_vm_function_t publish = {};
+  // Production recurrent ownership encoder.
+  iree_vm_function_t bind_state = {};
   // Host plans, known IDs, opaque upload/feedback banks and semantic progress.
   std::array<std::vector<int32_t>, 8> storage;
+  // Ownership events borrowing their backing through the source invocation.
+  std::array<uint64_t, 64> state_bindings = {};
+  // Model-specific origins retained across successive ownership updates.
+  std::array<uint64_t, 64> state_origins = {};
   // Wrappers borrowing storage until the next cold case initialization.
   std::array<iree_vm_buffer_t*, 8> buffers = {};
 };
@@ -277,6 +288,48 @@ TEST_F(PacketTest, PreservesPacketLayoutAndPublishesSemanticProgress) {
       SCOPED_TRACE(trial);
       ASSERT_NO_FATAL_FAILURE(Run(count, trial));
     }
+  }
+}
+
+TEST_F(PacketTest, RebindsStateWithoutChangingKVOrOtherRows) {
+  auto& bindings = state_bindings;
+  auto& origins = state_origins;
+  for (size_t i = 0; i < origins.size(); ++i) {
+    origins[i] = 1000 + i;
+  }
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ,
+      iree_make_byte_span(bindings.data(), sizeof(bindings)),
+      iree_vm_buffer_release_callback_null(), allocator, &buffers[0]));
+  IREE_ASSERT_OK(iree_vm_buffer_wrap(
+      IREE_VM_BUFFER_ACCESS_FLAG_READ | IREE_VM_BUFFER_ACCESS_FLAG_WRITE,
+      iree_make_byte_span(origins.data(), sizeof(origins)),
+      iree_vm_buffer_release_callback_null(), allocator, &buffers[1]));
+  for (int count = 1; count <= 16; ++count) {
+    auto expected = origins;
+    for (int i = 0; i < count; ++i) {
+      const int row = 15 - i;
+      const uint64_t read = (uint64_t{1} << 33) + count * 1024;
+      const uint64_t write = i % 2 ? read : read + (row + 1) * 8192;
+      const uint64_t position = 127 + count;
+      bindings[i * 4] = row;
+      bindings[i * 4 + 1] = expected[row * 4] = read;
+      bindings[i * 4 + 2] = expected[row * 4 + 1] = write;
+      bindings[i * 4 + 3] = expected[row * 4 + 3] = position;
+    }
+    iree_vm_variant_t arguments[] = {Buffer(0), iree_vm_variant_from_i32(count),
+                                     Buffer(1)};
+    const auto allocation_count = counting_allocator.allocation_count();
+    const auto free_count = counting_allocator.free_count();
+    iree_status_t status =
+        iree_vm_invoke(loom_serve_program_invocation(program), bind_state,
+                       iree_vm_variant_span_from_array(arguments),
+                       iree_vm_variant_span_empty());
+    iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+    IREE_ASSERT_OK(status);
+    EXPECT_EQ(counting_allocator.allocation_count(), allocation_count);
+    EXPECT_EQ(counting_allocator.free_count(), free_count);
+    EXPECT_EQ(origins, expected);
   }
 }
 

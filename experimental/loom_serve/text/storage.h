@@ -52,6 +52,17 @@ typedef struct loom_serve_text_storage_t {
   iree_device_size_t carry_stride;
   // Split between first and second MTP feedback banks, in bytes.
   iree_device_size_t feedback_split;
+  // Recurrent state slots in the state arena, independent of row identity.
+  struct {
+    // Byte origin of the first slot.
+    iree_device_size_t origin;
+    // Byte distance between adjacent slot origins.
+    iree_device_size_t stride;
+    // Bytes initialized and retained for one slot.
+    iree_device_size_t length;
+    // Number of independently owned slots.
+    uint32_t capacity;
+  } recurrent;
   // Owned source-declared cache plane groups.
   loom_serve_text_cache_region_t* regions;
   // Number of validated cache plane groups.
