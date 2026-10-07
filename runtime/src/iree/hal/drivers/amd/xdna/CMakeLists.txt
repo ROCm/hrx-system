@@ -88,6 +88,50 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    memory_backend
+  HDRS
+    "memory_backend.h"
+  SRCS
+    "memory_backend.c"
+  DEPS
+    ::context
+    ::slab_provider
+    amdf::headers
+    iree::base
+    iree::base::internal
+    iree::hal
+    iree::hal::drivers::amd::status
+    iree::hal::memory::maintenance
+    iree::hal::memory::passthrough_pool
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    memory_backend_test
+  SRCS
+    "memory_backend_test.cc"
+  DEPS
+    ::memory_backend
+    amdf::headers
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::memory::maintenance_thread
+    iree::hal::testing::mock_device
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     semaphore
   HDRS
     "semaphore.h"

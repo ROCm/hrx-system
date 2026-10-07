@@ -70,6 +70,40 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "memory_backend",
+    srcs = ["memory_backend.c"],
+    hdrs = ["memory_backend.h"],
+    deps = [
+        ":context",
+        ":slab_provider",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/drivers/amd:status",
+        "//runtime/src/iree/hal/memory:maintenance",
+        "//runtime/src/iree/hal/memory:passthrough_pool",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "memory_backend_test",
+    srcs = ["memory_backend_test.cc"],
+    deps = [
+        ":memory_backend",
+        "//libamdf:headers",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:maintenance_thread",
+        "//runtime/src/iree/hal/testing:mock_device",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "semaphore",
     srcs = ["semaphore.c"],
     hdrs = ["semaphore.h"],
