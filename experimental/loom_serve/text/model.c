@@ -817,12 +817,21 @@ iree_host_size_t loom_serve_text_model_checkpoint_capacity(
 
 loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model) {
-  return (loom_serve_text_pool_usage_t){
+  loom_serve_text_pool_usage_t usage = {
       .block_size = model->state.storage.block_size,
       .capacity = model->state.cache.capacity,
       .available = (iree_host_size_t)model->state.cache.pool.available *
                    model->state.storage.block_size,
   };
+  for (iree_host_size_t i = 0; usage.capacity && i < model->row_count; ++i) {
+    const loom_serve_text_state_row_t* row = &model->state.rows[i];
+    if (row->reserved_extent) {
+      const iree_host_size_t live =
+          (row->position + usage.block_size - 1) / usage.block_size;
+      usage.pending += (row->block_count - live) * usage.block_size;
+    }
+  }
+  return usage;
 }
 
 iree_host_size_t loom_serve_text_row_pool_usage(
@@ -875,7 +884,11 @@ iree_status_t loom_serve_text_model_trim(
 }
 
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row) {
+  const bool reserved = row->state->reserved_extent != 0;
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_reset(row->state));
+  if (reserved) {
+    loom_serve_residency_release(row->model->residency);
+  }
   row->has_prediction = false;
   memset(&row->transfer, 0, sizeof(row->transfer));
   memset(&row->metrics, 0, sizeof(row->metrics));
@@ -888,6 +901,10 @@ iree_host_size_t loom_serve_text_row_suspended_bytes(
 }
 
 iree_status_t loom_serve_text_row_suspend(loom_serve_text_row_t* row) {
+  if (row->state->reserved_extent) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot suspend an active request reservation");
+  }
   return loom_serve_text_state_row_suspend(row->state);
 }
 
@@ -899,9 +916,11 @@ iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
 iree_status_t loom_serve_text_row_try_pin(
     loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint) {
   *out_checkpoint = NULL;
-  if (!row->state->position || row->state->snapshot) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "checkpoint requires a nonempty resident row");
+  if (!row->state->position || row->state->snapshot ||
+      row->state->reserved_extent) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "checkpoint requires an idle nonempty resident row");
   }
   loom_serve_text_state_checkpoint_t* state = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_try_pin(row->state, &state));
@@ -928,6 +947,10 @@ iree_status_t loom_serve_text_row_try_restore(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "checkpoint belongs to a different model");
   }
+  if (row->state->reserved_extent) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "cannot replace an active request reservation");
+  }
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_try_restore(
       row->state, checkpoint->state, out_restored));
   if (*out_restored) {
@@ -939,6 +962,68 @@ iree_status_t loom_serve_text_row_try_restore(
                                 checkpoint->token == row->model->eos_token;
   }
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_row_try_reserve(
+    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_admitted) {
+  *out_admitted = false;
+  const iree_host_size_t block_size = row->model->state.storage.block_size;
+  const iree_host_size_t maximum =
+      ((row->model->context_capacity + block_size - 1) / block_size) *
+      block_size;
+  if ((mode != LOOM_SERVE_TEXT_RESERVE_FRESH &&
+       mode != LOOM_SERVE_TEXT_RESERVE_CONTINUE &&
+       mode != LOOM_SERVE_TEXT_RESERVE_CHECKPOINT) ||
+      ((checkpoint != NULL) != (mode == LOOM_SERVE_TEXT_RESERVE_CHECKPOINT)) ||
+      (checkpoint && checkpoint->model != row->model) || !extent ||
+      extent > maximum ||
+      (checkpoint && extent < checkpoint->state->position) ||
+      (mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE &&
+       extent < row->state->position)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "invalid text completion reservation");
+  }
+  if (row->state->reserved_extent ||
+      (mode == LOOM_SERVE_TEXT_RESERVE_CONTINUE && row->state->snapshot)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "reservation requires an idle resident frontier");
+  }
+  bool pinned = false;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_residency_try_acquire(row->model->residency, &pinned));
+  if (!pinned) {
+    return iree_ok_status();
+  }
+  iree_status_t status = loom_serve_text_state_row_try_reserve(
+      row->state, mode, checkpoint ? checkpoint->state : NULL, extent,
+      out_admitted);
+  if (iree_status_is_ok(status) && *out_admitted) {
+    if (mode == LOOM_SERVE_TEXT_RESERVE_FRESH) {
+      row->has_prediction = false;
+      memset(&row->transfer, 0, sizeof(row->transfer));
+      memset(&row->metrics, 0, sizeof(row->metrics));
+    } else if (checkpoint) {
+      row->has_prediction = checkpoint->has_prediction;
+      memset(&row->transfer, 0, sizeof(row->transfer));
+      row->transfer.tokens[0] = checkpoint->token;
+      row->transfer.progress[0] = checkpoint->has_prediction;
+      row->transfer.progress[7] = checkpoint->has_prediction &&
+                                  checkpoint->token == row->model->eos_token;
+    }
+  } else {
+    status = loom_serve_residency_finish(row->model->residency, status);
+  }
+  return status;
+}
+
+void loom_serve_text_row_release_reservation(loom_serve_text_row_t* row) {
+  if (!row->state->reserved_extent) {
+    return;
+  }
+  loom_serve_text_state_row_release_reservation(row->state);
+  loom_serve_residency_release(row->model->residency);
 }
 
 void loom_serve_text_checkpoint_release(
@@ -1250,6 +1335,15 @@ static iree_status_t text_epoch(
   }
 
   uint32_t required_blocks = 0;
+  for (iree_host_size_t i = 0; i < span_count; ++i) {
+    const loom_serve_text_state_row_t* row =
+        model->rows[spans[i].row_index].state;
+    if (row->reserved_extent &&
+        extents[i] > row->reserved_extent - row->position) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "epoch exceeds request completion reservation");
+    }
+  }
   for (iree_host_size_t i = 0; model->state.cache.capacity && i < span_count;
        ++i) {
     const loom_serve_text_row_t* row = &model->rows[spans[i].row_index];
@@ -1429,9 +1523,11 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
                                           const int32_t* token_ids) {
   loom_serve_text_model_t* model = row->model;
   if (!count || count > model->prefill_capacity ||
-      count > model->context_capacity - row->state->position) {
+      count > model->context_capacity - row->state->position ||
+      (row->state->reserved_extent &&
+       count > row->state->reserved_extent - row->state->position)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "prefill chunk exceeds stage or context capacity");
+                            "prefill exceeds stage, context or reservation");
   }
   const iree_time_t start = iree_time_now();
   if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
@@ -1494,6 +1590,11 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
   if (row->state->position == row->model->context_capacity) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "text context is full");
+  }
+  if (row->state->reserved_extent &&
+      row->state->position == row->state->reserved_extent) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "decode exceeds request completion reservation");
   }
   const iree_time_t start = iree_time_now();
   if (iree_any_bit_set(row->model->state.flags,

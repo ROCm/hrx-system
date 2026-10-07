@@ -125,9 +125,11 @@ All elastic model reservations charge the same device physical budget;
 `--memory_bytes` excludes workspace until it uses a shared queue pool. The
 synchronous model APIs report capacity denial as an execution error. Scheduling
 across models can use the non-error admission result before invoking them;
-the HTTP tools still each host one model. Pooled text growth retains its logical
-completion-reservation policy; physical allocation failure during that growth
-is terminal, not an implicit offload or retry protocol.
+the HTTP tools still each host one model. Text HTTP admission additionally pins
+parameters for the request and backs its full completion high-water, recurrent
+writer and private state before opening SSE. Budget denial queues or refuses
+without replacing the selected history. Platform allocation/IO failures remain
+terminal, not an implicit offload or retry protocol.
 
 Qwen selects a preparation command that permutes FFN gate/up Q5 blocks
 in place into eight-channel groups; all other tensors retain their checkpoint
@@ -173,8 +175,10 @@ of active row capacity. Source reserves optional writer headroom and carry;
 elastic backing commits only used ranges. See [text](../text/README.md#explicit-shared-endpoints)
 for the pin/restore/release contract and real-model witness.
 
-At a completed maintenance cut, `model_trim` compacts live blocks, updates all
-row maps, and releases slabs containing no retained range. It uses the same
+At a completed maintenance cut, `model_trim` releases dead slabs and admits the
+whole temporary relocation union before copying. When that union cannot fit,
+live sparse maps remain valid without movement. Successful compaction updates
+all row maps and releases old backing. It uses the same
 exported, release-tracked roots as model commands; the underlying virtual
 reservation supplies commit/unmap authority, not a separate queue lifetime.
 
@@ -230,11 +234,16 @@ File-backed images still require a storage-route consumer.
 Before scheduling, `text_enqueue` validates a bounded request without assigning
 a device row. `text_admit_pending` selects an idle row for the oldest request,
 prepares its actual retained append, and reserves page-rounded completion and
-speculative capacity. It charges unique resident pages plus remaining growth,
-including shared partial-tail COW. Idle rows may yield in LRU order under
-pressure, while explicit pins and active completion credit remain protected.
-Physical pages are assigned as epochs grow. A completed response gives back
-unused growth credit before network output finishes draining.
+speculative capacity through `row_try_reserve`. Native state owns the exact page
+IDs and source-defined physical slab union, including recurrent reader/writer,
+partial-tail COW and target/draft high-water. The request holds a parameter pin
+through inference. Idle rows may yield in LRU order under pressure; selected
+history survives refusal and active reservations cannot be evicted. All backing
+is admitted before SSE, so epochs consume their reservation without allocation.
+A completed response gives back unused pages and its pin before network output
+finishes draining. The reserved extent is the requested turn, not the model's
+context ceiling. Bare epoch callers can still grow on demand without retaining
+request-level credit, accepting capacity failure at their invocation boundary.
 
 Pending requests borrow HTTP payloads until admission, rejection, cancellation,
 or shutdown. Connection and body-byte budgets belong to transport; pending

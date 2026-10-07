@@ -65,9 +65,11 @@ speculation. It is not an arbitrary model-graph interpreter.
   `--mtp`; merely declaring MTP does not implement it.
 * `--continuation_epochs=2` pre-issues a second device-fed cohort. The host
   still joins each cohort; this is not an autonomous persistent device loop.
-* Pooled execution reserves stable device addresses at startup and backs
-  row/page ranges on demand. Admission reserves completion high-water credit
-  and queues excess work, counting shared explicit prefixes only once.
+* Pooled execution reserves stable device addresses at startup. HTTP admission
+  backs each request's page-rounded completion high-water, including speculative
+  slack and its recurrent writer, while pinning the required parameters. This
+  is the turn's requested extent, not the session's entire context ceiling.
+  Shared explicit prefixes count once; excess work queues or refuses before SSE.
   Explicit model-level suspend/resume is described below; HTTP admission does
   not yet select sessions for offload. Fixed backing remains an explicit
   comparison and device-sanitizer configuration.
@@ -182,8 +184,10 @@ checks real target/MTP continuation across compaction and parameter eviction.
 on one device. A physical budget below their combined weight extent exercises
 reuse of returned backing rather than simultaneous residency.
 
-`loom_serve_text_model_trim` compacts owned blocks into a live ID prefix and
-returns empty physical slabs. Source regions drive bounded device-copy batches;
+`loom_serve_text_model_trim` returns empty physical slabs, then compacts owned
+blocks when the complete temporary destination union fits the budget. Otherwise
+the live sparse map stays usable without turning maintenance into an execution
+failure. Source regions drive bounded device-copy batches;
 KV never reads back to the host. Copies retire before host and device maps
 change, and map uploads retire before old backing is unmapped. Live recurrent
 state and partially occupied slabs stay backed. Reset rows release their private
@@ -192,10 +196,10 @@ does not evict live history, rebuild commands, or change virtual addresses.
 Its result separates relocated blocks, copied bytes, and physically released
 bytes. The real-weight `models/qwen:epoch_check --trim` witness compares an
 uncompacted continuation, including MTP, then checks full trim and regrowth.
-The HTTP service coalesces evicted and cancelled rows into one maintenance cut
-before the next cohort. `state_trim` JSONL records expose the copied/released
-bytes and elapsed maintenance time. Active and retained idle histories survive;
-normal epochs without ownership loss do not perform this maintenance.
+The HTTP service reclaims evicted/cancelled rows and unused completion credit
+at admission/completed-cohort boundaries. `state_trim` JSONL records expose
+copied/released bytes and elapsed maintenance time. Active and retained idle
+histories survive; normal epochs without ownership loss skip this maintenance.
 
 `loom_serve_text_row_suspend` captures a completed row's private state, MTP carry
 and logical-order target/draft blocks into one host-owned DRAM image before
@@ -248,14 +252,25 @@ zero final mutable commitment. It requires elastic backing. The HTTP controls
 below expose explicit suspension; no automatic eviction policy or disk image
 format is implied.
 
-A restored branch initially owns no private recurrent destination. Its first
-advance acquires one and the model kernels read the anchor directly. The source
-fork frontier switches subsequent queued epochs to the writer without a host
+A bare `row_try_restore` initially owns no private recurrent destination. Its
+first advance acquires one and the model kernels read the anchor directly. The
+source fork frontier switches subsequent queued epochs to the writer without a host
 wait. A shared partial KV tail gets one private page copied across all declared
 target/draft planes before append. Other prefix pages remain shared. Old readers
 and COW sources retire at the existing completed-cohort boundary, never during
 cohort assembly. Ordinary decode examines the current state and last page;
 it does not walk or retain the whole prefix per token.
+
+Request-level callers use `row_try_reserve` with a fresh, continued or checkpoint
+frontier and the turn's completion high-water. It acquires exact page IDs and a
+private recurrent writer, admits all their slabs beside pinned parameters,
+and only then replaces the selected row. Epochs consume those already-backed
+pages without growing physical commitment. `row_release_reservation` returns
+unused pages and the parameter pin while retaining the consumed frontier; even
+a fork cancelled before its first epoch remains valid. Reset also releases a
+reservation. The source/kernel ABI is unchanged. This reserve policy commits
+the full requested turn at admission; demand growth across turns remains
+independent of the model's maximum context, and overcommit is not enabled.
 
 Pin capacity refusal returns a null handle without changing the row. Restore
 admits missing private slabs before replacing a continuation and returns
@@ -312,19 +327,21 @@ output, generate a summary, restore with summary-only history, then release
 the pin without keeping hidden history. These endpoints mark completed turns;
 they do not invent intermediate system/message snapshots inside a traversal.
 
-Admission counts unique resident pages once plus remaining active completion
-growth, including partial-tail detachment and speculative credit. The JSONL
-`pool.reserved_tokens` is additional growth; `pool.resident_tokens` is unique
-residency including explicit pins. Their sum stays within logical capacity.
+Admission counts unique resident pages once plus assigned active completion
+pages, including partial-tail detachment and speculative credit. The JSONL
+`pool.reserved_tokens` counts owned positions beyond consumed frontiers;
+`pool.resident_tokens` is unique consumed residency including explicit pins.
+Both have physical backing and their sum stays within logical capacity.
 Idle cache can be evicted under pressure. Pins are never automatically evicted;
 if pins make a request impossible even without active work, it returns `503`
 with a release/increase-capacity diagnostic instead of waiting indefinitely.
 Rejected replacement preserves the selected continuation. Other idle session
 caches may be reclaimed while admission evaluates a request, even if it cannot
 ultimately fit; their independent explicit pins remain usable.
-Cold restore charges the missing prefix pages as well as future growth and
-the shared partial tail. Free IDs must fit that prefix before the selected
-row can be replaced; its later reclamation cannot fund unsafe early reuse.
+Cold request admission includes the missing prefix, private writer, future
+pages and shared partial tail. It can tentatively retain the selected row's
+private IDs for reuse, but changes no contents until the entire physical union
+is admitted. Denial releases only tentative references, preserving both owners.
 Physical restore refusal also returns `503` without replacing the destination
 continuation. Heartbeat `checkpoint_host_bytes` accounts for cold payloads
 separately from the device pool. Admission events report `restored_bytes` when
