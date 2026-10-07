@@ -28,15 +28,18 @@ typedef struct loom_serve_block_region_t {
 } loom_serve_block_region_t;
 
 // Commits destinations and queues copies on the execution dependency chain.
-// The map has block_count entries: UINT32_MAX denotes an unowned source;
-// otherwise the entry names its destination. Moved destinations are unowned
-// and disjoint from every source. No logical owner changes here. The caller
-// excludes model work, drains accepted copies even on failure, then publishes
-// new logical maps before reclaiming old storage. Host metadata is captured
-// before return. out_copied_bytes counts successfully submitted copy bytes.
-// reservation owns physical commitment; buffer is its whole exported view,
-// including the caller's retirement tracking. Copies retain that exact view,
-// not the reservation's raw root, through terminal queue completion.
+// The map has block_count entries: UINT32_MAX omits a source whose contents
+// need not survive; otherwise the entry names its destination. Moved
+// destinations have no live contents and are disjoint from every preserved
+// source. Logical ownership and backing for reserved-but-unwritten pages stay
+// with the caller, independently of this payload-only map. No logical owner
+// changes here. The caller excludes model work, drains accepted copies even on
+// failure, then publishes new logical maps before reclaiming old storage. Host
+// metadata is captured before return. out_copied_bytes counts successfully
+// submitted copy bytes. reservation owns physical commitment; buffer is its
+// whole exported view, including the caller's retirement tracking. Copies
+// retain that exact view, not the reservation's raw root, through terminal
+// queue completion.
 iree_status_t loom_serve_block_region_relocate(
     loom_serve_execution_t* execution, loom_serve_virtual_buffer_t* reservation,
     iree_hal_buffer_t* buffer, const loom_serve_block_region_t* region,

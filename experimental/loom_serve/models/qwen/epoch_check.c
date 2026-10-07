@@ -1329,13 +1329,14 @@ static iree_status_t qwen_check_checkpoint_suspension(
 
 static iree_status_t qwen_check_reserved_relocation(
     loom_serve_text_model_t* model, const int32_t* input,
-    iree_host_size_t position) {
+    iree_host_size_t position, iree_host_size_t extent,
+    uint64_t* out_copied_bytes) {
   loom_serve_text_row_t* filler = loom_serve_text_model_row(model, 0);
   loom_serve_text_row_t* survivor = loom_serve_text_model_row(model, 1);
   loom_serve_text_row_t* reference = loom_serve_text_model_row(model, 7);
   bool admitted = false;
   IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
-      filler, LOOM_SERVE_TEXT_RESERVE_FRESH, NULL, 512, &admitted));
+      filler, LOOM_SERVE_TEXT_RESERVE_FRESH, NULL, extent, &admitted));
   if (!admitted) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "filler reservation refused");
@@ -1345,7 +1346,7 @@ static iree_status_t qwen_check_reserved_relocation(
   loom_serve_text_trim_result_t trimmed;
   IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
   IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
-      survivor, LOOM_SERVE_TEXT_RESERVE_FRESH, NULL, 512, &admitted));
+      survivor, LOOM_SERVE_TEXT_RESERVE_FRESH, NULL, extent, &admitted));
   if (!admitted) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "survivor reservation refused");
@@ -1361,20 +1362,22 @@ static iree_status_t qwen_check_reserved_relocation(
       loom_serve_text_model_pool_usage(model);
   const iree_host_size_t consumed =
       ((position + pool.block_size - 1) / pool.block_size) * pool.block_size;
-  if (pool.available != pool.capacity - 512 || pool.pending != 512 - consumed ||
+  if (pool.available != pool.capacity - extent ||
+      pool.pending != extent - consumed ||
       loom_serve_text_row_position(survivor) != position ||
       (memory.reserved_bytes &&
-       trimmed.moved_blocks != 512 / pool.block_size)) {
+       trimmed.moved_blocks != extent / pool.block_size)) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "compaction changed reserved page ownership");
   }
   fprintf(
       stderr,
       "{\"event\":\"reservation_relocated\",\"position\":%zu,"
-      "\"reserved_tokens\":512,\"moved_blocks\":%u,\"copied_bytes\":%" PRIu64
+      "\"reserved_tokens\":%zu,\"moved_blocks\":%u,\"copied_bytes\":%" PRIu64
       ",\"committed_bytes\":%" PRIu64 "}\n",
-      position, trimmed.moved_blocks, trimmed.copied_bytes,
+      position, extent, trimmed.moved_blocks, trimmed.copied_bytes,
       memory.committed_bytes);
+  *out_copied_bytes = trimmed.copied_bytes;
   // Cross from retained KV into a relocated, previously unwritten page while
   // keeping the completion reservation. No new backing may be needed.
   IREE_RETURN_IF_ERROR(
@@ -1509,8 +1512,17 @@ static iree_status_t qwen_check_reservations(loom_serve_text_model_t* model,
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "request reservations leaked retained backing");
   }
-  IREE_RETURN_IF_ERROR(qwen_check_reserved_relocation(model, input, 0));
-  IREE_RETURN_IF_ERROR(qwen_check_reserved_relocation(model, input, 127));
+  uint64_t empty_bytes = 0, short_bytes = 0, long_bytes = 0;
+  IREE_RETURN_IF_ERROR(
+      qwen_check_reserved_relocation(model, input, 0, 512, &empty_bytes));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_reserved_relocation(model, input, 127, 192, &short_bytes));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_reserved_relocation(model, input, 127, 512, &long_bytes));
+  if (empty_bytes || short_bytes != long_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "compaction copied unconsumed completion credit");
+  }
   if (loom_serve_text_model_weight_statistics(model).reserved_bytes) {
     IREE_RETURN_IF_ERROR(loom_serve_text_model_deactivate(model));
   }
@@ -1609,12 +1621,19 @@ static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(
       loom_serve_text_row_reset(loom_serve_text_model_row(model, 0)));
   IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(source));
+  // The pin alone must preserve this prefix while its physical pages move.
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_reset(loom_serve_text_model_row(model, 1)));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_reset(loom_serve_text_model_row(model, 3)));
   IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
   if (loom_serve_text_model_memory_statistics(model).reserved_bytes &&
       !trimmed.moved_blocks) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "shared prefix did not relocate");
   }
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 3, checkpoint));
   IREE_RETURN_IF_ERROR(qwen_check_restore(model, 2, checkpoint));
   const bool elastic =
       loom_serve_text_model_memory_statistics(model).reserved_bytes != 0;

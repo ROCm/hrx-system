@@ -188,11 +188,14 @@ reuse of returned backing rather than simultaneous residency.
 blocks when the complete temporary destination union fits the budget. Otherwise
 the live sparse map stays usable without turning maintenance into an execution
 failure. Source regions drive bounded device-copy batches;
-KV never reads back to the host. Copies retire before host and device maps
-change, and map uploads retire before old backing is unmapped. Live recurrent
-state and partially occupied slabs stay backed. Reset rows release their private
-backing at this maintenance cut and initialize again on reuse. The operation
-does not evict live history, rebuild commands, or change virtual addresses.
+KV never reads back to the host. Only consumed pages and resident checkpoint
+pages carry payload to copy, including partial tails. Unwritten completion
+credit still relocates with fully backed destinations but no content transfer.
+Copies retire before host and device maps change, and map uploads retire before
+old backing is unmapped. Live recurrent state and partially occupied slabs stay
+backed. Reset rows release their private backing at this maintenance cut and
+initialize again on reuse. The operation does not evict live history, rebuild
+commands, or change virtual addresses.
 Its result separates relocated blocks, copied bytes, and physically released
 bytes. The real-weight `models/qwen:epoch_check --trim` witness compares an
 uncompacted continuation, including MTP, then checks full trim and regrowth.
