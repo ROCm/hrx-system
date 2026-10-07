@@ -132,6 +132,8 @@ typedef struct text_heartbeat_snapshot_t {
     // Unique resident positions, including idle rows and explicit pins.
     iree_host_size_t resident;
   } pool;
+  // Host payload owned by explicitly suspended endpoints, not device backing.
+  iree_host_size_t checkpoint_host_bytes;
   // Elastic mutable-state backing; weights and transient workspace are
   // separate.
   loom_serve_memory_statistics_t state_memory;
@@ -242,6 +244,8 @@ typedef struct text_service_t {
     text_checkpoint_t* values;
     // Record count, equal to the native model's configured pin capacity.
     iree_host_size_t capacity;
+    // Sum of cold native endpoint payloads, updated only at ownership changes.
+    iree_host_size_t host_bytes;
   } checkpoints;
   // Shared JSON/SSE serialization scratch, copied into a row packet or carrier.
   iree_string_builder_t scratch;
@@ -284,6 +288,7 @@ static int text_heartbeat_main(void* argument) {
         "\"since_completion_ms\":%.3f,\"active_rows\":%zu,"
         "\"queued_requests\":%zu,\"pool\":{\"capacity_tokens\":%zu,"
         "\"reserved_tokens\":%zu,\"resident_tokens\":%zu},"
+        "\"checkpoint_host_bytes\":%zu,"
         "\"elastic_state\":{\"reserved_bytes\":%" PRIu64
         ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
         ",\"released_bytes\":%" PRIu64
@@ -306,16 +311,16 @@ static int text_heartbeat_main(void* argument) {
         state.phase, (now - state.phase_start) / 1e6,
         (now - state.last_completion) / 1e6, state.active_rows,
         state.queued_requests, state.pool.capacity, state.pool.reserved,
-        state.pool.resident, state.state_memory.reserved_bytes,
-        state.state_memory.committed_bytes, state.state_memory.peak_bytes,
-        state.state_memory.released_bytes, state.weight_memory.reserved_bytes,
-        state.weight_memory.committed_bytes, state.weight_memory.peak_bytes,
-        state.weight_memory.released_bytes, state.prefill_rows,
-        state.decode_rows, state.backpressured_rows, state.issued_epochs,
-        state.completed_epochs, state.traversals, state.prefill_tokens,
-        state.decode_tokens, state.output_tokens, state.model_duration / 1e6,
-        state.epoch_spans, state.epoch_tokens, state.mtp.proposed_tokens,
-        state.mtp.accepted_inputs,
+        state.pool.resident, state.checkpoint_host_bytes,
+        state.state_memory.reserved_bytes, state.state_memory.committed_bytes,
+        state.state_memory.peak_bytes, state.state_memory.released_bytes,
+        state.weight_memory.reserved_bytes, state.weight_memory.committed_bytes,
+        state.weight_memory.peak_bytes, state.weight_memory.released_bytes,
+        state.prefill_rows, state.decode_rows, state.backpressured_rows,
+        state.issued_epochs, state.completed_epochs, state.traversals,
+        state.prefill_tokens, state.decode_tokens, state.output_tokens,
+        state.model_duration / 1e6, state.epoch_spans, state.epoch_tokens,
+        state.mtp.proposed_tokens, state.mtp.accepted_inputs,
         seconds > 0 ? (state.prefill_tokens - previous_prefill) / seconds : 0,
         seconds > 0 ? (state.output_tokens - previous_output) / seconds : 0);
     previous_time = now;
@@ -358,6 +363,7 @@ static void text_observe(text_service_t* service, const char* phase) {
   state->pool.capacity = pool.capacity;
   state->pool.reserved = text_future_growth(service);
   state->pool.resident = pool.capacity - pool.available;
+  state->checkpoint_host_bytes = service->checkpoints.host_bytes;
   state->state_memory = loom_serve_text_model_memory_statistics(service->model);
   state->weight_memory =
       loom_serve_text_model_weight_statistics(service->model);
@@ -526,17 +532,20 @@ static text_checkpoint_t* text_checkpoint_find(text_service_t* service,
 static iree_status_t text_checkpoint_request(
     text_service_t* service, loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request, iree_string_view_t name) {
-  const bool create = iree_string_view_equal(request->method, IREE_SV("POST"));
+  const bool suspend =
+      iree_string_view_consume_suffix(&name, IREE_SV("/suspend"));
+  const bool post = iree_string_view_equal(request->method, IREE_SV("POST"));
+  const bool create = post && !suspend;
   const bool release =
-      iree_string_view_equal(request->method, IREE_SV("DELETE"));
-  if ((!create && !release) || !name.size || !text_session_name_valid(name) ||
-      request->body.size) {
+      !suspend && iree_string_view_equal(request->method, IREE_SV("DELETE"));
+  if ((!create && !release && !(suspend && post)) || !name.size ||
+      !text_session_name_valid(name) || request->body.size) {
     return text_reject(
         service, connection, 400, "Bad Request",
-        iree_make_status(
-            IREE_STATUS_INVALID_ARGUMENT,
-            "use POST or DELETE /v1/checkpoints/NAME with an empty body; "
-            "NAME is 1-64 ASCII identifier characters"));
+        iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                         "use POST/DELETE /v1/checkpoints/NAME or POST "
+                         "/v1/checkpoints/NAME/suspend with an empty body; "
+                         "NAME is 1-64 ASCII identifier characters"));
   }
   text_checkpoint_t* checkpoint = text_checkpoint_find(service, name);
   if (create && checkpoint) {
@@ -544,7 +553,7 @@ static iree_status_t text_checkpoint_request(
                        iree_make_status(IREE_STATUS_ALREADY_EXISTS,
                                         "checkpoint name is already pinned"));
   }
-  if (release && !checkpoint) {
+  if (!create && !checkpoint) {
     return text_reject(
         service, connection, 404, "Not Found",
         iree_make_status(IREE_STATUS_NOT_FOUND, "checkpoint is not pinned"));
@@ -619,25 +628,54 @@ static iree_status_t text_checkpoint_request(
                                : LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN;
   }
   const iree_host_size_t position = checkpoint->position;
+  iree_host_size_t host_bytes =
+      loom_serve_text_checkpoint_suspended_bytes(checkpoint->state);
+  if (suspend) {
+    if (!loom_serve_text_model_memory_statistics(service->model)
+             .reserved_bytes) {
+      return text_reject(
+          service, connection, 400, "Bad Request",
+          iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                           "checkpoint suspension requires elastic backing"));
+    }
+    text_observe(service, "checkpoint_suspend");
+    iree_status_t status =
+        loom_serve_text_checkpoint_suspend(checkpoint->state);
+    if (!iree_status_is_ok(status)) {
+      loom_serve_http_connection_abort(connection);
+      return status;
+    }
+    const iree_host_size_t captured =
+        loom_serve_text_checkpoint_suspended_bytes(checkpoint->state);
+    service->checkpoints.host_bytes += captured - host_bytes;
+    host_bytes = captured;
+  }
   if (release) {
+    service->checkpoints.host_bytes -= host_bytes;
+    host_bytes = 0;
     loom_serve_text_checkpoint_release(checkpoint->state);
     loom_serve_text_chat_completion_deinitialize(&checkpoint->completion);
     memset(checkpoint, 0, sizeof(*checkpoint));
-    service->pool.trim_pending = true;
-    service->pending.changed = true;
   }
-  fprintf(stderr,
-          "{\"event\":\"checkpoint_%s\",\"checkpoint\":\"%.*s\",\"position\":%"
-          "zu}\n",
-          create ? "pin" : "release", (int)name.size, name.data, position);
+  service->pool.trim_pending |= suspend || release;
+  service->pending.changed |= suspend || release;
+  fprintf(
+      stderr,
+      "{\"event\":\"checkpoint_%s\",\"checkpoint\":\"%.*s\",\"position\":%zu,"
+      "\"host_snapshot_bytes\":%zu}\n",
+      create    ? "pin"
+      : suspend ? "suspend"
+                : "release",
+      (int)name.size, name.data, position, host_bytes);
   iree_string_builder_reset(&service->scratch);
   iree_status_t status = iree_string_builder_append_format(
       &service->scratch,
       "HTTP/1.1 %s\r\nContent-Type: application/json\r\nConnection: "
       "close\r\n\r\n"
-      "{\"checkpoint\":\"%.*s\",\"position\":%zu,\"pinned\":%s}",
+      "{\"checkpoint\":\"%.*s\",\"position\":%zu,\"pinned\":%s,"
+      "\"host_snapshot_bytes\":%zu}",
       create ? "201 Created" : "200 OK", (int)name.size, name.data, position,
-      create ? "true" : "false");
+      release ? "false" : "true", host_bytes);
   if (iree_status_is_ok(status)) {
     iree_status_t sent = loom_serve_http_connection_send(
         connection, iree_string_builder_view(&service->scratch));
@@ -770,13 +808,21 @@ static iree_status_t text_reclaim_idle(text_service_t* service,
     return iree_ok_status();
   }
   *out_admitted = false;
+  const iree_host_size_t restore_tokens =
+      checkpoint &&
+              loom_serve_text_checkpoint_suspended_bytes(checkpoint->state)
+          ? ((checkpoint->position + service->pool.geometry.block_size - 1) /
+             service->pool.geometry.block_size) *
+                service->pool.geometry.block_size
+          : 0;
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status)) {
     const loom_serve_text_pool_usage_t pool =
         loom_serve_text_model_pool_usage(service->model);
     const iree_host_size_t growth =
-        checkpoint ? reservation - (checkpoint->position / pool.block_size) *
-                                       pool.block_size
+        checkpoint
+            ? restore_tokens + reservation -
+                  (checkpoint->position / pool.block_size) * pool.block_size
         : retained ? loom_serve_text_row_pool_growth(selected->row, reservation)
                    : reservation;
     const iree_host_size_t reclaimed =
@@ -786,7 +832,9 @@ static iree_status_t text_reclaim_idle(text_service_t* service,
     const iree_host_size_t charged = pool.capacity - pool.available -
                                      reclaimed + text_future_growth(service) +
                                      growth;
-    if (charged <= pool.capacity) {
+    // Replacing the selected row can fund later completion, but cannot fund
+    // warming the immutable endpoint before that replacement is admitted.
+    if (charged <= pool.capacity && restore_tokens <= pool.available) {
       *out_admitted = true;
       break;
     }
@@ -869,7 +917,10 @@ static iree_status_t text_admit_pending(text_service_t* service) {
               "release a checkpoint or increase pool_capacity"));
       continue;
     }
+    iree_host_size_t restored_bytes = 0;
     if (pending->checkpoint) {
+      restored_bytes = loom_serve_text_checkpoint_suspended_bytes(
+          pending->checkpoint->state);
       status = loom_serve_text_row_try_restore(
           session->row, pending->checkpoint->state, &admitted);
       if (iree_status_is_ok(status) && !admitted) {
@@ -878,10 +929,12 @@ static iree_status_t text_admit_pending(text_service_t* service) {
         text_pending_remove(service, 0);
         status = text_reject(
             service, connection, 503, "Service Unavailable",
-            iree_make_status(
-                IREE_STATUS_RESOURCE_EXHAUSTED,
-                "checkpoint restore exceeds physical memory budget"));
+            iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                             "checkpoint restore exceeds available memory"));
         continue;
+      }
+      if (iree_status_is_ok(status)) {
+        service->checkpoints.host_bytes -= restored_bytes;
       }
       service->pool.trim_pending = true;
     } else if (!retained_count && loom_serve_text_row_position(session->row)) {
@@ -930,13 +983,15 @@ static iree_status_t text_admit_pending(text_service_t* service) {
               "{\"event\":\"admit\",\"request\":%" PRIu64
               ",\"session\":\"%s\",\"row\":%zu,\"cache\":\"%s\","
               "\"retained_tokens\":%zu,\"appended_tokens\":%zu,"
+              "\"restored_bytes\":%zu,"
               "\"max_tokens\":%zu,\"reservation_tokens\":%zu,"
               "\"pool_reserved_tokens\":%zu,\"pool_resident_tokens\":%zu,"
               "\"queue_ms\":%.3f}\n",
               session->serial, session->name,
               (iree_host_size_t)(session - service->sessions),
               retained_count ? "hit" : "replay", retained_count, input_count,
-              request.chat.max_tokens, reservation, text_future_growth(service),
+              restored_bytes, request.chat.max_tokens, reservation,
+              text_future_growth(service),
               service->pool.geometry.capacity -
                   loom_serve_text_model_pool_usage(service->model).available,
               session->request.queue_duration / 1e6);

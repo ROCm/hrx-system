@@ -219,8 +219,10 @@ The current HTTP scheduler still reserves complete request credit and discards
 idle cache under pressure. It does not call these suspension APIs automatically.
 Using them for overcommit needs an explicit host-image budget and wake/eviction
 policy. Named HTTP checkpoints separately support shared prefixes and marked
-rewind; independent cold endpoints are available through the native model API,
-while a suspended row image remains tied to its original row.
+rewind; their explicit `/v1/checkpoints/NAME/suspend` control parks an endpoint
+without consuming an active row. Admission warms it on demand while charging
+the missing pages and preserving the selected continuation until it fits.
+A suspended row image, in contrast, remains tied to its original row.
 File-backed images still require a storage-route consumer.
 
 ## One real packed epoch
