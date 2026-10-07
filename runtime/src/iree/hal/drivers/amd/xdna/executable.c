@@ -78,6 +78,54 @@ typedef struct iree_hal_amd_xdna_executable_t {
 
 static const iree_hal_executable_vtable_t iree_hal_amd_xdna_executable_vtable;
 
+static iree_hal_memory_access_t iree_hal_amd_xdna_required_binding_access(
+    iree_xdna_elf_binding_access_t access) {
+  iree_hal_memory_access_t required_access = IREE_HAL_MEMORY_ACCESS_NONE;
+  if (iree_any_bit_set(access, IREE_XDNA_ELF_BINDING_ACCESS_READ)) {
+    required_access |= IREE_HAL_MEMORY_ACCESS_READ;
+  }
+  if (iree_any_bit_set(access, IREE_XDNA_ELF_BINDING_ACCESS_WRITE)) {
+    required_access |= IREE_HAL_MEMORY_ACCESS_WRITE;
+  }
+  return required_access;
+}
+
+static iree_hal_buffer_usage_t iree_hal_amd_xdna_required_binding_usage(
+    iree_xdna_elf_binding_access_t access) {
+  iree_hal_buffer_usage_t required_usage = IREE_HAL_BUFFER_USAGE_NONE;
+  if (iree_any_bit_set(access, IREE_XDNA_ELF_BINDING_ACCESS_READ)) {
+    required_usage |= IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+  }
+  if (iree_any_bit_set(access, IREE_XDNA_ELF_BINDING_ACCESS_WRITE)) {
+    required_usage |= IREE_HAL_BUFFER_USAGE_STORAGE_WRITE;
+  }
+  return required_usage;
+}
+
+static iree_hal_memory_type_t iree_hal_amd_xdna_required_binding_memory_type(
+    const iree_xdna_elf_binding_record_t* contract) {
+  iree_hal_memory_type_t required_memory_type = IREE_HAL_MEMORY_TYPE_NONE;
+  if (iree_any_bit_set(contract->usage,
+                       IREE_XDNA_ELF_BINDING_USAGE_DEVICE_VISIBLE)) {
+    required_memory_type |= IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  }
+  const bool requires_host_visibility =
+      contract->address_space == IREE_XDNA_ELF_BINDING_ADDRESS_SPACE_HOST ||
+      iree_any_bit_set(contract->usage,
+                       IREE_XDNA_ELF_BINDING_USAGE_HOST_VISIBLE);
+  if (requires_host_visibility) {
+    required_memory_type |= IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
+    if (iree_any_bit_set(contract->usage,
+                         IREE_XDNA_ELF_BINDING_USAGE_COHERENT)) {
+      required_memory_type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+    }
+    if (iree_any_bit_set(contract->usage, IREE_XDNA_ELF_BINDING_USAGE_CACHED)) {
+      required_memory_type |= IREE_HAL_MEMORY_TYPE_HOST_CACHED;
+    }
+  }
+  return required_memory_type;
+}
+
 static void iree_hal_amd_xdna_invocation_destroy(
     iree_hal_amd_xdna_invocation_t* invocation) {
   iree_hal_amd_xdna_function_t* function = invocation->function;
@@ -328,6 +376,68 @@ static iree_status_t iree_hal_amd_xdna_executable_lookup(
   return iree_ok_status();
 }
 
+static iree_status_t iree_hal_amd_xdna_executable_capture_binding(
+    iree_hal_amd_xdna_function_t* function,
+    const iree_hal_queue_family_t* family, uint32_t binding_ordinal,
+    const iree_xdna_elf_binding_record_t* contract,
+    iree_hal_buffer_ref_t buffer_ref,
+    iree_hal_amd_xdna_executable_binding_t* out_binding) {
+  *out_binding = (iree_hal_amd_xdna_executable_binding_t){0};
+  if (buffer_ref.reserved != 0 || buffer_ref.buffer_slot != 0 ||
+      !buffer_ref.buffer) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "XDNA binding %u must be a direct non-null buffer reference",
+        binding_ordinal);
+  }
+
+  iree_device_size_t resource_byte_offset = 0;
+  iree_device_size_t resource_byte_length = 0;
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_calculate_range(
+      /*base_offset=*/0, iree_hal_buffer_byte_length(buffer_ref.buffer),
+      buffer_ref.offset, buffer_ref.length, &resource_byte_offset,
+      &resource_byte_length));
+  const iree_hal_buffer_usage_t required_usage =
+      iree_hal_amd_xdna_required_binding_usage(contract->access);
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_family_usage(
+      buffer_ref.buffer, family, required_usage));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_access(
+      iree_hal_buffer_allowed_access(buffer_ref.buffer),
+      iree_hal_amd_xdna_required_binding_access(contract->access)));
+  IREE_RETURN_IF_ERROR(iree_hal_buffer_validate_memory_type(
+      iree_hal_buffer_memory_type(buffer_ref.buffer),
+      iree_hal_amd_xdna_required_binding_memory_type(contract)));
+
+  if (resource_byte_offset < contract->minimum_byte_offset ||
+      resource_byte_offset > contract->maximum_byte_offset) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "XDNA binding %u offset %" PRIu64
+                            " is outside [%" PRIu64 ", %" PRIu64 "]",
+                            binding_ordinal, (uint64_t)resource_byte_offset,
+                            contract->minimum_byte_offset,
+                            contract->maximum_byte_offset);
+  }
+  if (resource_byte_length < contract->minimum_byte_length) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "XDNA binding %u length %" PRIu64
+                            " is smaller than required %" PRIu64,
+                            binding_ordinal, (uint64_t)resource_byte_length,
+                            contract->minimum_byte_length);
+  }
+
+  iree_hal_buffer_native_binding_slot_t slot;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_resolve_binding_slot(
+      function->context, family, buffer_ref.buffer, &slot));
+  buffer_ref.offset = resource_byte_offset;
+  buffer_ref.length = resource_byte_length;
+  *out_binding = (iree_hal_amd_xdna_executable_binding_t){
+      .buffer_ref = buffer_ref,
+      .slot = slot,
+      .byte_length = resource_byte_length,
+  };
+  return iree_ok_status();
+}
+
 iree_status_t iree_hal_amd_xdna_executable_resolve(
     iree_hal_executable_t* executable, iree_hal_executable_function_t token,
     iree_hal_buffer_ref_list_t bindings,
@@ -348,12 +458,53 @@ iree_status_t iree_hal_amd_xdna_executable_resolve(
         iree_hal_amd_xdna_image_tables_binding(
             tables, function->record.first_binding + i);
     out_bindings[i] = (iree_hal_amd_xdna_executable_binding_t){0};
-    if (contract.kind != IREE_XDNA_ELF_BINDING_KIND_NONE) {
-      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_resolve(
-          function->context, bindings.values[i], &out_bindings[i]));
+    if (contract.kind == IREE_XDNA_ELF_BINDING_KIND_NONE) {
+      continue;
     }
+    IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_executable_capture_binding(
+        function, iree_hal_executable_queue_family(executable), i, &contract,
+        bindings.values[i], &out_bindings[i]));
   }
   *out_function = function;
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amd_xdna_function_resolve_binding_addresses(
+    iree_hal_amd_xdna_function_t* function,
+    iree_hal_amd_xdna_executable_binding_t* bindings) {
+  const iree_hal_amd_xdna_image_tables_t* tables =
+      iree_hal_amd_xdna_image_tables(function->image);
+  for (uint32_t i = 0; i < function->record.binding_count; ++i) {
+    const iree_xdna_elf_binding_record_t contract =
+        iree_hal_amd_xdna_image_tables_binding(
+            tables, function->record.first_binding + i);
+    if (contract.kind == IREE_XDNA_ELF_BINDING_KIND_NONE) {
+      continue;
+    }
+    iree_hal_amd_xdna_executable_binding_t* binding = &bindings[i];
+    IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_load_device_address(
+        binding->buffer_ref, binding->slot, &binding->device_address));
+    if ((binding->device_address & (contract.minimum_alignment - 1)) != 0) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "XDNA binding %u device address 0x%" PRIx64
+                              " does not satisfy %" PRIu64 "-byte alignment",
+                              i, binding->device_address,
+                              contract.minimum_alignment);
+    }
+    if (binding->byte_length != 0 &&
+        binding->device_address > UINT64_MAX - (binding->byte_length - 1)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "XDNA binding %u native range overflows", i);
+    }
+  }
+  for (uint32_t i = 0; i < function->record.dynamic_relocation_count; ++i) {
+    const iree_xdna_elf_relocation_record_t relocation =
+        iree_hal_amd_xdna_image_tables_relocation(
+            tables, function->record.first_dynamic_relocation + i);
+    IREE_RETURN_IF_ERROR(
+        iree_hal_amd_xdna_executable_storage_validate_relocation(
+            &relocation, bindings[relocation.source_ordinal].device_address));
+  }
   return iree_ok_status();
 }
 
@@ -371,10 +522,12 @@ void iree_hal_amd_xdna_invocation_release(
 
 iree_status_t iree_hal_amd_xdna_function_prepare(
     iree_hal_amd_xdna_function_t* function,
-    const iree_hal_amd_xdna_executable_binding_t* bindings,
+    iree_hal_amd_xdna_executable_binding_t* bindings,
     iree_hal_amd_xdna_invocation_t** out_invocation,
     amdf_xdna_kernel_command_t* out_command) {
   *out_invocation = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_xdna_function_resolve_binding_addresses(function, bindings));
   iree_slim_mutex_lock(&function->pool_mutex);
   iree_hal_amd_xdna_invocation_t* invocation = function->available;
   if (invocation) {
@@ -389,9 +542,9 @@ iree_status_t iree_hal_amd_xdna_function_prepare(
     function->invocations = invocation;
     iree_slim_mutex_unlock(&function->pool_mutex);
   }
-  iree_status_t status = iree_hal_amd_xdna_executable_storage_bind(
-      function->image, function->ordinal, function->record.allocation_use_count,
-      invocation->storage, function->record.binding_count, bindings);
+  iree_hal_amd_xdna_executable_storage_patch(function->image, function->ordinal,
+                                             invocation->storage, bindings);
+  iree_status_t status = iree_ok_status();
   for (uint32_t i = 0;
        i < function->record.allocation_use_count && iree_status_is_ok(status);
        ++i) {

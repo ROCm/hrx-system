@@ -99,6 +99,9 @@ iree_status_t iree_hal_amd_xdna_memory_allocate(
 typedef struct iree_hal_amd_xdna_buffer_t {
   // Logical HAL allocation and view metadata.
   iree_hal_buffer_t base;
+  // Prepared execution addresses published through base.memory.bindings.
+  iree_hal_buffer_native_binding_t
+      bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_COUNT];
   // Borrowed native device owner.
   iree_hal_amd_xdna_context_t* context;
   // Allocator owning the HAL wrapper.
@@ -108,6 +111,22 @@ typedef struct iree_hal_amd_xdna_buffer_t {
 } iree_hal_amd_xdna_buffer_t;
 
 static const iree_hal_buffer_vtable_t iree_hal_amd_xdna_buffer_vtable;
+
+const iree_hal_buffer_binding_layout_t* iree_hal_amd_xdna_buffer_binding_layout(
+    void) {
+  static const uint16_t types[] = {
+      IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+      IREE_HAL_BUFFER_INTERFACE_HOST,
+  };
+  static const iree_hal_buffer_binding_layout_t layout = {
+      .byte_length = sizeof(iree_hal_buffer_native_binding_t) *
+                     IREE_HAL_AMD_XDNA_BUFFER_BINDING_COUNT,
+      .binding_count = IREE_ARRAYSIZE(types),
+      .host_binding_index = IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST,
+      .types = types,
+  };
+  return &layout;
+}
 
 static void iree_hal_amd_xdna_buffer_destroy(iree_hal_buffer_t* base_buffer) {
   iree_hal_amd_xdna_buffer_t* buffer = (iree_hal_amd_xdna_buffer_t*)base_buffer;
@@ -163,36 +182,78 @@ static iree_status_t iree_hal_amd_xdna_buffer_export_range(
                           "XDNA buffer export is not supported");
 }
 
-iree_status_t iree_hal_amd_xdna_buffer_resolve(
-    iree_hal_amd_xdna_context_t* context, iree_hal_buffer_ref_t buffer_ref,
-    iree_hal_amd_xdna_executable_binding_t* out_binding) {
-  iree_hal_buffer_t* allocation =
-      buffer_ref.buffer ? iree_hal_buffer_allocated_buffer(buffer_ref.buffer)
-                        : NULL;
-  if (!allocation || !iree_hal_resource_is((iree_hal_resource_t*)allocation,
-                                           &iree_hal_amd_xdna_buffer_vtable)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "XDNA dispatch requires prepared native buffers");
+iree_status_t iree_hal_amd_xdna_buffer_resolve_binding_slot(
+    iree_hal_amd_xdna_context_t* context, const iree_hal_queue_family_t* family,
+    const iree_hal_buffer_t* buffer,
+    iree_hal_buffer_native_binding_slot_t* out_slot) {
+  *out_slot = (iree_hal_buffer_native_binding_slot_t){
+      .index = IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE,
+  };
+  const iree_hal_memory_contract_t* contract = buffer->memory.contract;
+  if (contract) {
+    const uint64_t program_scope_id =
+        (uint64_t)family->memory.queue_scope_id + 1;
+    if (!family->memory.domain || family->memory.domain != contract->domain ||
+        program_scope_id >= contract->scope_count) {
+      return iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "XDNA program family is outside the buffer memory scope");
+    }
+    const iree_hal_memory_scope_access_t* access =
+        &contract->scopes[program_scope_id];
+    const uint32_t interface_bit = UINT32_C(1)
+                                   << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA;
+    const uint16_t index =
+        access->bindings[IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA];
+    if (!iree_any_bit_set(access->interfaces, interface_bit) ||
+        index == IREE_HAL_BUFFER_NATIVE_BINDING_INDEX_NONE) {
+      return iree_make_status(
+          IREE_STATUS_PERMISSION_DENIED,
+          "XDNA shim DMA access is not prepared for this program family");
+    }
+    *out_slot = (iree_hal_buffer_native_binding_slot_t){
+        .index = index,
+        .type = IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+    };
+    return iree_ok_status();
   }
-  iree_hal_amd_xdna_buffer_t* buffer = (iree_hal_amd_xdna_buffer_t*)allocation;
-  if (buffer->context != context) {
+
+  iree_hal_buffer_t* allocation = iree_hal_buffer_allocated_buffer(buffer);
+  if (!iree_hal_resource_is((iree_hal_resource_t*)allocation,
+                            &iree_hal_amd_xdna_buffer_vtable)) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "XDNA dispatch requires a prepared shim DMA buffer binding");
+  }
+  const iree_hal_amd_xdna_buffer_t* native_buffer =
+      (const iree_hal_amd_xdna_buffer_t*)allocation;
+  if (native_buffer->context != context) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "buffer belongs to another XDNA device");
   }
-  uint64_t offset = 0;
-  uint64_t address = 0;
-  if (!iree_checked_add_u64(iree_hal_buffer_byte_offset(buffer_ref.buffer),
-                            buffer_ref.offset, &offset) ||
-      !iree_checked_add_u64(buffer->memory.device_address, offset, &address)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "XDNA binding offset overflows");
-  }
-  *out_binding = (iree_hal_amd_xdna_executable_binding_t){
-      .buffer_ref = buffer_ref,
-      .memory = buffer->memory.handle,
-      .memory_byte_offset = offset,
-      .device_address = address,
+  *out_slot = (iree_hal_buffer_native_binding_slot_t){
+      .index = IREE_HAL_AMD_XDNA_BUFFER_BINDING_SHIM_DMA,
+      .type = IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
   };
+  return iree_ok_status();
+}
+
+iree_status_t iree_hal_amd_xdna_buffer_load_device_address(
+    iree_hal_buffer_ref_t buffer_ref,
+    iree_hal_buffer_native_binding_slot_t slot, uint64_t* out_device_address) {
+  *out_device_address = 0;
+  const uint64_t base_address =
+      iree_hal_buffer_native_binding(buffer_ref.buffer, slot).device_address;
+  if (!base_address) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "XDNA binding storage is not committed after its queue prerequisites");
+  }
+  if (!iree_checked_add_u64(base_address, buffer_ref.offset,
+                            out_device_address)) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "XDNA binding address overflows");
+  }
   return iree_ok_status();
 }
 
@@ -327,6 +388,12 @@ static iree_status_t iree_hal_amd_xdna_allocator_allocate_buffer(
         &buffer->base, allocation_size, 0, allocation_size, actual_params.type,
         actual_params.access, actual_params.usage,
         &iree_hal_amd_xdna_buffer_vtable, &buffer->base);
+    buffer->bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_SHIM_DMA].device_address =
+        buffer->memory.device_address;
+    buffer->bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST].host_pointer =
+        buffer->memory.contents.data;
+    buffer->base.memory.bindings = buffer->bindings;
+    buffer->base.host_binding_index = IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST;
     *out_buffer = &buffer->base;
   } else {
     iree_allocator_free(allocator->host_allocator, buffer);

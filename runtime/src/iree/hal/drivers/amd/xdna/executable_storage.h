@@ -48,18 +48,18 @@ typedef struct iree_hal_amd_xdna_executable_storage_t {
   uint64_t device_address;
 } iree_hal_amd_xdna_executable_storage_t;
 
-// Borrowed external binding resolved by the caller into a shim DMA address.
-// Rows corresponding to image-declared NONE slots are ignored and may remain
-// zero. The caller keeps each active logical buffer and native backing alive
-// until every invocation using the binding has reached terminal completion.
+// Captured external binding whose native address is published after queue
+// prerequisites resolve. Rows corresponding to image-declared NONE slots are
+// ignored and may remain zero. The caller keeps each active logical buffer and
+// its native backing alive through terminal completion.
 typedef struct iree_hal_amd_xdna_executable_binding_t {
-  // Direct logical HAL buffer range whose access contract is validated.
+  // Direct logical HAL buffer range validated at queue capture.
   iree_hal_buffer_ref_t buffer_ref;
-  // XDNA memory attachment backing buffer_ref.buffer.
-  amdf_memory_t* memory;
-  // Byte offset of the bound range within memory.
-  uint64_t memory_byte_offset;
-  // Exact shim DMA address of the first bound byte.
+  // Stable native table slot selected for the exact program family.
+  iree_hal_buffer_native_binding_slot_t slot;
+  // Validated logical range length in bytes.
+  iree_device_size_t byte_length;
+  // Shim DMA address loaded once after queue prerequisites resolve.
   uint64_t device_address;
 } iree_hal_amd_xdna_executable_binding_t;
 
@@ -73,17 +73,19 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
     iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage);
 
-// Validates external binding ranges and patches their declared address fields
-// in loaded backing. Prior users of mutable backing must have drained. The
-// caller publishes mapped writes through the native cache API before
-// submission. Independent storage ranges can bind the same or different images
-// to different addresses while other ranges remain pending. Binding modifies
-// only the supplied storage; it establishes no queue-global argument state.
-iree_status_t iree_hal_amd_xdna_executable_storage_bind(
+// Validates one externally supplied address against an admitted relocation.
+// This remains fallible because queue-ordered native binding publication is a
+// public sequencing boundary.
+iree_status_t iree_hal_amd_xdna_executable_storage_validate_relocation(
+    const iree_xdna_elf_relocation_record_t* relocation, uint64_t base_address);
+
+// Applies validated external binding addresses to invocation-private backing.
+// The image, storage, binding counts, logical ranges, and every relocation
+// address have already been validated. Prior users of mutable backing have
+// drained. This trusted transform performs no allocation or native operation.
+void iree_hal_amd_xdna_executable_storage_patch(
     const iree_hal_amd_xdna_image_t* image, uint32_t entry_ordinal,
-    iree_host_size_t storage_count,
     const iree_hal_amd_xdna_executable_storage_t* storage,
-    iree_host_size_t binding_count,
     const iree_hal_amd_xdna_executable_binding_t* bindings);
 
 // Resolves an independent invocation to a native command over caller-owned

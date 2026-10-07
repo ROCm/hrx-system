@@ -33,7 +33,6 @@ iree_runtime_cc_library(
     hdrs = ["memory.h"],
     deps = [
         ":context",
-        ":executable_storage",
         "//libamdf:headers",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
@@ -231,6 +230,7 @@ iree_runtime_cc_test(
     srcs = ["queue_test.cc"],
     deps = [
         ":device",
+        ":memory",
         ":queue",
         ":queue_frontier",
         ":semaphore",

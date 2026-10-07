@@ -38,7 +38,6 @@ iree_cc_library(
     "memory.c"
   DEPS
     ::context
-    ::executable_storage
     amdf::headers
     iree::base
     iree::hal
@@ -305,6 +304,7 @@ iree_cc_test(
     "queue_test.cc"
   DEPS
     ::device
+    ::memory
     ::queue
     ::queue_frontier
     ::semaphore
