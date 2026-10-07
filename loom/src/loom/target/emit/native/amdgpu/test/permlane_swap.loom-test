@@ -162,3 +162,176 @@ low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_sufficient_progress(
 
 // ----
 amdgpu.wait_state_plan states=0 progress=5 hazards=0
+
+// ====
+
+// Preserve both results and canonicalize the independent e64 controls.
+// Explicit zero controls disappear without changing the selected encoding.
+// RUN: roundtrip
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_roundtrip(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %compact_left, %compact_right = v_permlane32_swap_b32 %lhs, %rhs
+  %default_left, %default_right = v_permlane32_swap_b32_e64 %compact_left, %compact_right {bound_ctrl = 0, fi = 0}
+  %left, %right = v_permlane32_swap_b32_e64 %default_left, %default_right {fi = 1, bound_ctrl = 1}
+  return %left, %right
+}
+
+// ----
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_roundtrip(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %compact_left, %compact_right = v_permlane32_swap_b32 %lhs, %rhs
+  %default_left, %default_right = v_permlane32_swap_b32_e64 %compact_left, %compact_right
+  %left, %right = v_permlane32_swap_b32_e64 %default_left, %default_right {bound_ctrl = 1, fi = 1}
+  return %left, %right
+}
+
+// ====
+
+// Both prior values must be single VGPRs, including the encoded SRC0 result.
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_scalar_first_input(%lhs: reg<amdgpu.sgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: PARSE/034 {detail="tied operand type must be one of: reg<amdgpu.vgpr>"}
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_scalar_second_input(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.sgpr>) asm {
+  // ERROR@+1: PARSE/034 {detail="tied operand type must be one of: reg<amdgpu.vgpr>"}
+  %left, %right = v_permlane32_swap_b32_e64 %lhs, %rhs
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_wide_first_input(%lhs: reg<amdgpu.vgpr x2>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: PARSE/034 {detail="tied operand type must be one of: reg<amdgpu.vgpr>"}
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_wide_second_input(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr x2>) asm {
+  // ERROR@+1: PARSE/034 {detail="tied operand type must be one of: reg<amdgpu.vgpr>"}
+  %left, %right = v_permlane32_swap_b32_e64 %lhs, %rhs
+  return
+}
+
+// ====
+
+// Compact VOP1 has no control bits; controls require the explicit e64 form.
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_compact_bound_ctrl(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: PARSE/034 {detail="unexpected immediate syntax"}
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs {bound_ctrl = 1}
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_compact_fi(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: PARSE/034 {detail="unexpected immediate syntax"}
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs {fi = 1}
+  return
+}
+
+// ====
+
+// Each named control is a single bit, not an arbitrary OP_SEL value.
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_bound_ctrl_overflow(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="bound_ctrl", actual_value="2", expected_constraint="0..1"}
+  %left, %right = v_permlane32_swap_b32_e64 %lhs, %rhs {bound_ctrl = 2}
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_bound_ctrl_negative(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="bound_ctrl", actual_value="-1", expected_constraint="0..1"}
+  %left, %right = v_permlane32_swap_b32_e64 %lhs, %rhs {bound_ctrl = -1}
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_fi_overflow(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="fi", actual_value="2", expected_constraint="0..1"}
+  %left, %right = v_permlane32_swap_b32_e64 %lhs, %rhs {fi = 2}
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx950> @target
+
+low.func.def target<amdgpu.cdna4.core>(@target) @permlane32_fi_negative(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: STRUCTURE/014 {attr_name="fi", actual_value="-1", expected_constraint="0..1"}
+  %left, %right = v_permlane32_swap_b32_e64 %lhs, %rhs {fi = -1}
+  return
+}
+
+// ====
+
+// The gfx950 instruction cannot be authored through older or generic contracts.
+// RUN: verify
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @permlane32_unavailable_cdna3(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: PARSE/034 "unknown low asm mnemonic"
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs
+  return
+}
+
+// ====
+
+// RUN: verify
+
+amdgpu.target<gfx9-4-generic> @target
+
+low.func.def target<amdgpu.gfx9_4.generic.core>(@target) @permlane32_unavailable_generic(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  // ERROR@+1: PARSE/034 "unknown low asm mnemonic"
+  %left, %right = v_permlane32_swap_b32_e64 %lhs, %rhs
+  return
+}
