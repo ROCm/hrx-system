@@ -123,6 +123,43 @@ TEST_F(TextStorageTest, RejectsUnrepresentablePoolGeometry) {
                             &types, results, 3, 17, 32, &storage, allocator));
 }
 
+TEST_F(TextStorageTest, IndependentEndpointOmitsRowPrivateExecutionState) {
+  // Carry has its own endpoint bank beyond the three active row entries.
+  iree_unaligned_store_le_u64(bytes[0].data + 6 * 24, 5 * 128);
+  iree_unaligned_store_le_u64(bytes[0].data + 6 * 24 + 8, 256);
+  IREE_ASSERT_OK(loom_serve_text_storage_initialize(&types, results, 3, 17, 32,
+                                                    &storage, allocator));
+  iree_hal_allocator_t* heap = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_create_heap(IREE_SV("snapshot-plan"),
+                                                allocator, allocator, &heap));
+  iree_hal_buffer_t* arena = nullptr;
+  iree_hal_buffer_params_t params = {};
+  params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  IREE_ASSERT_OK(
+      iree_hal_allocator_allocate_buffer(heap, params, 1 << 20, &arena));
+  iree_hal_buffer_t* views[5] = {};
+  IREE_ASSERT_OK(iree_hal_buffer_subspan(arena, 72, 32, allocator, &views[1]));
+  const uint32_t blocks[] = {7, 2};
+  iree_host_size_t count = 0;
+  loom_serve_snapshot_range_t* ranges = nullptr;
+  IREE_ASSERT_OK(loom_serve_text_storage_plan_snapshot(
+      &storage, 4, views, true, 2, blocks, &count, &ranges, allocator));
+  ASSERT_EQ(count, 8u);
+  EXPECT_EQ(ranges[0].buffer_index, 1u);
+  EXPECT_EQ(ranges[0].offset, 72u);
+  EXPECT_EQ(ranges[0].length, 32u);
+  EXPECT_EQ(ranges[1].buffer_index, 6u);
+  EXPECT_EQ(ranges[1].offset, 512u);
+  EXPECT_EQ(ranges[1].length, 128u);
+  EXPECT_EQ(ranges[2].offset, 256u + 7 * 128);
+  EXPECT_EQ(ranges[3].offset, 256u + 2 * 128);
+  iree_allocator_free(allocator, ranges);
+  iree_hal_buffer_release(views[1]);
+  iree_hal_buffer_release(arena);
+  iree_hal_allocator_release(heap);
+}
+
 TEST_F(TextStorageTest, RejectsPlanesOverlappingPrivateStorage) {
   iree_unaligned_store_le_u64(bytes[4].data + 72, 128);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

@@ -86,12 +86,13 @@ void loom_serve_text_storage_release_payloads(
 void loom_serve_text_storage_deinitialize(loom_serve_text_storage_t* storage);
 
 // Builds a cold logical-order transfer plan from the source geometry. The five
-// private views are row bindings 1-5; pooled attention's view is null. Control,
-// recurrence, pending input/progress, optional MTP carry and logical-order KV
-// are retained; workspace and proposal scratch are not. The caller owns the
+// private views are row bindings 1-5; null views are omitted. A row supplies
+// control, recurrence and input/progress; an independent endpoint supplies only
+// recurrence. carry_index selects the source-declared row or checkpoint carry
+// entry. Workspace and proposal scratch are not retained. The caller owns the
 // returned array. Capture and restore supply their respective physical IDs.
 iree_status_t loom_serve_text_storage_plan_snapshot(
-    const loom_serve_text_storage_t* storage, iree_host_size_t row_index,
+    const loom_serve_text_storage_t* storage, iree_host_size_t carry_index,
     iree_hal_buffer_t* const* private_views, bool enable_mtp,
     uint32_t block_count, const uint32_t* blocks, iree_host_size_t* out_count,
     loom_serve_snapshot_range_t** out_ranges, iree_allocator_t allocator);

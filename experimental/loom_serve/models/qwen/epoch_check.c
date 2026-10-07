@@ -28,6 +28,10 @@ IREE_FLAG(bool, reload_weights, false,
 IREE_FLAG(bool, checkpoints, false,
           "Check shared non-page-aligned forks, rewind, COW and reclamation; "
           "requires checkpoint_capacity=1 and pooled state.");
+IREE_FLAG(bool, suspend_checkpoints, false,
+          "Extend checkpoints with independent DRAM endpoints, live-branch "
+          "preservation and denied restore; requires elastic backing and pool "
+          "capacity in [2048, 3584].");
 IREE_FLAG(
     bool, suspend_rows, false,
     "Extend the trim witness with retained-row DRAM capture, block reuse, "
@@ -1143,6 +1147,164 @@ static iree_status_t qwen_check_restore(
                         "checkpoint witness could not admit row %zu", index);
 }
 
+static iree_status_t qwen_check_checkpoint_suspension(
+    loom_serve_text_model_t* model, const int32_t input[512]) {
+  const loom_serve_text_pool_usage_t pool =
+      loom_serve_text_model_pool_usage(model);
+  if (pool.capacity < 2048 || pool.capacity > 3584 ||
+      !loom_serve_text_model_memory_statistics(model).reserved_bytes) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "suspend_checkpoints requires elastic pool capacity in [2048, 3584]");
+  }
+  loom_serve_text_row_t* source = loom_serve_text_model_row(model, 7);
+  loom_serve_text_row_t* selected = loom_serve_text_model_row(model, 0);
+  loom_serve_text_row_t* branch = loom_serve_text_model_row(model, 1);
+  loom_serve_text_row_t* restored = loom_serve_text_model_row(model, 3);
+  loom_serve_text_row_t* reference = loom_serve_text_model_row(model, 6);
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 0, 512, input));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, 127, input));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 6, 127, input));
+  loom_serve_text_checkpoint_t* checkpoint = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(source, &checkpoint));
+  if (!checkpoint) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "cold endpoint pin refused");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(source));
+  // Reuse the original execution row while another branch owns the prefix.
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, 512, input));
+  const iree_host_size_t available =
+      loom_serve_text_model_pool_usage(model).available;
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_suspend(checkpoint));
+  const iree_host_size_t saved =
+      loom_serve_text_checkpoint_suspended_bytes(checkpoint);
+  if (!saved ||
+      loom_serve_text_model_pool_usage(model).available != available) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "suspended endpoint released a live branch");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_suspend(checkpoint));
+  loom_serve_text_trim_result_t trimmed;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(branch));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 6));
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  if (loom_serve_text_model_memory_statistics(model).committed_bytes ||
+      loom_serve_text_model_pool_usage(model).available != pool.capacity) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "cold endpoint retained device backing");
+  }
+  // Fill every logical slot, starting with the old source row. The endpoint
+  // cannot borrow selected-row IDs before its replacement is safely admitted.
+  for (iree_host_size_t i = 0; i < 7; ++i) {
+    const iree_host_size_t remaining =
+        loom_serve_text_model_pool_usage(model).available;
+    if (!remaining) {
+      break;
+    }
+    IREE_RETURN_IF_ERROR(qwen_check_prefill(model, (i + 7) % 8,
+                                            iree_min(remaining, 512u), input));
+  }
+  const iree_host_size_t position = loom_serve_text_row_position(selected);
+  const int32_t token = loom_serve_text_row_token(selected);
+  bool admitted = true;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_try_restore(selected, checkpoint, &admitted));
+  if (admitted || loom_serve_text_model_pool_usage(model).available ||
+      loom_serve_text_checkpoint_suspended_bytes(checkpoint) != saved ||
+      loom_serve_text_row_position(selected) != position ||
+      loom_serve_text_row_token(selected) != token) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "cold restore refusal changed an owner");
+  }
+  // Rows 7 and 0 keep the low IDs occupied, forcing a different physical map.
+  for (iree_host_size_t i = 1; i < 7; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 3, checkpoint));
+  if (loom_serve_text_checkpoint_suspended_bytes(checkpoint)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "warm endpoint retained its DRAM image");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 6, 127, input));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 3, 6));
+  if (loom_serve_text_mtp_from_flags()) {
+    const int32_t anchor = loom_serve_text_row_token(restored);
+    const loom_serve_text_span_t span = {
+        3, 4, &anchor,
+        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
+    loom_serve_text_span_t next = span;
+    next.token_ids = NULL;
+    const uint32_t limit = 8;
+    const loom_serve_text_continuation_t continuation = {0, 1, &next, &limit};
+    loom_serve_text_result_t result;
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_verify(
+        model, 0, 1, &span, &limit, &continuation, &result));
+    if (!result.output_count || result.verification_count != 2) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "cold endpoint did not execute both MTP epochs");
+    }
+    for (iree_host_size_t i = 0; i < result.output_count; ++i) {
+      IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+      if (result.tokens[i] != loom_serve_text_row_token(reference)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "cold endpoint MTP differs from replay");
+      }
+    }
+  } else {
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(restored));
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 3, 6));
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_suspend(checkpoint));
+  loom_serve_text_checkpoint_release(checkpoint);
+  checkpoint = NULL;
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  // An unselected cold endpoint preserves the absence of a pending token.
+  const loom_serve_text_span_t hidden = {7, 3, input, 0};
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(model, 0, 1, &hidden));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(source, &checkpoint));
+  if (!checkpoint) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "cold pin capacity leaked");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_suspend(checkpoint));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(source));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 3, checkpoint));
+  IREE_RETURN_IF_ERROR(qwen_check_error(loom_serve_text_row_decode(restored),
+                                        IREE_STATUS_FAILED_PRECONDITION));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 3, 1, input + 3));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 6, 4, input));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 3, 6));
+  // Model destruction invalidates remaining endpoint handles and must own
+  // their cold images too; the first endpoint exercised explicit cold release.
+  IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_suspend(checkpoint));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(restored));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(reference));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  if (loom_serve_text_model_memory_statistics(model).committed_bytes ||
+      loom_serve_text_model_pool_usage(model).available != pool.capacity) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "cold endpoint lifecycle leaked backing");
+  }
+  fprintf(stderr,
+          "{\"event\":\"cold_checkpoint\",\"host_snapshot_bytes\":%zu,"
+          "\"source_row\":7,\"restored_row\":3,\"committed_bytes\":0}\n",
+          saved);
+  return iree_ok_status();
+}
+
 static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
                                             iree_allocator_t allocator) {
   const loom_serve_text_pool_usage_t pool =
@@ -1396,7 +1558,9 @@ static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
   fprintf(stderr,
           "PASS: shared prefix, divergent forks, queued continuation, rewind, "
           "pin release and full reclamation.\n");
-  return iree_ok_status();
+  return FLAG_suspend_checkpoints
+             ? qwen_check_checkpoint_suspension(model, input)
+             : iree_ok_status();
 }
 
 static iree_status_t qwen_check_compare(loom_serve_text_model_t* model,
@@ -1538,7 +1702,8 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status) && FLAG_shared_residency) {
     status = qwen_check_shared_residency(device, model, allocator);
   }
-  if (iree_status_is_ok(status) && FLAG_checkpoints) {
+  if (iree_status_is_ok(status) &&
+      (FLAG_checkpoints || FLAG_suspend_checkpoints)) {
     status = qwen_check_checkpoints(model, allocator);
   }
   if (iree_status_is_ok(status)) {

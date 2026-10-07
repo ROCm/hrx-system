@@ -197,6 +197,17 @@ actual queue ownership before releasing host bytes, even after failed readiness.
 Neither transition needs parameter activation, JIT work or command rebuilding.
 Reset can discard a suspended image without touching unmapped device storage.
 
+Independent endpoints use `checkpoint_suspend` instead of retaining an active
+row slot. The image contains recurrence, logical target/draft pages and MTP
+carry; the endpoint wrapper retains its consumed frontier and pending token.
+The originating row can be reset and reused immediately. Live branches retain
+their own device references and remain runnable. Restoring into any same-model
+row admits the endpoint and destination-private storage together before
+replacing that row. A refused restore preserves both owners. After successful
+restore the endpoint is resident again, its image is released, and further
+branches share the same immutable pages. Cold endpoint release drops the image
+without accessing device storage.
+
 Host snapshot bytes have separate accounting from device commitment. Copying
 UMA state into DRAM does not create additional machine RAM; a discrete GPU can
 release VRAM while retaining that DRAM image. HAL transfer staging is another
@@ -208,7 +219,8 @@ The current HTTP scheduler still reserves complete request credit and discards
 idle cache under pressure. It does not call these suspension APIs automatically.
 Using them for overcommit needs an explicit host-image budget and wake/eviction
 policy. Named HTTP checkpoints separately support shared prefixes and marked
-rewind; a suspended row image is not itself a reusable prefix checkpoint.
+rewind; independent cold endpoints are available through the native model API,
+while a suspended row image remains tied to its original row.
 File-backed images still require a storage-route consumer.
 
 ## One real packed epoch
