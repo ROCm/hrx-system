@@ -13,6 +13,7 @@ shutdown are explicit; an outer test runner owns any hang deadline.
 
 import argparse
 import contextlib
+import http.client
 import json
 import signal
 import subprocess
@@ -22,6 +23,22 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from experimental.loom_serve.models.qwen import benchmark_service
+
+
+def control(address, method, path, expected, *, session=None, body=None, headers=None):
+    connection = http.client.HTTPConnection(address.hostname, address.port)
+    fields = dict(headers or {})
+    if session is not None:
+        fields["X-Loom-Session"] = session
+    try:
+        connection.request(method, path, body=body, headers=fields)
+        response = connection.getresponse()
+        payload = response.read()
+        if response.status != expected:
+            raise RuntimeError(f"{method} {path}: {response.status}, {payload!r}")
+        return json.loads(payload)
+    finally:
+        connection.close()
 
 
 class Events:
@@ -40,13 +57,15 @@ class Events:
                 self.values.append(event)
             self.condition.notify_all()
 
-    def wait(self, kind, session):
+    def wait(self, kind, session, *, model=None):
         def match():
             return next(
                 (
                     event
                     for event in self.values
-                    if event.get("event") == kind and event.get("session") == session
+                    if event.get("event") == kind
+                    and event.get("session") == session
+                    and (model is None or event.get("model") == model)
                 ),
                 None,
             )

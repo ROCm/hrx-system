@@ -31,6 +31,21 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "router",
+    srcs = ["router.c"],
+    hdrs = ["router.h"],
+    deps = [
+        ":request",
+        ":server",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/threading",
+    ],
+)
+
+loom_cc_library(
     name = "server",
     srcs = ["server.c"],
     hdrs = ["server.h"],
@@ -43,6 +58,24 @@ loom_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/net:carrier",
         "//runtime/src/iree/net/carrier/tcp",
+    ],
+)
+
+loom_cc_test(
+    name = "router_test",
+    srcs = ["router_test.cc"],
+    target_compatible_with = select({
+        "@platforms//os:linux": [],
+        "//conditions:default": ["@platforms//:incompatible"],
+    }),
+    deps = [
+        ":request",
+        ":router",
+        ":server",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

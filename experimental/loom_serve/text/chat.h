@@ -127,12 +127,13 @@ typedef struct loom_serve_text_chat_t {
 // Validates and renders the supported chat request. Unknown execution options
 // fail instead of pretending to implement unsupported execution modes. Source
 // policy interprets model_options and enable_thinking from the original body.
+// model_name is the expected deployment route, independent of policy->name.
 // Body storage outlives the initialized chat. Deinitialize after success only;
 // failure releases partial storage. The HTTP layer bounds the input body.
 iree_status_t loom_serve_text_chat_initialize(
-    const loom_serve_text_chat_policy_t* policy, iree_string_view_t body,
-    iree_host_size_t default_max_tokens, iree_allocator_t host_allocator,
-    loom_serve_text_chat_t* out_chat);
+    const loom_serve_text_chat_policy_t* policy, iree_string_view_t model_name,
+    iree_string_view_t body, iree_host_size_t default_max_tokens,
+    iree_allocator_t host_allocator, loom_serve_text_chat_t* out_chat);
 void loom_serve_text_chat_deinitialize(loom_serve_text_chat_t* chat);
 
 // Source output phase. Final text releases incomplete marker prefixes; complete

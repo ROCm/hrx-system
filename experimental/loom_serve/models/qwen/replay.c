@@ -147,9 +147,10 @@ static iree_status_t qwen_replay_prepare_turn(
                             "EOS needs the original selected token IDs");
   }
   loom_serve_text_chat_t chat;
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_chat_initialize(loom_serve_text_model_chat_policy(model),
-                                      request, 192, allocator, &chat));
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_initialize(
+      loom_serve_text_model_chat_policy(model),
+      loom_serve_text_model_chat_policy(model)->name, request, 192, allocator,
+      &chat));
   iree_string_builder_t text, tool_calls;
   iree_string_builder_initialize(allocator, &text);
   iree_string_builder_initialize(allocator, &tool_calls);

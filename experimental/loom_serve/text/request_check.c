@@ -144,8 +144,8 @@ static iree_status_t run(iree_allocator_t allocator) {
   loom_serve_text_chat_t chat = {0};
   bool chat_initialized = false;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_chat_initialize(&policy, file_text(request), 128,
-                                             allocator, &chat);
+    status = loom_serve_text_chat_initialize(
+        &policy, policy.name, file_text(request), 128, allocator, &chat);
     chat_initialized = iree_status_is_ok(status);
   }
   int32_t* tokens = NULL;

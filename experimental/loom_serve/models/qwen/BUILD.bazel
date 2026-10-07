@@ -297,6 +297,16 @@ py_binary(
 )
 
 py_binary(
+    name = "check_router",
+    testonly = True,
+    srcs = ["check_router.py"],
+    deps = [
+        ":benchmark_service_lib",
+        ":check_service_lib",
+    ],
+)
+
+py_binary(
     name = "check_checkpoints",
     testonly = True,
     srcs = ["check_checkpoints.py"],

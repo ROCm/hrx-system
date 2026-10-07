@@ -19,7 +19,8 @@ configuration, numerical policy, and model-specific reference checks.
 | Package | Responsibility |
 | --- | --- |
 | [`runtime/`](runtime) | Source JIT, command materialization, VM imports, weight streaming and queue timelines |
-| [`http/`](http) | TCP carrier and bounded HTTP connection/request storage |
+| [`http/`](http) | TCP carrier, bounded request storage and single-owner model routing |
+| [`serving/`](serving) | Deployment catalogs and multiple source models sharing one device and listener |
 | [`text/`](text) | Source-defined packed autoregressive residency, chat protocol, admission and retained token scheduling |
 | [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |
 | [`storage/`](storage) | Logical block IDs, shared physical slab accounting, relocation and retained-state snapshots |
@@ -41,7 +42,9 @@ The [motif guide](motifs/README.md) describes composition and shape contracts.
 
 For example, the image server is
 `//experimental/loom_serve/image:server`; the text server is
-`//experimental/loom_serve/text:server`. Full serving coverage runs with
+`//experimental/loom_serve/text:server`. The [shared server](serving/README.md)
+is `//experimental/loom_serve/serving:server`, selecting multiple named text
+deployments with `--models=/path/to/catalog.json`. Full serving coverage runs with
 `build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.
 
 ## Shared execution
