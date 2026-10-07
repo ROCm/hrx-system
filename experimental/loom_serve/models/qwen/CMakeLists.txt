@@ -97,6 +97,135 @@ loom_execution_test(
 )
 endif()
 
+loom_test_module(
+  NAME
+    attention_state_test_module
+  SRCS
+    "kernels/qwen38/attention_common.loom"
+    "kernels/qwen38/attention_prefill.loom"
+    "kernels/qwen38/attention_prefill_wmma.loom"
+    "kernels/qwen38/attention_spans.loom"
+    "kernels/qwen38/spans.loom"
+    "tests/attention_pages.loom"
+    "tests/attention_spans.loom"
+)
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    attention_state_test_dense_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::attention_state_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.attention.cache_capacity=257"
+    "--config=qwen38.attention.pool_capacity=0"
+    "--case=@mixed_attention_spans"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    attention_state_test_dense_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::attention_state_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=qwen38.attention.cache_capacity=257"
+    "--config=qwen38.attention.pool_capacity=0"
+    "--case=@mixed_attention_spans"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    attention_state_test_paged_execute_amdgpu_hardware_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::attention_state_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--config=qwen38.attention.cache_capacity=192"
+    "--config=qwen38.attention.pool_capacity=256"
+    "--case=@scattered_attention_pages"
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_hardware"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_AMDGPU)
+loom_execution_test(
+  NAME
+    attention_state_test_paged_execute_amdgpu_access_test
+  CORRECTNESS_ONLY
+  MODULE
+    "::attention_state_test_module"
+  RUNNER_ARGS
+    "--device=amdgpu"
+    "--sanitizer=access"
+    "--config=qwen38.attention.cache_capacity=192"
+    "--config=qwen38.attention.pool_capacity=256"
+    "--case=@scattered_attention_pages"
+  LABELS
+    "notsan"
+    "iree-build-requirement=loom.target.arch.amdgpu"
+    "iree-build-requirement=loom.emit.amdgpu"
+    "iree-build-requirement=loom.execute.iree_hal"
+    "iree-build-requirement=runtime.hal.amdgpu"
+    "iree-run-requirement=runtime.resource.amd_gpu"
+    "runtime-resource=amd-gpu"
+    "loom-execution-profile=amdgpu_access"
+    "loom-target-family=amdgpu"
+    "loom-target-class=gpu"
+    "loom-executor=hardware"
+  RESOURCE_GROUP
+    "gpu-device"
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_test(
   NAME

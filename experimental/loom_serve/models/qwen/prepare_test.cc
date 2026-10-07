@@ -90,7 +90,7 @@ class PrepareTest : public ::testing::Test {
     const uint64_t attention = pool ? 0 : context * 65536;
     const uint64_t stride = 156895744 + attention;
     const uint64_t row_bytes = rows * stride;
-    const uint64_t table = pool ? 1024 + rows * ((context + 63) / 64) * 4 : 256;
+    const uint64_t table = pool ? 2048 + rows * ((context + 63) / 64) * 4 : 512;
     const uint64_t lengths[] = {
         10485760,
         row_bytes + pool * 65536,
@@ -110,19 +110,20 @@ class PrepareTest : public ::testing::Test {
     for (size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
       expected[0].insert(expected[0].end(), {lengths[i], 256, clear[i]});
     }
-    expected[2].resize(32);
-    expected[3].resize(32);
+    expected[2].resize(64);
+    expected[3].resize(64);
     for (uint64_t row = 0; row < rows; ++row) {
       const uint64_t base = row * stride;
       expected[1].insert(expected[1].end(),
                          {base, 12, base + 256, 156893184, base + 156893440,
                           attention, base + 156893440 + attention, 2048,
                           base + 156895488 + attention, 32});
-      expected[2][row * 2] = base + 256;
-      expected[2][row * 2 + 1] = pool ? row_bytes : base + 156893440;
-      expected[3][row * 2 + 1] = pool ? 0 : row * context * 4096;
+      expected[2][row * 4] = base + 256;
+      expected[2][row * 4 + 1] = base + 256;
+      expected[2][row * 4 + 2] = pool ? row_bytes : base + 156893440;
+      expected[3][row * 4 + 2] = pool ? 0 : row * context * 4096;
     }
-    expected[4] = {64, 1024, 20480, 384};
+    expected[4] = {64, 2048, 20480, 384};
     if (pool) {
       expected[4].insert(expected[4].end(),
                          {1, row_bytes, 32, pool * 2048, 131072});
