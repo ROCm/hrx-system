@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/matrix_multiply.loom-test
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @matrix_multiply_s8s8_m8n8k8(%lhs: buffer, %rhs: buffer, %output: buffer) {

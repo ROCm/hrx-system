@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/packed_q8_dequant_dot.loom-test
 // RUN: emit source-low target=amdgpu:gfx11-generic output=low
 
 func.def @q8_packed_word_dequant_dot4(%packed: vector<1xi32>, %scale: f16, %rhs: vector<4xf32>, %acc: f32) -> (f32) {

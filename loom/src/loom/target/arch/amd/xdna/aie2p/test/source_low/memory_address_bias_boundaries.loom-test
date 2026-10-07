@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_address_bias_boundaries.loom-test
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 // The positive base makes every neighboring byte address nonnegative. Negative

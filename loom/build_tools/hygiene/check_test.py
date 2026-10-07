@@ -30,17 +30,21 @@ class CheckTest(unittest.TestCase):
             source_root = root / "loom/source"
             source_root.mkdir(parents=True)
             template = source_root / "template.loom-test"
-            consumer = source_root / "consumer.loom-test"
+            consumers = [
+                source_root / "first_consumer.loom-test",
+                source_root / "second_consumer.loom-test",
+            ]
             contents = "func.def @example() {\n  func.return\n}\n"
             template.write_text(contents, encoding="utf-8")
-            consumer.write_text(
-                "// TEMPLATE: loom/source/template.loom-test\n\n" + contents,
-                encoding="utf-8",
-            )
+            for consumer in consumers:
+                consumer.write_text(
+                    "// TEMPLATE: loom/source/template.loom-test\n\n" + contents,
+                    encoding="utf-8",
+                )
             manifest = root / "sources.json"
             manifest.write_text(
                 json.dumps(
-                    [str(path.relative_to(root)) for path in (consumer, template)]
+                    [str(path.relative_to(root)) for path in (*consumers, template)]
                 ),
                 encoding="utf-8",
             )
@@ -70,7 +74,7 @@ class CheckTest(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("is stale relative to", result.stdout + result.stderr)
-            self.assertIn("consumer.loom-test", result.stdout + result.stderr)
+            self.assertIn("first_consumer.loom-test", result.stdout + result.stderr)
             self.assertFalse(output.exists())
 
             template.write_text(contents, encoding="utf-8")
@@ -81,6 +85,44 @@ class CheckTest(unittest.TestCase):
             result = subprocess.run(command, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("NOT_FOUND", result.stdout + result.stderr)
+            self.assertFalse(output.exists())
+
+    def test_unshared_template_container_is_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="loom hygiene ") as temporary:
+            root = Path(temporary)
+            source_root = root / "loom/source"
+            source_root.mkdir(parents=True)
+            template = source_root / "template.loom-test"
+            consumer = source_root / "consumer.loom-test"
+            contents = "func.def @example() {\n  func.return\n}\n"
+            template.write_text(contents, encoding="utf-8")
+            consumer.write_text(
+                "// TEMPLATE: loom/source/template.loom-test\n\n" + contents,
+                encoding="utf-8",
+            )
+            manifest = root / "sources.json"
+            manifest.write_text(
+                json.dumps(
+                    [str(path.relative_to(root)) for path in (consumer, template)]
+                ),
+                encoding="utf-8",
+            )
+            output = root / "passed"
+            command = [
+                self.runner,
+                "--check=templates",
+                "--tool",
+                self.checker,
+                "--sources",
+                str(manifest),
+                "--output",
+                str(output),
+            ]
+
+            result = subprocess.run(command, capture_output=True, text=True)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("has only one consumer", result.stdout + result.stderr)
             self.assertFalse(output.exists())
 
     def test_formatter_and_authoring_use_real_tools_and_preserve_inputs(self):

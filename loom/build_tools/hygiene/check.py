@@ -16,6 +16,36 @@ from pathlib import Path
 from build_tools.devtools.command_line import batch_path_commands
 
 
+def check_template_ownership(paths: list[str], root: Path) -> bool:
+    """Rejects template containers that do not actually share source."""
+    consumers: dict[str, list[str]] = {}
+    for path in paths:
+        source = root / path
+        if not source.is_file():
+            continue
+        for line in source.read_text(encoding="utf-8").splitlines():
+            if line.startswith("// TEMPLATE: "):
+                template = line.removeprefix("// TEMPLATE: ").strip()
+                consumers.setdefault(template, []).append(path)
+                break
+
+    ok = True
+    for template, template_consumers in sorted(consumers.items()):
+        template_path = root / template
+        if (
+            len(template_consumers) != 1
+            or template_path.suffix != ".loom-test"
+            or not template_path.is_file()
+        ):
+            continue
+        print(
+            f"{template_consumers[0]}:1: TEMPLATE source {template} has only "
+            "one consumer; keep the source in its owning fixture"
+        )
+        ok = False
+    return ok
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tool", type=Path, required=True)
@@ -34,6 +64,10 @@ def main() -> int:
         commands = [[str(tool), "--manifest", str(source_manifest)]]
     else:
         paths = json.loads(source_manifest.read_text(encoding="utf-8"))
+        if arguments.check == "templates" and not check_template_ownership(
+            paths, source_manifest.parent
+        ):
+            return 1
         flags = {
             "templates": ["--check-templates", "--template-root=."],
             "format": ["--check"],

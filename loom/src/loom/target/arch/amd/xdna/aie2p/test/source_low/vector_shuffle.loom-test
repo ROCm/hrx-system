@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_shuffle.loom-test
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @shuffle_i1_family(%value: vector<3xi1>) -> (vector<3xi1>) {

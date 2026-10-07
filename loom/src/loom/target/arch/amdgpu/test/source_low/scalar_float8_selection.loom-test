@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/scalar_float8_selection.loom-test
 // RUN: emit source-low target=amdgpu:gfx1151 output=low
 
 func.def @select_f8e4m3_uniform(%choice: i32, %left: f8E4M3, %right: f8E4M3) -> (f8E4M3, f8E4M3, f8E4M3) {

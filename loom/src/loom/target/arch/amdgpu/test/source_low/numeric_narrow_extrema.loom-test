@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_narrow_extrema.loom-test
 // RUN: pass target=amdgpu:gfx1250 target-legalize{mode=final}
 
 func.def @bf16_extrema(%lhs: bf16, %rhs: bf16) -> (bf16, bf16, bf16, bf16) {

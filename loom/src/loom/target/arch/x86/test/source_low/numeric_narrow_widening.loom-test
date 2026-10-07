@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_narrow_widening.loom
 // RUN: emit source-low target=x86:scalar output=low
 
 func.def @widen_unsigned_byte(%value: i8) -> (i32) {

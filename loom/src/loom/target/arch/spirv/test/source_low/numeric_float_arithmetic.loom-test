@@ -1,6 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_float_arithmetic.loom-test
-// TEMPLATE-EXCLUDE: @float_arithmetic_f32 Requires scalar copysignf, negf and absf contracts.
-// TEMPLATE-EXCLUDE: @float_arithmetic_f64 Requires scalar copysignf, negf and absf contracts.
 // RUN: emit source-low target=spirv:vulkan1.3+bda+extended-types output=low
 
 func.def @float_arithmetic_f16(%a: f16, %b: f16) -> (f16, f16) {

@@ -474,7 +474,7 @@ class LoomPresubmitTest(unittest.TestCase):
     def test_loom_test_containers_are_in_formatter_contract(self):
         self.assertTrue(
             self.presubmit.is_format_source_path(
-                "loom/src/loom/test/corpus/source_low/numeric_i32_memory.loom-test"
+                "loom/build_tools/bazel/test/roundtrip.loom-test"
             )
         )
 
@@ -680,9 +680,7 @@ class LoomPresubmitTest(unittest.TestCase):
 
     def test_source_format_fix_rewrites_loom_test_inputs(self):
         formatter_path = Path("/tools/loom-format")
-        loom_test_path = (
-            "loom/src/loom/test/corpus/source_low/numeric_i32_memory.loom-test"
-        )
+        loom_test_path = "loom/build_tools/bazel/test/roundtrip.loom-test"
         with (
             mock.patch.object(
                 self.presubmit,

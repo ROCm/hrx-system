@@ -9,15 +9,17 @@ consumers' assertions: selected instructions, addressing, access widths,
 returned values, or other observable behavior. Parser/printer roundtrip coverage
 belongs beside the corresponding format implementation.
 
-A target participates through a `TEMPLATE` fixture with its own compiler options,
-RUN mode, and output assertions, or through an execution test with an independent
-oracle. TEMPLATE copies the common source without adding declarations, changing
-modifiers, or binding targets in the IR. Each target/profile instantiation needs
-an independently useful assertion; corpus membership does not require a backend
-matrix. Successful compilation alone adds no correctness assertion. Missing
-lowering support belongs in work tracking, not a list of expected errors copied
-across positive programs. Precise diagnostic expectations describe intentional
-rejection behavior and live beside the subsystem that owns that contract.
+Several independently useful target fixtures share source through `TEMPLATE`;
+otherwise the source stays in its sole owning fixture. A standalone template
+container with only one consumer merely duplicates authored IR and is rejected
+by source hygiene. Each consumer owns its compiler options, RUN mode, and output
+assertions. TEMPLATE copies the common source without adding declarations,
+changing modifiers, or binding targets in the IR. Corpus membership does not
+require a backend matrix. Successful compilation alone adds no correctness
+assertion. Missing lowering support belongs in work tracking, not a list of
+expected errors copied across positive programs. Precise diagnostic expectations
+describe intentional rejection behavior and live beside the subsystem that owns
+that contract.
 
 Corpora without useful assertions for a target need no fixture or build
 registration. A mixed fixture excludes exact cases outside its assertion contract

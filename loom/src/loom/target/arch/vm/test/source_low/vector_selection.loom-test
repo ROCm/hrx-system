@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/vector_selection.loom-test
 // RUN: emit source-low target=vm:core output=low
 
 func.def @whole_vector_select(%condition: i1, %a: f32, %b: f32) -> (f32, f32) {

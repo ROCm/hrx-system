@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/uniform_packed_memory.loom-test
 // RUN: with-checks emit source-low target=amdgpu:gfx1151 output=low
 
 // Every workitem reads the same codebook with independently selected indices.

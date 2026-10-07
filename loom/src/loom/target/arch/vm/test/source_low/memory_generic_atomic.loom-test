@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/memory_generic_atomic.loom-test
 // RUN: emit source-low target=vm:core output=low
 
 func.def @generic_atomic_i32_static(%input: buffer) {

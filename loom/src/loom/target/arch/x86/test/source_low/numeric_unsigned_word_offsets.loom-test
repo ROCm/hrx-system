@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_unsigned_word_offsets.loom-test
 // RUN: emit source-low target=x86:avx2 output=low
 
 // A word-sized record ordinal must be unsigned before forming a wide address.

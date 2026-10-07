@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_float8_arithmetic.loom-test
 // RUN: pass target=amdgpu:gfx1151 legalize-math
 
 func.def @f8e4m3_scalar_arithmetic(%lhs: f8E4M3, %rhs: f8E4M3) -> (f8E4M3, f8E4M3, f8E4M3, f8E4M3) {

@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_index_conversion.loom-test
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 // XFAIL: AIE2P 32-bit offset carriers cannot represent INT64_MAX

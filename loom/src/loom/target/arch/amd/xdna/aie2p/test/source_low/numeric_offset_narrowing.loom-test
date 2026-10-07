@@ -1,4 +1,3 @@
-// TEMPLATE: loom/src/loom/test/corpus/source_low/numeric_offset_narrowing.loom-test
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 func.def @native_origin(%origin: offset, %position: i32) -> (offset) {
