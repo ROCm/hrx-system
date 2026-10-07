@@ -28,6 +28,19 @@ typedef struct iree_hal_amd_xdna_memory_t {
   amdf_host_cacheability_t host_cacheability;
 } iree_hal_amd_xdna_memory_t;
 
+// Prepared native storage borrowed by one materialized buffer view. The memory
+// owner, mapping, and binding table must outlive the returned buffer.
+typedef struct iree_hal_amd_xdna_buffer_storage_t {
+  // Native allocation and persistent host mapping used by public map calls.
+  iree_hal_amd_xdna_memory_t* memory;
+  // Complete native binding table for byte zero of the owning allocation.
+  const iree_hal_buffer_native_binding_t* bindings;
+  // Private host execution slot in |bindings|.
+  uint16_t host_binding_index;
+  // Byte position of this view within the owning allocation.
+  iree_device_size_t offset;
+} iree_hal_amd_xdna_buffer_storage_t;
+
 // Native slots published by direct XDNA allocator buffers. Contract-backed
 // storage may assign the same interfaces to different slot indices.
 enum iree_hal_amd_xdna_buffer_binding_index_e {
@@ -54,6 +67,16 @@ iree_status_t iree_hal_amd_xdna_memory_allocate(
 // reported through the context's sink and never abort the application.
 void iree_hal_amd_xdna_memory_deinitialize(iree_hal_amd_xdna_context_t* context,
                                            iree_hal_amd_xdna_memory_t* memory);
+
+// Creates a HAL buffer view over provider-owned native storage. Destruction
+// invokes |release_callback| and frees only the wrapper; the callback owner
+// controls the storage lifetime. Failure leaves |out_buffer| NULL.
+iree_status_t iree_hal_amd_xdna_buffer_wrap(
+    iree_hal_device_t* device, iree_hal_amd_xdna_context_t* context,
+    iree_hal_amd_xdna_buffer_storage_t storage,
+    iree_device_size_t allocation_size, iree_hal_buffer_params_t params,
+    iree_hal_buffer_release_callback_t release_callback,
+    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer);
 
 // Creates the allocation facade used by direct HAL callers. The device and
 // context are borrowed and outlive the allocator and its buffers.

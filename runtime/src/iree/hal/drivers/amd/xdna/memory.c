@@ -99,18 +99,32 @@ iree_status_t iree_hal_amd_xdna_memory_allocate(
 typedef struct iree_hal_amd_xdna_buffer_t {
   // Logical HAL allocation and view metadata.
   iree_hal_buffer_t base;
-  // Prepared execution addresses published through base.memory.bindings.
-  iree_hal_buffer_native_binding_t
-      bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_COUNT];
   // Borrowed native device owner.
   iree_hal_amd_xdna_context_t* context;
   // Allocator owning the HAL wrapper.
   iree_allocator_t host_allocator;
-  // Native allocation, map, and device address.
-  iree_hal_amd_xdna_memory_t memory;
+  // Native allocation and mapping borrowed from the storage owner.
+  iree_hal_amd_xdna_memory_t* memory;
+  // Byte position of this view in the native mapping.
+  iree_device_size_t storage_offset;
+  // Storage-owner callback invoked before freeing this wrapper.
+  iree_hal_buffer_release_callback_t release_callback;
+  // Native allocation owned by a direct allocator buffer.
+  iree_hal_amd_xdna_memory_t inline_memory;
+  // Prepared bindings owned by a direct allocator buffer.
+  iree_hal_buffer_native_binding_t
+      inline_bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_COUNT];
 } iree_hal_amd_xdna_buffer_t;
 
 static const iree_hal_buffer_vtable_t iree_hal_amd_xdna_buffer_vtable;
+
+static void iree_hal_amd_xdna_direct_buffer_release(
+    void* user_data, iree_hal_buffer_t* base_buffer) {
+  (void)user_data;
+  iree_hal_amd_xdna_buffer_t* buffer = (iree_hal_amd_xdna_buffer_t*)base_buffer;
+  iree_hal_amd_xdna_memory_deinitialize(buffer->context,
+                                        &buffer->inline_memory);
+}
 
 const iree_hal_buffer_binding_layout_t* iree_hal_amd_xdna_buffer_binding_layout(
     void) {
@@ -130,7 +144,10 @@ const iree_hal_buffer_binding_layout_t* iree_hal_amd_xdna_buffer_binding_layout(
 
 static void iree_hal_amd_xdna_buffer_destroy(iree_hal_buffer_t* base_buffer) {
   iree_hal_amd_xdna_buffer_t* buffer = (iree_hal_amd_xdna_buffer_t*)base_buffer;
-  iree_hal_amd_xdna_memory_deinitialize(buffer->context, &buffer->memory);
+  if (buffer->release_callback.fn) {
+    buffer->release_callback.fn(buffer->release_callback.user_data,
+                                base_buffer);
+  }
   iree_allocator_free(buffer->host_allocator, buffer);
 }
 
@@ -140,8 +157,8 @@ static iree_status_t iree_hal_amd_xdna_buffer_map_range(
     iree_device_size_t offset, iree_device_size_t length,
     iree_hal_buffer_mapping_t* mapping) {
   iree_hal_amd_xdna_buffer_t* buffer = (iree_hal_amd_xdna_buffer_t*)base_buffer;
-  mapping->contents =
-      iree_make_byte_span(buffer->memory.contents.data + offset, length);
+  mapping->contents = iree_make_byte_span(
+      buffer->memory->contents.data + buffer->storage_offset + offset, length);
   return iree_ok_status();
 }
 
@@ -157,8 +174,8 @@ static iree_status_t iree_hal_amd_xdna_buffer_invalidate_range(
   iree_hal_amd_xdna_buffer_t* buffer = (iree_hal_amd_xdna_buffer_t*)base_buffer;
   return IREE_HAL_AMD_STATUS_FROM_AMDF(
       buffer->context->api->host_mapping_cache_control(
-          buffer->memory.mapping, AMDF_HOST_CACHE_OPERATION_INVALIDATE, offset,
-          length),
+          buffer->memory->mapping, AMDF_HOST_CACHE_OPERATION_INVALIDATE,
+          buffer->storage_offset + offset, length),
       "host_mapping_cache_control(INVALIDATE)");
 }
 
@@ -168,8 +185,8 @@ static iree_status_t iree_hal_amd_xdna_buffer_flush_range(
   iree_hal_amd_xdna_buffer_t* buffer = (iree_hal_amd_xdna_buffer_t*)base_buffer;
   return IREE_HAL_AMD_STATUS_FROM_AMDF(
       buffer->context->api->host_mapping_cache_control(
-          buffer->memory.mapping, AMDF_HOST_CACHE_OPERATION_FLUSH, offset,
-          length),
+          buffer->memory->mapping, AMDF_HOST_CACHE_OPERATION_FLUSH,
+          buffer->storage_offset + offset, length),
       "host_mapping_cache_control(FLUSH)");
 }
 
@@ -266,6 +283,36 @@ static const iree_hal_buffer_vtable_t iree_hal_amd_xdna_buffer_vtable = {
     .invalidate_range = iree_hal_amd_xdna_buffer_invalidate_range,
     .flush_range = iree_hal_amd_xdna_buffer_flush_range,
 };
+
+iree_status_t iree_hal_amd_xdna_buffer_wrap(
+    iree_hal_device_t* device, iree_hal_amd_xdna_context_t* context,
+    iree_hal_amd_xdna_buffer_storage_t storage,
+    iree_device_size_t allocation_size, iree_hal_buffer_params_t params,
+    iree_hal_buffer_release_callback_t release_callback,
+    iree_allocator_t host_allocator, iree_hal_buffer_t** out_buffer) {
+  *out_buffer = NULL;
+  iree_hal_amd_xdna_buffer_t* buffer = NULL;
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc(host_allocator, sizeof(*buffer), (void**)&buffer));
+  iree_hal_buffer_initialize(
+      (iree_hal_buffer_placement_t){
+          .device = device,
+          .queue_family_affinity = params.queue_family_affinity,
+      },
+      &buffer->base, allocation_size, 0, allocation_size, params.type,
+      params.access, params.usage, &iree_hal_amd_xdna_buffer_vtable,
+      &buffer->base);
+  buffer->context = context;
+  buffer->host_allocator = host_allocator;
+  buffer->memory = storage.memory;
+  buffer->storage_offset = storage.offset;
+  buffer->release_callback = release_callback;
+  buffer->base.memory.bindings = storage.bindings;
+  buffer->base.memory.binding_offset = storage.offset;
+  buffer->base.host_binding_index = storage.host_binding_index;
+  *out_buffer = &buffer->base;
+  return iree_ok_status();
+}
 
 //===----------------------------------------------------------------------===//
 // Allocation facade
@@ -373,11 +420,17 @@ static iree_status_t iree_hal_amd_xdna_allocator_allocate_buffer(
                                              sizeof(*buffer), (void**)&buffer));
   buffer->context = allocator->context;
   buffer->host_allocator = allocator->host_allocator;
+  buffer->memory = &buffer->inline_memory;
+  buffer->storage_offset = 0;
+  buffer->release_callback = (iree_hal_buffer_release_callback_t){
+      .fn = iree_hal_amd_xdna_direct_buffer_release,
+  };
   iree_status_t status = iree_hal_amd_xdna_memory_allocate(
       buffer->context, &buffer->context->data_source, allocation_size,
-      params->min_alignment, &buffer->memory);
+      params->min_alignment, buffer->memory);
   if (iree_status_is_ok(status)) {
-    if (buffer->memory.host_cacheability == AMDF_HOST_CACHEABILITY_WRITE_BACK) {
+    if (buffer->memory->host_cacheability ==
+        AMDF_HOST_CACHEABILITY_WRITE_BACK) {
       actual_params.type |= IREE_HAL_MEMORY_TYPE_HOST_CACHED;
     }
     iree_hal_buffer_initialize(
@@ -388,11 +441,11 @@ static iree_status_t iree_hal_amd_xdna_allocator_allocate_buffer(
         &buffer->base, allocation_size, 0, allocation_size, actual_params.type,
         actual_params.access, actual_params.usage,
         &iree_hal_amd_xdna_buffer_vtable, &buffer->base);
-    buffer->bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_SHIM_DMA].device_address =
-        buffer->memory.device_address;
-    buffer->bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST].host_pointer =
-        buffer->memory.contents.data;
-    buffer->base.memory.bindings = buffer->bindings;
+    buffer->inline_bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_SHIM_DMA]
+        .device_address = buffer->memory->device_address;
+    buffer->inline_bindings[IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST]
+        .host_pointer = buffer->memory->contents.data;
+    buffer->base.memory.bindings = buffer->inline_bindings;
     buffer->base.host_binding_index = IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST;
     *out_buffer = &buffer->base;
   } else {
