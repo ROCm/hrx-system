@@ -318,6 +318,9 @@ typedef struct iree_hal_mock_device_t {
   // Immutable device facts captured at creation time.
   iree_hal_device_spec_t* device_spec;
 
+  // Optional caller-owned native-memory metadata.
+  const iree_hal_memory_backend_t* memory_backend;
+
   // Number of queue family identities exposed by the device spec.
   iree_host_size_t queue_family_count;
 
@@ -422,6 +425,7 @@ iree_status_t iree_hal_mock_device_create(
   device->assign_topology_info_status_code =
       options->assign_topology_info_status_code;
   device->executable_loading_enabled = options->executable_loading_enabled;
+  device->memory_backend = options->memory_backend;
 
   // Copy identifier into trailing storage.
   iree_string_view_append_to_buffer(
@@ -663,6 +667,12 @@ static iree_status_t iree_hal_mock_device_profiling_end(
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED);
 }
 
+static const iree_hal_memory_backend_t* iree_hal_mock_device_memory_backend(
+    iree_hal_device_t* base_device) {
+  iree_hal_mock_device_t* device = iree_hal_mock_device_cast(base_device);
+  return device->memory_backend;
+}
+
 //===----------------------------------------------------------------------===//
 // Vtable
 //===----------------------------------------------------------------------===//
@@ -692,4 +702,5 @@ static const iree_hal_device_vtable_t iree_hal_mock_device_vtable = {
     .profiling_begin = iree_hal_mock_device_profiling_begin,
     .profiling_flush = iree_hal_mock_device_profiling_flush,
     .profiling_end = iree_hal_mock_device_profiling_end,
+    .memory_backend = iree_hal_mock_device_memory_backend,
 };
