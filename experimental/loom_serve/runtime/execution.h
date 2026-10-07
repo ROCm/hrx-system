@@ -35,6 +35,35 @@ void loom_serve_execution_retain(loom_serve_execution_t* execution);
 // host I/O storage.
 void loom_serve_execution_release(loom_serve_execution_t* execution);
 
+// Cold registration of a command's private workspace requirement. Grows the
+// shared pool's slab geometry after draining prior work; does not commit device
+// memory. The host serializes registration with model calls.
+iree_status_t loom_serve_execution_reserve_workspace(
+    loom_serve_execution_t* execution, iree_device_size_t length,
+    iree_device_size_t alignment);
+
+// Enqueues a private workspace allocation on the work timeline. The caller
+// owns the returned root, orders its consumers through this execution domain,
+// enqueues dealloca, and releases the root before draining the domain. The pool
+// and final queue ownership belong to execution, not the model or invocation.
+iree_status_t loom_serve_execution_alloca(
+    loom_serve_execution_t* execution,
+    const iree_hal_pool_reservation_request_t* request,
+    iree_hal_buffer_t** out_buffer);
+
+// Enqueues release after all preceding accepted work. Caller ownership is not
+// consumed. A synchronous rejection leaves the allocation live until its final
+// queue/caller release; it does not tear down shared queues or pools.
+iree_status_t loom_serve_execution_dealloca(loom_serve_execution_t* execution,
+                                            iree_hal_buffer_t* buffer,
+                                            uint64_t* out_value);
+
+// Pool accounting and idle-backing reclamation shared by all registered models.
+iree_hal_pool_stats_t loom_serve_execution_workspace_statistics(
+    const loom_serve_execution_t* execution);
+iree_status_t loom_serve_execution_trim_workspace(
+    loom_serve_execution_t* execution);
+
 // Enqueues reusable commands. HAL captures the binding table and retains its
 // buffers before returning; the table itself may immediately be reused.
 // Success returns an accepted submission value, not a completed result.
@@ -71,6 +100,7 @@ iree_status_t loom_serve_execution_feedback_wait(
 // never advances either frontier to an unsignaled value. A failed semaphore is
 // not proof of final queue resource retirement; terminal owners also join their
 // tracked buffer views before freeing borrowed payloads or virtual mappings.
+// Private workspace roots are joined here after all callers release them.
 iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution);
 
 #ifdef __cplusplus

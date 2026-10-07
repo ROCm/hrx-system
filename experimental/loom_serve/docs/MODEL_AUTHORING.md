@@ -54,9 +54,10 @@ cover [kernels](../../../loom/docs/src/guide/kernels-and-launch.md),
 `command.parameter` names a tensor and its required view. The compiler lays out
 parameter roots and publishes their offsets, sizes, and alignment. Semantic
 `buffer.alloca<global>` inside a command program becomes planned transient
-storage; the runner allocates its backing during setup. It is not a per-token
-HAL queue allocation. Workgroup allocations inside kernels have a different
-lifetime and represent local shared storage.
+storage, distinct from persistent model state. The runner supplies backing for
+the whole command's reflected private requirement, not one HAL allocation per
+source tensor. Workgroup allocations inside kernels have a different lifetime
+and represent local shared storage.
 
 Workspace contents are undefined when a model invocation begins. Each command
 transient is initialized by its producers before any consumer reads it;
@@ -341,7 +342,8 @@ The generic [image CLI](../image/generate.c) uses a
 request preparation, source JIT, immutable weight loading, queued request upload,
 source command execution and final RGB download. The CLI encodes that output as PPM.
 The model can serve successive serialized calls without warm JIT, weight loads
-or device allocations. Its output view lasts until the next call; the consumer
+or fresh physical backing. Queue allocation returns private ranges from the
+shared workspace pool. Its output view lasts until the next call; the consumer
 copies or encodes it before then. It requires no external encoder or captured
 tensors. [Krea's control source](../models/krea/control.loom) owns prompt framing,
 token validation, stage selection and payload layout. The generic native
@@ -380,7 +382,13 @@ The caller passes dimensions, text capacity and asset paths into the cold
 entry. Source validates its architecture's geometry before declaring stages.
 Each retained command has the same reflected fixed parameter placement and
 three dynamic bindings: opaque request, F32 CHW RGB in [-1,1], and workspace.
-The native owner allocates one shared parameter bank and maximum workspace.
+The native owner prepares one shared parameter bank. The warm VM passes only
+request and output buffers; the runner inserts the reflected private workspace
+using queue allocation, execution and deallocation on explicit timeline edges.
+Its HAL pool is shared across models in the device's execution domain, with
+slab geometry rounded to a TLSF size class covering the largest registered
+command and no backing committed until execution. Idle backing can be trimmed
+independently of model residency.
 The command graph owns the payload layout, mathematical preparation, stage
 composition and temporary lifetimes. Adding a postprocessing kernel is a source
 composition; it does not require a native callback or a rebuilt image binary.

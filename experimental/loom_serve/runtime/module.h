@@ -10,6 +10,7 @@
 #include "experimental/loom_serve/runtime/execution.h"
 #include "iree/module/hal/types.h"
 #include "iree/vm/module.h"
+#include "loom/target/arch/cmd/program.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,8 +20,10 @@ extern "C" {
 typedef struct loom_serve_stage_t {
   // Reusable commands retained by the module.
   iree_hal_command_buffer_t* command_buffer;
-  // Exact number of rebindable slots, including explicit workspace slots.
+  // Exact number of model-provided buffers, excluding private workspace.
   uint16_t binding_count;
+  // Compiler-owned private binding, inserted by the runner when nonempty.
+  loom_cmd_program_transient_requirement_t transient;
 } loom_serve_stage_t;
 
 // Cold capabilities shared by every invocation of one model program.
@@ -49,7 +52,9 @@ typedef struct loom_serve_module_options_t {
 // Creates the runner-local native "runner" module. execute_N exports
 // (i32 stage, hal.buffer, ... N slots ...) -> i64. Linking checks reference
 // types; calls check the stage's exact arity and reject null buffers before
-// enqueuing without waiting. feedback exports (i32 slot, hal.buffer source,
+// enqueuing without waiting. Private transient bindings are queue-allocated
+// around each execute and are not model VM arguments. feedback exports
+// (i32 slot, hal.buffer source,
 // i64 source_offset, i64 length) -> i64, downloading into a registered host
 // span from its beginning. Host bounds are checked here; HAL checks device
 // ranges. Feedback advances only the independent feedback timeline.

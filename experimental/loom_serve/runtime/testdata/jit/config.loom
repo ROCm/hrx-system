@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 config.def @increment.delta = 5 : index
+config.def @increment.temporary_bytes = 64 : offset
 
 // The catalog encounters declarations before the implementation provider.
 command.program.decl @advance() launch(%storage: buffer)

@@ -5,6 +5,7 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 config.decl @increment.delta : %value: index where [range(%value, 1, 8)]
+config.decl @increment.temporary_bytes : offset
 
 amdgpu.target<gfx11-generic> @wave32 {subgroup_size = 32}
 
@@ -133,6 +134,65 @@ command.program.def public @advance() launch(%storage: buffer) {
   kernel.launch @increment_5(%storage) : (buffer)
   kernel.launch @increment_6(%storage) : (buffer)
   kernel.launch @increment_7(%storage) : (buffer)
+  command.return
+}
+
+kernel.def target(@wave32) @temporary_write() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%storage: buffer, %temporary: buffer) {
+  %zero = index.constant 0 : offset
+  %bytes = config.get @increment.temporary_bytes : offset
+  %byte_count = index.cast %bytes : offset to index
+  %four = index.constant 4 : index
+  %elements = index.div %byte_count, %four : index
+  %eight = index.constant 8 : index
+  %tail = index.sub %elements, %eight : index
+  %input = buffer.view %storage[%zero] : buffer -> view<8xi32>
+  %output = buffer.view %temporary[%zero] : buffer -> view<[%elements]xi32>
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %i = [%begin to %eight step %one] {
+    %value = view.load %input[%i] : view<8xi32> -> i32
+    %destination = index.add %tail, %i : index
+    view.store %value, %output[%destination] : i32, view<[%elements]xi32>
+    scf.yield
+  }
+  kernel.return
+}
+
+kernel.def target(@wave32) @temporary_read() {
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%temporary: buffer, %storage: buffer) {
+  %zero = index.constant 0 : offset
+  %bytes = config.get @increment.temporary_bytes : offset
+  %byte_count = index.cast %bytes : offset to index
+  %four = index.constant 4 : index
+  %elements = index.div %byte_count, %four : index
+  %eight = index.constant 8 : index
+  %tail = index.sub %elements, %eight : index
+  %input = buffer.view %temporary[%zero] : buffer -> view<[%elements]xi32>
+  %output = buffer.view %storage[%zero] : buffer -> view<8xi32>
+  %delta = config.get @increment.delta : index
+  %delta_i32 = index.cast %delta : index to i32
+  %begin = index.constant 0 : index
+  %one = index.constant 1 : index
+  scf.for %i = [%begin to %eight step %one] {
+    %source = index.add %tail, %i : index
+    %value = view.load %input[%source] : view<[%elements]xi32> -> i32
+    %sum = scalar.addi %value, %delta_i32 : i32
+    view.store %sum, %output[%i] : i32, view<8xi32>
+    scf.yield
+  }
+  kernel.return
+}
+
+command.program.def public @temporary_advance() launch(%storage: buffer) {
+  %bytes = config.get @increment.temporary_bytes : offset
+  %temporary = buffer.alloca<global> align(16) %bytes : buffer
+  kernel.launch @temporary_write(%storage, %temporary) : (buffer, buffer)
+  kernel.launch @temporary_read(%temporary, %storage) : (buffer, buffer)
   command.return
 }
 

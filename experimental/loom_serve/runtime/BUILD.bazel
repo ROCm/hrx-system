@@ -66,8 +66,11 @@ loom_cc_library(
     hdrs = ["execution.h"],
     deps = [
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
     ],
 )
 
@@ -117,6 +120,7 @@ loom_cc_library(
     hdrs = ["module.h"],
     deps = [
         ":execution",
+        "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/module/hal:types",

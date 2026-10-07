@@ -69,8 +69,11 @@ loom_cc_library(
     "execution.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::base::threading
+    iree::base::threading::thread
     iree::hal
+    iree::hal::memory::tlsf_pool
   PUBLIC
 )
 
@@ -134,6 +137,7 @@ loom_cc_library(
     iree::hal
     iree::module::hal::types
     iree::vm
+    loom::target::arch::cmd::program
   PUBLIC
 )
 

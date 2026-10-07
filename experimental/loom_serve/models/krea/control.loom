@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-func.decl import("runner") @execute_3(%stage: i32, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) -> (i64)
+func.decl import("runner") @execute_2(%stage: i32, %request: hal.buffer, %rgb: hal.buffer) -> (i64)
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
@@ -164,8 +164,8 @@ func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i3
 // One invocation submits the complete image and its final readback without
 // waiting. The native image owner retires both accepted queue frontiers before
 // returning the image or reusing request storage.
-func.def public @generate(%stage: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer, %workspace: hal.buffer) {
-  %work = func.call @execute_3(%stage, %request, %rgb, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+func.def public @generate(%stage: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer) {
+  %work = func.call @execute_2(%stage, %request, %rgb) : (i32, hal.buffer, hal.buffer) -> (i64)
   %zero = scalar.constant 0 : i32
   %offset = scalar.constant 0 : i64
   %completion = func.call @feedback(%zero, %rgb, %offset, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
