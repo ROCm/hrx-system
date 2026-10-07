@@ -115,6 +115,18 @@ loom_low_placement_defining_transfer_for_value_ordinal(
              : NULL;
 }
 
+loom_value_ordinal_t loom_low_placement_tied_source_for_value_ordinal(
+    const loom_low_placement_table_t* table,
+    loom_value_ordinal_t value_ordinal) {
+  const loom_low_placement_relation_range_t range =
+      loom_low_placement_relation_range_for_value_ordinal(table, value_ordinal);
+  IREE_ASSERT_GT(range.count, 0);
+  const loom_low_placement_relation_t* relation =
+      &table->relations[range.start];
+  IREE_ASSERT_EQ(relation->cause, LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT);
+  return relation->source_ordinal;
+}
+
 loom_low_placement_relation_range_t
 loom_low_placement_relation_range_for_source_value_ordinal(
     const loom_low_placement_table_t* table,

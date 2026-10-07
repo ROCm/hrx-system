@@ -252,8 +252,9 @@ typedef struct loom_low_placement_table_t {
   loom_value_ordinal_t value_count;
   // Placement relations grouped by result index key. Hard register-ordinal
   // relations use the result's tied storage origin; all other relations use
-  // their authored result ordinal. A defining copy or move, when present,
-  // is first in its result's range; other relations retain collection order.
+  // their authored result ordinal. An immediate tied source or defining copy
+  // or move, when present, is first in its result's range; other relations
+  // retain collection order.
   // Allocation refines optional alias permissions before assigning locations.
   loom_low_placement_relation_t* relations;
   // Number of relation records.
@@ -398,6 +399,13 @@ loom_low_placement_relation_range_for_value_ordinal(
 // relation's current flags determine whether it permits coalescing.
 const loom_low_placement_relation_t*
 loom_low_placement_defining_transfer_for_value_ordinal(
+    const loom_low_placement_table_t* table,
+    loom_value_ordinal_t value_ordinal);
+
+// Returns the immediate tied-storage source for tied result |value_ordinal|.
+// This is a constant-time lookup of the producer-reserved first relation and
+// does not flatten across destructive writes. The value must be a tied result.
+loom_value_ordinal_t loom_low_placement_tied_source_for_value_ordinal(
     const loom_low_placement_table_t* table,
     loom_value_ordinal_t value_ordinal);
 

@@ -863,7 +863,11 @@ static void loom_amdgpu_wait_plan_classify_preserved_source(
   // Generated asynchronous continuation contracts have one one-unit VGPR
   // result and exactly one tied source. Synchronous partial VALU writes do not
   // publish preserved readiness: their physical writes first retire old loads.
-  const uint16_t source_index = loom_op_tied_results(node->op)[0].operand_index;
+  const loom_value_ordinal_t result_ordinal =
+      loom_low_schedule_node_const_result_ordinals(node)[0];
+  const loom_value_ordinal_t source_ordinal =
+      loom_low_placement_tied_source_for_value_ordinal(
+          &builder->allocation->placement, result_ordinal);
   const loom_low_reg_class_alt_t* result_alternative =
       &descriptors->reg_class_alts[result->reg_class_alt_start];
   const loom_low_register_part_mask_t full_mask =
@@ -876,8 +880,7 @@ static void loom_amdgpu_wait_plan_classify_preserved_source(
                 ~descriptors
                      ->register_parts[result_alternative->register_part_id]
                      .mask);
-  producer->preserved_source_ordinal =
-      loom_low_schedule_node_const_operand_ordinals(node)[source_index];
+  producer->preserved_source_ordinal = source_ordinal;
   builder->classification.node_states[node_index].flags |=
       LOOM_AMDGPU_WAIT_NODE_STATE_PRESERVES_RESULT_PART;
 }
@@ -2138,22 +2141,12 @@ static uint32_t loom_amdgpu_wait_plan_result_storage_continuation_producer_node(
     return LOOM_LOW_SCHEDULE_NODE_NONE;
   }
 
-  const loom_tied_result_t* tied_results = loom_op_tied_results(node->op);
-  for (uint16_t i = 0; i < node->op->tied_result_count; ++i) {
-    if (tied_results[i].result_index != result_index) {
-      continue;
-    }
-    IREE_ASSERT_LT(tied_results[i].operand_index, node->operand_count);
-    const loom_value_ordinal_t* operand_ordinals =
-        loom_low_schedule_node_const_operand_ordinals(node);
-    const loom_value_ordinal_t source_ordinal =
-        operand_ordinals[tied_results[i].operand_index];
-    IREE_ASSERT_LT(source_ordinal, builder->schedule->value_count);
-    return builder->producer_nodes[source_ordinal];
-  }
-  IREE_ASSERT_UNREACHABLE(
-      "storage-continuation result must have a tied source operand");
-  return LOOM_LOW_SCHEDULE_NODE_NONE;
+  const loom_value_ordinal_t result_ordinal =
+      loom_low_schedule_node_const_result_ordinals(node)[result_index];
+  const loom_value_ordinal_t source_ordinal =
+      loom_low_placement_tied_source_for_value_ordinal(
+          &builder->allocation->placement, result_ordinal);
+  return builder->producer_nodes[source_ordinal];
 }
 
 static iree_status_t loom_amdgpu_wait_plan_handle_materialized_result_writes(

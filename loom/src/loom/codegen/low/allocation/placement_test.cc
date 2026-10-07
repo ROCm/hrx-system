@@ -646,6 +646,11 @@ class LowPlacementStorageTest : public ::testing::Test {
       const auto& relation = table.relations[range.start];
       const bool is_edge = i == operations_.size();
       const bool is_tied = !is_edge && i - 1 >= first_tie_;
+      if (is_tied) {
+        EXPECT_EQ(
+            loom_low_placement_tied_source_for_value_ordinal(&table, ordinal),
+            loom_local_value_domain_ordinal(&domain_, values_[i - 1]));
+      }
       EXPECT_EQ(relation.op, operations_[i - 1]);
       EXPECT_EQ(relation.result_ordinal, ordinal);
       EXPECT_EQ(relation.source_ordinal,

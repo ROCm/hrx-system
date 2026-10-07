@@ -171,6 +171,12 @@ static bool loom_low_placement_cause_is_defining_transfer(
          cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE;
 }
 
+static bool loom_low_placement_cause_is_direct_source(
+    loom_low_placement_cause_t cause) {
+  return cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT ||
+         loom_low_placement_cause_is_defining_transfer(cause);
+}
+
 static loom_value_ordinal_t loom_low_placement_value_ordinal(
     const loom_low_placement_build_state_t* state, loom_value_id_t value_id) {
   const loom_value_ordinal_t value_ordinal =
@@ -331,8 +337,12 @@ static void loom_low_placement_prefix_ranges(
       const loom_value_ordinal_t source_ordinal =
           loom_low_placement_relation_index_ordinal(state, relation,
                                                     relation->source_ordinal);
-      if (loom_low_placement_cause_is_defining_transfer(relation->cause)) {
-        state->ranges_by_result_ordinal[result_ordinal].start = 1;
+      if (loom_low_placement_cause_is_direct_source(relation->cause)) {
+        loom_low_placement_relation_range_t* result =
+            &state->ranges_by_result_ordinal[result_ordinal];
+        IREE_ASSERT_EQ(result->start, 0,
+                       "verified SSA result must have one direct source");
+        result->start = 1;
       }
       ++state->ranges_by_result_ordinal[result_ordinal].count;
       ++state->ranges_by_source_ordinal[source_ordinal].count;
@@ -366,12 +376,13 @@ static void loom_low_placement_append_relation(
                                                 relation->source_ordinal);
   loom_low_placement_relation_range_t* result_range =
       &state->ranges_by_result_ordinal[result_ordinal];
-  // SSA gives each copy/move result exactly one defining transfer. Its slot
-  // was reserved during prefixing, even when block layout visited a use of
-  // the result first. Publish reverse and edge indexes at the final location.
+  // SSA gives each tied or copy/move result exactly one direct source. Its
+  // slot was reserved during prefixing, even when block layout visited a use
+  // of the result first. Publish reverse and edge indexes at the final
+  // location.
   const iree_host_size_t relation_index =
       (iree_host_size_t)result_range->start +
-      (loom_low_placement_cause_is_defining_transfer(relation->cause)
+      (loom_low_placement_cause_is_direct_source(relation->cause)
            ? 0
            : result_range->count++);
   IREE_ASSERT_LT(relation_index, state->relation_count);
