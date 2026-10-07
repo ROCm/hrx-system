@@ -19,7 +19,7 @@ struct loom_run_hal_dispatch_sequence_direct_step_t {
   iree_hal_executable_function_t function;
   // Static dispatch geometry captured during preparation.
   iree_hal_dispatch_config_t config;
-  // Inline constants captured in HAL ABI order.
+  // Byte-addressed constants captured in HAL ABI order.
   uint8_t constants[LOOM_RUN_HAL_MAX_CONSTANT_BYTE_LENGTH];
   // Live byte length of |constants|, including ABI padding.
   iree_host_size_t constant_byte_length;
