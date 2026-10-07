@@ -42,6 +42,33 @@ iree_runtime_cc_library(
 )
 
 iree_runtime_cc_library(
+    name = "semaphore",
+    srcs = ["semaphore.c"],
+    hdrs = ["semaphore.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:submitted_signal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "semaphore_test",
+    srcs = ["semaphore_test.cc"],
+    deps = [
+        ":semaphore",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/utils:submitted_signal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "queue",
     srcs = ["queue.c"],
     hdrs = ["queue.h"],
@@ -108,6 +135,7 @@ iree_runtime_cc_library(
         ":executable",
         ":memory",
         ":queue",
+        ":semaphore",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -115,7 +143,6 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/utils:device_spec_builder",
-        "//runtime/src/iree/hal/utils:host_semaphore",
     ],
 )
 
@@ -140,6 +167,7 @@ iree_runtime_cc_test(
     deps = [
         ":device",
         ":queue",
+        ":semaphore",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

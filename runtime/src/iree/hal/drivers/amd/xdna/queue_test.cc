@@ -17,6 +17,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/xdna/device.h"
 #include "iree/hal/drivers/amd/xdna/image/testing/image_fixture.h"
+#include "iree/hal/drivers/amd/xdna/semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -478,6 +479,17 @@ class QueueHarness {
   // Number of published driver failure diagnostics.
   size_t diagnostic_count = 0;
 };
+
+TEST(XdnaQueueTest, DeviceCreatesOwnedHostCompatibleSemaphores) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  EXPECT_TRUE(iree_hal_amd_xdna_semaphore_isa(harness.done));
+  EXPECT_TRUE(
+      iree_hal_amd_xdna_semaphore_is_local(harness.done, harness.device));
+  EXPECT_EQ(iree_hal_device_query_semaphore_compatibility(harness.device,
+                                                          harness.done),
+            IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY);
+}
 
 TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
   QueueHarness harness;

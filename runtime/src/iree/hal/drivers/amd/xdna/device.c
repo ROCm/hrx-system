@@ -9,8 +9,8 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
 #include "iree/hal/drivers/amd/xdna/queue.h"
+#include "iree/hal/drivers/amd/xdna/semaphore.h"
 #include "iree/hal/utils/device_spec_builder.h"
-#include "iree/hal/utils/host_semaphore.h"
 
 typedef struct iree_hal_amd_xdna_device_t {
   // HAL resource header.
@@ -245,15 +245,19 @@ static iree_status_t iree_hal_amd_xdna_device_create_semaphore(
     uint64_t initial_value, iree_hal_semaphore_flags_t flags,
     iree_hal_semaphore_t** out_semaphore) {
   iree_hal_amd_xdna_device_t* device = (iree_hal_amd_xdna_device_t*)base;
-  return iree_hal_host_semaphore_create(
-      iree_async_proactor_pool_entry_proactor(device->proactor_entry),
-      initial_value, device->host_allocator, out_semaphore);
+  return iree_hal_amd_xdna_semaphore_create(
+      base, iree_async_proactor_pool_entry_proactor(device->proactor_entry),
+      affinity, initial_value, flags, device->host_allocator, out_semaphore);
 }
 
 static iree_hal_semaphore_compatibility_t
 iree_hal_amd_xdna_device_query_semaphore_compatibility(
     iree_hal_device_t* device, iree_hal_semaphore_t* semaphore) {
-  return IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL;
+  (void)device;
+  (void)semaphore;
+  // The current queue resolves every dependency through host timepoints. The
+  // device bits become truthful only when the causal native resolver lands.
+  return IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY;
 }
 
 static iree_status_t iree_hal_amd_xdna_device_acquire_queue(

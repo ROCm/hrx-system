@@ -50,6 +50,43 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    semaphore
+  HDRS
+    "semaphore.h"
+  SRCS
+    "semaphore.c"
+  DEPS
+    iree::async
+    iree::base
+    iree::hal
+    iree::hal::utils::submitted_signal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    semaphore_test
+  SRCS
+    "semaphore_test.cc"
+  DEPS
+    ::semaphore
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::hal::utils::submitted_signal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     queue
   HDRS
     "queue.h"
@@ -138,6 +175,7 @@ iree_cc_library(
     ::executable
     ::memory
     ::queue
+    ::semaphore
     amdf::headers
     iree::async
     iree::async::util::proactor_pool
@@ -145,7 +183,6 @@ iree_cc_library(
     iree::base::internal
     iree::hal
     iree::hal::utils::device_spec_builder
-    iree::hal::utils::host_semaphore
   PUBLIC
 )
 endif()
@@ -179,6 +216,7 @@ iree_cc_test(
   DEPS
     ::device
     ::queue
+    ::semaphore
     amdf::headers
     iree::async
     iree::async::util::proactor_pool
