@@ -34,10 +34,10 @@ typedef struct iree_hal_amdgpu_semaphore_t {
 
   // Seqlock-protected cache of the most recent signal from a queue.
   // Updated by the submission path when queue_execute signals this semaphore.
-  // Read by the submission path for same-queue FIFO elision, cross-queue
+  // Read by the submission path for same-queue wait resolution, cross-queue
   // epoch lookup, and by the host-wait fast path for direct signal waits.
   // Initialized to zero (flags=0) — no valid signal has been recorded yet.
-  iree_hal_amdgpu_last_signal_t last_signal;
+  iree_hal_submitted_signal_t submitted_signal;
 } iree_hal_amdgpu_semaphore_t;
 
 static const iree_hal_semaphore_vtable_t iree_hal_amdgpu_semaphore_vtable;
@@ -80,7 +80,8 @@ iree_status_t iree_hal_amdgpu_semaphore_create(
     semaphore->device = device;
     semaphore->flags = flags;
     semaphore->queue_family_affinity = queue_family_affinity;
-    memset(&semaphore->last_signal, 0, sizeof(semaphore->last_signal));
+    memset(&semaphore->submitted_signal, 0,
+           sizeof(semaphore->submitted_signal));
     *out_semaphore = iree_hal_semaphore_cast(&semaphore->async);
   }
 
@@ -145,9 +146,9 @@ bool iree_hal_amdgpu_semaphore_has_private_stream_semantics(
          !iree_any_bit_set(flags, public_flags);
 }
 
-iree_hal_amdgpu_last_signal_t* iree_hal_amdgpu_semaphore_last_signal(
+iree_hal_submitted_signal_t* iree_hal_amdgpu_semaphore_submitted_signal(
     iree_hal_semaphore_t* semaphore) {
-  return &((iree_hal_amdgpu_semaphore_t*)semaphore)->last_signal;
+  return &((iree_hal_amdgpu_semaphore_t*)semaphore)->submitted_signal;
 }
 
 bool iree_hal_amdgpu_semaphore_publish_signal(
@@ -158,18 +159,18 @@ bool iree_hal_amdgpu_semaphore_publish_signal(
   iree_hal_amdgpu_semaphore_t* semaphore =
       iree_hal_amdgpu_semaphore_cast(base_semaphore);
 
-  iree_hal_amdgpu_last_signal_flags_t flags =
-      IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID;
+  iree_hal_submitted_signal_flags_t flags =
+      IREE_HAL_SUBMITTED_SIGNAL_FLAG_VALID;
   bool source_dominates_frontier = false;
   iree_slim_mutex_lock(&semaphore->async.mutex);
   bool merged = iree_async_frontier_merge_and_test_source_dominance(
       semaphore->async.frontier, semaphore->async.frontier_capacity,
       producer_frontier, &source_dominates_frontier);
   if (merged && source_dominates_frontier) {
-    flags |= IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT;
+    flags |= IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT;
   }
-  iree_hal_amdgpu_last_signal_store(
-      &semaphore->last_signal, merged ? flags : 0,
+  iree_hal_submitted_signal_store(
+      &semaphore->submitted_signal, merged ? flags : 0,
       merged ? producer_axis : (iree_async_axis_t)0,
       merged ? producer_epoch : 0, merged ? producer_value : 0);
   iree_slim_mutex_unlock(&semaphore->async.mutex);
@@ -182,21 +183,21 @@ void iree_hal_amdgpu_semaphore_publish_private_stream_signal(
     uint64_t producer_epoch, uint64_t producer_value) {
   iree_hal_amdgpu_semaphore_t* semaphore =
       iree_hal_amdgpu_semaphore_cast(base_semaphore);
-  iree_hal_amdgpu_last_signal_store(
-      &semaphore->last_signal,
-      IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_VALID |
-          IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT,
+  iree_hal_submitted_signal_store(
+      &semaphore->submitted_signal,
+      IREE_HAL_SUBMITTED_SIGNAL_FLAG_VALID |
+          IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT,
       producer_axis, producer_epoch, producer_value);
 }
 
-void iree_hal_amdgpu_semaphore_clear_last_signal(
+void iree_hal_amdgpu_semaphore_clear_submitted_signal(
     iree_hal_semaphore_t* base_semaphore) {
   iree_hal_amdgpu_semaphore_t* semaphore =
       iree_hal_amdgpu_semaphore_cast(base_semaphore);
   iree_slim_mutex_lock(&semaphore->async.mutex);
-  iree_hal_amdgpu_last_signal_store(&semaphore->last_signal,
-                                    IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE,
-                                    (iree_async_axis_t)0, 0, 0);
+  iree_hal_submitted_signal_store(&semaphore->submitted_signal,
+                                  IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE,
+                                  (iree_async_axis_t)0, 0, 0);
   iree_slim_mutex_unlock(&semaphore->async.mutex);
 }
 
@@ -356,19 +357,19 @@ static iree_status_t iree_hal_amdgpu_semaphore_wait(
     return iree_ok_status();
   }
 
-  iree_hal_amdgpu_last_signal_flags_t last_signal_flags =
-      IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE;
+  iree_hal_submitted_signal_flags_t submitted_signal_flags =
+      IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
   iree_async_axis_t producer_axis = 0;
   uint64_t producer_epoch = 0;
   uint64_t producer_value = 0;
   // A later producer may depend on host work performed after this wait
   // returns. Its epoch is therefore not a safe substitute for this value.
-  if (iree_hal_amdgpu_last_signal_load(&semaphore->last_signal,
-                                       &last_signal_flags, &producer_axis,
-                                       &producer_epoch, &producer_value) &&
+  if (iree_hal_submitted_signal_load(&semaphore->submitted_signal,
+                                     &submitted_signal_flags, &producer_axis,
+                                     &producer_epoch, &producer_value) &&
       iree_all_bits_set(
-          last_signal_flags,
-          IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) &&
+          submitted_signal_flags,
+          IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) &&
       producer_value == value) {
     iree_hal_amdgpu_host_queue_epoch_wait_t wait_state;
     if (iree_hal_amdgpu_logical_device_lookup_host_queue_epoch_wait(

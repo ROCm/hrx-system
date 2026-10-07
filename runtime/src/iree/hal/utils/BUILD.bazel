@@ -172,6 +172,26 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "submitted_signal",
+    hdrs = ["submitted_signal.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "submitted_signal_test",
+    srcs = ["submitted_signal_test.cc"],
+    deps = [
+        ":submitted_signal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "statistics_sink_test",
     srcs = ["statistics_sink_test.cc"],

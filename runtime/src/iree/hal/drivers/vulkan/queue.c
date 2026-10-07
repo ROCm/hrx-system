@@ -311,7 +311,7 @@ typedef struct iree_hal_vulkan_queue_wait_entry_t {
 } iree_hal_vulkan_queue_wait_entry_t;
 
 typedef struct iree_hal_vulkan_queue_wait_resolution_t {
-  // Native Vulkan wait semaphores resolved from queue last-signal metadata.
+  // Native Vulkan waits resolved from submitted-signal metadata.
   VkSemaphoreSubmitInfo* wait_infos;
 
   // Number of populated wait_infos entries.
@@ -5209,15 +5209,15 @@ static iree_status_t iree_hal_vulkan_queue_resolve_waits(
       continue;
     }
 
-    iree_hal_vulkan_last_signal_flags_t signal_flags = 0;
+    iree_hal_submitted_signal_flags_t signal_flags = 0;
     iree_async_axis_t producer_axis = 0;
     uint64_t producer_epoch = 0;
     uint64_t producer_value = 0;
-    const bool has_last_signal = iree_hal_vulkan_last_signal_load(
-        iree_hal_vulkan_semaphore_last_signal(semaphore), &signal_flags,
+    const bool has_submitted_signal = iree_hal_submitted_signal_load(
+        iree_hal_vulkan_semaphore_submitted_signal(semaphore), &signal_flags,
         &producer_axis, &producer_epoch, &producer_value);
     (void)signal_flags;
-    if (!has_last_signal || producer_value < minimum_value) {
+    if (!has_submitted_signal || producer_value < minimum_value) {
       if (allow_software_deferral) {
         resolution->needs_deferral = true;
         return iree_ok_status();

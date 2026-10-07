@@ -533,13 +533,13 @@ class QueueBenchmark : public benchmark::Fixture {
           "epoch completion floor requires an AMDGPU semaphore");
     }
 
-    iree_hal_amdgpu_last_signal_flags_t signal_flags =
-        IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE;
+    iree_hal_submitted_signal_flags_t signal_flags =
+        IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
     iree_async_axis_t producer_axis = 0;
     uint64_t producer_epoch = 0;
     uint64_t producer_value = 0;
-    if (IREE_UNLIKELY(!iree_hal_amdgpu_last_signal_load(
-            iree_hal_amdgpu_semaphore_last_signal(completion.semaphore),
+    if (IREE_UNLIKELY(!iree_hal_submitted_signal_load(
+            iree_hal_amdgpu_semaphore_submitted_signal(completion.semaphore),
             &signal_flags, &producer_axis, &producer_epoch, &producer_value))) {
       return iree_make_status(
           IREE_STATUS_FAILED_PRECONDITION,
