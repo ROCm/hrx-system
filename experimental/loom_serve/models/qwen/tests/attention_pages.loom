@@ -30,10 +30,10 @@ kernel.def @page_metadata() {
   view.store %zero, %header[5] : i32, view<13xi32>
   view.store %one, %header[6] : i32, view<13xi32>
   view.store %zero, %header[7] : i32, view<13xi32>
-  %origins = buffer.view %rows[%origin] : buffer -> view<2x2xi64>
+  %origins = buffer.view %rows[%origin] : buffer -> view<2x4xi64>
   %guard = scalar.constant 256 : i64
-  view.store %guard, %origins[1, 1] : i64, view<2x2xi64>
-  %map_origin = index.constant 1036 : offset
+  view.store %guard, %origins[1, 2] : i64, view<2x4xi64>
+  %map_origin = index.constant 2060 : offset
   %map = buffer.view %rows[%map_origin] : buffer -> view<3xi32>
   %three = scalar.constant 3 : i32
   %two = scalar.constant 2 : i32
@@ -95,7 +95,7 @@ check.case public @scattered_attention_pages {
   %epsilon = check.literal value(0.000001) : f32
   %layer_origin = check.literal value(1048576) : offset
   %epoch = check.generate.fill value(-99) : tensor<13xi32>
-  %rows = check.generate.fill value(-1) : tensor<262xi32>
+  %rows = check.generate.fill value(-1) : tensor<518xi32>
   %control = check.generate.iota offset(17) step(44) : tensor<2xi32>
   %projection = check.generate.iota offset(-0.5) step(0.0000152587890625) period(65521) : tensor<17x12288xf32>
   %key = check.generate.iota offset(-0.5) step(0.000030517578125) period(32749) : tensor<17x1024xf32>
@@ -111,11 +111,11 @@ check.case public @scattered_attention_pages {
   %expected_query = check.generate.fill value(9.125) : tensor<17x6144xf32>
   %expected_gate = check.generate.fill value(9.125) : tensor<17x6144xf32>
   %expected_output = check.generate.fill value(9.125) : tensor<17x6144xf32>
-  kernel.launch @page_metadata(%epoch, %rows) : (tensor<13xi32>, tensor<262xi32>)
+  kernel.launch @page_metadata(%epoch, %rows) : (tensor<13xi32>, tensor<518xi32>)
   kernel.launch @scatter_reference_pages(%key_cache, %value_cache, %state) : (tensor<192x1024xf16>, tensor<192x1024xf16>, tensor<1048832xf16>)
   kernel.launch @qwen38_attention_query_prepare_spans[%tokens, %spans](%epoch, %epsilon, %projection, %weight, %query, %gate) : [index, index](tensor<13xi32>, f32, tensor<17x12288xf32>, tensor<256xf32>, tensor<17x6144xf32>, tensor<17x6144xf32>)
-  kernel.launch @qwen38_attention_kv_prepare_spans[%tokens, %spans](%epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %state) : [index, index](tensor<13xi32>, tensor<262xi32>, offset, f32, tensor<17x1024xf32>, tensor<17x1024xf32>, tensor<256xf32>, tensor<1048832xf16>)
-  kernel.launch @qwen38_attention_spans_f16_wmma[%tokens, %spans](%epoch, %rows, %layer_origin, %query, %gate, %state, %output) : [index, index](tensor<13xi32>, tensor<262xi32>, offset, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<1048832xf16>, tensor<17x6144xf32>)
+  kernel.launch @qwen38_attention_kv_prepare_spans[%tokens, %spans](%epoch, %rows, %layer_origin, %epsilon, %key, %value, %weight, %state) : [index, index](tensor<13xi32>, tensor<518xi32>, offset, f32, tensor<17x1024xf32>, tensor<17x1024xf32>, tensor<256xf32>, tensor<1048832xf16>)
+  kernel.launch @qwen38_attention_spans_f16_wmma[%tokens, %spans](%epoch, %rows, %layer_origin, %query, %gate, %state, %output) : [index, index](tensor<13xi32>, tensor<518xi32>, offset, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<1048832xf16>, tensor<17x6144xf32>)
   kernel.launch @qwen38_attention_query_prepare_prefill[%tokens](%control, %epsilon, %projection, %weight, %expected_query, %expected_gate) : [index](tensor<2xi32>, f32, tensor<17x12288xf32>, tensor<256xf32>, tensor<17x6144xf32>, tensor<17x6144xf32>)
   kernel.launch @qwen38_attention_kv_prepare_prefill[%tokens](%control, %epsilon, %key, %value, %weight, %key_cache, %value_cache) : [index](tensor<2xi32>, f32, tensor<17x1024xf32>, tensor<17x1024xf32>, tensor<256xf32>, tensor<192x1024xf16>, tensor<192x1024xf16>)
   kernel.launch @qwen38_attention_prefill_f16_wmma[%tokens](%control, %expected_query, %expected_gate, %key_cache, %value_cache, %expected_output) : [index](tensor<2xi32>, tensor<17x6144xf32>, tensor<17x6144xf32>, tensor<192x1024xf16>, tensor<192x1024xf16>, tensor<17x6144xf32>)

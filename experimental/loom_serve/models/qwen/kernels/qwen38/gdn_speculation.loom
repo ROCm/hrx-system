@@ -6,7 +6,7 @@
 
 func.decl @qwen38_span_active(%epoch: buffer, %span: index) -> (i1)
 func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, index)
-func.decl @qwen38_row_gdn_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
+func.decl @qwen38_row_gdn_binding(%epoch: buffer, %control_origin: offset, %rows: buffer, %row: index, %layer_origin: offset) -> (offset, offset, i1)
 template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish: i1, %head: index, %thread: index, %epoch: buffer, %epsilon: f32, %qkv: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset, %next_history_origin: offset)
 template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish: i1, %head: index, %column: index, %lane: index, %epoch: buffer, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset, %next_state_origin: offset)
 
@@ -39,11 +39,15 @@ kernel.def export("qwen38_gdn_conv_verify_spans") @qwen38_gdn_conv_verify_spans(
     %thread_value = kernel.workitem.id<x> : index
     %thread = index.assume %thread_value [range(%thread_value, 0, 255)] : index
     %control, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
-    %history = func.call @qwen38_row_gdn_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+    %history, %next_history, %first_advance = func.call @qwen38_row_gdn_binding(%epoch, %control, %rows, %row, %layer_origin) : (buffer, offset, buffer, index, offset) -> (offset, offset, i1)
     %speculative = func.call @qwen38_span_speculative(%epoch, %span) : (buffer, index) -> (i1)
     %true = scalar.constant true : i1
     %publish = scalar.xori %speculative, %true : i1
-    template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish, %head, %thread, %epoch, %epsilon, %qkv, %weight, %state, %output, %inverse_norm, %control, %begin, %history, %history) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+    scf.if %first_advance {
+      template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish, %head, %thread, %epoch, %epsilon, %qkv, %weight, %state, %output, %inverse_norm, %control, %begin, %history, %next_history) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+    } else {
+      template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish, %head, %thread, %epoch, %epsilon, %qkv, %weight, %state, %output, %inverse_norm, %control, %begin, %next_history, %next_history) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+    }
   }
   kernel.return
 }
@@ -66,11 +70,15 @@ kernel.def export("qwen38_gdn_recurrent_verify_spans") @qwen38_gdn_recurrent_ver
     %lane_value = kernel.workitem.id<x> : index
     %lane = index.assume %lane_value [range(%lane_value, 0, 31)] : index
     %control, %begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
-    %origin = func.call @qwen38_row_gdn_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
+    %origin, %next_origin, %first_advance = func.call @qwen38_row_gdn_binding(%epoch, %control, %rows, %row, %layer_origin) : (buffer, offset, buffer, index, offset) -> (offset, offset, i1)
     %speculative = func.call @qwen38_span_speculative(%epoch, %span) : (buffer, index) -> (i1)
     %true = scalar.constant true : i1
     %publish = scalar.xori %speculative, %true : i1
-    template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish, %head, %column, %lane, %epoch, %qkv, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output, %control, %begin, %origin, %origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+    scf.if %first_advance {
+      template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish, %head, %column, %lane, %epoch, %qkv, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output, %control, %begin, %origin, %next_origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+    } else {
+      template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish, %head, %column, %lane, %epoch, %qkv, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output, %control, %begin, %next_origin, %next_origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+    }
   }
   kernel.return
 }

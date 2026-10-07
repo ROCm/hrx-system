@@ -28,7 +28,7 @@ kernel.def @gdn_verify_fixture() {
   %accepted_spans = buffer.view %accepted[%descriptor_origin] : buffer -> view<64x5xi32>
   %replay_header = buffer.view %replay[%origin] : buffer -> view<3xi32>
   %replay_spans = buffer.view %replay[%descriptor_origin] : buffer -> view<64x5xi32>
-  %origins = buffer.view %rows[%origin] : buffer -> view<16x2xi64>
+  %origins = buffer.view %rows[%origin] : buffer -> view<16x4xi64>
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %four = index.constant 4 : index
@@ -66,7 +66,8 @@ kernel.def @gdn_verify_fixture() {
   scf.for %row = [%zero to %sixteen step %one] {
     %address = index.mul %row, %state_bytes : index
     %address_word = index.cast %address : index to i64
-    view.store %address_word, %origins[%row, 0] : i64, view<16x2xi64>
+    view.store %address_word, %origins[%row, 0] : i64, view<16x4xi64>
+    view.store %address_word, %origins[%row, 1] : i64, view<16x4xi64>
   }
   scf.for %span = [%zero to %sixteen step %one] {
     %is_known = index.cmp eq, %span, %zero : index
@@ -115,7 +116,7 @@ check.case public @gdn_accepted_publication {
   %known = check.generate.fill value(-99) : tensor<387xi32>
   %accepted = check.generate.fill value(-99) : tensor<387xi32>
   %replay = check.generate.fill value(-99) : tensor<387xi32>
-  %rows = check.generate.fill value(0) : tensor<16x2xi64>
+  %rows = check.generate.fill value(0) : tensor<16x4xi64>
   %qkv = check.generate.iota offset(-0.5) step(0.000003814697265625) : tensor<64x10240xf32>
   %alpha = check.generate.iota offset(-0.1) step(0.00006103515625) : tensor<64x48xf32>
   %beta = check.generate.iota offset(0.1) step(0.00006103515625) : tensor<64x48xf32>
@@ -131,16 +132,16 @@ check.case public @gdn_accepted_publication {
   %captured_qkv = check.tensor.view %capture offset(0) : tensor<661504xf32> -> tensor<64x10240xf32>
   %captured_alpha = check.tensor.view %capture offset(2621440) : tensor<661504xf32> -> tensor<64x48xf32>
   %captured_beta = check.tensor.view %capture offset(2633728) : tensor<661504xf32> -> tensor<64x48xf32>
-  kernel.launch @gdn_verify_fixture(%epoch, %known, %accepted, %replay, %rows) : (tensor<516xi32>, tensor<387xi32>, tensor<387xi32>, tensor<387xi32>, tensor<16x2xi64>)
-  kernel.launch @qwen38_gdn_conv_verify_spans[%spans](%epoch, %rows, %history, %epsilon, %qkv, %weight, %state, %convolved, %norm) : [index](tensor<516xi32>, tensor<16x2xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
-  kernel.launch @qwen38_gdn_recurrent_verify_spans[%spans](%epoch, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state, %output) : [index](tensor<516xi32>, tensor<16x2xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
-  kernel.launch @qwen38_gdn_conv_spans[%spans](%known, %rows, %history, %epsilon, %qkv, %weight, %reference, %convolved, %norm) : [index](tensor<387xi32>, tensor<16x2xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
-  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%known, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %reference, %output) : [index](tensor<387xi32>, tensor<16x2xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
+  kernel.launch @gdn_verify_fixture(%epoch, %known, %accepted, %replay, %rows) : (tensor<516xi32>, tensor<387xi32>, tensor<387xi32>, tensor<387xi32>, tensor<16x4xi64>)
+  kernel.launch @qwen38_gdn_conv_verify_spans[%spans](%epoch, %rows, %history, %epsilon, %qkv, %weight, %state, %convolved, %norm) : [index](tensor<516xi32>, tensor<16x4xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_verify_spans[%spans](%epoch, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %state, %output) : [index](tensor<516xi32>, tensor<16x4xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_spans[%spans](%known, %rows, %history, %epsilon, %qkv, %weight, %reference, %convolved, %norm) : [index](tensor<387xi32>, tensor<16x4xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%known, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %reference, %output) : [index](tensor<387xi32>, tensor<16x4xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
   kernel.launch @qwen38_gdn_capture_spans[%spans](%epoch, %qkv, %alpha, %beta, %capture, %origin) : [index](tensor<516xi32>, tensor<64x10240xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<661504xf32>, offset)
-  kernel.launch @qwen38_gdn_conv_spans[%spans](%replay, %rows, %history, %epsilon, %captured_qkv, %weight, %state, %convolved, %norm) : [index](tensor<387xi32>, tensor<16x2xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
-  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%replay, %rows, %origin, %convolved, %norm, %captured_alpha, %captured_beta, %a, %bias, %state, %output) : [index](tensor<387xi32>, tensor<16x2xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
-  kernel.launch @qwen38_gdn_conv_spans[%spans](%accepted, %rows, %history, %epsilon, %qkv, %weight, %reference, %convolved, %norm) : [index](tensor<387xi32>, tensor<16x2xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
-  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%accepted, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %reference, %output) : [index](tensor<387xi32>, tensor<16x2xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_spans[%spans](%replay, %rows, %history, %epsilon, %captured_qkv, %weight, %state, %convolved, %norm) : [index](tensor<387xi32>, tensor<16x4xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%replay, %rows, %origin, %convolved, %norm, %captured_alpha, %captured_beta, %a, %bias, %state, %output) : [index](tensor<387xi32>, tensor<16x4xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_spans[%spans](%accepted, %rows, %history, %epsilon, %qkv, %weight, %reference, %convolved, %norm) : [index](tensor<387xi32>, tensor<16x4xi64>, offset, f32, tensor<64x10240xf32>, tensor<40960xf32>, tensor<16x817152xf32>, tensor<64x10240xf32>, tensor<64x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%spans](%accepted, %rows, %origin, %convolved, %norm, %alpha, %beta, %a, %bias, %reference, %output) : [index](tensor<387xi32>, tensor<16x4xi64>, offset, tensor<64x10240xf32>, tensor<64x32xf32>, tensor<64x48xf32>, tensor<64x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<16x817152xf32>, tensor<64x6144xf32>)
   check.expect.bitwise actual(%state) expected(%reference) : tensor<16x817152xf32>
   check.return
 }

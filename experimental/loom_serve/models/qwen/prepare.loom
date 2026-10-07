@@ -135,8 +135,8 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   %word_bytes = scalar.constant 4 : i64
   %sixty_three = scalar.constant 63 : i64
   %block_tokens = scalar.constant 64 : i64
-  %map_origin = scalar.constant 1024 : i64
-  %origin_bytes = scalar.constant 256 : i64
+  %map_origin = scalar.constant 2048 : i64
+  %origin_bytes = scalar.constant 512 : i64
   %target_token_bytes = scalar.constant 65536 : i64
   %draft_token_bytes = scalar.constant 4096 : i64
   %carry_stride = scalar.constant 20480 : i64
@@ -200,17 +200,21 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   %view_stride = index.constant 80 : offset
   %view_bytes = index.scale %row_count, %view_stride : index, offset -> offset
   %views = buffer.alloca<private> align(8) %view_bytes : buffer
-  %table_payload_bytes = index.constant 256 : offset
+  %table_payload_bytes = index.constant 512 : offset
   %target_origins = buffer.alloca<private> align(8) %table_payload_bytes : buffer
   %draft_origins = buffer.alloca<private> align(8) %table_payload_bytes : buffer
-  %target = buffer.view %target_origins[%origin] : buffer -> view<16x2xi64>
-  %draft = buffer.view %draft_origins[%origin] : buffer -> view<16x2xi64>
+  %target = buffer.view %target_origins[%origin] : buffer -> view<16x4xi64>
+  %draft = buffer.view %draft_origins[%origin] : buffer -> view<16x4xi64>
   %origin_capacity = index.constant 16 : index
   scf.for %i = [%zero to %origin_capacity step %one] {
-    view.store %zero64, %target[%i, 0] : i64, view<16x2xi64>
-    view.store %zero64, %target[%i, 1] : i64, view<16x2xi64>
-    view.store %zero64, %draft[%i, 0] : i64, view<16x2xi64>
-    view.store %zero64, %draft[%i, 1] : i64, view<16x2xi64>
+    view.store %zero64, %target[%i, 0] : i64, view<16x4xi64>
+    view.store %zero64, %target[%i, 1] : i64, view<16x4xi64>
+    view.store %zero64, %target[%i, 2] : i64, view<16x4xi64>
+    view.store %zero64, %target[%i, 3] : i64, view<16x4xi64>
+    view.store %zero64, %draft[%i, 0] : i64, view<16x4xi64>
+    view.store %zero64, %draft[%i, 1] : i64, view<16x4xi64>
+    view.store %zero64, %draft[%i, 2] : i64, view<16x4xi64>
+    view.store %zero64, %draft[%i, 3] : i64, view<16x4xi64>
     scf.yield
   }
   scf.for %i = [%zero to %row_count step %one] {
@@ -226,11 +230,12 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
     func.call @row_view(%views, %row_count, %i, %three, %tokens_base, %token_bytes) : (buffer, index, index, index, i64, i64) -> ()
     func.call @row_view(%views, %row_count, %i, %four, %progress_base, %progress_bytes) : (buffer, index, index, index, i64, i64) -> ()
     %kv_base = scf.select %pooled, %row_bytes, %attention_base : i64
-    view.store %gdn_base, %target[%i, 0] : i64, view<16x2xi64>
-    view.store %kv_base, %target[%i, 1] : i64, view<16x2xi64>
+    view.store %gdn_base, %target[%i, 0] : i64, view<16x4xi64>
+    view.store %gdn_base, %target[%i, 1] : i64, view<16x4xi64>
+    view.store %kv_base, %target[%i, 2] : i64, view<16x4xi64>
     %dense_draft_base = scalar.muli %row, %draft_row_bytes : i64
     %draft_base = scf.select %pooled, %zero64, %dense_draft_base : i64
-    view.store %draft_base, %draft[%i, 1] : i64, view<16x2xi64>
+    view.store %draft_base, %draft[%i, 2] : i64, view<16x4xi64>
     scf.yield
   }
   // Cache regions are {allocation, origin, plane_count, plane_stride,

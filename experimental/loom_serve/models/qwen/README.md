@@ -54,6 +54,18 @@ progress order. Two initial origin payloads and a page-size/map-origin/carry-
 stride/feedback-split record complete the cold result. These roles remain a
 private adapter contract, not a universal storage language.
 
+The packed row table uses four I64 words per row: recurrent read byte origin,
+recurrent write byte origin, attention byte origin, and fork position. The
+ordinary initializer makes read and write origins equal. Span kernels can
+also consume an immutable shared anchor and publish directly to a private
+destination: verification and accepted replay at the fork position read the
+anchor; subsequent positions read the destination. The original table stays
+immutable across queued epochs. A writer is exclusive for the entire cohort,
+including its other readers. Paged attention maps begin at byte 2048 and remain
+independent of recurrent placement. Native pin/fork admission is not exposed;
+the device contract is exercised by `tests/gdn_fork.loom` against isolated
+execution, including read-only verification and queued continuation.
+
 `control.loom:encode_epoch` maps semantic host spans into opaque device metadata
 and padded token banks. Each host record carries input length, original position,
 resident row, known-ID start/count, selection/proposal flags, output credit and

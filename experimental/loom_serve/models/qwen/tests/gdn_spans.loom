@@ -68,7 +68,7 @@ kernel.def @mixed_gdn_metadata() {
   view.store %span3_3, %header[21] : i32, view<43xi32>
   %span3_4 = scalar.constant 3 : i32
   view.store %span3_4, %header[22] : i32, view<43xi32>
-  %table = buffer.view %rows[%origin] : buffer -> view<6x2xi64>
+  %table = buffer.view %rows[%origin] : buffer -> view<6x4xi64>
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
   %six = index.constant 6 : index
@@ -78,7 +78,8 @@ kernel.def @mixed_gdn_metadata() {
     %wide_row = index.cast %row : index to i64
     %base = scalar.muli %wide_row, %stride : i64
     %gdn = scalar.addi %base, %guard : i64
-    view.store %gdn, %table[%row, %zero] : i64, view<6x2xi64>
+    view.store %gdn, %table[%row, 0] : i64, view<6x4xi64>
+    view.store %gdn, %table[%row, 1] : i64, view<6x4xi64>
   }
   kernel.return
 }
@@ -95,7 +96,7 @@ check.case public @mixed_gdn_spans {
   %history_origin = check.literal value(3145728) : offset
   %epsilon = check.literal value(9.9999999999999995e-07) : f32
   %epoch = check.generate.fill value(-99) : tensor<43xi32>
-  %rows = check.generate.fill value(-1) : tensor<6x2xi64>
+  %rows = check.generate.fill value(-1) : tensor<6x4xi64>
   %input = check.generate.iota offset(-0.5) step(1.52587890625e-05) period(65521) : tensor<16x10240xf32>
   %weight = check.generate.iota offset(-0.125) step(0.0001220703125) period(2048) : tensor<40960xf32>
   %alpha = check.generate.iota offset(-0.25) step(0.0013020833333333333) : tensor<16x48xf32>
@@ -152,23 +153,23 @@ check.case public @mixed_gdn_spans {
   %history3 = check.tensor.view %isolated_state offset(9684224) : tensor<4903680xf32> -> tensor<30720xf32>
 
   // Issue 1: 4 spans use the fixed eight-span dispatch capacity.
-  kernel.launch @mixed_gdn_metadata(%four, %epoch, %rows) : (i32, tensor<43xi32>, tensor<6x2xi64>)
-  kernel.launch @qwen38_gdn_conv_spans[%capacity](%epoch, %rows, %history_origin, %epsilon, %input, %weight, %packed_state, %packed_qkv, %packed_norm) : [index](tensor<43xi32>, tensor<6x2xi64>, offset, f32, tensor<16x10240xf32>, tensor<40960xf32>, tensor<4903680xf32>, tensor<16x10240xf32>, tensor<16x32xf32>)
+  kernel.launch @mixed_gdn_metadata(%four, %epoch, %rows) : (i32, tensor<43xi32>, tensor<6x4xi64>)
+  kernel.launch @qwen38_gdn_conv_spans[%capacity](%epoch, %rows, %history_origin, %epsilon, %input, %weight, %packed_state, %packed_qkv, %packed_norm) : [index](tensor<43xi32>, tensor<6x4xi64>, offset, f32, tensor<16x10240xf32>, tensor<40960xf32>, tensor<4903680xf32>, tensor<16x10240xf32>, tensor<16x32xf32>)
   kernel.launch @qwen38_gdn_conv_prepare_prefill[%count0](%control0, %epsilon, %input0, %weight, %history0, %qkv0, %norm0) : [index](tensor<1xi32>, f32, tensor<5x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<5x10240xf32>, tensor<5x32xf32>)
   kernel.launch @qwen38_gdn_conv_prepare_prefill[%count1](%control1, %epsilon, %input1, %weight, %history1, %qkv1, %norm1) : [index](tensor<1xi32>, f32, tensor<3x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<3x10240xf32>, tensor<3x32xf32>)
   kernel.launch @qwen38_gdn_conv_prepare_prefill[%count2](%control2, %epsilon, %input2, %weight, %history2, %qkv2, %norm2) : [index](tensor<1xi32>, f32, tensor<1x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<1x10240xf32>, tensor<1x32xf32>)
   kernel.launch @qwen38_gdn_conv_prepare_prefill[%count3](%control3, %epsilon, %input3, %weight, %history3, %qkv3, %norm3) : [index](tensor<1xi32>, f32, tensor<1x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<1x10240xf32>, tensor<1x32xf32>)
-  kernel.launch @qwen38_gdn_recurrent_spans[%capacity](%epoch, %rows, %recurrent_origin, %packed_qkv, %packed_norm, %alpha, %beta, %a, %bias, %packed_state, %packed_output) : [index](tensor<43xi32>, tensor<6x2xi64>, offset, tensor<16x10240xf32>, tensor<16x32xf32>, tensor<16x48xf32>, tensor<16x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<4903680xf32>, tensor<16x6144xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%capacity](%epoch, %rows, %recurrent_origin, %packed_qkv, %packed_norm, %alpha, %beta, %a, %bias, %packed_state, %packed_output) : [index](tensor<43xi32>, tensor<6x4xi64>, offset, tensor<16x10240xf32>, tensor<16x32xf32>, tensor<16x48xf32>, tensor<16x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<4903680xf32>, tensor<16x6144xf32>)
   kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count0](%control0, %qkv0, %norm0, %alpha0, %beta0, %a, %bias, %state0, %output0) : [index](tensor<1xi32>, tensor<5x10240xf32>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<5x6144xf32>)
   kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count1](%control1, %qkv1, %norm1, %alpha1, %beta1, %a, %bias, %state1, %output1) : [index](tensor<1xi32>, tensor<3x10240xf32>, tensor<3x32xf32>, tensor<3x48xf32>, tensor<3x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<3x6144xf32>)
   kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count2](%control2, %qkv2, %norm2, %alpha2, %beta2, %a, %bias, %state2, %output2) : [index](tensor<1xi32>, tensor<1x10240xf32>, tensor<1x32xf32>, tensor<1x48xf32>, tensor<1x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<1x6144xf32>)
   kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count3](%control3, %qkv3, %norm3, %alpha3, %beta3, %a, %bias, %state3, %output3) : [index](tensor<1xi32>, tensor<1x10240xf32>, tensor<1x32xf32>, tensor<1x48xf32>, tensor<1x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<1x6144xf32>)
   // Issue 2: 2 spans use the fixed eight-span dispatch capacity.
-  kernel.launch @mixed_gdn_metadata(%two, %epoch, %rows) : (i32, tensor<43xi32>, tensor<6x2xi64>)
-  kernel.launch @qwen38_gdn_conv_spans[%capacity](%epoch, %rows, %history_origin, %epsilon, %input, %weight, %packed_state, %packed_qkv, %packed_norm) : [index](tensor<43xi32>, tensor<6x2xi64>, offset, f32, tensor<16x10240xf32>, tensor<40960xf32>, tensor<4903680xf32>, tensor<16x10240xf32>, tensor<16x32xf32>)
+  kernel.launch @mixed_gdn_metadata(%two, %epoch, %rows) : (i32, tensor<43xi32>, tensor<6x4xi64>)
+  kernel.launch @qwen38_gdn_conv_spans[%capacity](%epoch, %rows, %history_origin, %epsilon, %input, %weight, %packed_state, %packed_qkv, %packed_norm) : [index](tensor<43xi32>, tensor<6x4xi64>, offset, f32, tensor<16x10240xf32>, tensor<40960xf32>, tensor<4903680xf32>, tensor<16x10240xf32>, tensor<16x32xf32>)
   kernel.launch @qwen38_gdn_conv_prepare_prefill[%count0](%control0, %epsilon, %input0, %weight, %history0, %qkv0, %norm0) : [index](tensor<1xi32>, f32, tensor<5x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<5x10240xf32>, tensor<5x32xf32>)
   kernel.launch @qwen38_gdn_conv_prepare_prefill[%count1](%control1, %epsilon, %input1, %weight, %history1, %qkv1, %norm1) : [index](tensor<1xi32>, f32, tensor<3x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<3x10240xf32>, tensor<3x32xf32>)
-  kernel.launch @qwen38_gdn_recurrent_spans[%capacity](%epoch, %rows, %recurrent_origin, %packed_qkv, %packed_norm, %alpha, %beta, %a, %bias, %packed_state, %packed_output) : [index](tensor<43xi32>, tensor<6x2xi64>, offset, tensor<16x10240xf32>, tensor<16x32xf32>, tensor<16x48xf32>, tensor<16x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<4903680xf32>, tensor<16x6144xf32>)
+  kernel.launch @qwen38_gdn_recurrent_spans[%capacity](%epoch, %rows, %recurrent_origin, %packed_qkv, %packed_norm, %alpha, %beta, %a, %bias, %packed_state, %packed_output) : [index](tensor<43xi32>, tensor<6x4xi64>, offset, tensor<16x10240xf32>, tensor<16x32xf32>, tensor<16x48xf32>, tensor<16x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<4903680xf32>, tensor<16x6144xf32>)
   kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count0](%control0, %qkv0, %norm0, %alpha0, %beta0, %a, %bias, %state0, %output0) : [index](tensor<1xi32>, tensor<5x10240xf32>, tensor<5x32xf32>, tensor<5x48xf32>, tensor<5x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<5x6144xf32>)
   kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count1](%control1, %qkv1, %norm1, %alpha1, %beta1, %a, %bias, %state1, %output1) : [index](tensor<1xi32>, tensor<3x10240xf32>, tensor<3x32xf32>, tensor<3x48xf32>, tensor<3x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<3x6144xf32>)
   check.expect.bitwise actual(%packed_qkv) expected(%isolated_qkv) : tensor<16x10240xf32>
