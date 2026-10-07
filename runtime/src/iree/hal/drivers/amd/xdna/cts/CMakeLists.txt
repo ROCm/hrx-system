@@ -21,6 +21,8 @@ iree_cc_test(
     iree::base
     iree::hal
     iree::hal::drivers::amd::xdna::driver
+    iree::hal::drivers::amd::xdna::image::testdata::add_i32
+    iree::hal::drivers::amd::xdna::image::testdata::add_i32_npu4
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4
     iree::testing::gtest
@@ -46,6 +48,8 @@ iree_cc_binary_benchmark(
     iree::base
     iree::hal
     iree::hal::drivers::amd::xdna::driver
+    iree::hal::drivers::amd::xdna::image::testdata::add_i32
+    iree::hal::drivers::amd::xdna::image::testdata::add_i32_npu4
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32
     iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4
     iree::third_party::google_benchmark
