@@ -136,14 +136,17 @@ bool loom_low_memory_access_summaries_may_alias(
   }
   const loom_low_memory_relative_interval_t* lhs = left->relative_interval;
   const loom_low_memory_relative_interval_t* rhs = right->relative_interval;
-  if (comparison == LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION && lhs && rhs &&
-      lhs->scope == rhs->scope && lhs->disjoint_storage_ordinal != 0 &&
+  const bool same_captured_invocation =
+      comparison == LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION ||
+      comparison == LOOM_LOW_MEMORY_COMPARISON_SAME_ACYCLIC_INVOCATION;
+  if (same_captured_invocation && lhs && rhs && lhs->scope == rhs->scope &&
+      lhs->disjoint_storage_ordinal != 0 &&
       rhs->disjoint_storage_ordinal != 0 &&
       lhs->disjoint_storage_ordinal != rhs->disjoint_storage_ordinal) {
     return false;
   }
-  if (comparison == LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION && lhs && rhs &&
-      lhs->scope == rhs->scope && lhs->storage_id == rhs->storage_id) {
+  if (same_captured_invocation && lhs && rhs && lhs->scope == rhs->scope &&
+      lhs->storage_id == rhs->storage_id) {
     int64_t lower = 0, upper = 0;
     if (iree_checked_sub_i64(lhs->lower, rhs->upper, &lower) &&
         iree_checked_add_i64(lower, 1, &lower) &&

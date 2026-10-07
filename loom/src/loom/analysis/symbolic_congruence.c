@@ -12,8 +12,9 @@ static uint64_t loom_symbolic_congruence_magnitude(int64_t value) {
   return value < 0 ? UINT64_C(0) - (uint64_t)value : (uint64_t)value;
 }
 
-static const loom_symbolic_expr_t* loom_symbolic_congruence_form(
+const loom_symbolic_expr_t* loom_symbolic_congruence_form(
     const loom_symbolic_expr_t* expression) {
+  IREE_ASSERT_ARGUMENT(expression);
   return expression->congruence ? &expression->congruence->expression
                                 : expression;
 }

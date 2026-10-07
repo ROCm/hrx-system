@@ -176,8 +176,10 @@ static void loom_amdgpu_wait_classification_classify_effects(
         if (!loom_amdgpu_wait_effect_is_dependency_memory(effect)) {
           // Counter-backed external reads produce asynchronous results without
           // participating in memory alias dependencies.
-          frontier_node->read_counter_mask |=
+          const uint32_t counter_mask =
               loom_amdgpu_wait_effect_counter_mask(effect);
+          frontier_node->read_counter_mask |= counter_mask;
+          frontier_node->external_counter_mask |= counter_mask;
           break;
         }
         node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_READ;
@@ -209,8 +211,10 @@ static void loom_amdgpu_wait_classification_classify_effects(
               LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE;
         }
         if (!loom_amdgpu_wait_effect_is_dependency_memory(effect)) {
-          frontier_node->write_counter_mask |=
+          const uint32_t counter_mask =
               loom_amdgpu_wait_effect_counter_mask(effect);
+          frontier_node->write_counter_mask |= counter_mask;
+          frontier_node->external_counter_mask |= counter_mask;
           break;
         }
         node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_DEPENDENCY_WRITE;

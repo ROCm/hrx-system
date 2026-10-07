@@ -272,12 +272,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "wait_frontier_budget",
+    srcs = ["wait_frontier_budget.c"],
+    hdrs = ["wait_frontier_budget.h"],
+    deps = [
+        ":wait_counters",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "wait_frontier_budget_test",
+    srcs = ["wait_frontier_budget_test.cc"],
+    deps = [
+        ":wait_frontier_budget",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "wait_frontier",
     srcs = ["wait_frontier.c"],
     hdrs = ["wait_frontier.h"],
     deps = [
         ":wait_completion",
         ":wait_counters",
+        ":wait_frontier_budget",
+        "//loom/src/loom/analysis:symbolic_expr",
         "//loom/src/loom/codegen/low:memory_access",
         "//loom/src/loom/codegen/low/allocation:storage_lease_index",
         "//loom/src/loom/codegen/low/allocation:table",
@@ -438,9 +461,11 @@ loom_cc_test(
     srcs = ["wait_plan_test.cc"],
     target_compatible_with = loom_amdgpu_descriptor_set_compatible_with(_DESCRIPTOR_SET_GFX125X),
     deps = [
+        ":wait_frontier",
         ":wait_plan",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:immediates",
+        "//loom/src/loom/codegen/low:memory_access",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
@@ -448,6 +473,7 @@ loom_cc_test(
         "//loom/src/loom/target/arch/amdgpu:target_info",
         "//loom/src/loom/target/arch/amdgpu/descriptors:low_registry",
         "//loom/src/loom/target/arch/amdgpu/refs:target_refs",
+        "//loom/src/loom/util:cfg_graph_test_util",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",

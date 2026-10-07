@@ -239,15 +239,24 @@ TEST(MemoryAccessTest, DisjointStorageRequiresOneCapturedEvaluation) {
   }
   EXPECT_FALSE(loom_low_memory_access_summaries_may_alias(
       &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION));
+  EXPECT_FALSE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1],
+      LOOM_LOW_MEMORY_COMPARISON_SAME_ACYCLIC_INVOCATION));
   EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
       &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_INDEPENDENT));
   intervals[1].scope = &scopes[1];
   EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
       &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION));
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1],
+      LOOM_LOW_MEMORY_COMPARISON_SAME_ACYCLIC_INVOCATION));
   intervals[1].scope = &scopes[0];
   intervals[1].disjoint_storage_ordinal = 0;
   EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
       &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION));
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1],
+      LOOM_LOW_MEMORY_COMPARISON_SAME_ACYCLIC_INVOCATION));
 }
 
 TEST(MemoryAccessTest, PeriodicBanksRequireOneEvaluationAndCompleteEnvelopes) {
@@ -293,6 +302,76 @@ TEST(MemoryAccessTest, PeriodicBanksRequireOneEvaluationAndCompleteEnvelopes) {
   intervals[1].scope = &intervals;
   EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
       &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION));
+}
+
+TEST(MemoryAccessTest, AffinePingPongBanksShareOneParityIdentity) {
+  constexpr int64_t kStageBytes = 34048;
+  constexpr int64_t kFootprintBytes = 32240;
+  constexpr loom_value_id_t kParityValue = 17;
+  const int scope = 0;
+  const loom_symbolic_term_t terms[2] = {
+      {/*.coefficient=*/kStageBytes,
+       /*.value_id=*/kParityValue,
+       /*.relation_value_id=*/kParityValue},
+      {/*.coefficient=*/-kStageBytes,
+       /*.value_id=*/kParityValue,
+       /*.relation_value_id=*/kParityValue},
+  };
+  loom_low_memory_relative_interval_t intervals[2] = {};
+  loom_low_memory_access_summary_t accesses[2] = {};
+  for (size_t i = 0; i < 2; ++i) {
+    intervals[i].scope = &scope;
+    intervals[i].storage_id = 4;
+    intervals[i].origin.constant = i == 0 ? 0 : kStageBytes;
+    intervals[i].origin.terms = &terms[i];
+    intervals[i].origin.term_count = 1;
+    intervals[i].origin.flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR;
+    intervals[i].upper = kFootprintBytes;
+    accesses[i].memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP;
+    accesses[i].relative_interval = &intervals[i];
+  }
+
+  // active = 34048 * parity
+  // inactive = 34048 - 34048 * parity
+  EXPECT_FALSE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION));
+  EXPECT_FALSE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1],
+      LOOM_LOW_MEMORY_COMPARISON_SAME_ACYCLIC_INVOCATION));
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_INDEPENDENT));
+}
+
+TEST(MemoryAccessTest, AffinePingPongBanksRequireTheSameParityIdentity) {
+  constexpr int64_t kStageBytes = 34048;
+  const int scope = 0;
+  const loom_symbolic_term_t terms[2] = {
+      {/*.coefficient=*/kStageBytes,
+       /*.value_id=*/17,
+       /*.relation_value_id=*/17},
+      {/*.coefficient=*/-kStageBytes,
+       /*.value_id=*/18,
+       /*.relation_value_id=*/18},
+  };
+  loom_low_memory_relative_interval_t intervals[2] = {};
+  loom_low_memory_access_summary_t accesses[2] = {};
+  for (size_t i = 0; i < 2; ++i) {
+    intervals[i].scope = &scope;
+    intervals[i].storage_id = 4;
+    intervals[i].origin.constant = i == 0 ? 0 : kStageBytes;
+    intervals[i].origin.terms = &terms[i];
+    intervals[i].origin.term_count = 1;
+    intervals[i].origin.flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR;
+    intervals[i].upper = 32240;
+    accesses[i].memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP;
+    accesses[i].relative_interval = &intervals[i];
+  }
+
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1], LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION));
+  EXPECT_TRUE(loom_low_memory_access_summaries_may_alias(
+      &accesses[0], &accesses[1],
+      LOOM_LOW_MEMORY_COMPARISON_SAME_ACYCLIC_INVOCATION));
 }
 
 class MemoryAccessMapTest : public ::testing::Test {

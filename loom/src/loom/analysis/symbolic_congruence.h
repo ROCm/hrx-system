@@ -27,6 +27,11 @@ struct loom_symbolic_congruence_t {
   loom_symbolic_expr_t expression;
 };
 
+// Returns the normalized affine form traversed by congruence proofs. When the
+// expression has no periodic refinement, this is the expression itself.
+const loom_symbolic_expr_t* loom_symbolic_congruence_form(
+    const loom_symbolic_expr_t* expression);
+
 // Attaches input modulo |modulus| to an already constructed exact result.
 // A modulus of one, unknown affine form, or unrepresentable combination
 // contributes no additional guarantee. |modulus| must be positive.

@@ -104,7 +104,8 @@ typedef struct loom_low_memory_relative_interval_t {
   // Storage equality identity within scope; inequality proves nothing.
   uint32_t storage_id;
   // One-based disjoint-storage identity within scope, or zero when unknown.
-  // Unequal nonzero identities prove disjointness only in one evaluation.
+  // Unequal nonzero identities require a comparison mode that establishes one
+  // captured dynamic invocation without CFG re-entry.
   uint32_t disjoint_storage_ordinal;
   // Participant-uniform symbolic origin, with optional periodic guarantees.
   loom_symbolic_expr_t origin;
@@ -119,6 +120,9 @@ typedef enum loom_low_memory_comparison_e {
   LOOM_LOW_MEMORY_COMPARISON_INDEPENDENT,
   // Both effects execute in the same block invocation and participant domain.
   LOOM_LOW_MEMORY_COMPARISON_SAME_EVALUATION,
+  // Both effects execute in the same source-function invocation and participant
+  // domain, and control flow between them crosses no CFG re-entry/backedge.
+  LOOM_LOW_MEMORY_COMPARISON_SAME_ACYCLIC_INVOCATION,
 } loom_low_memory_comparison_t;
 
 typedef struct loom_low_memory_access_summary_t {

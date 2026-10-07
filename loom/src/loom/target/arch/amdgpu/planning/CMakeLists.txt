@@ -308,6 +308,37 @@ endif()
 if(LOOM_TARGET_ARCH_AMDGPU)
 loom_cc_library(
   NAME
+    wait_frontier_budget
+  HDRS
+    "wait_frontier_budget.h"
+  SRCS
+    "wait_frontier_budget.c"
+  DEPS
+    ::wait_counters
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_test(
+  NAME
+    wait_frontier_budget_test
+  SRCS
+    "wait_frontier_budget_test.cc"
+  DEPS
+    ::wait_frontier_budget
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=loom.target.arch.amdgpu"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_AMDGPU)
+loom_cc_library(
+  NAME
     wait_frontier
   HDRS
     "wait_frontier.h"
@@ -316,9 +347,11 @@ loom_cc_library(
   DEPS
     ::wait_completion
     ::wait_counters
+    ::wait_frontier_budget
     iree::base
     iree::base::internal
     iree::base::internal::arena
+    loom::analysis::symbolic_expr
     loom::codegen::low::allocation::storage_lease_index
     loom::codegen::low::allocation::table
     loom::codegen::low::memory_access
@@ -513,12 +546,14 @@ loom_cc_test(
   SRCS
     "wait_plan_test.cc"
   DEPS
+    ::wait_frontier
     ::wait_plan
     iree::base::internal::arena
     iree::testing::gtest
     iree::testing::gtest_main
     loom::codegen::low::builder
     loom::codegen::low::immediates
+    loom::codegen::low::memory_access
     loom::codegen::low::schedule
     loom::ir
     loom::ops::low
@@ -526,6 +561,7 @@ loom_cc_test(
     loom::target::arch::amdgpu::facts
     loom::target::arch::amdgpu::refs::target_refs
     loom::target::arch::amdgpu::target_info
+    loom::util::cfg_graph_test_util
   LABELS
     "iree-build-requirement=loom.target.arch.amdgpu"
 )

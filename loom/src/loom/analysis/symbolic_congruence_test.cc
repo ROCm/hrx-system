@@ -110,6 +110,16 @@ TEST_F(SymbolicCongruenceTest, BankProofsAgreeWithConcreteAddressSets) {
   EXPECT_GT(proved_count, 0u);
 }
 
+TEST_F(SymbolicCongruenceTest, FormSelectsTheExpressionTraversedByProofs) {
+  const auto direct = Variable(0);
+  EXPECT_EQ(loom_symbolic_congruence_form(&direct), &direct);
+
+  const auto periodic = Remainder(direct, 4);
+  ASSERT_NE(periodic.congruence, nullptr);
+  EXPECT_EQ(loom_symbolic_congruence_form(&periodic),
+            &periodic.congruence->expression);
+}
+
 TEST_F(SymbolicCongruenceTest, CorrelationRequiresTheSameEvaluation) {
   const auto current = Bank(0, 0, 2, 32768, false);
   const auto next = Bank(0, 1, 2, 32768, false);

@@ -2315,7 +2315,7 @@ loom_amdgpu_wait_plan_handle_cross_block_memory_dependencies(
   }
   const uint32_t counter_mask =
       loom_amdgpu_wait_frontier_memory_dependency_mask(&builder->frontier,
-                                                       frontier_node);
+                                                       node_index);
   if (counter_mask == 0) {
     return iree_ok_status();
   }
@@ -3116,6 +3116,134 @@ static iree_status_t loom_amdgpu_wait_plan_build_actions(
   return iree_ok_status();
 }
 
+static bool loom_amdgpu_wait_plan_budget_add_u64(uint64_t increment,
+                                                 uint64_t* inout_value) {
+  uint64_t next_value = 0;
+  if (!iree_checked_add_u64(*inout_value, increment, &next_value)) {
+    return false;
+  }
+  *inout_value = next_value;
+  return true;
+}
+
+static iree_status_t loom_amdgpu_wait_plan_collect_precise_runtime_bounds(
+    loom_amdgpu_wait_plan_builder_t* builder,
+    loom_amdgpu_wait_frontier_precise_runtime_bounds_t* out_bounds) {
+  *out_bounds = (loom_amdgpu_wait_frontier_precise_runtime_bounds_t){
+      .arithmetic_valid = true,
+  };
+  const loom_low_schedule_table_t* schedule = builder->schedule;
+  uint64_t effect_use_count = 0;
+  uint64_t block_count = 0;
+  uint64_t cfg_edge_count = 0;
+  uint64_t scheduled_node_count = 0;
+  uint64_t node_count = 0;
+  uint64_t dependency_count = 0;
+  uint64_t pre_admission_visits = 0;
+  if ((iree_host_size_t)(effect_use_count = schedule->effect_use_count) !=
+          schedule->effect_use_count ||
+      (iree_host_size_t)(block_count = schedule->block_count) !=
+          schedule->block_count ||
+      (iree_host_size_t)(cfg_edge_count = schedule->cfg_graph.edge_count) !=
+          schedule->cfg_graph.edge_count ||
+      (iree_host_size_t)(scheduled_node_count =
+                             schedule->scheduled_node_count) !=
+          schedule->scheduled_node_count ||
+      (iree_host_size_t)(node_count = schedule->node_count) !=
+          schedule->node_count ||
+      (iree_host_size_t)(dependency_count = builder->dependency_link_count) !=
+          builder->dependency_link_count ||
+      !loom_amdgpu_wait_frontier_precise_budget_pre_admission_visits(
+          effect_use_count, block_count, cfg_edge_count, scheduled_node_count,
+          node_count, dependency_count, &pre_admission_visits) ||
+      pre_admission_visits >
+          LOOM_AMDGPU_WAIT_FRONTIER_PRECISE_MAX_PRE_ADMISSION_VISITS) {
+    out_bounds->arithmetic_valid = false;
+    return iree_ok_status();
+  }
+
+  bool valid = schedule->scheduled_node_count == 0 ||
+               schedule->scheduled_node_indices != NULL;
+  for (iree_host_size_t packet_index = 0;
+       valid && packet_index < schedule->scheduled_node_count;
+       ++packet_index) {
+    const uint32_t node_index = schedule->scheduled_node_indices[packet_index];
+    if (node_index >= schedule->node_count) {
+      valid = false;
+      break;
+    }
+    const loom_amdgpu_wait_node_state_t* node_state =
+        &builder->classification.node_states[node_index];
+    valid &= loom_amdgpu_wait_plan_budget_add_u64(
+        (node_state->barrier_counter_mask |
+         node_state->workgroup_barrier_counter_mask) != 0,
+        &out_bounds->barrier_query_count);
+    valid &= loom_amdgpu_wait_plan_budget_add_u64(
+        iree_any_bit_set(schedule->nodes[node_index].flags,
+                         LOOM_LOW_SCHEDULE_NODE_FLAG_PROGRAM_EXIT_MEMORY),
+        &out_bounds->program_exit_query_count);
+
+    uint64_t traversed_link_count = 0;
+    for (uint32_t link_index =
+             builder->first_dependency_link_by_consumer[node_index];
+         valid && link_index != LOOM_LOW_SCHEDULE_NODE_NONE;) {
+      if (link_index >= builder->dependency_link_count ||
+          !loom_amdgpu_wait_plan_budget_add_u64(1, &traversed_link_count) ||
+          traversed_link_count > builder->dependency_link_count) {
+        valid = false;
+        break;
+      }
+      const loom_amdgpu_wait_dependency_t* link =
+          &builder->dependency_links[link_index];
+      if (link->consumer_node != node_index ||
+          link->producer_node >= schedule->node_count ||
+          (link->counter_mask & ~LOOM_AMDGPU_WAIT_COUNTER_MASK_ALL) != 0) {
+        valid = false;
+        break;
+      }
+      const loom_low_schedule_node_t* producer =
+          &schedule->nodes[link->producer_node];
+      const loom_low_schedule_node_t* consumer = &schedule->nodes[node_index];
+      const bool may_query_completion =
+          producer->block_index != consumer->block_index ||
+          producer->scheduled_ordinal >= consumer->scheduled_ordinal;
+      uint32_t pending_mask = link->counter_mask;
+      while (valid && may_query_completion && pending_mask != 0) {
+        const uint32_t slot =
+            (uint32_t)iree_math_count_trailing_zeros_u32(pending_mask);
+        const uint32_t counter_mask =
+            loom_amdgpu_wait_counter_mask_from_slot(slot);
+        valid &= loom_amdgpu_wait_plan_budget_add_u64(
+            1, &out_bounds->producer_completion_call_count);
+        const loom_amdgpu_wait_frontier_node_t* producer_state =
+            &builder->classification.frontier_nodes[link->producer_node];
+        const uint32_t tracked_counter_mask =
+            producer_state->read_counter_mask |
+            producer_state->write_counter_mask;
+        if (iree_all_bits_set(tracked_counter_mask, counter_mask)) {
+          valid &= loom_amdgpu_wait_plan_budget_add_u64(
+              1, &out_bounds->producer_completion_full_path_count);
+          valid &= loom_amdgpu_wait_plan_budget_add_u64(
+              producer_state->read_space_flags != 0,
+              &out_bounds
+                   ->producer_completion_full_path_read_space_count);
+          valid &= loom_amdgpu_wait_plan_budget_add_u64(
+              producer_state->write_space_flags != 0,
+              &out_bounds
+                   ->producer_completion_full_path_write_space_count);
+        } else {
+          valid &= loom_amdgpu_wait_plan_budget_add_u64(
+              1, &out_bounds->producer_completion_guard_reject_count);
+        }
+        pending_mask &= pending_mask - 1;
+      }
+      link_index = link->next_dependency;
+    }
+  }
+  out_bounds->arithmetic_valid = valid;
+  return iree_ok_status();
+}
+
 iree_status_t loom_amdgpu_wait_plan_build(
     const loom_low_schedule_table_t* schedule,
     const loom_low_allocation_table_t* allocation,
@@ -3138,6 +3266,8 @@ iree_status_t loom_amdgpu_wait_plan_build(
   };
   loom_amdgpu_wait_packet_analyze_target(schedule->target.descriptor_set,
                                          &builder.wait_packet_target);
+  loom_amdgpu_wait_frontier_precise_runtime_bounds_t precise_runtime_bounds =
+      {0};
   loom_amdgpu_wait_actions_initialize(&builder.actions);
   iree_status_t status = loom_amdgpu_wait_classification_build(
       schedule, allocation, builder.processor_properties,
@@ -3164,11 +3294,15 @@ iree_status_t loom_amdgpu_wait_plan_build(
     loom_amdgpu_wait_completion_analyze(
         schedule, builder.first_dependency_link_by_consumer,
         builder.dependency_links, builder.classification.completion_nodes);
+    status = loom_amdgpu_wait_plan_collect_precise_runtime_bounds(
+        &builder, &precise_runtime_bounds);
+  }
+  if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_frontier_initialize(
         schedule, allocation, builder.classification.frontier_nodes,
         builder.classification.completion_nodes, builder.dependency_links,
         builder.dependency_link_count, builder.loop_entry_drain_counter_masks,
-        transient_arena, &builder.frontier);
+        &precise_runtime_bounds, transient_arena, &builder.frontier);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_loop_analysis_build_cyclic_frontiers(

@@ -16,6 +16,7 @@
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/target/arch/amdgpu/planning/wait_completion.h"
 #include "loom/target/arch/amdgpu/planning/wait_counters.h"
+#include "loom/target/arch/amdgpu/planning/wait_frontier_budget.h"
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 
 #ifdef __cplusplus
@@ -58,6 +59,8 @@ typedef struct loom_amdgpu_wait_frontier_node_t {
   loom_amdgpu_wait_counter_mask_t drained_after_production_counter_mask;
   // Gfx125x XCNT translation group produced by this node, or zero.
   loom_amdgpu_wait_xcnt_group_flags_t xcnt_group_flags;
+  // Counter classes also produced by non-memory asynchronous effects.
+  loom_amdgpu_wait_counter_mask_t external_counter_mask;
   // Normalized memory spaces read by this node.
   loom_amdgpu_wait_memory_space_flags_t read_space_flags;
   // Normalized memory spaces written by this node.
@@ -76,6 +79,21 @@ typedef struct loom_amdgpu_wait_memory_state_t {
   uint16_t access_counter_masks[LOOM_AMDGPU_WAIT_MEMORY_SPACE_COUNT];
 } loom_amdgpu_wait_memory_state_t;
 
+// One source-refined dependency-memory effect retained across acyclic CFG
+// edges. The summary is owned by the schedule's memory-access map. Pending
+// counter classes are represented independently in the precise-state bitmap so
+// a partial drain never retires unrelated work from the same effect.
+typedef struct loom_amdgpu_wait_memory_access_t {
+  // Source-derived alias summary for this exact descriptor effect.
+  const loom_low_memory_access_summary_t* summary;
+  // Counter classes produced by this effect.
+  loom_amdgpu_wait_counter_mask_t producer_counter_mask;
+  // Normalized memory space touched by this effect.
+  loom_amdgpu_wait_memory_space_flags_t space_flags;
+  // Whether the effect reads or writes memory.
+  loom_amdgpu_wait_memory_access_flags_t access_flags;
+} loom_amdgpu_wait_memory_access_t;
+
 // Cross-block wait frontier for one scheduled function.
 typedef struct loom_amdgpu_wait_frontier_t {
   // Schedule whose CFG and block order define the frontier.
@@ -92,6 +110,21 @@ typedef struct loom_amdgpu_wait_frontier_t {
     loom_amdgpu_wait_memory_state_t* resolved_outgoing_states;
     // Incoming state active while the current block is processed.
     loom_amdgpu_wait_memory_state_t active_state;
+    // Per-node conservative facts not represented by precise accesses. This is
+    // |nodes| when no precise state is retained.
+    const loom_amdgpu_wait_frontier_node_t* coarse_nodes;
+    // Source-refined effects grouped by node. The final index is a sentinel.
+    const loom_amdgpu_wait_memory_access_t* precise_accesses;
+    const uint32_t* precise_access_indices_by_node;
+    // Number of source-refined effects and bitmap words per state.
+    iree_host_size_t precise_access_count;
+    iree_host_size_t precise_word_count;
+    // Conservative fixed-point and resolved outgoing precise state. Each effect
+    // owns one bit per AMDGPU counter slot.
+    uint64_t* precise_static_outgoing_words;
+    uint64_t* precise_resolved_outgoing_words;
+    // Incoming precise state active while the current block is processed.
+    uint64_t* precise_active_words;
   } memory;
   // Assignment-backed storage leases that remain active across block edges.
   struct {
@@ -166,11 +199,12 @@ iree_status_t loom_amdgpu_wait_frontier_initialize(
     const loom_amdgpu_wait_dependency_t* dependencies,
     iree_host_size_t dependency_count,
     const uint32_t* planned_block_drain_counter_masks,
+    const loom_amdgpu_wait_frontier_precise_runtime_bounds_t* runtime_bounds,
     iree_arena_allocator_t* arena, loom_amdgpu_wait_frontier_t* out_frontier);
 
 // Begins processing |block_index| and selects predecessor state. Processed
-// predecessors contribute refined state; backedges and forward-unknown
-// predecessors contribute conservative static state.
+// predecessors contribute refined state unless a precise-memory backedge must
+// select conservative static state consistently across all frontier domains.
 void loom_amdgpu_wait_frontier_begin_block(
     loom_amdgpu_wait_frontier_t* frontier, uint16_t block_index);
 
@@ -184,8 +218,7 @@ uint32_t loom_amdgpu_wait_frontier_memory_query(
 // Returns full-drain counters needed by the current node's incoming memory
 // antidependencies.
 uint32_t loom_amdgpu_wait_frontier_memory_dependency_mask(
-    const loom_amdgpu_wait_frontier_t* frontier,
-    const loom_amdgpu_wait_frontier_node_t* node);
+    const loom_amdgpu_wait_frontier_t* frontier, uint32_t consumer_node);
 
 // Returns true when incoming memory or result-lease state proves
 // |producer_node|'s incoming work in |counter_mask| complete. A producer in the
