@@ -107,3 +107,15 @@ iree_runtime_cc_test(
         "//runtime/src/iree/testing:gtest_main",
     ],
 )
+
+iree_runtime_cc_test(
+    name = "proactor_cancel_test",
+    srcs = ["proactor_cancel_test.cc"],
+    target_compatible_with = ["@platforms//os:windows"],
+    deps = [
+        ":iocp",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
