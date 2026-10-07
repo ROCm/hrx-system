@@ -25,6 +25,9 @@ IREE_FLAG(bool, trim, false,
 IREE_FLAG(bool, reload_weights, false,
           "Run the trim witness with weight eviction/reload before target/MTP "
           "continuation; requires elastic backing.");
+IREE_FLAG(bool, checkpoints, false,
+          "Check shared non-page-aligned forks, rewind, COW and reclamation; "
+          "requires checkpoint_capacity=1 and pooled state.");
 IREE_FLAG(
     bool, suspend_rows, false,
     "Extend the trim witness with retained-row DRAM capture, block reuse, "
@@ -1103,6 +1106,290 @@ static iree_status_t qwen_check_measure(
   return status;
 }
 
+static iree_status_t qwen_check_endpoint(loom_serve_text_model_t* model,
+                                         iree_host_size_t actual_index,
+                                         iree_host_size_t reference_index) {
+  const loom_serve_text_row_t* actual =
+      loom_serve_text_model_row(model, actual_index);
+  const loom_serve_text_row_t* reference =
+      loom_serve_text_model_row(model, reference_index);
+  if (loom_serve_text_row_position(actual) !=
+          loom_serve_text_row_position(reference) ||
+      loom_serve_text_row_token(actual) !=
+          loom_serve_text_row_token(reference) ||
+      loom_serve_text_row_is_eos(actual) !=
+          loom_serve_text_row_is_eos(reference)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "checkpoint row %zu differs from replay row %zu at "
+                            "position %zu/%zu, token %d/%d",
+                            actual_index, reference_index,
+                            loom_serve_text_row_position(actual),
+                            loom_serve_text_row_position(reference),
+                            loom_serve_text_row_token(actual),
+                            loom_serve_text_row_token(reference));
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t qwen_check_restore(
+    loom_serve_text_model_t* model, iree_host_size_t index,
+    const loom_serve_text_checkpoint_t* checkpoint) {
+  bool restored = false;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_restore(
+      loom_serve_text_model_row(model, index), checkpoint, &restored));
+  return restored ? iree_ok_status()
+                  : iree_make_status(
+                        IREE_STATUS_RESOURCE_EXHAUSTED,
+                        "checkpoint witness could not admit row %zu", index);
+}
+
+static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
+                                            iree_allocator_t allocator) {
+  const loom_serve_text_pool_usage_t pool =
+      loom_serve_text_model_pool_usage(model);
+  if (pool.block_size != 64 || pool.capacity < 1024 ||
+      loom_serve_text_model_context_capacity(model) < 512 ||
+      loom_serve_text_model_shapes(model)[0].token_capacity < 8 ||
+      loom_serve_text_model_shapes(model)[0].span_capacity < 2) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "checkpoint witness needs paged context >=512 and shape >=8:2");
+  }
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  loom_serve_text_trim_result_t trimmed;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  int32_t input[512], prompt[128], padding[32];
+  iree_host_size_t prompt_count = 0, padding_count = 0;
+  IREE_RETURN_IF_ERROR(iree_tokenizer_encode(
+      loom_serve_text_model_tokenizer(model),
+      IREE_SV(
+          "<|im_start|>user\nReturn exactly: amber cedar maple raven copper "
+          "hazel sparrow juniper bronze larch heron poplar crimson beech "
+          "kestrel "
+          "spruce.<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"),
+      IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_tokenizer_make_token_output(prompt, NULL, NULL,
+                                       IREE_ARRAYSIZE(prompt)),
+      allocator, &prompt_count));
+  IREE_RETURN_IF_ERROR(iree_tokenizer_encode(
+      loom_serve_text_model_tokenizer(model), IREE_SV("Background context.\n"),
+      IREE_TOKENIZER_ENCODE_FLAG_NONE,
+      iree_tokenizer_make_token_output(padding, NULL, NULL,
+                                       IREE_ARRAYSIZE(padding)),
+      allocator, &padding_count));
+  if (!padding_count || prompt_count > 127) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "invalid checkpoint fixture");
+  }
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(input); ++i) {
+    input[i] = padding[i % padding_count];
+  }
+  memcpy(input + 127 - prompt_count, prompt, prompt_count * sizeof(*input));
+  // Occupy low IDs first, so the shared prefix must relocate during trim.
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 0, 512, input));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, 127, input));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 6, 127, input));
+  loom_serve_text_row_t* source = loom_serve_text_model_row(model, 7);
+  loom_serve_text_checkpoint_t* checkpoint = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(source, &checkpoint));
+  if (!checkpoint) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "checkpoint witness requires checkpoint_capacity=1");
+  }
+  loom_serve_text_checkpoint_t* refused = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(source, &refused));
+  if (refused) {
+    loom_serve_text_checkpoint_release(refused);
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "checkpoint witness requires exactly one pin slot");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 7, 6));
+  const iree_host_size_t before_fork =
+      loom_serve_text_model_pool_usage(model).available;
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 1, checkpoint));
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 3, checkpoint));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 6));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 3, 6));
+  if (loom_serve_text_model_pool_usage(model).available != before_fork) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "fork copied immutable KV");
+  }
+  fprintf(stderr,
+          "{\"event\":\"checkpoint_shared\",\"prefix_tokens\":127,"
+          "\"branches\":2,\"added_kv_blocks\":0}\n");
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_reset(loom_serve_text_model_row(model, 0)));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(source));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  if (loom_serve_text_model_memory_statistics(model).reserved_bytes &&
+      !trimmed.moved_blocks) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "shared prefix did not relocate");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 2, checkpoint));
+  const bool elastic =
+      loom_serve_text_model_memory_statistics(model).reserved_bytes != 0;
+  if (elastic) {
+    // This row has never advanced: its effective recurrent state is the anchor.
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_suspend(loom_serve_text_model_row(model, 2)));
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 5, 127, input));
+  const loom_serve_text_span_t first[] = {{1, 4, input, 0},
+                                          {3, 3, input + 1, 0}};
+  const loom_serve_text_span_t second[] = {
+      {1, 3, input + 4, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+      {3, 2, input + 7, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT}};
+  const uint32_t known_limits[] = {0, 0};
+  const loom_serve_text_continuation_t known = {0, 2, second, known_limits};
+  const iree_host_size_t before_append =
+      loom_serve_text_model_pool_usage(model).available;
+  if (loom_serve_text_mtp_from_flags()) {
+    loom_serve_text_result_t results[2];
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_verify(
+        model, 0, 2, first, known_limits, &known, results));
+  } else {
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(model, 0, 2, first));
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(model, 0, 2, second));
+  }
+  if (before_append - loom_serve_text_model_pool_usage(model).available !=
+      4 * pool.block_size) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "fork did not detach two partial tails");
+  }
+  fprintf(stderr,
+          "{\"event\":\"checkpoint_detached\",\"partial_tails\":2,"
+          "\"new_pages\":2}\n");
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    const iree_host_size_t reference = i ? 5 : 6;
+    IREE_RETURN_IF_ERROR(qwen_check_prefill(
+        model, reference, first[i].token_count, first[i].token_ids));
+    IREE_RETURN_IF_ERROR(qwen_check_prefill(
+        model, reference, second[i].token_count, second[i].token_ids));
+    IREE_RETURN_IF_ERROR(
+        qwen_check_endpoint(model, first[i].row_index, reference));
+  }
+  if (elastic) {
+    // Every live writer has left the original recurrent slot; only the pin
+    // now owns it. Maintenance must retain that anchor for the later rewind.
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+    bool resumed = false;
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_try_resume(
+        loom_serve_text_model_row(model, 2), &resumed));
+    if (!resumed) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "unadvanced fork resume refused");
+    }
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 4, 127, input));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 2, 4));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_decode(loom_serve_text_model_row(model, 2)));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_decode(loom_serve_text_model_row(model, 4)));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 2, 4));
+  // Rewind both divergent writers to the same still-immutable endpoint.
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_RETURN_IF_ERROR(
+        qwen_check_restore(model, first[i].row_index, checkpoint));
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i ? 5 : 6)));
+    IREE_RETURN_IF_ERROR(qwen_check_prefill(model, i ? 5 : 6, 127, input));
+    IREE_RETURN_IF_ERROR(
+        qwen_check_endpoint(model, first[i].row_index, i ? 5 : 6));
+  }
+  if (loom_serve_text_mtp_from_flags()) {
+    int32_t anchors[2];
+    loom_serve_text_span_t spans[2];
+    loom_serve_text_span_t next[2];
+    const uint32_t limits[] = {8, 8};
+    for (iree_host_size_t i = 0; i < 2; ++i) {
+      anchors[i] = loom_serve_text_row_token(
+          loom_serve_text_model_row(model, first[i].row_index));
+      spans[i] = (loom_serve_text_span_t){
+          first[i].row_index, 4, &anchors[i],
+          LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE};
+      next[i] = spans[i];
+      next[i].token_ids = NULL;
+    }
+    const loom_serve_text_continuation_t continuation = {0, 2, next, limits};
+    loom_serve_text_result_t results[2];
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_verify(
+        model, 0, 2, spans, limits, &continuation, results));
+    for (iree_host_size_t i = 0; i < 2; ++i) {
+      loom_serve_text_row_t* reference =
+          loom_serve_text_model_row(model, i ? 5 : 6);
+      for (iree_host_size_t j = 0; j < results[i].output_count; ++j) {
+        IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+        if (results[i].tokens[j] != loom_serve_text_row_token(reference)) {
+          return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                  "forked MTP differs from replay");
+        }
+      }
+      IREE_RETURN_IF_ERROR(
+          qwen_check_endpoint(model, spans[i].row_index, i ? 5 : 6));
+      fprintf(stderr,
+              "{\"event\":\"checkpoint_mtp\",\"row\":%zu,\"outputs\":%zu,"
+              "\"epochs\":%zu}\n",
+              spans[i].row_index, results[i].output_count,
+              results[i].verification_count);
+    }
+  }
+  loom_serve_text_checkpoint_release(checkpoint);
+  checkpoint = NULL;
+  // A short-lived pin released without rewind must not leave a hidden owner.
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(
+      loom_serve_text_model_row(model, 1), &checkpoint));
+  if (!checkpoint) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "pin capacity leaked");
+  }
+  loom_serve_text_checkpoint_release(checkpoint);
+  checkpoint = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_decode(loom_serve_text_model_row(model, 1)));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_decode(loom_serve_text_model_row(model, 6)));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 6));
+  // An unselected endpoint has no recoverable prediction, but known-input
+  // continuation can fork it without evaluating its prefix again.
+  const loom_serve_text_span_t hidden = {7, 3, input, 0};
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(model, 0, 1, &hidden));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(source, &checkpoint));
+  if (!checkpoint) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "unselected pin refused");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_restore(model, 2, checkpoint));
+  IREE_RETURN_IF_ERROR(qwen_check_error(
+      loom_serve_text_row_decode(loom_serve_text_model_row(model, 2)),
+      IREE_STATUS_FAILED_PRECONDITION));
+  // Both remaining readers advance together after the explicit pin is gone.
+  // Releasing the first reader during cohort assembly would reuse live state.
+  loom_serve_text_checkpoint_release(checkpoint);
+  checkpoint = NULL;
+  const loom_serve_text_span_t visible[] = {
+      {7, 1, input + 3, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+      {2, 1, input + 3, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT}};
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(model, 0, 2, visible));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 2, 7));
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  if (loom_serve_text_model_pool_usage(model).available != pool.capacity ||
+      loom_serve_text_model_memory_statistics(model).committed_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "checkpoint lifecycle leaked retained backing");
+  }
+  fprintf(stderr,
+          "PASS: shared prefix, divergent forks, queued continuation, rewind, "
+          "pin release and full reclamation.\n");
+  return iree_ok_status();
+}
+
 static iree_status_t qwen_check_compare(loom_serve_text_model_t* model,
                                         iree_allocator_t allocator) {
   iree_host_size_t span_count = 4;
@@ -1241,6 +1528,9 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status) && FLAG_shared_residency) {
     status = qwen_check_shared_residency(device, model, allocator);
+  }
+  if (iree_status_is_ok(status) && FLAG_checkpoints) {
+    status = qwen_check_checkpoints(model, allocator);
   }
   if (iree_status_is_ok(status)) {
     const loom_serve_memory_statistics_t memory =

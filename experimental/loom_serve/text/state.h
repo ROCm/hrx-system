@@ -45,8 +45,15 @@ typedef struct loom_serve_text_state_row_t {
   // Private views in slots 1, 3-5; recurrence borrows its owned pool slot.
   // Residual/workspace borrow model-wide storage.
   iree_hal_buffer_t* buffers[TEXT_BINDING_COUNT];
-  // Owned recurrent slot, or UINT32_MAX while empty or suspended.
-  uint32_t recurrent_slot;
+  // Current destination and the immutable source of an in-flight fork.
+  struct {
+    // Owned slot, or UINT32_MAX while empty or suspended.
+    uint32_t slot;
+    // Owned reader until the cohort retires, or UINT32_MAX when in-place.
+    uint32_t anchor;
+  } recurrent;
+  // Old partial KV tail owned through COW retirement, or UINT32_MAX.
+  uint32_t retiring_tail;
   // Number of inputs actually consumed into KV/recurrent state.
   iree_host_size_t position;
   // Owned physical pages, including any in-flight speculative suffix.
@@ -54,6 +61,21 @@ typedef struct loom_serve_text_state_row_t {
   // Owned DRAM image while suspended; no physical KV IDs remain owned.
   loom_serve_snapshot_t* snapshot;
 } loom_serve_text_state_row_t;
+
+// Explicit endpoint holding immutable KV and recurrence by reference. MTP carry
+// lives in the source-declared carry slab after the ordinary row entries.
+typedef struct loom_serve_text_state_checkpoint_t {
+  // Borrowed storage owner, outliving this endpoint.
+  loom_serve_text_state_t* owner;
+  // Exact consumed input frontier.
+  iree_host_size_t position;
+  // Retained recurrent slot.
+  uint32_t recurrent_slot;
+  // Number of retained logical pages.
+  uint32_t block_count;
+  // Logical-order IDs borrowing the owner's fixed checkpoint map bank.
+  uint32_t* blocks;
+} loom_serve_text_state_checkpoint_t;
 
 // Retained text storage, independent of source compilation and VM invocation.
 // All mutations use the device owner's serialized execution domain. External
@@ -77,6 +99,17 @@ struct loom_serve_text_state_t {
   loom_serve_text_state_row_t* rows;
   // Validated source geometry and retained initialization payloads.
   loom_serve_text_storage_t storage;
+  // Explicit endpoint records, separate from active row capacity.
+  struct {
+    // Configured cold record count, including before allocation.
+    uint32_t capacity;
+    // Available checkpoint IDs; each live endpoint owns one.
+    loom_serve_block_pool_t pool;
+    // Owned records indexed by checkpoint ID.
+    loom_serve_text_state_checkpoint_t* values;
+    // Owned logical page maps for all checkpoint records.
+    uint32_t* maps;
+  } checkpoints;
   // Recurrent ownership is independent of row-private control and KV maps.
   struct {
     // Free slot IDs; release follows retirement or completed capture.
@@ -86,7 +119,7 @@ struct loom_serve_text_state_t {
     // Rows whose new byte origins need source encoding before packed work.
     uint32_t dirty_rows;
   } recurrent;
-  // Private-page ownership shared by target and draft cache planes.
+  // Referenced page ownership shared by target and draft cache planes.
   struct {
     // Addressable pooled token capacity; zero selects dense comparison.
     iree_host_size_t capacity;
@@ -164,8 +197,12 @@ iree_status_t loom_serve_text_state_grow(loom_serve_text_state_t* state,
                                          const loom_serve_text_span_t* spans,
                                          const uint32_t* extents);
 
-// Releases only the retired speculative suffix beyond the consumed frontier.
+// Releases fork readers, COW sources and the rejected speculative suffix only
+// after the cohort has retired and the consumed frontier is published.
 void loom_serve_text_state_row_trim(loom_serve_text_state_row_t* row);
+// Unique pages required for append, including detaching a shared partial tail.
+uint32_t loom_serve_text_state_row_growth(
+    const loom_serve_text_state_row_t* row, uint32_t extent);
 // Activates an empty row's recurrent slot and initializes private state on the
 // existing work timeline. An already resident row performs no work.
 iree_status_t loom_serve_text_state_row_activate(
@@ -175,6 +212,14 @@ iree_status_t loom_serve_text_state_row_suspend(
     loom_serve_text_state_row_t* row);
 iree_status_t loom_serve_text_state_row_try_resume(
     loom_serve_text_state_row_t* row, bool* out_resumed);
+iree_status_t loom_serve_text_state_row_try_pin(
+    loom_serve_text_state_row_t* row,
+    loom_serve_text_state_checkpoint_t** out_checkpoint);
+iree_status_t loom_serve_text_state_row_try_restore(
+    loom_serve_text_state_row_t* row,
+    const loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored);
+void loom_serve_text_state_checkpoint_release(
+    loom_serve_text_state_checkpoint_t* checkpoint);
 iree_status_t loom_serve_text_state_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result);
 

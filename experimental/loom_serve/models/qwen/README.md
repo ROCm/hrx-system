@@ -25,8 +25,9 @@ parameter groups load once. There is no command ABI or HAL extension.
 ## Source startup and control
 
 The native constructor calls `prepare` with the requested prefill, context,
-pool and resident-row capacities, MTP selection, packed shapes and checkpoint
-path. Shapes cross as little-endian i64 token/span pairs, not a native struct.
+pool, resident-row and pinned-endpoint capacities, MTP selection, packed shapes
+and checkpoint path. Shapes cross as little-endian i64 token/span pairs, not a
+native struct.
 The source declares stages through `prepare.stage`, `prepare.config_i64` and
 `prepare.parameter`. It returns the effective prefill capacity, the number of
 leading stages sharing target parameter placement, an opaque control buffer,
@@ -61,6 +62,14 @@ use a different slot. `encode_state` maps native ownership records into the
 source-owned target origin payload before work; ordinary epochs reuse it
 unchanged. These bindings preserve the arena extent and math while allowing
 retained state and active row lifetimes to differ.
+
+Explicit checkpoint capacity defaults to zero. With pins enabled, storage
+reserves `2*rows+pins` recurrent slots, leaving room for the whole cohort's
+immutable readers and private writers. Elastic backing commits only used
+slots. Pins share target/draft KV pages and recurrence; the only eager state
+copy is the 20 KiB MTP carry. A shared partial 64-token page detaches before
+append, while recurrence reads the retained source directly and publishes into
+its private slot. No full 149.625 MiB recurrent/history copy precedes a fork.
 
 The packed row table uses four I64 words per row: recurrent read byte origin,
 recurrent write byte origin, attention byte origin, and fork position. The

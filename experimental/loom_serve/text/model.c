@@ -104,6 +104,8 @@ struct loom_serve_text_model_t {
   iree_host_size_t row_count;
   // Fixed row records, owned by this model.
   loom_serve_text_row_t* rows;
+  // Fixed semantic endpoint records paired with the state's checkpoint IDs.
+  loom_serve_text_checkpoint_t* checkpoints;
   // Retained device state, mappings and final queue ownership.
   loom_serve_text_state_t state;
   // Environment owning canonical VM reference types.
@@ -161,6 +163,17 @@ struct loom_serve_text_row_t {
     // Device-generated count at zero and EOS flag at seven.
     int32_t progress[8];
   } transfer;
+};
+
+struct loom_serve_text_checkpoint_t {
+  // Borrowed model, outliving this handle.
+  loom_serve_text_model_t* model;
+  // Borrowed endpoint storage owned until release by this handle.
+  loom_serve_text_state_checkpoint_t* state;
+  // Whether the exact endpoint selected an unconsumed prediction.
+  bool has_prediction;
+  // Pending token; meaningful only when has_prediction is set.
+  int32_t token;
 };
 
 static iree_string_view_t text_file_text(iree_io_file_contents_t* contents) {
@@ -463,6 +476,7 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
       iree_vm_variant_from_i64((int64_t)options->context_capacity),
       iree_vm_variant_from_i64((int64_t)options->pool_capacity),
       iree_vm_variant_from_i64((int64_t)options->row_count),
+      iree_vm_variant_from_i64((int64_t)options->checkpoint_capacity),
       iree_vm_variant_from_i32(options->enable_mtp),
       iree_vm_buffer_variant_from_ptr_move(&model->vm_types, &shapes),
       iree_vm_variant_from_i64((int64_t)options->epoch_count),
@@ -522,6 +536,23 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
         &model->vm_types, results + 4, model->row_count,
         model->context_capacity, model->state.cache.capacity,
         &model->state.storage, model->allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    const loom_serve_text_storage_t* storage = &model->state.storage;
+    const iree_host_size_t slots =
+        options->checkpoint_capacity
+            ? 2 * options->row_count + options->checkpoint_capacity
+            : options->row_count;
+    const uint64_t carry_bytes = iree_unaligned_load_le_u64(
+        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + 6 * 24);
+    if (storage->recurrent.capacity < slots ||
+        (options->enable_mtp &&
+         options->row_count + options->checkpoint_capacity >
+             carry_bytes / storage->carry_stride)) {
+      status = iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "source storage lacks configured checkpoint headroom");
+    }
   }
   if (iree_status_is_ok(status)) {
     status = text_load_tokenizer(
@@ -625,6 +656,11 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
     model->rows[i].model = model;
     model->rows[i].state = &model->state.rows[i];
   }
+  if (model->state.checkpoints.capacity) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        model->allocator, model->state.checkpoints.capacity,
+        sizeof(*model->checkpoints), (void**)&model->checkpoints));
+  }
   fprintf(stderr,
           "Residency: %zu rows, %.3f GiB retained arena, %.3f GiB shared "
           "workspace, %zu-token context, %zu-token prefill capacity.\n",
@@ -652,6 +688,8 @@ iree_status_t loom_serve_text_model_create(
       options->epoch_count > SIZE_MAX / (2 * sizeof(int64_t)) ||
       (options->enable_mtp && !options->epoch_count) ||
       options->pool_capacity > 4194304 ||
+      options->checkpoint_capacity > INT32_MAX ||
+      (options->checkpoint_capacity && !options->pool_capacity) ||
       (options->pool_capacity && !options->epoch_count)) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -715,6 +753,7 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   }
   iree_vm_environment_free(model->environment);
   iree_allocator_free(model->allocator, model->rows);
+  iree_allocator_free(model->allocator, model->checkpoints);
   loom_serve_residency_destroy(model->residency);
   memory_status = iree_status_join(memory_status,
                                    loom_serve_weights_destroy(model->weights));
@@ -829,6 +868,60 @@ iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
   return loom_serve_text_state_row_try_resume(row->state, out_resumed);
 }
 
+iree_status_t loom_serve_text_row_try_pin(
+    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint) {
+  *out_checkpoint = NULL;
+  if (!row->state->position || row->state->snapshot) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "checkpoint requires a nonempty resident row");
+  }
+  loom_serve_text_state_checkpoint_t* state = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_try_pin(row->state, &state));
+  if (!state) {
+    return iree_ok_status();
+  }
+  const iree_host_size_t index =
+      (iree_host_size_t)(state - row->model->state.checkpoints.values);
+  loom_serve_text_checkpoint_t* checkpoint = &row->model->checkpoints[index];
+  *checkpoint =
+      (loom_serve_text_checkpoint_t){.model = row->model,
+                                     .state = state,
+                                     .has_prediction = row->has_prediction,
+                                     .token = row->transfer.tokens[0]};
+  *out_checkpoint = checkpoint;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_row_try_restore(
+    loom_serve_text_row_t* row, const loom_serve_text_checkpoint_t* checkpoint,
+    bool* out_restored) {
+  *out_restored = false;
+  if (checkpoint->model != row->model) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "checkpoint belongs to a different model");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_try_restore(
+      row->state, checkpoint->state, out_restored));
+  if (*out_restored) {
+    row->has_prediction = checkpoint->has_prediction;
+    memset(&row->transfer, 0, sizeof(row->transfer));
+    row->transfer.tokens[0] = checkpoint->token;
+    row->transfer.progress[0] = checkpoint->has_prediction;
+    row->transfer.progress[7] = checkpoint->has_prediction &&
+                                checkpoint->token == row->model->eos_token;
+  }
+  return iree_ok_status();
+}
+
+void loom_serve_text_checkpoint_release(
+    loom_serve_text_checkpoint_t* checkpoint) {
+  if (!checkpoint) {
+    return;
+  }
+  loom_serve_text_state_checkpoint_release(checkpoint->state);
+  checkpoint->state = NULL;
+}
+
 static iree_status_t text_invoke(loom_serve_text_model_t* model,
                                  iree_vm_function_t function,
                                  iree_vm_variant_span_t arguments,
@@ -893,10 +986,15 @@ static iree_status_t text_publish_state_bindings(
     const loom_serve_text_state_row_t* row = &model->state.rows[i];
     const uint64_t origin =
         iree_hal_buffer_byte_offset(row->buffers[TEXT_RECURRENT]);
+    const uint64_t read_origin =
+        row->recurrent.anchor == UINT32_MAX
+            ? origin
+            : iree_hal_buffer_byte_offset(
+                  model->state.recurrent.buffers[row->recurrent.anchor]);
     uint8_t* record =
         model->host.bytes[TEXT_HOST_STATE_BINDINGS].data + count++ * 32;
     iree_unaligned_store_le_u64(record, i);
-    iree_unaligned_store_le_u64(record + 8, origin);
+    iree_unaligned_store_le_u64(record + 8, read_origin);
     iree_unaligned_store_le_u64(record + 16, origin);
     iree_unaligned_store_le_u64(record + 24, row->position);
   }
@@ -1117,10 +1215,7 @@ static iree_status_t text_epoch(
   for (iree_host_size_t i = 0; model->state.cache.capacity && i < span_count;
        ++i) {
     const loom_serve_text_row_t* row = &model->rows[spans[i].row_index];
-    required_blocks += (uint32_t)((row->state->position + extents[i] +
-                                   model->state.storage.block_size - 1) /
-                                  model->state.storage.block_size) -
-                       row->state->block_count;
+    required_blocks += loom_serve_text_state_row_growth(row->state, extents[i]);
   }
   if (required_blocks > model->state.cache.pool.available) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,

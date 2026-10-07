@@ -13,11 +13,11 @@
 extern "C" {
 #endif
 
-// Single-owner free physical block IDs. Storage geometry, logical mappings,
-// admission credit, and execution retirement belong to the caller. Warm
-// acquire/release only move IDs; they allocate no host or device memory.
+// Serialized-owner physical block IDs with shared lifetime references. Storage
+// geometry, logical mappings, admission credit and execution retirement belong
+// to the caller. Warm ownership changes allocate no host or device memory.
 typedef struct loom_serve_block_pool_t {
-  // Allocator owning the fixed free-ID array.
+  // Allocator owning the fixed free-ID and reference arrays.
   iree_allocator_t allocator;
   // Total number of physical block IDs in this pool.
   uint32_t capacity;
@@ -25,10 +25,13 @@ typedef struct loom_serve_block_pool_t {
   uint32_t available;
   // Fixed free-ID stack; acquired entries beyond available are not read.
   uint32_t* free_blocks;
+  // References per ID; zero denotes an ID on the free stack. Borrows backing.
+  uint32_t* references;
 } loom_serve_block_pool_t;
 
-// Creates capacity IDs in [0, capacity). Failure leaves an empty pool that can
-// be deinitialized. The caller owns all backing storage addressed by these IDs.
+// Creates capacity IDs in [0, capacity), allocating nothing for zero capacity.
+// Failure leaves an empty pool that can be deinitialized. The caller owns all
+// backing storage addressed by these IDs.
 iree_status_t loom_serve_block_pool_initialize(
     uint32_t capacity, iree_allocator_t allocator,
     loom_serve_block_pool_t* out_pool);
@@ -41,10 +44,20 @@ void loom_serve_block_pool_deinitialize(loom_serve_block_pool_t* pool);
 void loom_serve_block_pool_acquire(loom_serve_block_pool_t* pool,
                                    uint32_t count, uint32_t* out_blocks);
 
-// Returns distinct owned IDs after their last device use has retired. They may
-// immediately be reassigned; mappings referring to them must be inaccessible.
+// Adds one owner to each already-owned ID. Ownership changes are serialized;
+// the caller bounds the number of holders below UINT32_MAX.
+void loom_serve_block_pool_retain(loom_serve_block_pool_t* pool, uint32_t count,
+                                  const uint32_t* blocks);
+
+// Drops one owner after its device use retires. Last release returns the ID
+// for immediate reassignment; the released mapping must be inaccessible.
 void loom_serve_block_pool_release(loom_serve_block_pool_t* pool,
                                    uint32_t count, const uint32_t* blocks);
+
+static inline bool loom_serve_block_pool_is_shared(
+    const loom_serve_block_pool_t* pool, uint32_t block) {
+  return pool->references[block] > 1;
+}
 
 // Builds a cold maintenance map of capacity entries: UINT32_MAX for originally
 // free IDs, otherwise the ID's destination in a compact live prefix. Every
@@ -56,7 +69,8 @@ uint32_t loom_serve_block_pool_plan_compaction(
 
 // Publishes the compact live prefix after copies retire and every logical map
 // has been rewritten using the plan. No old-address consumers may remain.
-void loom_serve_block_pool_commit_compaction(loom_serve_block_pool_t* pool);
+void loom_serve_block_pool_commit_compaction(loom_serve_block_pool_t* pool,
+                                             const uint32_t* destinations);
 
 #ifdef __cplusplus
 }  // extern "C"

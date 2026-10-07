@@ -118,7 +118,7 @@ func.def @row_view(%records: buffer, %row_count: index, %row: index, %slot: inde
   func.return
 }
 
-func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) -> (buffer, buffer, buffer, buffer, buffer) {
+func.def @storage(%context: i64, %pool: i64, %rows: i64, %pins: i64, %packed: i1, %mtp: i1) -> (buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -159,7 +159,11 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   %tokens_offset = scalar.addi %attention_offset, %attention_bytes : i64
   %progress_offset = scalar.addi %tokens_offset, %token_bytes : i64
   %row_stride = scalar.addi %progress_offset, %progress_extent : i64
-  %row_bytes = scalar.muli %row_stride, %rows : i64
+  %pinned = scalar.cmpi ne, %pins, %zero64 : i64
+  %owners = scalar.addi %rows, %pins : i64
+  %fork_slots = scalar.addi %owners, %rows : i64
+  %state_slots = scf.select %pinned, %fork_slots, %rows : i64
+  %row_bytes = scalar.muli %row_stride, %state_slots : i64
   %pool_bytes = scalar.muli %pool, %target_token_bytes : i64
   %arena_bytes = scalar.addi %row_bytes, %pool_bytes : i64
   %padded_context = scalar.addi %context, %sixty_three : i64
@@ -168,7 +172,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   %map_bytes = scalar.muli %map_entries, %word_bytes : i64
   %pooled_table_bytes = scalar.addi %map_origin, %map_bytes : i64
   %table_bytes = scf.select %pooled, %pooled_table_bytes, %origin_bytes : i64
-  %carry_bytes = scalar.muli %carry_stride, %rows : i64
+  %carry_bytes = scalar.muli %carry_stride, %owners : i64
   %draft_row_bytes = scalar.muli %context, %draft_token_bytes : i64
   %dense_draft_bytes = scalar.muli %rows, %draft_row_bytes : i64
   %pooled_draft_bytes = scalar.muli %pool, %draft_token_bytes : i64
@@ -255,7 +259,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
   view.store %gdn_offset, %geometry_view[4] : i64, view<8xi64>
   view.store %row_stride, %geometry_view[5] : i64, view<8xi64>
   view.store %gdn_bytes, %geometry_view[6] : i64, view<8xi64>
-  view.store %rows, %geometry_view[7] : i64, view<8xi64>
+  view.store %state_slots, %geometry_view[7] : i64, view<8xi64>
   scf.if %pooled {
     %regions = buffer.view %geometry[%header_bytes] : buffer -> view<5xi64>
     %one64 = scalar.constant 1 : i64
@@ -288,7 +292,7 @@ func.def @storage(%context: i64, %pool: i64, %rows: i64, %packed: i1, %mtp: i1) 
 // little-endian i64 {tokens, spans}; no C struct layout crosses this boundary.
 // Commands, specialization and their shared checkpoint identity are source
 // policy. Returned state is interpreted only by control.loom.
-func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %mtp: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
+func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %pins: i64, %mtp: i32, %shapes: buffer, %shape_count: i64, %weights: buffer) -> (i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer) {
   %origin = index.constant 0 : offset
   %zero = index.constant 0 : index
   %one = index.constant 1 : index
@@ -358,6 +362,6 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   view.store %proposal_stage, %state_view[3] : i32, view<4xi32>
   %terminal = global.load @terminal : buffer
   %packed = scalar.cmpi ne, %shape_count, %zero64 : i64
-  %allocations, %views, %target_origins, %draft_origins, %geometry = func.call @storage(%context, %pool, %rows, %packed, %enabled) : (i64, i64, i64, i1, i1) -> (buffer, buffer, buffer, buffer, buffer)
+  %allocations, %views, %target_origins, %draft_origins, %geometry = func.call @storage(%context, %pool, %rows, %pins, %packed, %enabled) : (i64, i64, i64, i64, i1, i1) -> (buffer, buffer, buffer, buffer, buffer)
   func.return %effective_prefill, %shared, %state, %terminal, %allocations, %views, %target_origins, %draft_origins, %geometry : i64, i32, buffer, buffer, buffer, buffer, buffer, buffer, buffer
 }

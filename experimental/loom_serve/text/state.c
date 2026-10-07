@@ -6,6 +6,8 @@
 
 #include "experimental/loom_serve/text/state.h"
 
+#include <string.h>
+
 #include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/storage/relocation.h"
 #include "experimental/loom_serve/storage/snapshot.h"
@@ -19,6 +21,7 @@ void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
                (options->enable_mtp ? LOOM_SERVE_TEXT_STATE_FLAG_MTP : 0),
       .row_count = options->row_count,
       .cache.capacity = options->pool_capacity,
+      .checkpoints.capacity = (uint32_t)options->checkpoint_capacity,
   };
   loom_serve_retirement_initialize(&out_state->retirement);
 }
@@ -160,11 +163,36 @@ iree_status_t loom_serve_text_state_allocate(
         iree_allocator_malloc_array(state->allocator, state->row_count,
                                     sizeof(*state->rows), (void**)&state->rows);
   }
+  if (iree_status_is_ok(status) && state->checkpoints.capacity) {
+    status = loom_serve_block_pool_initialize(state->checkpoints.capacity,
+                                              state->allocator,
+                                              &state->checkpoints.pool);
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc_array(state->allocator,
+                                           state->checkpoints.capacity,
+                                           sizeof(*state->checkpoints.values),
+                                           (void**)&state->checkpoints.values);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_allocator_malloc_array(
+          state->allocator,
+          state->checkpoints.capacity * state->storage.blocks_per_row,
+          sizeof(*state->checkpoints.maps), (void**)&state->checkpoints.maps);
+    }
+    for (uint32_t i = 0;
+         i < state->checkpoints.capacity && iree_status_is_ok(status); ++i) {
+      state->checkpoints.values[i].owner = state;
+      state->checkpoints.values[i].blocks =
+          state->checkpoints.maps + i * state->storage.blocks_per_row;
+    }
+  }
   for (iree_host_size_t i = 0;
        i < state->row_count && iree_status_is_ok(status); ++i) {
     loom_serve_text_state_row_t* row = &state->rows[i];
     row->owner = state;
-    row->recurrent_slot = UINT32_MAX;
+    row->recurrent.slot = UINT32_MAX;
+    row->recurrent.anchor = UINT32_MAX;
+    row->retiring_tail = UINT32_MAX;
     row->buffers[TEXT_RESIDUAL] = state->residual;
     row->buffers[TEXT_WORKSPACE] = state->workspace;
     const uint32_t bindings[] = {TEXT_CONTROL, TEXT_ATTENTION, TEXT_TOKENS,
@@ -249,6 +277,9 @@ iree_status_t loom_serve_text_state_deinitialize(
   }
   iree_allocator_free(state->allocator, state->recurrent.buffers);
   loom_serve_block_pool_deinitialize(&state->recurrent.pool);
+  loom_serve_block_pool_deinitialize(&state->checkpoints.pool);
+  iree_allocator_free(state->allocator, state->checkpoints.values);
+  iree_allocator_free(state->allocator, state->checkpoints.maps);
   iree_allocator_free(state->allocator, state->cache.destinations);
   loom_serve_block_pool_deinitialize(&state->cache.pool);
   iree_hal_buffer_release(state->mtp.next_results);
@@ -307,6 +338,17 @@ iree_status_t loom_serve_text_state_trim(
         blocks[j] = state->cache.destinations[blocks[j]];
       }
     }
+    for (uint32_t i = 0; i < state->checkpoints.pool.capacity; ++i) {
+      if (!state->checkpoints.pool.references[i]) {
+        continue;
+      }
+      loom_serve_text_state_checkpoint_t* checkpoint =
+          &state->checkpoints.values[i];
+      for (uint32_t j = 0; j < checkpoint->block_count; ++j) {
+        checkpoint->blocks[j] =
+            state->cache.destinations[checkpoint->blocks[j]];
+      }
+    }
     const iree_device_size_t length = state->row_count *
                                       state->storage.blocks_per_row *
                                       sizeof(*state->cache.maps);
@@ -331,7 +373,8 @@ iree_status_t loom_serve_text_state_trim(
         iree_status_join(status, loom_serve_execution_drain(state->execution));
   }
   if (iree_status_is_ok(status)) {
-    loom_serve_block_pool_commit_compaction(&state->cache.pool);
+    loom_serve_block_pool_commit_compaction(&state->cache.pool,
+                                            state->cache.destinations);
     for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
          ++i) {
       if (!state->memory.buffers[i]) {
@@ -360,6 +403,18 @@ iree_status_t loom_serve_text_state_trim(
     }
     const uint32_t live =
         state->cache.pool.capacity - state->cache.pool.available;
+    for (uint32_t i = 0;
+         state->memory.buffers[1] && i < state->checkpoints.pool.capacity;
+         ++i) {
+      if (!state->checkpoints.pool.references[i]) {
+        continue;
+      }
+      iree_hal_buffer_t* view =
+          state->recurrent.buffers[state->checkpoints.values[i].recurrent_slot];
+      loom_serve_virtual_buffer_keep(state->memory.buffers[1],
+                                     iree_hal_buffer_byte_offset(view),
+                                     iree_hal_buffer_byte_length(view));
+    }
     for (iree_host_size_t i = 0; live && i < state->storage.region_count; ++i) {
       const loom_serve_text_cache_region_t* region = &state->storage.regions[i];
       for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
@@ -387,6 +442,15 @@ iree_status_t loom_serve_text_state_trim(
 // retained last page stays private; subsequent appends overwrite it before use.
 void loom_serve_text_state_row_trim(loom_serve_text_state_row_t* row) {
   loom_serve_text_state_t* state = row->owner;
+  if (row->recurrent.anchor != UINT32_MAX) {
+    loom_serve_block_pool_release(&state->recurrent.pool, 1,
+                                  &row->recurrent.anchor);
+    row->recurrent.anchor = UINT32_MAX;
+  }
+  if (row->retiring_tail != UINT32_MAX) {
+    loom_serve_block_pool_release(&state->cache.pool, 1, &row->retiring_tail);
+    row->retiring_tail = UINT32_MAX;
+  }
   if (!state->cache.capacity) {
     return;
   }
@@ -403,26 +467,26 @@ void loom_serve_text_state_row_trim(loom_serve_text_state_row_t* row) {
 static void text_row_acquire_recurrent(loom_serve_text_state_row_t* row) {
   loom_serve_text_state_t* state = row->owner;
   loom_serve_block_pool_acquire(&state->recurrent.pool, 1,
-                                &row->recurrent_slot);
-  row->buffers[TEXT_RECURRENT] = state->recurrent.buffers[row->recurrent_slot];
+                                &row->recurrent.slot);
+  row->buffers[TEXT_RECURRENT] = state->recurrent.buffers[row->recurrent.slot];
   state->recurrent.dirty_rows |= 1u << (row - state->rows);
 }
 
 static void text_row_release_recurrent(loom_serve_text_state_row_t* row) {
-  if (row->recurrent_slot == UINT32_MAX) {
+  if (row->recurrent.slot == UINT32_MAX) {
     return;
   }
   loom_serve_text_state_t* state = row->owner;
   loom_serve_block_pool_release(&state->recurrent.pool, 1,
-                                &row->recurrent_slot);
-  row->recurrent_slot = UINT32_MAX;
+                                &row->recurrent.slot);
+  row->recurrent.slot = UINT32_MAX;
   row->buffers[TEXT_RECURRENT] = NULL;
   state->recurrent.dirty_rows &= ~(1u << (row - state->rows));
 }
 
 iree_status_t loom_serve_text_state_row_activate(
     loom_serve_text_state_row_t* row) {
-  if (row->recurrent_slot != UINT32_MAX) {
+  if (row->recurrent.slot != UINT32_MAX) {
     return iree_ok_status();
   }
   loom_serve_text_state_t* state = row->owner;
@@ -622,6 +686,203 @@ iree_status_t loom_serve_text_state_row_try_resume(
   return status;
 }
 
+static iree_status_t text_copy_carry(loom_serve_text_state_t* state,
+                                     iree_host_size_t source,
+                                     iree_host_size_t target) {
+  if (!iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+    return iree_ok_status();
+  }
+  const iree_hal_transfer_operation_t copy = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+      .copy = {.source_buffer = state->mtp.carry,
+               .source_offset = source * state->storage.carry_stride,
+               .target_buffer = state->mtp.carry,
+               .target_offset = target * state->storage.carry_stride,
+               .length = state->storage.carry_stride}};
+  uint64_t completion = 0;
+  return loom_serve_execution_transfer(state->execution, 1, &copy, &completion);
+}
+
+iree_status_t loom_serve_text_state_row_try_pin(
+    loom_serve_text_state_row_t* row,
+    loom_serve_text_state_checkpoint_t** out_checkpoint) {
+  *out_checkpoint = NULL;
+  loom_serve_text_state_t* state = row->owner;
+  if (!state->checkpoints.pool.available) {
+    return iree_ok_status();
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(state->execution));
+  uint32_t index = 0;
+  loom_serve_block_pool_acquire(&state->checkpoints.pool, 1, &index);
+  loom_serve_text_state_checkpoint_t* checkpoint =
+      &state->checkpoints.values[index];
+  checkpoint->position = row->position;
+  checkpoint->recurrent_slot = row->recurrent.slot;
+  checkpoint->block_count = row->block_count;
+  const iree_host_size_t row_index = (iree_host_size_t)(row - state->rows);
+  memcpy(checkpoint->blocks,
+         state->cache.maps + row_index * state->storage.blocks_per_row,
+         row->block_count * sizeof(*checkpoint->blocks));
+  loom_serve_block_pool_retain(&state->cache.pool, checkpoint->block_count,
+                               checkpoint->blocks);
+  loom_serve_block_pool_retain(&state->recurrent.pool, 1,
+                               &checkpoint->recurrent_slot);
+  iree_status_t status =
+      text_copy_carry(state, row_index, state->row_count + index);
+  status =
+      iree_status_join(status, loom_serve_execution_drain(state->execution));
+  if (iree_status_is_ok(status)) {
+    *out_checkpoint = checkpoint;
+  }
+  return status;
+}
+
+void loom_serve_text_state_checkpoint_release(
+    loom_serve_text_state_checkpoint_t* checkpoint) {
+  loom_serve_text_state_t* state = checkpoint->owner;
+  loom_serve_block_pool_release(&state->cache.pool, checkpoint->block_count,
+                                checkpoint->blocks);
+  loom_serve_block_pool_release(&state->recurrent.pool, 1,
+                                &checkpoint->recurrent_slot);
+  const uint32_t index = (uint32_t)(checkpoint - state->checkpoints.values);
+  loom_serve_block_pool_release(&state->checkpoints.pool, 1, &index);
+}
+
+iree_status_t loom_serve_text_state_row_try_restore(
+    loom_serve_text_state_row_t* row,
+    const loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored) {
+  *out_restored = false;
+  loom_serve_text_state_t* state = row->owner;
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(state->execution));
+  if (state->memory.buffers[1]) {
+    loom_serve_memory_range_t ranges[4];
+    iree_host_size_t count = 0;
+    for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
+         ++binding) {
+      iree_hal_buffer_t* view = row->buffers[binding];
+      if (binding != TEXT_RECURRENT && view) {
+        ranges[count++] = (loom_serve_memory_range_t){
+            state->memory.buffers[1], iree_hal_buffer_byte_offset(view),
+            iree_hal_buffer_byte_length(view)};
+      }
+    }
+    bool admitted = false;
+    IREE_RETURN_IF_ERROR(loom_serve_memory_pool_try_commit(
+        state->memory.pool, count, ranges, &admitted));
+    if (!admitted) {
+      return iree_ok_status();
+    }
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_reset(row));
+  row->position = checkpoint->position;
+  row->recurrent.slot = checkpoint->recurrent_slot;
+  row->buffers[TEXT_RECURRENT] = state->recurrent.buffers[row->recurrent.slot];
+  loom_serve_block_pool_retain(&state->recurrent.pool, 1, &row->recurrent.slot);
+  const iree_host_size_t row_index = (iree_host_size_t)(row - state->rows);
+  state->recurrent.dirty_rows |= 1u << row_index;
+  row->block_count = checkpoint->block_count;
+  const iree_host_size_t map_index = row_index * state->storage.blocks_per_row;
+  uint32_t* blocks = state->cache.maps + map_index;
+  memcpy(blocks, checkpoint->blocks, row->block_count * sizeof(*blocks));
+  loom_serve_block_pool_retain(&state->cache.pool, row->block_count, blocks);
+  const iree_host_size_t checkpoint_index =
+      (iree_host_size_t)(checkpoint - state->checkpoints.values);
+  iree_status_t status =
+      text_copy_carry(state, state->row_count + checkpoint_index, row_index);
+  const iree_hal_transfer_operation_t uploads[] = {
+      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+       .upload = {.source = blocks,
+                  .target_buffer = state->epoch.buffers[2],
+                  .target_offset = state->storage.map_origin + map_index * 4,
+                  .length = row->block_count * sizeof(*blocks)}},
+      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+       .upload = {.source = blocks,
+                  .target_buffer = state->mtp.row_table,
+                  .target_offset = state->storage.map_origin + map_index * 4,
+                  .length = row->block_count * sizeof(*blocks)}},
+  };
+  uint64_t completion = 0;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_execution_transfer(
+        state->execution,
+        iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ? 2 : 1,
+        uploads, &completion);
+  }
+  status =
+      iree_status_join(status, loom_serve_execution_drain(state->execution));
+  if (iree_status_is_ok(status)) {
+    *out_restored = true;
+  }
+  return status;
+}
+
+static bool text_row_has_shared_tail(const loom_serve_text_state_row_t* row) {
+  const loom_serve_text_state_t* state = row->owner;
+  if (!row->position || !(row->position % state->storage.block_size)) {
+    return false;
+  }
+  const iree_host_size_t row_index = (iree_host_size_t)(row - state->rows);
+  const uint32_t tail =
+      state->cache.maps[row_index * state->storage.blocks_per_row +
+                        row->block_count - 1];
+  return loom_serve_block_pool_is_shared(&state->cache.pool, tail);
+}
+
+uint32_t loom_serve_text_state_row_growth(
+    const loom_serve_text_state_row_t* row, uint32_t extent) {
+  const loom_serve_text_state_t* state = row->owner;
+  return (uint32_t)((row->position + extent + state->storage.block_size - 1) /
+                    state->storage.block_size) -
+         row->block_count + text_row_has_shared_tail(row);
+}
+
+// COW copies only one partial logical page, across every source-declared plane.
+// The row retains the old page through the existing cohort completion.
+static iree_status_t text_fork_cache_block(loom_serve_text_state_t* state,
+                                           uint32_t source, uint32_t target) {
+  iree_hal_transfer_operation_t copies[64];
+  iree_host_size_t count = 0;
+  uint64_t completion = 0;
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t r = 0;
+       r < state->storage.region_count && iree_status_is_ok(status); ++r) {
+    const loom_serve_text_cache_region_t* region = &state->storage.regions[r];
+    iree_hal_buffer_t* buffer = *text_allocation(state, region->allocation);
+    for (iree_host_size_t plane = 0;
+         plane < region->blocks.count && iree_status_is_ok(status); ++plane) {
+      const iree_device_size_t origin =
+          region->blocks.origin + plane * region->blocks.stride;
+      const iree_device_size_t target_offset =
+          origin + target * region->blocks.block_bytes;
+      if (state->memory.buffers[region->allocation]) {
+        status = loom_serve_virtual_buffer_commit(
+            state->memory.buffers[region->allocation], target_offset,
+            region->blocks.block_bytes);
+      }
+      if (iree_status_is_ok(status)) {
+        copies[count++] = (iree_hal_transfer_operation_t){
+            .type = IREE_HAL_TRANSFER_OPERATION_TYPE_COPY,
+            .copy = {
+                .source_buffer = buffer,
+                .source_offset = origin + source * region->blocks.block_bytes,
+                .target_buffer = buffer,
+                .target_offset = target_offset,
+                .length = region->blocks.block_bytes}};
+      }
+      if (iree_status_is_ok(status) && count == IREE_ARRAYSIZE(copies)) {
+        status = loom_serve_execution_transfer(state->execution, count, copies,
+                                               &completion);
+        count = 0;
+      }
+    }
+  }
+  if (iree_status_is_ok(status) && count) {
+    status = loom_serve_execution_transfer(state->execution, count, copies,
+                                           &completion);
+  }
+  return status;
+}
+
 // The whole epoch has passed its capacity check. Publish only newly assigned
 // map entries on the existing ordered transfer path. The fixed host maps stay
 // alive until completion, including partial submission failure and destruction.
@@ -635,20 +896,44 @@ iree_status_t loom_serve_text_state_grow(loom_serve_text_state_t* state,
     const loom_serve_text_span_t* span = &spans[i];
     loom_serve_text_state_row_t* row = &state->rows[span->row_index];
     IREE_RETURN_IF_ERROR(loom_serve_text_state_row_activate(row));
+    if (loom_serve_block_pool_is_shared(&state->recurrent.pool,
+                                        row->recurrent.slot)) {
+      row->recurrent.anchor = row->recurrent.slot;
+      text_row_acquire_recurrent(row);
+      if (state->memory.buffers[1]) {
+        IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_commit(
+            state->memory.buffers[1],
+            iree_hal_buffer_byte_offset(row->buffers[TEXT_RECURRENT]),
+            state->storage.recurrent.length));
+      }
+    }
     if (!state->cache.capacity) {
       continue;
     }
     const uint32_t needed = (uint32_t)((row->position + extents[i] +
                                         state->storage.block_size - 1) /
                                        state->storage.block_size);
-    const uint32_t count = needed - row->block_count;
+    uint32_t first = row->block_count;
+    const iree_host_size_t row_map =
+        span->row_index * state->storage.blocks_per_row;
+    if (text_row_has_shared_tail(row)) {
+      --first;
+      uint32_t* tail = &state->cache.maps[row_map + first];
+      row->retiring_tail = *tail;
+      loom_serve_block_pool_acquire(&state->cache.pool, 1, tail);
+      IREE_RETURN_IF_ERROR(
+          text_fork_cache_block(state, row->retiring_tail, *tail));
+    }
+    const uint32_t new_count = needed - row->block_count;
+    loom_serve_block_pool_acquire(
+        &state->cache.pool, new_count,
+        state->cache.maps + row_map + row->block_count);
+    const uint32_t count = needed - first;
     if (!count) {
       continue;
     }
-    const iree_host_size_t map_index =
-        span->row_index * state->storage.blocks_per_row + row->block_count;
+    const iree_host_size_t map_index = row_map + first;
     uint32_t* blocks = state->cache.maps + map_index;
-    loom_serve_block_pool_acquire(&state->cache.pool, count, blocks);
     row->block_count = needed;
     for (iree_host_size_t j = 0;
          state->memory.pool && j < state->storage.region_count; ++j) {
