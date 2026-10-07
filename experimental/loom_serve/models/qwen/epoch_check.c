@@ -132,6 +132,9 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
         "shared residency witness requires elastic backing");
   }
   const loom_serve_text_flag_defaults_t defaults = {.row_count = 1};
+  loom_serve_execution_t* execution = loom_serve_device_execution(device);
+  const iree_hal_pool_stats_t workspace_before =
+      loom_serve_execution_workspace_statistics(execution);
   loom_serve_text_model_t* second = NULL;
   iree_status_t status = loom_serve_text_model_create_from_flags(
       device, &defaults, &second, allocator);
@@ -194,6 +197,28 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
   }
   if (iree_status_is_ok(status)) {
     status = qwen_check_residency_continuation(second, expected[1]);
+  }
+  const iree_hal_pool_stats_t workspace_after =
+      loom_serve_execution_workspace_statistics(execution);
+  if (iree_status_is_ok(status) &&
+      (workspace_after.bytes_committed != workspace_before.bytes_committed ||
+       workspace_after.reservation_count ||
+       workspace_after.reuse_count <= workspace_before.reuse_count)) {
+    status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "two models did not share idle scratch backing");
+  }
+  if (iree_status_is_ok(status)) {
+    fprintf(stderr,
+            "{\"event\":\"shared_workspace\",\"committed_bytes\":%" PRIu64
+            ",\"reuse_count\":%" PRIu64 "}\n",
+            (uint64_t)workspace_after.bytes_committed,
+            workspace_after.reuse_count);
+    status = loom_serve_execution_trim_workspace(execution);
+    if (iree_status_is_ok(status) &&
+        loom_serve_execution_workspace_statistics(execution).bytes_committed) {
+      status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "idle shared scratch did not trim to zero");
+    }
   }
   if (iree_status_is_ok(status)) {
     const loom_serve_memory_statistics_t memory =

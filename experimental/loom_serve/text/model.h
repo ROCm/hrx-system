@@ -20,7 +20,8 @@ extern "C" {
 #endif
 
 // One packed autoregressive model residency. A single host owner multiplexes
-// retained rows through the same VM process, commands, weights and workspace.
+// retained rows through the same VM process, commands and weights. Private
+// command workspace is borrowed from the shared device execution pool.
 // Calls wait for their result; no row-local VM or thread is required. This
 // runner-private interface exposes model work and shared source policy, not
 // network sessions. Input-capacity rejection submits no work. An

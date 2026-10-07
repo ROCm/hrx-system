@@ -25,8 +25,7 @@ enum {
   TEXT_ATTENTION = 3,
   TEXT_TOKENS = 4,
   TEXT_PROGRESS = 5,
-  TEXT_WORKSPACE = 6,
-  TEXT_BINDING_COUNT = 7,
+  TEXT_BINDING_COUNT = 6,
 };
 
 enum loom_serve_text_state_flag_bits_e {
@@ -43,7 +42,7 @@ typedef struct loom_serve_text_state_row_t {
   // Borrowed single-owner state arena, outliving this row.
   loom_serve_text_state_t* owner;
   // Private views in slots 1, 3-5; recurrence borrows its owned pool slot.
-  // Residual/workspace borrow model-wide storage.
+  // Residual borrows model-wide storage.
   iree_hal_buffer_t* buffers[TEXT_BINDING_COUNT];
   // Current destination and the immutable source of an in-flight fork.
   struct {
@@ -138,7 +137,7 @@ struct loom_serve_text_state_t {
   struct {
     // Borrowed shared allocation domain for state and model parameters.
     loom_serve_memory_pool_t* pool;
-    // Mutable virtual state only, excluding weights and fixed workspace.
+    // Mutable virtual state only, excluding weights and execution workspace.
     loom_serve_memory_statistics_t statistics;
     // Optional reservations in source allocation order.
     loom_serve_virtual_buffer_t*
@@ -151,11 +150,9 @@ struct loom_serve_text_state_t {
   iree_hal_buffer_t* row_arena;
   // Model-wide residual storage serialized by the execution timeline.
   iree_hal_buffer_t* residual;
-  // Model-wide transient storage with undefined contents on stage entry.
-  iree_hal_buffer_t* workspace;
   // Packed bindings; slots 1, 2, 4 and 5 are owned, others borrow roots.
   struct {
-    // Residual, metadata, origins, arena, inputs, outputs, workspace.
+    // Residual, metadata, origins, arena, inputs and outputs.
     iree_hal_buffer_t* buffers[TEXT_BINDING_COUNT];
   } epoch;
   // Optional retained draft state and speculative proposal/feedback storage.
@@ -181,10 +178,8 @@ struct loom_serve_text_state_t {
 void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
                                       loom_serve_text_state_t* out_state,
                                       iree_allocator_t allocator);
-iree_status_t loom_serve_text_state_allocate(
-    loom_serve_text_state_t* state, loom_serve_device_t* device,
-    iree_device_size_t workspace_length,
-    iree_device_size_t workspace_alignment);
+iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
+                                             loom_serve_device_t* device);
 
 // The model first drains execution and releases its VM and command references.
 // This releases views, joins actual queue ownership, then frees maps, rows and

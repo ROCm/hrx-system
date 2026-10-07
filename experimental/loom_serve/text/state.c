@@ -55,10 +55,8 @@ static iree_hal_buffer_t** text_allocation(loom_serve_text_state_t* state,
   return allocations[index];
 }
 
-iree_status_t loom_serve_text_state_allocate(
-    loom_serve_text_state_t* state, loom_serve_device_t* device,
-    iree_device_size_t workspace_length,
-    iree_device_size_t workspace_alignment) {
+iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
+                                             loom_serve_device_t* device) {
   state->device = loom_serve_device_handle(device);
   state->execution = loom_serve_device_execution(device);
   state->memory.pool = loom_serve_device_memory_pool(device);
@@ -74,10 +72,6 @@ iree_status_t loom_serve_text_state_allocate(
         sizeof(*state->cache.destinations),
         (void**)&state->cache.destinations));
   }
-  // Workspace contents are undefined on entry. Retained state belongs to the
-  // source-declared allocations below, never to command transient storage.
-  IREE_RETURN_IF_ERROR(text_allocate_buffer(
-      state, workspace_length, workspace_alignment, &state->workspace));
   // Binding roles are the private adapter contract. Sizes, views, initial
   // contents and zero extents are produced by the state's source bootstrap.
   const uint32_t zero = 0;
@@ -195,7 +189,6 @@ iree_status_t loom_serve_text_state_allocate(
     row->recurrent.anchor = UINT32_MAX;
     row->retiring_tail = UINT32_MAX;
     row->buffers[TEXT_RESIDUAL] = state->residual;
-    row->buffers[TEXT_WORKSPACE] = state->workspace;
     const uint32_t bindings[] = {TEXT_CONTROL, TEXT_ATTENTION, TEXT_TOKENS,
                                  TEXT_PROGRESS};
     for (iree_host_size_t j = 0;
@@ -216,7 +209,6 @@ iree_status_t loom_serve_text_state_allocate(
       iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_PACKED)) {
     state->epoch.buffers[0] = state->residual;
     state->epoch.buffers[3] = state->row_arena;
-    state->epoch.buffers[6] = state->workspace;
     const iree_const_byte_span_t origins =
         state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS];
     if (origins.data_length) {
@@ -293,7 +285,6 @@ iree_status_t loom_serve_text_state_deinitialize(
        ++i) {
     iree_hal_buffer_release(*text_allocation(state, i));
   }
-  iree_hal_buffer_release(state->workspace);
   // Failed readiness does not retire borrowed payloads. Final queue ownership
   // of their device counterparts does, including nested row views.
   loom_serve_retirement_deinitialize(&state->retirement);

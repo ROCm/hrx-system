@@ -81,8 +81,9 @@ The pool is independent of session count and idle during warm serving.
 
 The packed server constructs a bounded Cartesian catalog of token classes and
 independent span classes, including exact terminal sizes for odd residency
-counts. Explicit `--epoch` lists replace it for experiments. Shapes share one
-maximum workspace; proposal storage follows resident count and verification
+counts. Explicit `--epoch` lists replace it for experiments. Shapes borrow
+their reflected private workspace from one execution-owned HAL pool shared
+across models; proposal storage follows resident count and verification
 capture follows each compiled span capacity. Shape changes reuse backing;
 elastic row/page growth commits new physical slabs only as capacity is needed.
 
@@ -122,10 +123,11 @@ mutable state. Insufficient eligible capacity on automatic admission preserves
 useful idle weights rather than evicting them for a request that still cannot fit.
 
 All elastic model reservations charge the same device physical budget;
-`--memory_bytes` excludes workspace until it uses a shared queue pool. The
-synchronous model APIs report capacity denial as an execution error. Scheduling
-across models can use the non-error admission result before invoking them;
-the HTTP tools still each host one model. Text HTTP admission additionally pins
+`--memory_bytes` excludes the execution-owned workspace pool, which has separate
+HAL accounting and explicit idle trimming. The synchronous model APIs report
+capacity denial as an execution error. Scheduling across models can use the
+non-error admission result before invoking them; the HTTP tools still each
+host one model. Text HTTP admission additionally pins
 parameters for the request and backs its full completion high-water, recurrent
 writer and private state before opening SSE. Budget denial queues or refuses
 without replacing the selected history. Platform allocation/IO failures remain
@@ -218,7 +220,7 @@ without accessing device storage.
 Host snapshot bytes have separate accounting from device commitment. Copying
 UMA state into DRAM does not create additional machine RAM; a discrete GPU can
 release VRAM while retaining that DRAM image. HAL transfer staging is another
-host allocation, and fixed model workspace remains outside `--memory_bytes`.
+host allocation, and shared execution workspace remains outside `--memory_bytes`.
 The byte limit is therefore a virtual-pool commitment bound, not a total-process
 or whole-machine memory ceiling.
 
