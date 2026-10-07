@@ -485,8 +485,7 @@ static uint32_t loom_amdgpu_wait_frontier_effect_counter_mask(
 static const loom_low_memory_access_summary_t*
 loom_amdgpu_wait_frontier_classify_effect_summary(
     const loom_low_schedule_table_t* schedule,
-    const loom_low_schedule_effect_use_t* effect,
-    bool* out_generic_summary) {
+    const loom_low_schedule_effect_use_t* effect, bool* out_generic_summary) {
   if (out_generic_summary != NULL) {
     *out_generic_summary = false;
   }
@@ -859,10 +858,9 @@ static bool loom_amdgpu_wait_frontier_collect_precise_budget(
       !loom_amdgpu_wait_frontier_budget_u64_from_size(
           graph->edge_count, &out_input->cfg_edge_count) ||
       !loom_amdgpu_wait_frontier_budget_u64_from_size(
-          schedule->scheduled_node_count,
-          &out_input->scheduled_node_count) ||
-      !loom_amdgpu_wait_frontier_budget_u64_from_size(
-          schedule->node_count, &out_input->node_count)) {
+          schedule->scheduled_node_count, &out_input->scheduled_node_count) ||
+      !loom_amdgpu_wait_frontier_budget_u64_from_size(schedule->node_count,
+                                                      &out_input->node_count)) {
     return false;
   }
   if (!loom_amdgpu_wait_frontier_budget_u64_from_size(
@@ -898,8 +896,8 @@ static bool loom_amdgpu_wait_frontier_collect_precise_budget(
     const loom_low_schedule_effect_use_t* effect = &schedule->effect_uses[i];
     bool generic_summary = false;
     const loom_low_memory_access_summary_t* summary =
-        loom_amdgpu_wait_frontier_classify_effect_summary(
-            schedule, effect, &generic_summary);
+        loom_amdgpu_wait_frontier_classify_effect_summary(schedule, effect,
+                                                          &generic_summary);
     out_input->collector_heavy_path_possible |= generic_summary;
     if (summary == NULL) {
       if (loom_amdgpu_wait_frontier_effect_is_dependency_memory(effect)) {
@@ -1137,15 +1135,15 @@ static iree_status_t loom_amdgpu_wait_frontier_build_precise_memory_metadata(
       !loom_amdgpu_wait_frontier_budget_u64_from_size(
           schedule->effect_use_count, &effect_use_count) ||
       !loom_amdgpu_wait_frontier_budget_u64_from_size(schedule->block_count,
-                                                       &block_count) ||
+                                                      &block_count) ||
       !loom_amdgpu_wait_frontier_budget_u64_from_size(graph->edge_count,
-                                                       &cfg_edge_count) ||
+                                                      &cfg_edge_count) ||
       !loom_amdgpu_wait_frontier_budget_u64_from_size(
           schedule->scheduled_node_count, &scheduled_node_count) ||
       !loom_amdgpu_wait_frontier_budget_u64_from_size(schedule->node_count,
-                                                       &node_count) ||
+                                                      &node_count) ||
       !loom_amdgpu_wait_frontier_budget_u64_from_size(dependency_count,
-                                                       &dependency_count_u64) ||
+                                                      &dependency_count_u64) ||
       !loom_amdgpu_wait_frontier_precise_budget_pre_admission_visits(
           effect_use_count, block_count, cfg_edge_count, scheduled_node_count,
           node_count, dependency_count_u64, &pre_admission_visits) ||
@@ -1257,9 +1255,9 @@ static iree_status_t loom_amdgpu_wait_frontier_build_precise_memory_metadata(
     }
   }
   if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(arena, schedule->node_count,
-                                       sizeof(*budget_nodes),
-                                       (void**)&budget_nodes);
+    status =
+        iree_arena_allocate_array(arena, schedule->node_count,
+                                  sizeof(*budget_nodes), (void**)&budget_nodes);
   }
   if (!iree_status_is_ok(status)) {
     iree_arena_checkpoint_restore(&validation_checkpoint);
@@ -1274,9 +1272,8 @@ static iree_status_t loom_amdgpu_wait_frontier_build_precise_memory_metadata(
       graph_is_valid &&
       loom_amdgpu_wait_frontier_collect_precise_budget(
           frontier, completion_nodes, planned_block_drain_counter_masks,
-          runtime_bounds, budget_nodes, dependency_count,
-          precise_access_count, precise_word_count, total_allocation_byte_count,
-          &budget_input) &&
+          runtime_bounds, budget_nodes, dependency_count, precise_access_count,
+          precise_word_count, total_allocation_byte_count, &budget_input) &&
       loom_amdgpu_wait_frontier_precise_budget_is_admitted(&budget_input);
   iree_arena_checkpoint_restore(&validation_checkpoint);
   if (!budget_is_admitted) {
@@ -1292,33 +1289,33 @@ static iree_status_t loom_amdgpu_wait_frontier_build_precise_memory_metadata(
   uint64_t* precise_resolved_outgoing_words = NULL;
   const iree_arena_checkpoint_t precise_checkpoint =
       iree_arena_checkpoint_save(arena);
-  status = iree_arena_allocate_array(arena, schedule->node_count,
-                                     sizeof(*coarse_nodes),
-                                     (void**)&coarse_nodes);
+  status =
+      iree_arena_allocate_array(arena, schedule->node_count,
+                                sizeof(*coarse_nodes), (void**)&coarse_nodes);
   if (iree_status_is_ok(status)) {
     status = iree_arena_allocate_array(arena, precise_access_count,
                                        sizeof(*precise_accesses),
                                        (void**)&precise_accesses);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(
-        arena, index_count, sizeof(*precise_access_indices_by_node),
-        (void**)&precise_access_indices_by_node);
+    status = iree_arena_allocate_array(arena, index_count,
+                                       sizeof(*precise_access_indices_by_node),
+                                       (void**)&precise_access_indices_by_node);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(
-        arena, schedule->node_count, sizeof(*next_precise_access_indices),
-        (void**)&next_precise_access_indices);
+    status = iree_arena_allocate_array(arena, schedule->node_count,
+                                       sizeof(*next_precise_access_indices),
+                                       (void**)&next_precise_access_indices);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(
-        arena, precise_word_count, sizeof(*precise_active_words),
-        (void**)&precise_active_words);
+    status = iree_arena_allocate_array(arena, precise_word_count,
+                                       sizeof(*precise_active_words),
+                                       (void**)&precise_active_words);
   }
   if (iree_status_is_ok(status)) {
-    status = iree_arena_allocate_array(
-        arena, state_word_count, sizeof(*precise_static_outgoing_words),
-        (void**)&precise_static_outgoing_words);
+    status = iree_arena_allocate_array(arena, state_word_count,
+                                       sizeof(*precise_static_outgoing_words),
+                                       (void**)&precise_static_outgoing_words);
   }
   if (iree_status_is_ok(status)) {
     status = iree_arena_allocate_array(

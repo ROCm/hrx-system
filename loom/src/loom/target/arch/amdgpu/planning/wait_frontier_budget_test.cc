@@ -15,10 +15,9 @@
 namespace loom {
 namespace {
 
-static_assert(
-    LOOM_AMDGPU_WAIT_FRONTIER_PRECISE_MAX_SCORE_SCALED ==
-        UINT64_C(25000000000000) * 4 / 5 - UINT64_C(17313009454246),
-    "raw score cap must apply the 1.25 safety factor exactly once");
+static_assert(LOOM_AMDGPU_WAIT_FRONTIER_PRECISE_MAX_SCORE_SCALED ==
+                  UINT64_C(25000000000000) * 4 / 5 - UINT64_C(17313009454246),
+              "raw score cap must apply the 1.25 safety factor exactly once");
 
 loom_amdgpu_wait_frontier_precise_budget_input_t MakeBudgetInput(
     uint64_t precise_access_count) {
@@ -183,8 +182,7 @@ TEST(AmdgpuWaitFrontierBudgetTest, CheckedArithmeticRejectsOverflow) {
       loom_amdgpu_wait_frontier_precise_budget_calculate(&input, &usage));
 
   input = MakeBudgetInput(2);
-  input.producer_completion_call_count =
-      std::numeric_limits<uint64_t>::max();
+  input.producer_completion_call_count = std::numeric_limits<uint64_t>::max();
   input.producer_completion_full_path_count =
       std::numeric_limits<uint64_t>::max();
   input.producer_complete_precise_access_visit_count =

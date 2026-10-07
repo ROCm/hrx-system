@@ -731,11 +731,10 @@ struct PingPongAccesses {
   loom_low_memory_access_summary_t accesses[2] = {};
 };
 
-TEST_F(AmdgpuWaitPlanTest,
-       CrossBlockPlanUsesPreciseDisjointMemorySummaries) {
+TEST_F(AmdgpuWaitPlanTest, CrossBlockPlanUsesPreciseDisjointMemorySummaries) {
   const iree_host_size_t producer_effect_start = effects_.size();
-  AppendImmediate(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B32,
-                  IREE_SV("scope"), LOOM_CACHE_SCOPE_DEVICE);
+  AppendImmediate(LOOM_AMDGPU_DESCRIPTOR_REF_GLOBAL_STORE_B32, IREE_SV("scope"),
+                  LOOM_CACHE_SCOPE_DEVICE);
   const uint32_t producer = static_cast<uint32_t>(nodes_.size() - 1);
   ASSERT_EQ(effects_.size(), producer_effect_start + 1);
   EXPECT_EQ(effects_[producer_effect_start].kind, LOOM_LOW_EFFECT_KIND_WRITE);
@@ -826,9 +825,9 @@ TEST_F(AmdgpuWaitPlanTest,
   schedule_.memory_accesses = memory_accesses;
 
   const loom_amdgpu_address_state_plan_t address_state = {};
-  IREE_ASSERT_OK(loom_amdgpu_wait_plan_build(
-      &schedule_, &allocation_, &address_state, &arena_, &transient_arena_,
-      &plan_));
+  IREE_ASSERT_OK(loom_amdgpu_wait_plan_build(&schedule_, &allocation_,
+                                             &address_state, &arena_,
+                                             &transient_arena_, &plan_));
   for (iree_host_size_t i = 0; i < plan_.action_count; ++i) {
     EXPECT_NE(plan_.actions[i].reason,
               LOOM_AMDGPU_WAIT_PLAN_REASON_MEMORY_EFFECT);
@@ -838,9 +837,9 @@ TEST_F(AmdgpuWaitPlanTest,
   iree_arena_reset(&transient_arena_);
   schedule_.memory_accesses = nullptr;
   plan_ = {};
-  IREE_ASSERT_OK(loom_amdgpu_wait_plan_build(
-      &schedule_, &allocation_, &address_state, &arena_, &transient_arena_,
-      &plan_));
+  IREE_ASSERT_OK(loom_amdgpu_wait_plan_build(&schedule_, &allocation_,
+                                             &address_state, &arena_,
+                                             &transient_arena_, &plan_));
   iree_host_size_t memory_effect_action_count = 0;
   for (iree_host_size_t i = 0; i < plan_.action_count; ++i) {
     const auto& action = plan_.actions[i];
@@ -988,8 +987,8 @@ TEST_F(AmdgpuWaitFrontierTest,
   constexpr iree_host_size_t kBlockCount = 801;
   DisconnectedCfgGraph graph(kBlockCount);
   PingPongAccesses ping_pong;
-  AddAccess(0, LOOM_LOW_EFFECT_KIND_WRITE,
-            LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE, &ping_pong.accesses[0]);
+  AddAccess(0, LOOM_LOW_EFFECT_KIND_WRITE, LOOM_AMDGPU_WAIT_COUNTER_VMEM_STORE,
+            &ping_pong.accesses[0]);
   const uint32_t consumer =
       AddAccess(1, LOOM_LOW_EFFECT_KIND_READ,
                 LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD, &ping_pong.accesses[1]);
@@ -1005,8 +1004,7 @@ TEST_F(AmdgpuWaitFrontierTest,
   ASSERT_NE(light_frontier.memory.precise_active_words, nullptr);
 
   ASSERT_FALSE(graph.blocks.back().reachable);
-  completion_nodes_[unreachable_node]
-      .completed_before_block_exit_counter_mask =
+  completion_nodes_[unreachable_node].completed_before_block_exit_counter_mask =
       LOOM_AMDGPU_WAIT_COUNTER_MASK_TENSOR;
   IREE_ASSERT_OK(loom_amdgpu_wait_frontier_initialize(
       &schedule_, /*allocation=*/nullptr, frontier_nodes_.data(),
@@ -1038,31 +1036,43 @@ TEST_F(AmdgpuWaitFrontierTest, StorageLeaseOnlyChangeRequeuesCycleHeader) {
 
   const loom_low_storage_lease_record_t records[] = {
       {
-          .packet_index = 1,
-          .node_index = first_lease_node,
-          .block_index = 1,
-          .scheduled_ordinal = 0,
-          .release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
-          .release_class_id = LOOM_AMDGPU_WAIT_COUNTER_LDS,
+          /*.packet_index=*/1,
+          /*.node_index=*/first_lease_node,
+          /*.block_index=*/1,
+          /*.scheduled_ordinal=*/0,
+          /*.kind=*/{},
+          /*.attachment=*/{},
+          /*.attachment_index=*/{},
+          /*.unit_offset=*/{},
+          /*.unit_count=*/{},
+          /*.release_scope=*/
+          LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
+          /*.release_class_id=*/LOOM_AMDGPU_WAIT_COUNTER_LDS,
       },
       {
-          .packet_index = 2,
-          .node_index = second_lease_node,
-          .block_index = 2,
-          .scheduled_ordinal = 0,
-          .release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
-          .release_class_id = LOOM_AMDGPU_WAIT_COUNTER_LDS,
+          /*.packet_index=*/2,
+          /*.node_index=*/second_lease_node,
+          /*.block_index=*/2,
+          /*.scheduled_ordinal=*/0,
+          /*.kind=*/{},
+          /*.attachment=*/{},
+          /*.attachment_index=*/{},
+          /*.unit_offset=*/{},
+          /*.unit_count=*/{},
+          /*.release_scope=*/
+          LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
+          /*.release_class_id=*/LOOM_AMDGPU_WAIT_COUNTER_LDS,
       },
   };
   const loom_low_allocation_storage_lease_t instances[] = {
-      {.lease_record_index = 0},
-      {.lease_record_index = 1},
+      {/*.lease_record_index=*/0},
+      {/*.lease_record_index=*/1},
   };
   loom_low_allocation_table_t allocation = {};
   allocation.storage_leases = {
-      .schedule = &schedule_,
-      .records = records,
-      .record_count = IREE_ARRAYSIZE(records),
+      /*.schedule=*/&schedule_,
+      /*.records=*/records,
+      /*.record_count=*/IREE_ARRAYSIZE(records),
   };
   allocation.storage_lease_instances = instances;
   allocation.storage_lease_instance_count = IREE_ARRAYSIZE(instances);
@@ -1089,16 +1099,29 @@ TEST_F(AmdgpuWaitFrontierTest, CoarseOnlyBackedgeUsesResolvedState) {
       LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_VMEM;
 
   const loom_low_storage_lease_record_t records[] = {{
-      .packet_index = 0,
-      .node_index = producer,
-      .block_index = 1,
-      .scheduled_ordinal = 0,
-      .release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
-      .release_class_id = LOOM_AMDGPU_WAIT_COUNTER_LDS,
+      /*.packet_index=*/0,
+      /*.node_index=*/producer,
+      /*.block_index=*/1,
+      /*.scheduled_ordinal=*/0,
+      /*.kind=*/{},
+      /*.attachment=*/{},
+      /*.attachment_index=*/{},
+      /*.unit_offset=*/{},
+      /*.unit_count=*/{},
+      /*.release_scope=*/LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
+      /*.release_class_id=*/LOOM_AMDGPU_WAIT_COUNTER_LDS,
   }};
   const loom_low_allocation_storage_lease_t instances[] = {{
-      .lease_record_index = 0,
-      .location_count = 1,
+      /*.lease_record_index=*/0,
+      /*.assignment_index=*/{},
+      /*.value_id=*/{},
+      /*.start_point=*/{},
+      /*.end_point=*/{},
+      /*.release_action_index=*/{},
+      /*.descriptor_reg_class_id=*/{},
+      /*.location_kind=*/{},
+      /*.location_base=*/{},
+      /*.location_count=*/1,
   }};
   loom_low_allocation_storage_lease_unit_index_t unit_index = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_initialize(
@@ -1106,9 +1129,9 @@ TEST_F(AmdgpuWaitFrontierTest, CoarseOnlyBackedgeUsesResolvedState) {
       /*lease_unit_capacity=*/1, /*distinct_unit_capacity=*/1, &arena_));
   loom_low_allocation_table_t allocation = {};
   allocation.storage_leases = {
-      .schedule = &schedule_,
-      .records = records,
-      .record_count = IREE_ARRAYSIZE(records),
+      /*.schedule=*/&schedule_,
+      /*.records=*/records,
+      /*.record_count=*/IREE_ARRAYSIZE(records),
   };
   allocation.storage_lease_instances = instances;
   allocation.storage_lease_instance_count = IREE_ARRAYSIZE(instances);
@@ -1164,16 +1187,29 @@ TEST_F(AmdgpuWaitFrontierTest,
       LOOM_AMDGPU_WAIT_XCNT_GROUP_FLAG_VMEM;
 
   const loom_low_storage_lease_record_t records[] = {{
-      .packet_index = 0,
-      .node_index = producer,
-      .block_index = 1,
-      .scheduled_ordinal = 0,
-      .release_scope = LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
-      .release_class_id = LOOM_AMDGPU_WAIT_COUNTER_LDS,
+      /*.packet_index=*/0,
+      /*.node_index=*/producer,
+      /*.block_index=*/1,
+      /*.scheduled_ordinal=*/0,
+      /*.kind=*/{},
+      /*.attachment=*/{},
+      /*.attachment_index=*/{},
+      /*.unit_offset=*/{},
+      /*.unit_count=*/{},
+      /*.release_scope=*/LOOM_LOW_STORAGE_LEASE_RELEASE_SCOPE_PROGRESS_CLASS,
+      /*.release_class_id=*/LOOM_AMDGPU_WAIT_COUNTER_LDS,
   }};
   const loom_low_allocation_storage_lease_t instances[] = {{
-      .lease_record_index = 0,
-      .location_count = 1,
+      /*.lease_record_index=*/0,
+      /*.assignment_index=*/{},
+      /*.value_id=*/{},
+      /*.start_point=*/{},
+      /*.end_point=*/{},
+      /*.release_action_index=*/{},
+      /*.descriptor_reg_class_id=*/{},
+      /*.location_kind=*/{},
+      /*.location_base=*/{},
+      /*.location_count=*/1,
   }};
   loom_low_allocation_storage_lease_unit_index_t unit_index = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_unit_index_initialize(
@@ -1181,9 +1217,9 @@ TEST_F(AmdgpuWaitFrontierTest,
       /*lease_unit_capacity=*/1, /*distinct_unit_capacity=*/1, &arena_));
   loom_low_allocation_table_t allocation = {};
   allocation.storage_leases = {
-      .schedule = &schedule_,
-      .records = records,
-      .record_count = IREE_ARRAYSIZE(records),
+      /*.schedule=*/&schedule_,
+      /*.records=*/records,
+      /*.record_count=*/IREE_ARRAYSIZE(records),
   };
   allocation.storage_lease_instances = instances;
   allocation.storage_lease_instance_count = IREE_ARRAYSIZE(instances);
@@ -1549,8 +1585,8 @@ TEST_F(AmdgpuWaitFrontierTest,
                 LOOM_AMDGPU_WAIT_COUNTER_VMEM_LOAD, &ping_pong.accesses[1]);
   const loom_low_schedule_effect_use_t producer_prototype = effects_[0];
   const loom_low_schedule_effect_use_t consumer_prototype = effects_[1];
-  for (uint16_t effect_ordinal = 1;
-       effect_ordinal < kEffectsPerDirection; ++effect_ordinal) {
+  for (uint16_t effect_ordinal = 1; effect_ordinal < kEffectsPerDirection;
+       ++effect_ordinal) {
     loom_low_schedule_effect_use_t producer_effect = producer_prototype;
     producer_effect.effect_ordinal = effect_ordinal;
     effects_.push_back(producer_effect);
@@ -1660,7 +1696,7 @@ TEST_F(AmdgpuWaitFrontierTest,
        FinalPreciseRetainedAllocationFailureRollsBackAndRetries) {
   constexpr uint16_t kEffectsPerNode = 128;
   constexpr iree_host_size_t kPoolBlockSize = 512;
-  constexpr iree_host_size_t kStateByteLength = 512;
+  static constexpr iree_host_size_t kStateByteLength = 512;
   testing::CfgGraph graph({{1}, {}});
   PingPongAccesses ping_pong;
   const uint32_t producer =
@@ -1707,8 +1743,7 @@ TEST_F(AmdgpuWaitFrontierTest,
           // Matching request #2 is precise_resolved_outgoing_words, the
           // seventh and final retained allocation after six successes.
           if (allocation->byte_length == state_allocation_byte_length &&
-              ++state->matching_request_count == 2 &&
-              state->failure_enabled) {
+              ++state->matching_request_count == 2 && state->failure_enabled) {
             state->failed_byte_length = allocation->byte_length;
             ++state->failure_count;
             *pointer = nullptr;

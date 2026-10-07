@@ -3165,8 +3165,7 @@ static iree_status_t loom_amdgpu_wait_plan_collect_precise_runtime_bounds(
   bool valid = schedule->scheduled_node_count == 0 ||
                schedule->scheduled_node_indices != NULL;
   for (iree_host_size_t packet_index = 0;
-       valid && packet_index < schedule->scheduled_node_count;
-       ++packet_index) {
+       valid && packet_index < schedule->scheduled_node_count; ++packet_index) {
     const uint32_t node_index = schedule->scheduled_node_indices[packet_index];
     if (node_index >= schedule->node_count) {
       valid = false;
@@ -3225,12 +3224,10 @@ static iree_status_t loom_amdgpu_wait_plan_collect_precise_runtime_bounds(
               1, &out_bounds->producer_completion_full_path_count);
           valid &= loom_amdgpu_wait_plan_budget_add_u64(
               producer_state->read_space_flags != 0,
-              &out_bounds
-                   ->producer_completion_full_path_read_space_count);
+              &out_bounds->producer_completion_full_path_read_space_count);
           valid &= loom_amdgpu_wait_plan_budget_add_u64(
               producer_state->write_space_flags != 0,
-              &out_bounds
-                   ->producer_completion_full_path_write_space_count);
+              &out_bounds->producer_completion_full_path_write_space_count);
         } else {
           valid &= loom_amdgpu_wait_plan_budget_add_u64(
               1, &out_bounds->producer_completion_guard_reject_count);
@@ -3266,8 +3263,8 @@ iree_status_t loom_amdgpu_wait_plan_build(
   };
   loom_amdgpu_wait_packet_analyze_target(schedule->target.descriptor_set,
                                          &builder.wait_packet_target);
-  loom_amdgpu_wait_frontier_precise_runtime_bounds_t precise_runtime_bounds =
-      {0};
+  loom_amdgpu_wait_frontier_precise_runtime_bounds_t precise_runtime_bounds = {
+      0};
   loom_amdgpu_wait_actions_initialize(&builder.actions);
   iree_status_t status = loom_amdgpu_wait_classification_build(
       schedule, allocation, builder.processor_properties,

@@ -468,6 +468,7 @@ loom_cc_test(
         "//loom/src/loom/codegen/low:memory_access",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/ir",
+        "//loom/src/loom/ops:cache",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target/arch/amdgpu:facts",
         "//loom/src/loom/target/arch/amdgpu:target_info",

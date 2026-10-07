@@ -11,15 +11,13 @@
 
 #define LOOM_AMDGPU_WAIT_FRONTIER_PRECISE_BITS_PER_WORD UINT64_C(64)
 
-#define LOOM_AMDGPU_WAIT_FRONTIER_COLLECTOR_FLOOR_SCALED \
-  UINT64_C(491585961000)
+#define LOOM_AMDGPU_WAIT_FRONTIER_COLLECTOR_FLOOR_SCALED UINT64_C(491585961000)
 #define LOOM_AMDGPU_WAIT_FRONTIER_COLLECTOR_SLOPE_SCALED UINT64_C(26474491)
 #define LOOM_AMDGPU_WAIT_FRONTIER_COLLECTOR_HEAVY_PREMIUM_SCALED \
   UINT64_C(1539208063000)
 #define LOOM_AMDGPU_WAIT_FRONTIER_QUERY_CALL_COST_SCALED UINT64_C(809881225)
 #define LOOM_AMDGPU_WAIT_FRONTIER_QUERY_BIT_COST_SCALED UINT64_C(4831942)
-#define LOOM_AMDGPU_WAIT_FRONTIER_PRODUCER_CALL_COST_SCALED \
-  UINT64_C(582256419)
+#define LOOM_AMDGPU_WAIT_FRONTIER_PRODUCER_CALL_COST_SCALED UINT64_C(582256419)
 
 static bool loom_amdgpu_wait_frontier_budget_mul3(uint64_t a, uint64_t b,
                                                   uint64_t c,
@@ -42,14 +40,14 @@ bool loom_amdgpu_wait_frontier_precise_budget_pre_admission_visits(
     uint64_t dependency_count, uint64_t* out_visits) {
   IREE_ASSERT_ARGUMENT(out_visits);
   *out_visits = 0;
-  return loom_amdgpu_wait_frontier_budget_add_product(
-             2, effect_use_count, out_visits) &&
+  return loom_amdgpu_wait_frontier_budget_add_product(2, effect_use_count,
+                                                      out_visits) &&
          loom_amdgpu_wait_frontier_budget_add_product(11, block_count,
-                                                       out_visits) &&
+                                                      out_visits) &&
          loom_amdgpu_wait_frontier_budget_add_product(7, cfg_edge_count,
-                                                       out_visits) &&
-         loom_amdgpu_wait_frontier_budget_add_product(
-             3, scheduled_node_count, out_visits) &&
+                                                      out_visits) &&
+         loom_amdgpu_wait_frontier_budget_add_product(3, scheduled_node_count,
+                                                      out_visits) &&
          iree_checked_add_u64(*out_visits, node_count, out_visits) &&
          iree_checked_add_u64(*out_visits, dependency_count, out_visits);
 }
@@ -245,8 +243,7 @@ bool loom_amdgpu_wait_frontier_precise_budget_calculate(
                            &query_base_calls) &&
       iree_checked_add_u64(query_base_calls, input->program_exit_query_count,
                            &query_base_calls) &&
-      iree_checked_mul_u64(2,
-                           input->producer_completion_full_path_count,
+      iree_checked_mul_u64(2, input->producer_completion_full_path_count,
                            &twice_producer_completion_full_path_count) &&
       iree_checked_add_u64(query_base_calls,
                            twice_producer_completion_full_path_count,
@@ -254,8 +251,7 @@ bool loom_amdgpu_wait_frontier_precise_budget_calculate(
       iree_checked_mul_u64(input->precise_access_count, query_base_calls,
                            &out_usage->memory_query_precise_access_visits) &&
       iree_checked_mul_u64(input->precise_access_count,
-                           producer_full_path_space_count,
-                           &term_merge_left) &&
+                           producer_full_path_space_count, &term_merge_left) &&
       iree_checked_add_u64(out_usage->memory_query_precise_access_visits,
                            term_merge_left,
                            &out_usage->memory_query_precise_access_visits) &&
@@ -293,8 +289,7 @@ bool loom_amdgpu_wait_frontier_precise_budget_calculate(
       iree_checked_add_u64(query_bit_visits, query_bit_component,
                            &out_usage->memory_query_precise_bit_visits) &&
       iree_checked_mul_u64(LOOM_AMDGPU_WAIT_FRONTIER_COLLECTOR_SLOPE_SCALED,
-                           out_usage->pre_admission_visits,
-                           &collector_score);
+                           out_usage->pre_admission_visits, &collector_score);
   if (!valid) {
     *out_usage = (loom_amdgpu_wait_frontier_precise_budget_usage_t){0};
     return false;
@@ -308,9 +303,8 @@ bool loom_amdgpu_wait_frontier_precise_budget_calculate(
       input->producer_complete_precise_access_visit_count;
   out_usage->producer_complete_storage_lease_visits =
       input->producer_complete_storage_lease_visit_count;
-  collector_score =
-      iree_max(collector_score,
-               LOOM_AMDGPU_WAIT_FRONTIER_COLLECTOR_FLOOR_SCALED);
+  collector_score = iree_max(collector_score,
+                             LOOM_AMDGPU_WAIT_FRONTIER_COLLECTOR_FLOOR_SCALED);
   if (input->collector_heavy_path_possible &&
       !iree_checked_add_u64(
           collector_score,

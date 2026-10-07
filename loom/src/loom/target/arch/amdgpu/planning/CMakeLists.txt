@@ -556,6 +556,7 @@ loom_cc_test(
     loom::codegen::low::memory_access
     loom::codegen::low::schedule
     loom::ir
+    loom::ops::cache
     loom::ops::low
     loom::target::arch::amdgpu::descriptors::low_registry
     loom::target::arch::amdgpu::facts
