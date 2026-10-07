@@ -1127,7 +1127,8 @@ iree_status_t loom_run_hal_testbench_actual_invoke(
   }
   loom_run_hal_iteration_deinitialize(&iteration);
   loom_run_hal_invocation_plan_deinitialize(&plan);
-  loom_run_hal_testbench_staging_deinitialize(&staging);
+  status = iree_status_join(
+      status, loom_run_hal_testbench_staging_deinitialize(&staging));
   return status;
 }
 
@@ -1595,7 +1596,8 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_invoke_span(
     status = loom_run_hal_testbench_staging_readback(&span->context->runtime,
                                                      &staging);
   }
-  loom_run_hal_testbench_staging_deinitialize(&staging);
+  status = iree_status_join(
+      status, loom_run_hal_testbench_staging_deinitialize(&staging));
   return status;
 }
 

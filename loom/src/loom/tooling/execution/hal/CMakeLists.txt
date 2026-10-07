@@ -177,6 +177,8 @@ loom_cc_library(
     iree::base
     iree::base::threading
     iree::hal
+    iree::hal::memory::slab_cache
+    iree::hal::memory::tlsf_pool
     iree::tooling::device_util
   PUBLIC
 )
