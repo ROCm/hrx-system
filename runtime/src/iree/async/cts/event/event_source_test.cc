@@ -33,7 +33,8 @@ struct EventSourceOwner {
     ++owner->ready_count;
   }
 
-  static void Unregistered(void* context) {
+  static void Unregistered(void* context, iree_status_t status) {
+    IREE_EXPECT_OK(status);
     auto* owner = static_cast<EventSourceOwner*>(context);
     iree_async_event_native_deinitialize(&owner->native);
     ++owner->unregistered_count;
@@ -46,7 +47,11 @@ TEST_P(EventSourceTest, NullSourceCompletesInline) {
   int count = 0;
   iree_async_proactor_unregister_event_source(
       proactor_, nullptr,
-      {+[](void* context) { ++*static_cast<int*>(context); }, &count});
+      {+[](void* context, iree_status_t status) {
+         IREE_EXPECT_OK(status);
+         ++*static_cast<int*>(context);
+       },
+       &count});
   EXPECT_EQ(count, 1);
 }
 

@@ -283,15 +283,23 @@ struct ibv_cq* iree_net_rdma_completion_queue_handle(
   return queue->handle;
 }
 
-static void iree_net_rdma_completion_queue_unregistered(void* user_data) {
+static void iree_net_rdma_completion_queue_unregistered(void* user_data,
+                                                        iree_status_t status) {
   iree_net_rdma_completion_queue_t* queue = user_data;
+  if (!iree_status_is_ok(status)) {
+    // The monitor still owns this service and its native channel. Publish the
+    // cleanup failure through the established owner channel and withhold the
+    // deactivation receipt so no containing ownership can be released.
+    iree_net_rdma_completion_queue_fail(queue, status);
+    return;
+  }
   queue->monitor = NULL;
   queue->flags &= ~IREE_NET_RDMA_COMPLETION_QUEUE_FLAG_STOPPING;
   queue->flags |= IREE_NET_RDMA_COMPLETION_QUEUE_FLAG_STOPPED;
   iree_async_event_source_unregistered_callback_t callback =
       queue->deactivated_callback;
   if (callback.fn) {
-    callback.fn(callback.user_data);
+    callback.fn(callback.user_data, iree_ok_status());
   }
 }
 
@@ -316,7 +324,7 @@ void iree_net_rdma_completion_queue_deactivate(
             .user_data = queue,
         });
   } else {
-    iree_net_rdma_completion_queue_unregistered(queue);
+    iree_net_rdma_completion_queue_unregistered(queue, iree_ok_status());
   }
 }
 

@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <stdio.h>
 #include <unistd.h>
 
 #include "iree/async/platform/io_uring/notification.h"
@@ -17,6 +18,15 @@ static iree_status_t iree_async_proactor_io_uring_drain_observers(
     iree_async_proactor_io_uring_t* proactor) {
   iree_async_io_uring_event_source_unregister_all(proactor);
   iree_async_io_uring_unregister_all_relays(proactor);
+  for (iree_async_event_source_t* source = proactor->event_sources; source;
+       source = source->next) {
+    if (iree_any_bit_set(source->flags,
+                         IREE_ASYNC_IO_URING_EVENT_SOURCE_FLAG_RETAINED)) {
+      return iree_make_status(
+          IREE_STATUS_INTERNAL,
+          "io_uring event source cleanup retained native-reachable state");
+    }
+  }
   iree_status_t status = iree_ok_status();
   while ((proactor->event_sources || proactor->relays) &&
          iree_status_is_ok(status)) {
@@ -81,7 +91,16 @@ void iree_async_proactor_io_uring_destroy(
   // Ring close schedules asynchronous kernel teardown; it is not a native
   // retirement receipt. Borrowed observers join their actual completions first.
   // A native progress failure cannot authorize returning those resources.
-  IREE_CHECK_OK(iree_async_proactor_io_uring_drain_observers(proactor));
+  iree_status_t observer_status =
+      iree_async_proactor_io_uring_drain_observers(proactor);
+  if (!iree_status_is_ok(observer_status)) {
+    // A failed native retirement may still reach ring and source storage.
+    // Diagnose and retain the complete proactor allocation.
+    iree_status_fprint(stderr, observer_status);
+    iree_status_free(observer_status);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
   iree_io_uring_ring_deinitialize(&proactor->ring);
 
   iree_async_message_pool_deinitialize(&proactor->message_pool);

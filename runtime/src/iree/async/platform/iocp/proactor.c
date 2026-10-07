@@ -6,6 +6,7 @@
 
 #include "iree/async/platform/iocp/proactor.h"
 
+#include <stdio.h>
 #include <string.h>
 
 #include "iree/async/buffer_pool.h"
@@ -675,7 +676,16 @@ static void iree_async_proactor_iocp_destroy(
     iree_async_proactor_iocp_signal_deinitialize(proactor);
   }
 
-  iree_async_iocp_event_source_deinitialize_all(proactor);
+  iree_status_t event_source_status =
+      iree_async_iocp_event_source_deinitialize_all(proactor);
+  if (!iree_status_is_ok(event_source_status)) {
+    // Native reachability remains uncertain. Preserve the completion port and
+    // every object it may still reach instead of freeing live callback state.
+    iree_status_fprint(stderr, event_source_status);
+    iree_status_free(event_source_status);
+    IREE_TRACE_ZONE_END(z0);
+    return;
+  }
 
   iree_async_iocp_notification_deinitialize_relays(proactor);
 
@@ -2053,8 +2063,10 @@ static iree_status_t iree_async_proactor_iocp_poll(
 
     // Event source wake: dispatch the callback and re-arm the one-shot wait.
     if (entry->lpCompletionKey == IREE_ASYNC_IOCP_EVENT_SOURCE_COMPLETION_KEY) {
-      iree_async_iocp_event_source_dispatch(
-          proactor, (iree_async_event_source_t*)entry->lpOverlapped);
+      gqcs_status = iree_status_join(
+          gqcs_status,
+          iree_async_iocp_event_source_dispatch(
+              proactor, (iree_async_event_source_t*)entry->lpOverlapped));
       continue;
     }
 

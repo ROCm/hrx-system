@@ -134,7 +134,10 @@ inline void WaitForEventSourceUnregistration(
   bool completed = false;
   iree_async_proactor_unregister_event_source(
       proactor, source,
-      {+[](void* user_data) { *static_cast<bool*>(user_data) = true; },
+      {+[](void* user_data, iree_status_t status) {
+         IREE_CHECK_OK(status);
+         *static_cast<bool*>(user_data) = true;
+       },
        &completed});
   while (!completed) {
     IREE_CHECK_OK(
