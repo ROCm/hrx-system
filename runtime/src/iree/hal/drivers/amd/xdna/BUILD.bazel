@@ -206,8 +206,14 @@ iree_runtime_cc_library(
 
 iree_runtime_cc_library(
     name = "queue",
-    srcs = ["queue.c"],
-    hdrs = ["queue.h"],
+    srcs = [
+        "queue.c",
+        "queue_operation.c",
+    ],
+    hdrs = [
+        "queue.h",
+        "queue_operation.h",
+    ],
     deps = [
         ":context",
         ":executable",

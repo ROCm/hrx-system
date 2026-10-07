@@ -276,8 +276,10 @@ iree_cc_library(
     queue
   HDRS
     "queue.h"
+    "queue_operation.h"
   SRCS
     "queue.c"
+    "queue_operation.c"
   DEPS
     ::context
     ::executable
