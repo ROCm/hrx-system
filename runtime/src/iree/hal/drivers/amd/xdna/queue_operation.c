@@ -119,27 +119,75 @@ void iree_hal_amd_xdna_operation_release_resources(
   iree_hal_semaphore_list_release(operation->waits);
 }
 
+// Queue transfers use the slab's persistent host execution binding. This
+// binding exists independently of public mapping grants, which describe host
+// API access and may intentionally be empty for device-only pool scopes.
+static const iree_hal_buffer_vtable_t*
+iree_hal_amd_xdna_buffer_execution_vtable(iree_hal_buffer_t* buffer) {
+  return (const iree_hal_buffer_vtable_t*)((const iree_hal_resource_t*)buffer)
+      ->vtable;
+}
+
+static iree_status_t iree_hal_amd_xdna_buffer_execution_invalidate(
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  if (iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                        IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+    return iree_ok_status();
+  }
+  const iree_device_size_t allocation_offset =
+      iree_hal_buffer_byte_offset(buffer) + offset;
+  const iree_hal_buffer_vtable_t* vtable =
+      iree_hal_amd_xdna_buffer_execution_vtable(buffer);
+  return vtable->invalidate_range(buffer, allocation_offset, length);
+}
+
+static iree_status_t iree_hal_amd_xdna_buffer_execution_flush(
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  if (iree_all_bits_set(iree_hal_buffer_memory_type(buffer),
+                        IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
+    return iree_ok_status();
+  }
+  const iree_device_size_t allocation_offset =
+      iree_hal_buffer_byte_offset(buffer) + offset;
+  const iree_hal_buffer_vtable_t* vtable =
+      iree_hal_amd_xdna_buffer_execution_vtable(buffer);
+  return vtable->flush_range(buffer, allocation_offset, length);
+}
+
+static iree_status_t iree_hal_amd_xdna_buffer_execution_read(
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length, iree_byte_span_t* out_span) {
+  IREE_RETURN_IF_ERROR(
+      iree_hal_buffer_native_host_span(buffer, offset, length, out_span));
+  return iree_hal_amd_xdna_buffer_execution_invalidate(buffer, offset,
+                                                       out_span->data_length);
+}
+
+static iree_status_t iree_hal_amd_xdna_buffer_execution_write(
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length, iree_byte_span_t* out_span) {
+  return iree_hal_buffer_native_host_span(buffer, offset, length, out_span);
+}
+
+static iree_status_t iree_hal_amd_xdna_buffer_execution_publish(
+    iree_hal_buffer_t* buffer, iree_device_size_t offset,
+    iree_device_size_t length) {
+  return iree_hal_amd_xdna_buffer_execution_flush(buffer, offset, length);
+}
+
 static iree_status_t iree_hal_amd_xdna_update_execute(
     const iree_hal_amd_xdna_transfer_t* transfer) {
   const iree_hal_transfer_operation_t* operation = &transfer->operation;
-  iree_hal_buffer_mapping_t target_mapping = {{0}};
-  IREE_RETURN_IF_ERROR(iree_hal_buffer_map_range(
-      operation->update.target_buffer, IREE_HAL_MAPPING_MODE_SCOPED,
-      IREE_HAL_MEMORY_ACCESS_WRITE, IREE_HAL_BUFFER_MAP_FLAG_DISCARD,
-      operation->update.target_offset, operation->update.length,
-      &target_mapping));
-  iree_hal_amd_xdna_queue_payload_copy(&transfer->update_payload,
-                                       target_mapping.contents.data);
-  iree_status_t status = iree_ok_status();
-  if (!iree_all_bits_set(
-          iree_hal_buffer_memory_type(operation->update.target_buffer),
-          IREE_HAL_MEMORY_TYPE_HOST_COHERENT)) {
-    status = iree_hal_buffer_mapping_flush_range(&target_mapping, 0,
-                                                 IREE_HAL_WHOLE_BUFFER);
-  }
-  status =
-      iree_status_join(status, iree_hal_buffer_unmap_range(&target_mapping));
-  return status;
+  iree_byte_span_t target;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
+      operation->update.target_buffer, operation->update.target_offset,
+      operation->update.length, &target));
+  iree_hal_amd_xdna_queue_payload_copy(&transfer->update_payload, target.data);
+  return iree_hal_amd_xdna_buffer_execution_publish(
+      operation->update.target_buffer, operation->update.target_offset,
+      target.data_length);
 }
 
 static iree_status_t iree_hal_amd_xdna_transfer_execute(
@@ -150,10 +198,23 @@ static iree_status_t iree_hal_amd_xdna_transfer_execute(
       if (!operation->fill.length) {
         return iree_ok_status();
       }
-      return iree_hal_buffer_map_fill(
+      iree_byte_span_t fill_target;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
           operation->fill.target_buffer, operation->fill.target_offset,
-          operation->fill.length, operation->fill.pattern,
-          operation->fill.pattern_length);
+          operation->fill.length, &fill_target));
+      if (operation->fill.pattern_length == 1) {
+        memset(fill_target.data, *(const uint8_t*)operation->fill.pattern,
+               fill_target.data_length);
+      } else {
+        for (iree_host_size_t offset = 0; offset < fill_target.data_length;
+             offset += operation->fill.pattern_length) {
+          memcpy(fill_target.data + offset, operation->fill.pattern,
+                 operation->fill.pattern_length);
+        }
+      }
+      return iree_hal_amd_xdna_buffer_execution_publish(
+          operation->fill.target_buffer, operation->fill.target_offset,
+          fill_target.data_length);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE:
       if (!operation->update.length) {
         return iree_ok_status();
@@ -163,24 +224,44 @@ static iree_status_t iree_hal_amd_xdna_transfer_execute(
       if (!operation->copy.length) {
         return iree_ok_status();
       }
-      return iree_hal_buffer_map_copy(
+      iree_byte_span_t copy_source;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_read(
           operation->copy.source_buffer, operation->copy.source_offset,
+          operation->copy.length, &copy_source));
+      iree_byte_span_t copy_target;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
           operation->copy.target_buffer, operation->copy.target_offset,
-          operation->copy.length);
+          operation->copy.length, &copy_target));
+      const iree_host_size_t copy_length =
+          iree_min(copy_source.data_length, copy_target.data_length);
+      memcpy(copy_target.data, copy_source.data, copy_length);
+      return iree_hal_amd_xdna_buffer_execution_publish(
+          operation->copy.target_buffer, operation->copy.target_offset,
+          copy_length);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD:
       if (!operation->upload.length) {
         return iree_ok_status();
       }
-      return iree_hal_buffer_map_write(
+      iree_byte_span_t upload_target;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_write(
           operation->upload.target_buffer, operation->upload.target_offset,
-          operation->upload.source, operation->upload.length);
+          operation->upload.length, &upload_target));
+      memcpy(upload_target.data, operation->upload.source,
+             upload_target.data_length);
+      return iree_hal_amd_xdna_buffer_execution_publish(
+          operation->upload.target_buffer, operation->upload.target_offset,
+          upload_target.data_length);
     case IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD:
       if (!operation->download.length) {
         return iree_ok_status();
       }
-      return iree_hal_buffer_map_read(
+      iree_byte_span_t download_source;
+      IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_buffer_execution_read(
           operation->download.source_buffer, operation->download.source_offset,
-          operation->download.target, operation->download.length);
+          operation->download.length, &download_source));
+      memcpy(operation->download.target, download_source.data,
+             download_source.data_length);
+      return iree_ok_status();
     default:
       IREE_BUILTIN_UNREACHABLE();
   }
