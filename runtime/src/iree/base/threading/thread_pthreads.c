@@ -182,7 +182,13 @@ static void iree_thread_delete(iree_thread_t* thread) {
   IREE_TRACE_ZONE_BEGIN(z0);
 
   iree_thread_resume(thread);
-  pthread_join(thread->handle, NULL);
+  if (pthread_equal(thread->handle, pthread_self())) {
+    // Self-releasing threads cannot join themselves. Detach so native thread
+    // resources are reclaimed automatically after the entry point returns.
+    pthread_detach(thread->handle);
+  } else {
+    pthread_join(thread->handle, NULL);
+  }
 
   iree_notification_deinitialize(&thread->suspend_barrier);
   iree_thread_override_list_deinitialize(&thread->qos_override_list);
