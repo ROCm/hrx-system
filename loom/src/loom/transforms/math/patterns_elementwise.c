@@ -986,6 +986,411 @@ static iree_status_t loom_math_legalize_build_gelu_logistic(
                                          source->input, logistic, out_value);
 }
 
+static loom_type_t loom_math_legalize_packet_vector_type(
+    loom_scalar_type_t element_type, uint64_t element_count) {
+  return loom_type_shaped_1d(LOOM_TYPE_VECTOR, element_type, element_count, 0);
+}
+
+static iree_status_t loom_math_legalize_build_bf16_conversion(
+    loom_builder_t* builder, loom_value_id_t input, loom_type_t input_type,
+    loom_type_t result_type, loom_location_id_t location,
+    loom_value_id_t* out_value) {
+  const bool is_vector = loom_type_is_vector(input_type);
+  const loom_scalar_type_t input_element = loom_type_element_type(input_type);
+  switch (input_element) {
+    case LOOM_SCALAR_TYPE_F8E4M3:
+    case LOOM_SCALAR_TYPE_F8E5M2:
+      return loom_math_legalize_build_cast(
+          builder, is_vector ? loom_vector_extf_build : loom_scalar_extf_build,
+          input, input_type, result_type, location, out_value);
+    case LOOM_SCALAR_TYPE_F16: {
+      const loom_type_t f32_type = loom_math_legalize_type_with_element(
+          input_type, LOOM_SCALAR_TYPE_F32);
+      loom_value_id_t extended = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_math_legalize_build_cast(
+          builder, is_vector ? loom_vector_extf_build : loom_scalar_extf_build,
+          input, input_type, f32_type, location, &extended));
+      return loom_math_legalize_build_cast(
+          builder,
+          is_vector ? loom_vector_fptrunc_build : loom_scalar_fptrunc_build,
+          extended, f32_type, result_type, location, out_value);
+    }
+    case LOOM_SCALAR_TYPE_BF16:
+      *out_value = input;
+      return iree_ok_status();
+    case LOOM_SCALAR_TYPE_F32:
+      return loom_math_legalize_build_cast(
+          builder,
+          is_vector ? loom_vector_fptrunc_build : loom_scalar_fptrunc_build,
+          input, input_type, result_type, location, out_value);
+    default:
+      break;
+  }
+  IREE_ASSERT_UNREACHABLE("BF16 packet recipe selected unsupported input type");
+  IREE_BUILTIN_UNREACHABLE();
+}
+
+static iree_status_t loom_math_legalize_build_bf16_packet_input(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    uint64_t element_count, loom_value_id_t* out_value) {
+  const loom_type_t packet_type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_BF16, 16);
+  if (loom_type_is_scalar(source->result_type)) {
+    const loom_scalar_type_t input_element =
+        loom_type_element_type(source->result_type);
+    if (input_element != LOOM_SCALAR_TYPE_F32) {
+      loom_value_id_t scalar_bf16 = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_conversion(
+          builder, source->input, source->result_type,
+          loom_type_scalar(LOOM_SCALAR_TYPE_BF16), source->location,
+          &scalar_bf16));
+      loom_op_t* splat_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_splat_build(
+          builder, scalar_bf16, packet_type, source->location, &splat_op));
+      *out_value = loom_vector_splat_result(splat_op);
+      return iree_ok_status();
+    }
+
+    const loom_type_t source_packet_type =
+        loom_math_legalize_packet_vector_type(input_element, 16);
+    loom_op_t* splat_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_splat_build(builder, source->input,
+                                                 source_packet_type,
+                                                 source->location, &splat_op));
+    return loom_math_legalize_build_bf16_conversion(
+        builder, loom_vector_splat_result(splat_op), source_packet_type,
+        packet_type, source->location, out_value);
+  }
+
+  const loom_type_t flat_source_type = loom_math_legalize_packet_vector_type(
+      loom_type_element_type(source->result_type), element_count);
+  loom_value_id_t flat_input = source->input;
+  if (!loom_type_equal(source->result_type, flat_source_type)) {
+    loom_op_t* bitcast_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+        builder, flat_input, source->result_type, flat_source_type,
+        source->location, &bitcast_op));
+    flat_input = loom_vector_bitcast_result(bitcast_op);
+  }
+
+  const loom_type_t flat_bf16_type = loom_math_legalize_packet_vector_type(
+      LOOM_SCALAR_TYPE_BF16, element_count);
+  loom_value_id_t flat_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_conversion(
+      builder, flat_input, flat_source_type, flat_bf16_type, source->location,
+      &flat_bf16));
+  if (element_count == 16) {
+    *out_value = flat_bf16;
+    return iree_ok_status();
+  }
+
+  const loom_type_t padding_type = loom_math_legalize_packet_vector_type(
+      LOOM_SCALAR_TYPE_BF16, 16 - element_count);
+  loom_op_t* padding_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_constant_build(builder, loom_attr_f64(0.0), padding_type,
+                                 source->location, &padding_op));
+  const loom_value_id_t inputs[] = {
+      flat_bf16,
+      loom_vector_constant_result(padding_op),
+  };
+  loom_op_t* concat_op = NULL;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_concat_build(builder, 0, inputs, IREE_ARRAYSIZE(inputs),
+                               packet_type, source->location, &concat_op));
+  *out_value = loom_vector_concat_result(concat_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_bf16_packet_pairs(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    loom_value_id_t value, loom_value_id_t zero, loom_value_id_t* out_value) {
+  const loom_type_t paired_type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_BF16, 32);
+  loom_op_t* interleave_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_interleave_build(
+      builder, 0, value, zero, paired_type, source->location, &interleave_op));
+  *out_value = loom_vector_interleave_result(interleave_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_bf16_packet_dot2(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    loom_value_id_t lhs, loom_value_id_t rhs, loom_value_id_t accumulator,
+    loom_value_id_t* out_value) {
+  const loom_type_t result_type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_F32, 16);
+  loom_op_t* dot_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_dot2f_build(
+      builder, lhs, rhs, accumulator, result_type, source->location, &dot_op));
+  *out_value = loom_vector_dot2f_result(dot_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_bf16_packet_constant(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    double value, loom_value_id_t* out_value) {
+  const loom_type_t type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_BF16, 16);
+  loom_op_t* constant_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+      builder, loom_attr_f64(value), type, source->location, &constant_op));
+  *out_value = loom_vector_constant_result(constant_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_bf16_packet_f32_constant(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    double value, loom_value_id_t* out_value) {
+  const loom_type_t type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_F32, 16);
+  loom_op_t* constant_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_constant_build(
+      builder, loom_attr_f64(value), type, source->location, &constant_op));
+  *out_value = loom_vector_constant_result(constant_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_bf16_packet_round(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    loom_value_id_t input, loom_value_id_t* out_value) {
+  const loom_type_t f32_type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_F32, 16);
+  const loom_type_t bf16_type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_BF16, 16);
+  return loom_math_legalize_build_cast(builder, loom_vector_fptrunc_build,
+                                       input, f32_type, bf16_type,
+                                       source->location, out_value);
+}
+
+static iree_status_t loom_math_legalize_restore_bf16_packet_result(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    uint64_t element_count, loom_value_id_t packet_result,
+    loom_value_id_t* out_value) {
+  if (loom_type_is_scalar(source->result_type)) {
+    const loom_scalar_type_t result_element =
+        loom_type_element_type(source->result_type);
+    if (result_element == LOOM_SCALAR_TYPE_BF16) {
+      const loom_type_t packet_result_type =
+          loom_math_legalize_packet_vector_type(result_element, 16);
+      loom_value_id_t converted_packet = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_math_legalize_build_cast(
+          builder, loom_vector_fptrunc_build, packet_result,
+          loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_F32, 16),
+          packet_result_type, source->location, &converted_packet));
+      const int64_t static_index = 0;
+      loom_op_t* extract_op = NULL;
+      IREE_RETURN_IF_ERROR(loom_vector_extract_build(
+          builder, converted_packet, NULL, 0, &static_index, 1,
+          source->result_type, source->location, &extract_op));
+      *out_value = loom_vector_extract_result(extract_op);
+      return iree_ok_status();
+    }
+
+    const int64_t static_index = 0;
+    loom_op_t* extract_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_vector_extract_build(
+        builder, packet_result, NULL, 0, &static_index, 1,
+        loom_type_scalar(LOOM_SCALAR_TYPE_F32), source->location, &extract_op));
+    const loom_value_id_t scalar_f32 = loom_vector_extract_result(extract_op);
+    if (result_element == LOOM_SCALAR_TYPE_F32) {
+      *out_value = scalar_f32;
+      return iree_ok_status();
+    }
+    return loom_math_legalize_build_cast(
+        builder, loom_scalar_fptrunc_build, scalar_f32,
+        loom_type_scalar(LOOM_SCALAR_TYPE_F32), source->result_type,
+        source->location, out_value);
+  }
+
+  const loom_type_t flat_f32_type = loom_math_legalize_packet_vector_type(
+      LOOM_SCALAR_TYPE_F32, element_count);
+  loom_value_id_t flat_f32 = packet_result;
+  if (element_count != 16) {
+    const int64_t static_offset = 0;
+    loom_op_t* slice_op = NULL;
+    IREE_RETURN_IF_ERROR(
+        loom_vector_slice_build(builder, packet_result, NULL, 0, &static_offset,
+                                1, flat_f32_type, source->location, &slice_op));
+    flat_f32 = loom_vector_slice_result(slice_op);
+  }
+
+  const loom_type_t flat_result_type = loom_math_legalize_packet_vector_type(
+      loom_type_element_type(source->result_type), element_count);
+  loom_value_id_t flat_result = flat_f32;
+  if (loom_type_element_type(source->result_type) != LOOM_SCALAR_TYPE_F32) {
+    IREE_RETURN_IF_ERROR(loom_math_legalize_build_cast(
+        builder, loom_vector_fptrunc_build, flat_f32, flat_f32_type,
+        flat_result_type, source->location, &flat_result));
+  }
+  if (loom_type_equal(flat_result_type, source->result_type)) {
+    *out_value = flat_result;
+    return iree_ok_status();
+  }
+
+  loom_op_t* bitcast_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_bitcast_build(
+      builder, flat_result, flat_result_type, source->result_type,
+      source->location, &bitcast_op));
+  *out_value = loom_vector_bitcast_result(bitcast_op);
+  return iree_ok_status();
+}
+
+static iree_status_t loom_math_legalize_build_gelu_bf16_packet_finalize(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    loom_value_id_t zero_bf16, loom_value_id_t input_pairs,
+    loom_value_id_t zero_f32, loom_value_id_t tangent, uint64_t element_count,
+    loom_value_id_t* out_value) {
+  loom_value_id_t half = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_constant(
+      builder, source, 0.5, &half));
+  loom_value_id_t half_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, half, zero_bf16, &half_pairs));
+  loom_value_id_t half_input = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_dot2(
+      builder, source, input_pairs, half_pairs, zero_f32, &half_input));
+  loom_value_id_t half_input_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_round(
+      builder, source, half_input, &half_input_bf16));
+  loom_value_id_t half_input_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, half_input_bf16, zero_bf16, &half_input_pairs));
+  loom_value_id_t tangent_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_round(
+      builder, source, tangent, &tangent_bf16));
+  loom_value_id_t tangent_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, tangent_bf16, zero_bf16, &tangent_pairs));
+  loom_value_id_t packet_result = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_dot2(
+      builder, source, tangent_pairs, half_input_pairs, half_input,
+      &packet_result));
+  return loom_math_legalize_restore_bf16_packet_result(
+      builder, source, element_count, packet_result, out_value);
+}
+
+static iree_status_t loom_math_legalize_build_gelu_tanh_bf16_packet(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    loom_value_id_t* out_value) {
+  uint64_t element_count = 1;
+  if (loom_type_is_vector(source->result_type)) {
+    const bool has_static_element_count =
+        loom_type_static_element_count(source->result_type, &element_count);
+    IREE_ASSERT(has_static_element_count && element_count >= 1 &&
+                element_count <= 16);
+  }
+
+  loom_value_id_t input_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_input(
+      builder, source, element_count, &input_bf16));
+  loom_value_id_t zero_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_constant(
+      builder, source, 0.0, &zero_bf16));
+  loom_value_id_t zero_f32 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_f32_constant(
+      builder, source, 0.0, &zero_f32));
+  loom_value_id_t input_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, input_bf16, zero_bf16, &input_pairs));
+
+  loom_value_id_t square = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_dot2(
+      builder, source, input_pairs, input_pairs, zero_f32, &square));
+  loom_value_id_t square_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_round(
+      builder, source, square, &square_bf16));
+  loom_value_id_t square_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, square_bf16, zero_bf16, &square_pairs));
+
+  loom_value_id_t beta = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_constant(
+      builder, source, 0.03564453125, &beta));
+  loom_value_id_t beta_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, beta, zero_bf16, &beta_pairs));
+  loom_value_id_t beta_input = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_dot2(
+      builder, source, input_pairs, beta_pairs, zero_f32, &beta_input));
+  loom_value_id_t beta_input_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_round(
+      builder, source, beta_input, &beta_input_bf16));
+  loom_value_id_t beta_input_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, beta_input_bf16, zero_bf16, &beta_input_pairs));
+
+  loom_value_id_t sqrt_two_over_pi = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_constant(
+      builder, source, 0.796875, &sqrt_two_over_pi));
+  loom_value_id_t sqrt_two_over_pi_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, sqrt_two_over_pi, zero_bf16, &sqrt_two_over_pi_pairs));
+  loom_value_id_t scaled_input = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_dot2(
+      builder, source, input_pairs, sqrt_two_over_pi_pairs, zero_f32,
+      &scaled_input));
+  loom_value_id_t inner = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_dot2(
+      builder, source, beta_input_pairs, square_pairs, scaled_input, &inner));
+
+  const loom_type_t f32_type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_F32, 16);
+  loom_op_t* tanh_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_tanhf_build(builder, source->fastmath_flags,
+                                               inner, f32_type,
+                                               source->location, &tanh_op));
+  return loom_math_legalize_build_gelu_bf16_packet_finalize(
+      builder, source, zero_bf16, input_pairs, zero_f32,
+      loom_vector_tanhf_result(tanh_op), element_count, out_value);
+}
+
+static iree_status_t loom_math_legalize_build_gelu_logistic_bf16_packet(
+    loom_builder_t* builder, const loom_math_legalize_source_t* source,
+    const loom_op_t* op, loom_value_id_t* out_value) {
+  uint64_t element_count = 1;
+  if (loom_type_is_vector(source->result_type)) {
+    const bool has_static_element_count =
+        loom_type_static_element_count(source->result_type, &element_count);
+    IREE_ASSERT(has_static_element_count && element_count >= 1 &&
+                element_count <= 16);
+  }
+
+  loom_value_id_t input_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_input(
+      builder, source, element_count, &input_bf16));
+  loom_value_id_t zero_bf16 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_constant(
+      builder, source, 0.0, &zero_bf16));
+  loom_value_id_t zero_f32 = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_f32_constant(
+      builder, source, 0.0, &zero_f32));
+  loom_value_id_t input_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, input_bf16, zero_bf16, &input_pairs));
+
+  loom_value_id_t half_scale = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_constant(
+      builder, source, loom_math_legalize_gelu_logistic_scale(op) * 0.5,
+      &half_scale));
+  loom_value_id_t half_scale_pairs = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_pairs(
+      builder, source, half_scale, zero_bf16, &half_scale_pairs));
+  loom_value_id_t argument = LOOM_VALUE_ID_INVALID;
+  IREE_RETURN_IF_ERROR(loom_math_legalize_build_bf16_packet_dot2(
+      builder, source, input_pairs, half_scale_pairs, zero_f32, &argument));
+
+  const loom_type_t f32_type =
+      loom_math_legalize_packet_vector_type(LOOM_SCALAR_TYPE_F32, 16);
+  loom_op_t* tanh_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_tanhf_build(builder, source->fastmath_flags,
+                                               argument, f32_type,
+                                               source->location, &tanh_op));
+  return loom_math_legalize_build_gelu_bf16_packet_finalize(
+      builder, source, zero_bf16, input_pairs, zero_f32,
+      loom_vector_tanhf_result(tanh_op), element_count, out_value);
+}
+
 static iree_status_t loom_math_legalize_build_recipe(
     const loom_math_legalize_recipe_context_t* context, loom_op_t* op,
     loom_rewriter_t* rewriter, loom_value_id_t* out_value) {
@@ -1040,6 +1445,12 @@ static iree_status_t loom_math_legalize_build_recipe(
     case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_F32:
       return loom_math_legalize_build_gelu_logistic(&rewriter->builder, &source,
                                                     op, out_value);
+    case LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET:
+      return loom_math_legalize_build_gelu_tanh_bf16_packet(&rewriter->builder,
+                                                            &source, out_value);
+    case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_BF16_PACKET:
+      return loom_math_legalize_build_gelu_logistic_bf16_packet(
+          &rewriter->builder, &source, op, out_value);
     case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND:
       IREE_ASSERT_UNREACHABLE("recipe is not elementwise math legalization");
       IREE_BUILTIN_UNREACHABLE();
@@ -1083,6 +1494,8 @@ static bool loom_math_legalize_elementwise_recipe_is_supported(
     case LOOM_TARGET_MATH_RECIPE_GELU_ERF_F32:
     case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_F32:
     case LOOM_TARGET_MATH_RECIPE_WIDEN_F32_ROUND:
+    case LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET:
+    case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_BF16_PACKET:
       return true;
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:
       return false;

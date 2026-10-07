@@ -1,0 +1,108 @@
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @gelu_tanh_f32_packet(%input: vector<16xf32>) -> (vector<16xf32>) {
+  %result = vector.geluf<tanh, afn> %input : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core>(@target) abi(object_function) @gelu_tanh_f32_packet(%input: reg<aie2p.vec256 x2>) -> (reg<aie2p.vec256 x2>) asm {
+  %30 = vmov.vector512.to.accumulator512 %input
+  set.rounding 12
+  %31 = vconv.bf16.fp32x16 %30
+  %32 = slice %input[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %33 = concat(%31, %32) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %34 = mov.i32 0
+  %35 = vbcst.16 %34
+  %36 = mova.i32 18
+  %37 = vshuffle %33, %35, %36
+  %38 = mova.i32 2
+  %39 = vshuffle %37, %37, %38
+  %41 = mova.i32 3
+  %42 = vshuffle %37, %37, %41
+  %44 = acc.clear.f32x64
+  %45 = mova.i32 60
+  %46 = vmac.bf16x32 %44, %39, %39, %45
+  %47 = vmac.bf16x32 %46, %42, %42, %45
+  %48 = slice %47[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %49 = vmov.accumulator512.to.vector512 %48
+  %50 = vmov.vector512.to.accumulator512 %49
+  %51 = vconv.bf16.fp32x16 %50
+  %52 = slice %49[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %53 = concat(%51, %52) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %55 = vshuffle %53, %35, %36
+  %56 = mov.i32 15634
+  %57 = vbcst.16 %56
+  %64 = vmac.bf16x32 %44, %39, %57, %45
+  %65 = vmac.bf16x32 %64, %42, %35, %45
+  %66 = slice %65[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %67 = vmov.accumulator512.to.vector512 %66
+  %68 = vmov.vector512.to.accumulator512 %67
+  %69 = vconv.bf16.fp32x16 %68
+  %70 = slice %67[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %71 = concat(%69, %70) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %73 = vshuffle %71, %35, %36
+  %74 = mov.i32 16204
+  %75 = vbcst.16 %74
+  %82 = vmac.bf16x32 %44, %39, %75, %45
+  %83 = vmac.bf16x32 %82, %42, %35, %45
+  %84 = slice %83[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %85 = vmov.accumulator512.to.vector512 %84
+  %87 = vshuffle %73, %73, %38
+  %88 = vshuffle %55, %55, %38
+  %90 = vshuffle %73, %73, %41
+  %91 = vshuffle %55, %55, %41
+  %93 = slice %44[1] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %94 = slice %44[2] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %95 = slice %44[3] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %96 = vmov.vector512.to.accumulator512 %85
+  %97 = concat(%96, %93, %94, %95) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %99 = vmac.bf16x32 %97, %87, %88, %45
+  %100 = vmac.bf16x32 %99, %90, %91, %45
+  %101 = slice %100[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %102 = vmov.accumulator512.to.vector512 %101
+  %103 = vmov.vector512.to.accumulator512 %102
+  %104 = vtanh.bf16x16 %103
+  %105 = vconv.fp32.bf16x16 %104
+  %106 = vmov.accumulator512.to.vector512 %105
+  %107 = mov.i32 16128
+  %108 = vbcst.16 %107
+  %115 = vmac.bf16x32 %44, %39, %108, %45
+  %116 = vmac.bf16x32 %115, %42, %35, %45
+  %117 = slice %116[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %118 = vmov.accumulator512.to.vector512 %117
+  %119 = vmov.vector512.to.accumulator512 %118
+  %120 = vconv.bf16.fp32x16 %119
+  %121 = slice %118[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %122 = concat(%120, %121) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %124 = vshuffle %122, %35, %36
+  %125 = vmov.vector512.to.accumulator512 %106
+  %126 = vconv.bf16.fp32x16 %125
+  %127 = slice %106[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %128 = concat(%126, %127) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %130 = vshuffle %128, %35, %36
+  %132 = vshuffle %130, %130, %38
+  %133 = vshuffle %124, %124, %38
+  %135 = vshuffle %130, %130, %41
+  %136 = vshuffle %124, %124, %41
+  %142 = concat(%119, %93, %94, %95) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %144 = vmac.bf16x32 %142, %132, %133, %45
+  %145 = vmac.bf16x32 %144, %135, %136, %45
+  %146 = slice %145[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %result = vmov.accumulator512.to.vector512 %146
+  return %result
+}
+
+// ====
+
+// RUN: emit source-low output=low
+
+aie2p.target<core> @target
+
+func.def target(@target) @gelu_tanh_f16_packet(%input: vector<16xf16>) -> (vector<16xf16>) {
+  // ERROR@+1: LOWERING/036 {op_name="vector.geluf", phase_name="legalize-math", policy_name="aie2p-math", math_op="geluf.tanh", lane_domain="vector", element_type="f16", constraint_key="math.element.aie2p_gelu_bf16_packet_vector"}
+  %result = vector.geluf<tanh, afn> %input : vector<16xf16>
+  func.return %result : vector<16xf16>
+}

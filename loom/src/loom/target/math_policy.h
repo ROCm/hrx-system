@@ -105,6 +105,8 @@ typedef enum loom_target_math_recipe_e {
   LOOM_TARGET_MATH_RECIPE_TANH_LOGISTIC_F32 = 13,
   LOOM_TARGET_MATH_RECIPE_POW_LOG2_EXP2_F32 = 14,
   LOOM_TARGET_MATH_RECIPE_ROUND_AWAY = 15,
+  LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET = 16,
+  LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_BF16_PACKET = 17,
 } loom_target_math_recipe_t;
 
 typedef struct loom_target_math_query_t {

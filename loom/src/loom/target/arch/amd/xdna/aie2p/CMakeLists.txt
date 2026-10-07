@@ -622,6 +622,31 @@ loom_cc_binary(
 endif()
 
 if(LOOM_TARGET_ARCH_XDNA)
+iree_native_test(
+  NAME
+    "gelu_resident_compile"
+  WORKING_DIRECTORY "${IREE_ROOT_DIR}"
+  ARGS
+    "{{${CMAKE_CURRENT_SOURCE_DIR}/test/gelu_resident_compile.loom-test}}"
+  SRC
+    ::loom-check
+  LABELS
+    "loom-check"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_check_compile_tests(
+  NAME
+    "gelu_resident_compile"
+  SRC
+    "test/gelu_resident_compile.loom-test"
+  TARGETS
+    loom::target::xdna::npu5
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
 loom_check_test_suite(
   NAME
     loom_check_file_test
@@ -683,6 +708,7 @@ loom_check_test_suite(
     "test/descriptors/scalar_nonlinear.loom-test"
     "test/descriptors/scalar_stream.loom-test"
     "test/expansion_report.loom-test"
+    "test/gelu_bf16_packet_report.loom-test"
     "test/leaf_alignment.loom-test"
     "test/leaf_allocation.loom-test"
     "test/leaf_expansion_timing.loom-test"
@@ -708,6 +734,7 @@ loom_check_test_suite(
     "test/source_low/component_packetization_report.loom-test"
     "test/source_low/function_storage.loom-test"
     "test/source_low/fused_packet_memory.loom-test"
+    "test/source_low/gelu_bf16_packet.loom-test"
     "test/source_low/immutable_gather.loom-test"
     "test/source_low/index_conversion.loom-test"
     "test/source_low/integer_float_conversion.loom-test"
@@ -1063,6 +1090,22 @@ loom_cc_test(
     iree::testing::gtest
     iree::testing::gtest_main
     loom::target::provider
+  LABELS
+    "iree-build-requirement=loom.target.arch.xdna"
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA)
+loom_cc_test(
+  NAME
+    math_policy_test
+  SRCS
+    "math_policy_test.cc"
+  DEPS
+    ::math_policy
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::target::math_policy
   LABELS
     "iree-build-requirement=loom.target.arch.xdna"
 )

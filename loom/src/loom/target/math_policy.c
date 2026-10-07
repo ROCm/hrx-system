@@ -162,6 +162,10 @@ iree_string_view_t loom_target_math_recipe_name(
       return IREE_SV("pow-log2-exp2-f32");
     case LOOM_TARGET_MATH_RECIPE_ROUND_AWAY:
       return IREE_SV("round-away");
+    case LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET:
+      return IREE_SV("gelu-tanh-bf16-packet");
+    case LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_BF16_PACKET:
+      return IREE_SV("gelu-logistic-bf16-packet");
     case LOOM_TARGET_MATH_RECIPE_UNKNOWN:
       return IREE_SV("unknown");
   }

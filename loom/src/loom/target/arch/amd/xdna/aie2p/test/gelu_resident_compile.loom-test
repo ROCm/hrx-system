@@ -1,0 +1,30 @@
+// RUN: verify
+
+// A model-aligned resident leaf keeps its transfers and GELU computation on
+// packet paths through final NPU artifact emission.
+aie2p.target<array> @array_target
+
+aie2p.target<core> @core_target
+
+func.def target(@core_target) @direct_gelu_row(%input_argument: buffer, %output_argument: buffer) {
+  %input, %output = buffer.assume.alignment %input_argument, %output_argument {minimum_alignment = 64} : buffer, buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<16xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xf32>
+  %value = vector.load %input_view[0] : view<16xf32> -> vector<16xf32>
+  %activated = vector.geluf<tanh, afn> %value : vector<16xf32>
+  vector.store %activated, %output_view[0] : vector<16xf32>, view<16xf32>
+  func.return
+}
+
+pipeline.def<kernel> public retain target(@array_target) @direct_gelu() launch(%input: buffer, %output: buffer) {
+  %worker_count = index.constant 1 : index
+  %origin = index.constant 0 : offset
+  %workers = group.create %worker_count : index -> group
+  %inputs = buffer.view %input[%origin] : buffer -> view<16xf32>
+  %outputs = buffer.view %output[%origin] : buffer -> view<16xf32>
+  %record = pipeline.read %inputs on %workers : view<16xf32>, group -> pipeline.flow<tile<16xf32>>
+  %activated = pipeline.stage @direct_gelu_row on %workers(%record) : (group, pipeline.flow<tile<16xf32>>) -> (pipeline.flow<tile<16xf32>>)
+  pipeline.write %activated to %outputs : pipeline.flow<tile<16xf32>>, view<16xf32>
+  pipeline.return
+}

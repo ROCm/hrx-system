@@ -1,0 +1,44 @@
+// RUN: with-checks compile-report legalize-math,dce,canonicalize,target-legalize{mode=final},dce,canonicalize,source-to-low,low-dce
+
+aie2p.target<core> @target
+
+func.def target(@target) @gelu_scalar_family(%f8e4: f8E4M3, %f8e5: f8E5M2, %f16: f16, %bf16: bf16, %f32: f32) -> (f8E4M3, f8E5M2, f16, bf16, f32) {
+  %f8e4_result = scalar.geluf<erf, afn> %f8e4 : f8E4M3
+  %f8e5_result = scalar.geluf<tanh, afn> %f8e5 : f8E5M2
+  %f16_result = scalar.geluf<logistic, afn> %f16 {scale = 1.702} : f16
+  %bf16_result = scalar.geluf<erf, afn> %bf16 : bf16
+  %f32_result = scalar.geluf<tanh, afn> %f32 : f32
+  func.return %f8e4_result, %f8e5_result, %f16_result, %bf16_result, %f32_result : f8E4M3, f8E5M2, f16, bf16, f32
+}
+
+func.def target(@target) @gelu_f8_vector_boundaries(%f8e4_single: vector<1xf8E4M3>, %f8e4_packet: vector<16xf8E4M3>, %f8e5_single: vector<1xf8E5M2>, %f8e5_matrix: vector<4x4xf8E5M2>) -> (vector<1xf8E4M3>, vector<16xf8E4M3>, vector<1xf8E5M2>, vector<4x4xf8E5M2>) {
+  %f8e4_single_result = vector.geluf<erf, afn> %f8e4_single : vector<1xf8E4M3>
+  %f8e4_packet_result = vector.geluf<logistic, afn> %f8e4_packet {scale = 1.702} : vector<16xf8E4M3>
+  %f8e5_single_result = vector.geluf<tanh, afn> %f8e5_single : vector<1xf8E5M2>
+  %f8e5_matrix_result = vector.geluf<logistic, afn> %f8e5_matrix {scale = 1.702} : vector<4x4xf8E5M2>
+  func.return %f8e4_single_result, %f8e4_packet_result, %f8e5_single_result, %f8e5_matrix_result : vector<1xf8E4M3>, vector<16xf8E4M3>, vector<1xf8E5M2>, vector<4x4xf8E5M2>
+}
+
+func.def target(@target) @gelu_bf16_f32_vector_boundaries(%bf16_single: vector<1xbf16>, %bf16_packet: vector<16xbf16>, %f32_single: vector<1xf32>, %f32_packet: vector<16xf32>) -> (vector<1xbf16>, vector<16xbf16>, vector<1xf32>, vector<16xf32>) {
+  %bf16_single_result = vector.geluf<erf, afn> %bf16_single : vector<1xbf16>
+  %bf16_packet_result = vector.geluf<tanh, afn> %bf16_packet : vector<16xbf16>
+  %f32_single_result = vector.geluf<logistic, afn> %f32_single {scale = 1.702} : vector<1xf32>
+  %f32_packet_result = vector.geluf<tanh, afn> %f32_packet : vector<16xf32>
+  func.return %bf16_single_result, %bf16_packet_result, %f32_single_result, %f32_packet_result : vector<1xbf16>, vector<16xbf16>, vector<1xf32>, vector<16xf32>
+}
+
+// ----
+CHECK: COMPILE-REPORT: math_legalization rewritten=13 rejected=0 missing_policy=0 missing_recipe=0 rows=13 *
+CHECK: COMPILE-REPORT: math_legalization[*] * source_op=scalar.geluf action=rewritten policy=aie2p-math math_op=geluf.erf domain=scalar element=f8E4M3 recipe=gelu-tanh-bf16-packet constraint=math.recipe.gelu_erf_tanh_bf16_packet *
+CHECK: COMPILE-REPORT: math_legalization[*] * source_op=scalar.geluf action=rewritten policy=aie2p-math math_op=geluf.logistic domain=scalar element=f16 recipe=gelu-logistic-bf16-packet constraint=math.recipe.gelu_logistic_bf16_packet *
+CHECK: COMPILE-REPORT: math_legalization[*] * source_op=vector.geluf action=rewritten policy=aie2p-math math_op=geluf.tanh domain=vector element=f8E5M2 recipe=gelu-tanh-bf16-packet constraint=math.recipe.gelu_tanh_bf16_packet *
+CHECK: COMPILE-REPORT: math_legalization[*] * source_op=vector.geluf action=rewritten policy=aie2p-math math_op=geluf.erf domain=vector element=bf16 recipe=gelu-tanh-bf16-packet constraint=math.recipe.gelu_erf_tanh_bf16_packet *
+CHECK: COMPILE-REPORT: math_legalization[*] * source_op=vector.geluf action=rewritten policy=aie2p-math math_op=geluf.tanh domain=vector element=f32 recipe=gelu-tanh-bf16-packet constraint=math.recipe.gelu_tanh_bf16_packet *
+CHECK: COMPILE-REPORT: source_low selected_ops=* emitted_ops=* rows=* unkeyed_maximum_emitted_ops=0
+CHECK: COMPILE-REPORT: source_low[*] * plan_key=native_f8e5m2x16_to_bfloat16x16 *
+CHECK: COMPILE-REPORT: source_low[*] * plan_key=native_binary32x1-16_to_f8e5m2x1-16 *
+CHECK: COMPILE-REPORT: source_low[*] * plan_key=exact_f16_to_binary32 *
+CHECK: COMPILE-REPORT: source_low[*] * plan_key=exact_binary32_to_f16 *
+CHECK: COMPILE-REPORT: source_low[*] * plan_key=native_binary32x16_to_bfloat16x16 *
+CHECK: COMPILE-REPORT: source_low[*] * plan_key=native_bf16_tanh_vector_f32 *
+CHECK-NOT: COMPILE-REPORT: target_legalization[*] * scalarized=true *

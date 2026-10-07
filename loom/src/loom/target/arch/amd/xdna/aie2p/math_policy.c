@@ -31,16 +31,27 @@ static loom_target_math_policy_decision_t loom_aie2p_math_rewrite(
   };
 }
 
+typedef enum loom_aie2p_math_shape_e {
+  // Match the authored rank-one vector lane count.
+  LOOM_AIE2P_MATH_SHAPE_RANK_ONE = 0,
+  // Match the total element count of any static vector shape.
+  LOOM_AIE2P_MATH_SHAPE_STATIC_ELEMENTS = 1,
+} loom_aie2p_math_shape_t;
+
 typedef struct loom_aie2p_math_form_t {
   // Semantic math operation implemented by the lowering form.
   loom_target_math_op_t math_op;
-  // Scalar element type accepted by the lowering form.
-  loom_scalar_type_t element_type;
+  // Scalar element types accepted by the lowering form.
+  loom_scalar_type_set_t element_types;
   // Source lane domain accepted by the lowering form.
   loom_target_math_lane_domain_t lane_domain;
+  // Interpretation of vector lane-count bounds.
+  loom_aie2p_math_shape_t shape;
   // Inclusive source lane-count bounds accepted by the row.
   int64_t minimum_lane_count;
   int64_t maximum_lane_count;
+  // Stable diagnostic constraint describing the accepted element types.
+  iree_string_view_t element_constraint_key;
   // Stable diagnostic constraint describing the required shape.
   iree_string_view_t shape_constraint_key;
   // Stable diagnostic constraint naming the selected lowering form.
@@ -53,10 +64,110 @@ typedef struct loom_aie2p_math_form_t {
   loom_target_math_recipe_t recipe;
 } loom_aie2p_math_form_t;
 
+#define LOOM_AIE2P_GELU_SCALAR_ELEMENT_TYPES                   \
+  (LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2 | \
+   LOOM_SCALAR_TYPE_SET_F16 | LOOM_SCALAR_TYPE_SET_BF16 |      \
+   LOOM_SCALAR_TYPE_SET_F32)
+
+#define LOOM_AIE2P_GELU_VECTOR_ELEMENT_TYPES                   \
+  (LOOM_SCALAR_TYPE_SET_F8E4M3 | LOOM_SCALAR_TYPE_SET_F8E5M2 | \
+   LOOM_SCALAR_TYPE_SET_BF16 | LOOM_SCALAR_TYPE_SET_F32)
+
 static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     {
+        .math_op = LOOM_TARGET_MATH_OP_GELUF_ERF,
+        .element_types = LOOM_AIE2P_GELU_SCALAR_ELEMENT_TYPES,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .element_constraint_key =
+            IREE_SVL("math.element.aie2p_gelu_bf16_packet_scalar"),
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_gelu_bf16_packet"),
+        .form_constraint_key =
+            IREE_SVL("math.recipe.gelu_erf_tanh_bf16_packet"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.gelu.erf.exact"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_GELUF_ERF,
+        .element_types = LOOM_AIE2P_GELU_VECTOR_ELEMENT_TYPES,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .shape = LOOM_AIE2P_MATH_SHAPE_STATIC_ELEMENTS,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .element_constraint_key =
+            IREE_SVL("math.element.aie2p_gelu_bf16_packet_vector"),
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_gelu_bf16_packet"),
+        .form_constraint_key =
+            IREE_SVL("math.recipe.gelu_erf_tanh_bf16_packet"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.gelu.erf.exact"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_GELUF_TANH,
+        .element_types = LOOM_AIE2P_GELU_SCALAR_ELEMENT_TYPES,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .element_constraint_key =
+            IREE_SVL("math.element.aie2p_gelu_bf16_packet_scalar"),
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_gelu_bf16_packet"),
+        .form_constraint_key = IREE_SVL("math.recipe.gelu_tanh_bf16_packet"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.gelu.tanh.exact"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_GELUF_TANH,
+        .element_types = LOOM_AIE2P_GELU_VECTOR_ELEMENT_TYPES,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .shape = LOOM_AIE2P_MATH_SHAPE_STATIC_ELEMENTS,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .element_constraint_key =
+            IREE_SVL("math.element.aie2p_gelu_bf16_packet_vector"),
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_gelu_bf16_packet"),
+        .form_constraint_key = IREE_SVL("math.recipe.gelu_tanh_bf16_packet"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.gelu.tanh.exact"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_GELU_TANH_BF16_PACKET,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_GELUF_LOGISTIC,
+        .element_types = LOOM_AIE2P_GELU_SCALAR_ELEMENT_TYPES,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 1,
+        .element_constraint_key =
+            IREE_SVL("math.element.aie2p_gelu_bf16_packet_scalar"),
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_gelu_bf16_packet"),
+        .form_constraint_key =
+            IREE_SVL("math.recipe.gelu_logistic_bf16_packet"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.gelu.logistic.exact"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_BF16_PACKET,
+    },
+    {
+        .math_op = LOOM_TARGET_MATH_OP_GELUF_LOGISTIC,
+        .element_types = LOOM_AIE2P_GELU_VECTOR_ELEMENT_TYPES,
+        .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
+        .shape = LOOM_AIE2P_MATH_SHAPE_STATIC_ELEMENTS,
+        .minimum_lane_count = 1,
+        .maximum_lane_count = 16,
+        .element_constraint_key =
+            IREE_SVL("math.element.aie2p_gelu_bf16_packet_vector"),
+        .shape_constraint_key = IREE_SVL("math.shape.aie2p_gelu_bf16_packet"),
+        .form_constraint_key =
+            IREE_SVL("math.recipe.gelu_logistic_bf16_packet"),
+        .required_fastmath_flags = LOOM_TARGET_MATH_FASTMATH_FLAG_AFN,
+        .permission_constraint_key = IREE_SVL("math.gelu.logistic.exact"),
+        .recipe = LOOM_TARGET_MATH_RECIPE_GELU_LOGISTIC_BF16_PACKET,
+    },
+    {
         .math_op = LOOM_TARGET_MATH_OP_LOGISTICF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -69,7 +180,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_LOGISTICF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 16,
@@ -82,7 +193,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_SILUF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -95,7 +206,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_SILUF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 16,
@@ -108,7 +219,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_SINF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -119,7 +230,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_COSF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -130,7 +241,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_SINTURNSF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -141,7 +252,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_COSTURNSF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -152,7 +263,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_EXPF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -163,7 +274,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_EXPF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 16,
@@ -174,7 +285,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_TANHF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -185,7 +296,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_TANHF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 16,
@@ -196,7 +307,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_MULF,
-        .element_type = LOOM_SCALAR_TYPE_F16,
+        .element_types = LOOM_SCALAR_TYPE_SET_F16,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -205,7 +316,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ROUNDF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -215,7 +326,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ROUNDF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 16,
@@ -225,7 +336,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ROUNDEVENF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -234,7 +345,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ROUNDEVENF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 16,
@@ -243,7 +354,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_TRUNCF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -252,7 +363,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_TRUNCF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 16,
@@ -261,7 +372,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_MULF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -270,7 +381,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_MULF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 32,
@@ -279,7 +390,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ADDF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -288,7 +399,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ADDF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 32,
@@ -297,7 +408,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_ADDF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 64,
         .maximum_lane_count = 64,
@@ -306,7 +417,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_SUBF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 1,
@@ -315,7 +426,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_SUBF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 1,
         .maximum_lane_count = 32,
@@ -324,7 +435,7 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
     {
         .math_op = LOOM_TARGET_MATH_OP_SUBF,
-        .element_type = LOOM_SCALAR_TYPE_F32,
+        .element_types = LOOM_SCALAR_TYPE_SET_F32,
         .lane_domain = LOOM_TARGET_MATH_LANE_DOMAIN_VECTOR,
         .minimum_lane_count = 64,
         .maximum_lane_count = 64,
@@ -333,10 +444,12 @@ static const loom_aie2p_math_form_t kAie2pMathForms[] = {
     },
 };
 
-static bool loom_aie2p_math_query_matches_form(
+#undef LOOM_AIE2P_GELU_VECTOR_ELEMENT_TYPES
+#undef LOOM_AIE2P_GELU_SCALAR_ELEMENT_TYPES
+
+static bool loom_aie2p_math_query_matches_shape(
     const loom_target_math_query_t* query, const loom_aie2p_math_form_t* form) {
-  if (query->lane_domain != form->lane_domain ||
-      query->element_type != form->element_type) {
+  if (query->lane_domain != form->lane_domain) {
     return false;
   }
   if (query->lane_domain == LOOM_TARGET_MATH_LANE_DOMAIN_SCALAR) {
@@ -344,11 +457,23 @@ static bool loom_aie2p_math_query_matches_form(
            form->minimum_lane_count <= 1 && form->maximum_lane_count >= 1;
   }
   if (!loom_type_is_vector(query->value_type) ||
-      loom_type_rank(query->value_type) != 1 ||
       !loom_type_is_all_static(query->value_type)) {
     return false;
   }
-  const int64_t lane_count = loom_type_dim_static_size_at(query->value_type, 0);
+  int64_t lane_count = 0;
+  if (form->shape == LOOM_AIE2P_MATH_SHAPE_STATIC_ELEMENTS) {
+    uint64_t element_count = 0;
+    if (!loom_type_static_element_count(query->value_type, &element_count) ||
+        element_count > INT64_MAX) {
+      return false;
+    }
+    lane_count = (int64_t)element_count;
+  } else {
+    if (loom_type_rank(query->value_type) != 1) {
+      return false;
+    }
+    lane_count = loom_type_dim_static_size_at(query->value_type, 0);
+  }
   return lane_count >= form->minimum_lane_count &&
          lane_count <= form->maximum_lane_count;
 }
@@ -364,8 +489,18 @@ static void loom_aie2p_math_policy_query(
     if (query->math_op != form->math_op) {
       continue;
     }
+    if (query->lane_domain != form->lane_domain) {
+      continue;
+    }
+    if (!loom_scalar_type_set_contains(form->element_types,
+                                       query->element_type)) {
+      constraint_key = iree_string_view_is_empty(form->element_constraint_key)
+                           ? form->shape_constraint_key
+                           : form->element_constraint_key;
+      continue;
+    }
     constraint_key = form->shape_constraint_key;
-    if (loom_aie2p_math_query_matches_form(query, form)) {
+    if (loom_aie2p_math_query_matches_shape(query, form)) {
       if (!iree_all_bits_set(query->fastmath_flags,
                              form->required_fastmath_flags)) {
         *out_decision = loom_aie2p_math_reject(form->permission_constraint_key);

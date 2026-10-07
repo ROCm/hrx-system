@@ -1,0 +1,172 @@
+// RUN: pass legalize-math
+
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @f32_packet(%input: vector<16xf32>) -> (vector<16xf32>) {
+  %result = vector.geluf<tanh, afn> %input : vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ----
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @f32_packet(%input: vector<16xf32>) -> (vector<16xf32>) {
+  %3 = vector.fptrunc %input : vector<16xf32> to vector<16xbf16>
+  %4 = vector.constant 0.0 : vector<16xbf16>
+  %5 = vector.constant 0.0 : vector<16xf32>
+  %6 = vector.interleave<0> %3, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %7 = vector.dot2f %6, %6, %5 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %8 = vector.fptrunc %7 : vector<16xf32> to vector<16xbf16>
+  %9 = vector.interleave<0> %8, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %10 = vector.constant 0.03564453125 : vector<16xbf16>
+  %11 = vector.interleave<0> %10, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %12 = vector.dot2f %6, %11, %5 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %13 = vector.fptrunc %12 : vector<16xf32> to vector<16xbf16>
+  %14 = vector.interleave<0> %13, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %15 = vector.constant 0.796875 : vector<16xbf16>
+  %16 = vector.interleave<0> %15, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %17 = vector.dot2f %6, %16, %5 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %18 = vector.dot2f %14, %9, %17 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %19 = vector.tanhf<afn> %18 : vector<16xf32>
+  %20 = vector.constant 0.5 : vector<16xbf16>
+  %21 = vector.interleave<0> %20, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %22 = vector.dot2f %6, %21, %5 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %23 = vector.fptrunc %22 : vector<16xf32> to vector<16xbf16>
+  %24 = vector.interleave<0> %23, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %25 = vector.fptrunc %19 : vector<16xf32> to vector<16xbf16>
+  %26 = vector.interleave<0> %25, %4 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %result = vector.dot2f %26, %24, %22 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  func.return %result : vector<16xf32>
+}
+
+// ====
+
+// RUN: pass legalize-math
+
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @bf16_partial_matrix(%input: vector<2x4xbf16>) -> (vector<2x4xbf16>) {
+  %result = vector.geluf<tanh, afn> %input : vector<2x4xbf16>
+  func.return %result : vector<2x4xbf16>
+}
+
+// ----
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @bf16_partial_matrix(%input: vector<2x4xbf16>) -> (vector<2x4xbf16>) {
+  %3 = vector.bitcast %input : vector<2x4xbf16> to vector<8xbf16>
+  %4 = vector.constant 0.0 : vector<8xbf16>
+  %5 = vector.concat<0> %3, %4 : vector<8xbf16>, vector<8xbf16> -> vector<16xbf16>
+  %6 = vector.constant 0.0 : vector<16xbf16>
+  %7 = vector.constant 0.0 : vector<16xf32>
+  %8 = vector.interleave<0> %5, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %9 = vector.dot2f %8, %8, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %10 = vector.fptrunc %9 : vector<16xf32> to vector<16xbf16>
+  %11 = vector.interleave<0> %10, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %12 = vector.constant 0.03564453125 : vector<16xbf16>
+  %13 = vector.interleave<0> %12, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %14 = vector.dot2f %8, %13, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %15 = vector.fptrunc %14 : vector<16xf32> to vector<16xbf16>
+  %16 = vector.interleave<0> %15, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %17 = vector.constant 0.796875 : vector<16xbf16>
+  %18 = vector.interleave<0> %17, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %19 = vector.dot2f %8, %18, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %20 = vector.dot2f %16, %11, %19 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %21 = vector.tanhf<afn> %20 : vector<16xf32>
+  %22 = vector.constant 0.5 : vector<16xbf16>
+  %23 = vector.interleave<0> %22, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %24 = vector.dot2f %8, %23, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %25 = vector.fptrunc %24 : vector<16xf32> to vector<16xbf16>
+  %26 = vector.interleave<0> %25, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %27 = vector.fptrunc %21 : vector<16xf32> to vector<16xbf16>
+  %28 = vector.interleave<0> %27, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %29 = vector.dot2f %28, %26, %24 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %30 = vector.slice %29[0] : vector<16xf32> -> vector<8xf32>
+  %31 = vector.fptrunc %30 : vector<8xf32> to vector<8xbf16>
+  %result = vector.bitcast %31 : vector<8xbf16> to vector<2x4xbf16>
+  func.return %result : vector<2x4xbf16>
+}
+
+// ====
+
+// RUN: pass legalize-math
+
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @f16_scalar_erf(%input: f16) -> (f16) {
+  %result = scalar.geluf<erf, afn> %input : f16
+  func.return %result : f16
+}
+
+// ----
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @f16_scalar_erf(%input: f16) -> (f16) {
+  %3 = scalar.extf %input : f16 to f32
+  %4 = scalar.fptrunc %3 : f32 to bf16
+  %5 = vector.splat %4 : vector<16xbf16>
+  %6 = vector.constant 0.0 : vector<16xbf16>
+  %7 = vector.constant 0.0 : vector<16xf32>
+  %8 = vector.interleave<0> %5, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %9 = vector.dot2f %8, %8, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %10 = vector.fptrunc %9 : vector<16xf32> to vector<16xbf16>
+  %11 = vector.interleave<0> %10, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %12 = vector.constant 0.03564453125 : vector<16xbf16>
+  %13 = vector.interleave<0> %12, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %14 = vector.dot2f %8, %13, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %15 = vector.fptrunc %14 : vector<16xf32> to vector<16xbf16>
+  %16 = vector.interleave<0> %15, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %17 = vector.constant 0.796875 : vector<16xbf16>
+  %18 = vector.interleave<0> %17, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %19 = vector.dot2f %8, %18, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %20 = vector.dot2f %16, %11, %19 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %21 = vector.tanhf<afn> %20 : vector<16xf32>
+  %22 = vector.constant 0.5 : vector<16xbf16>
+  %23 = vector.interleave<0> %22, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %24 = vector.dot2f %8, %23, %7 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %25 = vector.fptrunc %24 : vector<16xf32> to vector<16xbf16>
+  %26 = vector.interleave<0> %25, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %27 = vector.fptrunc %21 : vector<16xf32> to vector<16xbf16>
+  %28 = vector.interleave<0> %27, %6 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %29 = vector.dot2f %28, %26, %24 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %30 = vector.extract %29[0] : vector<16xf32> -> f32
+  %result = scalar.fptrunc %30 : f32 to f16
+  func.return %result : f16
+}
+
+// ====
+
+// RUN: pass legalize-math
+
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @f8_scalar_logistic(%input: f8E5M2) -> (f8E5M2) {
+  %result = scalar.geluf<logistic, afn> %input {scale = 1.702} : f8E5M2
+  func.return %result : f8E5M2
+}
+
+// ----
+test.target<low_core> @math_target {contract_set_key = "test.math.gelu_bf16_packet"}
+
+func.def target(@math_target) @f8_scalar_logistic(%input: f8E5M2) -> (f8E5M2) {
+  %3 = scalar.extf %input : f8E5M2 to bf16
+  %4 = vector.splat %3 : vector<16xbf16>
+  %5 = vector.constant 0.0 : vector<16xbf16>
+  %6 = vector.constant 0.0 : vector<16xf32>
+  %7 = vector.interleave<0> %4, %5 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %8 = vector.constant 0.85099999999999998 : vector<16xbf16>
+  %9 = vector.interleave<0> %8, %5 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %10 = vector.dot2f %7, %9, %6 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %11 = vector.tanhf<afn> %10 : vector<16xf32>
+  %12 = vector.constant 0.5 : vector<16xbf16>
+  %13 = vector.interleave<0> %12, %5 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %14 = vector.dot2f %7, %13, %6 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %15 = vector.fptrunc %14 : vector<16xf32> to vector<16xbf16>
+  %16 = vector.interleave<0> %15, %5 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %17 = vector.fptrunc %11 : vector<16xf32> to vector<16xbf16>
+  %18 = vector.interleave<0> %17, %5 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %19 = vector.dot2f %18, %16, %14 : vector<32xbf16>, vector<32xbf16>, vector<16xf32>
+  %20 = vector.extract %19[0] : vector<16xf32> -> f32
+  %result = scalar.fptrunc %20 : f32 to f8E5M2
+  func.return %result : f8E5M2
+}

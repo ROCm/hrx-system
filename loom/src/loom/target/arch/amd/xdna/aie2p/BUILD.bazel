@@ -15,6 +15,7 @@ load(
 )
 load(
     "//loom/build_tools/bazel:loom_check.bzl",
+    "loom_check_test",
     "loom_check_test_suite",
 )
 
@@ -534,6 +535,13 @@ loom_cc_binary(
     ],
 )
 
+loom_check_test(
+    name = "gelu_resident_compile",
+    src = "test/gelu_resident_compile.loom-test",
+    compile_targets = ["//loom/target/xdna:npu5"],
+    runner = ":loom-check",
+)
+
 loom_check_test_suite(
     name = "loom_check_file_test",
     srcs = [
@@ -594,6 +602,7 @@ loom_check_test_suite(
         "test/descriptors/scalar_nonlinear.loom-test",
         "test/descriptors/scalar_stream.loom-test",
         "test/expansion_report.loom-test",
+        "test/gelu_bf16_packet_report.loom-test",
         "test/leaf_alignment.loom-test",
         "test/leaf_allocation.loom-test",
         "test/leaf_expansion_timing.loom-test",
@@ -619,6 +628,7 @@ loom_check_test_suite(
         "test/source_low/component_packetization_report.loom-test",
         "test/source_low/function_storage.loom-test",
         "test/source_low/fused_packet_memory.loom-test",
+        "test/source_low/gelu_bf16_packet.loom-test",
         "test/source_low/immutable_gather.loom-test",
         "test/source_low/index_conversion.loom-test",
         "test/source_low/integer_float_conversion.loom-test",
@@ -930,6 +940,17 @@ loom_cc_test(
     deps = [
         ":provider",
         "//loom/src/loom/target:provider",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_test(
+    name = "math_policy_test",
+    srcs = ["math_policy_test.cc"],
+    deps = [
+        ":math_policy",
+        "//loom/src/loom/target:math_policy",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
