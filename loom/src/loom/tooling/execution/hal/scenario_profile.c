@@ -90,9 +90,10 @@ static iree_status_t loom_run_hal_testbench_scenario_emit_unsupported_results(
       "HAL scenario profile cannot transport invocation results");
 }
 
-static void loom_run_hal_testbench_scenario_batch_deinitialize(
+static iree_status_t loom_run_hal_testbench_scenario_batch_deinitialize(
     loom_run_hal_testbench_scenario_batch_t* batch) {
-  loom_run_hal_testbench_staging_deinitialize(&batch->staging);
+  iree_status_t status =
+      loom_run_hal_testbench_staging_deinitialize(&batch->staging);
   loom_run_hal_dispatch_sequence_deinitialize(&batch->sequence);
   for (iree_host_size_t i = batch->initialized_binding_list_count; i > 0; --i) {
     loom_run_hal_binding_list_deinitialize(&batch->binding_lists[i - 1]);
@@ -102,6 +103,7 @@ static void loom_run_hal_testbench_scenario_batch_deinitialize(
   iree_allocator_free(batch->host_allocator, batch->steps);
   iree_allocator_free(batch->host_allocator, batch->binding_lists);
   *batch = (loom_run_hal_testbench_scenario_batch_t){0};
+  return status;
 }
 
 static iree_status_t loom_run_hal_testbench_scenario_allocate_array(
@@ -150,7 +152,8 @@ static iree_status_t loom_run_hal_testbench_scenario_batch_initialize(
         sizeof(*out_batch->binding_table), (void**)&out_batch->binding_table);
   }
   if (!iree_status_is_ok(status)) {
-    loom_run_hal_testbench_scenario_batch_deinitialize(out_batch);
+    status = iree_status_join(
+        status, loom_run_hal_testbench_scenario_batch_deinitialize(out_batch));
   }
   return status;
 }
@@ -323,7 +326,8 @@ static iree_status_t loom_run_hal_testbench_scenario_product_benchmark(
         },
         options, host_allocator, out_result);
   }
-  loom_run_hal_testbench_scenario_batch_deinitialize(&batch);
+  status = iree_status_join(
+      status, loom_run_hal_testbench_scenario_batch_deinitialize(&batch));
   return status;
 }
 
