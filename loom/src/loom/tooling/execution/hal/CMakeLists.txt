@@ -270,6 +270,7 @@ loom_cc_library(
     iree::tooling::device_util
     loom::analysis::kernel_launch_config
     loom::analysis::symbol_facts
+    loom::codegen::low::launch_config_program
     loom::error::diagnostic
     loom::ir
     loom::ir::facts
@@ -281,7 +282,6 @@ loom_cc_library(
     loom::ops::target
     loom::pass::pipeline_snapshot
     loom::sanitizer::options
-    loom::target::function_version
     loom::target::provider
     loom::target::types
     loom::tooling::compile::options

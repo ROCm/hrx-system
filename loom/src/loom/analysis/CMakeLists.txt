@@ -734,17 +734,13 @@ loom_cc_library(
   SRCS
     "kernel_launch_config.c"
   DEPS
-    ::symbol_facts
+    ::symbol_value_constraints
     iree::base
     iree::base::internal::arena
-    loom::error::emitter
     loom::ir
     loom::ir::facts
-    loom::ops::func_symbol_facts
-    loom::ops::kernel
+    loom::ops::func
     loom::pass::value_facts
-    loom::target::facts
-    loom::target::function_contract
     loom::target::types
   PUBLIC
 )
@@ -762,8 +758,6 @@ loom_cc_test(
     iree::testing::gtest_main
     loom::format::text::parser
     loom::ir
-    loom::target::facts
-    loom::target::types
     loom::testing::context
     loom::testing::module_ptr
 )

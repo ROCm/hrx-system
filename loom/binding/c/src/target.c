@@ -460,11 +460,13 @@ loom_pass_environment_t loomc_codegen_pass_environment_storage_initialize(
     const loomc_target_pass_environment_t* target_environment,
     const loom_cleanup_pattern_registry_t* cleanup_pattern_registry,
     loom_function_version_owner_t* function_version_owner,
+    const loom_pass_environment_capability_t* launch_config_capability,
     loom_target_compile_report_t* compile_report,
     loom_codegen_pass_environment_storage_t* out_storage) {
   loom_codegen_pass_environment_options_t options = {
       .cleanup_pattern_registry = cleanup_pattern_registry,
       .compile_report = compile_report,
+      .launch_config_capability = launch_config_capability,
   };
   if (target_environment != NULL) {
     options.descriptor_registry =

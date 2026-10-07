@@ -396,6 +396,7 @@ loom_cc_library(
     ::storage_layout
     iree::base
     iree::base::internal::arena
+    loom::analysis::kernel_launch_config
     loom::ir
     loom::ops::func
     loom::ops::kernel

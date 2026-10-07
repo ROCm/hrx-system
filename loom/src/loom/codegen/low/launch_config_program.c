@@ -9,6 +9,7 @@
 #include <inttypes.h>
 #include <string.h>
 
+#include "loom/analysis/kernel_launch_config.h"
 #include "loom/codegen/low/storage_layout.h"
 #include "loom/ir/context.h"
 #include "loom/ops/func/ops.h"
@@ -22,21 +23,6 @@
 #include "loom/rewrite/remap.h"
 #include "loom/rewrite/rewriter.h"
 #include "loom/transforms/cleanup/dce.h"
-
-enum {
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X = 0,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Y = 1,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Z = 2,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_X = 3,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Y = 4,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Z = 5,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_X = 6,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Y = 7,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Z = 8,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE = 9,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES = 10,
-  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT = 11,
-};
 
 struct loom_kernel_launch_config_program_entry_t {
   // Next entry in capture order.
@@ -530,4 +516,11 @@ iree_status_t loom_kernel_launch_config_program_finalize(
     *out_module = program->module;
   }
   return status;
+}
+
+loom_module_t* loom_kernel_launch_config_program_take_module(
+    loom_kernel_launch_config_program_t* program) {
+  loom_module_t* module = program->module;
+  program->module = NULL;
+  return module;
 }

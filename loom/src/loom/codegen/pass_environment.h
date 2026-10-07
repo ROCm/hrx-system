@@ -42,6 +42,8 @@ typedef struct loom_codegen_pass_environment_options_t {
   const loom_target_environment_t* target_environment;
   // Cleanup pattern registries prepared for this compiler invocation.
   const loom_cleanup_pattern_registry_t* cleanup_pattern_registry;
+  // Optional launch-config product capability populated by source-to-Low.
+  const loom_pass_environment_capability_t* launch_config_capability;
 } loom_codegen_pass_environment_options_t;
 
 typedef struct loom_codegen_pass_environment_storage_t {
@@ -54,7 +56,7 @@ typedef struct loom_codegen_pass_environment_storage_t {
   // Cleanup capability entry stored for the borrowed environment view.
   loom_cleanup_pass_capability_t cleanup_capability;
   // Pointer table borrowed by |environment|.
-  const loom_pass_environment_capability_t* capabilities[4];
+  const loom_pass_environment_capability_t* capabilities[5];
   // Pass environment view over |capabilities|.
   loom_pass_environment_t environment;
 } loom_codegen_pass_environment_storage_t;

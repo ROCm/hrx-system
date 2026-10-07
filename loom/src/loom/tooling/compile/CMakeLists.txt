@@ -59,6 +59,7 @@ loom_cc_library(
     loom::error::source
     loom::ir
     loom::pass::builtin_registry
+    loom::pass::environment
     loom::pass::interpreter
     loom::pass::registry
     loom::pass::tooling

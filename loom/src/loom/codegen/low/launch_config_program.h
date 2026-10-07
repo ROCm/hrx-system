@@ -91,6 +91,13 @@ iree_status_t loom_kernel_launch_config_program_finalize(
     iree_arena_block_pool_t* scratch_block_pool,
     const loom_module_t** out_module);
 
+// Transfers the finalized host module out of |program|.
+//
+// The caller owns the returned module and must release it with
+// loom_module_free. The program may be deinitialized immediately afterward.
+loom_module_t* loom_kernel_launch_config_program_take_module(
+    loom_kernel_launch_config_program_t* program);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif

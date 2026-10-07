@@ -141,13 +141,15 @@ LOOMC_API_PRIVATE loomc_status_t loomc_target_pass_registry_initialize(
     loom_pass_registry_storage_t* out_storage,
     const loom_pass_registry_t** out_registry);
 
-// Initializes codegen pass capability storage over optional target tables and
-// the context-owned cleanup registry, then returns its borrowed environment.
+// Initializes codegen pass capability storage over optional target tables,
+// compiler products, and the context-owned cleanup registry, then returns its
+// borrowed environment.
 LOOMC_API_PRIVATE loom_pass_environment_t
 loomc_codegen_pass_environment_storage_initialize(
     const loomc_target_pass_environment_t* target_environment,
     const loom_cleanup_pattern_registry_t* cleanup_pattern_registry,
     loom_function_version_owner_t* function_version_owner,
+    const loom_pass_environment_capability_t* launch_config_capability,
     loom_target_compile_report_t* compile_report,
     loom_codegen_pass_environment_storage_t* out_storage);
 

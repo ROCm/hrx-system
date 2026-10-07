@@ -217,7 +217,8 @@ static loomc_status_t loomc_pass_program_compile_state_initialize(
       loomc_codegen_pass_environment_storage_initialize(
           target_pass_environment,
           loomc_context_cleanup_pattern_registry(pass_program->context),
-          /*function_version_owner=*/NULL, /*compile_report=*/NULL,
+          /*function_version_owner=*/NULL,
+          /*launch_config_capability=*/NULL, /*compile_report=*/NULL,
           &out_state->codegen_environment_storage);
   if (target_environment == NULL) {
     return loomc_ok_status();

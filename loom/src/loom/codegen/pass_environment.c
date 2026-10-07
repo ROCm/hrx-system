@@ -42,12 +42,21 @@ loom_codegen_pass_environment_storage_initialize_with_target(
       (loom_cleanup_canonicalizer_context_resolver_t){
           .fn = loom_codegen_resolve_cleanup_canonicalizer_context,
       });
-  out_storage->capabilities[0] = &out_storage->target_capability.base;
-  out_storage->capabilities[1] = &out_storage->low_capability.base;
-  out_storage->capabilities[2] = &out_storage->math_capability.base;
-  out_storage->capabilities[3] = &out_storage->cleanup_capability.base;
-  out_storage->environment = loom_pass_environment_make(
-      out_storage->capabilities, IREE_ARRAYSIZE(out_storage->capabilities));
+  iree_host_size_t capability_count = 0;
+  out_storage->capabilities[capability_count++] =
+      &out_storage->target_capability.base;
+  out_storage->capabilities[capability_count++] =
+      &out_storage->low_capability.base;
+  out_storage->capabilities[capability_count++] =
+      &out_storage->math_capability.base;
+  out_storage->capabilities[capability_count++] =
+      &out_storage->cleanup_capability.base;
+  if (options->launch_config_capability != NULL) {
+    out_storage->capabilities[capability_count++] =
+        options->launch_config_capability;
+  }
+  out_storage->environment =
+      loom_pass_environment_make(out_storage->capabilities, capability_count);
   return out_storage->environment;
 }
 

@@ -392,7 +392,7 @@ pass.pipeline<module> @debug pipeline {
   loom_run_hal_testbench_actual_provider_t provider = {};
   loom_run_hal_testbench_actual_provider_initialize(&options, &provider);
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
+      IREE_STATUS_FAILED_PRECONDITION,
       loom_run_hal_testbench_actual_provider_compile(&provider));
 
   EXPECT_EQ(g_profile_target_selection_count,
@@ -403,25 +403,18 @@ pass.pipeline<module> @debug pipeline {
   EXPECT_EQ(provider.owns_compile_device_target, !expects_explicit_selection);
   EXPECT_EQ(g_projected_target_profile, &kFakeTargetProfile);
 
-  // Both private modules retain exact spelling through their independent
-  // source-ID maps and share the compile owner's source bytes.
-  loom_source_table_resolver_t* tables[] = {
-      &provider.compile_module.sources.table, &provider.launch_config_sources};
-  EXPECT_EQ(tables[0]->module, provider.compile_module.module);
-  EXPECT_EQ(tables[1]->module, provider.launch_config_module);
-  for (auto* table : tables) {
-    const auto* module = table->module;
-    auto symbol = loom_module_find_symbol(
-        module, loom_module_lookup_string(module, IREE_SV("entry")));
-    ASSERT_NE(symbol, LOOM_SYMBOL_ID_INVALID);
-    loom_source_range_t range = {};
-    ASSERT_TRUE(loom_source_table_resolve(
-        table, module, module->symbols.entries[symbol].defining_op->location,
-        &range));
-    EXPECT_EQ(range.provenance, LOOM_SOURCE_PROVENANCE_EXACT_SOURCE);
-    EXPECT_TRUE(iree_string_view_equal(range.source, IREE_SV(kSource)));
-    EXPECT_EQ(range.source.data, tables[0]->entries[0].source.data);
-  }
+  loom_source_table_resolver_t* table = &provider.compile_module.sources.table;
+  EXPECT_EQ(table->module, provider.compile_module.module);
+  const auto* module = table->module;
+  auto symbol = loom_module_find_symbol(
+      module, loom_module_lookup_string(module, IREE_SV("entry")));
+  ASSERT_NE(symbol, LOOM_SYMBOL_ID_INVALID);
+  loom_source_range_t range = {};
+  ASSERT_TRUE(loom_source_table_resolve(
+      table, module, module->symbols.entries[symbol].defining_op->location,
+      &range));
+  EXPECT_EQ(range.provenance, LOOM_SOURCE_PROVENANCE_EXACT_SOURCE);
+  EXPECT_TRUE(iree_string_view_equal(range.source, IREE_SV(kSource)));
 
   loom_run_hal_testbench_actual_provider_deinitialize(&provider);
   loom_run_hal_testbench_context_deinitialize(&context);
@@ -925,7 +918,7 @@ check.case @host_only {
   loom_run_module_deinitialize(&run_module);
 }
 
-TEST_F(HalTestbenchActualTest, RetainsResolvedLaunchConfigForExactWorkload) {
+TEST_F(HalTestbenchActualTest, EvaluatesCompiledLaunchConfigForExactWorkload) {
   static constexpr char kSource[] = R"(
 kernel.def @dynamic(%workgroup_count: index) {
   %unit = index.constant 1 : index
@@ -941,6 +934,15 @@ check.case @dynamic_case {
   check.return
 }
 )";
+  static constexpr char kLaunchConfigSource[] = R"(
+func.def public pure @device_dynamic(%workgroup_count: index) -> (index, index, index, index, index, index, index, index, index, index, index) {
+  %one = index.constant 1 : index
+  %size = index.constant 64 : index
+  %subgroup_size = index.constant 32 : index
+  %storage = index.constant 0 : index
+  func.return %workgroup_count, %one, %one, %size, %one, %one, %one, %one, %one, %subgroup_size, %storage : index, index, index, index, index, index, index, index, index, index, index
+}
+)";
   loom_run_module_t run_module = {};
   loom_testbench_module_plan_t module_plan = {};
   ParseAndPlan(IREE_SV(kSource), &run_module, &module_plan);
@@ -950,9 +952,20 @@ check.case @dynamic_case {
   IREE_ASSERT_OK(
       loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch));
 
-  loom_target_facts_t target_facts = {};
-  target_facts.storage.snapshot = kIndex32Offset64TargetSnapshot;
-  int64_t workload_arguments[1] = {};
+  loom_run_module_parse_options_t parse_options = {};
+  loom_run_module_parse_options_initialize(&parse_options);
+  parse_options.filename = IREE_SV("hal_testbench_launch_config.loom");
+  parse_options.source = IREE_SV(kLaunchConfigSource);
+  loom_run_module_t launch_config_module = {};
+  IREE_ASSERT_OK(
+      loom_run_module_parse(&session_, &parse_options, &launch_config_module));
+  const loom_string_id_t launch_name_id = loom_module_lookup_string(
+      launch_config_module.module, IREE_SV("device_dynamic"));
+  const loom_symbol_id_t launch_symbol_id =
+      loom_module_find_symbol(launch_config_module.module, launch_name_id);
+  ASSERT_NE(launch_symbol_id, LOOM_SYMBOL_ID_INVALID);
+
+  uint64_t workload_argument_bits[1] = {};
   loom_run_hal_testbench_context_t context = {};
   context.host_allocator = iree_allocator_system();
   loom_run_hal_testbench_actual_provider_t provider = {};
@@ -960,11 +973,18 @@ check.case @dynamic_case {
   provider.session = &session_;
   provider.run_module = &run_module;
   provider.kernel_launch = kernel_launch;
-  provider.launch_config_module = run_module.module;
-  provider.launch_config_target_facts = &target_facts;
-  provider.workload_arguments = workload_arguments;
-  provider.entry_symbol = IREE_SV("dynamic");
-  provider.invocation_options.function_name = IREE_SV("@device_dynamic");
+  provider.launch_config_module = launch_config_module.module;
+  provider.launch_config_function = loom_kernel_launch_config_function_bind(
+      launch_config_module.module,
+      loom_func_like_cast(
+          launch_config_module.module,
+          launch_config_module.module->symbols.entries[launch_symbol_id]
+              .defining_op));
+  loom_pass_value_fact_owner_initialize(loom_run_session_block_pool(&session_),
+                                        &provider.launch_config_fact_owner);
+  provider.workload_argument_bits = workload_argument_bits;
+  provider.prepared_candidate.target_bundle = &kFakeTargetBundle;
+  provider.invocation_options.function_name = IREE_SV("device_dynamic");
 
   loom_testbench_value_materializer_options_t materializer_options = {};
   loom_testbench_value_materializer_options_initialize(&materializer_options);
@@ -983,7 +1003,7 @@ check.case @dynamic_case {
         &bindings));
 
     const uint32_t expected_workgroup_count = sample_ordinal == 0 ? 1 : 4;
-    EXPECT_EQ(provider.workload_arguments[0], expected_workgroup_count);
+    EXPECT_EQ(provider.workload_argument_bits[0], expected_workgroup_count);
     EXPECT_EQ(invocation_options.workgroup_count[0], expected_workgroup_count);
     EXPECT_EQ(provider.resolved_launch_config.workgroup_count.x,
               expected_workgroup_count);
@@ -1021,6 +1041,8 @@ check.case @dynamic_case {
   }
 
   loom_testbench_value_table_deinitialize(&value_table);
+  loom_pass_value_fact_owner_deinitialize(&provider.launch_config_fact_owner);
+  loom_run_module_deinitialize(&launch_config_module);
   loom_run_module_deinitialize(&run_module);
 }
 
@@ -1095,8 +1117,8 @@ func.def inline @linked_identity(%value: index) -> (index) {
 
   loom_run_hal_testbench_context_t context = {};
   context.device_provider = &kFakeDeviceProvider;
-  // The fake target emitter rejects emission after the rooted module has been
-  // cloned. Disable transforms so this test can inspect that clone.
+  // An empty pipeline cannot produce the required launch program. Disable
+  // transforms so this test can inspect the rooted clone at that boundary.
   context.runtime_initialized = true;
   context.host_allocator = iree_allocator_system();
 
@@ -1110,7 +1132,7 @@ func.def inline @linked_identity(%value: index) -> (index) {
   loom_run_hal_testbench_actual_provider_t provider = {};
   loom_run_hal_testbench_actual_provider_initialize(&options, &provider);
   IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
+      IREE_STATUS_FAILED_PRECONDITION,
       loom_run_hal_testbench_actual_provider_compile(&provider));
   EXPECT_TRUE(
       ModuleHasSymbol(provider.compile_module.module, IREE_SV("selected")));

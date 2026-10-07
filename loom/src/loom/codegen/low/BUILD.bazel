@@ -395,6 +395,7 @@ loom_cc_library(
     hdrs = ["launch_config_program.h"],
     deps = [
         ":storage_layout",
+        "//loom/src/loom/analysis:kernel_launch_config",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops:op_defs",
         "//loom/src/loom/ops:special_values",

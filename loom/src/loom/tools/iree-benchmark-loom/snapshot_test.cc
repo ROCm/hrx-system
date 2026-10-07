@@ -124,9 +124,11 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
           /*.fields=*/
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
               LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE |
+              LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_CLUSTER_SIZE |
               LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE,
           /*.workgroup_count=*/{64, 2, 1},
           /*.workgroup_size=*/{64, 1, 1},
+          /*.workgroup_cluster_size=*/{2, 1, 1},
           /*.subgroup_size=*/32,
       },
   };
@@ -243,6 +245,10 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
       LookupObject(launch_config, IREE_SV("workgroup_count"));
   EXPECT_TRUE(iree_string_view_equal(
       LookupObject(workgroup_count, IREE_SV("x")), IREE_SV("64")));
+  iree_string_view_t workgroup_cluster_size =
+      LookupObject(launch_config, IREE_SV("workgroup_cluster_size"));
+  EXPECT_TRUE(iree_string_view_equal(
+      LookupObject(workgroup_cluster_size, IREE_SV("x")), IREE_SV("2")));
   EXPECT_TRUE(
       iree_string_view_is_empty(TryLookupObject(root, IREE_SV("failures"))));
   EXPECT_TRUE(iree_string_view_is_empty(

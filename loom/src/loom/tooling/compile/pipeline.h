@@ -18,6 +18,7 @@
 #include "loom/error/diagnostic.h"
 #include "loom/error/source.h"
 #include "loom/ir/ir.h"
+#include "loom/pass/environment.h"
 #include "loom/pass/interpreter.h"
 #include "loom/pass/trace.h"
 #include "loom/target/pipeline.h"
@@ -85,6 +86,10 @@ typedef struct loom_compile_pipeline_options_t {
   loom_target_compile_report_t* report;
   // Optional caller-owned trace configuration for selected pass boundaries.
   const loom_pass_trace_options_t* trace_options;
+
+  // Optional compiler-owned launch-config capability populated by
+  // source-to-Low.
+  const loom_pass_environment_capability_t* launch_config_capability;
 } loom_compile_pipeline_options_t;
 
 // Compiler products retained after running a compile pipeline.

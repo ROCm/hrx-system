@@ -39,7 +39,7 @@ typedef struct iree_benchmark_loom_launch_record_t {
   const iree_benchmark_loom_workload_value_t* workload_values;
   // Number of entries in |workload_values|.
   iree_host_size_t workload_value_count;
-  // Fully evaluated source launch configuration for this workload.
+  // Fully evaluated compiled launch configuration for this workload.
   loom_kernel_launch_config_t launch_config;
 } iree_benchmark_loom_launch_record_t;
 

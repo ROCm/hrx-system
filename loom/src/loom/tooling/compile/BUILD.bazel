@@ -62,6 +62,7 @@ loom_cc_library(
         "//loom/src/loom/error:source",
         "//loom/src/loom/ir",
         "//loom/src/loom/pass:builtin_registry",
+        "//loom/src/loom/pass:environment",
         "//loom/src/loom/pass:interpreter",
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:tooling",

@@ -102,7 +102,7 @@ loom_cc_library(
     iree::base::internal::arena
     iree::io::file_handle
     iree::io::stream
-    loom::analysis::symbol_value_constraints
+    loom::analysis::kernel_launch_config
     loom::codegen::low::launch_config_program
     loom::codegen::low::pipeline::legalizer_registry
     loom::codegen::low::repr
@@ -124,7 +124,6 @@ loom_cc_library(
     loom::format::text::parser
     loom::format::text::printer
     loom::ir
-    loom::ir::facts
     loom::link::dependency_analysis
     loom::link::dependency_report
     loom::link::index_materializer

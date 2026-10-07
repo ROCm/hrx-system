@@ -630,9 +630,11 @@ TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
           /*.fields=*/
           LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_COUNT |
               LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_SIZE |
+              LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_CLUSTER_SIZE |
               LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE,
           /*.workgroup_count=*/{65, 2, 1},
           /*.workgroup_size=*/{64, 1, 1},
+          /*.workgroup_cluster_size=*/{2, 1, 1},
           /*.subgroup_size=*/32,
       },
   };
@@ -689,6 +691,9 @@ TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
   const iree_string_view_t workgroup_size =
       LookupObject(launch_config, IREE_SV("workgroup_size"));
   ExpectObjectValueEquals(workgroup_size, IREE_SV("x"), IREE_SV("64"));
+  const iree_string_view_t workgroup_cluster_size =
+      LookupObject(launch_config, IREE_SV("workgroup_cluster_size"));
+  ExpectObjectValueEquals(workgroup_cluster_size, IREE_SV("x"), IREE_SV("2"));
   ExpectObjectValueEquals(launch_config, IREE_SV("subgroup_size"),
                           IREE_SV("32"));
 

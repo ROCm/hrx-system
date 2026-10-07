@@ -6,7 +6,6 @@
 
 #include "loomc/launch_config.h"
 
-#include <inttypes.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
@@ -15,11 +14,8 @@
 #include "iree/base/api.h"
 #include "iree/base/internal/arena.h"
 #include "iree/base/internal/atomics.h"
-#include "loom/analysis/symbol_value_constraints.h"
+#include "loom/analysis/kernel_launch_config.h"
 #include "loom/format/bytecode/reader.h"
-#include "loom/ir/attribute.h"
-#include "loom/ir/facts.h"
-#include "loom/ir/float_facts.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
 #include "loom/ops/op_defs.h"
@@ -32,39 +28,7 @@ enum {
   // executable. A conventional compiler workspace block avoids tiny-block
   // churn without deriving allocation policy from artifact byte length.
   LOOMC_LAUNCH_CONFIG_BLOCK_SIZE = 128 * 1024,
-
-  // Private host-function result ABI. The compiler emits these values in this
-  // fixed order and the loader verifies every public function against it.
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X = 0,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Y = 1,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Z = 2,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_X = 3,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Y = 4,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Z = 5,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_X = 6,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Y = 7,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Z = 8,
-  LOOMC_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE = 9,
-  LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES = 10,
-  LOOMC_LAUNCH_CONFIG_RESULT_COUNT = 11,
 };
-
-typedef struct loomc_launch_config_function_storage_t {
-  // Prepared public function borrowed from the immutable module.
-  loom_func_like_t function;
-
-  // Public function name borrowed from the immutable module.
-  iree_string_view_t name;
-
-  // Positional function argument value IDs.
-  const loom_value_id_t* argument_ids;
-
-  // Positional returned value IDs following the private result ABI.
-  const loom_value_id_t* result_ids;
-
-  // Number of entries in argument_ids.
-  uint16_t argument_count;
-} loomc_launch_config_function_storage_t;
 
 typedef struct loomc_launch_config_evaluation_t {
   // Block pool used by reusable evaluation arenas.
@@ -91,7 +55,7 @@ struct loomc_launch_config_program_t {
   loom_module_t* module;
 
   // Dense exported launch-function table.
-  loomc_launch_config_function_storage_t* functions;
+  loom_kernel_launch_config_function_t* functions;
 
   // Number of entries in functions.
   iree_host_size_t function_count;
@@ -129,11 +93,6 @@ static void loomc_launch_config_evaluation_initialize(
                                         &evaluation->fact_owner);
 }
 
-static void loomc_launch_config_evaluation_reset(
-    loomc_launch_config_evaluation_t* evaluation) {
-  loom_pass_value_fact_owner_invalidate(&evaluation->fact_owner);
-}
-
 static void loomc_launch_config_program_destroy(
     loomc_launch_config_program_t* program) {
   loomc_allocator_t allocator = program->allocator;
@@ -147,7 +106,7 @@ static void loomc_launch_config_program_destroy(
 
 static loomc_status_t loomc_launch_config_program_bind_function(
     const loom_module_t* module, loom_func_like_t function,
-    loomc_launch_config_function_storage_t* out_function) {
+    loom_kernel_launch_config_function_t* out_function) {
   const iree_string_view_t name =
       loomc_launch_config_function_name(module, function);
   if (!loom_func_def_isa(function.op)) {
@@ -198,11 +157,11 @@ static loomc_status_t loomc_launch_config_program_bind_function(
         (int)name.size, name.data));
   }
   const loom_value_slice_t results = loom_func_return_operands(block->last_op);
-  if (results.count != LOOMC_LAUNCH_CONFIG_RESULT_COUNT) {
+  if (results.count != LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT) {
     return loomc_status_from_iree(iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "launch config function '@%.*s' must return %u values", (int)name.size,
-        name.data, (unsigned)LOOMC_LAUNCH_CONFIG_RESULT_COUNT));
+        name.data, (unsigned)LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT));
   }
   for (uint16_t i = 0; i < results.count; ++i) {
     const loom_type_t type = loom_module_value_type(module, results.values[i]);
@@ -215,13 +174,7 @@ static loomc_status_t loomc_launch_config_program_bind_function(
     }
   }
 
-  *out_function = (loomc_launch_config_function_storage_t){
-      .function = function,
-      .name = name,
-      .argument_ids = argument_ids,
-      .result_ids = results.values,
-      .argument_count = argument_count,
-  };
+  *out_function = loom_kernel_launch_config_function_bind(module, function);
   return loomc_ok_status();
 }
 
@@ -288,7 +241,7 @@ static loomc_status_t loomc_launch_config_program_prewarm(
       loom_pass_value_fact_scope_function(program->functions[0].function),
       &fact_table);
   (void)fact_table;
-  loomc_launch_config_evaluation_reset(&program->evaluation);
+  loom_pass_value_fact_owner_invalidate(&program->evaluation.fact_owner);
   return loomc_status_from_iree(status);
 }
 
@@ -482,190 +435,6 @@ static loomc_status_t loomc_launch_config_validate_result(
   return loomc_ok_status();
 }
 
-static bool loomc_launch_config_argument_facts(loom_scalar_type_t scalar_type,
-                                               uint64_t bits,
-                                               loom_value_facts_t* out_facts) {
-  switch (scalar_type) {
-    case LOOM_SCALAR_TYPE_INDEX:
-    case LOOM_SCALAR_TYPE_I64:
-      *out_facts = loom_value_facts_make_signed_raw_bits(bits, 64);
-      return true;
-    case LOOM_SCALAR_TYPE_OFFSET:
-      return loom_value_facts_make_unsigned_raw_bits(bits, 64, out_facts);
-    case LOOM_SCALAR_TYPE_I1:
-      *out_facts = loom_value_facts_exact_i64((bits & 1) != 0 ? 1 : 0);
-      return true;
-    case LOOM_SCALAR_TYPE_I8:
-    case LOOM_SCALAR_TYPE_I16:
-    case LOOM_SCALAR_TYPE_I32:
-      *out_facts = loom_value_facts_make_signed_raw_bits(
-          bits, loom_scalar_type_bitwidth(scalar_type));
-      return true;
-    case LOOM_SCALAR_TYPE_F8E4M3:
-    case LOOM_SCALAR_TYPE_F8E5M2:
-    case LOOM_SCALAR_TYPE_F16:
-    case LOOM_SCALAR_TYPE_BF16:
-    case LOOM_SCALAR_TYPE_F32:
-    case LOOM_SCALAR_TYPE_F64:
-      return loom_value_facts_from_float_bits(scalar_type, bits, out_facts);
-    default:
-      return false;
-  }
-}
-
-static iree_status_t loomc_launch_config_check_argument(
-    const loom_module_t* module,
-    const loomc_launch_config_function_storage_t* function,
-    uint16_t argument_ordinal, loom_value_facts_t facts) {
-  const loom_value_id_t value_id = function->argument_ids[argument_ordinal];
-  const loom_type_t type = loom_module_value_type(module, value_id);
-  const loom_scalar_type_t scalar_type = loom_type_element_type(type);
-  if (loom_scalar_type_is_float(scalar_type)) {
-    return iree_ok_status();
-  }
-
-  int64_t exact_value = 0;
-  if (!loom_value_facts_as_exact_i64(facts, &exact_value)) {
-    return iree_make_status(
-        IREE_STATUS_OUT_OF_RANGE,
-        "launch config function '@%.*s' argument %u is outside the exact "
-        "fact domain",
-        (int)function->name.size, function->name.data,
-        (unsigned)argument_ordinal);
-  }
-  const loom_attribute_t exact_attribute =
-      scalar_type == LOOM_SCALAR_TYPE_I1 ? loom_attr_bool(exact_value != 0)
-                                         : loom_attr_i64(exact_value);
-  uint16_t predicate_count = 0;
-  const loom_predicate_t* predicates =
-      loom_func_like_predicates(function->function, &predicate_count);
-  return loom_symbol_value_constraints_check_exact(
-      function->name, type, value_id, exact_attribute,
-      loom_attr_predicate_list((loom_predicate_t*)predicates, predicate_count));
-}
-
-static iree_status_t loomc_launch_config_exact_u32(
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    iree_string_view_t function_name, const char* field_name,
-    bool require_nonzero, uint32_t* out_value) {
-  int64_t value = 0;
-  if (!loom_value_facts_as_exact_i64(
-          loom_value_fact_table_lookup(fact_table, value_id), &value)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "launch config function '@%.*s' %s is not exact",
-                            (int)function_name.size, function_name.data,
-                            field_name);
-  }
-  if (value < (require_nonzero ? 1 : 0) || value > UINT32_MAX) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "launch config function '@%.*s' %s value %" PRId64
-                            " is outside its u32 domain",
-                            (int)function_name.size, function_name.data,
-                            field_name, value);
-  }
-  *out_value = (uint32_t)value;
-  return iree_ok_status();
-}
-
-static iree_status_t loomc_launch_config_exact_u64(
-    const loom_value_fact_table_t* fact_table, loom_value_id_t value_id,
-    iree_string_view_t function_name, const char* field_name,
-    uint64_t* out_value) {
-  int64_t value = 0;
-  if (!loom_value_facts_as_exact_i64(
-          loom_value_fact_table_lookup(fact_table, value_id), &value)) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "launch config function '@%.*s' %s is not exact",
-                            (int)function_name.size, function_name.data,
-                            field_name);
-  }
-  if (value < 0) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "launch config function '@%.*s' %s value %" PRId64
-                            " is outside its u64 domain",
-                            (int)function_name.size, function_name.data,
-                            field_name, value);
-  }
-  *out_value = (uint64_t)value;
-  return iree_ok_status();
-}
-
-static iree_status_t loomc_launch_config_evaluate(
-    loomc_launch_config_evaluation_t* evaluation, const loom_module_t* module,
-    const loomc_launch_config_function_storage_t* function,
-    const uint64_t* argument_bits, iree_host_size_t argument_count,
-    loomc_launch_config_t* out_config) {
-  if (argument_count != function->argument_count) {
-    return iree_make_status(
-        IREE_STATUS_INVALID_ARGUMENT,
-        "launch config function '@%.*s' expects %u arguments but received "
-        "%" PRIhsz,
-        (int)function->name.size, function->name.data,
-        (unsigned)function->argument_count, argument_count);
-  }
-
-  loom_value_fact_table_t* fact_table = NULL;
-  IREE_RETURN_IF_ERROR(loom_pass_value_fact_owner_prepare(
-      &evaluation->fact_owner, module,
-      loom_pass_value_fact_scope_function(function->function), &fact_table));
-  for (uint16_t i = 0; i < function->argument_count; ++i) {
-    const loom_type_t type =
-        loom_module_value_type(module, function->argument_ids[i]);
-    loom_value_facts_t facts = loom_value_facts_unknown();
-    if (!loomc_launch_config_argument_facts(loom_type_element_type(type),
-                                            argument_bits[i], &facts)) {
-      return iree_make_status(
-          IREE_STATUS_OUT_OF_RANGE,
-          "launch config function '@%.*s' argument %u bit pattern cannot be "
-          "represented as exact facts",
-          (int)function->name.size, function->name.data, (unsigned)i);
-    }
-    IREE_RETURN_IF_ERROR(
-        loomc_launch_config_check_argument(module, function, i, facts));
-    IREE_RETURN_IF_ERROR(loom_value_fact_table_define(
-        fact_table, function->argument_ids[i], facts));
-  }
-  IREE_RETURN_IF_ERROR(
-      loom_value_fact_table_compute(fact_table, module, function->function));
-
-  loomc_launch_config_t config = {
-      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      .structure_size = sizeof(config),
-  };
-#define LOOMC_EXTRACT_U32(field, result, nonzero)                       \
-  IREE_RETURN_IF_ERROR(loomc_launch_config_exact_u32(                   \
-      fact_table, function->result_ids[result], function->name, #field, \
-      nonzero, &config.field))
-  LOOMC_EXTRACT_U32(workgroup_count.x,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X, false);
-  LOOMC_EXTRACT_U32(workgroup_count.y,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Y, false);
-  LOOMC_EXTRACT_U32(workgroup_count.z,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Z, false);
-  LOOMC_EXTRACT_U32(workgroup_size.x,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_X, true);
-  LOOMC_EXTRACT_U32(workgroup_size.y,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Y, true);
-  LOOMC_EXTRACT_U32(workgroup_size.z,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Z, true);
-  LOOMC_EXTRACT_U32(workgroup_cluster_size.x,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_X, true);
-  LOOMC_EXTRACT_U32(workgroup_cluster_size.y,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Y, true);
-  LOOMC_EXTRACT_U32(workgroup_cluster_size.z,
-                    LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Z, true);
-  LOOMC_EXTRACT_U32(subgroup_size, LOOMC_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE,
-                    false);
-#undef LOOMC_EXTRACT_U32
-  IREE_RETURN_IF_ERROR(loomc_launch_config_exact_u64(
-      fact_table,
-      function->result_ids[LOOMC_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES],
-      function->name, "workgroup_storage_bytes",
-      &config.workgroup_storage_bytes));
-  *out_config = config;
-  return iree_ok_status();
-}
-
 loomc_status_t loomc_launch_config_program_invoke(
     loomc_launch_config_program_t* program,
     loomc_launch_config_function_t function,
@@ -688,14 +457,37 @@ loomc_status_t loomc_launch_config_program_invoke(
         "NULL");
   }
 
-  loomc_launch_config_t config = {0};
-  loomc_status_t status = loomc_status_from_iree(loomc_launch_config_evaluate(
-      &program->evaluation, program->module,
-      &program->functions[function.value], workload_argument_bits,
-      workload_argument_count, &config));
-  loomc_launch_config_evaluation_reset(&program->evaluation);
+  loom_kernel_launch_config_t evaluated = {0};
+  loomc_status_t status =
+      loomc_status_from_iree(loom_kernel_launch_config_function_evaluate(
+          program->module, &program->functions[function.value],
+          workload_argument_bits, workload_argument_count,
+          &program->evaluation.fact_owner, &evaluated));
   if (loomc_status_is_ok(status)) {
-    *out_config = config;
+    *out_config = (loomc_launch_config_t){
+        .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+        .structure_size = sizeof(*out_config),
+        .workgroup_count =
+            {
+                evaluated.workgroup_count.x,
+                evaluated.workgroup_count.y,
+                evaluated.workgroup_count.z,
+            },
+        .workgroup_size =
+            {
+                evaluated.workgroup_size.x,
+                evaluated.workgroup_size.y,
+                evaluated.workgroup_size.z,
+            },
+        .workgroup_cluster_size =
+            {
+                evaluated.workgroup_cluster_size.x,
+                evaluated.workgroup_cluster_size.y,
+                evaluated.workgroup_cluster_size.z,
+            },
+        .subgroup_size = evaluated.subgroup_size,
+        .workgroup_storage_bytes = evaluated.workgroup_storage_bytes,
+    };
   }
   return status;
 }

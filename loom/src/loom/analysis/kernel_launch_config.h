@@ -4,11 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Kernel launch configuration analysis.
-//
-// This layer evaluates launch configuration regions under caller-provided
-// workload arguments and target contracts. It sits above raw kernel dialect
-// helpers and below public API wrappers, tools, and artifact producers.
+// Compiler-produced kernel launch configuration evaluation.
 
 #ifndef LOOM_KERNEL_LAUNCH_CONFIG_H_
 #define LOOM_KERNEL_LAUNCH_CONFIG_H_
@@ -16,9 +12,8 @@
 #include <stdint.h>
 
 #include "iree/base/api.h"
-#include "iree/base/internal/arena.h"
-#include "loom/error/emitter.h"
 #include "loom/ir/module.h"
+#include "loom/pass/value_facts.h"
 #include "loom/target/types.h"
 
 #ifdef __cplusplus
@@ -37,67 +32,12 @@ typedef enum loom_kernel_launch_config_field_flag_bits_e {
 
   // workgroup_storage_bytes is present.
   LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_STORAGE_BYTES = 0x8u,
+
+  // workgroup_cluster_size is present.
+  LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_CLUSTER_SIZE = 0x10u,
 } loom_kernel_launch_config_field_flag_bits_t;
 
 typedef uint32_t loom_kernel_launch_config_field_flags_t;
-
-typedef enum loom_kernel_launch_config_failure_e {
-  // Evaluation succeeded.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NONE = 0,
-
-  // The requested function symbol was not found.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_FUNCTION_NOT_FOUND = 1,
-
-  // The requested symbol is not a source kernel definition.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NOT_KERNEL = 2,
-
-  // Workload argument count does not match the launch-config region signature.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_WORKLOAD_ARGUMENT_COUNT = 3,
-
-  // A workload argument cannot be represented from an i64 value.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_WORKLOAD_ARGUMENT_TYPE = 4,
-
-  // Target contract resolution emitted diagnostics.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_TARGET_CONTRACT = 5,
-
-  // Required workgroup count could not be resolved.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_MISSING_WORKGROUP_COUNT = 6,
-
-  // Required workgroup size could not be resolved.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_MISSING_WORKGROUP_SIZE = 7,
-
-  // Required subgroup size could not be resolved.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_MISSING_SUBGROUP_SIZE = 8,
-
-  // Required workgroup-local storage byte count could not be resolved.
-  LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_MISSING_WORKGROUP_STORAGE_BYTES = 9,
-} loom_kernel_launch_config_failure_t;
-
-static inline bool loom_kernel_launch_config_has_failure(
-    loom_kernel_launch_config_failure_t failure) {
-  return failure != LOOM_KERNEL_LAUNCH_CONFIG_FAILURE_NONE;
-}
-
-typedef struct loom_kernel_launch_config_options_t {
-  // Kernel function symbol to evaluate, with or without a leading @.
-  iree_string_view_t function_symbol;
-
-  // Workload argument values supplied as signed 64-bit integers.
-  const int64_t* workload_arguments;
-
-  // Number of entries in workload_arguments.
-  iree_host_size_t workload_argument_count;
-
-  // Fields that must be present for evaluation to succeed.
-  loom_kernel_launch_config_field_flags_t required_fields;
-
-  // Optional exact target facts selected for the compiled function version.
-  // When absent, authored target contracts are resolved from |module|.
-  const loom_target_facts_t* function_target_facts;
-
-  // Structured diagnostic emitter for target-contract diagnostics.
-  iree_diagnostic_emitter_t diagnostic_emitter;
-} loom_kernel_launch_config_options_t;
 
 typedef struct loom_kernel_launch_config_t {
   // Present evaluated fields.
@@ -109,27 +49,67 @@ typedef struct loom_kernel_launch_config_t {
   // Optional concrete local workgroup size.
   loom_target_workgroup_size_t workgroup_size;
 
+  // Optional concrete cooperative workgroup cluster size.
+  loom_target_workgroup_cluster_size_t workgroup_cluster_size;
+
   // Optional concrete subgroup size.
   uint32_t subgroup_size;
 
   // Optional concrete workgroup-local storage byte count.
   uint64_t workgroup_storage_bytes;
-
-  // Evaluation failure code, or NONE on success.
-  loom_kernel_launch_config_failure_t failure;
 } loom_kernel_launch_config_t;
 
-bool loom_kernel_launch_config_fields_are_valid(
-    loom_kernel_launch_config_field_flags_t fields);
+// Result positions in the compiler-produced launch-config function ABI.
+typedef enum loom_kernel_launch_config_result_e {
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_X = 0,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Y = 1,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_COUNT_Z = 2,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_X = 3,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Y = 4,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_SIZE_Z = 5,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_X = 6,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Y = 7,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_CLUSTER_SIZE_Z = 8,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_SUBGROUP_SIZE = 9,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_WORKGROUP_STORAGE_BYTES = 10,
+  LOOM_KERNEL_LAUNCH_CONFIG_RESULT_COUNT = 11,
+} loom_kernel_launch_config_result_t;
 
-iree_status_t loom_kernel_launch_config_try_evaluate_direct(
-    const loom_module_t* module, iree_arena_block_pool_t* block_pool,
-    const loom_kernel_launch_config_options_t* options,
-    loom_kernel_launch_config_t* out_config, bool* out_evaluated);
+// Bound compiler-produced host function ready for launch evaluation.
+//
+// Construction is infallible for functions from a verified launch-config
+// program. Public artifact loaders validate the function ABI before binding.
+typedef struct loom_kernel_launch_config_function_t {
+  // Pure host function implementing the launch calculation.
+  loom_func_like_t function;
 
-iree_status_t loom_kernel_launch_config_evaluate(
-    const loom_module_t* module, iree_arena_block_pool_t* block_pool,
-    const loom_kernel_launch_config_options_t* options,
+  // Public executable export name borrowed from the module string table.
+  iree_string_view_t name;
+
+  // Positional workload argument value IDs borrowed from |function|.
+  const loom_value_id_t* argument_ids;
+
+  // Positional result value IDs following loom_kernel_launch_config_result_t.
+  const loom_value_id_t* result_ids;
+
+  // Number of entries in |argument_ids|.
+  uint16_t argument_count;
+} loom_kernel_launch_config_function_t;
+
+// Binds a verified compiler-produced host function for repeated evaluation.
+loom_kernel_launch_config_function_t loom_kernel_launch_config_function_bind(
+    const loom_module_t* module, loom_func_like_t function);
+
+// Evaluates one compiler-produced launch function for raw workload bits.
+//
+// |fact_owner| is reusable caller-owned scratch. Evaluation invalidates its
+// active scope before returning while retaining allocated table capacity.
+iree_status_t loom_kernel_launch_config_function_evaluate(
+    const loom_module_t* module,
+    const loom_kernel_launch_config_function_t* function,
+    const uint64_t* workload_argument_bits,
+    iree_host_size_t workload_argument_count,
+    loom_pass_value_fact_owner_t* fact_owner,
     loom_kernel_launch_config_t* out_config);
 
 #ifdef __cplusplus

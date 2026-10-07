@@ -204,7 +204,7 @@ loom_cc_library(
         "src",
     ],
     deps = [
-        "//loom/src/loom/analysis:symbol_value_constraints",
+        "//loom/src/loom/analysis:kernel_launch_config",
         "//loom/src/loom/codegen:pass_environment",
         "//loom/src/loom/codegen/low:launch_config_program",
         "//loom/src/loom/codegen/low:repr",
@@ -226,7 +226,6 @@ loom_cc_library(
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/format/text:printer",
         "//loom/src/loom/ir",
-        "//loom/src/loom/ir:facts",
         "//loom/src/loom/link:dependency_analysis",
         "//loom/src/loom/link:dependency_report",
         "//loom/src/loom/link:index_materializer",

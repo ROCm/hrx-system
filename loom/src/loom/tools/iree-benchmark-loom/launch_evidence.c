@@ -89,9 +89,12 @@ void iree_benchmark_loom_launch_evidence_capture(
         loom_module_value_type(invocation->module, value_id);
     IREE_ASSERT(loom_type_is_scalar(type));
     IREE_ASSERT(loom_scalar_type_name(loom_type_element_type(type)) != NULL);
+    int64_t workload_value = 0;
+    memcpy(&workload_value, &provider->workload_argument_bits[i],
+           sizeof(workload_value));
     workload_values[i] = (iree_benchmark_loom_workload_value_t){
         .type = loom_type_element_type(type),
-        .value = provider->workload_arguments[i],
+        .value = workload_value,
     };
   }
 }
@@ -147,6 +150,14 @@ static iree_status_t iree_benchmark_loom_write_launch_config_json(
     IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_launch_dimension_json(
         config->workgroup_size.x, config->workgroup_size.y,
         config->workgroup_size.z, stream));
+  }
+  if (config->fields &
+      LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_WORKGROUP_CLUSTER_SIZE) {
+    IREE_RETURN_IF_ERROR(loom_json_object_begin_field(
+        &object, IREE_SV("workgroup_cluster_size")));
+    IREE_RETURN_IF_ERROR(iree_benchmark_loom_write_launch_dimension_json(
+        config->workgroup_cluster_size.x, config->workgroup_cluster_size.y,
+        config->workgroup_cluster_size.z, stream));
   }
   if (config->fields & LOOM_KERNEL_LAUNCH_CONFIG_FIELD_FLAG_SUBGROUP_SIZE) {
     IREE_RETURN_IF_ERROR(loom_json_object_write_uint32_field(

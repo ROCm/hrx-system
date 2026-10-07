@@ -356,12 +356,15 @@ iree_status_t loom_compile_run_pipeline(
       .cleanup_pattern_registry =
           loom_cleanup_pattern_registry_storage_registry(
               &cleanup_pattern_registry_storage),
+      .launch_config_capability = options->launch_config_capability,
   };
+  const loom_pass_environment_t pass_environment =
+      loom_codegen_pass_environment_storage_initialize_mutable(
+          &environment_options, &out_result->function_versions,
+          &codegen_environment_storage);
   loom_pass_tool_run_options_t run_options = {
       .registry = pass_registry,
-      .environment = loom_codegen_pass_environment_storage_initialize_mutable(
-          &environment_options, &out_result->function_versions,
-          &codegen_environment_storage),
+      .environment = pass_environment,
       .function_versions = &out_result->function_versions.list,
       .predicate_provider =
           loom_target_pass_predicate_provider(&predicate_storage),
