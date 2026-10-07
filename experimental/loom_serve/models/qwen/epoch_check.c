@@ -1327,6 +1327,99 @@ static iree_status_t qwen_check_checkpoint_suspension(
   return iree_ok_status();
 }
 
+static iree_status_t qwen_check_reserved_relocation(
+    loom_serve_text_model_t* model, const int32_t* input,
+    iree_host_size_t position) {
+  loom_serve_text_row_t* filler = loom_serve_text_model_row(model, 0);
+  loom_serve_text_row_t* survivor = loom_serve_text_model_row(model, 1);
+  loom_serve_text_row_t* reference = loom_serve_text_model_row(model, 7);
+  bool admitted = false;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
+      filler, LOOM_SERVE_TEXT_RESERVE_FRESH, NULL, 512, &admitted));
+  if (!admitted) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "filler reservation refused");
+  }
+  // Establish a compact low-ID filler independently of previous free order.
+  // The subsequent survivor must lie above it until the filler is released.
+  loom_serve_text_trim_result_t trimmed;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
+      survivor, LOOM_SERVE_TEXT_RESERVE_FRESH, NULL, 512, &admitted));
+  if (!admitted) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "survivor reservation refused");
+  }
+  if (position) {
+    IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 1, position, input));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(filler));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  const loom_serve_memory_statistics_t memory =
+      loom_serve_text_model_memory_statistics(model);
+  const loom_serve_text_pool_usage_t pool =
+      loom_serve_text_model_pool_usage(model);
+  const iree_host_size_t consumed =
+      ((position + pool.block_size - 1) / pool.block_size) * pool.block_size;
+  if (pool.available != pool.capacity - 512 || pool.pending != 512 - consumed ||
+      loom_serve_text_row_position(survivor) != position ||
+      (memory.reserved_bytes &&
+       trimmed.moved_blocks != 512 / pool.block_size)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "compaction changed reserved page ownership");
+  }
+  fprintf(
+      stderr,
+      "{\"event\":\"reservation_relocated\",\"position\":%zu,"
+      "\"reserved_tokens\":512,\"moved_blocks\":%u,\"copied_bytes\":%" PRIu64
+      ",\"committed_bytes\":%" PRIu64 "}\n",
+      position, trimmed.moved_blocks, trimmed.copied_bytes,
+      memory.committed_bytes);
+  // Cross from retained KV into a relocated, previously unwritten page while
+  // keeping the completion reservation. No new backing may be needed.
+  IREE_RETURN_IF_ERROR(
+      qwen_check_prefill(model, 1, 129 - position, input + position));
+  if (loom_serve_text_model_memory_statistics(model).committed_bytes !=
+      memory.committed_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "relocated reservation lost physical backing");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, 129, input));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 7));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(survivor));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 7));
+  if (loom_serve_text_mtp_from_flags()) {
+    const int32_t token = loom_serve_text_row_token(survivor);
+    const loom_serve_text_span_t spans[] = {
+        {1, 4, &token,
+         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE},
+        {7, 4, &token,
+         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT | LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE}};
+    const uint32_t limits[] = {4, 4};
+    loom_serve_text_result_t results[2];
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_verify(model, 0, 2, spans,
+                                                      limits, NULL, results));
+    if (results[0].consumed_count != results[1].consumed_count ||
+        results[0].output_count != results[1].output_count ||
+        memcmp(results[0].tokens, results[1].tokens,
+               results[0].output_count * sizeof(*results[0].tokens))) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "relocated reservation changed draft output");
+    }
+    IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 7));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(survivor));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(reference));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  if (loom_serve_text_model_pool_usage(model).available != pool.capacity ||
+      loom_serve_text_model_memory_statistics(model).committed_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "relocated reservation leaked backing");
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t qwen_check_reservations(loom_serve_text_model_t* model,
                                              const int32_t* input) {
   loom_serve_text_row_t* row = loom_serve_text_model_row(model, 0);
@@ -1416,6 +1509,8 @@ static iree_status_t qwen_check_reservations(loom_serve_text_model_t* model,
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "request reservations leaked retained backing");
   }
+  IREE_RETURN_IF_ERROR(qwen_check_reserved_relocation(model, input, 0));
+  IREE_RETURN_IF_ERROR(qwen_check_reserved_relocation(model, input, 127));
   if (loom_serve_text_model_weight_statistics(model).reserved_bytes) {
     IREE_RETURN_IF_ERROR(loom_serve_text_model_deactivate(model));
   }
