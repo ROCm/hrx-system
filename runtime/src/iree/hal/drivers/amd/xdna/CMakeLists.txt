@@ -346,6 +346,7 @@ iree_cc_library(
     ::context
     ::executable
     ::memory
+    ::memory_backend
     ::queue
     ::semaphore
     amdf::headers
@@ -354,6 +355,7 @@ iree_cc_library(
     iree::base
     iree::base::internal
     iree::hal
+    iree::hal::memory::maintenance_thread
     iree::hal::utils::device_spec_builder
   PUBLIC
 )
@@ -388,6 +390,7 @@ iree_cc_test(
   DEPS
     ::device
     ::memory
+    ::memory_backend
     ::queue
     ::queue_frontier
     ::semaphore

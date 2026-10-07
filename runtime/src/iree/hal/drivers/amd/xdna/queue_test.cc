@@ -21,6 +21,7 @@
 #include "iree/hal/drivers/amd/xdna/device.h"
 #include "iree/hal/drivers/amd/xdna/image/testing/image_fixture.h"
 #include "iree/hal/drivers/amd/xdna/memory.h"
+#include "iree/hal/drivers/amd/xdna/memory_backend.h"
 #include "iree/hal/drivers/amd/xdna/queue_frontier.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
 #include "iree/testing/gtest.h"
@@ -802,6 +803,31 @@ class PreparedContractBuffer {
   // Owned nonzero-offset logical view used by dispatch.
   iree_hal_buffer_t* view_ = nullptr;
 };
+
+TEST(XdnaDeviceTest, PublishesMemoryProgressBackend) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+
+  const iree_hal_memory_backend_t* base =
+      iree_hal_device_memory_backend(harness.device);
+  ASSERT_NE(base, nullptr);
+  EXPECT_EQ(base->type, IREE_HAL_MEMORY_BACKEND_AMDF);
+  const auto* backend =
+      reinterpret_cast<const iree_hal_amd_xdna_memory_backend_t*>(base);
+  EXPECT_EQ(backend->device, harness.device);
+  EXPECT_NE(backend->context, nullptr);
+  EXPECT_NE(backend->notification, nullptr);
+  EXPECT_NE(backend->maintenance, nullptr);
+  ASSERT_NE(backend->epoch_query.fn, nullptr);
+  EXPECT_FALSE(backend->epoch_query.fn(backend->epoch_query.user_data, 0, 0));
+
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  const iree_async_axis_t axis =
+      iree_hal_device_topology_info(harness.device)->frontier.base_axis;
+  EXPECT_TRUE(backend->epoch_query.fn(backend->epoch_query.user_data, axis, 0));
+  EXPECT_FALSE(
+      backend->epoch_query.fn(backend->epoch_query.user_data, axis, 1));
+}
 
 TEST(XdnaQueueTest, DeviceCreatesOwnedDeviceCompatibleSemaphores) {
   QueueHarness harness;
