@@ -46,13 +46,22 @@ across reusable payload blocks and copied through one target mapping. The pools
 grow for a new workload shape and then reuse those blocks; repeating a warmed
 shape and depth performs no host allocation or free.
 
-The shared proactor owns causal admission, native acceptance state, and checked
-retirement. A private publisher performs function preparation and potentially
-blocking native submission. Accepted invocations occupy a bounded ring sized to
-the native queue's prepared capacity. Each pending invocation owns exclusive
-mutable command and binding storage; checked retirement returns that storage for
-reuse. Immutable backing is shared when its static address references also point
-to shared allocations. Binding updates publish only their patched ranges. Every
+Each dispatch first attempts a nonwaiting claim on native publication. When the
+persistent observer is active, the pending ring has capacity, and every wait is
+proved by an exact accepted frontier, the calling thread prepares and submits
+the command directly. A placed proactor receipt commits the accepted point and
+transfers the claim to older deferred work before releasing it. Full capacity,
+unsatisfied waits, inexact causal state, and claim contention use the private
+publisher instead. libamdf has no nonblocking native try-submit contract, so a
+direct caller can still pay device-wake or native-credit latency; the private
+publisher isolates that cost on every queued route.
+
+The shared proactor owns queued causal admission, native acceptance commits,
+and checked retirement. Accepted invocations occupy a bounded ring sized to the
+native queue's prepared capacity. Each pending invocation owns exclusive mutable
+command and binding storage; checked retirement returns that storage for reuse.
+Immutable backing is shared when its static address references also point to
+shared allocations. Binding updates publish only their patched ranges. Every
 dispatch executes invocation zero to establish the array state; time slicing
 does not promise resident tile state across submissions.
 
@@ -63,7 +72,8 @@ placed proactor operations, preserving one owner for causal state, completion
 publication, and terminal reclamation. A dependent dispatch whose producer is
 still entering the native queue retries after that producer's acceptance; other
 unresolved waits register their ordinary semaphore timepoints immediately. The
-public queue call captures arguments and hands readiness to the proactor.
+public queue call always captures its arguments before either direct or queued
+publication takes ownership.
 
 Direct fill, update, copy, upload, download, and barriers are supported. Transfers
 use mapped native storage with the required cache operations. Allocated buffers
