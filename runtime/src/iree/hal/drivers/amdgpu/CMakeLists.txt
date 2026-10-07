@@ -423,6 +423,7 @@ iree_cc_library(
     iree::hal::utils::elf_format
     iree::hal::utils::files
     iree::hal::utils::resource_set
+    iree::hal::utils::submitted_signal
   PUBLIC
 )
 endif()
@@ -518,6 +519,7 @@ iree_cc_library(
     iree::hal::drivers::amdgpu::util::vmem
     iree::hal::memory::slab_provider
     iree::hal::memory::tracing
+    iree::hal::utils::submitted_signal
   PUBLIC
 )
 endif()

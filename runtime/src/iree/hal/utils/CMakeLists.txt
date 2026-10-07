@@ -194,6 +194,29 @@ iree_cc_library(
   PUBLIC
 )
 
+iree_cc_library(
+  NAME
+    submitted_signal
+  HDRS
+    "submitted_signal.h"
+  DEPS
+    iree::async
+    iree::base
+    iree::base::internal
+  PUBLIC
+)
+
+iree_cc_test(
+  NAME
+    submitted_signal_test
+  SRCS
+    "submitted_signal_test.cc"
+  DEPS
+    ::submitted_signal
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+
 iree_cc_test(
   NAME
     statistics_sink_test

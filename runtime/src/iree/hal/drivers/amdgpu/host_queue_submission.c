@@ -1036,10 +1036,10 @@ static uint64_t iree_hal_amdgpu_host_queue_commit_signals(
     if (!did_publish_frontier) {
       // The semaphore's frontier storage overflowed, so its frontier is no
       // longer a conservative summary of this signal's causal dependencies.
-      // Clear the last-signal cache to force future waits down the software
-      // deferral path instead of unsafely eliding or under-barriering them.
+      // Clear submitted-signal metadata to force future waits down the
+      // software path instead of unsafely eliding or under-barriering them.
       if (is_amdgpu_semaphore) {
-        iree_hal_amdgpu_semaphore_clear_last_signal(hal_semaphore);
+        iree_hal_amdgpu_semaphore_clear_submitted_signal(hal_semaphore);
       }
       continue;
     }

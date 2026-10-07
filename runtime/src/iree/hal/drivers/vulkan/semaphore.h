@@ -11,9 +11,9 @@
 
 #include "iree/async/semaphore.h"
 #include "iree/base/api.h"
-#include "iree/base/internal/atomics.h"
 #include "iree/hal/api.h"
 #include "iree/hal/drivers/vulkan/util/libvulkan.h"
+#include "iree/hal/utils/submitted_signal.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -21,53 +21,6 @@ extern "C" {
 
 typedef struct iree_hal_vulkan_logical_device_t
     iree_hal_vulkan_logical_device_t;
-
-typedef uint8_t iree_hal_vulkan_last_signal_flags_t;
-enum iree_hal_vulkan_last_signal_flag_bits_e {
-  IREE_HAL_VULKAN_LAST_SIGNAL_FLAG_NONE = 0u,
-
-  // The cache contains a producer queue axis/epoch/value snapshot.
-  IREE_HAL_VULKAN_LAST_SIGNAL_FLAG_VALID = 1u << 0,
-
-  // Waiting on the producer queue epoch exactly covers the signal frontier.
-  IREE_HAL_VULKAN_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT = 1u << 1,
-};
-
-// Seqlock-protected cache of the most recent queue signal on a semaphore.
-// Payload fields use atomic accesses so speculative snapshots remain
-// data-race-free while the sequence counter detects and rejects torn reads.
-// Writers are serialized by the semaphore mutex while readers may be
-// concurrent.
-typedef struct iree_hal_vulkan_last_signal_t {
-  // Seqlock sequence counter; odd means a writer is updating payload fields.
-  iree_atomic_int32_t sequence;
-
-  // Cached signal validity and producer-frontier precision flags.
-  iree_atomic_int32_t flags;
-
-  // Producer queue axis that submitted the last cached signal.
-  iree_atomic_int64_t producer_axis;
-
-  // Producer queue epoch associated with the last cached signal.
-  iree_atomic_int64_t epoch;
-
-  // Semaphore payload value signaled at producer_axis/epoch.
-  iree_atomic_int64_t value;
-} iree_hal_vulkan_last_signal_t;
-
-// Stores a new last-signal snapshot. Callers must serialize writers; readers
-// may concurrently load the cache.
-void iree_hal_vulkan_last_signal_store(
-    iree_hal_vulkan_last_signal_t* cache,
-    iree_hal_vulkan_last_signal_flags_t flags, iree_async_axis_t producer_axis,
-    uint64_t epoch, uint64_t value);
-
-// Loads a last-signal snapshot. Returns false when no valid signal is cached.
-bool iree_hal_vulkan_last_signal_load(
-    const iree_hal_vulkan_last_signal_t* cache,
-    iree_hal_vulkan_last_signal_flags_t* out_flags,
-    iree_async_axis_t* out_producer_axis, uint64_t* out_epoch,
-    uint64_t* out_value);
 
 // Creates a Vulkan HAL semaphore backed by a native timeline VkSemaphore.
 iree_status_t iree_hal_vulkan_semaphore_create(
@@ -93,8 +46,8 @@ iree_hal_semaphore_flags_t iree_hal_vulkan_semaphore_flags(
 iree_status_t iree_hal_vulkan_semaphore_handle(iree_hal_semaphore_t* semaphore,
                                                VkSemaphore* out_handle);
 
-// Returns a pointer to the queue last-signal cache.
-iree_hal_vulkan_last_signal_t* iree_hal_vulkan_semaphore_last_signal(
+// Returns the latest submitted-signal metadata on a Vulkan semaphore.
+iree_hal_submitted_signal_t* iree_hal_vulkan_semaphore_submitted_signal(
     iree_hal_semaphore_t* semaphore);
 
 // Publishes submission-time frontier metadata for a future queue signal.

@@ -389,6 +389,7 @@ iree_cc_library(
     iree::hal::memory::tracing
     iree::hal::utils::files
     iree::hal::utils::resource_set
+    iree::hal::utils::submitted_signal
     iree::third_party::vulkan_headers
   PUBLIC
 )

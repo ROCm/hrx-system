@@ -87,14 +87,15 @@ static bool iree_hal_amdgpu_host_queue_append_wait_barrier(
 //
 // Tier 0: timeline_value >= value -> already completed.
 // Tier 1a: signal submitted by this queue -> append one barrier directly from
-//   last_signal. Same-queue submission order is not a user-visible ordering
-//   contract; the semaphore wait must observe completion of the producer epoch.
+//   submitted-signal metadata. Same-queue submission order does not establish
+//   user-visible ordering; the semaphore wait must observe completion of the
+//   producer epoch.
 // Tier 1b: signal submitted by a producer epoch that exactly covers the
 //   semaphore frontier, and this queue already dominates that producer epoch
-//   -> elide directly from last_signal.
+//   -> elide directly from submitted-signal metadata.
 // Tier 1c: signal submitted + queue frontier dominates -> no barrier needed.
 // Tier 2a: signal submitted by a local producer epoch that exactly covers the
-//   semaphore frontier -> append one barrier directly from last_signal.
+//   semaphore frontier -> append one barrier from submitted-signal metadata.
 // Tier 2b: signal submitted + local queue axes from semaphore frontier ->
 //   barriers appended from the undominated frontier entries.
 // Tier 3: anything else -> deferral.
@@ -132,20 +133,20 @@ static bool iree_hal_amdgpu_host_queue_resolve_wait(
   // signal can depend on this consumer, so its epoch cannot replace |value|'s
   // blocking dependency. An already-covered later proof can still elide the
   // wait without adding a dependency; a future value has no proof yet.
-  iree_hal_amdgpu_last_signal_flags_t signal_flags =
-      IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_NONE;
+  iree_hal_submitted_signal_flags_t signal_flags =
+      IREE_HAL_SUBMITTED_SIGNAL_FLAG_NONE;
   iree_async_axis_t signal_axis = 0;
   uint64_t signal_epoch = 0;
   uint64_t signal_value = 0;
-  if (!iree_hal_amdgpu_last_signal_load(
-          iree_hal_amdgpu_semaphore_last_signal(semaphore), &signal_flags,
+  if (!iree_hal_submitted_signal_load(
+          iree_hal_amdgpu_semaphore_submitted_signal(semaphore), &signal_flags,
           &signal_axis, &signal_epoch, &signal_value)) {
     return false;
   }
   if (IREE_UNLIKELY(signal_value != value)) {
     if (signal_value > value &&
         (signal_flags &
-         IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) &&
+         IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) &&
         iree_hal_amdgpu_frontier_dominates_axis(
             iree_hal_amdgpu_host_queue_const_frontier(queue), signal_axis,
             signal_epoch)) {
@@ -157,7 +158,7 @@ static bool iree_hal_amdgpu_host_queue_resolve_wait(
     return false;
   }
 
-  // Tier 1a: same-queue dependency from the last_signal cache alone.
+  // Tier 1a: same-queue dependency from submitted-signal metadata alone.
   // HAL queues are not FIFO: user-visible order comes from semaphore edges. A
   // submitted signal only proves that the producer epoch is known; it does not
   // prove that packets for the producer epoch have completed. Emit a real
@@ -178,7 +179,7 @@ static bool iree_hal_amdgpu_host_queue_resolve_wait(
   // that producer axis/epoch snapshot. This avoids the semaphore-frontier
   // mutex/copy on common cross-queue handoffs while still refusing to guess
   // on TP fan-in semaphores with independent producers.
-  if (signal_flags & IREE_HAL_AMDGPU_LAST_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) {
+  if (signal_flags & IREE_HAL_SUBMITTED_SIGNAL_FLAG_PRODUCER_FRONTIER_EXACT) {
     if (iree_hal_amdgpu_frontier_dominates_axis(
             iree_hal_amdgpu_host_queue_const_frontier(queue), signal_axis,
             signal_epoch)) {
@@ -209,8 +210,8 @@ static bool iree_hal_amdgpu_host_queue_resolve_wait(
   // the copy above. Recheck afterward so a newer frontier cannot silently
   // strengthen this exact wait. A publication after the copy can only make
   // this check conservatively defer; it cannot alter the copied frontier.
-  if (!iree_hal_amdgpu_last_signal_load(
-          iree_hal_amdgpu_semaphore_last_signal(semaphore), &signal_flags,
+  if (!iree_hal_submitted_signal_load(
+          iree_hal_amdgpu_semaphore_submitted_signal(semaphore), &signal_flags,
           &signal_axis, &signal_epoch, &signal_value) ||
       signal_value != value) {
     return false;
