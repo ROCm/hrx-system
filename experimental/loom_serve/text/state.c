@@ -411,6 +411,40 @@ static iree_status_t text_try_back_compaction(loom_serve_text_state_t* state,
   return status;
 }
 
+// Completion credit owns backing but has no payload beyond the consumed
+// frontier. Only resident rows and immutable endpoints preserve KV contents;
+// shared physical pages enter this copy map once, regardless of reader count.
+static void text_plan_compaction_copies(const loom_serve_text_state_t* state,
+                                        uint32_t* destinations) {
+  memset(destinations, 0xFF,
+         state->cache.pool.capacity * sizeof(*destinations));
+  for (iree_host_size_t i = 0; i < state->row_count; ++i) {
+    const loom_serve_text_state_row_t* row = &state->rows[i];
+    if (row->snapshot) {
+      continue;
+    }
+    const uint32_t count =
+        (uint32_t)((row->position + state->storage.block_size - 1) /
+                   state->storage.block_size);
+    const uint32_t* blocks =
+        state->cache.maps + i * state->storage.blocks_per_row;
+    for (uint32_t j = 0; j < count; ++j) {
+      destinations[blocks[j]] = state->cache.destinations[blocks[j]];
+    }
+  }
+  for (uint32_t i = 0; i < state->checkpoints.pool.capacity; ++i) {
+    if (!state->checkpoints.pool.references[i]) {
+      continue;
+    }
+    const loom_serve_text_state_checkpoint_t* checkpoint =
+        &state->checkpoints.values[i];
+    for (uint32_t j = 0; j < checkpoint->block_count; ++j) {
+      const uint32_t block = checkpoint->blocks[j];
+      destinations[block] = state->cache.destinations[block];
+    }
+  }
+}
+
 iree_status_t loom_serve_text_state_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result) {
   *out_result = (loom_serve_text_trim_result_t){0};
@@ -432,6 +466,15 @@ iree_status_t loom_serve_text_state_trim(
       out_result->moved_blocks = 0;
     }
   }
+  uint32_t* copy_destinations = NULL;
+  if (iree_status_is_ok(status) && out_result->moved_blocks) {
+    status = iree_allocator_malloc_array(
+        state->allocator, state->cache.pool.capacity,
+        sizeof(*copy_destinations), (void**)&copy_destinations);
+    if (iree_status_is_ok(status)) {
+      text_plan_compaction_copies(state, copy_destinations);
+    }
+  }
   for (iree_host_size_t i = 0;
        out_result->moved_blocks && i < state->storage.region_count &&
        iree_status_is_ok(status);
@@ -441,7 +484,7 @@ iree_status_t loom_serve_text_state_trim(
     status = loom_serve_block_region_relocate(
         state->execution, state->memory.buffers[region->allocation],
         *text_allocation(state, region->allocation), &region->blocks,
-        state->cache.pool.capacity, state->cache.destinations, &copied_bytes);
+        state->cache.pool.capacity, copy_destinations, &copied_bytes);
     out_result->copied_bytes += copied_bytes;
   }
   // Even a rejected later copy batch leaves earlier submissions owning their
@@ -497,6 +540,7 @@ iree_status_t loom_serve_text_state_trim(
   out_result->released_bytes =
       loom_serve_memory_pool_statistics(state->memory.pool).released_bytes -
       released_before;
+  iree_allocator_free(state->allocator, copy_destinations);
   return status;
 }
 

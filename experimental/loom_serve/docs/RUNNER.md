@@ -177,8 +177,11 @@ for the pin/restore/release contract and real-model witness.
 
 At a completed maintenance cut, `model_trim` releases dead slabs and admits the
 whole temporary relocation union before copying. When that union cannot fit,
-live sparse maps remain valid without movement. Successful compaction updates
-all row maps and releases old backing. It uses the same
+live sparse maps remain valid without movement. A separate payload map copies
+only consumed row pages and resident endpoint pages, deduplicated by physical
+ID. Reserved future pages still receive backed destinations and updated maps
+without copying undefined contents. Successful compaction updates every row
+and endpoint map and releases old backing. It uses the same
 exported, release-tracked roots as model commands; the underlying virtual
 reservation supplies commit/unmap authority, not a separate queue lifetime.
 
