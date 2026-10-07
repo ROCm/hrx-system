@@ -5,9 +5,9 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 func.decl import("runner") @execute_3(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer) -> (i64)
+func.decl import("runner") @execute_5(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer) -> (i64)
 func.decl import("runner") @execute_6(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer) -> (i64)
 func.decl import("runner") @execute_7(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer, %b6: hal.buffer) -> (i64)
-func.decl import("runner") @execute_8(%stage: i32, %b0: hal.buffer, %b1: hal.buffer, %b2: hal.buffer, %b3: hal.buffer, %b4: hal.buffer, %b5: hal.buffer, %b6: hal.buffer, %b7: hal.buffer) -> (i64)
 func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
 
 // Ownership events provide {row, read_origin, write_origin, fork_position}.
@@ -965,7 +965,7 @@ func.def public @chat_end(%state: i64) -> (buffer) {
 }
 
 // The program is shared; all request state arrives as buffer bindings.
-func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer, %workspace: hal.buffer) -> (i64) {
+func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %control: hal.buffer, %gdn: hal.buffer, %attention: hal.buffer, %tokens: hal.buffer, %progress: hal.buffer) -> (i64) {
   %origin = index.constant 0 : offset
   %view = buffer.view %state[%origin] : buffer -> view<4xi32>
   %prefill = view.load %view[0] : view<4xi32> -> i32
@@ -973,7 +973,7 @@ func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %
   %zero = scalar.constant 0 : i32
   %is_prefill = scalar.cmpi ne, %initialize, %zero : i32
   %stage = scf.select %is_prefill, %prefill, %decode : i32
-  %completion = func.call @execute_7(%stage, %residual, %control, %gdn, %attention, %tokens, %progress, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %completion = func.call @execute_6(%stage, %residual, %control, %gdn, %attention, %tokens, %progress) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   func.return %completion : i64
 }
 
@@ -983,7 +983,7 @@ func.def public @step(%state: buffer, %initialize: i32, %residual: hal.buffer, %
 // Feedback slot zero holds ordinary tokens; slots one/two hold separate
 // verification banks. Neither branch waits: the owner joins both timelines
 // before advancing host frontiers.
-func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %feedback_slot: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
+func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %feedback_slot: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer) -> (i64) {
   %origin = index.constant 0 : offset
   %view = buffer.view %control_state[%origin] : buffer -> view<4xi32>
   %shape_count = view.load %view[2] : view<4xi32> -> i32
@@ -995,14 +995,14 @@ func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verif
   %propose = scalar.cmpi ne, %proposes, %zero : i32
   %verify = scalar.cmpi ne, %verifies, %zero : i32
   scf.if %propose {
-    %proposal = func.call @execute_6(%mtp_first, %metadata, %tokens, %draft_origins, %draft_cache, %carry, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %proposal = func.call @execute_5(%mtp_first, %metadata, %tokens, %draft_origins, %draft_cache, %carry) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield
   }
   %warm_first = scalar.addi %mtp_first, %one : i32
   %warm_stage = scalar.addi %warm_first, %shape : i32
   %target = scf.if %verify -> (i64) {
     %verify_stage = scalar.addi %warm_stage, %shape_count : i32
-    %completion = func.call @execute_8(%verify_stage, %residual, %metadata, %origins, %state, %tokens, %committed, %results, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %completion = func.call @execute_7(%verify_stage, %residual, %metadata, %origins, %state, %tokens, %committed, %results) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %count = scalar.extui %span_count : i32 to i64
     %record_bytes = scalar.constant 24 : i64
     %record_length = scalar.muli %count, %record_bytes : i64
@@ -1013,7 +1013,7 @@ func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verif
     scf.yield %completion : i64
   } else {
     %target_stage = scalar.addi %shape, %two : i32
-    %completion = func.call @execute_7(%target_stage, %residual, %metadata, %origins, %state, %tokens, %outputs, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %completion = func.call @execute_6(%target_stage, %residual, %metadata, %origins, %state, %tokens, %outputs) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     %has_output = scalar.cmpi ne, %output_count, %zero : i32
     scf.if %has_output {
       %count = scalar.extui %output_count : i32 to i64
@@ -1033,7 +1033,7 @@ func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verif
     } else {
       scf.yield %metadata : hal.buffer
     }
-    %warm = func.call @execute_7(%warm_stage, %residual, %accepted, %draft_origins, %draft_cache, %carry, %tokens, %workspace) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %warm = func.call @execute_6(%warm_stage, %residual, %accepted, %draft_origins, %draft_cache, %carry, %tokens) : (i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield %warm : i64
   } else {
     scf.yield %target : i64
@@ -1041,15 +1041,15 @@ func.def @epoch_once(%control_state: buffer, %shape: i32, %proposes: i32, %verif
   func.return %completion : i64
 }
 
-// A bounded cohort reuses state/workspace on the work timeline, while each
+// A bounded cohort reuses retained state on the work timeline, while each
 // feedback bank stays immutable on its independent transfer branch. Acceptance
 // produces the next input and position entirely on device; neither call waits.
-func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %continuation_proposes: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %workspace: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer, %next_results: hal.buffer) -> (i64) {
+func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %verifies: i32, %span_count: i32, %output_count: i32, %epoch_count: i32, %continuation_shape: i32, %continuation_proposes: i32, %residual: hal.buffer, %metadata: hal.buffer, %origins: hal.buffer, %state: hal.buffer, %tokens: hal.buffer, %outputs: hal.buffer, %carry: hal.buffer, %committed: hal.buffer, %results: hal.buffer, %draft_cache: hal.buffer, %draft_origins: hal.buffer, %next_results: hal.buffer) -> (i64) {
   %zero = scalar.constant 0 : i32
   %one = scalar.constant 1 : i32
   %two = scalar.constant 2 : i32
   %sixteen = scalar.constant 16 : i32
-  %first = func.call @epoch_once(%control_state, %shape, %proposes, %verifies, %span_count, %output_count, %one, %residual, %metadata, %origins, %state, %tokens, %outputs, %workspace, %carry, %committed, %results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+  %first = func.call @epoch_once(%control_state, %shape, %proposes, %verifies, %span_count, %output_count, %one, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
   %continues = scalar.cmpi eq, %epoch_count, %two : i32
   %completion = scf.if %continues -> (i64) {
     %origin = index.constant 0 : offset
@@ -1060,7 +1060,7 @@ func.def public @epoch(%control_state: buffer, %shape: i32, %proposes: i32, %ver
     %after_shapes = scalar.addi %proposal, %shapes : i32
     %continuation = scalar.addi %after_shapes, %one : i32
     %ready = func.call @execute_3(%continuation, %metadata, %tokens, %results) : (i32, hal.buffer, hal.buffer, hal.buffer) -> (i64)
-    %next = func.call @epoch_once(%control_state, %continuation_shape, %continuation_proposes, %one, %sixteen, %zero, %two, %residual, %metadata, %origins, %state, %tokens, %outputs, %workspace, %carry, %committed, %next_results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
+    %next = func.call @epoch_once(%control_state, %continuation_shape, %continuation_proposes, %one, %sixteen, %zero, %two, %residual, %metadata, %origins, %state, %tokens, %outputs, %carry, %committed, %next_results, %draft_cache, %draft_origins) : (buffer, i32, i32, i32, i32, i32, i32, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer, hal.buffer) -> (i64)
     scf.yield %next : i64
   } else {
     scf.yield %first : i64

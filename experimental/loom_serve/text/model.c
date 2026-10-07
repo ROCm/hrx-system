@@ -222,7 +222,9 @@ static iree_status_t text_check_layouts(loom_serve_text_model_t* runner) {
     if (i >= runner->shared_stage_count) {
       continue;
     }
-    if (roots != 1 || binding_count != TEXT_BINDING_COUNT) {
+    const bool has_workspace =
+        program->requirements.transient.required_byte_length != 0;
+    if (roots != 1 || binding_count - has_workspace != TEXT_BINDING_COUNT) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "shared stages must implement the target bindings");
@@ -344,9 +346,14 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
       iree_allocator_malloc_array(runner->allocator, runner->stage_count,
                                   sizeof(*stages), (void**)&stages));
   for (iree_host_size_t i = 0; i < runner->stage_count; ++i) {
+    const loom_cmd_program_requirements_t* requirements =
+        &runner->stages[i].program.requirements;
     stages[i] = (loom_serve_stage_t){
-        runner->stages[i].command,
-        runner->stages[i].program.requirements.rebindable_binding_count};
+        .command_buffer = runner->stages[i].command,
+        .binding_count = requirements->rebindable_binding_count -
+                         (requirements->transient.required_byte_length != 0),
+        .transient = requirements->transient,
+    };
   }
   const iree_byte_span_t feedback[] = {
       runner->host.bytes[TEXT_HOST_OUTPUTS],
@@ -354,7 +361,7 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
       runner->host.bytes[TEXT_HOST_NEXT_RESULTS],
   };
   const loom_serve_module_options_t options = {
-      .binding_capacity = 8,
+      .binding_capacity = 7,
       .stages = {runner->stage_count, stages},
       .feedback = {IREE_ARRAYSIZE(feedback), feedback},
   };
@@ -637,18 +644,13 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   }
   IREE_RETURN_IF_ERROR(status);
   uint64_t workspace_length = 0;
-  uint64_t workspace_alignment = 0;
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
     workspace_length = iree_max(
         workspace_length,
         model->stages[i].program.requirements.transient.required_byte_length);
-    workspace_alignment = iree_max(
-        workspace_alignment,
-        model->stages[i].program.requirements.transient.minimum_alignment);
   }
   IREE_RETURN_IF_ERROR(
-      loom_serve_text_state_allocate(&model->state, model->device_owner,
-                                     workspace_length, workspace_alignment));
+      loom_serve_text_state_allocate(&model->state, model->device_owner));
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(model->allocator, model->row_count,
                                   sizeof(*model->rows), (void**)&model->rows));
@@ -662,8 +664,8 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
         sizeof(*model->checkpoints), (void**)&model->checkpoints));
   }
   fprintf(stderr,
-          "Residency: %zu rows, %.3f GiB retained arena, %.3f GiB shared "
-          "workspace, %zu-token context, %zu-token prefill capacity.\n",
+          "Residency: %zu rows, %.3f GiB retained arena, %.3f GiB maximum "
+          "private workspace, %zu-token context, %zu-token prefill capacity.\n",
           model->row_count,
           iree_hal_buffer_byte_length(model->state.row_arena) / 1073741824.0,
           workspace_length / 1073741824.0, model->context_capacity,
@@ -1412,10 +1414,9 @@ static iree_status_t text_epoch(
       model->state.residual,         model->state.epoch.buffers[1],
       model->state.epoch.buffers[2], model->state.row_arena,
       model->state.epoch.buffers[4], model->state.epoch.buffers[5],
-      model->state.workspace,        model->state.mtp.carry,
-      model->state.mtp.committed,    model->state.mtp.results,
-      model->state.mtp.cache,        model->state.mtp.row_table,
-      model->state.mtp.next_results,
+      model->state.mtp.carry,        model->state.mtp.committed,
+      model->state.mtp.results,      model->state.mtp.cache,
+      model->state.mtp.row_table,    model->state.mtp.next_results,
   };
   iree_vm_variant_t arguments[9 + IREE_ARRAYSIZE(buffers)] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->vm_types,

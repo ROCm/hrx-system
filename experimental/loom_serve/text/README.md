@@ -49,8 +49,9 @@ model's actual contract.
 This is a bounded packed-autoregressive runner, with optional three-token
 speculation. It is not an arbitrary model-graph interpreter.
 
-* One residency shares a VM process, cached commands, weights and workspace.
-  Sessions are data rows. Calls to the shared invocation are serialized.
+* One residency shares a VM process, cached commands and weights. Sessions are
+  data rows. Calls to the shared invocation are serialized. Private command
+  workspace comes from the device execution pool, shared across models.
 * The host chooses ready spans and a cached token/span shape. Source creates
   device packets and chooses commands. Attention and recurrent state layout
   are source concerns; the host owns physical page IDs and completion credit.
@@ -95,8 +96,11 @@ prepare(prefill:i64, context:i64, pool:i64, rows:i64, pins:i64, mtp:i32,
 pairs. The source declares command roots, configuration overrides and
 checkpoint bindings through the [preparation capability](../runtime/preparation.h).
 The first `shared_stage_count` stages have identical target parameter
-placement and seven dynamic bindings. All stages use one checkpoint domain,
-with at most eight dynamic bindings and workspace last when present.
+placement and six persistent bindings. All stages use one checkpoint domain,
+with at most seven explicit dynamic bindings plus private workspace when present.
+The runner inserts the reflected transient binding; the model VM never receives
+it. Allocation, command execution and deallocation have explicit queue edges,
+so draft/verify/catch-up stages can reuse the same backing without host waits.
 Auxiliary roots may share existing tensors or add draft tensors.
 
 `state` is opaque to C and survives cold-VM teardown. The terminal spelling
@@ -167,7 +171,7 @@ image model constructor. That owner holds the common physical pool, queues,
 execution timelines, and profiling session. It outlives all models; one host
 owner serializes their calls and residency transitions. `--memory_bytes` bounds
 physical parameter/state commitment across those models, not virtual address
-space or separately allocated workspace. Creation compiles, indexes, and
+space or shared execution workspace. Creation compiles, indexes, and
 records without loading parameter payloads. Explicit activation can warm a
 model before accepting requests; otherwise its first inference loads weights.
 
@@ -396,13 +400,14 @@ is independent of the model's device packet format:
   counts and the terminal ID. It fills the opaque metadata/input upload
   buffers and returns ordinary output count.
 * `epoch` receives opaque state, shape/selection/speculation facts and the
-  thirteen retained device buffers. It invokes `runner.execute_N` and
-  `runner.feedback`; it does not wait or allocate new device storage.
+  twelve retained device buffers. It invokes `runner.execute_N` and
+  `runner.feedback` without waiting. Private workspace is allocated by the
+  execution domain around each command; escaping state has separate bindings.
 * After retirement, `publish_epoch` translates opaque feedback into
   `{consumed, known, outputs, verifications, tokens[8]}` i32 records in
   original span order. Only accepted state contributes to consumed progress.
-* The isolated `step` receives state, a prefill/decode selector and seven
-  buffers: residual, control, recurrent, attention, IDs, progress, workspace.
+* The isolated `step` receives state, a prefill/decode selector and six
+  buffers: residual, control, recurrent, attention, IDs and progress.
   Control holds `{input_count, absolute_position, terminal_id}`.
   Selected ID is at input slot zero; progress slot zero is selected count
   and slot seven is the terminal flag.

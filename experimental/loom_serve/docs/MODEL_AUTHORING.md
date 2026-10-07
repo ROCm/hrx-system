@@ -555,7 +555,8 @@ multi-turn responses. These checks protect different boundaries.
 
 JIT makes specialization cheap to request; it does not remove authored storage
 bounds. The current adapter generates token and span classes independently at
-startup, shares a maximum workspace, and publishes an immutable command table.
+startup and publishes an immutable command table. Commands borrow their private
+workspace from the shared execution pool; persistent state remains separate.
 The shared VM selects entries by index; model entry points resolve once.
 Its sixteen-row bound comes from four-input verification fitting a 64-entry
 selected-output table, not from assigning sixteen full contexts. The private

@@ -56,7 +56,7 @@ typedef struct loom_serve_text_service_options_t {
 
 // Runs one application owner until transport shutdown or model failure. Model
 // and transport are borrowed. Each epoch gathers credited ready rows, executes
-// their known/verifier spans and commits outputs before reusing the workspace.
+// their known/verifier spans and commits outputs before reusing feedback.
 // Heartbeats observe a copied snapshot and continue during model waits.
 // Admission owns and physically backs the exact completion high-water, private
 // recurrent writer and partial-tail COW while pinning required parameters.
