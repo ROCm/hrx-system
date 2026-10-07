@@ -96,6 +96,27 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "queue_storage",
+    srcs = ["queue_storage.c"],
+    hdrs = ["queue_storage.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_storage_test",
+    srcs = ["queue_storage_test.cc"],
+    deps = [
+        ":queue_storage",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "queue",
     srcs = ["queue.c"],
     hdrs = ["queue.h"],
@@ -103,6 +124,7 @@ iree_runtime_cc_library(
         ":context",
         ":executable",
         ":queue_frontier",
+        ":queue_storage",
         ":semaphore",
         "//libamdf:headers",
         "//runtime/src/iree/async",

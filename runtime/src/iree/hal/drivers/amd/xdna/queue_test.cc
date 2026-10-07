@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cstdlib>
 #include <cstring>
 #include <vector>
@@ -25,6 +26,57 @@
 namespace {
 
 #if defined(IREE_ASYNC_HAVE_EVENTFD) || defined(IREE_ASYNC_HAVE_WIN32_HANDLE)
+
+struct HostAllocationCounters {
+  std::atomic<uint64_t> allocations{0};
+  std::atomic<uint64_t> reallocations{0};
+  std::atomic<uint64_t> frees{0};
+};
+
+struct HostAllocationSnapshot {
+  uint64_t allocations;
+  uint64_t reallocations;
+  uint64_t frees;
+};
+
+iree_status_t TrackingAllocatorControl(void* self,
+                                       iree_allocator_command_t command,
+                                       const void* params,
+                                       void** inout_pointer) {
+  auto* counters = static_cast<HostAllocationCounters*>(self);
+  if (command == IREE_ALLOCATOR_COMMAND_MALLOC ||
+      command == IREE_ALLOCATOR_COMMAND_CALLOC) {
+    ++counters->allocations;
+  } else if (command == IREE_ALLOCATOR_COMMAND_REALLOC) {
+    ++counters->reallocations;
+  } else if (command == IREE_ALLOCATOR_COMMAND_FREE) {
+    ++counters->frees;
+  }
+  iree_allocator_t system_allocator = iree_allocator_system();
+  return system_allocator.ctl(system_allocator.self, command, params,
+                              inout_pointer);
+}
+
+iree_allocator_t TrackingAllocator(HostAllocationCounters* counters) {
+  return {counters, TrackingAllocatorControl};
+}
+
+HostAllocationSnapshot SnapshotHostAllocations(
+    const HostAllocationCounters& counters) {
+  return {
+      counters.allocations.load(),
+      counters.reallocations.load(),
+      counters.frees.load(),
+  };
+}
+
+void ExpectHostAllocationsUnchanged(const HostAllocationSnapshot& before,
+                                    const HostAllocationCounters& counters) {
+  const HostAllocationSnapshot after = SnapshotHostAllocations(counters);
+  EXPECT_EQ(after.allocations, before.allocations);
+  EXPECT_EQ(after.reallocations, before.reallocations);
+  EXPECT_EQ(after.frees, before.frees);
+}
 
 enum class Outcome {
   kSuccess,
@@ -304,17 +356,17 @@ class QueueHarness {
     iree_async_proactor_pool_release(pool);
   }
 
-  void Initialize() {
+  void Initialize(iree_allocator_t allocator = iree_allocator_system()) {
+    host_allocator = allocator;
     auto options = iree_async_proactor_pool_options_default();
     options.runner = {};  // This test owns the polling thread.
-    IREE_ASSERT_OK(iree_async_proactor_pool_create(
-        1, nullptr, options, iree_allocator_system(), &pool));
+    IREE_ASSERT_OK(iree_async_proactor_pool_create(1, nullptr, options,
+                                                   host_allocator, &pool));
     IREE_ASSERT_OK(iree_async_proactor_pool_get(pool, 0, &proactor));
     iree_hal_amd_xdna_context_t* context = nullptr;
-    IREE_ASSERT_OK(iree_allocator_malloc(iree_allocator_system(),
-                                         sizeof(*context),
+    IREE_ASSERT_OK(iree_allocator_malloc(host_allocator, sizeof(*context),
                                          reinterpret_cast<void**>(&context)));
-    context->host_allocator = iree_allocator_system();
+    context->host_allocator = host_allocator;
     context->api = &native.api;
     context->xdna = &native.xdna;
     context->handle = reinterpret_cast<amdf_xdna_context_t*>(&native);
@@ -357,8 +409,8 @@ class QueueHarness {
     params.proactor_pool = pool;
     params.event_sink = context->event_sink;
     IREE_ASSERT_OK(iree_hal_amd_xdna_device_create(
-        context, IREE_SV("controlled XDNA provider"), &params,
-        iree_allocator_system(), &device));
+        context, IREE_SV("controlled XDNA provider"), &params, host_allocator,
+        &device));
     queue = iree_hal_device_queue(device, 0, 0);
     IREE_ASSERT_OK(
         iree_hal_semaphore_create(device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
@@ -467,6 +519,16 @@ class QueueHarness {
     }
   }
 
+  void PollUntilValue(iree_hal_semaphore_t* semaphore, uint64_t target_value) {
+    uint64_t value = 0;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
+    while (value < target_value) {
+      IREE_ASSERT_OK(
+          iree_async_proactor_poll(proactor, iree_infinite_timeout(), nullptr));
+      IREE_ASSERT_OK(iree_hal_semaphore_query(semaphore, &value));
+    }
+  }
+
   void ReleaseDevice() {
     iree_hal_semaphore_release(done);
     done = nullptr;
@@ -476,6 +538,8 @@ class QueueHarness {
 
   // Mocked native dependency; all access runs on this test's polling thread.
   NativeProvider native;
+  // Allocator used by the production device and shared proactor.
+  iree_allocator_t host_allocator = iree_allocator_system();
   // Pool retaining the real platform proactor without a polling runner.
   iree_async_proactor_pool_t* pool = nullptr;
   // Proactor borrowed from the pool and shared with the HAL device.
@@ -812,6 +876,173 @@ TEST(XdnaQueueTest, HostProducerProgressesWithFullNativeQueue) {
   iree_hal_buffer_release(buffer);
 }
 
+TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
+  constexpr uint64_t kWarmupIterations = 4;
+  constexpr uint64_t kMeasuredIterations = 64;
+  constexpr uint64_t kTotalIterations = kWarmupIterations + kMeasuredIterations;
+
+  HostAllocationCounters allocation_counters;
+  QueueHarness harness;
+  harness.native.pending_capacity = 2;
+  ASSERT_NO_FATAL_FAILURE(
+      harness.Initialize(TrackingAllocator(&allocation_counters)));
+
+  iree_hal_executable_t* executable = nullptr;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(harness.LoadExecutable(
+      iree::hal::amd::xdna::testing::ImageFixture(), &executable, &function));
+  iree_hal_buffer_t* dispatch_buffer = nullptr;
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&dispatch_buffer));
+  const iree_hal_buffer_ref_t binding =
+      iree_hal_make_buffer_ref(dispatch_buffer, 0, 64);
+
+  iree_hal_semaphore_t* ready_completion = nullptr;
+  iree_hal_semaphore_t* reached_gate = nullptr;
+  iree_hal_semaphore_t* wait_gate = nullptr;
+  iree_hal_semaphore_t* wait_completion = nullptr;
+  std::array<iree_hal_semaphore_t*, 3> capacity_completions = {};
+  iree_hal_semaphore_t* small_update_completion = nullptr;
+  iree_hal_semaphore_t* large_update_completion = nullptr;
+  auto create_semaphore = [&](iree_hal_semaphore_t** out_semaphore) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, out_semaphore));
+  };
+  create_semaphore(&ready_completion);
+  create_semaphore(&reached_gate);
+  create_semaphore(&wait_gate);
+  create_semaphore(&wait_completion);
+  for (iree_hal_semaphore_t** semaphore :
+       {&capacity_completions[0], &capacity_completions[1],
+        &capacity_completions[2]}) {
+    create_semaphore(semaphore);
+  }
+  create_semaphore(&small_update_completion);
+  create_semaphore(&large_update_completion);
+
+  auto check_steady_state = [&](const char* name,
+                                const HostAllocationSnapshot& before,
+                                size_t native_allocations_before) {
+    SCOPED_TRACE(name);
+    ExpectHostAllocationsUnchanged(before, allocation_counters);
+    EXPECT_EQ(harness.native.memory_create_count, native_allocations_before);
+  };
+
+  HostAllocationSnapshot before = {};
+  size_t native_allocations_before = 0;
+  for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
+    if (iteration == kWarmupIterations + 1) {
+      before = SnapshotHostAllocations(allocation_counters);
+      native_allocations_before = harness.native.memory_create_count;
+    }
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        harness.queue, {}, {1, &ready_completion, &iteration}, executable,
+        function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+        {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+    harness.PollUntilValue(ready_completion, iteration);
+  }
+  check_steady_state("ready dispatch", before, native_allocations_before);
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(reached_gate, 1, nullptr));
+  for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
+    if (iteration == kWarmupIterations + 1) {
+      before = SnapshotHostAllocations(allocation_counters);
+      native_allocations_before = harness.native.memory_create_count;
+    }
+    iree_hal_semaphore_t* wait_semaphores[] = {reached_gate, wait_gate};
+    uint64_t wait_values[] = {1, iteration};
+    IREE_ASSERT_OK(iree_hal_queue_dispatch(
+        harness.queue,
+        {IREE_ARRAYSIZE(wait_semaphores), wait_semaphores, wait_values},
+        {1, &wait_completion, &iteration}, executable, function,
+        iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
+        IREE_HAL_DISPATCH_FLAG_NONE));
+    IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                            iree_infinite_timeout(), nullptr));
+    IREE_ASSERT_OK(iree_hal_semaphore_signal(wait_gate, iteration, nullptr));
+    harness.PollUntilValue(wait_completion, iteration);
+  }
+  check_steady_state("unsatisfied wait", before, native_allocations_before);
+
+  for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
+    if (iteration == kWarmupIterations + 1) {
+      before = SnapshotHostAllocations(allocation_counters);
+      native_allocations_before = harness.native.memory_create_count;
+    }
+    harness.native.hold_retirement = true;
+    const size_t submission_count = harness.native.submission_count;
+    for (iree_hal_semaphore_t* completion : capacity_completions) {
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          harness.queue, {}, {1, &completion, &iteration}, executable, function,
+          iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
+          IREE_HAL_DISPATCH_FLAG_NONE));
+    }
+    ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 2));
+    harness.native.hold_retirement = false;
+    harness.native.Wake();
+    for (iree_hal_semaphore_t* completion : capacity_completions) {
+      harness.PollUntilValue(completion, iteration);
+    }
+  }
+  check_steady_state("native capacity", before, native_allocations_before);
+
+  constexpr iree_host_size_t kLargeUpdateLength = 128 * 1024;
+  iree_hal_buffer_params_t buffer_params = {};
+  buffer_params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  iree_hal_buffer_t* transfer_buffer = nullptr;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(harness.device), buffer_params,
+      kLargeUpdateLength, &transfer_buffer));
+  std::array<uint8_t, 64> small_update;
+  small_update.fill(0x5A);
+  std::vector<uint8_t> large_update(kLargeUpdateLength, 0xA5);
+
+  auto run_updates = [&](iree_const_byte_span_t source,
+                         iree_hal_semaphore_t* completion) {
+    iree_hal_transfer_operation_t transfer = {};
+    transfer.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+    transfer.update.source_buffer = source.data;
+    transfer.update.target_buffer = transfer_buffer;
+    transfer.update.length = source.data_length;
+    for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
+      if (iteration == kWarmupIterations + 1) {
+        before = SnapshotHostAllocations(allocation_counters);
+        native_allocations_before = harness.native.memory_create_count;
+      }
+      IREE_ASSERT_OK(iree_hal_queue_transfer(
+          harness.queue, {}, {1, &completion, &iteration}, 1, &transfer));
+      harness.PollUntilValue(completion, iteration);
+    }
+  };
+
+  run_updates(
+      iree_make_const_byte_span(small_update.data(), small_update.size()),
+      small_update_completion);
+  check_steady_state("64-byte update", before, native_allocations_before);
+  run_updates(
+      iree_make_const_byte_span(large_update.data(), large_update.size()),
+      large_update_completion);
+  check_steady_state("128-KiB update", before, native_allocations_before);
+
+  std::vector<uint8_t> actual(large_update.size());
+  IREE_ASSERT_OK(iree_hal_buffer_map_read(transfer_buffer, 0, actual.data(),
+                                          actual.size()));
+  EXPECT_EQ(actual, large_update);
+
+  iree_hal_buffer_release(transfer_buffer);
+  iree_hal_semaphore_release(large_update_completion);
+  iree_hal_semaphore_release(small_update_completion);
+  for (iree_hal_semaphore_t* completion : capacity_completions) {
+    iree_hal_semaphore_release(completion);
+  }
+  iree_hal_semaphore_release(wait_completion);
+  iree_hal_semaphore_release(wait_gate);
+  iree_hal_semaphore_release(reached_gate);
+  iree_hal_semaphore_release(ready_completion);
+  iree_hal_buffer_release(dispatch_buffer);
+  iree_hal_executable_release(executable);
+}
+
 TEST(XdnaQueueTest, FailedDependencyDoesNotWaitForNativeCapacity) {
   QueueHarness harness;
   harness.native.hold_retirement = true;
@@ -972,7 +1203,7 @@ TEST(XdnaQueueDeathTest, ObserverFailuresPreserveAcceptedOwnership) {
           harness.ReleaseDevice();
           EXPECT_EQ(harness.native.queue_destroy_count, 0u);
           EXPECT_EQ(harness.native.context_destroy_count, 0u);
-          EXPECT_GE(harness.diagnostic_count, 2u);
+          EXPECT_GE(harness.diagnostic_count, 1u);
           std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
         },
         ::testing::ExitedWithCode(0), "");

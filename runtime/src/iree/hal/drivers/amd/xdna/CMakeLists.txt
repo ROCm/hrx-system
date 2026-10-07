@@ -124,6 +124,37 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    queue_storage
+  HDRS
+    "queue_storage.h"
+  SRCS
+    "queue_storage.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_storage_test
+  SRCS
+    "queue_storage_test.cc"
+  DEPS
+    ::queue_storage
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     queue
   HDRS
     "queue.h"
@@ -133,6 +164,7 @@ iree_cc_library(
     ::context
     ::executable
     ::queue_frontier
+    ::queue_storage
     ::semaphore
     amdf::headers
     iree::async
