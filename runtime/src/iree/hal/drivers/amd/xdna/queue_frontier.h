@@ -85,15 +85,21 @@ const iree_async_frontier_t* iree_hal_amd_xdna_frontier_state_as_frontier(
 //
 // |device| identifies the exact XDNA semaphore domain. |accepted_state| is the
 // current native queue frontier, or NULL for host work that cannot inherit
-// native FIFO order. A failed semaphore is returned as a status. A reached but
+// native FIFO order. |initial_state| is an optional causal lower bound already
+// accumulated from an earlier prefix of the wait list and may alias
+// |out_state|. A failed semaphore is returned as a status. A reached but
 // tainted value or a fixed-capacity overflow remains executable but makes the
-// resulting state inexact.
+// resulting state inexact. When resolution defers,
+// |out_deferred_wait_index| receives the first unresolved wait index if it is
+// non-NULL. It receives IREE_HOST_SIZE_MAX when every wait is ready.
 iree_status_t iree_hal_amd_xdna_frontier_resolve_waits(
     iree_hal_device_t* device, iree_hal_semaphore_list_t waits,
     const iree_hal_amd_xdna_frontier_state_t* accepted_state,
+    const iree_hal_amd_xdna_frontier_state_t* initial_state,
     iree_hal_amd_xdna_wait_resolution_flags_t flags,
     iree_hal_amd_xdna_frontier_state_t* out_state,
-    iree_hal_amd_xdna_wait_resolution_t* out_resolution);
+    iree_hal_amd_xdna_wait_resolution_t* out_resolution,
+    iree_host_size_t* out_deferred_wait_index);
 
 #ifdef __cplusplus
 }  // extern "C"

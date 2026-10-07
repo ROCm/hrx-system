@@ -1509,6 +1509,170 @@ TEST(XdnaQueueTest, AcceptedSignalChainUsesNativeFifoBeforeRetirement) {
   iree_async_frontier_tracker_release(tracker);
 }
 
+TEST(XdnaQueueTest, DeferredConsumersTargetLowestPendingSignal) {
+  QueueHarness harness;
+  harness.native.pending_capacity = 4;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_async_frontier_tracker_t* tracker = nullptr;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+      &tracker));
+  IREE_ASSERT_OK(iree_hal_amd_xdna_queue_assign_frontier(
+      harness.queue, tracker, iree_async_axis_make_queue(1, 0, 0, 0, 0)));
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+  iree_hal_semaphore_t* anchor_done = nullptr;
+  iree_hal_semaphore_t* gate = nullptr;
+  iree_hal_semaphore_t* edge = nullptr;
+  iree_hal_semaphore_t* reached = nullptr;
+  std::array<iree_hal_semaphore_t*, 2> consumer_done = {};
+  for (auto** semaphore : {&anchor_done, &gate, &edge, &reached,
+                           &consumer_done[0], &consumer_done[1]}) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
+  }
+  iree_hal_executable_t* anchor_executable = nullptr;
+  iree_hal_executable_function_t anchor_function;
+  ASSERT_NO_FATAL_FAILURE(
+      harness.LoadExecutable(iree::hal::amd::xdna::testing::ImageFixture(),
+                             &anchor_executable, &anchor_function));
+  iree_hal_buffer_t* anchor_buffer = nullptr;
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&anchor_buffer));
+  const iree_hal_buffer_ref_t anchor_binding =
+      iree_hal_make_buffer_ref(anchor_buffer, 0, 64);
+
+  // Hold the direct publisher so all following operations are admitted by the
+  // proactor before any one of them becomes native-visible. The value-2
+  // producer is submitted first but cannot run until |gate| is signaled. The
+  // consumer must link to the later value-1 producer instead of selecting by
+  // queue-list order or retrying behind every unrelated acceptance.
+  harness.native.BlockSubmission();
+  uint64_t anchor_value = 1;
+  std::thread anchor_submitter([&]() {
+    IREE_EXPECT_OK(iree_hal_queue_dispatch(
+        harness.queue, {}, {1, &anchor_done, &anchor_value}, anchor_executable,
+        anchor_function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+        {1, &anchor_binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+  });
+  harness.native.AwaitBlockedSubmission();
+  harness.SubmitAfter(gate, 1, edge, 2);
+  harness.Submit(edge);
+  uint64_t wait_values[] = {1, 1};
+  iree_hal_semaphore_t* wait_semaphores[] = {edge, reached};
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(reached, 1, nullptr));
+  for (iree_hal_semaphore_t* completion : consumer_done) {
+    harness.SubmitWithWaits(
+        {IREE_ARRAYSIZE(wait_semaphores), wait_semaphores, wait_values},
+        completion, 1);
+  }
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+
+  harness.native.ReleaseSubmission();
+  anchor_submitter.join();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(4));
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(gate, &value));
+  EXPECT_EQ(value, 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(edge, &value));
+  EXPECT_EQ(value, 0u);
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, 1, nullptr));
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, anchor_done));
+  for (iree_hal_semaphore_t* completion : consumer_done) {
+    ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, completion));
+    iree_hal_semaphore_release(completion);
+  }
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(edge, 2));
+
+  iree_hal_semaphore_release(reached);
+  iree_hal_semaphore_release(edge);
+  iree_hal_semaphore_release(gate);
+  iree_hal_semaphore_release(anchor_done);
+  iree_hal_buffer_release(anchor_buffer);
+  iree_hal_executable_release(anchor_executable);
+  iree_async_frontier_tracker_release(tracker);
+}
+
+TEST(XdnaQueueTest, InexactTimelineChainDrainsAcrossNativeCapacity) {
+  constexpr uint64_t kChainLength = 31;
+
+  QueueHarness harness;
+  harness.native.pending_capacity = 4;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+  iree_hal_semaphore_t* completion = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &completion));
+  for (uint64_t value = 1; value <= kChainLength; ++value) {
+    uint64_t wait_value = value - 1;
+    const iree_hal_semaphore_list_t waits =
+        wait_value ? iree_hal_semaphore_list_t{1, &completion, &wait_value}
+                   : iree_hal_semaphore_list_t{};
+    harness.SubmitWithWaits(waits, completion, value);
+  }
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(completion, kChainLength));
+  EXPECT_EQ(harness.native.submission_count, kChainLength);
+
+  iree_hal_semaphore_release(completion);
+}
+
+TEST(XdnaQueueTest, LargeSignalSetUsesPooledProducerChunks) {
+  constexpr iree_host_size_t kSignalCount = 52;
+
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+  iree_hal_semaphore_t* gate = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_NONE, &gate));
+  std::vector<iree_hal_semaphore_t*> signals(kSignalCount);
+  std::vector<uint64_t> signal_values(kSignalCount, 1);
+  for (iree_hal_semaphore_t*& signal : signals) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, &signal));
+  }
+
+  iree_hal_executable_t* executable = nullptr;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(harness.LoadExecutable(
+      iree::hal::amd::xdna::testing::ImageFixture(), &executable, &function));
+  iree_hal_buffer_t* buffer = nullptr;
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&buffer));
+  const iree_hal_buffer_ref_t binding = iree_hal_make_buffer_ref(buffer, 0, 64);
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      harness.queue, {1, &gate, &gate_value},
+      {signals.size(), signals.data(), signal_values.data()}, executable,
+      function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  EXPECT_EQ(harness.native.submission_count, 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, gate_value, nullptr));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(signals.back(), 1));
+  for (iree_hal_semaphore_t* signal : signals) {
+    uint64_t value = 0;
+    IREE_ASSERT_OK(iree_hal_semaphore_query(signal, &value));
+    EXPECT_EQ(value, 1u);
+    iree_hal_semaphore_release(signal);
+  }
+
+  iree_hal_buffer_release(buffer);
+  iree_hal_executable_release(executable);
+  iree_hal_semaphore_release(gate);
+}
+
 TEST(XdnaQueueTest, ConsumerSubmittedBeforeProducerDefersUntilRetirement) {
   QueueHarness harness;
   harness.native.pending_capacity = 2;

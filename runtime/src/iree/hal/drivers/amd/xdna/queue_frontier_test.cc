@@ -80,7 +80,9 @@ class QueueFrontierTest : public ::testing::Test {
     iree_hal_amd_xdna_wait_resolution_t resolution =
         IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_DEFER;
     IREE_EXPECT_OK(iree_hal_amd_xdna_frontier_resolve_waits(
-        device_, waits, accepted_state, flags, out_state, &resolution));
+        device_, waits, accepted_state, /*initial_state=*/nullptr, flags,
+        out_state, &resolution,
+        /*out_deferred_wait_index=*/nullptr));
     return resolution;
   }
 
@@ -130,6 +132,24 @@ TEST_F(QueueFrontierTest, UndominatedLaterProducerDefers) {
             IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY);
 }
 
+TEST_F(QueueFrontierTest, DeferredIndexNamesFirstUnresolvedWait) {
+  iree_hal_semaphore_t* reached = CreateSemaphore();
+  iree_hal_semaphore_t* unresolved = CreateSemaphore();
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(reached, 1, nullptr));
+  iree_hal_semaphore_t* semaphores[] = {reached, unresolved};
+  uint64_t values[] = {1, 1};
+  iree_hal_amd_xdna_frontier_state_t state;
+  iree_hal_amd_xdna_wait_resolution_t resolution =
+      IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY;
+  iree_host_size_t deferred_wait_index = IREE_HOST_SIZE_MAX;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_frontier_resolve_waits(
+      device_, {IREE_ARRAYSIZE(semaphores), semaphores, values}, nullptr,
+      /*initial_state=*/nullptr, IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_FLAG_NONE,
+      &state, &resolution, &deferred_wait_index));
+  EXPECT_EQ(resolution, IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_DEFER);
+  EXPECT_EQ(deferred_wait_index, 1u);
+}
+
 TEST_F(QueueFrontierTest, ReachedHeterogeneousFanInRemainsExact) {
   iree_hal_semaphore_t* first = CreateSemaphore();
   iree_hal_semaphore_t* second = CreateSemaphore();
@@ -151,6 +171,42 @@ TEST_F(QueueFrontierTest, ReachedHeterogeneousFanInRemainsExact) {
       iree_hal_amd_xdna_frontier_state_dominates(&state, first_axis, 3));
   EXPECT_TRUE(
       iree_hal_amd_xdna_frontier_state_dominates(&state, second_axis, 11));
+}
+
+TEST_F(QueueFrontierTest, SuffixResolutionAccumulatesReachedPrefix) {
+  iree_hal_semaphore_t* prefix = CreateSemaphore();
+  iree_hal_semaphore_t* suffix = CreateSemaphore();
+  const iree_async_axis_t prefix_axis = test_queue_axis(4);
+  const iree_async_axis_t suffix_axis = test_queue_axis(7);
+  const iree_async_axis_t accepted_axis = test_queue_axis(9);
+  Publish(prefix, prefix_axis, /*epoch=*/3, /*value=*/1);
+  Complete(prefix, prefix_axis, /*epoch=*/3, /*value=*/1);
+  Publish(suffix, suffix_axis, /*epoch=*/11, /*value=*/1);
+  Complete(suffix, suffix_axis, /*epoch=*/11, /*value=*/1);
+
+  uint64_t value = 1;
+  iree_hal_amd_xdna_frontier_state_t state;
+  EXPECT_EQ(Resolve({1, &prefix, &value}, nullptr,
+                    IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_FLAG_NONE, &state),
+            IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY);
+  iree_hal_amd_xdna_frontier_state_t accepted_state;
+  iree_hal_amd_xdna_frontier_state_initialize(&accepted_state);
+  iree_hal_amd_xdna_frontier_state_advance(&accepted_state, accepted_axis, 5);
+  iree_hal_amd_xdna_wait_resolution_t resolution =
+      IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_DEFER;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_frontier_resolve_waits(
+      device_, {1, &suffix, &value}, &accepted_state, &state,
+      IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_FLAG_NONE, &state, &resolution,
+      /*out_deferred_wait_index=*/nullptr));
+
+  EXPECT_EQ(resolution, IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY);
+  EXPECT_TRUE(state.exact);
+  EXPECT_TRUE(
+      iree_hal_amd_xdna_frontier_state_dominates(&state, prefix_axis, 3));
+  EXPECT_TRUE(
+      iree_hal_amd_xdna_frontier_state_dominates(&state, suffix_axis, 11));
+  EXPECT_TRUE(
+      iree_hal_amd_xdna_frontier_state_dominates(&state, accepted_axis, 5));
 }
 
 TEST_F(QueueFrontierTest, ReachedIndependentProducerDoesNotImportFutureAxis) {
@@ -221,7 +277,9 @@ TEST_F(QueueFrontierTest, SemaphoreFailurePropagates) {
       IREE_STATUS_ABORTED,
       iree_hal_amd_xdna_frontier_resolve_waits(
           device_, {1, &semaphore, &value}, nullptr,
-          IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_FLAG_NONE, &state, &resolution));
+          /*initial_state=*/nullptr,
+          IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_FLAG_NONE, &state, &resolution,
+          /*out_deferred_wait_index=*/nullptr));
 }
 
 }  // namespace
