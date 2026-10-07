@@ -29,6 +29,9 @@ iree_status_t iree_hal_amd_xdna_queue_assign_frontier(
     iree_hal_queue_t* queue, iree_async_frontier_tracker_t* tracker,
     iree_async_axis_t axis);
 
+// Releases currently unused operation and payload capture blocks.
+void iree_hal_amd_xdna_queue_trim(iree_hal_queue_t* queue);
+
 // Releases native queue ownership before the parent releases its proactor and
 // context. Called with exclusive access after all HAL queue users retire.
 // Returns false only when native BUSY preserves the queue; the diagnosed

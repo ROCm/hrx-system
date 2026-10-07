@@ -187,6 +187,7 @@ static void iree_hal_amd_xdna_device_replace_channel_provider(
     iree_hal_device_t* device, iree_hal_channel_provider_t* provider) {}
 
 static iree_status_t iree_hal_amd_xdna_device_trim(iree_hal_device_t* device) {
+  iree_hal_amd_xdna_queue_trim(((iree_hal_amd_xdna_device_t*)device)->queue);
   return iree_ok_status();
 }
 

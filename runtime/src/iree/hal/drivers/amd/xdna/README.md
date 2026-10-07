@@ -40,6 +40,12 @@ context. Each accepted operation captures its transient arguments and retains
 its resources. Semaphore dependencies express ordering. A consumer submitted
 before its producer waits without occupying a native execution slot.
 
+Queue-owned fixed-block arenas capture operation metadata, placed semaphore
+timepoints, transfer descriptors, and dispatch bindings. UPDATE data is split
+across reusable payload blocks and copied through one target mapping. The pools
+grow for a new workload shape and then reuse those blocks; repeating a warmed
+shape and depth performs no host allocation or free.
+
 The shared proactor admits ready operations and observes native completion.
 Accepted invocations occupy a bounded ring sized to the native queue's prepared
 capacity. Each pending invocation owns exclusive mutable command and binding
@@ -63,7 +69,10 @@ buffer offsets and aliases survive upload and readback.
 
 Queue notifications are wake hints. Completion refreshes the native queue's
 checked retirement and terminal outcome before publishing HAL semaphores.
-Ordinary retired work releases its references before signaling completion.
+Ordinary retired work releases payload resources before signaling completion.
+An operation-held device reference keeps the queue's capture pools alive
+through inline signal callbacks, then the arenas are returned before the final
+device release.
 If observation fails without proving retirement, the queue reports the error,
 fails completion edges, and retains the unsafe-to-release ownership graph.
 Teardown failures similarly report and retain ownership without aborting the
