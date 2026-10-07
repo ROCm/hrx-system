@@ -9,6 +9,8 @@
 
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/xdna/driver.h"
+#include "iree/hal/drivers/amd/xdna/image/testdata/add_i32.h"
+#include "iree/hal/drivers/amd/xdna/image/testdata/add_i32_npu4.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32_npu4.h"
 #include "iree/testing/gtest.h"
@@ -18,6 +20,11 @@ namespace {
 
 class XdnaNativeTest : public ::testing::Test {
  protected:
+  enum class BinaryOperation {
+    kAdd,
+    kMultiply,
+  };
+
   void SetUp() override {
     IREE_ASSERT_OK(
         iree_hal_amd_xdna_driver_create(iree_allocator_system(), &driver_));
@@ -51,31 +58,48 @@ class XdnaNativeTest : public ::testing::Test {
     for (auto* buffer : buffers_) {
       iree_hal_buffer_release(buffer);
     }
+    iree_hal_executable_release(alternate_executable_);
     iree_hal_executable_release(executable_);
     iree_hal_device_release(device_);
     iree_async_proactor_pool_release(pool_);
     iree_hal_driver_release(driver_);
   }
 
-  void LoadMultiply() {
+  void LoadProgram(const iree_file_toc_t* halo_toc,
+                   const iree_file_toc_t* npu4_toc,
+                   iree_string_view_t function_name,
+                   iree_hal_executable_t** out_executable,
+                   iree_hal_executable_function_t* out_function) {
     const auto* targets =
         iree_hal_device_spec_executables(iree_hal_device_spec(device_));
     ASSERT_EQ(targets->target_count, 1u);
     const bool halo = iree_string_view_equal(
         targets->targets[0].target_key, IREE_SV("amd.xdna.strix_halo.17f0_11"));
-    const auto* toc = halo ? iree_hal_amd_xdna_test_mul_i32_create()
-                           : iree_hal_amd_xdna_test_mul_i32_npu4_create();
+    const auto* toc = halo ? halo_toc : npu4_toc;
     std::vector<uint8_t> bytes(toc[0].data, toc[0].data + toc[0].size);
     iree_hal_executable_load_params_t params;
     iree_hal_executable_load_params_initialize(&params);
     params.executable_data =
         iree_make_const_byte_span(bytes.data(), bytes.size());
-    IREE_ASSERT_OK(
-        iree_hal_executable_load(iree_hal_device_queue_family(device_, 0),
-                                 &targets->targets[0], &params, &executable_));
+    IREE_ASSERT_OK(iree_hal_executable_load(
+        iree_hal_device_queue_family(device_, 0), &targets->targets[0], &params,
+        out_executable));
     std::fill(bytes.begin(), bytes.end(), 0xCC);
     IREE_ASSERT_OK(iree_hal_executable_lookup_function_by_name(
-        executable_, IREE_SV("mul_i32"), &function_));
+        *out_executable, function_name, out_function));
+  }
+
+  void LoadMultiply() {
+    LoadProgram(iree_hal_amd_xdna_test_mul_i32_create(),
+                iree_hal_amd_xdna_test_mul_i32_npu4_create(),
+                IREE_SV("mul_i32"), &executable_, &function_);
+  }
+
+  void LoadAdd() {
+    LoadProgram(iree_hal_amd_xdna_test_add_i32_create(),
+                iree_hal_amd_xdna_test_add_i32_npu4_create(),
+                IREE_SV("add_i32"), &alternate_executable_,
+                &alternate_function_);
   }
 
   void MakeBuffer(iree_hal_buffer_t** out_buffer) {
@@ -104,7 +128,8 @@ class XdnaNativeTest : public ::testing::Test {
 
   void CheckOutput(iree_hal_buffer_t* output,
                    const std::array<uint32_t, 16>& lhs,
-                   const std::array<uint32_t, 16>& rhs) {
+                   const std::array<uint32_t, 16>& rhs,
+                   BinaryOperation operation = BinaryOperation::kMultiply) {
     std::array<uint32_t, 48> result;
     iree_hal_buffer_mapping_t mapping;
     IREE_ASSERT_OK(iree_hal_buffer_map_range(
@@ -120,7 +145,10 @@ class XdnaNativeTest : public ::testing::Test {
     IREE_ASSERT_OK(status);
     for (size_t i = 0; i < 16; ++i) {
       EXPECT_EQ(result[i], 0xA5A5A5A5u) << i;
-      EXPECT_EQ(result[16 + i], lhs[i] * rhs[i]) << i;
+      const uint32_t expected = operation == BinaryOperation::kAdd
+                                    ? lhs[i] + rhs[i]
+                                    : lhs[i] * rhs[i];
+      EXPECT_EQ(result[16 + i], expected) << i;
       EXPECT_EQ(result[32 + i], 0xA5A5A5A5u) << i;
     }
   }
@@ -139,6 +167,11 @@ class XdnaNativeTest : public ::testing::Test {
   iree_hal_executable_t* executable_ = nullptr;
   // Reflected function token.
   iree_hal_executable_function_t function_ =
+      iree_hal_executable_function_invalid();
+  // Independently loaded image used to prove executable switching.
+  iree_hal_executable_t* alternate_executable_ = nullptr;
+  // Reflected function token from |alternate_executable_|.
+  iree_hal_executable_function_t alternate_function_ =
       iree_hal_executable_function_invalid();
   // Test-owned buffers, released before device teardown.
   std::vector<iree_hal_buffer_t*> buffers_;
@@ -275,6 +308,60 @@ TEST_F(XdnaNativeTest, ReusesIndependentBindingsAcrossPendingBatches) {
                                              IREE_ASYNC_WAIT_FLAG_NONE));
       CheckOutput(invocation.buffers[2], invocation.lhs, invocation.rhs);
     }
+  }
+}
+
+TEST_F(XdnaNativeTest, AlternatesExecutablesAcrossAcceptedChains) {
+  ASSERT_NO_FATAL_FAILURE(LoadMultiply());
+  ASSERT_NO_FATAL_FAILURE(LoadAdd());
+  iree_hal_buffer_t *lhs_buffer = nullptr, *rhs_buffer = nullptr,
+                    *output = nullptr;
+  ASSERT_NO_FATAL_FAILURE(MakeBuffer(&lhs_buffer));
+  ASSERT_NO_FATAL_FAILURE(MakeBuffer(&rhs_buffer));
+  ASSERT_NO_FATAL_FAILURE(MakeBuffer(&output));
+  std::array<uint32_t, 16> lhs, rhs;
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    lhs[i] = static_cast<uint32_t>(i * 19 + 7);
+    rhs[i] = static_cast<uint32_t>(i * 11 + 3);
+  }
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(lhs_buffer, 0, lhs.data(), kBytes));
+  IREE_ASSERT_OK(iree_hal_buffer_map_write(rhs_buffer, 0, rhs.data(), kBytes));
+  const iree_hal_buffer_ref_t bindings[] = {
+      iree_hal_make_buffer_ref(lhs_buffer, 0, kBytes),
+      iree_hal_make_buffer_ref(rhs_buffer, 0, kBytes),
+      iree_hal_make_buffer_ref(output, 0, kBytes),
+  };
+  iree_hal_semaphore_t* completion = nullptr;
+  ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&completion));
+
+  uint64_t completion_value = 0;
+  uint64_t dispatch_ordinal = 0;
+  for (uint64_t batch_length : {UINT64_C(16), UINT64_C(15)}) {
+    BinaryOperation final_operation = BinaryOperation::kMultiply;
+    for (uint64_t i = 0; i < batch_length; ++i, ++dispatch_ordinal) {
+      uint64_t wait_value = completion_value;
+      uint64_t signal_value = ++completion_value;
+      const iree_hal_semaphore_list_t waits =
+          wait_value ? iree_hal_semaphore_list_t{1, &completion, &wait_value}
+                     : iree_hal_semaphore_list_t{};
+      const iree_hal_semaphore_list_t signals = {1, &completion, &signal_value};
+      final_operation = dispatch_ordinal % 2 == 0 ? BinaryOperation::kAdd
+                                                  : BinaryOperation::kMultiply;
+      iree_hal_executable_t* executable =
+          final_operation == BinaryOperation::kAdd ? alternate_executable_
+                                                   : executable_;
+      const iree_hal_executable_function_t function =
+          final_operation == BinaryOperation::kAdd ? alternate_function_
+                                                   : function_;
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queue_, waits, signals, executable, function,
+          iree_hal_make_static_dispatch_config(1, 1, 1), {},
+          {IREE_ARRAYSIZE(bindings), bindings}, IREE_HAL_DISPATCH_FLAG_NONE));
+    }
+    IREE_ASSERT_OK(iree_hal_semaphore_wait(completion, completion_value,
+                                           iree_infinite_timeout(),
+                                           IREE_ASYNC_WAIT_FLAG_NONE));
+    CheckOutput(output, lhs, rhs, final_operation);
   }
 }
 
