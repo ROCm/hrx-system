@@ -239,6 +239,25 @@ def main():
             raise RuntimeError(
                 "pooled concurrent output differs from sequential dense output"
             )
+        heartbeats = [e for e in events.values if e.get("event") == "heartbeat"]
+        if not heartbeats:
+            raise RuntimeError("workload did not observe memory heartbeats")
+        for event in heartbeats:
+            memory = event["device_memory"]
+            retained_bytes = (
+                event["elastic_state"]["committed_bytes"]
+                + event["elastic_parameters"]["committed_bytes"]
+            )
+            if memory["retained_committed_bytes"] != retained_bytes:
+                raise RuntimeError("single-model device backing disagrees with owners")
+            if memory["workspace_live_bytes"] > memory["workspace_committed_bytes"]:
+                raise RuntimeError("live workspace exceeds reported shared backing")
+        if not any(
+            e["device_memory"]["workspace_committed_bytes"]
+            and e["device_memory"]["workspace_reuse_count"]
+            for e in heartbeats
+        ):
+            raise RuntimeError("workload did not observe shared workspace reuse")
         if capacity:
             if arguments.continuation_epochs == 2 and not any(
                 row["verification_epochs"] == 2
@@ -260,7 +279,6 @@ def main():
             trims = [e for e in events.values if e.get("event") == "state_trim"]
             if not any(e["released_bytes"] for e in trims):
                 raise RuntimeError("idle eviction did not release physical backing")
-            heartbeats = [e for e in events.values if e.get("event") == "heartbeat"]
             if any(
                 e["pool"]["reserved_tokens"] + e["pool"]["resident_tokens"] > capacity
                 for e in heartbeats

@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/schedule.h"
@@ -139,6 +140,8 @@ typedef struct text_heartbeat_snapshot_t {
   loom_serve_memory_statistics_t state_memory;
   // Prepared parameters, independently reclaimable from retained state.
   loom_serve_memory_statistics_t weight_memory;
+  // Shared owner accounting, including other models and pooled command scratch.
+  loom_serve_device_memory_statistics_t device_memory;
   // Active requests still consuming prompt input.
   iree_host_size_t prefill_rows;
   // Active requests generating output.
@@ -284,6 +287,11 @@ static int text_heartbeat_main(void* argument) {
         ",\"committed_bytes\":%" PRIu64 ",\"peak_bytes\":%" PRIu64
         ",\"released_bytes\":%" PRIu64
         "},"
+        "\"device_memory\":{\"retained_committed_bytes\":%" PRIu64
+        ",\"workspace_committed_bytes\":%" PRIu64
+        ",\"workspace_live_bytes\":%" PRIu64
+        ",\"workspace_slab_count\":%u,\"workspace_reuse_count\":%" PRIu64
+        "},"
         "\"prefill_rows\":%zu,\"decode_rows\":%zu,"
         "\"backpressured_rows\":%zu,\"issued_epochs\":%" PRIu64
         ",\"completed_epochs\":%" PRIu64 ",\"traversals\":%" PRIu64
@@ -303,11 +311,16 @@ static int text_heartbeat_main(void* argument) {
         state.state_memory.peak_bytes, state.state_memory.released_bytes,
         state.weight_memory.reserved_bytes, state.weight_memory.committed_bytes,
         state.weight_memory.peak_bytes, state.weight_memory.released_bytes,
-        state.prefill_rows, state.decode_rows, state.backpressured_rows,
-        state.issued_epochs, state.completed_epochs, state.traversals,
-        state.prefill_tokens, state.decode_tokens, state.output_tokens,
-        state.model_duration / 1e6, state.epoch_spans, state.epoch_tokens,
-        state.mtp.proposed_tokens, state.mtp.accepted_inputs,
+        state.device_memory.retained.committed_bytes,
+        (uint64_t)state.device_memory.workspace.bytes_committed,
+        (uint64_t)state.device_memory.workspace.bytes_reserved,
+        state.device_memory.workspace.slab_count,
+        state.device_memory.workspace.reuse_count, state.prefill_rows,
+        state.decode_rows, state.backpressured_rows, state.issued_epochs,
+        state.completed_epochs, state.traversals, state.prefill_tokens,
+        state.decode_tokens, state.output_tokens, state.model_duration / 1e6,
+        state.epoch_spans, state.epoch_tokens, state.mtp.proposed_tokens,
+        state.mtp.accepted_inputs,
         seconds > 0 ? (state.prefill_tokens - previous_prefill) / seconds : 0,
         seconds > 0 ? (state.output_tokens - previous_output) / seconds : 0);
     previous_time = now;
@@ -354,6 +367,8 @@ static void text_observe(text_service_t* service, const char* phase) {
   state->state_memory = loom_serve_text_model_memory_statistics(service->model);
   state->weight_memory =
       loom_serve_text_model_weight_statistics(service->model);
+  state->device_memory = loom_serve_device_memory_statistics(
+      loom_serve_text_model_device(service->model));
   state->prefill_rows = prefill;
   state->decode_rows = decode;
   state->backpressured_rows = backpressured;

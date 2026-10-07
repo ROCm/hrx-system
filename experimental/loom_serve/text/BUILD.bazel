@@ -139,6 +139,7 @@ loom_cc_library(
         ":schedule",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/scheduling:packing",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",

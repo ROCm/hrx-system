@@ -769,6 +769,11 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   return status;
 }
 
+loom_serve_device_t* loom_serve_text_model_device(
+    const loom_serve_text_model_t* model) {
+  return model->device_owner;
+}
+
 loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,
                                                  iree_host_size_t index) {
   return &model->rows[index];
