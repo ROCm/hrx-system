@@ -349,9 +349,9 @@ void iree_hal_amdgpu_transient_buffer_commit(iree_hal_buffer_t* base_buffer) {
   IREE_ASSERT_TRUE(buffer->staged_backing != NULL);
   IREE_ASSERT_TRUE(
       iree_hal_amdgpu_transient_buffer_load_committed_backing(buffer) == NULL);
-  iree_hal_buffer_copy_bindings(buffer->staged_backing,
-                                iree_hal_amdgpu_buffer_binding_layout(),
-                                buffer->native.bindings);
+  iree_hal_buffer_memory_copy_bindings(&buffer->staged_backing->memory,
+                                       iree_hal_amdgpu_buffer_binding_layout(),
+                                       buffer->native.bindings);
   iree_atomic_store(&buffer->committed_backing,
                     (intptr_t)buffer->staged_backing,
                     iree_memory_order_release);
