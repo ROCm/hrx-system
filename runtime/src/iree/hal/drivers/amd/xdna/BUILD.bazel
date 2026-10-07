@@ -180,6 +180,28 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "queue_producer_index",
+    srcs = ["queue_producer_index.c"],
+    hdrs = ["queue_producer_index.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_producer_index_test",
+    srcs = ["queue_producer_index_test.cc"],
+    deps = [
+        ":queue_producer_index",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "queue_storage_test",
     srcs = ["queue_storage_test.cc"],
@@ -218,6 +240,7 @@ iree_runtime_cc_library(
         ":context",
         ":executable",
         ":queue_frontier",
+        ":queue_producer_index",
         ":queue_service",
         ":queue_storage",
         ":semaphore",

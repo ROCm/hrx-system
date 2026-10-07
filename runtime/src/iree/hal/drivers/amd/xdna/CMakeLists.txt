@@ -237,6 +237,38 @@ iree_cc_library(
 endif()
 
 if(AMDF_BUILD)
+iree_cc_library(
+  NAME
+    queue_producer_index
+  HDRS
+    "queue_producer_index.h"
+  SRCS
+    "queue_producer_index.c"
+  DEPS
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_producer_index_test
+  SRCS
+    "queue_producer_index_test.cc"
+  DEPS
+    ::queue_producer_index
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
 iree_cc_test(
   NAME
     queue_storage_test
@@ -284,6 +316,7 @@ iree_cc_library(
     ::context
     ::executable
     ::queue_frontier
+    ::queue_producer_index
     ::queue_service
     ::queue_storage
     ::semaphore

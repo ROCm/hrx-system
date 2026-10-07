@@ -10,6 +10,7 @@
 #include "iree/async/frontier_tracker.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
 #include "iree/hal/drivers/amd/xdna/queue_frontier.h"
+#include "iree/hal/drivers/amd/xdna/queue_producer_index.h"
 #include "iree/hal/drivers/amd/xdna/queue_service.h"
 #include "iree/hal/drivers/amd/xdna/queue_storage.h"
 #include "iree/hal/pool_wait.h"
@@ -20,6 +21,14 @@ extern "C" {
 
 typedef struct iree_hal_amd_xdna_queue_t iree_hal_amd_xdna_queue_t;
 typedef struct iree_hal_amd_xdna_operation_t iree_hal_amd_xdna_operation_t;
+
+// One locally visible signal owned by an unaccepted dispatch.
+typedef struct iree_hal_amd_xdna_producer_entry_t {
+  // Intrusive queue-local lookup node.
+  iree_hal_amd_xdna_queue_producer_node_t index_node;
+  // Next signal owned by the same queue operation, or NULL.
+  struct iree_hal_amd_xdna_producer_entry_t* next;
+} iree_hal_amd_xdna_producer_entry_t;
 
 typedef enum iree_hal_amd_xdna_memory_wait_kind_e {
   IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE = 0,
@@ -98,6 +107,8 @@ struct iree_hal_amd_xdna_operation_t {
   iree_hal_amd_xdna_operation_t* next;
   // Captured wait semaphores, retained through readiness.
   iree_hal_semaphore_list_t waits;
+  // First wait not yet proven reached or native FIFO ordered.
+  iree_host_size_t wait_resolution_offset;
   // Captured signal semaphores, retained through final publication.
   iree_hal_semaphore_list_t signals;
   // Owning terminal operation status.
@@ -166,6 +177,14 @@ struct iree_hal_amd_xdna_operation_t {
       iree_host_size_t binding_count;
       // Stable native slots with retained logical buffers in trailing storage.
       iree_hal_amd_xdna_executable_binding_t* bindings;
+      // Intrusive index entries for locally visible signal semaphores.
+      iree_hal_amd_xdna_producer_entry_t* producer_entries;
+      // True while |producer_entries| are present in the queue index.
+      bool producers_indexed;
+      // First consumer waiting for this operation's native acceptance.
+      iree_hal_amd_xdna_operation_t* acceptance_waiters_head;
+      // Final consumer waiting for this operation's native acceptance.
+      iree_hal_amd_xdna_operation_t* acceptance_waiters_tail;
     } dispatch;
     // Host-mapped transfer transaction.
     struct {

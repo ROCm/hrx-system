@@ -160,15 +160,25 @@ static void iree_hal_amd_xdna_frontier_merge_reached_wait(
 iree_status_t iree_hal_amd_xdna_frontier_resolve_waits(
     iree_hal_device_t* device, iree_hal_semaphore_list_t waits,
     const iree_hal_amd_xdna_frontier_state_t* accepted_state,
+    const iree_hal_amd_xdna_frontier_state_t* initial_state,
     iree_hal_amd_xdna_wait_resolution_flags_t flags,
     iree_hal_amd_xdna_frontier_state_t* out_state,
-    iree_hal_amd_xdna_wait_resolution_t* out_resolution) {
-  if (accepted_state) {
-    iree_hal_amd_xdna_frontier_state_copy(accepted_state, out_state);
+    iree_hal_amd_xdna_wait_resolution_t* out_resolution,
+    iree_host_size_t* out_deferred_wait_index) {
+  if (initial_state) {
+    if (initial_state != out_state) {
+      iree_hal_amd_xdna_frontier_state_copy(initial_state, out_state);
+    }
   } else {
     iree_hal_amd_xdna_frontier_state_initialize(out_state);
   }
+  if (accepted_state) {
+    iree_hal_amd_xdna_frontier_state_merge(out_state, accepted_state);
+  }
   *out_resolution = IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_READY;
+  if (out_deferred_wait_index) {
+    *out_deferred_wait_index = IREE_HOST_SIZE_MAX;
+  }
 
   for (iree_host_size_t i = 0; i < waits.count; ++i) {
     iree_hal_semaphore_t* semaphore = waits.semaphores[i];
@@ -210,6 +220,9 @@ iree_status_t iree_hal_amd_xdna_frontier_resolve_waits(
     }
     if (!fifo_resolved) {
       *out_resolution = IREE_HAL_AMD_XDNA_WAIT_RESOLUTION_DEFER;
+      if (out_deferred_wait_index) {
+        *out_deferred_wait_index = i;
+      }
       return iree_ok_status();
     }
   }
