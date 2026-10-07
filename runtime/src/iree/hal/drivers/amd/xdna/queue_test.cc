@@ -24,6 +24,9 @@
 #include "iree/hal/drivers/amd/xdna/memory_backend.h"
 #include "iree/hal/drivers/amd/xdna/queue_frontier.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
+#include "iree/hal/memory/slab_cache.h"
+#include "iree/hal/memory/tlsf_pool.h"
+#include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -127,6 +130,10 @@ struct NativeProvider {
     api.host_mapping_query_info = MappingInfo;
     api.host_mapping_cache_control = CacheControl;
     api.memory_query_address = MemoryAddress;
+    api.memory_scope_query_info = MemoryScopeQueryInfo;
+    api.memory_scope_query_device_profile = MemoryScopeQueryDeviceProfile;
+    api.memory_scope_query_pair_info = MemoryScopeQueryPairInfo;
+    api.device_destroy = DeviceDestroy;
     api.kernel_queue_query_info = QueueInfo;
     api.kernel_queue_request_notification = Notify;
     api.kernel_queue_refresh_status = Refresh;
@@ -227,6 +234,73 @@ struct NativeProvider {
                                                amdf_memory_address_kind_t kind,
                                                uint64_t* out_address) {
     *out_address = reinterpret_cast<Memory*>(handle)->address;
+    return AMDF_STATUS_OK;
+  }
+  static amdf_status_t AMDF_CALL MemoryScopeQueryInfo(
+      amdf_memory_scope_t* scope, amdf_memory_scope_info_t* out_info) {
+    (void)scope;
+    out_info->kind = AMDF_MEMORY_SCOPE_KIND_SYSTEM;
+    out_info->memory_profile_count = 1;
+    return AMDF_STATUS_OK;
+  }
+  static amdf_status_t AMDF_CALL MemoryScopeQueryDeviceProfile(
+      amdf_memory_scope_t* scope, uint32_t profile_ordinal,
+      uint32_t access_count, const amdf_memory_device_access_t* accesses,
+      amdf_memory_profile_t* out_profile,
+      amdf_memory_access_capabilities_t* out_capabilities) {
+    auto* self = reinterpret_cast<NativeProvider*>(scope);
+    EXPECT_EQ(profile_ordinal, 0u);
+    EXPECT_EQ(access_count, 1u);
+    if (access_count != 1) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+    EXPECT_EQ(accesses[0].device, reinterpret_cast<amdf_device_t*>(self));
+    EXPECT_EQ(accesses[0].requirements.access,
+              AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE);
+    EXPECT_EQ(accesses[0].requirements.flags, AMDF_MEMORY_FLAG_DEVICE_ADDRESS);
+    EXPECT_EQ(accesses[0].requirements.address_kinds,
+              UINT64_C(1) << AMDF_MEMORY_ADDRESS_XDNA_DMA);
+    out_capabilities[0].guaranteed_access =
+        AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
+    out_capabilities[0].supported_access =
+        AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
+    out_capabilities[0].guaranteed_flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+    out_capabilities[0].supported_flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+    out_capabilities[0].address_kinds = UINT64_C(1)
+                                        << AMDF_MEMORY_ADDRESS_XDNA_DMA;
+    out_profile->ordinal = profile_ordinal;
+    out_profile->memory_class = AMDF_MEMORY_CLASS_SYSTEM;
+    out_profile->roles =
+        AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP;
+    out_profile->guaranteed_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
+    out_profile->supported_flags =
+        AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
+    out_profile->allocation.maximum_byte_length = UINT64_C(1) << 30;
+    out_profile->allocation.byte_length_granularity = 4096;
+    out_profile->allocation.minimum_alignment = 4096;
+    out_profile->allocation.maximum_alignment = UINT64_C(1) << 20;
+    out_profile->allocation.native_byte_length_granularity = 4096;
+    out_profile->host_mapping.maximum_byte_length = UINT64_C(1) << 30;
+    out_profile->host_mapping.byte_offset_granularity = 1;
+    out_profile->host_mapping.byte_length_granularity = 1;
+    out_profile->host_mapping.supported_access =
+        AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    return AMDF_STATUS_OK;
+  }
+  static amdf_status_t AMDF_CALL MemoryScopeQueryPairInfo(
+      amdf_memory_scope_t* scope, const amdf_memory_profile_pair_query_t* query,
+      amdf_memory_pair_info_t* out_info) {
+    auto* self = reinterpret_cast<NativeProvider*>(scope);
+    EXPECT_EQ(query->memory_profile_ordinal, 0u);
+    EXPECT_EQ(query->access_count, 1u);
+    if (query->access_count != 1) {
+      return amdf_make_api_status(AMDF_STATUS_CODE_INVALID_ARGUMENT);
+    }
+    EXPECT_EQ(query->accesses[0].device,
+              reinterpret_cast<amdf_device_t*>(self));
+    out_info->flags = AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE;
+    out_info->release.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
+    out_info->acquire.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
     return AMDF_STATUS_OK;
   }
   static amdf_status_t AMDF_CALL
@@ -369,6 +443,10 @@ struct NativeProvider {
     ++self->queue_destroy_count;
     return self->destroy_status;
   }
+  static amdf_status_t AMDF_CALL DeviceDestroy(amdf_device_t* device) {
+    (void)device;
+    return AMDF_STATUS_OK;
+  }
   static amdf_status_t AMDF_CALL ContextDestroy(amdf_xdna_context_t* context) {
     auto* self = reinterpret_cast<NativeProvider*>(context);
     self->context_destroy_saw_queue = self->queue_destroy_count == 1;
@@ -487,6 +565,7 @@ class QueueHarness {
           ++static_cast<QueueHarness*>(user_data)->diagnostic_count;
         },
         this};
+    context->device = reinterpret_cast<amdf_device_t*>(&native);
     context->data_source.scope =
         reinterpret_cast<amdf_memory_scope_t*>(&native);
     context->data_source.profile.roles =
@@ -613,6 +692,55 @@ class QueueHarness {
     }
     IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
         iree_hal_device_allocator(device), params, 64, out_buffer));
+  }
+
+  iree_status_t CreateSlabPool(iree_hal_buffer_usage_t usage,
+                               iree_hal_pool_t** out_pool) {
+    const iree_hal_pool_family_access_t access = {
+        /*.family=*/iree_hal_queue_family(queue),
+        /*.usage=*/usage,
+        /*.interfaces=*/UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+    };
+    const iree_hal_pool_scope_t scope = {
+        /*.family_count=*/1,
+        /*.families=*/&access,
+    };
+    iree_hal_slab_pool_options_t options;
+    iree_hal_slab_pool_options_initialize(&options);
+    return iree_hal_slab_pool_create(group, scope, &options, host_allocator,
+                                     out_pool);
+  }
+
+  iree_status_t CreateCachedTLSFPool(iree_hal_buffer_usage_t usage,
+                                     iree_hal_pool_t** out_pool) {
+    *out_pool = nullptr;
+    iree_hal_pool_t* source_pool = nullptr;
+    IREE_RETURN_IF_ERROR(CreateSlabPool(usage, &source_pool));
+
+    iree_hal_tlsf_pool_options_t tlsf_options = {};
+    tlsf_options.tlsf_options.range_length = 64 * 1024;
+    tlsf_options.tlsf_options.alignment = IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT;
+    tlsf_options.tlsf_options.frontier_capacity = 64;
+    iree_hal_pool_reservation_request_t backing_request = {};
+    iree_status_t status = iree_hal_tlsf_pool_query_backing_request(
+        source_pool, &tlsf_options, &backing_request);
+
+    iree_hal_pool_t* cache = nullptr;
+    if (iree_status_is_ok(status)) {
+      iree_hal_slab_cache_options_t cache_options;
+      iree_hal_slab_cache_options_initialize(&cache_options);
+      cache_options.slab = backing_request;
+      cache_options.max_count = 1;
+      status = iree_hal_slab_cache_create(source_pool, &cache_options,
+                                          host_allocator, &cache);
+    }
+    if (iree_status_is_ok(status)) {
+      status = iree_hal_tlsf_pool_create(cache, &tlsf_options, host_allocator,
+                                         out_pool);
+    }
+    iree_hal_pool_release(cache);
+    iree_hal_pool_release(source_pool);
+    return status;
   }
 
   void PollUntilSubmitted(uint64_t count) {
@@ -955,6 +1083,232 @@ TEST(XdnaQueueTest, QueueWaitPublishesContractBindingBeforePreparation) {
   iree_hal_semaphore_release(completion);
   iree_hal_semaphore_release(allocation_ready);
   iree_hal_executable_release(executable);
+}
+
+TEST(XdnaQueueTest, CachedQueueAllocationPublishesContractBeforeDispatch) {
+  QueueHarness harness;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+  iree_hal_pool_t* source_pool = nullptr;
+  IREE_ASSERT_OK(harness.CreateCachedTLSFPool(
+      IREE_HAL_BUFFER_USAGE_STORAGE_READ, &source_pool));
+  iree_hal_executable_t* executable = nullptr;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(harness.LoadExecutable(
+      iree::hal::amd::xdna::testing::ImageFixture(), &executable, &function));
+  const uint64_t expected_allocation_address = harness.native.next_address;
+
+  iree_hal_semaphore_t* allocation_ready = nullptr;
+  iree_hal_semaphore_t* dispatch_done = nullptr;
+  iree_hal_semaphore_t* deallocation_done = nullptr;
+  for (auto** semaphore :
+       {&allocation_ready, &dispatch_done, &deallocation_done}) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
+  }
+
+  std::array<iree_hal_pool_reservation_request_t, 2> requests = {};
+  for (auto& request : requests) {
+    request.params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+    request.allocation_size = 64;
+  }
+  std::array<iree_hal_buffer_t*, 2> buffers = {};
+  uint64_t value = 1;
+  const size_t memory_create_count = harness.native.memory_create_count;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(
+      harness.queue, {}, {1, &allocation_ready, &value}, source_pool,
+      requests.size(), requests.data(), buffers.data()));
+  ASSERT_NE(buffers[0], nullptr);
+  ASSERT_NE(buffers[1], nullptr);
+  EXPECT_EQ(harness.native.memory_create_count, memory_create_count);
+
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(allocation_ready, value));
+  EXPECT_EQ(harness.native.memory_create_count, memory_create_count + 1);
+  iree_hal_memory_scope_t program_scope;
+  const iree_hal_memory_site_t program_site = {
+      /*.kind=*/IREE_HAL_MEMORY_SITE_PROGRAM,
+      /*.family=*/iree_hal_queue_family(harness.queue),
+  };
+  IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+      harness.group, program_site, &program_scope));
+  iree_hal_buffer_native_binding_slot_t slot;
+  IREE_ASSERT_OK(iree_hal_pool_resolve_binding(
+      source_pool, program_scope, IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+      &slot));
+  const uint64_t first_address =
+      iree_hal_buffer_native_binding(buffers[0], slot).device_address;
+  const uint64_t second_address =
+      iree_hal_buffer_native_binding(buffers[1], slot).device_address;
+  EXPECT_EQ(first_address, expected_allocation_address);
+  EXPECT_NE(second_address, first_address);
+
+  const iree_hal_buffer_ref_t binding =
+      iree_hal_make_buffer_ref(buffers[0], 0, requests[0].allocation_size);
+  IREE_ASSERT_OK(
+      iree_hal_queue_dispatch(harness.queue, {1, &allocation_ready, &value},
+                              {1, &dispatch_done, &value}, executable, function,
+                              iree_hal_make_static_dispatch_config(1, 1, 1), {},
+                              {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(1));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(1));
+  {
+    std::lock_guard<std::mutex> lock(harness.native.mutex);
+    ASSERT_EQ(harness.native.pending_commands.size(), 1u);
+    const auto& command_bytes = harness.native.pending_commands[0].bytes;
+    ASSERT_GE(command_bytes.size(), 16u);
+    const uint64_t patched_address = expected_allocation_address + 4;
+    EXPECT_EQ(iree_unaligned_load_le_u32(command_bytes.data() + 8),
+              (uint32_t)patched_address | 1u);
+    EXPECT_EQ(iree_unaligned_load_le_u32(command_bytes.data() + 12),
+              UINT32_C(0xA5A50000) | (uint32_t)(patched_address >> 32));
+  }
+
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(dispatch_done, value));
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(
+      harness.queue, {1, &dispatch_done, &value},
+      {1, &deallocation_done, &value}, buffers.size(), buffers.data()));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(deallocation_done, value));
+
+  for (iree_hal_buffer_t* buffer : buffers) {
+    iree_hal_buffer_release(buffer);
+  }
+  iree_hal_executable_release(executable);
+  iree_hal_pool_release(source_pool);
+  iree_hal_semaphore_release(deallocation_done);
+  iree_hal_semaphore_release(dispatch_done);
+  iree_hal_semaphore_release(allocation_ready);
+}
+
+TEST(XdnaQueueTest, QueueAllocationWaitsBeforeGrowingSourcePool) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+  iree_hal_pool_t* source_pool = nullptr;
+  IREE_ASSERT_OK(
+      harness.CreateSlabPool(IREE_HAL_BUFFER_USAGE_STORAGE_READ, &source_pool));
+  iree_hal_semaphore_t* gate = nullptr;
+  iree_hal_semaphore_t* allocation_ready = nullptr;
+  iree_hal_semaphore_t* deallocation_done = nullptr;
+  for (auto** semaphore : {&gate, &allocation_ready, &deallocation_done}) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
+  }
+
+  iree_hal_pool_reservation_request_t request = {};
+  request.params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+  request.allocation_size = 64;
+  iree_hal_buffer_t* buffer = nullptr;
+  uint64_t value = 1;
+  const size_t memory_create_count = harness.native.memory_create_count;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(harness.queue, {1, &gate, &value},
+                                       {1, &allocation_ready, &value},
+                                       source_pool, 1, &request, &buffer));
+
+  // Admission must register the unresolved wait without entering the blocking
+  // pool path or manufacturing a native allocation on the proactor thread.
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  EXPECT_EQ(harness.native.memory_create_count, memory_create_count);
+  uint64_t reached_value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(allocation_ready, &reached_value));
+  EXPECT_EQ(reached_value, 0u);
+
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate, value, nullptr));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(allocation_ready, value));
+  EXPECT_EQ(harness.native.memory_create_count, memory_create_count + 1);
+  IREE_ASSERT_OK(
+      iree_hal_queue_dealloca(harness.queue, {1, &allocation_ready, &value},
+                              {1, &deallocation_done, &value}, 1, &buffer));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(deallocation_done, value));
+
+  iree_hal_buffer_release(buffer);
+  iree_hal_pool_release(source_pool);
+  iree_hal_semaphore_release(deallocation_done);
+  iree_hal_semaphore_release(allocation_ready);
+  iree_hal_semaphore_release(gate);
+}
+
+TEST(XdnaQueueTest, WarmQueueMemoryOperationsAllocateNoHostStorage) {
+  constexpr uint64_t kWarmupIterations = 4;
+  constexpr uint64_t kMeasuredIterations = 64;
+  constexpr uint64_t kTotalIterations = kWarmupIterations + kMeasuredIterations;
+
+  HostAllocationCounters allocation_counters;
+  {
+    QueueHarness harness;
+    ASSERT_NO_FATAL_FAILURE(
+        harness.Initialize(TrackingAllocator(&allocation_counters)));
+    ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+    ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+    iree_hal_pool_t* pool = nullptr;
+    IREE_ASSERT_OK(harness.CreateCachedTLSFPool(
+        IREE_HAL_BUFFER_USAGE_STORAGE_READ, &pool));
+    iree_hal_semaphore_t* anchor_ready = nullptr;
+    iree_hal_semaphore_t* allocation_ready = nullptr;
+    iree_hal_semaphore_t* deallocation_done = nullptr;
+    iree_hal_semaphore_t* anchor_done = nullptr;
+    for (auto** semaphore :
+         {&anchor_ready, &allocation_ready, &deallocation_done, &anchor_done}) {
+      IREE_ASSERT_OK(iree_hal_semaphore_create(
+          harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+          IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
+    }
+
+    iree_hal_pool_reservation_request_t request = {};
+    request.params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+    request.allocation_size = 64;
+    iree_hal_buffer_t* anchor_buffer = nullptr;
+    uint64_t anchor_value = 1;
+    IREE_ASSERT_OK(iree_hal_queue_alloca(harness.queue, {},
+                                         {1, &anchor_ready, &anchor_value},
+                                         pool, 1, &request, &anchor_buffer));
+    ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(anchor_ready, anchor_value));
+
+    HostAllocationSnapshot before = {};
+    size_t native_allocations_before = 0;
+    for (uint64_t iteration = 1; iteration <= kTotalIterations; ++iteration) {
+      if (iteration == kWarmupIterations + 1) {
+        before = SnapshotHostAllocations(allocation_counters);
+        native_allocations_before = harness.native.memory_create_count;
+      }
+      iree_hal_buffer_t* buffer = nullptr;
+      IREE_ASSERT_OK(iree_hal_queue_alloca(harness.queue, {},
+                                           {1, &allocation_ready, &iteration},
+                                           pool, 1, &request, &buffer));
+      ASSERT_NO_FATAL_FAILURE(
+          harness.PollUntilValue(allocation_ready, iteration));
+      IREE_ASSERT_OK(iree_hal_queue_dealloca(
+          harness.queue, {1, &allocation_ready, &iteration},
+          {1, &deallocation_done, &iteration}, 1, &buffer));
+      ASSERT_NO_FATAL_FAILURE(
+          harness.PollUntilValue(deallocation_done, iteration));
+      iree_hal_buffer_release(buffer);
+    }
+
+    ExpectHostAllocationsUnchanged(before, allocation_counters);
+    EXPECT_EQ(harness.native.memory_create_count, native_allocations_before);
+    IREE_ASSERT_OK(iree_hal_queue_dealloca(
+        harness.queue, {1, &anchor_ready, &anchor_value},
+        {1, &anchor_done, &anchor_value}, 1, &anchor_buffer));
+    ASSERT_NO_FATAL_FAILURE(harness.PollUntilValue(anchor_done, anchor_value));
+    iree_hal_buffer_release(anchor_buffer);
+    iree_hal_semaphore_release(anchor_done);
+    iree_hal_semaphore_release(deallocation_done);
+    iree_hal_semaphore_release(allocation_ready);
+    iree_hal_semaphore_release(anchor_ready);
+    iree_hal_pool_release(pool);
+  }
+  EXPECT_EQ(allocation_counters.live_allocations.load(), 0);
 }
 
 TEST(XdnaQueueTest, ReadyDispatchPublishesBeforeProactorProgress) {
@@ -1920,22 +2274,26 @@ TEST(XdnaQueueTest, FinalPublicationAllowsImmediateDeviceRelease) {
   EXPECT_EQ(allocation_counters.live_allocations.load(), 0);
 }
 
-TEST(XdnaQueueTest, ConsumingCleanupFailureReleasesParent) {
-  QueueHarness harness;
-  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
-  harness.native.destroy_status =
-      amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
-  harness.ReleaseDevice();
-  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDeviceDestroyed());
-  EXPECT_EQ(harness.native.queue_destroy_count, 1u);
-  EXPECT_EQ(harness.native.context_destroy_count, 1u);
-  EXPECT_TRUE(harness.native.context_destroy_saw_queue);
-  EXPECT_EQ(harness.diagnostic_count, 1u);
-}
-
 // These paths deliberately preserve live native ownership until process exit.
 // Child processes verify the retained resources and use _Exit so deliberate
 // retention does not become an accidental LeakSanitizer failure at exit.
+TEST(XdnaQueueDeathTest, CleanupFailurePreservesParentOwnership) {
+  ASSERT_EXIT(
+      {
+        QueueHarness harness;
+        ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+        harness.native.destroy_status =
+            amdf_make_api_status(AMDF_STATUS_CODE_INTERNAL);
+        harness.ReleaseDevice();
+        ASSERT_NO_FATAL_FAILURE(harness.PollUntilQueueDestroyAttempted());
+        EXPECT_EQ(harness.native.queue_destroy_count, 1u);
+        EXPECT_EQ(harness.native.context_destroy_count, 0u);
+        EXPECT_EQ(harness.diagnostic_count, 1u);
+        std::_Exit(::testing::Test::HasFailure() ? 1 : 0);
+      },
+      ::testing::ExitedWithCode(0), "");
+}
+
 TEST(XdnaQueueDeathTest, ObserverFailuresPreserveAcceptedOwnership) {
   for (Outcome outcome :
        {Outcome::kNotificationFailure, Outcome::kRefreshFailure,
