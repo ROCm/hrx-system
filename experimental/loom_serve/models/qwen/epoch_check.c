@@ -1214,6 +1214,15 @@ static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(qwen_check_restore(model, 3, checkpoint));
   IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 6));
   IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 3, 6));
+  if (loom_serve_text_row_pool_reclaimable(source) != 0 ||
+      loom_serve_text_row_pool_reclaimable(
+          loom_serve_text_model_row(model, 6)) != 2 * pool.block_size ||
+      loom_serve_text_row_pool_growth(loom_serve_text_model_row(model, 1),
+                                      134) != 2 * pool.block_size) {
+    return iree_make_status(
+        IREE_STATUS_DATA_LOSS,
+        "shared admission queries miscounted unique pages or tail COW");
+  }
   if (loom_serve_text_model_pool_usage(model).available != before_fork) {
     return iree_make_status(IREE_STATUS_DATA_LOSS, "fork copied immutable KV");
   }

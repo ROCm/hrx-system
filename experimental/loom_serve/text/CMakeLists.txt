@@ -151,6 +151,7 @@ loom_cc_library(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::scheduling::packing
     iree::tokenizer
+    iree::vm
     loom::util::json
     loom::util::stream
   PUBLIC

@@ -181,7 +181,7 @@ def main():
             for event in events:
                 if event and event.get("event") == "heartbeat":
                     pool = event["pool"]
-                    if max(pool["reserved_tokens"], pool["resident_tokens"]) > capacity:
+                    if pool["reserved_tokens"] + pool["resident_tokens"] > capacity:
                         raise RuntimeError("pool accounting exceeded its budget")
         print(
             json.dumps(

@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 WORDS = ("MAPLE", "COBALT", "CEDAR", "QUARTZ", "AMBER", "CORAL", "JADE", "ONYX")
 
 
-def request(address, session, messages, maximum, *, tools=None):
+def request(address, session, messages, maximum, *, tools=None, checkpoint=None):
     connection = http.client.HTTPConnection(address.hostname, address.port)
     start = time.monotonic_ns()
     first = None
@@ -44,11 +44,14 @@ def request(address, session, messages, maximum, *, tools=None):
         }
         if tools is not None:
             body["tools"] = tools
+        headers = {"Content-Type": "application/json", "X-Loom-Session": session}
+        if checkpoint is not None:
+            headers["X-Loom-Checkpoint"] = checkpoint
         connection.request(
             "POST",
             "/v1/chat/completions",
             json.dumps(body),
-            {"Content-Type": "application/json", "X-Loom-Session": session},
+            headers,
         )
         response = connection.getresponse()
         if response.status != 200:

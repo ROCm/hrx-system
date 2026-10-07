@@ -24,6 +24,41 @@ from urllib.parse import urlsplit
 from experimental.loom_serve.models.qwen import benchmark_service
 
 
+class Events:
+    """Completed service events establish readiness without timed sleeps."""
+
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.values = []
+        self.closed = False
+
+    def record(self, event):
+        with self.condition:
+            if event is None:
+                self.closed = True
+            else:
+                self.values.append(event)
+            self.condition.notify_all()
+
+    def wait(self, kind, session):
+        def match():
+            return next(
+                (
+                    event
+                    for event in self.values
+                    if event.get("event") == kind and event.get("session") == session
+                ),
+                None,
+            )
+
+        with self.condition:
+            self.condition.wait_for(lambda: match() or self.closed)
+            event = match()
+            if event is None:
+                raise RuntimeError(f"server closed before {kind}: {session}")
+            return event
+
+
 @contextlib.contextmanager
 def running_server(command, log_path, on_event=None):
     with log_path.open("x") as log, ThreadPoolExecutor(max_workers=1) as readers:

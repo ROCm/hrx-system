@@ -67,7 +67,7 @@ speculation. It is not an arbitrary model-graph interpreter.
   still joins each cohort; this is not an autonomous persistent device loop.
 * Pooled execution reserves stable device addresses at startup and backs
   row/page ranges on demand. Admission reserves completion high-water credit
-  and queues excess work. These are private pages, not shared prefixes.
+  and queues excess work, counting shared explicit prefixes only once.
   Explicit model-level suspend/resume is described below; HTTP admission does
   not yet select sessions for offload. Fixed backing remains an explicit
   comparison and device-sanitizer configuration.
@@ -251,12 +251,57 @@ once. Trim preserves pinned anchors even without a live row. An unadvanced
 fork's suspension captures its actual shared state. The last release makes
 storage reusable; no automatic soft history retains a released endpoint.
 
-These handles are serialized model API objects, not HTTP identifiers. Prefix
-lookup, request markers and cache admission policy can own these handles;
-none is inferred from a prompt or silently enabled. The real-model witness is
+These handles are serialized model API objects. The HTTP service owns them
+through explicitly named endpoints; automatic prefix discovery is not enabled.
+The native real-model witness is
 `models/qwen:epoch_check --checkpoints --checkpoint_capacity=1
 --pool_capacity=65536 --context_capacity=1024 --prefill_capacity=128
 --epoch=64:4 --epoch=128:8 --mtp`, with normal model/weights/tokenizer flags.
+
+### Named HTTP checkpoints
+
+With nonzero `--checkpoint_capacity`, an empty-body
+`POST /v1/checkpoints/NAME` carrying `X-Loom-Session: SESSION` pins that idle,
+completed session. The `201` JSON receipt reports its consumed token position.
+Names use 1–64 ASCII letters, digits, underscores, dots or hyphens. They are
+process/model-local identifiers, not content hashes or authentication tokens.
+An absent/evicted session returns `404`; a busy session or duplicate name
+returns `409`; exhausted pin capacity returns `503`. Pins never replace one
+another implicitly.
+
+A normal chat completion can set `X-Loom-Checkpoint: NAME` alongside its
+destination `X-Loom-Session`. It still sends full history. The source-rendered
+history must extend the checkpoint's canonical transcript; mismatches return
+`400` before changing that session. The service restores the exact consumed
+frontier and pending raw token, then encodes the appended suffix with the model
+source's existing framing. Another destination session forks the endpoint;
+the same session rewinds it. An unknown explicit name returns `404`, never a
+silently fabricated cache hit. Omitting the header retains normal best-effort
+session reuse and full replay on a miss.
+
+`DELETE /v1/checkpoints/NAME` releases the explicit pin and returns `200`.
+Queued admissions borrow the record, so deletion returns `409` until they are
+admitted or cancelled. Active branches already own independent references and
+do not prevent deletion. A client can therefore pin before disposable tool
+output, generate a summary, restore with summary-only history, then release
+the pin without keeping hidden history. These endpoints mark completed turns;
+they do not invent intermediate system/message snapshots inside a traversal.
+
+Admission counts unique resident pages once plus remaining active completion
+growth, including partial-tail detachment and speculative credit. The JSONL
+`pool.reserved_tokens` is additional growth; `pool.resident_tokens` is unique
+residency including explicit pins. Their sum stays within logical capacity.
+Idle cache can be evicted under pressure. Pins are never automatically evicted;
+if pins make a request impossible even without active work, it returns `503`
+with a release/increase-capacity diagnostic instead of waiting indefinitely.
+Physical restore refusal also returns `503` without replacing the destination
+continuation. Native metadata does not constitute disk persistence.
+
+`models/qwen:check_checkpoints` exercises the actual HTTP summary/rewind and
+concurrent shared-prefix flow, comparing output with independent full replay.
+It accepts the built `--server`, external `--model`, `--weights`, `--tokenizer`
+and a new `--output` evidence directory. It runs on a separately excluded GPU;
+it is not a synthetic model test or a performance benchmark.
 
 Each row's control/input/progress views are present. Dense
 attention is present only without a physical pool; pooled kernels find it

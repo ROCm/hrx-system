@@ -58,16 +58,21 @@ typedef struct loom_serve_text_service_options_t {
 // and transport are borrowed. Each epoch gathers credited ready rows, executes
 // their known/verifier spans and commits outputs before reusing the workspace.
 // Heartbeats observe a copied snapshot and continue during model waits.
-// Admission reserves completion capacity before assigning physical pages as
-// execution grows. Excess work waits in a bounded FIFO; impossible requests
-// reject before altering retained state. Idle cache yields to admitted work.
+// Admission charges unique resident pages plus remaining completion growth,
+// including shared partial-tail COW. Excess work waits in a bounded FIFO;
+// invalid requests reject before altering retained state. Idle cache yields to
+// admission pressure, but explicit pins remain protected until deletion.
 // Evicted/cancelled rows trigger one compaction/physical trim per admission
 // cohort, outside ordinary decoding. state_trim events report copy, release
 // and maintenance costs separately from model epochs.
 // X-Loom-Session selects retained state, not a durable session. Active or
-// queued named sessions reject overlapping requests. Untagged requests always
-// replay. Peer cancellation discards its checkpoint at a completed stage
-// boundary. Return relinquishes every connection view before the caller
+// queued named sessions reject overlapping requests. X-Loom-Checkpoint selects
+// an explicit pinned endpoint only after full canonical-history validation.
+// POST/DELETE /v1/checkpoints/NAME pin an idle completed X-Loom-Session or
+// release that pin. Deletion refuses while queued requests borrow the endpoint.
+// Untagged requests without an explicit pin always replay. Peer cancellation
+// discards its live row, not independently pinned endpoints, at a completed
+// stage boundary. Return relinquishes every connection view before the caller
 // destroys transport/model. Capacities match the created model.
 iree_status_t loom_serve_text_service_run(
     loom_serve_text_model_t* model, loom_serve_http_server_t* server,
