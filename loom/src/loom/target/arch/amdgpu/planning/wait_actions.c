@@ -168,8 +168,6 @@ static void loom_amdgpu_wait_actions_progress_query(
                                               packet->node_index)) {
     return;
   }
-  const loom_amdgpu_wait_frontier_node_t* frontier_node =
-      &publication->classification->frontier_nodes[packet->node_index];
   loom_amdgpu_wait_actions_emit_counter_progress_mask(
       emit, emit_user_data,
       node_state->explicit_wait_counter_mask |
@@ -192,8 +190,8 @@ static void loom_amdgpu_wait_actions_progress_query(
     }
   }
   const uint32_t producer_counter_mask =
-      frontier_node->read_counter_mask | frontier_node->write_counter_mask |
-      node_state->trans_result_counter_mask | node_state->source_counter_mask;
+      publication->classification->completion_nodes[packet->node_index]
+          .producer_counter_mask;
   loom_amdgpu_wait_actions_emit_counter_progress_mask(
       emit, emit_user_data, producer_counter_mask,
       LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1);

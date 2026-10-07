@@ -75,25 +75,15 @@ typedef struct loom_amdgpu_wait_node_state_t {
     // Immutable bounds row for an EXPLICIT_WAIT node.
     uint32_t wait_bounds_index;
   } state;
-  // Counters observed on WAIT_COUNTER hazard rows for this node.
-  loom_amdgpu_wait_counter_mask_t hazard_counter_mask;
   // Counters drained by explicit counter effects on this node.
   loom_amdgpu_wait_counter_mask_t explicit_wait_counter_mask;
-  // Counters produced by RDNA TRANS result hazards on this node.
-  loom_amdgpu_wait_counter_mask_t trans_result_counter_mask;
-  // Counters produced only to retain issued source storage on this node.
-  loom_amdgpu_wait_counter_mask_t source_counter_mask;
   // Counters implicitly drained by the emitted packet.
   loom_amdgpu_wait_counter_mask_t implicit_wait_counter_mask;
-  // Access counters whose effects are visible to workgroup-memory barriers.
-  loom_amdgpu_wait_counter_mask_t workgroup_access_counter_mask;
   // Counters that must be drained before this barrier node executes.
   loom_amdgpu_wait_counter_mask_t barrier_counter_mask;
-  // Workgroup-memory access counters drained before this barrier executes.
-  loom_amdgpu_wait_counter_mask_t workgroup_barrier_counter_mask;
 } loom_amdgpu_wait_node_state_t;
 
-static_assert(sizeof(loom_amdgpu_wait_node_state_t) == 16,
+static_assert(sizeof(loom_amdgpu_wait_node_state_t) == 12,
               "classified wait-node state must remain compact");
 
 // Target wait state indexed by the completed low schedule.
@@ -105,7 +95,8 @@ typedef struct loom_amdgpu_wait_classification_t {
   // Memory facts indexed by schedule node. Action planning records locally
   // completed producer prefixes in the same compact rows.
   loom_amdgpu_wait_frontier_node_t* frontier_nodes;
-  // Counter facts indexed by schedule node. Dependency completion analysis
+  // Counter facts indexed by schedule node. Classification owns the producer,
+  // write, hazard, and workgroup fields; dependency completion analysis
   // finalizes reset and block-exit fields before action planning begins.
   loom_amdgpu_wait_completion_node_t* completion_nodes;
   // Decoded explicit-wait bounds indexed by node-state payload.

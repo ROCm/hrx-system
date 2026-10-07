@@ -17,7 +17,10 @@
 #include "loom/target/arch/amdgpu/refs/target_refs.h"
 #include "loom/target/arch/amdgpu/target_info.h"
 
-static iree_status_t loom_amdgpu_wait_classification_allocate(
+// Keep fallible table allocation out of the inlined classifier so its three
+// array sizes do not extend overflow and failure state across classification.
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_amdgpu_wait_classification_allocate(
     const loom_low_schedule_table_t* schedule, iree_arena_allocator_t* arena,
     loom_amdgpu_wait_classification_t* classification) {
   const iree_host_size_t node_count = schedule->node_count;
@@ -147,7 +150,7 @@ loom_amdgpu_wait_classification_classify_hazards(
     IREE_ASSERT_LT(hazard->node_index, schedule->node_count);
     const uint32_t counter_mask =
         loom_amdgpu_wait_counter_mask(hazard->reference_id);
-    classification->node_states[hazard->node_index].hazard_counter_mask |=
+    classification->completion_nodes[hazard->node_index].hazard_counter_mask |=
         counter_mask;
   }
 }
@@ -171,6 +174,8 @@ static void loom_amdgpu_wait_classification_classify_effects(
         &classification->node_states[effect->node_index];
     loom_amdgpu_wait_frontier_node_t* frontier_node =
         &classification->frontier_nodes[effect->node_index];
+    loom_amdgpu_wait_completion_node_t* completion_node =
+        &classification->completion_nodes[effect->node_index];
     switch (effect->kind) {
       case LOOM_LOW_EFFECT_KIND_READ: {
         if (!loom_amdgpu_wait_effect_is_dependency_memory(effect)) {
@@ -192,7 +197,7 @@ static void loom_amdgpu_wait_classification_classify_effects(
           frontier_node->read_counter_mask |= counter_mask;
           if (effect->memory_space == LOOM_LOW_MEMORY_SPACE_WORKGROUP ||
               effect->memory_space == LOOM_LOW_MEMORY_SPACE_GENERIC) {
-            node_state->workgroup_access_counter_mask |= counter_mask;
+            completion_node->workgroup_access_counter_mask |= counter_mask;
           }
         }
         break;
@@ -225,7 +230,7 @@ static void loom_amdgpu_wait_classification_classify_effects(
           frontier_node->write_counter_mask |= counter_mask;
           if (effect->memory_space == LOOM_LOW_MEMORY_SPACE_WORKGROUP ||
               effect->memory_space == LOOM_LOW_MEMORY_SPACE_GENERIC) {
-            node_state->workgroup_access_counter_mask |= counter_mask;
+            completion_node->workgroup_access_counter_mask |= counter_mask;
           }
         }
         break;
@@ -235,7 +240,7 @@ static void loom_amdgpu_wait_classification_classify_effects(
           const uint32_t counter_mask =
               loom_amdgpu_wait_effect_counter_mask(effect);
           if (effect->memory_space == LOOM_LOW_MEMORY_SPACE_WORKGROUP) {
-            node_state->workgroup_barrier_counter_mask |=
+            completion_node->workgroup_barrier_counter_mask |=
                 counter_mask == 0 ? LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY
                                   : counter_mask;
           } else {
@@ -370,6 +375,8 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     loom_amdgpu_wait_node_state_t* node_state = &classification->node_states[i];
     loom_amdgpu_wait_frontier_node_t* frontier_node =
         &classification->frontier_nodes[i];
+    loom_amdgpu_wait_completion_node_t* completion_node =
+        &classification->completion_nodes[i];
     const loom_low_schedule_node_t* node = &schedule->nodes[i];
     const loom_amdgpu_wait_memory_space_flags_t generic_space =
         loom_amdgpu_wait_memory_space_flag(LOOM_LOW_MEMORY_SPACE_GENERIC);
@@ -428,11 +435,12 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     }
     if (loom_amdgpu_wait_classification_descriptor_has_xcnt_source_lease(
             descriptor_set, node->descriptor)) {
-      node_state->source_counter_mask |= LOOM_AMDGPU_WAIT_COUNTER_MASK_X;
-      node_state->flags |= iree_any_bit_set(node_state->hazard_counter_mask,
-                                            LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM)
-                               ? LOOM_AMDGPU_WAIT_NODE_STATE_XCNT_SMEM_PRODUCER
-                               : LOOM_AMDGPU_WAIT_NODE_STATE_XCNT_VMEM_PRODUCER;
+      completion_node->producer_counter_mask |= LOOM_AMDGPU_WAIT_COUNTER_MASK_X;
+      node_state->flags |=
+          iree_any_bit_set(completion_node->hazard_counter_mask,
+                           LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM)
+              ? LOOM_AMDGPU_WAIT_NODE_STATE_XCNT_SMEM_PRODUCER
+              : LOOM_AMDGPU_WAIT_NODE_STATE_XCNT_VMEM_PRODUCER;
       frontier_node->xcnt_group_flags =
           iree_any_bit_set(node_state->flags,
                            LOOM_AMDGPU_WAIT_NODE_STATE_XCNT_SMEM_PRODUCER)
@@ -477,7 +485,8 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     const bool has_generic_counter_effect = iree_any_bit_set(
         flags, LOOM_AMDGPU_WAIT_NODE_STATE_GENERIC_COUNTER_EFFECT);
     if (has_generic_counter_effect) {
-      node_state->explicit_wait_counter_mask |= node_state->hazard_counter_mask;
+      node_state->explicit_wait_counter_mask |=
+          completion_node->hazard_counter_mask;
     }
     if (node_state->explicit_wait_counter_mask != 0 &&
         !has_generic_counter_effect) {
@@ -490,36 +499,38 @@ static void loom_amdgpu_wait_classification_finish_nodes(
       node_state->flags |= LOOM_AMDGPU_WAIT_NODE_STATE_EXPLICIT_WAIT;
     }
     IREE_ASSERT(node_state->explicit_wait_counter_mask == 0 ||
-                node_state->hazard_counter_mask != 0);
+                completion_node->hazard_counter_mask != 0);
     if (iree_any_bit_set(flags,
                          LOOM_AMDGPU_WAIT_NODE_STATE_DEFAULT_DEPENDENCY_READ)) {
       const uint32_t default_read_counter_mask =
-          node_state->hazard_counter_mask &
+          completion_node->hazard_counter_mask &
           LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY;
       IREE_ASSERT_NE(default_read_counter_mask, 0u);
       frontier_node->read_counter_mask |= default_read_counter_mask;
       if (iree_any_bit_set(frontier_node->read_space_flags, workgroup_spaces)) {
-        node_state->workgroup_access_counter_mask |= default_read_counter_mask;
+        completion_node->workgroup_access_counter_mask |=
+            default_read_counter_mask;
       }
     }
-    IREE_ASSERT_EQ(
-        frontier_node->read_counter_mask & ~node_state->hazard_counter_mask,
-        0u);
+    IREE_ASSERT_EQ(frontier_node->read_counter_mask &
+                       ~completion_node->hazard_counter_mask,
+                   0u);
     if (iree_any_bit_set(
             flags, LOOM_AMDGPU_WAIT_NODE_STATE_DEFAULT_DEPENDENCY_WRITE)) {
       const uint32_t default_write_counter_mask =
-          node_state->hazard_counter_mask &
+          completion_node->hazard_counter_mask &
           LOOM_AMDGPU_WAIT_COUNTER_MASK_MEMORY;
       IREE_ASSERT_NE(default_write_counter_mask, 0u);
       frontier_node->write_counter_mask |= default_write_counter_mask;
       if (iree_any_bit_set(frontier_node->write_space_flags,
                            workgroup_spaces)) {
-        node_state->workgroup_access_counter_mask |= default_write_counter_mask;
+        completion_node->workgroup_access_counter_mask |=
+            default_write_counter_mask;
       }
     }
-    IREE_ASSERT_EQ(
-        frontier_node->write_counter_mask & ~node_state->hazard_counter_mask,
-        0u);
+    IREE_ASSERT_EQ(frontier_node->write_counter_mask &
+                       ~completion_node->hazard_counter_mask,
+                   0u);
     const uint32_t memory_counter_mask =
         frontier_node->read_counter_mask | frontier_node->write_counter_mask;
     if (iree_any_bit_set(memory_counter_mask,
@@ -556,30 +567,22 @@ static void loom_amdgpu_wait_classification_finish_nodes(
     }
     if (has_valu_trans_use_depctr &&
         iree_any_bit_set(flags, LOOM_AMDGPU_WAIT_NODE_STATE_TRANSCENDENTAL)) {
-      node_state->trans_result_counter_mask |=
+      completion_node->producer_counter_mask |=
           LOOM_AMDGPU_WAIT_COUNTER_MASK_ALU;
       ++classification->trans_result_node_count;
     }
-    const uint32_t producer_counter_mask =
-        frontier_node->read_counter_mask | frontier_node->write_counter_mask |
-        node_state->trans_result_counter_mask | node_state->source_counter_mask;
-    classification->completion_nodes[i] = (loom_amdgpu_wait_completion_node_t){
-        .producer_counter_mask = producer_counter_mask,
-        .write_counter_mask = frontier_node->write_counter_mask,
-        .reset_counter_mask = node_state->explicit_wait_counter_mask |
-                              node_state->implicit_wait_counter_mask |
-                              node_state->barrier_counter_mask,
-        .hazard_counter_mask = node_state->hazard_counter_mask,
-        .workgroup_access_counter_mask =
-            node_state->workgroup_access_counter_mask,
-        .workgroup_barrier_counter_mask =
-            node_state->workgroup_barrier_counter_mask,
-    };
+    completion_node->producer_counter_mask |=
+        frontier_node->read_counter_mask | frontier_node->write_counter_mask;
+    completion_node->write_counter_mask = frontier_node->write_counter_mask;
+    completion_node->reset_counter_mask =
+        node_state->explicit_wait_counter_mask |
+        node_state->implicit_wait_counter_mask |
+        node_state->barrier_counter_mask;
     // The payload indexes either immutable wait bounds or mutable issue state.
     IREE_ASSERT(!iree_any_bit_set(node_state->flags,
                                   LOOM_AMDGPU_WAIT_NODE_STATE_EXPLICIT_WAIT) ||
                 classification->completion_nodes[i].producer_counter_mask == 0);
-    if (producer_counter_mask != 0) {
+    if (completion_node->producer_counter_mask != 0) {
       IREE_ASSERT_LT(classification->producer_state_count, UINT32_MAX);
       node_state->state.producer_state_ordinal =
           (uint32_t)++classification->producer_state_count;
