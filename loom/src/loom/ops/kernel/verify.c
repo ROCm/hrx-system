@@ -17,6 +17,7 @@
 #include "loom/ops/function_contract_verify.h"
 #include "loom/ops/kernel/ops.h"
 #include "loom/ops/op_defs.h"
+#include "loom/ops/pipeline/ops.h"
 #include "loom/ops/target/facts.h"
 #include "loom/ops/template/ops.h"
 #include "loom/util/fact_table.h"
@@ -1094,27 +1095,70 @@ static iree_status_t loom_kernel_verify_dispatch_workgroup_counts(
 iree_status_t loom_kernel_launch_verify(const loom_module_t* module,
                                         const loom_op_t* op,
                                         iree_diagnostic_emitter_t emitter) {
-  loom_symbol_ref_t callee = loom_kernel_launch_callee(op);
+  const loom_symbol_ref_t callee = loom_kernel_launch_callee(op);
   const loom_symbol_t* symbol = &module->symbols.entries[callee.symbol_id];
+  const loom_op_t* definition_op = symbol->defining_op;
 
-  loom_value_slice_t workloads = loom_kernel_launch_workloads(op);
-  loom_value_slice_t workload_args =
-      loom_kernel_workload_arg_ids(module, symbol->defining_op);
+  const loom_func_like_t entry =
+      loom_func_like_const_cast(module, definition_op);
+  uint16_t entry_argument_count = 0;
+  const loom_value_id_t* entry_argument_ids =
+      loom_func_like_arg_ids(entry, &entry_argument_count);
+  const bool is_pipeline =
+      loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_PIPELINE);
+
+  const loom_value_id_t* workload_arg_ids = NULL;
+  uint16_t workload_arg_count = 0;
+  const loom_value_id_t* argument_ids = entry_argument_ids;
+  uint16_t argument_count = entry_argument_count;
+  iree_string_view_t workload_name = IREE_SV("kernel workload");
+  iree_string_view_t argument_name = IREE_SV("kernel ABI argument");
+  if (is_pipeline) {
+    const loom_pipeline_def_scope_t scope =
+        loom_pipeline_def_scope(definition_op);
+    if (scope != LOOM_PIPELINE_DEF_SCOPE_KERNEL) {
+      const loom_diagnostic_param_t params[] = {
+          loom_param_string(IREE_SV("pipeline scope")),
+          loom_param_i64(scope),
+          loom_param_string(IREE_SV("kernel")),
+      };
+      return loom_kernel_emit_entry_related(emitter, op, definition_op,
+                                            LOOM_ERR_STRUCTURE_014, params,
+                                            IREE_ARRAYSIZE(params));
+    }
+
+    const int64_t specialization_count =
+        loom_func_like_specialization_count(entry);
+    if (specialization_count < 0 ||
+        specialization_count > entry_argument_count) {
+      // The pipeline definition owns this malformed signature diagnostic.
+      return iree_ok_status();
+    }
+    workload_arg_ids = entry_argument_ids;
+    workload_arg_count = (uint16_t)specialization_count;
+    if (specialization_count != 0) {
+      argument_ids += specialization_count;
+    }
+    argument_count -= (uint16_t)specialization_count;
+    workload_name = IREE_SV("pipeline specialization");
+    argument_name = IREE_SV("pipeline launch binding");
+  } else {
+    const loom_value_slice_t kernel_workload_args =
+        loom_kernel_workload_arg_ids(module, definition_op);
+    workload_arg_ids = kernel_workload_args.values;
+    workload_arg_count = kernel_workload_args.count;
+  }
+
+  const loom_value_slice_t workloads = loom_kernel_launch_workloads(op);
   IREE_RETURN_IF_ERROR(loom_kernel_verify_entry_operand_group(
-      module, op, symbol->defining_op, emitter, IREE_SV("workload"),
-      IREE_SV("kernel workload"), workloads, workload_args.values,
-      workload_args.count,
+      module, op, definition_op, emitter, IREE_SV("workload"), workload_name,
+      workloads, workload_arg_ids, workload_arg_count,
       /*flat_operand_offset=*/0));
 
-  loom_func_like_t kernel = loom_func_like_cast(module, symbol->defining_op);
-  uint16_t argument_count = 0;
-  const loom_value_id_t* argument_ids =
-      loom_func_like_arg_ids(kernel, &argument_count);
-  loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
+  const loom_value_slice_t arguments = loom_kernel_launch_arguments(op);
   return loom_kernel_verify_entry_operand_group(
-      module, op, symbol->defining_op, emitter, IREE_SV("argument"),
-      IREE_SV("kernel ABI argument"), arguments, argument_ids, argument_count,
-      workloads.count);
+      module, op, definition_op, emitter, IREE_SV("argument"), argument_name,
+      arguments, argument_ids, argument_count, workloads.count);
 }
 
 iree_status_t loom_kernel_dispatch_verify(const loom_module_t* module,

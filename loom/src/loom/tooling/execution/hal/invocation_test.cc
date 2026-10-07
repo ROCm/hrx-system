@@ -66,6 +66,51 @@ TEST_F(HalInvocationTest, DispatchBatchOptionsUseFastReusableDefaults) {
       IREE_HAL_QUEUE_EXECUTE_FLAG_BORROW_BINDING_TABLE_LIFETIME));
 }
 
+TEST_F(HalInvocationTest, DispatchSequenceInitializeIsNotPrepared) {
+  loom_run_hal_dispatch_sequence_t sequence = {};
+  loom_run_hal_dispatch_sequence_initialize(&sequence);
+
+  EXPECT_FALSE(loom_run_hal_dispatch_sequence_is_prepared(&sequence));
+
+  loom_run_hal_dispatch_sequence_deinitialize(&sequence);
+}
+
+TEST_F(HalInvocationTest,
+       DispatchSequenceRejectsMixedRepresentationsBeforeDeviceUse) {
+  const loom_run_hal_prepared_candidate_t kernel_candidate = {
+      /*.executable=*/reinterpret_cast<iree_hal_executable_t*>(1),
+  };
+  const loom_run_hal_prepared_candidate_t array_candidate = {
+      /*.executable=*/reinterpret_cast<iree_hal_executable_t*>(1),
+  };
+  loom_run_hal_dispatch_sequence_step_t steps[2] = {
+      {
+          /*.candidate=*/&array_candidate,
+          /*.representation=*/
+          LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_DIRECT,
+          /*.execution_epoch=*/0,
+      },
+      {
+          /*.candidate=*/&kernel_candidate,
+          /*.representation=*/
+          LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_COMMAND_BUFFER,
+          /*.execution_epoch=*/1,
+      },
+  };
+  loom_run_hal_invocation_options_initialize(&steps[0].options);
+  loom_run_hal_invocation_options_initialize(&steps[1].options);
+
+  loom_run_hal_runtime_t runtime = {};
+  loom_run_hal_dispatch_sequence_t sequence = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_run_hal_dispatch_sequence_prepare(
+                            &runtime, IREE_ARRAYSIZE(steps), steps,
+                            iree_allocator_system(), &sequence));
+  EXPECT_FALSE(loom_run_hal_dispatch_sequence_is_prepared(&sequence));
+
+  loom_run_hal_dispatch_sequence_deinitialize(&sequence);
+}
+
 TEST_F(HalInvocationTest, ResultOwnsOutputBuilder) {
   loom_run_hal_invocation_result_t result = {};
   loom_run_hal_invocation_result_initialize(iree_allocator_system(), &result);

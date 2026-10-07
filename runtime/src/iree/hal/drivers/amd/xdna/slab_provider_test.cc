@@ -56,8 +56,11 @@ struct FakeNative {
     EXPECT_NE(info->byte_length, 0u);
     EXPECT_EQ(info->byte_length % 64, 0u);
     EXPECT_LE(info->byte_length, 4096u);
-    EXPECT_EQ(info->minimum_alignment, 64u);
+    EXPECT_GE(info->minimum_alignment, 64u);
+    EXPECT_LE(info->minimum_alignment, 4096u);
+    EXPECT_TRUE(iree_device_size_is_power_of_two(info->minimum_alignment));
     self->created_lengths.push_back(info->byte_length);
+    self->created_alignments.push_back(info->minimum_alignment);
     auto* memory =
         new FakeMemory{self, std::vector<uint8_t>(info->byte_length)};
     ++self->create_count;
@@ -133,6 +136,7 @@ struct FakeNative {
 
   amdf_api_t api = {};
   std::vector<uint64_t> created_lengths;
+  std::vector<uint64_t> created_alignments;
   std::vector<CacheOperation> cache_operations;
   int create_count = 0;
   int map_count = 0;
@@ -191,16 +195,20 @@ TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
   iree_hal_slab_provider_properties_t properties = {};
   iree_hal_slab_provider_query_properties(provider_, &properties);
   EXPECT_EQ(properties.allocation_alignment, 64u);
+  EXPECT_EQ(properties.max_allocation_alignment, 4096u);
   EXPECT_EQ(properties.maintenance_alignment, 64u);
 
   iree_hal_slab_t slab = {};
-  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab(provider_, 100, &slab));
+  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab(
+      provider_, 100, /*min_alignment=*/256, &slab));
   EXPECT_EQ(slab.length, 100u);
   ASSERT_NE(slab.base_ptr, nullptr);
   EXPECT_EQ(native_.create_count, 1);
   EXPECT_EQ(native_.map_count, 1);
   ASSERT_EQ(native_.created_lengths.size(), 1u);
   EXPECT_EQ(native_.created_lengths[0], 128u);
+  ASSERT_EQ(native_.created_alignments.size(), 1u);
+  EXPECT_EQ(native_.created_alignments[0], 256u);
 
   int release_count = 0;
   iree_hal_buffer_params_t params = {};
@@ -269,9 +277,12 @@ TEST_F(SlabProviderTest, PublishesRangedBindingsAndCacheControl) {
 TEST_F(SlabProviderTest, NativeDestroyFailureLeaksWithoutAborting) {
   native_.fail_memory_destroy = true;
   iree_hal_slab_t slab = {};
-  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab(provider_, 64, &slab));
+  IREE_ASSERT_OK(iree_hal_slab_provider_acquire_slab(
+      provider_, 64, /*min_alignment=*/1, &slab));
   ASSERT_EQ(native_.created_lengths.size(), 1u);
   EXPECT_EQ(native_.created_lengths[0], 64u);
+  ASSERT_EQ(native_.created_alignments.size(), 1u);
+  EXPECT_EQ(native_.created_alignments[0], 64u);
   iree_hal_slab_provider_release_slab(provider_, &slab);
   EXPECT_EQ(native_.unmap_count, 1);
   EXPECT_EQ(native_.destroy_count, 1);

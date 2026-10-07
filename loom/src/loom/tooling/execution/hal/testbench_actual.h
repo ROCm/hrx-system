@@ -213,6 +213,8 @@ typedef struct loom_run_hal_testbench_actual_provider_t {
   uint64_t* workload_argument_bits;
   // Prepared executable retained for correctness and benchmark dispatches.
   loom_run_hal_prepared_candidate_t prepared_candidate;
+  // Queue submission representation required by the prepared invocation.
+  loom_run_hal_dispatch_sequence_representation_t sequence_representation;
   // Allocator-owned reflected logical parameter layout for the prepared
   // executable function. Parameter string views borrow executable storage.
   iree_hal_executable_function_parameter_t* function_parameters;

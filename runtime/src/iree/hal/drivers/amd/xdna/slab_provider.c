@@ -72,6 +72,10 @@ iree_status_t iree_hal_amd_xdna_slab_provider_create(
       !options->profile.allocation.byte_length_granularity ||
       !iree_device_size_is_power_of_two(
           options->profile.allocation.minimum_alignment) ||
+      !iree_device_size_is_power_of_two(
+          options->profile.allocation.maximum_alignment) ||
+      options->profile.allocation.minimum_alignment >
+          options->profile.allocation.maximum_alignment ||
       !iree_device_size_is_power_of_two(options->maintenance_alignment)) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "invalid XDNA slab construction contract");
@@ -104,6 +108,7 @@ iree_status_t iree_hal_amd_xdna_slab_provider_create(
       .supported_usage = options->supported_usage,
       .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
       .allocation_alignment = options->profile.allocation.minimum_alignment,
+      .max_allocation_alignment = options->profile.allocation.maximum_alignment,
       .maintenance_alignment = options->maintenance_alignment,
   };
   *out_provider = &provider->base;
@@ -119,7 +124,7 @@ static void iree_hal_amd_xdna_slab_provider_destroy(
 
 static iree_status_t iree_hal_amd_xdna_slab_provider_acquire_slab(
     iree_hal_slab_provider_t* base_provider, iree_device_size_t min_length,
-    iree_hal_slab_t* out_slab) {
+    iree_device_size_t min_alignment, iree_hal_slab_t* out_slab) {
   iree_hal_amd_xdna_slab_provider_t* provider =
       iree_hal_amd_xdna_slab_provider_cast(base_provider);
   memset(out_slab, 0, sizeof(*out_slab));
@@ -163,7 +168,8 @@ static iree_status_t iree_hal_amd_xdna_slab_provider_acquire_slab(
       .access_count = provider->access_count,
       .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
       .byte_length = allocation_length,
-      .minimum_alignment = provider->profile.allocation.minimum_alignment,
+      .minimum_alignment = iree_max(
+          min_alignment, provider->profile.allocation.minimum_alignment),
       .accesses = provider->accesses,
   };
   iree_status_t status = IREE_HAL_AMD_STATUS_FROM_AMDF(
