@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "compiles and executes rebound XDNA pipelines through the HAL",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/hal_execution.loom",
+          "--device=xdna"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"case_count\":2",
+          "\"failed_sample_count\":0",
+          "\"trial_count\":8",
+          "\"failed_trial_count\":0",
+          "\"case\":\"serial_array_programs\"",
+          "\"case\":\"concurrent_array_programs\"",
+          "\"scenario\":\"rebound_pipeline\"",
+          "\"scenario\":\"aliased_inputs\"",
+          "\"failure_count\":0"
+        ]
+      }
+    }
+  ]
+}

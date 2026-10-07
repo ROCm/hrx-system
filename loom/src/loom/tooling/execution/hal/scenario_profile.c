@@ -50,7 +50,7 @@ typedef struct loom_run_hal_testbench_scenario_batch_t {
   iree_host_size_t binding_capacity;
   // Number of populated entries in |binding_table|.
   iree_host_size_t binding_count;
-  // Prepared command sequence containing every call.
+  // Prepared dispatch sequence containing every call.
   loom_run_hal_dispatch_sequence_t sequence;
   // Alias-preserving host-to-device staging for the flat binding table.
   loom_run_hal_testbench_staging_t staging;
@@ -225,6 +225,7 @@ static iree_status_t loom_run_hal_testbench_scenario_batch_prepare(
     }
     out_batch->steps[call_index] = (loom_run_hal_dispatch_sequence_step_t){
         .candidate = &provider->prepared_candidate,
+        .representation = provider->sequence_representation,
         .execution_epoch = 0,
         .options = invocation_options,
         .binding_lengths = bindings->count == 0
@@ -237,7 +238,7 @@ static iree_status_t loom_run_hal_testbench_scenario_batch_prepare(
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_dispatch_sequence_prepare(
         &provider->context->runtime, call_count, out_batch->steps,
-        &out_batch->sequence);
+        product->host_allocator, &out_batch->sequence);
   }
   if (iree_status_is_ok(status)) {
     status = loom_run_hal_testbench_staging_initialize(

@@ -1154,7 +1154,7 @@ iree_status_t loom_kernel_entry_decl_build(
     loom_location_id_t location,
     loom_op_t** out_op);
 
-// LOOM_OP_KERNEL_LAUNCH: Launch a kernel with explicit workload and device-ABI operands. Workloads configure the launch and never alter the kernel ABI.
+// LOOM_OP_KERNEL_LAUNCH: Launch a kernel or issue a kernel-scoped pipeline with explicit configuration and device-ABI operands. Workloads configure a kernel launch; for a pipeline they supply the leading specialization arguments.
 // kernel.launch @fill[%count](%count, %output) : [index](index, buffer)
 LOOM_DEFINE_ISA(loom_kernel_launch_isa, LOOM_OP_KERNEL_LAUNCH)
 LOOM_DEFINE_SEGMENTED_OPERANDS(loom_kernel_launch_workloads, 0)

@@ -55,7 +55,7 @@ struct loom_run_hal_testbench_actual_sequence_span_t {
   iree_host_size_t binding_count;
   // Reusable recording descriptors in invocation order.
   loom_run_hal_dispatch_sequence_step_t* steps;
-  // Reusable command sequence indexed by case sample ordinal.
+  // Reusable dispatch sequence indexed by case sample ordinal.
   loom_run_hal_dispatch_sequence_t* sample_sequences;
   // Number of entries in |sample_sequences|.
   iree_host_size_t sample_count;
@@ -378,6 +378,19 @@ static iree_status_t loom_run_hal_testbench_module_symbol_name_from_ref(
   return iree_ok_status();
 }
 
+static bool loom_run_hal_testbench_invocation_is_pipeline(
+    const loom_testbench_invocation_plan_t* invocation) {
+  if (invocation->kind == LOOM_TESTBENCH_INVOCATION_PIPELINE) {
+    return true;
+  }
+  if (invocation->kind != LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH ||
+      invocation->callee_ref.symbol_id >= invocation->module->symbols.count) {
+    return false;
+  }
+  const loom_symbol_t* symbol =
+      &invocation->module->symbols.entries[invocation->callee_ref.symbol_id];
+  return loom_symbol_implements(symbol, LOOM_SYMBOL_INTERFACE_PIPELINE);
+}
 static void loom_run_hal_testbench_record_compile_rejection(
     loom_run_hal_testbench_actual_provider_t* provider,
     iree_string_view_t stage, iree_string_view_t kind,
@@ -558,7 +571,7 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
                             "and invocation state");
   }
   const bool is_pipeline =
-      provider->invocation->kind == LOOM_TESTBENCH_INVOCATION_PIPELINE;
+      loom_run_hal_testbench_invocation_is_pipeline(provider->invocation);
   if (!is_pipeline &&
       provider->invocation->kind != LOOM_TESTBENCH_INVOCATION_KERNEL_LAUNCH) {
     return iree_make_status(
@@ -570,6 +583,10 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
         IREE_STATUS_UNIMPLEMENTED,
         "HAL pipeline specialization arguments are not implemented");
   }
+  provider->sequence_representation =
+      is_pipeline
+          ? LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_DIRECT
+          : LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_COMMAND_BUFFER;
   IREE_RETURN_IF_ERROR(
       loom_run_hal_testbench_context_add_module_runtime_requirements(
           provider->context, provider->module, provider->sanitizer));
@@ -960,7 +977,7 @@ static iree_status_t loom_run_hal_testbench_evaluate_launch_config(
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "HAL invocation workload count mismatch");
   }
-  if (provider->invocation->kind == LOOM_TESTBENCH_INVOCATION_PIPELINE) {
+  if (loom_run_hal_testbench_invocation_is_pipeline(provider->invocation)) {
     // Array-program distribution is part of the compiled executable. One HAL
     // dispatch invokes the complete array program.
     out_options->workgroup_count[0] = 1;
@@ -1300,6 +1317,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_span_initialize(
     out_span->steps[invocation_offset] =
         (loom_run_hal_dispatch_sequence_step_t){
             .candidate = &provider->prepared_candidate,
+            .representation = provider->sequence_representation,
             .execution_epoch = invocation->execution_epoch,
             .binding_lengths = step_binding_count == 0
                                    ? NULL
@@ -1523,7 +1541,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
   IREE_ASSERT(binding_offset == span->binding_count);
   return loom_run_hal_dispatch_sequence_prepare(
       &span->context->runtime, span->invocation_count, span->steps,
-      &span->sample_sequences[sample_ordinal]);
+      span->context->host_allocator, &span->sample_sequences[sample_ordinal]);
 }
 
 static void loom_run_hal_testbench_actual_sequence_populate_binding_table(
@@ -1577,7 +1595,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_invoke_span(
 
   loom_run_hal_dispatch_sequence_t* sample_sequence =
       &span->sample_sequences[sample_ordinal];
-  if (sample_sequence->command_buffer == NULL) {
+  if (!loom_run_hal_dispatch_sequence_is_prepared(sample_sequence)) {
     IREE_RETURN_IF_ERROR(loom_run_hal_testbench_actual_sequence_prepare_sample(
         span, sample_ordinal));
   }
