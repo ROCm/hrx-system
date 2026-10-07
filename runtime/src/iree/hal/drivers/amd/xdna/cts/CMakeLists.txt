@@ -35,4 +35,30 @@ iree_cc_test(
 )
 endif()
 
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+iree_cc_binary_benchmark(
+  NAME
+    queue_benchmark
+  SRCS
+    "queue_benchmark.cc"
+  DEPS
+    iree::async::util::proactor_pool
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::driver
+    iree::hal::drivers::amd::xdna::image::testdata::mul_i32
+    iree::hal::drivers::amd::xdna::image::testdata::mul_i32_npu4
+    iree::third_party::google_benchmark
+  TESTONLY
+  LABELS
+    "benchmark"
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.xdna"
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
