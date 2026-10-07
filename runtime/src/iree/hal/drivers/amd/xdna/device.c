@@ -253,11 +253,9 @@ static iree_status_t iree_hal_amd_xdna_device_create_semaphore(
 static iree_hal_semaphore_compatibility_t
 iree_hal_amd_xdna_device_query_semaphore_compatibility(
     iree_hal_device_t* device, iree_hal_semaphore_t* semaphore) {
-  (void)device;
-  (void)semaphore;
-  // The current queue resolves every dependency through host timepoints. The
-  // device bits become truthful only when the causal native resolver lands.
-  return IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY;
+  return iree_hal_amd_xdna_semaphore_is_local(semaphore, device)
+             ? IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL
+             : IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY;
 }
 
 static iree_status_t iree_hal_amd_xdna_device_acquire_queue(
