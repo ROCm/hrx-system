@@ -261,6 +261,7 @@ iree_runtime_cc_library(
         ":context",
         ":executable",
         ":memory",
+        ":memory_backend",
         ":queue",
         ":semaphore",
         "//libamdf:headers",
@@ -269,6 +270,7 @@ iree_runtime_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/hal",
+        "//runtime/src/iree/hal/memory:maintenance_thread",
         "//runtime/src/iree/hal/utils:device_spec_builder",
     ],
 )
@@ -294,6 +296,7 @@ iree_runtime_cc_test(
     deps = [
         ":device",
         ":memory",
+        ":memory_backend",
         ":queue",
         ":queue_frontier",
         ":semaphore",

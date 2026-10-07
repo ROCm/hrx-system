@@ -6,10 +6,13 @@
 
 #include "iree/hal/drivers/amd/xdna/device.h"
 
+#include "iree/async/notification.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/xdna/executable.h"
+#include "iree/hal/drivers/amd/xdna/memory_backend.h"
 #include "iree/hal/drivers/amd/xdna/queue.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
+#include "iree/hal/memory/maintenance_thread.h"
 #include "iree/hal/utils/device_spec_builder.h"
 
 typedef struct iree_hal_amd_xdna_device_t {
@@ -29,6 +32,15 @@ typedef struct iree_hal_amd_xdna_device_t {
   iree_hal_queue_t* queue;
   // Owned facade for prepared ordinary native allocations.
   iree_hal_allocator_t* allocator;
+  // Device-owned resources shared by pools over the native memory domain.
+  struct {
+    // Capacity-change notification driven by the device proactor.
+    iree_async_notification_t* notification;
+    // Cold allocation and retirement owner independent of queue lifetime.
+    iree_hal_memory_maintenance_t* maintenance;
+    // Borrowed factory view over the device's native and progress owners.
+    iree_hal_amd_xdna_memory_backend_t backend;
+  } memory;
   // Group-assigned topology; the queue retains its frontier tracker.
   iree_hal_device_topology_info_t topology;
 } iree_hal_amd_xdna_device_t;
@@ -102,6 +114,16 @@ static iree_status_t iree_hal_amd_xdna_device_build_spec(
   return status;
 }
 
+// Queries group progress without registering a waiter or touching the device.
+static bool iree_hal_amd_xdna_device_query_pool_epoch(void* user_data,
+                                                      iree_async_axis_t axis,
+                                                      uint64_t epoch) {
+  iree_hal_amd_xdna_device_t* device = user_data;
+  return device->topology.frontier.tracker &&
+         iree_async_frontier_tracker_query_epoch(
+             device->topology.frontier.tracker, axis, epoch);
+}
+
 // Runs from the queue's second placed finalization callback, after the queue no
 // longer borrows the native context or proactor.
 static void iree_hal_amd_xdna_device_finalize(void* user_data) {
@@ -110,6 +132,8 @@ static void iree_hal_amd_xdna_device_finalize(void* user_data) {
   device->queue = NULL;
   iree_hal_queue_release(queue);
   iree_hal_allocator_release(device->allocator);
+  iree_hal_memory_maintenance_release(device->memory.maintenance);
+  iree_async_notification_release(device->memory.notification);
   iree_hal_device_spec_release(device->spec);
   iree_hal_amd_xdna_context_destroy(device->context);
   iree_async_proactor_pool_entry_release(device->proactor_entry);
@@ -153,6 +177,16 @@ iree_status_t iree_hal_amd_xdna_device_create(
         create_params->proactor_pool, UINT32_MAX, &device->proactor_entry);
   }
   if (iree_status_is_ok(status)) {
+    status = iree_async_notification_create(
+        iree_async_proactor_pool_entry_proactor(device->proactor_entry),
+        IREE_ASYNC_NOTIFICATION_FLAG_NONE, &device->memory.notification);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_memory_maintenance_thread_create(
+        (iree_thread_affinity_t){0}, host_allocator,
+        &device->memory.maintenance);
+  }
+  if (iree_status_is_ok(status)) {
     status =
         iree_hal_amd_xdna_allocator_create((iree_hal_device_t*)device, context,
                                            host_allocator, &device->allocator);
@@ -168,11 +202,21 @@ iree_status_t iree_hal_amd_xdna_device_create(
         host_allocator, &device->queue);
   }
   if (iree_status_is_ok(status)) {
+    iree_hal_amd_xdna_memory_backend_initialize(
+        (iree_hal_device_t*)device, context, device->memory.notification,
+        device->memory.maintenance,
+        (iree_hal_pool_epoch_query_t){
+            .fn = iree_hal_amd_xdna_device_query_pool_epoch,
+            .user_data = device,
+        },
+        &device->memory.backend);
     device->context = context;
     *out_device = (iree_hal_device_t*)device;
   } else {
     iree_hal_queue_release(device->queue);
     iree_hal_allocator_release(device->allocator);
+    iree_hal_memory_maintenance_release(device->memory.maintenance);
+    iree_async_notification_release(device->memory.notification);
     iree_hal_device_spec_release(device->spec);
     iree_async_proactor_pool_entry_release(device->proactor_entry);
     iree_allocator_free(host_allocator, device);
@@ -224,6 +268,12 @@ static iree_hal_queue_t* iree_hal_amd_xdna_device_queue(
 static const iree_hal_device_topology_info_t*
 iree_hal_amd_xdna_device_topology_info(iree_hal_device_t* device) {
   return &((iree_hal_amd_xdna_device_t*)device)->topology;
+}
+
+static const iree_hal_memory_backend_t* iree_hal_amd_xdna_device_memory_backend(
+    iree_hal_device_t* base) {
+  iree_hal_amd_xdna_device_t* device = (iree_hal_amd_xdna_device_t*)base;
+  return &device->memory.backend.base;
 }
 
 static iree_status_t iree_hal_amd_xdna_device_refine_topology_edge(
@@ -354,6 +404,7 @@ static const iree_hal_device_vtable_t iree_hal_amd_xdna_device_vtable = {
     .acquire_queue = iree_hal_amd_xdna_device_acquire_queue,
     .sample_observation = iree_hal_amd_xdna_device_sample_observation,
     .topology_info = iree_hal_amd_xdna_device_topology_info,
+    .memory_backend = iree_hal_amd_xdna_device_memory_backend,
     .refine_topology_edge = iree_hal_amd_xdna_device_refine_topology_edge,
     .assign_topology_info = iree_hal_amd_xdna_device_assign_topology_info,
     .create_channel = iree_hal_amd_xdna_device_create_channel,
