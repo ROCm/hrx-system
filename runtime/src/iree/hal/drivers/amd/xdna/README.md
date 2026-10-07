@@ -46,20 +46,24 @@ across reusable payload blocks and copied through one target mapping. The pools
 grow for a new workload shape and then reuse those blocks; repeating a warmed
 shape and depth performs no host allocation or free.
 
-The shared proactor admits ready operations and observes native completion.
-Accepted invocations occupy a bounded ring sized to the native queue's prepared
-capacity. Each pending invocation owns exclusive mutable command and binding
-storage; checked retirement returns that storage for reuse. Immutable backing is
-shared when its static address references also point to shared allocations.
-Binding updates publish only their patched ranges. Every dispatch executes
-invocation zero to establish the array state; time slicing does not promise
-resident tile state across submissions.
+The shared proactor owns causal admission, native acceptance state, and checked
+retirement. A private publisher performs function preparation and potentially
+blocking native submission. Accepted invocations occupy a bounded ring sized to
+the native queue's prepared capacity. Each pending invocation owns exclusive
+mutable command and binding storage; checked retirement returns that storage for
+reuse. Immutable backing is shared when its static address references also point
+to shared allocations. Binding updates publish only their patched ranges. Every
+dispatch executes invocation zero to establish the array state; time slicing
+does not promise resident tile state across submissions.
 
-Eligible host operations progress independently of pending native commands and
-never advance the native queue's completion frontier. Admission still runs on
-the proactor: native submission can block on OS-owned credits or device wakeup,
-and mapped transfers perform CPU work there. The public queue call captures
-arguments and hands readiness to the proactor.
+Eligible host operations run on an independent private worker and never advance
+the native queue's completion frontier. Neither mapped transfer work nor native
+submission can block the shared proactor. Both services return results through
+placed proactor operations, preserving one owner for causal state, completion
+publication, and terminal reclamation. A dependent dispatch whose producer is
+still entering the native queue retries after that producer's acceptance; other
+unresolved waits register their ordinary semaphore timepoints immediately. The
+public queue call captures arguments and hands readiness to the proactor.
 
 Direct fill, update, copy, upload, download, and barriers are supported. Transfers
 use mapped native storage with the required cache operations. Allocated buffers

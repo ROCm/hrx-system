@@ -105,6 +105,19 @@ iree_runtime_cc_library(
     ],
 )
 
+iree_runtime_cc_library(
+    name = "queue_service",
+    srcs = ["queue_service.c"],
+    hdrs = ["queue_service.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+    ],
+)
+
 iree_runtime_cc_test(
     name = "queue_storage_test",
     srcs = ["queue_storage_test.cc"],
@@ -124,6 +137,7 @@ iree_runtime_cc_library(
         ":context",
         ":executable",
         ":queue_frontier",
+        ":queue_service",
         ":queue_storage",
         ":semaphore",
         "//libamdf:headers",
