@@ -213,6 +213,12 @@ iree_status_t loom_serve_text_model_create(
 // Null is accepted. All borrowed row/tokenizer pointers become invalid.
 iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model);
 
+// Borrowed shared device owner, including other models' backing and workspace.
+// Its cold pressure operations require the same serialized host ownership as
+// model invocation; this is not a model-private allocation domain.
+loom_serve_device_t* loom_serve_text_model_device(
+    const loom_serve_text_model_t* model);
+
 // At a serialized model boundary, release/reload parameter backing while
 // preserving compiled commands and all retained row state. Deactivation
 // requires unpinned elastic backing. Inference pins through retirement and

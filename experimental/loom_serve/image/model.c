@@ -747,17 +747,21 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
     model->input_payload = NULL;
     // Submission overlaps device work. The remaining wait includes queued
     // transfers and final readback, not an isolated GPU execution interval.
-    const iree_hal_pool_stats_t workspace =
-        loom_serve_execution_workspace_statistics(execution);
+    const loom_serve_device_memory_statistics_t memory =
+        loom_serve_device_memory_statistics(model->owner);
     fprintf(stderr,
             "{\"event\":\"image_execution\",\"prepare_ns\":%" PRId64
             ",\"submit_ns\":%" PRId64 ",\"completion_wait_ns\":%" PRId64
+            ",\"device_memory\":{\"retained_committed_bytes\":%" PRIu64
             ",\"workspace_committed_bytes\":%" PRIu64
             ",\"workspace_live_bytes\":%" PRIu64
-            ",\"workspace_reuse_count\":%" PRIu64 "}\n",
+            ",\"workspace_slab_count\":%u,\"workspace_reuse_count\":%" PRIu64
+            "}}\n",
             prepare_end - prepare_begin, submit_end - prepare_end,
-            completion_end - submit_end, (uint64_t)workspace.bytes_committed,
-            (uint64_t)workspace.bytes_reserved, workspace.reuse_count);
+            completion_end - submit_end, memory.retained.committed_bytes,
+            (uint64_t)memory.workspace.bytes_committed,
+            (uint64_t)memory.workspace.bytes_reserved,
+            memory.workspace.slab_count, memory.workspace.reuse_count);
   }
   return loom_serve_residency_finish(model->residency, status);
 }

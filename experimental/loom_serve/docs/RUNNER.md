@@ -133,6 +133,25 @@ writer and private state before opening SSE. Budget denial queues or refuses
 without replacing the selected history. Platform allocation/IO failures remain
 terminal, not an implicit offload or retry protocol.
 
+`device_memory_statistics` reports both shared domains: virtual parameter/state
+backing and HAL workspace backing. Text heartbeats and image completion events
+expose them together in `device_memory`, with workspace live bytes, slab count
+and reuse count. These observations include other models sharing the device;
+they are not per-request memory costs. Their sum is reported managed backing,
+not total VRAM: fixed buffers, loader storage, host snapshots, driver overhead
+and any provider-hidden allocation padding are excluded. Domain peaks are not
+summed into a fictitious simultaneous peak.
+
+The device's serialized host owner can call `device_trim(target_bytes)` at a
+pressure boundary. It releases idle workspace first, then evicts unpinned
+parameter groups in LRU order toward the remaining target. Live workspace,
+pinned parameters and model-owned mutable state survive, so an unreachable
+target is an ordinary best-effort result visible in the next snapshot. This
+does not insert waits into decoding or discard another model's session state.
+It is explicit pressure policy, not automatic idle-time eviction: keeping warm
+scratch avoids allocation on subsequent requests. The admission limit remains
+the virtual-pool limit described above, not a prospective workspace guarantee.
+
 Qwen selects a preparation command that permutes FFN gate/up Q5 blocks
 in place into eight-channel groups; all other tensors retain their checkpoint
 encoding. The inference commands consume this final layout directly, including

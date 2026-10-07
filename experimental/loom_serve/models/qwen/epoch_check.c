@@ -213,11 +213,19 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
             ",\"reuse_count\":%" PRIu64 "}\n",
             (uint64_t)workspace_after.bytes_committed,
             workspace_after.reuse_count);
-    status = loom_serve_execution_trim_workspace(execution);
+    // Request only the shared scratch headroom back. The device must satisfy
+    // this without unnecessarily evicting either model's retained parameters.
+    const loom_serve_device_memory_statistics_t before =
+        loom_serve_device_memory_statistics(device);
+    status = loom_serve_device_trim(device, before.retained.committed_bytes);
+    const loom_serve_device_memory_statistics_t after =
+        loom_serve_device_memory_statistics(device);
     if (iree_status_is_ok(status) &&
-        loom_serve_execution_workspace_statistics(execution).bytes_committed) {
+        (after.workspace.bytes_committed ||
+         after.retained.committed_bytes != before.retained.committed_bytes)) {
       status = iree_make_status(IREE_STATUS_DATA_LOSS,
-                                "idle shared scratch did not trim to zero");
+                                "device trim did not preserve retained backing "
+                                "while releasing idle shared scratch");
     }
   }
   if (iree_status_is_ok(status)) {

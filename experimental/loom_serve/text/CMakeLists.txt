@@ -149,6 +149,7 @@ loom_cc_library(
     iree::base::threading::thread
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::scheduling::packing
     iree::tokenizer
     iree::vm

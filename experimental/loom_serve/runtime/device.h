@@ -55,6 +55,33 @@ iree_status_t loom_serve_device_create(
 // physical domain after a model cleanup failure.
 iree_status_t loom_serve_device_destroy(loom_serve_device_t* device);
 
+// Serving-managed backing across every model sharing this device. Virtual
+// statistics are zero for fixed backing. Workspace statistics are atomic HAL
+// observations, not a coherent device-wide snapshot. The sum of commitments
+// excludes host snapshots, fixed buffers, loader storage and driver overhead;
+// HAL providers may also hide physical allocation padding.
+typedef struct loom_serve_device_memory_statistics_t {
+  // Virtual parameter/state reservations and their physical slab backing.
+  loom_serve_memory_statistics_t retained;
+  // Shared command workspace, including reusable idle backing.
+  iree_hal_pool_stats_t workspace;
+} loom_serve_device_memory_statistics_t;
+
+// Called by the host owner; copies observations without waiting for device
+// work.
+loom_serve_device_memory_statistics_t loom_serve_device_memory_statistics(
+    const loom_serve_device_t* device);
+
+// Cold owner-controlled trim toward target_bytes of reported managed backing.
+// Releases idle workspace first, then unpinned parameter groups in LRU order.
+// Live workspace, pinned parameters and model-owned mutable state survive.
+// An unreachable target is not an error; statistics expose the reached extent.
+// Consumers pin parameter groups through retirement; only those already
+// retired are eligible. Does not wait for live workspace or destroy queues.
+// Platform unmap/free failures propagate to the owner.
+iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
+                                     uint64_t target_bytes);
+
 // Borrowed handles valid through owner destruction. The group establishes the
 // semaphore namespace; the exact queues are also used by the execution object.
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device);

@@ -77,6 +77,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   }
 
   void TearDown() override {
+    iree_hal_buffer_release(workspace_);
     if (execution_) {
       IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
     }
@@ -239,6 +240,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   std::array<iree_hal_command_buffer_t*, 3> commands_ = {};
   // Mutable output independently allocated from immutable parameters.
   iree_hal_buffer_t* output_buffer_ = nullptr;
+  // Private workspace owned until deallocation has been accepted.
+  iree_hal_buffer_t* workspace_ = nullptr;
   // Readback backing retained until completion or terminal teardown.
   std::array<int32_t, 8> output_ = {};
 };
@@ -487,6 +490,72 @@ TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes,
             2 * kSlabBytes);
+}
+
+TEST_P(WeightsTest,
+       DeviceTrimPrefersIdleWorkspaceAndPreservesPinnedParameters) {
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    ASSERT_NO_FATAL_FAILURE(RunPinned(i, 70));
+  }
+  IREE_ASSERT_OK(loom_serve_residency_acquire(residencies_[0]));
+  IREE_ASSERT_OK(
+      loom_serve_execution_reserve_workspace(execution_, kSlabBytes, 256));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                          IREE_HAL_BUFFER_USAGE_TRANSFER,
+                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+                 .min_alignment = 256},
+      .allocation_size = kSlabBytes};
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(execution_, &request, &workspace_));
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_dealloca(execution_, workspace_, &completion));
+  iree_hal_buffer_release(workspace_);
+  workspace_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  const auto before = loom_serve_device_memory_statistics(device_owner_);
+  EXPECT_EQ(before.retained.committed_bytes, GetParam() ? 2 * kSlabBytes : 0);
+  EXPECT_EQ(before.workspace.bytes_committed, kSlabBytes);
+  IREE_ASSERT_OK(
+      loom_serve_device_trim(device_owner_, before.retained.committed_bytes));
+  const auto idle = loom_serve_device_memory_statistics(device_owner_);
+  EXPECT_EQ(idle.retained.committed_bytes, before.retained.committed_bytes);
+  EXPECT_EQ(idle.workspace.bytes_committed, 0u);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  ASSERT_NO_FATAL_FAILURE(Run(1, 70));
+
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(execution_, &request, &workspace_));
+  // The model's real command completion follows allocation on the work chain.
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, kSlabBytes - 1));
+  const auto pinned = loom_serve_device_memory_statistics(device_owner_);
+  EXPECT_EQ(pinned.workspace.bytes_committed, kSlabBytes);
+  EXPECT_EQ(pinned.workspace.reservation_count, 1u);
+  EXPECT_EQ(pinned.retained.committed_bytes, GetParam() ? kSlabBytes : 0);
+  if (GetParam()) {
+    EXPECT_EQ(loom_serve_weights_statistics(plans_[1]).committed_bytes, 0u);
+  }
+  ASSERT_NO_FATAL_FAILURE(Run(0, 70));
+  loom_serve_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(
+      loom_serve_execution_dealloca(execution_, workspace_, &completion));
+  iree_hal_buffer_release(workspace_);
+  workspace_ = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
+  const auto cold = loom_serve_device_memory_statistics(device_owner_);
+  EXPECT_EQ(cold.retained.committed_bytes, 0u);
+  EXPECT_EQ(cold.workspace.bytes_committed, 0u);
+  ASSERT_NO_FATAL_FAILURE(RunPinned(1, 70));
+  EXPECT_EQ(loom_serve_device_memory_statistics(device_owner_)
+                .retained.committed_bytes,
+            GetParam() ? kSlabBytes : 0);
 }
 
 INSTANTIATE_TEST_SUITE_P(Backing, WeightsTest, ::testing::Values(false, true));
