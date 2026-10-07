@@ -69,12 +69,41 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "queue_frontier",
+    srcs = ["queue_frontier.c"],
+    hdrs = ["queue_frontier.h"],
+    deps = [
+        ":semaphore",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "queue_frontier_test",
+    srcs = ["queue_frontier_test.cc"],
+    deps = [
+        ":queue_frontier",
+        ":semaphore",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async:platform",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "queue",
     srcs = ["queue.c"],
     hdrs = ["queue.h"],
     deps = [
         ":context",
         ":executable",
+        ":queue_frontier",
+        ":semaphore",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -167,6 +196,7 @@ iree_runtime_cc_test(
     deps = [
         ":device",
         ":queue",
+        ":queue_frontier",
         ":semaphore",
         "//libamdf:headers",
         "//runtime/src/iree/async",

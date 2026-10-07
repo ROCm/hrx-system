@@ -17,6 +17,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/xdna/device.h"
 #include "iree/hal/drivers/amd/xdna/image/testing/image_fixture.h"
+#include "iree/hal/drivers/amd/xdna/queue_frontier.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -368,6 +369,22 @@ class QueueHarness {
     if (!completion) {
       completion = done;
     }
+    SubmitWithWaits({}, completion, /*completion_value=*/1);
+  }
+
+  void SubmitAfter(iree_hal_semaphore_t* dependency, uint64_t dependency_value,
+                   iree_hal_semaphore_t* completion = nullptr,
+                   uint64_t completion_value = 1) {
+    if (!completion) {
+      completion = done;
+    }
+    SubmitWithWaits({1, &dependency, &dependency_value}, completion,
+                    completion_value);
+  }
+
+  void SubmitWithWaits(iree_hal_semaphore_list_t waits,
+                       iree_hal_semaphore_t* completion,
+                       uint64_t completion_value) {
     if (completion == done) {
       completion_timepoint.callback =
           +[](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
@@ -390,9 +407,8 @@ class QueueHarness {
     iree_hal_buffer_t* buffer = nullptr;
     ASSERT_NO_FATAL_FAILURE(MakeBuffer(&buffer));
     auto binding = iree_hal_make_buffer_ref(buffer, 0, 64);
-    uint64_t value = 1;
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
-        queue, {}, {1, &completion, &value}, executable, function,
+        queue, waits, {1, &completion, &completion_value}, executable, function,
         iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding}, 0));
     iree_hal_executable_release(executable);
     iree_hal_buffer_release(buffer);
@@ -480,7 +496,7 @@ class QueueHarness {
   size_t diagnostic_count = 0;
 };
 
-TEST(XdnaQueueTest, DeviceCreatesOwnedHostCompatibleSemaphores) {
+TEST(XdnaQueueTest, DeviceCreatesOwnedDeviceCompatibleSemaphores) {
   QueueHarness harness;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
   EXPECT_TRUE(iree_hal_amd_xdna_semaphore_isa(harness.done));
@@ -488,7 +504,94 @@ TEST(XdnaQueueTest, DeviceCreatesOwnedHostCompatibleSemaphores) {
       iree_hal_amd_xdna_semaphore_is_local(harness.done, harness.device));
   EXPECT_EQ(iree_hal_device_query_semaphore_compatibility(harness.device,
                                                           harness.done),
-            IREE_HAL_SEMAPHORE_COMPATIBILITY_HOST_ONLY);
+            IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL);
+}
+
+TEST(XdnaQueueTest, AcceptedSignalChainUsesNativeFifoBeforeRetirement) {
+  QueueHarness harness;
+  harness.native.pending_capacity = 2;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_async_frontier_tracker_t* tracker = nullptr;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+      &tracker));
+  const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 0, 0, 0);
+  IREE_ASSERT_OK(
+      iree_hal_amd_xdna_queue_assign_frontier(harness.queue, tracker, axis));
+
+  iree_hal_semaphore_t* edge = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_SINGLE_PRODUCER, &edge));
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(edge));
+  ASSERT_NO_FATAL_FAILURE(harness.SubmitAfter(edge, 1));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
+
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(edge, &value));
+  EXPECT_EQ(value, 0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
+  EXPECT_EQ(value, 0u);
+
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
+  EXPECT_FALSE(iree_async_semaphore_is_value_tainted(
+      reinterpret_cast<iree_async_semaphore_t*>(harness.done), 1));
+  iree_hal_amd_xdna_frontier_t frontier;
+  EXPECT_EQ(iree_async_semaphore_query_frontier(
+                reinterpret_cast<iree_async_semaphore_t*>(harness.done),
+                iree_async_fixed_frontier_as_frontier(&frontier),
+                IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY),
+            1u);
+  EXPECT_EQ(frontier.entries[0].axis, axis);
+  EXPECT_EQ(frontier.entries[0].epoch, 2u);
+
+  iree_hal_semaphore_release(edge);
+  iree_async_frontier_tracker_release(tracker);
+}
+
+TEST(XdnaQueueTest, ConsumerSubmittedBeforeProducerDefersUntilRetirement) {
+  QueueHarness harness;
+  harness.native.pending_capacity = 2;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_async_frontier_tracker_t* tracker = nullptr;
+  IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+      iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+      &tracker));
+  const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 0, 0, 0);
+  IREE_ASSERT_OK(
+      iree_hal_amd_xdna_queue_assign_frontier(harness.queue, tracker, axis));
+
+  iree_hal_semaphore_t* edge = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_SINGLE_PRODUCER, &edge));
+  ASSERT_NO_FATAL_FAILURE(harness.SubmitAfter(edge, 1));
+  IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
+                                          iree_infinite_timeout(), nullptr));
+  EXPECT_EQ(harness.native.submission_count, 0u);
+
+  ASSERT_NO_FATAL_FAILURE(harness.Submit(edge));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(1));
+  EXPECT_EQ(harness.native.submission_count, 1u);
+
+  harness.native.retirement_limit = 1;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
+  uint64_t value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &value));
+  EXPECT_EQ(value, 0u);
+
+  harness.native.retirement_limit = 2;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK));
+  EXPECT_TRUE(iree_async_frontier_tracker_query_epoch(tracker, axis, 2));
+
+  iree_hal_semaphore_release(edge);
+  iree_async_frontier_tracker_release(tracker);
 }
 
 TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {

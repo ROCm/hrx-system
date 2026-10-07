@@ -87,6 +87,43 @@ endif()
 if(AMDF_BUILD)
 iree_cc_library(
   NAME
+    queue_frontier
+  HDRS
+    "queue_frontier.h"
+  SRCS
+    "queue_frontier.c"
+  DEPS
+    ::semaphore
+    iree::async
+    iree::base
+    iree::hal
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_test(
+  NAME
+    queue_frontier_test
+  SRCS
+    "queue_frontier_test.cc"
+  DEPS
+    ::queue_frontier
+    ::semaphore
+    iree::async
+    iree::async::platform
+    iree::base
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+)
+endif()
+
+if(AMDF_BUILD)
+iree_cc_library(
+  NAME
     queue
   HDRS
     "queue.h"
@@ -95,6 +132,8 @@ iree_cc_library(
   DEPS
     ::context
     ::executable
+    ::queue_frontier
+    ::semaphore
     amdf::headers
     iree::async
     iree::base
@@ -216,6 +255,7 @@ iree_cc_test(
   DEPS
     ::device
     ::queue
+    ::queue_frontier
     ::semaphore
     amdf::headers
     iree::async
