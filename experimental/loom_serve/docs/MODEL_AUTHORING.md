@@ -288,11 +288,13 @@ returned opaque control buffer belongs to the residency, outlives the cold
 process, and is interpreted only by the warm source. Native code consumes
 declarations and command reflection instead of naming model commands. The
 source also returns allocation/view records and initial target/draft origin
-tables. These upload payloads remain retained until initialization retires,
-including partial failure. Native code owns physical allocation and page IDs,
-not layer/head-size formulas. Source also owns warm descriptor packing and
-feedback publication. Native role/history rendering, generated tool parsing
-and retained admission still prevent a model-neutral text adapter.
+tables. Their record formats belong to source; native code validates upload
+extents and page-map separation, not the number of origin fields per row.
+These payloads remain retained until initialization retires, including partial
+failure. Native code owns physical allocation and page IDs, not layer/head-size
+formulas. Source also owns warm descriptor packing, feedback publication,
+role/history framing and generated-tool grammar. The model-neutral text adapter
+retains protocol parsing, physical admission and execution lifetime management.
 
 [`control.loom`](../models/qwen/control.loom) is a concrete example of typed
 command selection, optional proposal, verification, and cache catch-up. Its

@@ -27,15 +27,15 @@ void loom_serve_text_storage_deinitialize(loom_serve_text_storage_t* storage) {
 // the established sizes directly; HAL owns allocation and subspan validation.
 iree_status_t loom_serve_text_storage_initialize(
     const iree_vm_ref_types_t* types, iree_vm_variant_t* results,
-    iree_host_size_t row_count, iree_host_size_t row_capacity,
-    iree_host_size_t context_capacity, iree_host_size_t pool_capacity,
-    loom_serve_text_storage_t* storage, iree_allocator_t allocator) {
+    iree_host_size_t row_count, iree_host_size_t context_capacity,
+    iree_host_size_t pool_capacity, loom_serve_text_storage_t* storage,
+    iree_allocator_t allocator) {
   *storage = (loom_serve_text_storage_t){.allocator = allocator};
   const iree_host_size_t lengths[] = {
       LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT * 3 * sizeof(int64_t),
       row_count * 5 * 2 * sizeof(int64_t),
-      row_capacity * 2 * sizeof(int64_t),
-      row_capacity * 2 * sizeof(int64_t),
+      0,
+      0,
       4 * sizeof(int64_t),
   };
   iree_status_t status = iree_ok_status();
@@ -47,9 +47,13 @@ iree_status_t loom_serve_text_storage_initialize(
     const iree_host_size_t length =
         storage->buffers[i] ? iree_vm_buffer_length(storage->buffers[i]) : 0;
     const bool geometry = i == LOOM_SERVE_TEXT_STORAGE_GEOMETRY;
+    const bool origins = i == LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS ||
+                         i == LOOM_SERVE_TEXT_STORAGE_DRAFT_ORIGINS;
     if (iree_status_is_ok(status) &&
-        (geometry ? (length < lengths[i] || (length - lengths[i]) % 40)
-                  : length != lengths[i])) {
+        (!storage->buffers[i] ||
+         (!origins &&
+          (geometry ? (length < lengths[i] || (length - lengths[i]) % 40)
+                    : length != lengths[i])))) {
       status =
           iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                            "source storage result %zu has invalid size", i);
@@ -78,6 +82,29 @@ iree_status_t loom_serve_text_storage_initialize(
   storage->blocks_per_row = (context_capacity + block_size - 1) / block_size;
   storage->carry_stride = carry_stride;
   storage->feedback_split = feedback_split;
+  // The native owner interprets page maps, not the model's preceding origin
+  // records. Optional unallocated tables have no upload or map consumers.
+  const iree_host_size_t table_allocations[] = {3, 10};
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(table_allocations); ++i) {
+    const uint64_t length = iree_unaligned_load_le_u64(
+        storage->bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data +
+        table_allocations[i] * 24);
+    if (!length) {
+      continue;
+    }
+    const iree_host_size_t payload_length =
+        storage->bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS + i].data_length;
+    if (payload_length > length ||
+        (pool_capacity &&
+         (map_origin < payload_length || map_origin > length ||
+          storage->blocks_per_row >
+              (length - map_origin) / (row_count * sizeof(uint32_t))))) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source table %zu cannot fit its origin "
+                              "payload and page maps",
+                              i);
+    }
+  }
   storage->region_count =
       (storage->bytes[LOOM_SERVE_TEXT_STORAGE_GEOMETRY].data_length - 32) / 40;
   if ((storage->region_count != 0) != (pool_capacity != 0)) {
