@@ -24,7 +24,16 @@ from urllib.parse import urlsplit
 WORDS = ("MAPLE", "COBALT", "CEDAR", "QUARTZ", "AMBER", "CORAL", "JADE", "ONYX")
 
 
-def request(address, session, messages, maximum, *, tools=None, checkpoint=None):
+def request(
+    address,
+    session,
+    messages,
+    maximum,
+    *,
+    tools=None,
+    checkpoint=None,
+    model="qwen3.8-27b",
+):
     connection = http.client.HTTPConnection(address.hostname, address.port)
     start = time.monotonic_ns()
     first = None
@@ -35,7 +44,7 @@ def request(address, session, messages, maximum, *, tools=None, checkpoint=None)
     done = False
     try:
         body = {
-            "model": "qwen3.8-27b",
+            "model": model,
             "messages": messages,
             "stream": True,
             "stream_options": {"include_usage": True},
@@ -66,6 +75,8 @@ def request(address, session, messages, maximum, *, tools=None, checkpoint=None)
             event = json.loads(payload)
             if "error" in event:
                 raise RuntimeError(event["error"])
+            if event.get("model") != model:
+                raise RuntimeError(f"response was routed to the wrong model: {event}")
             if event.get("usage"):
                 usage = event["usage"]
             for choice in event.get("choices", []):

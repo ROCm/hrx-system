@@ -17,23 +17,11 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from experimental.loom_serve.models.qwen.benchmark_service import request
-from experimental.loom_serve.models.qwen.check_service import Events, running_server
-
-
-def control(address, method, path, expected, *, session=None, body=None, headers=None):
-    connection = http.client.HTTPConnection(address.hostname, address.port)
-    fields = dict(headers or {})
-    if session is not None:
-        fields["X-Loom-Session"] = session
-    try:
-        connection.request(method, path, body=body, headers=fields)
-        response = connection.getresponse()
-        payload = response.read()
-        if response.status != expected:
-            raise RuntimeError(f"{method} {path}: {response.status}, {payload!r}")
-        return json.loads(payload)
-    finally:
-        connection.close()
+from experimental.loom_serve.models.qwen.check_service import (
+    Events,
+    control,
+    running_server,
+)
 
 
 def same_output(actual, reference):

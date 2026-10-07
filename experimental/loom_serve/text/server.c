@@ -154,6 +154,7 @@ int main(int argc, char** argv) {
               loom_serve_text_mtp_from_flags() ? "true" : "false",
               FLAG_mtp_depth, FLAG_continuation_epochs);
       const loom_serve_text_service_options_t service_options = {
+          .name = loom_serve_text_model_chat_policy(model)->name,
           .row_count = (iree_host_size_t)FLAG_rows,
           .chunk_size = chunk_size,
           .default_max_tokens = (iree_host_size_t)FLAG_max_tokens,

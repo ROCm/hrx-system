@@ -455,6 +455,8 @@ static iree_status_t chat_function_render(
 }
 
 typedef struct chat_history_t {
+  // Expected deployment identity, borrowed only while rendering the request.
+  iree_string_view_t model_name;
   // Request being rendered.
   loom_serve_text_chat_t* chat;
   // Decoded content, reasoning and argument scratch.
@@ -564,12 +566,11 @@ static iree_status_t chat_request_render(iree_string_view_t body,
   iree_string_builder_reset(&history->scratch);
   IREE_RETURN_IF_ERROR(chat_append_decoded(&history->scratch, fields[0].value));
   if (!iree_string_view_equal(iree_string_builder_view(&history->scratch),
-                              history->chat->policy->name) ||
+                              history->model_name) ||
       fields[2].type != IREE_JSON_VALUE_TYPE_TRUE || !fields[2].value.data) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "select model %.*s and stream=true",
-                            (int)history->chat->policy->name.size,
-                            history->chat->policy->name.data);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT, "select model %.*s and stream=true",
+        (int)history->model_name.size, history->model_name.data);
   }
   if ((fields[8].value.data && fields[8].type != IREE_JSON_VALUE_TYPE_FALSE) ||
       (fields[9].value.data &&
@@ -624,14 +625,14 @@ static iree_status_t chat_request_render(iree_string_view_t body,
 }
 
 iree_status_t loom_serve_text_chat_initialize(
-    const loom_serve_text_chat_policy_t* policy, iree_string_view_t body,
-    iree_host_size_t default_max_tokens, iree_allocator_t host_allocator,
-    loom_serve_text_chat_t* out_chat) {
+    const loom_serve_text_chat_policy_t* policy, iree_string_view_t model_name,
+    iree_string_view_t body, iree_host_size_t default_max_tokens,
+    iree_allocator_t host_allocator, loom_serve_text_chat_t* out_chat) {
   memset(out_chat, 0, sizeof(*out_chat));
   out_chat->policy = policy;
   out_chat->max_tokens = default_max_tokens;
   iree_string_builder_initialize(host_allocator, &out_chat->prompt);
-  chat_history_t history = {.chat = out_chat};
+  chat_history_t history = {.model_name = model_name, .chat = out_chat};
   iree_string_builder_initialize(host_allocator, &history.scratch);
   iree_string_builder_initialize(host_allocator, &history.arguments);
   iree_string_builder_initialize(host_allocator, &history.reasoning);

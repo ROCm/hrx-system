@@ -1,0 +1,60 @@
+# Copyright 2026 The IREE Authors
+#
+# Licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_library", "loom_cc_test", "loom_config_compatible_with")
+
+package(
+    default_visibility = ["//visibility:public"],
+    features = ["layering_check"],
+    licenses = ["notice"],
+)
+
+loom_cc_library(
+    name = "configuration",
+    srcs = ["configuration.c"],
+    hdrs = ["configuration.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:json",
+        "//runtime/src/iree/base/internal:unicode",
+    ],
+)
+
+loom_cc_binary(
+    name = "server",
+    srcs = ["server.c"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":configuration",
+        "//experimental/loom_serve/http:router",
+        "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/runtime:device",
+        "//experimental/loom_serve/runtime:device_flags",
+        "//experimental/loom_serve/scheduling:packing",
+        "//experimental/loom_serve/text:model",
+        "//experimental/loom_serve/text:schedule",
+        "//experimental/loom_serve/text:service",
+        "//loom/binding/c:loomc",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/io:file_handle",
+    ],
+)
+
+loom_cc_test(
+    name = "configuration_test",
+    srcs = ["configuration_test.cc"],
+    deps = [
+        ":configuration",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)

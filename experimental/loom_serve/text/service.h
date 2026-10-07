@@ -7,7 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_SERVICE_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_SERVICE_H_
 
-#include "experimental/loom_serve/http/server.h"
+#include "experimental/loom_serve/http/router.h"
 #include "experimental/loom_serve/text/model.h"
 
 #ifdef __cplusplus
@@ -31,6 +31,9 @@ typedef enum loom_serve_text_packing_mode_e {
 } loom_serve_text_packing_mode_t;
 
 typedef struct loom_serve_text_service_options_t {
+  // Borrowed deployment route name, outliving the service. Source identity and
+  // chat policy remain owned by the model, independently of this HTTP name.
+  iree_string_view_t name;
   // Number of retained rows, matching the model residency.
   iree_host_size_t row_count;
   // Maximum known input tokens admitted from one row in an epoch.
@@ -53,6 +56,29 @@ typedef struct loom_serve_text_service_options_t {
   // Two requires MTP; output credit and speculative residency cover both.
   iree_host_size_t continuation_epochs;
 } loom_serve_text_service_options_t;
+
+typedef struct loom_serve_text_service_t loom_serve_text_service_t;
+
+// Creates host session/admission state around a borrowed model. No transport or
+// execution thread is created; only the optional copied-snapshot reporter runs
+// independently. Capacities must match the model. Calls use its one host owner.
+iree_status_t loom_serve_text_service_create(
+    loom_serve_text_model_t* model,
+    const loom_serve_text_service_options_t* options,
+    loom_serve_text_service_t** out_service, iree_allocator_t host_allocator);
+
+// Returns borrowed callbacks for the shared owner loop. They take connection
+// claims, preserve model-local sessions/checkpoints, and advance one cohort.
+loom_serve_http_service_t loom_serve_text_service_interface(
+    loom_serve_text_service_t* service);
+
+// Relinquishes every accepted connection and joins the reporter. On terminal
+// failure, unresolved device reservations remain pinned for model destruction;
+// on ordinary completed-boundary shutdown, unused reservations are released.
+// terminal_code is the owner loop's result, including another model's failure.
+// Null is accepted. The borrowed model and transport both outlive this call.
+void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
+                                     iree_status_code_t terminal_code);
 
 // Runs one application owner until transport shutdown or model failure. Model
 // and transport are borrowed. Each epoch gathers credited ready rows, executes

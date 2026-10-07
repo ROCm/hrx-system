@@ -138,6 +138,7 @@ loom_cc_library(
         ":model",
         ":schedule",
         "//experimental/loom_serve/http:request",
+        "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/scheduling:packing",

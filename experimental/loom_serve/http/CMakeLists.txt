@@ -35,6 +35,24 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    router
+  HDRS
+    "router.h"
+  SRCS
+    "router.c"
+  DEPS
+    ::request
+    ::server
+    iree::base
+    iree::base::internal::json
+    iree::base::threading
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     server
   HDRS
     "server.h"
@@ -51,6 +69,23 @@ loom_cc_library(
     iree::net::carrier::tcp
   PUBLIC
 )
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+loom_cc_test(
+  NAME
+    router_test
+  SRCS
+    "router_test.cc"
+  DEPS
+    ::request
+    ::router
+    ::server
+    iree::async
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+)
+endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 loom_cc_test(
