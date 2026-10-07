@@ -134,7 +134,7 @@ downloaded weights remain separate from source history.
 | Target is incompatible or tests skip | Enabled AMDGPU/VM compiler, HAL substrate and runtime driver, plus the actual test runner's GPU capability |
 | `hsa_init`, loader, or device creation fails | ROCr dependency loading, device enumeration/permissions and available resources on the **execution** machine; model source has not run yet |
 | JIT cannot resolve a symbol or configuration | Catalog entry, named root, source `config.def`, `config.decl` constraints and supplied overrides; stderr identifies the failing stage |
-| Target contract rejects the GPU | Authored target declaration versus live device profile; full Qwen contains gfx1151-specific entries |
+| Target contract rejects the GPU | Authored architecture/features and subgroup width versus the live device profile; Qwen's Q6 wave64 kernels declare `gfx11-generic` |
 | Tensor missing, wrong size, or bad output at the first layer | Exact checkpoint hash, tensor name/shape/orientation/encoding, tokenizer IDs and reference intermediate values |
 | Single row works; retained or packed work fails | Absolute row origins/byte offsets, cache publication, inactive-row masking, input/output lifetime and explicit semaphore edges |
 | A GPU fault or unstable output | Smallest retained reproducer, target/profile, shape and source; `--kernel_sanitizer=access` instruments device accesses separately from host `--config=asan` |
