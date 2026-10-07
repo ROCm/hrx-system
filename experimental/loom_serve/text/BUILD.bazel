@@ -42,8 +42,14 @@ loom_cc_library(
 
 loom_cc_library(
     name = "model",
-    srcs = ["model.c"],
-    hdrs = ["model.h"],
+    srcs = [
+        "model.c",
+        "state.c",
+    ],
+    hdrs = [
+        "model.h",
+        "state.h",
+    ],
     target_compatible_with = loom_config_compatible_with([
         "//loom/config/target/arch:vm",
         "//runtime/config/hal:driver_amdgpu",
