@@ -28,6 +28,7 @@ extern "C" {
 // before any host payload is reused.
 typedef struct loom_serve_text_model_t loom_serve_text_model_t;
 typedef struct loom_serve_text_row_t loom_serve_text_row_t;
+typedef struct loom_serve_text_checkpoint_t loom_serve_text_checkpoint_t;
 
 // Four-input verification uses at most 64 selected-token entries per epoch.
 // Retained arenas are sized to row_count, not this control-payload bound.
@@ -60,6 +61,10 @@ typedef struct loom_serve_text_options_t {
   iree_string_view_t tokenizer_path;
   // Number of addressable retained rows in one stable state arena (1-16).
   iree_host_size_t row_count;
+  // Maximum explicitly retained endpoints; zero keeps no checkpoint reserve.
+  // Requires pooled execution. Source reserves reader/writer slot headroom;
+  // elastic backing commits only used ranges, fixed backing reserves it all.
+  iree_host_size_t checkpoint_capacity;
 } loom_serve_text_options_t;
 
 enum loom_serve_text_span_flag_bits_e {
@@ -137,11 +142,11 @@ typedef struct loom_serve_text_metrics_t {
 // Logical pool capacity measured in token positions, including page
 // rounding. Dense comparison storage reports zero capacity and availability.
 typedef struct loom_serve_text_pool_usage_t {
-  // Number of positions in one indivisible private cache page.
+  // Number of positions in one indivisible cache page.
   iree_host_size_t block_size;
   // Total addressable positions in target and optional draft storage.
   iree_host_size_t capacity;
-  // Positions in pages not currently owned by any row.
+  // Positions in pages not owned by any row, checkpoint or retiring use.
   iree_host_size_t available;
 } loom_serve_text_pool_usage_t;
 
@@ -265,10 +270,34 @@ iree_status_t loom_serve_text_model_verify(
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_result_t* out_results);
 
-// Clears recurrent state and position, then releases retired private KV pages.
+// Releases the row's recurrent/KV references and clears its host frontier.
 // Physical backing stays warm until model_trim. Attention beyond the new prefix
 // is inaccessible and need not clear before its pages are assigned again.
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row);
+
+// Retains the exact consumed endpoint without copying recurrent state or KV.
+// The pending prediction, if any, remains unconsumed. Requires a nonempty
+// resident row. Capacity refusal succeeds with a null output and no mutation.
+// A returned handle belongs to the caller until release and borrows the model;
+// model destruction invalidates outstanding handles. Optional source-sized
+// draft carry is copied on the existing queue timeline before returning.
+iree_status_t loom_serve_text_row_try_pin(
+    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint);
+
+// Restores an endpoint into any row of the same model, replacing that row's
+// continuation. Both owners share immutable state until advancement. Physical
+// admission refusal succeeds with restored=false and leaves the row intact.
+// Metrics continue to count effort already spent; they are not rewound.
+// Source/transfer/platform failures remain terminal, as with model_epoch.
+iree_status_t loom_serve_text_row_try_restore(
+    loom_serve_text_row_t* row, const loom_serve_text_checkpoint_t* checkpoint,
+    bool* out_restored);
+
+// Drops this endpoint's references at the serialized completed-call boundary.
+// No automatic history keeps them alive; live branches retain their own refs.
+// Null is accepted. The handle becomes invalid and may immediately be reused.
+void loom_serve_text_checkpoint_release(
+    loom_serve_text_checkpoint_t* checkpoint);
 
 // Captures an idle row's retained private/target/draft state into one DRAM
 // image, then returns its physical block IDs. Host frontier, pending prediction

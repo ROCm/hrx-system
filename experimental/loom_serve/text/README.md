@@ -82,7 +82,7 @@ specializations; the runner never substitutes another model or stale code.
 The cold entry in `prepare.loom` is:
 
 ```text
-prepare(prefill:i64, context:i64, pool:i64, rows:i64, mtp:i32,
+prepare(prefill:i64, context:i64, pool:i64, rows:i64, pins:i64, mtp:i32,
         shapes:buffer, shape_count:i64, weights:buffer)
   -> (prefill_capacity:i64, shared_stage_count:i32, state:buffer,
       terminal_spelling:buffer, allocations:buffer, row_views:buffer,
@@ -131,8 +131,11 @@ uploaded.
 Recurrent slots occupy `recurrent_length` bytes at
 `recurrent_origin + slot * recurrent_stride` in the state arena. They are
 disjoint from each other and all row-private views, and fit its initialized
-private extent. At least `rows` slots are available. A row acquires a slot on
-activation or restore and releases it after retired reset or successful
+private extent. With `pins=0`, at least `rows` slots are available. Opt-in
+checkpoints require at least `2*rows+pins` slots so every shared reader and
+private writer can survive an entire queued cohort. This is virtual headroom
+on elastic backing, not eagerly committed physical memory. A row acquires a
+slot on activation or restore and releases it after retired reset or successful
 suspension; an idle row owns none. Slot identity is independent of row identity.
 Views are created once, and elastic physical backing is committed on demand.
 Rebinding uses the source encoder below, not native device-record offsets.
@@ -214,9 +217,46 @@ pool, whose host allocation is separate from the device pool budget. The
 `models/qwen:epoch_check --suspend_rows --pool_capacity=2048 --mtp` witness
 overwrites the old blocks, denies resume under logical capacity pressure, then
 compares resumed target/MTP output with uninterrupted execution. It also covers
-unselected prefill state and resetting a suspended row. File-backed images,
-shared prefixes and automatic eviction require additional policy consumers;
-these explicit DRAM operations do not implement them.
+unselected prefill state and resetting a suspended row. File-backed images and
+automatic eviction require additional policy consumers; these explicit DRAM
+operations do not implement them.
+
+### Explicit shared endpoints
+
+`--checkpoint_capacity=N` opts into native `row_try_pin`, `row_try_restore` and
+`checkpoint_release`. Zero, the default, reserves no endpoint records or extra
+recurrent slots. A pin retains the exact consumed frontier and pending-token
+validity/value, with shared references to logical-order KV and recurrent state.
+Several branches of one prefix therefore share the same immutable anchor.
+MTP adds one source-sized carry entry per pin after the ordinary row entries
+in allocation six; its small device-to-device copy does not clone recurrence.
+The common pool metadata adds one host-side 32-bit reference count per physical
+ID, including when checkpoints are disabled. No extra recurrent device reserve
+or pin records are created in that default mode.
+
+A restored branch initially owns no private recurrent destination. Its first
+advance acquires one and the model kernels read the anchor directly. The source
+fork frontier switches subsequent queued epochs to the writer without a host
+wait. A shared partial KV tail gets one private page copied across all declared
+target/draft planes before append. Other prefix pages remain shared. Old readers
+and COW sources retire at the existing completed-cohort boundary, never during
+cohort assembly. Ordinary decode examines the current state and last page;
+it does not walk or retain the whole prefix per token.
+
+Pin capacity refusal returns a null handle without changing the row. Restore
+admits missing private slabs before replacing a continuation and returns
+`restored=false` on ordinary physical pressure. Effort metrics are not rewound.
+Compaction updates both live and pinned maps, moving each unique physical block
+once. Trim preserves pinned anchors even without a live row. An unadvanced
+fork's suspension captures its actual shared state. The last release makes
+storage reusable; no automatic soft history retains a released endpoint.
+
+These handles are serialized model API objects, not HTTP identifiers. Prefix
+lookup, request markers and cache admission policy can own these handles;
+none is inferred from a prompt or silently enabled. The real-model witness is
+`models/qwen:epoch_check --checkpoints --checkpoint_capacity=1
+--pool_capacity=65536 --context_capacity=1024 --prefill_capacity=128
+--epoch=64:4 --epoch=128:8 --mtp`, with normal model/weights/tokenizer flags.
 
 Each row's control/input/progress views are present. Dense
 attention is present only without a physical pool; pooled kernels find it
@@ -246,8 +286,8 @@ is independent of the model's device packet format:
   record bank. It updates the retained opaque target-origin payload in place,
   preserving other rows and model-specific fields such as KV origins. Native
   code orders its upload before subsequent work on the existing timeline.
-  Steady-state epochs do not invoke this encoder. The current exclusive slot
-  owner supplies equal read/write origins; shared pins need additional owners.
+  Steady-state epochs do not invoke this encoder. Exclusive slots supply equal
+  origins; the first advance of a shared slot supplies its anchor and writer.
 * A plan has 32 little-endian i32 records of eight fields:
   `{length, position, row, input_begin, input_count, flags, output_credit,
   first_span}`. The first cohort occupies records 0–15 and the continuation

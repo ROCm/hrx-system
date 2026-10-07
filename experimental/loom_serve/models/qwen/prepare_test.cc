@@ -41,8 +41,8 @@ class PrepareTest : public ::testing::Test {
 
   void Prepare(iree_host_size_t rows, iree_host_size_t pool, bool mtp,
                const std::vector<loom_serve_packing_shape_t>& shapes,
-               iree_host_size_t context = 16384,
-               iree_host_size_t prefill = 512) {
+               iree_host_size_t context = 16384, iree_host_size_t prefill = 512,
+               iree_host_size_t pins = 0) {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     loom_serve_preparation_destroy(preparation);
     preparation = nullptr;
@@ -69,6 +69,7 @@ class PrepareTest : public ::testing::Test {
         iree_vm_variant_from_i64(context),
         iree_vm_variant_from_i64(pool),
         iree_vm_variant_from_i64(rows),
+        iree_vm_variant_from_i64(pins),
         iree_vm_variant_from_i32(mtp),
         iree_vm_buffer_variant_from_ptr_move(&types, &shape_buffer),
         iree_vm_variant_from_i64(shapes.size()),
@@ -84,12 +85,13 @@ class PrepareTest : public ::testing::Test {
   }
 
   void CheckStorage(uint64_t rows, uint64_t context, uint64_t pool, bool packed,
-                    bool mtp) {
+                    bool mtp, uint64_t pins = 0) {
     // These address equations are the preceding production layout. Source
     // descriptors must preserve both dense and pooled kernel bindings.
     const uint64_t attention = pool ? 0 : context * 65536;
     const uint64_t stride = 156895744 + attention;
-    const uint64_t row_bytes = rows * stride;
+    const uint64_t slots = pins ? 2 * rows + pins : rows;
+    const uint64_t row_bytes = slots * stride;
     const uint64_t table = pool ? 2048 + rows * ((context + 63) / 64) * 4 : 512;
     const uint64_t lengths[] = {
         10485760,
@@ -98,14 +100,15 @@ class PrepareTest : public ::testing::Test {
         packed ? table : 0,
         packed ? 4096u : 0,
         packed ? 64u : 0,
-        mtp ? rows * 20480 : 0,
+        mtp ? (rows + pins) * 20480 : 0,
         mtp ? 1548u : 0,
         mtp ? 832u : 0,
         mtp ? (pool ? pool : rows * context) * 4096 : 0,
         mtp ? table : 0,
     };
     const uint64_t clear[] = {
-        10485760, row_bytes, 0, 0, 0, 0, mtp ? rows * 20480 : 0, 0, 0, 0, 0};
+        10485760, row_bytes, 0, 0, 0, 0, mtp ? (rows + pins) * 20480 : 0,
+        0,        0,         0, 0};
     std::vector<std::vector<uint64_t>> expected(5);
     for (size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
       expected[0].insert(expected[0].end(), {lengths[i], 256, clear[i]});
@@ -123,7 +126,7 @@ class PrepareTest : public ::testing::Test {
       expected[2][row * 4 + 2] = pool ? row_bytes : base + 156893440;
       expected[3][row * 4 + 2] = pool ? 0 : row * context * 4096;
     }
-    expected[4] = {64, 2048, 20480, 384, 256, stride, 156893184, rows};
+    expected[4] = {64, 2048, 20480, 384, 256, stride, 156893184, slots};
     if (pool) {
       expected[4].insert(expected[4].end(),
                          {1, row_bytes, 32, pool * 2048, 131072});
@@ -297,6 +300,18 @@ TEST_F(PrepareTest, StoragePreservesPageBoundariesAndWideByteOrigins) {
   }
 }
 
+TEST_F(PrepareTest, CheckpointCapacityReservesIndependentSlotsAndCarry) {
+  for (uint64_t rows : {1u, 8u, 16u}) {
+    for (uint64_t pins : {1u, 3u}) {
+      for (bool mtp : {false, true}) {
+        ASSERT_NO_FATAL_FAILURE(
+            Prepare(rows, 65536, mtp, {{32, rows}}, 262144, 32, pins));
+        CheckStorage(rows, 262144, 65536, true, mtp, pins);
+      }
+    }
+  }
+}
+
 TEST(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
   const std::string source = FLAG_prepare_source;
   const std::string directory = source.substr(0, source.find_last_of('/'));
@@ -320,6 +335,13 @@ TEST(PrepareModelTest, InvalidPoolAndMissingTokenizerRetireSourceResults) {
   EXPECT_EQ(model, nullptr);
   auto invalid = options;
   invalid.pool_capacity = 65;
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_model_create(nullptr, &invalid, &model,
+                                                     iree_allocator_system()));
+  EXPECT_EQ(model, nullptr);
+  invalid = options;
+  invalid.pool_capacity = 0;
+  invalid.checkpoint_capacity = 1;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_serve_text_model_create(nullptr, &invalid, &model,
                                                      iree_allocator_system()));

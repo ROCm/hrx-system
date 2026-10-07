@@ -165,8 +165,13 @@ at activation or restore, independently of row identity, and release them only
 after reset retirement or completed suspension. The source VM's `encode_state`
 maps changed ownership into its opaque target-origin payload; C never decodes
 the device record layout. This encoder and upload run on ownership changes,
-not every epoch. The slot pool is exclusive; shared pins add another lifetime
-contract rather than implicitly making these IDs shareable.
+not every epoch. Explicit checkpoint handles retain shared recurrent/KV IDs.
+Their first advancing branch gets an exclusive recurrent writer and a private
+copy of any partial KV tail; old readers survive the whole cohort. There is no
+recurrent-state clone. Checkpoint capacity defaults to zero and is independent
+of active row capacity. Source reserves optional writer headroom and carry;
+elastic backing commits only used ranges. See [text](../text/README.md#explicit-shared-endpoints)
+for the pin/restore/release contract and real-model witness.
 
 At a completed maintenance cut, `model_trim` compacts live blocks, updates all
 row maps, and releases slabs containing no retained range. It uses the same
@@ -345,7 +350,7 @@ owner with actual queues.
 | More rows or wider epochs | Host fixed arrays, descriptor capacities, authored views, scratch sizing, shape selection, and full-sized correctness/performance qualification |
 | Online shape insertion | Stage publication and immutable command-table lifetime; cached code and in-flight bindings must remain valid |
 | Overcommitted pooled sessions | Replace full-completion admission guarantees with explicit held/offloaded residency and a policy for restoring older sessions; kernels still consume only resident pages |
-| Shared prefix cache | Add shared ownership, partial-tail copy-on-write, recurrent snapshots, and retirement to the private-page lifecycle |
+| Shared prefix cache | Select exact compatible endpoints and own native checkpoint handles; add request markers, lookup and budget/retention policy over the shared-state lifecycle |
 | Continuous device-owned continuation | Extend the bounded two-epoch handoff to admission/completion rings with credit, cancellation and independently retired output slots |
 | Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |
 | NPU/GPU or collective execution | Target packages, actual queue/device domains, shared-memory/coherency contracts, and cross-device completion/ownership |

@@ -25,6 +25,9 @@ IREE_FLAG_LIST(
     "Packed JIT shape as tokens:spans; repeated flags replace the automatic "
     "catalog bounded by prefill_capacity and resident rows.");
 IREE_FLAG(bool, mtp, false, "JIT MTP proposal, catch-up, and verifier stages.");
+IREE_FLAG(int32_t, checkpoint_capacity, 0,
+          "Explicitly pinned endpoint capacity; zero disables checkpoints. "
+          "Requires pooled KV and reserves source-defined recurrent headroom.");
 IREE_FLAG(string, weights, "", "Parameter file selected by the model source.");
 IREE_FLAG(string, tokenizer, "", "Hugging Face tokenizer.json path.");
 IREE_FLAG(string, kernel_sanitizer, "none",
@@ -91,7 +94,7 @@ iree_status_t loom_serve_text_model_create_from_flags(
   if (!FLAG_model[0] || !FLAG_weights[0] || !FLAG_tokenizer[0] ||
       FLAG_prefill_capacity < 1 || FLAG_prefill_capacity > 512 ||
       FLAG_context_capacity < 1 || FLAG_pool_capacity < -1 ||
-      defaults->row_count < 1 ||
+      FLAG_checkpoint_capacity < 0 || defaults->row_count < 1 ||
       defaults->row_count > LOOM_SERVE_TEXT_ROW_CAPACITY) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -144,6 +147,7 @@ iree_status_t loom_serve_text_model_create_from_flags(
       .weights_path = iree_make_cstring_view(FLAG_weights),
       .tokenizer_path = iree_make_cstring_view(FLAG_tokenizer),
       .row_count = defaults->row_count,
+      .checkpoint_capacity = (iree_host_size_t)FLAG_checkpoint_capacity,
   };
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_model_create(device, &options, out_model,

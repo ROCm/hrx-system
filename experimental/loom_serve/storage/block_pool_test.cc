@@ -14,6 +14,21 @@
 
 namespace {
 
+TEST(BlockPoolTest, EmptyPoolHasNoOwnership) {
+  loom_serve_block_pool_t pool;
+  IREE_ASSERT_OK(
+      loom_serve_block_pool_initialize(0, iree_allocator_system(), &pool));
+  EXPECT_EQ(pool.capacity, 0u);
+  EXPECT_EQ(pool.available, 0u);
+  EXPECT_EQ(pool.references, nullptr);
+  loom_serve_block_pool_acquire(&pool, 0, nullptr);
+  loom_serve_block_pool_retain(&pool, 0, nullptr);
+  loom_serve_block_pool_release(&pool, 0, nullptr);
+  EXPECT_EQ(loom_serve_block_pool_plan_compaction(&pool, nullptr), 0u);
+  loom_serve_block_pool_commit_compaction(&pool, nullptr);
+  loom_serve_block_pool_deinitialize(&pool);
+}
+
 TEST(BlockPoolTest, InterleavedGrowthAndRetiredSuffixReuse) {
   loom_serve_block_pool_t pool;
   IREE_ASSERT_OK(
@@ -70,6 +85,45 @@ TEST(BlockPoolTest, WarmReuseKeepsBackingAndHandlesEmptyExtents) {
   loom_serve_block_pool_deinitialize(&pool);
 }
 
+TEST(BlockPoolTest, SharedOwnersSurviveCompactionAndLastRelease) {
+  loom_serve_block_pool_t pool;
+  IREE_ASSERT_OK(
+      loom_serve_block_pool_initialize(8, iree_allocator_system(), &pool));
+  std::array<uint32_t, 8> blocks;
+  loom_serve_block_pool_acquire(&pool, blocks.size(), blocks.data());
+  const uint32_t shared[] = {blocks[5], blocks[7]};
+  loom_serve_block_pool_retain(&pool, 2, shared);
+  loom_serve_block_pool_retain(&pool, 1, shared);
+  loom_serve_block_pool_release(&pool, 5, blocks.data());
+  loom_serve_block_pool_release(&pool, 1, &blocks[6]);
+  EXPECT_EQ(pool.available, 6u);
+  EXPECT_EQ(pool.references[5], 3u);
+  EXPECT_EQ(pool.references[7], 2u);
+  std::array<uint32_t, 8> destinations;
+  EXPECT_EQ(loom_serve_block_pool_plan_compaction(&pool, destinations.data()),
+            2u);
+  loom_serve_block_pool_commit_compaction(&pool, destinations.data());
+  uint32_t a = destinations[5], b = destinations[7];
+  EXPECT_EQ(pool.references[a], 3u);
+  EXPECT_EQ(pool.references[b], 2u);
+  loom_serve_block_pool_release(&pool, 1, &a);
+  loom_serve_block_pool_release(&pool, 1, &b);
+  EXPECT_EQ(pool.available, 6u);
+  EXPECT_TRUE(loom_serve_block_pool_is_shared(&pool, a));
+  EXPECT_FALSE(loom_serve_block_pool_is_shared(&pool, b));
+  loom_serve_block_pool_release(&pool, 1, &a);
+  loom_serve_block_pool_release(&pool, 1, &b);
+  EXPECT_EQ(pool.available, 7u);
+  loom_serve_block_pool_release(&pool, 1, &a);
+  EXPECT_EQ(pool.available, pool.capacity);
+  loom_serve_block_pool_acquire(&pool, blocks.size(), blocks.data());
+  EXPECT_EQ(std::set<uint32_t>(blocks.begin(), blocks.end()).size(), 8u);
+  for (uint32_t block : blocks) {
+    EXPECT_EQ(pool.references[block], 1u);
+  }
+  loom_serve_block_pool_deinitialize(&pool);
+}
+
 TEST(BlockPoolTest, CompactionMovesOnlyIntoDisjointFreeSlots) {
   // Exhaust every ownership pattern in a small pool, including all-live and
   // all-free. This checks the actual planning and commit contract, not a
@@ -107,7 +161,7 @@ TEST(BlockPoolTest, CompactionMovesOnlyIntoDisjointFreeSlots) {
       }
     }
     EXPECT_EQ(moved, observed_moves);
-    loom_serve_block_pool_commit_compaction(&pool);
+    loom_serve_block_pool_commit_compaction(&pool, destinations.data());
     const uint32_t available = pool.available;
     loom_serve_block_pool_acquire(&pool, available, blocks.data());
     for (uint32_t i = 0; i < available; ++i) {
