@@ -11,7 +11,7 @@ Enable the native provider, HAL registration, and Loom XDNA emitter:
 
 ```sh
 iree-bazel-configure -DAMDF_BUILD=ON -DIREE_HAL_DRIVER_XDNA=ON \
-  -DLOOM_TARGET_XDNA=ON -DLOOM_EMIT_XDNA=ON
+  -DLOOM_TARGET_XDNA=ON -DLOOM_EMIT_XDNA=ON -DLOOM_TARGET_VM=ON
 iree-bazel-run //loom/src/loom/tools/iree-test-loom -- \
   loom/src/loom/tooling/target/amd/xdna/test/hal_execution.loom --device=xdna
 ```
@@ -38,14 +38,22 @@ current native image ABI.
 A device provisions one dispatch/transfer queue and one time-sliced native
 context. Each accepted operation captures its transient arguments and retains
 its resources. Semaphore dependencies express ordering. A consumer submitted
-before its producer waits without occupying the native execution slot.
+before its producer waits without occupying a native execution slot.
 
 The shared proactor admits ready operations and observes native completion.
-Only one native invocation reads executable storage at a time. Its successor
-can patch bindings after checked retirement. Every dispatch executes invocation
-zero to establish the array state; time slicing does not promise resident tile
-state across submissions. This permits ordinary direct dispatch without a
-resident-program scheduler or reusable command buffer implementation.
+Accepted invocations occupy a bounded ring sized to the native queue's prepared
+capacity. Each pending invocation owns exclusive mutable command and binding
+storage; checked retirement returns that storage for reuse. Immutable backing is
+shared when its static address references also point to shared allocations.
+Binding updates publish only their patched ranges. Every dispatch executes
+invocation zero to establish the array state; time slicing does not promise
+resident tile state across submissions.
+
+Eligible host operations progress independently of pending native commands and
+never advance the native queue's completion frontier. Admission still runs on
+the proactor: native submission can block on OS-owned credits or device wakeup,
+and mapped transfers perform CPU work there. The public queue call captures
+arguments and hands readiness to the proactor.
 
 Direct fill, update, copy, upload, download, and barriers are supported. Transfers
 use mapped native storage with the required cache operations. Allocated buffers

@@ -13,10 +13,13 @@
 extern "C" {
 #endif
 
-// One admitted function and its prepared native backing. The owning executable
-// dominates this borrowed pointer. Only its queue's execution owner may bind
-// it.
+// One admitted function and its reusable invocation storage. The owning
+// executable dominates this borrowed pointer.
 typedef struct iree_hal_amd_xdna_function_t iree_hal_amd_xdna_function_t;
+
+// Exclusive mutable backing for one native invocation. The owning executable
+// stays retained until the invocation is returned after checked retirement.
+typedef struct iree_hal_amd_xdna_invocation_t iree_hal_amd_xdna_invocation_t;
 
 // Copies the artifact, admits its image, and prepares native storage. The
 // family and context are borrowed from the parent device for the executable
@@ -36,13 +39,23 @@ iree_status_t iree_hal_amd_xdna_executable_resolve(
     iree_hal_amd_xdna_executable_binding_t* out_bindings,
     iree_hal_amd_xdna_function_t** out_function);
 
-// Patches and publishes invocation zero after prior native users have retired.
-// |bindings| was captured by executable_resolve. The command borrows function
-// storage through checked native completion.
+// Acquires exclusive invocation storage, patches captured bindings and
+// publishes the changed ranges. Cold growth creates private mutable backing
+// while sharing the function's immutable allocation closure. Warm reuse
+// performs no allocation. On failure no invocation is acquired. On success the
+// command borrows |out_invocation| until the caller returns it after checked
+// native retirement.
 iree_status_t iree_hal_amd_xdna_function_prepare(
     iree_hal_amd_xdna_function_t* function,
     const iree_hal_amd_xdna_executable_binding_t* bindings,
+    iree_hal_amd_xdna_invocation_t** out_invocation,
     amdf_xdna_kernel_command_t* out_command);
+
+// Returns exclusively owned storage after rejection or checked retirement.
+// Safe concurrently with acquisition on another queue; performs no native work.
+// A NULL invocation requires no action.
+void iree_hal_amd_xdna_invocation_release(
+    iree_hal_amd_xdna_invocation_t* invocation);
 
 #ifdef __cplusplus
 }  // extern "C"
