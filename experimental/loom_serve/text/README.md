@@ -294,6 +294,9 @@ residency including explicit pins. Their sum stays within logical capacity.
 Idle cache can be evicted under pressure. Pins are never automatically evicted;
 if pins make a request impossible even without active work, it returns `503`
 with a release/increase-capacity diagnostic instead of waiting indefinitely.
+Rejected replacement preserves the selected continuation. Other idle session
+caches may be reclaimed while admission evaluates a request, even if it cannot
+ultimately fit; their independent explicit pins remain usable.
 Physical restore refusal also returns `503` without replacing the destination
 continuation. Native metadata does not constitute disk persistence.
 
