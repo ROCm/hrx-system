@@ -255,3 +255,56 @@ entry moves: 2
   test.explicit32:physical_register:3 <- test.explicit32:physical_register:2
 classes:
   test.explicit32: assignments=1 units=2 target_ids=0 physical=7 spill_slots=0 unassigned=0
+
+// ====
+
+// Incoming transport must not write an unused word over another live input.
+// RUN: emit low-allocation @partial_entry entry=0:physical_register:0 entry=1:physical_register:2 fixed=%guard:physical_register:0:1 fixed=%pair:physical_register:0:2
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @partial_entry(%guard: reg<test.phys>, %pair: reg<test.phys x2>) -> (reg<test.phys>, reg<test.phys>) asm {
+  %high = slice %pair[1] : reg<test.phys x2> -> reg<test.phys>
+  return %guard, %high
+}
+
+// ----
+low-allocation @partial_entry
+target: target
+descriptor_set: test.low.core
+mode: virtual
+assignments: 3
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+entry moves: 1
+  test.phys:physical_register:1 <- test.phys:physical_register:3
+classes:
+  test.phys: assignments=3 units=4 target_ids=0 physical=2 spill_slots=0 unassigned=0
+
+// ====
+
+// The same contract applies to noncontiguous physical views: l0 is r0/r2,
+// l1 is r1/r3, and r1 belongs to the independent live input.
+// RUN: emit low-allocation @partial_entry_view entry=0:physical_register:1 entry=1:physical_register:4 fixed=%guard:physical_register:1:1 fixed=%pair:physical_register:5:2
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @partial_entry_view(%guard: reg<test.explicit32>, %pair: reg<test.explicit32 x2>) -> (reg<test.explicit32>, reg<test.explicit32>) asm {
+  %high = slice %pair[1] : reg<test.explicit32 x2> -> reg<test.explicit32>
+  return %guard, %high
+}
+
+// ----
+low-allocation @partial_entry_view
+target: target
+descriptor_set: test.low.core
+mode: virtual
+assignments: 3
+remarks: 0
+spills: 0
+copies: coalesced=0 materialized=0
+entry moves: 1
+  test.explicit32:physical_register:3 <- test.explicit32:physical_register:2
+classes:
+  test.explicit32: assignments=3 units=4 target_ids=0 physical=7 spill_slots=0 unassigned=0

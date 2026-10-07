@@ -1378,13 +1378,32 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
         .unit_point_start = (uint32_t)unit_point_start,
         .acquisition_start_point = interval->start_point,
     };
+    uint32_t initial_end_point =
+        loom_low_allocation_live_range_interval_initial_unit_end_point(
+            interval);
+    if (interval->unit_count > 1 && interval->definition_point != UINT32_MAX) {
+      const loom_value_t* value =
+          loom_module_value(value_domain->module, interval->value_id);
+      const loom_op_t* definition =
+          loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
+      if (definition != NULL &&
+          (loom_low_op_isa(definition) || loom_low_const_isa(definition))) {
+        // Native definitions write every result word, including unread words.
+        // Structural transports instead write only demanded destination units.
+        initial_end_point =
+            iree_max(initial_end_point, interval->definition_point + 1u);
+        if (initial_end_point > interval->end_point) {
+          iree_bitmap_set(
+              out_unit_liveness->values_with_incomplete_storage_segments, i);
+        }
+      }
+    }
     for (uint32_t unit_index = 0; unit_index < interval->unit_count;
          ++unit_index) {
       out_unit_liveness->start_points[unit_point_start + unit_index] =
           interval->start_point;
       out_unit_liveness->end_points[unit_point_start + unit_index] =
-          loom_low_allocation_live_range_interval_initial_unit_end_point(
-              interval);
+          initial_end_point;
     }
     unit_point_start += interval->unit_count;
   }

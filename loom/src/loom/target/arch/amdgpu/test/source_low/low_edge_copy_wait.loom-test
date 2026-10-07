@@ -103,6 +103,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @packed_edge_preserves_coalesced
 ^join(%joined: reg<amdgpu.vgpr x2>):
   %first = slice %joined[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
   %used = v_add_u32 %first, %address
+  %second = slice %joined[1] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %second_used = v_add_u32 %second, %address
   return
 }
 
@@ -115,7 +117,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @packed_edge_preserves_coalesced
   v_mov_b32 v5, v8
 .Lbb1:
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  v_add_u32 v0, v4, v0
+  v_add_u32 v1, v4, v0
+  v_add_u32 v0, v5, v0
   s_endpgm
 
 // ====

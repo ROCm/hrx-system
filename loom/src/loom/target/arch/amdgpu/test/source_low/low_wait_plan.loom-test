@@ -1057,8 +1057,8 @@ low.func.def target<amdgpu.rdna3.core>(@target) @explicit_join_lgkm_wait_satisfi
   return
 }
 
-// The zero arm materializes its concat as dependent VALU edge copies. GFX11
-// must delay the first copy after producing %zero_lane.
+// The join reads only the first tuple word. The zero arm coalesces that word
+// directly, so its unused words need neither edge copies nor a VALU delay.
 // ----
   s_cbranch_scc0 .Lbb2
 .Lbb1:
@@ -1066,10 +1066,6 @@ low.func.def target<amdgpu.rdna3.core>(@target) @explicit_join_lgkm_wait_satisfi
   s_branch .Lbb3
 .Lbb2:
   v_mov_b32 v4, 0
-  s_delay_alu instid0(VALU_DEP_1)
-  v_mov_b32 v5, v4
-  v_mov_b32 v6, v4
-  v_mov_b32 v7, v4
 .Lbb3:
   s_waitcnt vmcnt(63) lgkmcnt(0)
   v_add_u32 v0, v4, v0

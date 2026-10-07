@@ -8,7 +8,9 @@
 
 #include <string.h>
 
+#include "loom/codegen/low/allocation/live_range.h"
 #include "loom/codegen/low/allocation/storage.h"
+#include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/codegen/low/schedule/types.h"
 
@@ -263,9 +265,34 @@ loom_low_allocation_move_plan_next_operation(
   return point;
 }
 
-loom_low_move_t* loom_low_allocation_move_plan_raw_moves(
-    loom_low_allocation_move_plan_t* plan) {
-  return plan->sequence_scratch.moves;
+void loom_low_allocation_move_plan_append_assignment(
+    loom_low_allocation_move_plan_t* plan,
+    const loom_low_allocation_assignment_t* source, uint32_t source_unit_offset,
+    const loom_low_allocation_assignment_t* destination,
+    uint32_t destination_unit_offset, uint32_t unit_count,
+    iree_host_size_t* inout_raw_move_count) {
+  const loom_low_allocation_unit_liveness_t* unit_liveness =
+      plan->context.unit_liveness;
+  for (uint32_t unit = 0; unit < unit_count; ++unit) {
+    const uint32_t destination_unit = destination_unit_offset + unit;
+    const uint32_t start_point =
+        loom_low_allocation_live_range_assignment_unit_start_point(
+            unit_liveness->start_points, unit_liveness->point_count,
+            destination, destination_unit);
+    const uint32_t end_point =
+        loom_low_allocation_live_range_assignment_unit_end_point(
+            unit_liveness->end_points, unit_liveness->point_count, destination,
+            destination_unit);
+    if (start_point >= end_point) {
+      continue;
+    }
+    plan->sequence_scratch.moves[(*inout_raw_move_count)++] = (loom_low_move_t){
+        .source = loom_low_allocation_assignment_unit_location(
+            plan->context.descriptor_set, source, source_unit_offset + unit),
+        .destination = loom_low_allocation_assignment_unit_location(
+            plan->context.descriptor_set, destination, destination_unit),
+    };
+  }
 }
 
 iree_status_t loom_low_allocation_move_plan_append_group(

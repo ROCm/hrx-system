@@ -132,6 +132,8 @@ bool loom_low_allocation_unit_liveness_storage_is_ignored(
 // structure over the canonical |cfg_graph|. The resulting points refine
 // register intervals down to target allocation units across CFG boundaries,
 // low.slice uses, descriptor early-clobber hazards, and structured backedges.
+// Native result units occupy their definition point even without readers.
+// Structural transports write only units with nonempty destination lifetimes.
 // The complete register-unit extent is bounded before point allocation;
 // retained-read construction consumes subsets of this same bounded domain.
 // Published point arrays are owned by |result_arena|; query metadata and

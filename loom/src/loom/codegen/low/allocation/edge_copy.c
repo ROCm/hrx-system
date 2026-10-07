@@ -7,7 +7,6 @@
 #include "loom/codegen/low/allocation/edge_copy.h"
 
 #include "loom/codegen/low/allocation/storage.h"
-#include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/ops/low/ops.h"
 
 typedef struct loom_low_allocation_edge_copy_builder_t {
@@ -127,18 +126,10 @@ static void loom_low_allocation_edge_copy_record_segment(
   if (kind == LOOM_LOW_ALLOCATION_COPY_COALESCED) {
     return;
   }
-  loom_low_move_t* raw_moves =
-      loom_low_allocation_move_plan_raw_moves(context->move_plan);
-  for (uint32_t i = 0; i < unit_count; ++i) {
-    raw_moves[builder->raw_move_count++] = (loom_low_move_t){
-        .destination = loom_low_allocation_assignment_unit_location(
-            context->move_plan->context.descriptor_set, destination_assignment,
-            destination_unit_offset + i),
-        .source = loom_low_allocation_assignment_unit_location(
-            context->move_plan->context.descriptor_set, source_assignment,
-            source_unit_offset + i),
-    };
-  }
+  loom_low_allocation_move_plan_append_assignment(
+      context->move_plan, source_assignment, source_unit_offset,
+      destination_assignment, destination_unit_offset, unit_count,
+      &builder->raw_move_count);
 }
 
 static void loom_low_allocation_edge_copy_record_branch_payload_segments(

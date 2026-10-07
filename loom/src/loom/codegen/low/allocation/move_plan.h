@@ -33,7 +33,7 @@ typedef struct loom_low_allocation_move_plan_context_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Mutable target storage constraints and diagnostic state.
   loom_low_allocation_target_constraints_t* target_constraints;
-  // Per-allocation-unit live end points.
+  // Per-allocation-unit physical storage lifetimes.
   const loom_low_allocation_unit_liveness_t* unit_liveness;
   // Completed assignment lookup map.
   loom_low_allocation_assignment_map_t assignment_map;
@@ -112,9 +112,15 @@ loom_low_allocation_move_plan_next_operation(
     const loom_low_allocation_move_plan_t* plan, const loom_op_t* op,
     loom_low_allocation_move_cursor_t* cursor);
 
-// Returns reusable storage for constructing one raw parallel move group.
-loom_low_move_t* loom_low_allocation_move_plan_raw_moves(
-    loom_low_allocation_move_plan_t* plan);
+// Appends transport for demanded destination units to the raw parallel group.
+// Empty destination lifetimes own no storage and must not be written. The
+// retained unit lifetimes include demand inherited through required aliases.
+void loom_low_allocation_move_plan_append_assignment(
+    loom_low_allocation_move_plan_t* plan,
+    const loom_low_allocation_assignment_t* source, uint32_t source_unit_offset,
+    const loom_low_allocation_assignment_t* destination,
+    uint32_t destination_unit_offset, uint32_t unit_count,
+    iree_host_size_t* inout_raw_move_count);
 
 // Sequences |raw_move_count| rows from the reusable raw storage and appends
 // the final rows to |plan|. Cycle scratch is resolved and indexed only when

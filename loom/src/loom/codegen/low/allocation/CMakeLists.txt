@@ -189,7 +189,6 @@ loom_cc_library(
     ::move_plan
     ::storage
     ::table
-    ::unit_location
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness
@@ -1174,12 +1173,14 @@ loom_cc_library(
     "move_plan.c"
   DEPS
     ::assignment_map
+    ::live_range
     ::move
     ::move_sequence
     ::storage
     ::storage_liveness_index
     ::target_constraints
     ::unit_liveness
+    ::unit_location
     ::write_interference
     iree::base
     iree::base::internal::arena
@@ -1256,7 +1257,6 @@ loom_cc_library(
     ::move_plan
     ::move_topology
     ::table
-    ::unit_location
     iree::base
     iree::base::internal::arena
     loom::analysis::liveness

@@ -20,7 +20,6 @@
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
 #include "loom/codegen/low/allocation/unit_liveness.h"
-#include "loom/codegen/low/allocation/unit_location.h"
 #include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/schedule/types.h"
@@ -218,8 +217,6 @@ loom_low_allocation_entry_destination(
 
 static iree_status_t loom_low_allocation_build_entry_moves(
     loom_low_allocation_build_state_t* state) {
-  loom_low_move_t* raw_moves =
-      loom_low_allocation_move_plan_raw_moves(&state->move_plan);
   iree_host_size_t raw_move_count = 0;
   for (iree_host_size_t i = 0; i < state->options->entry_location_count; ++i) {
     const loom_low_allocation_assignment_t* destination =
@@ -232,14 +229,9 @@ static iree_status_t loom_low_allocation_build_entry_moves(
     loom_low_allocation_assignment_t source = *destination;
     source.location_kind = entry->location_kind;
     source.location_base = entry->location_base;
-    for (uint32_t unit = 0; unit < destination->location_count; ++unit) {
-      raw_moves[raw_move_count++] = (loom_low_move_t){
-          .source = loom_low_allocation_assignment_unit_location(
-              state->target.descriptor_set, &source, unit),
-          .destination = loom_low_allocation_assignment_unit_location(
-              state->target.descriptor_set, destination, unit),
-      };
-    }
+    loom_low_allocation_move_plan_append_assignment(
+        &state->move_plan, &source, 0, destination, 0,
+        destination->location_count, &raw_move_count);
     loom_low_allocation_target_constraints_record_location_extent(
         &state->target_constraints, source.descriptor_reg_class_id,
         source.location_kind, source.location_base, source.location_count);
@@ -343,8 +335,6 @@ static iree_status_t loom_low_allocation_build_call_moves(
       const loom_value_ordinal_t* ordinals =
           side ? loom_low_schedule_node_const_result_ordinals(node)
                : loom_low_schedule_node_const_operand_ordinals(node);
-      loom_low_move_t* raw =
-          loom_low_allocation_move_plan_raw_moves(&state->move_plan);
       iree_host_size_t raw_count = 0;
       for (uint16_t i = 0; i < count; ++i) {
         const loom_low_allocation_assignment_t* assignment =
@@ -361,18 +351,10 @@ static iree_status_t loom_low_allocation_build_call_moves(
             &state->target_constraints, boundary.descriptor_reg_class_id,
             boundary.location_kind, boundary.location_base,
             boundary.location_count);
-        for (uint32_t unit = 0; unit < assignment->location_count; ++unit) {
-          const loom_low_move_location_t abi_location =
-              loom_low_allocation_assignment_unit_location(
-                  state->target.descriptor_set, &boundary, unit);
-          const loom_low_move_location_t value_location =
-              loom_low_allocation_assignment_unit_location(
-                  state->target.descriptor_set, assignment, unit);
-          raw[raw_count++] = (loom_low_move_t){
-              .source = side ? abi_location : value_location,
-              .destination = side ? value_location : abi_location,
-          };
-        }
+        loom_low_allocation_move_plan_append_assignment(
+            &state->move_plan, side ? &boundary : assignment, 0,
+            side ? assignment : &boundary, 0, assignment->location_count,
+            &raw_count);
       }
       loom_low_move_group_t group;
       // Overflow arguments have already been stored before register transport.

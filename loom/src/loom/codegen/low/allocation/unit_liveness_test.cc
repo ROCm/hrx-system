@@ -7,6 +7,7 @@
 #include "loom/codegen/low/allocation/unit_liveness.h"
 
 #include <array>
+#include <tuple>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -289,6 +290,120 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
   loom_local_value_domain_release(&domain);
   loom_module_free(module);
 }
+
+enum class ResultDefinitionKind { kInstruction, kConstant, kCopy };
+enum class ResultUseKind { kHighWord, kUnused };
+
+class LowAllocationDefinitionLivenessTest
+    : public LowAllocationUnitLivenessTest,
+      public ::testing::WithParamInterface<
+          std::tuple<ResultDefinitionKind, ResultUseKind, uint32_t>> {};
+
+TEST_P(LowAllocationDefinitionLivenessTest, DistinguishesWritesFromTransport) {
+  const auto [kind, use, width] = GetParam();
+  loom_low_reg_class_t register_class = {};
+  register_class.alloc_unit_bits = 32;
+  const loom_low_reg_class_alt_t alternative = {0, LOOM_LOW_REGISTER_PART_NONE,
+                                                0, 0};
+  loom_low_operand_t operand = {};
+  operand.role = LOOM_LOW_OPERAND_ROLE_RESULT;
+  operand.reg_class_alt_count = 1;
+  operand.unit_count = width;
+  loom_low_descriptor_t descriptor = {};
+  descriptor.operand_count = 1;
+  descriptor.result_count = 1;
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.stable_id = 1;
+  descriptors.reg_classes = &register_class;
+  descriptors.reg_class_count = 1;
+  descriptors.reg_class_alts = &alternative;
+  descriptors.reg_class_alt_count = 1;
+  descriptors.operands = &operand;
+  descriptors.operand_count = 1;
+  descriptors.descriptors = &descriptor;
+  descriptors.descriptor_count = 1;
+  loom_low_resolved_target_t target = {};
+  target.descriptor_set = &descriptors;
+
+  auto* module = AllocateModule();
+  loom_builder_t builder;
+  loom_builder_initialize(module, &module->arena, loom_module_block(module),
+                          &builder);
+  const auto type = loom_low_register_type(1, 0, width);
+  loom_op_t* definition = nullptr;
+  if (kind == ResultDefinitionKind::kConstant) {
+    IREE_ASSERT_OK(loom_low_build_resolved_descriptor_const(
+        &builder, &descriptors, &descriptor, {}, type, LOOM_LOCATION_UNKNOWN,
+        &definition));
+  } else {
+    IREE_ASSERT_OK(loom_low_build_resolved_descriptor_op(
+        &builder, &descriptors, &descriptor, 0, nullptr, 0, {}, &type, 1,
+        nullptr, 0, LOOM_LOCATION_UNKNOWN, &definition));
+  }
+  if (kind == ResultDefinitionKind::kCopy) {
+    const loom_value_id_t source = loom_op_results(definition)[0];
+    IREE_ASSERT_OK(loom_low_copy_build(&builder, source, false, type,
+                                       LOOM_LOCATION_UNKNOWN, &definition));
+  }
+  const loom_value_id_t result_value = loom_op_results(definition)[0];
+  loom_value_id_t returned = LOOM_VALUE_ID_INVALID;
+  if (use == ResultUseKind::kHighWord) {
+    loom_op_t* slice = nullptr;
+    IREE_ASSERT_OK(loom_low_slice_build(&builder, result_value, width - 1,
+                                        loom_low_register_type(1, 0, 1),
+                                        LOOM_LOCATION_UNKNOWN, &slice));
+    returned = loom_op_results(slice)[0];
+  }
+  loom_op_t* terminator = nullptr;
+  IREE_ASSERT_OK(loom_low_return_build(&builder, &returned,
+                                       use == ResultUseKind::kHighWord ? 1 : 0,
+                                       LOOM_LOCATION_UNKNOWN, &terminator));
+
+  loom_local_value_domain_t domain = {};
+  IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
+      module, module->body, &arena_, &domain));
+  loom_liveness_analysis_t liveness = {};
+  IREE_ASSERT_OK(loom_liveness_analyze_local_value_domain(
+      &domain, loom_liveness_order_empty(), &arena_, &liveness));
+  loom_cfg_graph_t graph = {};
+  IREE_ASSERT_OK(loom_cfg_graph_build(module, module->body, &arena_, &graph));
+  loom_low_allocation_unit_liveness_t result = {};
+  IREE_ASSERT_OK(loom_low_allocation_unit_liveness_initialize(
+      &target, nullptr, &domain, &liveness, &graph, {}, &arena_,
+      &decision_arena_, &result));
+  const auto ordinal = loom_local_value_domain_ordinal(&domain, result_value);
+  const auto* interval =
+      loom_liveness_interval_for_value_ordinal(&liveness, ordinal);
+  const uint32_t point_start = result.values[ordinal].unit_point_start;
+  for (uint32_t unit = 0; unit < width; ++unit) {
+    if (use == ResultUseKind::kHighWord && unit == width - 1) {
+      EXPECT_GT(result.end_points[point_start + unit],
+                interval->definition_point);
+    } else {
+      const bool empty_transport = kind == ResultDefinitionKind::kCopy &&
+                                   use == ResultUseKind::kHighWord;
+      EXPECT_EQ(result.end_points[point_start + unit],
+                interval->definition_point + (empty_transport ? 0u : 1u));
+    }
+  }
+  if (use == ResultUseKind::kUnused && kind != ResultDefinitionKind::kCopy) {
+    // A physical write outlives a semantically dead result. Its empty semantic
+    // segments cannot be used to dismiss that definition-boundary conflict.
+    EXPECT_TRUE(iree_bitmap_test(result.values_with_incomplete_storage_segments,
+                                 ordinal));
+  }
+  loom_local_value_domain_release(&domain);
+  loom_module_free(module);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    DefinitionUnits, LowAllocationDefinitionLivenessTest,
+    ::testing::Combine(::testing::Values(ResultDefinitionKind::kInstruction,
+                                         ResultDefinitionKind::kConstant,
+                                         ResultDefinitionKind::kCopy),
+                       ::testing::Values(ResultUseKind::kHighWord,
+                                         ResultUseKind::kUnused),
+                       ::testing::Values(2u, 4u, 8u)));
 
 TEST_F(LowAllocationUnitLivenessTest, ExcludesRequiredStorageComponents) {
   loom_module_t* module = AllocateModule();
