@@ -7118,6 +7118,60 @@ def _v_mov_b32_copy_overlay() -> AmdgpuDescriptorOverlay:
     )
 
 
+def _v_permlane32_swap_b32_overlay() -> AmdgpuDescriptorOverlay:
+    return AmdgpuDescriptorOverlay(
+        descriptor_key="amdgpu.v_permlane32_swap_b32",
+        instruction_name="V_PERMLANE32_SWAP_B32",
+        mnemonic="v_permlane32_swap_b32",
+        encoding_name="ENC_VOP1",
+        semantic_tag="lane.permlane32.swap.b32",
+        schedule_class=_SCHEDULE_VALU,
+        operands=(
+            AmdgpuOperandOverlay("VDST", _vgpr_result("dst")),
+            AmdgpuOperandOverlay("SRC0", _vgpr_result("src")),
+            AmdgpuOperandOverlay(
+                "VDST",
+                Operand(
+                    "old_dst",
+                    OperandRole.OPERAND,
+                    _VGPR_ALT,
+                    flags=(OperandFlag.IMPLICIT,),
+                ),
+                role_exception_reason=(
+                    "the encoded destination register is also the tied first swap input"
+                ),
+            ),
+            AmdgpuOperandOverlay(
+                "SRC0",
+                Operand(
+                    "old_src",
+                    OperandRole.OPERAND,
+                    _VGPR_ALT,
+                    flags=(OperandFlag.IMPLICIT,),
+                ),
+                role_exception_reason=(
+                    "the encoded source register is also the tied second swap input"
+                ),
+            ),
+        ),
+        asm_forms=_asm(
+            results=("dst", "src"),
+            operands=("old_dst", "old_src"),
+            native_assembly_values=(
+                _native_result("dst"),
+                _native_result("src"),
+            ),
+        ),
+        constraints=(
+            Constraint(ConstraintKind.TIED, 0, 2),
+            Constraint(ConstraintKind.DESTRUCTIVE, 0, 2),
+            Constraint(ConstraintKind.TIED, 1, 3),
+            Constraint(ConstraintKind.DESTRUCTIVE, 1, 3),
+        ),
+        effects=(_CONVERGENT_EFFECT,),
+    )
+
+
 def _v_mov_b32_dpp_overlay(
     *,
     descriptor_key: str,
@@ -7495,6 +7549,7 @@ __all__ = (
     "_v_perm_b32_overlay",
     "_v_perm_b32_src2_literal_overlay",
     "_v_perm_b32_src1_zero_src2_literal_overlay",
+    "_v_permlane32_swap_b32_overlay",
     "_v_permlanex16_b32_src12_inline_overlay",
     "_v_lshl_add_u32_shift_immediate_overlay",
     "_v_lshl_add_u32_shift_immediate_src2_literal_overlay",

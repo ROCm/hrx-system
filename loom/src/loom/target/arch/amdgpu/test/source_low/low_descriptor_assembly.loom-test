@@ -86,3 +86,44 @@ low.func.def target<amdgpu.rdna4.core>(@rdna4_target) @rdna4_med3_numeric(%a: re
   global_store_b32 v4, v3, s[0:1] offset:0
   s_wait_storecnt storecnt(0)
   s_endpgm
+
+// ====
+
+// RUN: roundtrip
+
+amdgpu.target<gfx950> @gfx950_target
+
+low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_permlane32_swap_roundtrip(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs
+  return %left, %right
+}
+
+// ====
+
+// RUN: emit amdgpu-assembly @gfx950_permlane32_swap fixed=%lhs:physical_register:11:1 fixed=%rhs:physical_register:13:1 fixed=%left:physical_register:11:1 fixed=%right:physical_register:13:1 waits=none
+
+amdgpu.target<gfx950> @gfx950_target
+
+low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_permlane32_swap(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs
+  return %left, %right
+}
+
+// ----
+  v_permlane32_swap_b32 v11, v13
+  s_endpgm
+
+// ====
+
+// RUN: emit amdgpu-native-words @gfx950_permlane32_swap_words fixed=%lhs:physical_register:11:1 fixed=%rhs:physical_register:13:1 fixed=%left:physical_register:11:1 fixed=%right:physical_register:13:1 waits=none
+
+amdgpu.target<gfx950> @gfx950_target
+
+low.func.def target<amdgpu.cdna4.core>(@gfx950_target) @gfx950_permlane32_swap_words(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) asm {
+  %left, %right = v_permlane32_swap_b32 %lhs, %rhs
+  return %left, %right
+}
+
+// ----
+0x7E16B50D
+0xBF810000

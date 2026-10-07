@@ -244,6 +244,44 @@ def test_ds_crosslane_effects_use_lds_counter_without_memory_alias(
     )
 
 
+def test_gfx950_permlane32_swap_models_two_destructive_inputs() -> None:
+    descriptor_key = "amdgpu.v_permlane32_swap_b32"
+    gfx950_descriptors = {
+        descriptor.descriptor_key: descriptor for descriptor in _gfx950_core_overlays()
+    }
+    descriptor = gfx950_descriptors[descriptor_key]
+
+    assert descriptor_key not in {
+        descriptor.descriptor_key for descriptor in _gfx940_core_overlays()
+    }
+    assert descriptor_key not in {
+        descriptor.descriptor_key for descriptor in _gfx9_4_generic_core_overlays()
+    }
+    assert tuple(
+        (
+            operand.xml_field_name,
+            operand.descriptor_operand.field_name,
+            operand.descriptor_operand.role,
+            operand.descriptor_operand.flags,
+        )
+        for operand in descriptor.operands
+    ) == (
+        ("VDST", "dst", OperandRole.RESULT, ()),
+        ("SRC0", "src", OperandRole.RESULT, ()),
+        ("VDST", "old_dst", OperandRole.OPERAND, (OperandFlag.IMPLICIT,)),
+        ("SRC0", "old_src", OperandRole.OPERAND, (OperandFlag.IMPLICIT,)),
+    )
+    assert descriptor.constraints == (
+        Constraint(ConstraintKind.TIED, 0, 2),
+        Constraint(ConstraintKind.DESTRUCTIVE, 0, 2),
+        Constraint(ConstraintKind.TIED, 1, 3),
+        Constraint(ConstraintKind.DESTRUCTIVE, 1, 3),
+    )
+    assert descriptor.effects == (
+        Effect(EffectKind.CONVERGENT, flags=(EffectFlag.ORDERED,)),
+    )
+
+
 def test_contract_descriptor_projection_preserves_operation_kind() -> None:
     for overlay_builder in _AMDGPU_CONTRACT_DESCRIPTOR_OVERLAY_BUILDERS.values():
         overlay = overlay_builder()

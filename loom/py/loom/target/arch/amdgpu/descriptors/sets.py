@@ -941,15 +941,18 @@ def _gfx940_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
 
 @cache
 def _gfx950_core_overlays() -> tuple[AmdgpuDescriptorOverlay, ...]:
-    return _cdna_core_overlays(
-        packed8_source_semantics="ocp",
-        global_load_lds_variants=_GLOBAL_LOAD_LDS_GFX950_VARIANTS,
-        buffer_load_lds_variants=_BUFFER_LOAD_LDS_GFX950_VARIANTS,
-        include_v_dot2_f32_bf16=True,
-        include_v_cvt_pk_bf16_f32=True,
-        include_v_cvt_scalef32_pk_packed8=True,
-        include_ds_transpose_reads=True,
-        matrix_overlays=(*_cdna4_mfma_overlays(), *_cdna4_smfmac_overlays()),
+    return (
+        *_cdna_core_overlays(
+            packed8_source_semantics="ocp",
+            global_load_lds_variants=_GLOBAL_LOAD_LDS_GFX950_VARIANTS,
+            buffer_load_lds_variants=_BUFFER_LOAD_LDS_GFX950_VARIANTS,
+            include_v_dot2_f32_bf16=True,
+            include_v_cvt_pk_bf16_f32=True,
+            include_v_cvt_scalef32_pk_packed8=True,
+            include_ds_transpose_reads=True,
+            matrix_overlays=(*_cdna4_mfma_overlays(), *_cdna4_smfmac_overlays()),
+        ),
+        _v_permlane32_swap_b32_overlay(),
     )
 
 
