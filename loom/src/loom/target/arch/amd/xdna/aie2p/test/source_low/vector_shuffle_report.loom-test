@@ -1,4 +1,4 @@
-// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+// RUN: compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
 
 func.def @shuffle_not_scalarized(%value: vector<3xi16>) -> (vector<3xi16>) {
   %result = vector.shuffle<[1, 0, 1]> %value : vector<3xi16>
@@ -6,12 +6,13 @@ func.def @shuffle_not_scalarized(%value: vector<3xi16>) -> (vector<3xi16>) {
 }
 
 // ----
-CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=0 scalarized=0 target_rewritten=0 reference_rewritten=0 deferred=1 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
-CHECK: COMPILE-REPORT: target_legalization[0] function=shuffle_not_scalarized source_op=vector.shuffle * action=deferred * legalizer=aie2p strategy=target * scalarized=false *
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: target_legalization legal=0 rewritten=0 scalarized=0 target_rewritten=0 reference_rewritten=0 deferred=1 invalid_ir=0 unsupported=0 unhandled=0 rows=1 maximum_created_ops=0
+COMPILE-REPORT: target_legalization[0] function=shuffle_not_scalarized source_op=vector.shuffle mode=final policy=prefer-native action=deferred outcome=deferred contract=unhandled legalizer=aie2p strategy=target bundle=aie2p-core config=amd.xdna.aie2p.core scalarized=false source_rejections=0x00000000 source_rejection_detail=0 target_rejections=0x00000000 missing_features=0x00000000 missing_facts=0x00000000 created_ops=0 erased_ops=0
 
 // ====
 
-// RUN: with-checks compile-report source-to-low,low-dce
+// RUN: compile-report source-to-low,low-dce
 
 aie2p.target<core> @target
 
@@ -25,9 +26,10 @@ func.def target(@target) @report_shuffle_strategies(%predicate: vector<2xi1>, %b
 }
 
 // ----
-CHECK: COMPILE-REPORT: source_low selected_ops=5 emitted_ops=27 rows=5 *
-CHECK: COMPILE-REPORT: source_low[*] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.predicate.broadcast-select *
-CHECK: COMPILE-REPORT: source_low[*] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i8.broadcast-select *
-CHECK: COMPILE-REPORT: source_low[*] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i16.broadcast-select *
-CHECK: COMPILE-REPORT: source_low[*] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i32.broadcast-select *
-CHECK: COMPILE-REPORT: source_low[*] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i64.broadcast-select *
+COMPILE-REPORT: summary artifact=none status=OK function=- backend=- bundle=- export=- export_symbol=- config=- lowered=-
+COMPILE-REPORT: source_low selected_ops=5 emitted_ops=27 rows=5 unkeyed_maximum_emitted_ops=0
+COMPILE-REPORT: source_low[0] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.predicate.broadcast-select emitted_ops=10
+COMPILE-REPORT: source_low[1] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i8.broadcast-select emitted_ops=5
+COMPILE-REPORT: source_low[2] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i16.broadcast-select emitted_ops=4
+COMPILE-REPORT: source_low[3] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i32.broadcast-select emitted_ops=4
+COMPILE-REPORT: source_low[4] function=report_shuffle_strategies source_op=vector.shuffle selection=plan plan_key=fixed-permutation.i64.broadcast-select emitted_ops=4
