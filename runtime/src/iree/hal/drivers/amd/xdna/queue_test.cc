@@ -20,6 +20,7 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/xdna/device.h"
 #include "iree/hal/drivers/amd/xdna/image/testing/image_fixture.h"
+#include "iree/hal/drivers/amd/xdna/memory.h"
 #include "iree/hal/drivers/amd/xdna/queue_frontier.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
 #include "iree/testing/gtest.h"
@@ -524,6 +525,17 @@ class QueueHarness {
                                   IREE_HAL_SEMAPHORE_FLAG_NONE, &done));
   }
 
+  void SealDeviceGroup() {
+    iree_async_frontier_tracker_t* tracker = nullptr;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        iree_async_frontier_tracker_options_default(), host_allocator,
+        &tracker));
+    iree_status_t status = iree_hal_device_group_create_from_device(
+        device, tracker, host_allocator, &group);
+    iree_async_frontier_tracker_release(tracker);
+    IREE_ASSERT_OK(status);
+  }
+
   void Submit(iree_hal_semaphore_t* completion = nullptr) {
     if (!completion) {
       completion = done;
@@ -592,9 +604,12 @@ class QueueHarness {
         *out_executable, IREE_SV("main"), out_function));
   }
 
-  void MakeBuffer(iree_hal_buffer_t** out_buffer) {
-    iree_hal_buffer_params_t params = {};
-    params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  void MakeBuffer(
+      iree_hal_buffer_t** out_buffer,
+      iree_hal_buffer_params_t params = iree_hal_buffer_params_t{}) {
+    if (!params.type) {
+      params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+    }
     IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
         iree_hal_device_allocator(device), params, 64, out_buffer));
   }
@@ -656,6 +671,8 @@ class QueueHarness {
     done = nullptr;
     iree_hal_device_release(device);
     device = nullptr;
+    iree_hal_device_group_release(group);
+    group = nullptr;
     device_release_requested = true;
   }
 
@@ -689,6 +706,8 @@ class QueueHarness {
   iree_async_proactor_t* proactor = nullptr;
   // Owned production HAL device.
   iree_hal_device_t* device = nullptr;
+  // Optional sealed group assigning exact memory scopes to |device|.
+  iree_hal_device_group_t* group = nullptr;
   // Queue borrowed from the production HAL device.
   iree_hal_queue_t* queue = nullptr;
   // Owned completion timeline.
@@ -705,6 +724,85 @@ class QueueHarness {
   bool device_release_requested = false;
 };
 
+// Contract-backed caller pages with a stable native table that can be
+// published after queue capture. This models the buffer surface produced by a
+// queue-ordered shared slab without replacing the queue or executable under
+// test.
+class PreparedContractBuffer {
+ public:
+  ~PreparedContractBuffer() {
+    iree_hal_buffer_release(view_);
+    iree_hal_buffer_release(root_);
+    iree_hal_memory_contract_release(contract_);
+  }
+
+  void Initialize(QueueHarness& harness) {
+    const iree_hal_queue_family_t* family =
+        iree_hal_queue_family(harness.queue);
+    IREE_ASSERT_OK(iree_hal_memory_contract_create(
+        iree_hal_device_group_memory_domain(harness.group),
+        iree_hal_device_group_memory_scope_count(harness.group),
+        iree_hal_amd_xdna_buffer_binding_layout(), iree_allocator_system(),
+        &contract_));
+    for (iree_hal_memory_site_kind_t kind :
+         {IREE_HAL_MEMORY_SITE_QUEUE, IREE_HAL_MEMORY_SITE_PROGRAM}) {
+      iree_hal_memory_scope_t scope;
+      IREE_ASSERT_OK(iree_hal_device_group_resolve_memory_scope(
+          harness.group, {kind, family}, &scope));
+      iree_hal_memory_scope_access_t* access = &contract_->scopes[scope.id];
+      access->usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+      access->interfaces = UINT32_C(1)
+                           << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA;
+      access->bindings[IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA] =
+          IREE_HAL_AMD_XDNA_BUFFER_BINDING_SHIM_DMA;
+    }
+    bindings_[IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST].host_pointer =
+        bytes_.data();
+    IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+        iree_hal_buffer_placement_undefined(),
+        IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE |
+            IREE_HAL_MEMORY_TYPE_HOST_VISIBLE |
+            IREE_HAL_MEMORY_TYPE_HOST_COHERENT,
+        IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+        IREE_HAL_BUFFER_USAGE_STORAGE_READ, bytes_.size(),
+        iree_make_byte_span(bytes_.data(), bytes_.size()),
+        iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+        &root_));
+    root_->memory.contract = contract_;
+    root_->memory.bindings = bindings_.data();
+    root_->host_binding_index = IREE_HAL_AMD_XDNA_BUFFER_BINDING_HOST;
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(root_, kViewOffset, kViewLength,
+                                           iree_allocator_system(), &view_));
+  }
+
+  void Publish(uint64_t device_address) {
+    bindings_[IREE_HAL_AMD_XDNA_BUFFER_BINDING_SHIM_DMA].device_address =
+        device_address;
+  }
+
+  iree_hal_buffer_ref_t ref(iree_device_size_t offset,
+                            iree_device_size_t length) const {
+    return iree_hal_make_buffer_ref(view_, offset, length);
+  }
+
+  static constexpr iree_device_size_t kViewOffset = 16;
+  static constexpr iree_device_size_t kViewLength = 64;
+
+ private:
+  // Caller-owned bytes represented by the prepared native table.
+  alignas(IREE_HAL_HEAP_BUFFER_ALIGNMENT) std::array<uint8_t, 128> bytes_ = {};
+  // Stable slot storage published under semaphore ordering.
+  std::array<iree_hal_buffer_native_binding_t,
+             IREE_HAL_AMD_XDNA_BUFFER_BINDING_COUNT>
+      bindings_ = {};
+  // Owned immutable contract borrowed by |root_| and |view_|.
+  iree_hal_memory_contract_t* contract_ = nullptr;
+  // Owned allocation root wrapping caller pages.
+  iree_hal_buffer_t* root_ = nullptr;
+  // Owned nonzero-offset logical view used by dispatch.
+  iree_hal_buffer_t* view_ = nullptr;
+};
+
 TEST(XdnaQueueTest, DeviceCreatesOwnedDeviceCompatibleSemaphores) {
   QueueHarness harness;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
@@ -714,6 +812,123 @@ TEST(XdnaQueueTest, DeviceCreatesOwnedDeviceCompatibleSemaphores) {
   EXPECT_EQ(iree_hal_device_query_semaphore_compatibility(harness.device,
                                                           harness.done),
             IREE_HAL_SEMAPHORE_COMPATIBILITY_ALL);
+}
+
+TEST(XdnaQueueTest, DispatchValidatesImageBindingContractAtCapture) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  iree_hal_executable_t* executable = nullptr;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(harness.LoadExecutable(
+      iree::hal::amd::xdna::testing::ImageFixture(), &executable, &function));
+  auto dispatch = [&](iree_hal_buffer_ref_list_t bindings) {
+    return iree_hal_queue_dispatch(
+        harness.queue, {}, {}, executable, function,
+        iree_hal_make_static_dispatch_config(1, 1, 1), {}, bindings,
+        IREE_HAL_DISPATCH_FLAG_NONE);
+  };
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, dispatch({}));
+  iree_hal_buffer_ref_t binding = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, dispatch({1, &binding}));
+  binding = iree_hal_make_indirect_buffer_ref(1, 0, 16);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, dispatch({1, &binding}));
+
+  iree_hal_buffer_t* buffer = nullptr;
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&buffer));
+  binding = iree_hal_make_buffer_ref(buffer, 56, 8);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, dispatch({1, &binding}));
+  iree_hal_buffer_release(buffer);
+
+  iree_hal_buffer_params_t params = {};
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+  params.access = IREE_HAL_MEMORY_ACCESS_WRITE;
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&buffer, params));
+  binding = iree_hal_make_buffer_ref(buffer, 0, 16);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, dispatch({1, &binding}));
+  iree_hal_buffer_release(buffer);
+
+  params = {};
+  params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
+  params.access = IREE_HAL_MEMORY_ACCESS_READ;
+  ASSERT_NO_FATAL_FAILURE(harness.MakeBuffer(&buffer, params));
+  binding = iree_hal_make_buffer_ref(buffer, 0, 16);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, dispatch({1, &binding}));
+  iree_hal_buffer_release(buffer);
+
+  alignas(IREE_HAL_HEAP_BUFFER_ALIGNMENT) std::array<uint8_t, 64> host_bytes =
+      {};
+  IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
+      iree_hal_buffer_placement_undefined(), IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
+      IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_USAGE_STORAGE_READ,
+      host_bytes.size(),
+      iree_make_byte_span(host_bytes.data(), host_bytes.size()),
+      iree_hal_buffer_release_callback_null(), iree_allocator_system(),
+      &buffer));
+  binding = iree_hal_make_buffer_ref(buffer, 0, 16);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_PERMISSION_DENIED, dispatch({1, &binding}));
+  iree_hal_buffer_release(buffer);
+  iree_hal_executable_release(executable);
+}
+
+TEST(XdnaQueueTest, QueueWaitPublishesContractBindingBeforePreparation) {
+  constexpr uint64_t kPublishedAddress = UINT64_C(0x123456780000);
+  constexpr iree_device_size_t kBindingOffset = 4;
+  constexpr iree_device_size_t kBindingLength = 32;
+
+  QueueHarness harness;
+  harness.native.hold_retirement = true;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+  PreparedContractBuffer prepared_buffer;
+  ASSERT_NO_FATAL_FAILURE(prepared_buffer.Initialize(harness));
+
+  iree_hal_executable_t* executable = nullptr;
+  iree_hal_executable_function_t function;
+  ASSERT_NO_FATAL_FAILURE(harness.LoadExecutable(
+      iree::hal::amd::xdna::testing::ImageFixture(), &executable, &function));
+  iree_hal_semaphore_t* allocation_ready = nullptr;
+  iree_hal_semaphore_t* completion = nullptr;
+  for (auto** semaphore : {&allocation_ready, &completion}) {
+    IREE_ASSERT_OK(iree_hal_semaphore_create(
+        harness.device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+        IREE_HAL_SEMAPHORE_FLAG_NONE, semaphore));
+  }
+
+  iree_hal_buffer_ref_t binding =
+      prepared_buffer.ref(kBindingOffset, kBindingLength);
+  uint64_t value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      harness.queue, {1, &allocation_ready, &value}, {1, &completion, &value},
+      executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+  EXPECT_EQ(harness.native.submission_count, 0u);
+
+  prepared_buffer.Publish(kPublishedAddress);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(allocation_ready, value, nullptr));
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(1));
+  std::vector<uint8_t> command_bytes;
+  {
+    std::lock_guard<std::mutex> lock(harness.native.mutex);
+    ASSERT_EQ(harness.native.pending_commands.size(), 1u);
+    command_bytes = harness.native.pending_commands[0].bytes;
+  }
+  const uint64_t patched_address = kPublishedAddress +
+                                   PreparedContractBuffer::kViewOffset +
+                                   kBindingOffset + 4;
+  ASSERT_GE(command_bytes.size(), 16u);
+  EXPECT_EQ(iree_unaligned_load_le_u32(command_bytes.data() + 8),
+            (uint32_t)patched_address | 1u);
+  EXPECT_EQ(iree_unaligned_load_le_u32(command_bytes.data() + 12),
+            UINT32_C(0xA5A50000) | (uint32_t)(patched_address >> 32));
+
+  harness.native.hold_retirement = false;
+  harness.native.Wake();
+  ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, completion));
+  iree_hal_semaphore_release(completion);
+  iree_hal_semaphore_release(allocation_ready);
+  iree_hal_executable_release(executable);
 }
 
 TEST(XdnaQueueTest, ReadyDispatchPublishesBeforeProactorProgress) {

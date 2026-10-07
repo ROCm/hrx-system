@@ -68,32 +68,11 @@ class XdnaExecutableTest : public ::testing::Test {
       storage_[i].memory_byte_offset = 65536;
       storage_[i].device_address = UINT64_C(0x123456780000) + i * 32768;
     }
-    ASSERT_NO_FATAL_FAILURE(
-        WrapBinding(IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-                    IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-                    IREE_HAL_BUFFER_USAGE_STORAGE));
-  }
-
-  void TearDown() override {
-    iree_hal_buffer_release(binding_.buffer_ref.buffer);
-    iree_hal_amd_xdna_image_destroy(image_);
-  }
-
-  void WrapBinding(iree_hal_memory_type_t type, iree_hal_memory_access_t access,
-                   iree_hal_buffer_usage_t usage) {
-    iree_hal_buffer_release(binding_.buffer_ref.buffer);
-    binding_.buffer_ref.buffer = nullptr;
-    IREE_ASSERT_OK(iree_hal_heap_buffer_wrap(
-        iree_hal_buffer_placement_undefined(), type, access, usage,
-        buffer_.size(), iree_make_byte_span(buffer_.data(), buffer_.size()),
-        iree_hal_buffer_release_callback_null(), iree_allocator_system(),
-        &binding_.buffer_ref.buffer));
-    binding_.buffer_ref.offset = 0;
-    binding_.buffer_ref.length = 16;
-    binding_.memory = reinterpret_cast<amdf_memory_t*>(uintptr_t{32});
-    binding_.memory_byte_offset = 128;
+    binding_.byte_length = 16;
     binding_.device_address = UINT64_C(0xABCD12340000);
   }
+
+  void TearDown() override { iree_hal_amd_xdna_image_destroy(image_); }
 
   void ReplaceImage(const ImageFixture& fixture) {
     auto source = MakeOwnedByteSequence(fixture.Build());
@@ -109,9 +88,10 @@ class XdnaExecutableTest : public ::testing::Test {
     return iree_hal_amd_xdna_executable_storage_load(image_, 0, storage_.size(),
                                                      storage_.data());
   }
-  iree_status_t Bind() {
-    return iree_hal_amd_xdna_executable_storage_bind(
-        image_, 0, storage_.size(), storage_.data(), 1, &binding_);
+
+  void Patch() {
+    iree_hal_amd_xdna_executable_storage_patch(image_, 0, storage_.data(),
+                                               &binding_);
   }
 
   // Admitted image with no native resource ownership.
@@ -120,9 +100,7 @@ class XdnaExecutableTest : public ::testing::Test {
   std::array<std::vector<uint8_t>, 2> bytes_;
   // Resolved native ranges borrowing bytes_.
   std::array<iree_hal_amd_xdna_executable_storage_t, 2> storage_ = {};
-  // Logical binding storage with room to exercise nonzero offsets.
-  alignas(IREE_HAL_HEAP_BUFFER_ALIGNMENT) std::array<uint8_t, 128> buffer_ = {};
-  // Owning HAL buffer reference and borrowed native address.
+  // Validated external address used by dynamic relocations.
   iree_hal_amd_xdna_executable_binding_t binding_ = {};
 };
 
@@ -150,7 +128,7 @@ TEST_F(XdnaExecutableTest, RebindsWithoutReloadingOrChangingOtherStorage) {
        {UINT64_C(0xABCD12340000), UINT64_C(0x123456789000)}) {
     const auto before = bytes_;
     binding_.device_address = address;
-    IREE_ASSERT_OK(Bind());
+    Patch();
     EXPECT_TRUE(std::equal(bytes_[0].begin(), bytes_[0].begin() + 8,
                            before[0].begin()));
     EXPECT_TRUE(std::equal(bytes_[0].begin() + 16, bytes_[0].end(),
@@ -174,9 +152,8 @@ TEST_F(XdnaExecutableTest, PreservesAndIgnoresUnusedBindingSlots) {
   IREE_ASSERT_OK(Load());
   std::array<iree_hal_amd_xdna_executable_binding_t, 2> bindings = {};
   bindings[1] = binding_;
-  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_bind(
-      image_, 0, storage_.size(), storage_.data(), bindings.size(),
-      bindings.data()));
+  iree_hal_amd_xdna_executable_storage_patch(image_, 0, storage_.data(),
+                                             bindings.data());
   const uint64_t address = binding_.device_address + 4;
   EXPECT_EQ(iree_unaligned_load_le_u32(bytes_[0].data() + 8),
             (uint32_t)address | 1u);
@@ -186,7 +163,7 @@ TEST_F(XdnaExecutableTest, PreservesAndIgnoresUnusedBindingSlots) {
 
 TEST_F(XdnaExecutableTest, ResolvesIndependentInvocationWithContinuation) {
   IREE_ASSERT_OK(Load());
-  IREE_ASSERT_OK(Bind());
+  Patch();
   const auto before = bytes_;
   // The image names a continuation at offset 32768. Independent invocations
   // must use the establishing range even though that continuation is present.
@@ -284,54 +261,21 @@ TEST_F(XdnaExecutableTest, LoadingPrivateStorageDoesNotReadSharedPayload) {
   EXPECT_EQ(bytes_[1], shared_bytes);
 }
 
-TEST_F(XdnaExecutableTest, ChecksBindingCountAndLogicalRanges) {
-  IREE_ASSERT_OK(Load());
-  const auto before = bytes_;
-  IREE_EXPECT_STATUS_IS(
-      StatusCode::kInvalidArgument,
-      iree_hal_amd_xdna_executable_storage_bind(image_, 0, storage_.size(),
-                                                storage_.data(), 0, nullptr));
-  binding_.buffer_ref.offset = buffer_.size() - 8;
-  IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange, Bind());
-  binding_.buffer_ref.offset = 4;
-  binding_.buffer_ref.length = IREE_HAL_WHOLE_BUFFER;
-  IREE_ASSERT_OK(Bind());
-  binding_.buffer_ref.length = 8;
-  IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange, Bind());
-  binding_.buffer_ref.offset = UINT64_MAX;
-  IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange, Bind());
-  EXPECT_EQ(bytes_[1], before[1]);
-}
-
 TEST_F(XdnaExecutableTest, RejectsInvalidAddressesBeforePatching) {
   IREE_ASSERT_OK(Load());
   const auto before = bytes_;
+  const auto relocation = iree_hal_amd_xdna_image_tables_relocation(
+      iree_hal_amd_xdna_image_tables(image_), 1);
   for (uint64_t address :
        {UINT64_MAX - 3, UINT64_C(0x1000000000000), UINT64_C(3)}) {
-    binding_.device_address = address;
-    IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange, Bind());
+    IREE_EXPECT_STATUS_IS(
+        StatusCode::kOutOfRange,
+        iree_hal_amd_xdna_executable_storage_validate_relocation(&relocation,
+                                                                 address));
     EXPECT_EQ(bytes_, before);
   }
   storage_[1].device_address = UINT64_C(0xFFFFFFFFFFFC);
   IREE_EXPECT_STATUS_IS(StatusCode::kOutOfRange, Load());
-  EXPECT_EQ(bytes_, before);
-}
-
-TEST_F(XdnaExecutableTest, EnforcesHalAccessUsageAndVisibility) {
-  IREE_ASSERT_OK(Load());
-  const auto before = bytes_;
-  ASSERT_NO_FATAL_FAILURE(WrapBinding(IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-                                      IREE_HAL_MEMORY_ACCESS_WRITE,
-                                      IREE_HAL_BUFFER_USAGE_STORAGE));
-  IREE_EXPECT_STATUS_IS(StatusCode::kPermissionDenied, Bind());
-  ASSERT_NO_FATAL_FAILURE(WrapBinding(IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-                                      IREE_HAL_MEMORY_ACCESS_READ,
-                                      IREE_HAL_BUFFER_USAGE_TRANSFER));
-  IREE_EXPECT_STATUS_IS(StatusCode::kPermissionDenied, Bind());
-  ASSERT_NO_FATAL_FAILURE(WrapBinding(IREE_HAL_MEMORY_TYPE_HOST_VISIBLE,
-                                      IREE_HAL_MEMORY_ACCESS_READ,
-                                      IREE_HAL_BUFFER_USAGE_STORAGE));
-  IREE_EXPECT_STATUS_IS(StatusCode::kPermissionDenied, Bind());
   EXPECT_EQ(bytes_, before);
 }
 

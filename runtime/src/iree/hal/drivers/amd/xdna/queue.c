@@ -221,7 +221,7 @@ struct iree_hal_amd_xdna_operation_t {
       bool publication_had_pending;
       // Number of captured binding rows.
       iree_host_size_t binding_count;
-      // Native views with retained logical buffers in trailing slab storage.
+      // Stable native slots with retained logical buffers in trailing storage.
       iree_hal_amd_xdna_executable_binding_t* bindings;
     } dispatch;
     // Host-mapped transfer transaction.
