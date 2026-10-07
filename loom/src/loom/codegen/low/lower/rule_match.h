@@ -98,7 +98,8 @@ struct loom_low_lower_rule_match_context_t {
   const loom_low_descriptor_set_t* descriptor_set;
   // Feature bits selected by the target-low contract.
   uint64_t feature_bits;
-  // Optional scoped vector lane projection used for candidate matching.
+  // Optional scoped vector lane projection used for value-type and
+  // source-memory candidate matching.
   loom_target_contract_vector_lane_projection_t vector_lane_projection;
   // Source-value to target-low register metadata mapper.
   loom_low_lower_rule_match_map_value_callback_t map_value;

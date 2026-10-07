@@ -60,9 +60,11 @@ typedef struct loom_target_source_vector_carrier_supported_callback_t {
 
 // Target vector packet candidates consumed by shared legalization.
 //
-// The target contributes representation widths only. The shared planner still
-// queries every projected operation through the target contract before
-// selecting a packet width; membership here is not itself a legality claim.
+// The target contributes representation widths only. Shared planners query
+// projected operations through the target contract before selecting a packet
+// width. A handled answer is authoritative; targets whose custom Low planner
+// leaves structural memory candidates unhandled retain their declared packet
+// decomposition. Membership here is not itself a final legality claim.
 typedef struct loom_target_vector_packet_lane_limit_t {
   // Scalar element type whose structural carrier has a logical lane ceiling.
   loom_scalar_type_t element_type;
@@ -93,13 +95,27 @@ typedef struct loom_target_vector_packet_policy_t {
 // Scoped vector lane-count projection for one contract query. An all-zero
 // value reads authored types directly. A populated projection presents static
 // vectors with |source_lane_count| total lanes as rank-one vectors with
-// |projected_lane_count| lanes without mutating source IR.
+// |projected_lane_count| lanes without mutating source IR. Source-memory
+// matching sees the same projected lane count while retaining every authored
+// address, layout, alignment, and execution fact.
 typedef struct loom_target_contract_vector_lane_projection_t {
   // Authored static vector lane count selected for projection.
   uint32_t source_lane_count;
   // Rank-one vector lane count presented to the contract query.
   uint32_t projected_lane_count;
 } loom_target_contract_vector_lane_projection_t;
+
+// Returns the vector lane count visible to a projected contract query. Facts
+// for unrelated lane counts retain their authored value.
+static inline uint32_t loom_target_contract_query_vector_lane_count(
+    loom_target_contract_vector_lane_projection_t projection,
+    uint32_t authored_lane_count) {
+  if (projection.source_lane_count != 0 &&
+      authored_lane_count == projection.source_lane_count) {
+    return projection.projected_lane_count;
+  }
+  return authored_lane_count;
+}
 
 // Returns the projected type for |value_id|. Callers first test for an empty
 // projection so ordinary authored queries remain on the direct type-table
@@ -287,7 +303,7 @@ typedef uint8_t loom_target_contract_fragment_flags_t;
 enum loom_target_contract_fragment_flag_bits_e {
   // Fragment cases participate in read-only target contract queries.
   LOOM_TARGET_CONTRACT_FRAGMENT_FLAG_TARGET_QUERY =
-      (loom_target_contract_fragment_flags_t)1u << 0,
+      (loom_target_contract_fragment_flags_t)(1u << 0),
 };
 
 typedef struct loom_target_contract_fragment_t {

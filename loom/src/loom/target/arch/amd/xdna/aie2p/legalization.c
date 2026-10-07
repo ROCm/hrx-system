@@ -520,7 +520,7 @@ static iree_status_t loom_aie2p_legalize_vector_store(
       !loom_aie2p_defer_multidimensional_memory_reference(context,
                                                           value_type) &&
       loom_target_legalization_op_has_source_vector_carriers(context, op)) {
-    IREE_RETURN_IF_ERROR(loom_vector_store_to_scalar_rewrite_op(
+    IREE_RETURN_IF_ERROR(loom_vector_store_captured_to_scalar_rewrite_op(
         context->pass, context->rewriter, op, &rewritten));
   }
   if (rewritten) {

@@ -1358,7 +1358,11 @@ loom_low_target_legalize_apply_final_rejection_to_contract_query(
     loom_low_target_legalize_function_state_t* state,
     const loom_target_contract_query_environment_t* environment,
     const loom_op_t* source_op, loom_target_contract_query_result_t* result) {
-  if (result->outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
+  // Final rejections describe the authored operation. A projected query asks
+  // whether a different candidate representation is legal and cannot reuse an
+  // authored-shape rejection when its target contract has no opinion.
+  if (environment->vector_lane_projection.source_lane_count != 0 ||
+      result->outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
     return iree_ok_status();
   }
   const loom_low_target_legalize_final_rejection_t* final_rejection =

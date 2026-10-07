@@ -1070,6 +1070,20 @@ func.def @extract_from_elements_to_operand() -> (i32) {
 
 // ====
 
+// Scalar extraction composes with every static source-slice offset.
+func.def @extract_static_slice_lane(%value: vector<8x8xi16>) -> (i16) {
+  %tile = vector.slice %value[3, 4] : vector<8x8xi16> -> vector<4x4xi16>
+  %result = vector.extract %tile[2, 1] : vector<4x4xi16> -> i16
+  func.return %result : i16
+}
+// ----
+func.def @extract_static_slice_lane(%value: vector<8x8xi16>) -> (i16) {
+  %result = vector.extract %value[5, 5] : vector<8x8xi16> -> i16
+  func.return %result : i16
+}
+
+// ====
+
 // Exact dynamic indices are represented as static extract coordinates.
 func.def @extract_constant_dynamic_index(%v: vector<4xi32>) -> (i32) {
   %lane = index.constant 2 : index

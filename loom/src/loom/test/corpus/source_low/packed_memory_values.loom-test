@@ -1,7 +1,7 @@
 // Indexed vector elements preserve byte codes through integer promotion.
-func.def @uniform_table(%input: buffer, %codebook: buffer, %output: buffer, %position: index) {
+func.def @uniform_table(%input: buffer, %codebook: buffer, %position: index) -> (vector<4xi8>) {
   %aligned = buffer.assume.alignment %codebook {minimum_alignment = 64} : buffer
-  %source, %table_source, %destination = buffer.assume.noalias %input, %aligned, %output : buffer, buffer, buffer
+  %source, %table_source = buffer.assume.noalias %input, %aligned : buffer, buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<32x4xi8>
   %input_values = vector.load %source_view[%position, 0] : view<32x4xi8> -> vector<4xi8>
@@ -10,107 +10,84 @@ func.def @uniform_table(%input: buffer, %codebook: buffer, %output: buffer, %pos
   %table_view = buffer.view %table_source[%c0] : buffer -> view<16xi8>
   %table = vector.load %table_view[0] : view<16xi8> -> vector<16xi8>
   %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<32x4xi8>
-  vector.store %values, %output_view[%position, 0] : vector<4xi8>, view<32x4xi8>
-  func.return
+  func.return %values : vector<4xi8>
 }
 
 // ====
 
-func.def @uniform_i8(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_i8(%input: buffer) -> (vector<8xi8>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<8xi8>
   %value = vector.load %source_view[0] : view<8xi8> -> vector<8xi8>
   %result = vector.addi %value, %value : vector<8xi8>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<8xi8>
-  vector.store %result, %output_view[0] : vector<8xi8>, view<8xi8>
-  func.return
+  func.return %result : vector<8xi8>
 }
 
 // ====
 
-func.def @uniform_i16(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_i16(%input: buffer) -> (vector<4xi16>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<4xi16>
   %value = vector.load %source_view[0] : view<4xi16> -> vector<4xi16>
   %result = vector.addi %value, %value : vector<4xi16>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<4xi16>
-  vector.store %result, %output_view[0] : vector<4xi16>, view<4xi16>
-  func.return
+  func.return %result : vector<4xi16>
 }
 
 // ====
 
-func.def @uniform_f16(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_f16(%input: buffer) -> (vector<4xf16>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<4xf16>
   %value = vector.load %source_view[0] : view<4xf16> -> vector<4xf16>
   %result = vector.addf %value, %value : vector<4xf16>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<4xf16>
-  vector.store %result, %output_view[0] : vector<4xf16>, view<4xf16>
-  func.return
+  func.return %result : vector<4xf16>
 }
 
 // ====
 
-func.def @uniform_bf16(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_bf16(%input: buffer) -> (vector<4xf32>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<4xbf16>
   %value = vector.load %source_view[0] : view<4xbf16> -> vector<4xbf16>
   %result = vector.extf %value : vector<4xbf16> to vector<4xf32>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<4xf32>
-  vector.store %result, %output_view[0] : vector<4xf32>, view<4xf32>
-  func.return
+  func.return %result : vector<4xf32>
 }
 
 // ====
 
-func.def @uniform_f8E4M3(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_f8E4M3(%input: buffer) -> (vector<8xf32>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<8xf8E4M3>
   %value = vector.load %source_view[0] : view<8xf8E4M3> -> vector<8xf8E4M3>
   %result = vector.extf %value : vector<8xf8E4M3> to vector<8xf32>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<8xf32>
-  vector.store %result, %output_view[0] : vector<8xf32>, view<8xf32>
-  func.return
+  func.return %result : vector<8xf32>
 }
 
 // ====
 
-func.def @uniform_f8E5M2(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_f8E5M2(%input: buffer) -> (vector<8xf32>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<8xf8E5M2>
   %value = vector.load %source_view[0] : view<8xf8E5M2> -> vector<8xf8E5M2>
   %result = vector.extf %value : vector<8xf8E5M2> to vector<8xf32>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<8xf32>
-  vector.store %result, %output_view[0] : vector<8xf32>, view<8xf32>
-  func.return
+  func.return %result : vector<8xf32>
 }
 
 // ====
 
-func.def @uniform_f16_extf(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_f16_extf(%input: buffer) -> (vector<4xf32>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<4xf16>
   %value = vector.load %source_view[0] : view<4xf16> -> vector<4xf16>
   %result = vector.extf %value : vector<4xf16> to vector<4xf32>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<4xf32>
-  vector.store %result, %output_view[0] : vector<4xf32>, view<4xf32>
-  func.return
+  func.return %result : vector<4xf32>
 }
 
 // ====

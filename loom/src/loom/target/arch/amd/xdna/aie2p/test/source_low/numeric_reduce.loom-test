@@ -1,173 +1,132 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
-func.def @i32_reduce_add(%input: buffer, %output: buffer) {
-  %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
-  %loaded = vector.load %input_view[0] : view<4xi32> -> vector<4xi32>
+func.def @i32_reduce_add(%loaded: vector<4xi32>) -> (i32) {
   %init = scalar.constant 0 : i32
   %sum = vector.reduce<addi> %loaded, %init : vector<4xi32>, i32
-  %stored = vector.from_elements %sum : vector<1xi32>
-  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32>
-  func.return
+  func.return %sum : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_reduce_add() asm {
-  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %21 = lda %input_view, 0
-  %22 = lda %input_view, 4
-  %23 = lda %input_view, 8
-  %24 = lda %input_view, 12
-  %25 = vbcst.32 %21
-  %26 = mov.short 1
-  %27 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %28 = vinsert.32.reg %25, %27, %22
-  %29 = mov.short 2
-  %30 = copy %29 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %31 = vinsert.32.reg %28, %30, %23
-  %32 = mov.short 3
-  %33 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %loaded = vinsert.32.reg %31, %33, %24
-  %35 = mova.i32 7
-  %36 = vshuffle %loaded, %loaded, %35
-  %37 = vadd.32 %loaded, %36
-  %38 = mova.i32 5
-  %39 = vshuffle %37, %37, %38
-  %40 = vadd.32 %37, %39
-  %sum = vextract.32.imm %40, 0
-  st %sum, %output_view, 0
-  return
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_reduce_add(%loaded: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
+  %6 = mova.i32 7
+  %7 = vshuffle %loaded, %loaded, %6
+  %8 = vadd.32 %loaded, %7
+  %9 = mova.i32 5
+  %10 = vshuffle %8, %8, %9
+  %11 = vadd.32 %8, %10
+  %sum = vextract.32.imm %11, 0
+  return %sum
 }
 
 // ====
 
-func.def @f32_reduce_add(%input: buffer, %output: buffer) {
-  %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
-  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+func.def @f32_reduce_add(%loaded: vector<4xf32>) -> (f32) {
   %init = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf> %loaded, %init : vector<4xf32>, f32
-  %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
-  func.return
+  func.return %sum : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_reduce_add() asm {
-  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %35 = lda %input_view, 0
-  %36 = lda %input_view, 4
-  %37 = lda %input_view, 8
-  %38 = lda %input_view, 12
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_reduce_add(%loaded: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
   %init = mov.i32 0
-  %40 = vbcst.32 %init
-  %41 = vbcst.32 %35
-  %42 = acc.clear.f32x64
-  %43 = slice %42[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %44 = vmov.vector512.to.accumulator512 %40
-  %45 = concat(%44, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %46 = vmov.vector512.to.accumulator512 %41
-  %47 = concat(%46, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %48 = mova.i32 60
-  %49 = vadd.f32x64 %45, %47, %48
-  %50 = slice %49[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %51 = vmov.accumulator512.to.vector512 %50
-  %52 = vextract.32.imm %51, 0
-  %53 = vbcst.32 %52
-  %54 = vbcst.32 %36
-  %57 = vmov.vector512.to.accumulator512 %53
-  %58 = concat(%57, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %59 = vmov.vector512.to.accumulator512 %54
-  %60 = concat(%59, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %62 = vadd.f32x64 %58, %60, %48
-  %63 = slice %62[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %64 = vmov.accumulator512.to.vector512 %63
-  %65 = vextract.32.imm %64, 0
-  %66 = vbcst.32 %65
-  %67 = vbcst.32 %37
-  %70 = vmov.vector512.to.accumulator512 %66
-  %71 = concat(%70, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %72 = vmov.vector512.to.accumulator512 %67
-  %73 = concat(%72, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %75 = vadd.f32x64 %71, %73, %48
-  %76 = slice %75[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %77 = vmov.accumulator512.to.vector512 %76
-  %78 = vextract.32.imm %77, 0
-  %79 = vbcst.32 %78
-  %80 = vbcst.32 %38
-  %83 = vmov.vector512.to.accumulator512 %79
-  %84 = concat(%83, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %85 = vmov.vector512.to.accumulator512 %80
-  %86 = concat(%85, %43, %43, %43) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %88 = vadd.f32x64 %84, %86, %48
-  %89 = slice %88[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %90 = vmov.accumulator512.to.vector512 %89
-  %sum = vextract.32.imm %90, 0
-  st %sum, %output_view, 0
-  return
+  %15 = vextract.32.imm %loaded, 0
+  %16 = vbcst.32 %init
+  %17 = vbcst.32 %15
+  %18 = acc.clear.f32x64
+  %19 = slice %18[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %20 = vmov.vector512.to.accumulator512 %16
+  %21 = concat(%20, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %22 = vmov.vector512.to.accumulator512 %17
+  %23 = concat(%22, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %24 = mova.i32 60
+  %25 = vadd.f32x64 %21, %23, %24
+  %26 = slice %25[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %27 = vmov.accumulator512.to.vector512 %26
+  %28 = vextract.32.imm %27, 0
+  %29 = vextract.32.imm %loaded, 1
+  %30 = vbcst.32 %28
+  %31 = vbcst.32 %29
+  %34 = vmov.vector512.to.accumulator512 %30
+  %35 = concat(%34, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %36 = vmov.vector512.to.accumulator512 %31
+  %37 = concat(%36, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %39 = vadd.f32x64 %35, %37, %24
+  %40 = slice %39[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %41 = vmov.accumulator512.to.vector512 %40
+  %42 = vextract.32.imm %41, 0
+  %43 = vextract.32.imm %loaded, 2
+  %44 = vbcst.32 %42
+  %45 = vbcst.32 %43
+  %48 = vmov.vector512.to.accumulator512 %44
+  %49 = concat(%48, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %50 = vmov.vector512.to.accumulator512 %45
+  %51 = concat(%50, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %53 = vadd.f32x64 %49, %51, %24
+  %54 = slice %53[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %55 = vmov.accumulator512.to.vector512 %54
+  %56 = vextract.32.imm %55, 0
+  %57 = vextract.32.imm %loaded, 3
+  %58 = vbcst.32 %56
+  %59 = vbcst.32 %57
+  %62 = vmov.vector512.to.accumulator512 %58
+  %63 = concat(%62, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %64 = vmov.vector512.to.accumulator512 %59
+  %65 = concat(%64, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %67 = vadd.f32x64 %63, %65, %24
+  %68 = slice %67[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %69 = vmov.accumulator512.to.vector512 %68
+  %sum = vextract.32.imm %69, 0
+  return %sum
 }
 
 // ====
 
-func.def @f32_reduce_add_fastmath(%input: buffer, %output: buffer) {
-  %buffer_base = index.constant 0 : offset
-  %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xf32>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xf32>
-  %loaded = vector.load %input_view[0] : view<4xf32> -> vector<4xf32>
+func.def @f32_reduce_add_fastmath(%loaded: vector<4xf32>) -> (f32) {
   %init = scalar.constant 0.0 : f32
   %sum = vector.reduce<addf, reassoc|nnan|nsz> %loaded, %init : vector<4xf32>, f32
-  %stored = vector.from_elements %sum : vector<1xf32>
-  vector.store %stored, %output_view[0] : vector<1xf32>, view<1xf32>
-  func.return
+  func.return %sum : f32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_reduce_add_fastmath() asm {
-  %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %35 = lda %input_view, 0
-  %36 = lda %input_view, 4
-  %37 = lda %input_view, 8
-  %38 = lda %input_view, 12
-  %39 = vbcst.32 %35
-  %40 = vbcst.32 %36
-  %41 = acc.clear.f32x64
-  %42 = slice %41[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %43 = vmov.vector512.to.accumulator512 %39
-  %44 = concat(%43, %42, %42, %42) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %45 = vmov.vector512.to.accumulator512 %40
-  %46 = concat(%45, %42, %42, %42) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %47 = mova.i32 60
-  %48 = vadd.f32x64 %44, %46, %47
-  %49 = slice %48[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %50 = vmov.accumulator512.to.vector512 %49
-  %51 = vextract.32.imm %50, 0
-  %52 = vbcst.32 %37
-  %53 = vbcst.32 %38
-  %56 = vmov.vector512.to.accumulator512 %52
-  %57 = concat(%56, %42, %42, %42) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %58 = vmov.vector512.to.accumulator512 %53
-  %59 = concat(%58, %42, %42, %42) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %61 = vadd.f32x64 %57, %59, %47
-  %62 = slice %61[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %63 = vmov.accumulator512.to.vector512 %62
-  %64 = vextract.32.imm %63, 0
-  %65 = vbcst.32 %51
-  %66 = vbcst.32 %64
-  %69 = vmov.vector512.to.accumulator512 %65
-  %70 = concat(%69, %42, %42, %42) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %71 = vmov.vector512.to.accumulator512 %66
-  %72 = concat(%71, %42, %42, %42) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
-  %74 = vadd.f32x64 %70, %72, %47
-  %75 = slice %74[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
-  %76 = vmov.accumulator512.to.vector512 %75
-  %77 = vextract.32.imm %76, 0
-  st %77, %output_view, 0
-  return
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32_reduce_add_fastmath(%loaded: reg<aie2p.vec256 x2>) -> (reg<aie2p.er>) asm {
+  %14 = vextract.32.imm %loaded, 0
+  %15 = vextract.32.imm %loaded, 1
+  %16 = vbcst.32 %14
+  %17 = vbcst.32 %15
+  %18 = acc.clear.f32x64
+  %19 = slice %18[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %20 = vmov.vector512.to.accumulator512 %16
+  %21 = concat(%20, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %22 = vmov.vector512.to.accumulator512 %17
+  %23 = concat(%22, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %24 = mova.i32 60
+  %25 = vadd.f32x64 %21, %23, %24
+  %26 = slice %25[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %27 = vmov.accumulator512.to.vector512 %26
+  %28 = vextract.32.imm %27, 0
+  %29 = vextract.32.imm %loaded, 2
+  %30 = vextract.32.imm %loaded, 3
+  %31 = vbcst.32 %29
+  %32 = vbcst.32 %30
+  %35 = vmov.vector512.to.accumulator512 %31
+  %36 = concat(%35, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %37 = vmov.vector512.to.accumulator512 %32
+  %38 = concat(%37, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %40 = vadd.f32x64 %36, %38, %24
+  %41 = slice %40[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %42 = vmov.accumulator512.to.vector512 %41
+  %43 = vextract.32.imm %42, 0
+  %44 = vbcst.32 %28
+  %45 = vbcst.32 %43
+  %48 = vmov.vector512.to.accumulator512 %44
+  %49 = concat(%48, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %50 = vmov.vector512.to.accumulator512 %45
+  %51 = concat(%50, %19, %19, %19) : (reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>, reg<aie2p.mbms>) -> reg<aie2p.mbms x4>
+  %53 = vadd.f32x64 %49, %51, %24
+  %54 = slice %53[0] : reg<aie2p.mbms x4> -> reg<aie2p.mbms>
+  %55 = vmov.accumulator512.to.vector512 %54
+  %56 = vextract.32.imm %55, 0
+  return %56
 }
 
 // ====
@@ -229,47 +188,42 @@ low.func.def target<amd.xdna.aie2p.core> abi(object_function) @f32x16_reduce_add
 
 config.def @runtime.vector_width = 4 : index
 
-func.def @i32_configured_width_sum(%input: buffer, %output: buffer) {
+func.def @i32_configured_width_sum(%input: buffer) -> (i32) {
   %buffer_base = index.constant 0 : offset
   %vector_width = config.get @runtime.vector_width : index
   %vector_width_bounded = index.assume %vector_width [range(%vector_width, 2, 4)] : index
   %input_view = buffer.view %input[%buffer_base] : buffer -> view<4xi32>
-  %output_view = buffer.view %output[%buffer_base] : buffer -> view<1xi32>
   %loaded = vector.load %input_view[0] : view<4xi32> -> vector<[%vector_width_bounded]xi32>
   %initial_sum = scalar.constant 0 : i32
   %sum = vector.reduce<addi> %loaded, %initial_sum : vector<[%vector_width_bounded]xi32>, i32
-  %stored = vector.from_elements %sum : vector<1xi32>
-  vector.store %stored, %output_view[0] : vector<1xi32>, view<1xi32>
-  func.return
+  func.return %sum : i32
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_configured_width_sum() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @i32_configured_width_sum() -> (reg<aie2p.er>) asm {
   %input_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %24 = lda %input_view, 0
-  %25 = lda %input_view, 4
-  %26 = lda %input_view, 8
-  %27 = lda %input_view, 12
-  %28 = vbcst.32 %24
-  %29 = mov.short 1
+  %21 = lda %input_view, 0
+  %22 = lda %input_view, 4
+  %23 = lda %input_view, 8
+  %24 = lda %input_view, 12
+  %25 = vbcst.32 %21
+  %26 = mov.short 1
+  %27 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %28 = vinsert.32.reg %25, %27, %22
+  %29 = mov.short 2
   %30 = copy %29 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %31 = vinsert.32.reg %28, %30, %25
-  %32 = mov.short 2
+  %31 = vinsert.32.reg %28, %30, %23
+  %32 = mov.short 3
   %33 = copy %32 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %34 = vinsert.32.reg %31, %33, %26
-  %35 = mov.short 3
-  %36 = copy %35 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
-  %loaded = vinsert.32.reg %34, %36, %27
-  %38 = mova.i32 7
-  %39 = vshuffle %loaded, %loaded, %38
-  %40 = vadd.32 %loaded, %39
-  %41 = mova.i32 5
-  %42 = vshuffle %40, %40, %41
-  %43 = vadd.32 %40, %42
-  %sum = vextract.32.imm %43, 0
-  st %sum, %output_view, 0
-  return
+  %loaded = vinsert.32.reg %31, %33, %24
+  %35 = mova.i32 7
+  %36 = vshuffle %loaded, %loaded, %35
+  %37 = vadd.32 %loaded, %36
+  %38 = mova.i32 5
+  %39 = vshuffle %37, %37, %38
+  %40 = vadd.32 %37, %39
+  %sum = vextract.32.imm %40, 0
+  return %sum
 }
 
 // ====

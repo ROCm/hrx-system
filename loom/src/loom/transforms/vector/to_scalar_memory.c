@@ -506,8 +506,21 @@ typedef struct loom_vector_to_scalar_store_lane_t {
   loom_vector_to_scalar_view_indices_t indices;
 } loom_vector_to_scalar_store_lane_t;
 
+static iree_status_t loom_vector_to_scalar_materialize_store_value_lane(
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode, loom_value_id_t value,
+    loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane) {
+  if (value_mode == LOOM_VECTOR_TO_SCALAR_STORE_VALUE_MODE_CAPTURED) {
+    return loom_vector_to_scalar_build_terminal_extract(state, value, indices,
+                                                        out_lane);
+  }
+  return loom_vector_to_scalar_materialize_lane(state, value, indices,
+                                                out_lane);
+}
+
 static iree_status_t loom_vector_to_scalar_prepare_store_lane(
     loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode,
     loom_vector_to_scalar_index_list_t lane_indices,
     loom_vector_to_scalar_store_lane_t* out_lane) {
   out_lane->condition = LOOM_VALUE_ID_INVALID;
@@ -516,8 +529,8 @@ static iree_status_t loom_vector_to_scalar_prepare_store_lane(
         state, loom_vector_to_scalar_store_mask(state), lane_indices,
         &out_lane->condition));
   }
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_lane(
-      state, loom_vector_to_scalar_store_value(state), lane_indices,
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_materialize_store_value_lane(
+      state, value_mode, loom_vector_to_scalar_store_value(state), lane_indices,
       &out_lane->value));
   return loom_vector_to_scalar_build_view_indices(
       state, lane_indices, !loom_vector_to_scalar_store_is_scatter(state),
@@ -572,10 +585,11 @@ static iree_status_t loom_vector_to_scalar_emit_prepared_store_lane(
 
 static iree_status_t loom_vector_to_scalar_emit_store_lane(
     loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode,
     loom_vector_to_scalar_index_list_t indices) {
   loom_vector_to_scalar_store_lane_t lane;
-  IREE_RETURN_IF_ERROR(
-      loom_vector_to_scalar_prepare_store_lane(state, indices, &lane));
+  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_store_lane(
+      state, value_mode, indices, &lane));
   return loom_vector_to_scalar_emit_prepared_store_lane(state, &lane);
 }
 
@@ -630,7 +644,8 @@ static iree_status_t loom_vector_to_scalar_emit_store_compress_lane(
 }
 
 static iree_status_t loom_vector_to_scalar_lower_static_memory_store(
-    loom_vector_to_scalar_state_t* state) {
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode) {
   uint16_t element_count = 0;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_static_element_count(
       state, state->vector_type, &element_count));
@@ -657,8 +672,8 @@ static iree_status_t loom_vector_to_scalar_lower_static_memory_store(
     };
     loom_builder_set_before(&state->rewriter->builder, first_store);
     loom_vector_to_scalar_store_lane_t lane;
-    IREE_RETURN_IF_ERROR(
-        loom_vector_to_scalar_prepare_store_lane(state, index_list, &lane));
+    IREE_RETURN_IF_ERROR(loom_vector_to_scalar_prepare_store_lane(
+        state, value_mode, index_list, &lane));
     loom_builder_set_before(&state->rewriter->builder, state->op);
     IREE_RETURN_IF_ERROR(
         loom_vector_to_scalar_emit_prepared_store_lane(state, &lane));
@@ -670,7 +685,8 @@ static iree_status_t loom_vector_to_scalar_lower_static_memory_store(
 }
 
 static iree_status_t loom_vector_to_scalar_lower_memory_store_loop_axis(
-    loom_vector_to_scalar_state_t* state, uint8_t axis,
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode, uint8_t axis,
     loom_value_id_t* dynamic_indices) {
   loom_value_id_t lower_bound = LOOM_VALUE_ID_INVALID;
   loom_value_id_t step = LOOM_VALUE_ID_INVALID;
@@ -701,10 +717,10 @@ static iree_status_t loom_vector_to_scalar_lower_memory_store_loop_axis(
         .rank = loom_type_rank(state->vector_type),
     };
     IREE_RETURN_IF_ERROR(
-        loom_vector_to_scalar_emit_store_lane(state, index_list));
+        loom_vector_to_scalar_emit_store_lane(state, value_mode, index_list));
   } else {
     IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_memory_store_loop_axis(
-        state, (uint8_t)(axis + 1), dynamic_indices));
+        state, value_mode, (uint8_t)(axis + 1), dynamic_indices));
   }
   loom_op_t* yield_op = NULL;
   IREE_RETURN_IF_ERROR(loom_scf_yield_build(&state->rewriter->builder, NULL, 0,
@@ -714,22 +730,24 @@ static iree_status_t loom_vector_to_scalar_lower_memory_store_loop_axis(
 }
 
 static iree_status_t loom_vector_to_scalar_lower_dynamic_memory_store(
-    loom_vector_to_scalar_state_t* state) {
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode) {
   uint8_t rank = loom_type_rank(state->vector_type);
   loom_value_id_t* dynamic_indices = NULL;
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(state->rewriter->arena, rank,
                                                  sizeof(loom_value_id_t),
                                                  (void**)&dynamic_indices));
-  return loom_vector_to_scalar_lower_memory_store_loop_axis(state, 0,
-                                                            dynamic_indices);
+  return loom_vector_to_scalar_lower_memory_store_loop_axis(state, value_mode,
+                                                            0, dynamic_indices);
 }
 
 iree_status_t loom_vector_to_scalar_lower_memory_store(
-    loom_vector_to_scalar_state_t* state) {
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode) {
   if (loom_type_is_all_static(state->vector_type)) {
-    return loom_vector_to_scalar_lower_static_memory_store(state);
+    return loom_vector_to_scalar_lower_static_memory_store(state, value_mode);
   }
-  return loom_vector_to_scalar_lower_dynamic_memory_store(state);
+  return loom_vector_to_scalar_lower_dynamic_memory_store(state, value_mode);
 }
 
 //===----------------------------------------------------------------------===//

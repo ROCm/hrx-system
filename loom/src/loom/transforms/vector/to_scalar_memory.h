@@ -15,6 +15,13 @@
 extern "C" {
 #endif
 
+typedef enum loom_vector_to_scalar_store_value_mode_e {
+  // Rebuilds stored lanes from decomposable producer operations.
+  LOOM_VECTOR_TO_SCALAR_STORE_VALUE_MODE_REMATERIALIZE = 0,
+  // Extracts stored lanes from the authored SSA snapshot.
+  LOOM_VECTOR_TO_SCALAR_STORE_VALUE_MODE_CAPTURED = 1,
+} loom_vector_to_scalar_store_value_mode_t;
+
 iree_status_t loom_vector_to_scalar_build_load_lane(
     loom_vector_to_scalar_state_t* state,
     loom_vector_to_scalar_index_list_t indices, loom_value_id_t* out_lane);
@@ -38,8 +45,11 @@ iree_status_t loom_vector_to_scalar_build_load_expand_lane(
 // Expands dense, masked and scatter stores into scalar view stores. Fixed-shape
 // expansion places value, mask and destination-coordinate materializations
 // before all writes so one lane cannot overwrite another lane's input snapshot.
+// |value_mode| controls only stored-value materialization; masks and
+// destination coordinates retain their ordinary lowering behavior.
 iree_status_t loom_vector_to_scalar_lower_memory_store(
-    loom_vector_to_scalar_state_t* state);
+    loom_vector_to_scalar_state_t* state,
+    loom_vector_to_scalar_store_value_mode_t value_mode);
 
 iree_status_t loom_vector_to_scalar_lower_fragment_store(
     loom_vector_to_scalar_state_t* state, bool* out_handled);

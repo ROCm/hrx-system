@@ -70,6 +70,25 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
       &context, &constraint, &diagnostics, &access, 0, &diagnostic_index));
   EXPECT_EQ(diagnostic_index,
             100 + LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_VECTOR_LANE_COUNT);
+
+  context.vector_lane_projection = {
+      /*.source_lane_count=*/2,
+      /*.projected_lane_count=*/1,
+  };
+  EXPECT_TRUE(loom_low_lower_rule_source_memory_matches(
+      &context, &constraint, &diagnostics, &access, 0, &diagnostic_index));
+  access.minimum_alignment = 2;
+  EXPECT_FALSE(loom_low_lower_rule_source_memory_matches(
+      &context, &constraint, &diagnostics, &access, 0, &diagnostic_index));
+  EXPECT_EQ(diagnostic_index,
+            100 + LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_MINIMUM_ALIGNMENT);
+  access.minimum_alignment = 4;
+  context.vector_lane_projection.source_lane_count = 3;
+  EXPECT_FALSE(loom_low_lower_rule_source_memory_matches(
+      &context, &constraint, &diagnostics, &access, 0, &diagnostic_index));
+  EXPECT_EQ(diagnostic_index,
+            100 + LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_VECTOR_LANE_COUNT);
+  context.vector_lane_projection = {};
   access.vector_lane_count = 1;
 
   access.minimum_alignment = 2;

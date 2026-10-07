@@ -177,9 +177,10 @@ static loom_value_id_t loom_vector_to_scalar_memory_payload_value(
   return loom_memory_access_value(access);
 }
 
-static iree_status_t loom_vector_to_scalar_lower_memory_store_op(
+static iree_status_t
+loom_vector_to_scalar_lower_memory_store_op_with_value_mode(
     loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
-    bool* out_handled) {
+    loom_vector_to_scalar_store_value_mode_t value_mode, bool* out_handled) {
   *out_handled = true;
   loom_value_id_t value = loom_vector_to_scalar_memory_payload_value(
       rewriter->module, op, LOOM_MEMORY_ACCESS_OPERATION_STORE);
@@ -194,11 +195,20 @@ static iree_status_t loom_vector_to_scalar_lower_memory_store_op(
       .location = op->location,
   };
   loom_vector_to_scalar_state_initialize(&state, pass);
-  IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_memory_store(&state));
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_lower_memory_store(&state, value_mode));
   if (loom_pass_has_error_diagnostics(pass)) {
     return iree_ok_status();
   }
   return loom_vector_to_scalar_erase_lowered_op(&state);
+}
+
+static iree_status_t loom_vector_to_scalar_lower_memory_store_op(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool* out_handled) {
+  return loom_vector_to_scalar_lower_memory_store_op_with_value_mode(
+      pass, rewriter, op, LOOM_VECTOR_TO_SCALAR_STORE_VALUE_MODE_REMATERIALIZE,
+      out_handled);
 }
 
 static iree_status_t loom_vector_to_scalar_lower_fragment_store_op(
@@ -1219,6 +1229,25 @@ iree_status_t loom_vector_store_to_scalar_rewrite_op(loom_pass_t* pass,
   bool handled = false;
   IREE_RETURN_IF_ERROR(loom_vector_to_scalar_lower_memory_store_op(
       pass, rewriter, op, &handled));
+  if (handled && !loom_pass_has_error_diagnostics(pass)) {
+    loom_vector_to_scalar_record_rewrite(rewriter, out_rewritten);
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_vector_store_captured_to_scalar_rewrite_op(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool* out_rewritten) {
+  *out_rewritten = false;
+  if (!loom_vector_store_isa(op)) {
+    return iree_ok_status();
+  }
+  loom_builder_set_before(&rewriter->builder, op);
+  bool handled = false;
+  IREE_RETURN_IF_ERROR(
+      loom_vector_to_scalar_lower_memory_store_op_with_value_mode(
+          pass, rewriter, op, LOOM_VECTOR_TO_SCALAR_STORE_VALUE_MODE_CAPTURED,
+          &handled));
   if (handled && !loom_pass_has_error_diagnostics(pass)) {
     loom_vector_to_scalar_record_rewrite(rewriter, out_rewritten);
   }

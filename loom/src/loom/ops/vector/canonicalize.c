@@ -910,6 +910,56 @@ static iree_status_t loom_vector_canonicalize_extract_from_elements(
   return iree_ok_status();
 }
 
+// Composes a scalar extraction with the static offsets of its source slice.
+// Scalar results consume every source axis, so no trailing slice extent needs
+// to be preserved in the replacement.
+static iree_status_t loom_vector_canonicalize_extract_from_slice(
+    loom_op_t* op, loom_rewriter_t* rewriter, loom_op_t* source_def_op,
+    loom_type_t source_type, loom_type_t result_type, bool* out_changed) {
+  *out_changed = false;
+  if (!loom_type_is_scalar(result_type)) {
+    return iree_ok_status();
+  }
+
+  const uint8_t rank = loom_type_rank(source_type);
+  const loom_attribute_t extract_indices =
+      loom_vector_extract_static_indices(op);
+  const loom_attribute_t slice_offsets =
+      loom_vector_slice_static_offsets(source_def_op);
+  if (loom_vector_extract_indices(op).count != 0 ||
+      loom_vector_slice_offsets(source_def_op).count != 0 ||
+      extract_indices.kind != LOOM_ATTR_I64_ARRAY ||
+      slice_offsets.kind != LOOM_ATTR_I64_ARRAY ||
+      extract_indices.count != rank || slice_offsets.count != rank) {
+    return iree_ok_status();
+  }
+
+  int64_t combined_indices[LOOM_TYPE_MAX_RANK] = {0};
+  for (uint8_t axis = 0; axis < rank; ++axis) {
+    const int64_t extract_index = extract_indices.i64_array[axis];
+    const int64_t slice_offset = slice_offsets.i64_array[axis];
+    if (extract_index < 0 || extract_index == INT64_MIN || slice_offset < 0 ||
+        slice_offset == INT64_MIN ||
+        !iree_checked_add_i64(slice_offset, extract_index,
+                              &combined_indices[axis])) {
+      return iree_ok_status();
+    }
+  }
+
+  loom_builder_set_before(&rewriter->builder, op);
+  const loom_value_id_t value_checkpoint =
+      loom_rewriter_value_checkpoint(rewriter);
+  loom_op_t* replacement_op = NULL;
+  IREE_RETURN_IF_ERROR(loom_vector_extract_build(
+      &rewriter->builder, loom_vector_slice_source(source_def_op),
+      /*indices=*/NULL, /*indices_count=*/0, combined_indices, rank,
+      result_type, op->location, &replacement_op));
+  IREE_RETURN_IF_ERROR(loom_vector_replace_single_result_with_new_op(
+      op, rewriter, replacement_op, value_checkpoint));
+  *out_changed = true;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_vector_canonicalize_extract_from_iota(
     loom_op_t* op, loom_rewriter_t* rewriter, loom_op_t* source_def_op,
     loom_type_t source_type, loom_type_t result_type, bool* out_changed) {
@@ -1312,6 +1362,10 @@ static iree_status_t loom_vector_canonicalize_extract(loom_op_t* op,
   if (loom_vector_from_elements_isa(source_def_op)) {
     return loom_vector_canonicalize_extract_from_elements(
         op, rewriter, source_def_op, result_type, out_changed);
+  }
+  if (loom_vector_slice_isa(source_def_op)) {
+    return loom_vector_canonicalize_extract_from_slice(
+        op, rewriter, source_def_op, source_type, result_type, out_changed);
   }
   if (loom_vector_iota_isa(source_def_op)) {
     return loom_vector_canonicalize_extract_from_iota(

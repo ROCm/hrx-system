@@ -162,6 +162,61 @@ static bool loom_vector_packet_shape_from_type(
   return true;
 }
 
+// Constrains a geometric packet shape with target contract answers for this
+// memory operation. The authored access retains its address and view facts
+// while the scoped query projects matching vector values to each candidate
+// width.
+static iree_status_t loom_vector_packet_memory_shape_constrain(
+    loom_target_legalization_context_t* context, const loom_op_t* op,
+    const loom_target_vector_packet_policy_t* policy, loom_type_t vector_type,
+    loom_vector_packet_shape_t* inout_shape, bool* out_supported) {
+  *out_supported = false;
+  uint32_t lane_count = 0;
+  if (!loom_vector_packet_static_lane_count(vector_type, &lane_count) ||
+      lane_count != inout_shape->lane_count) {
+    return iree_ok_status();
+  }
+
+  uint32_t selected_lane_count = 0;
+  bool contract_handled_candidate = false;
+  for (uint8_t i = 0; i < policy->native_bit_count_count; ++i) {
+    const uint32_t candidate_lane_count =
+        loom_vector_packet_lane_count_for_bit_count(
+            policy, vector_type, policy->native_bit_counts[i]);
+    if (candidate_lane_count == 0 || candidate_lane_count >= lane_count ||
+        candidate_lane_count > inout_shape->chunk_lane_count) {
+      continue;
+    }
+    const loom_target_contract_vector_lane_projection_t projection = {
+        .source_lane_count = lane_count,
+        .projected_lane_count = candidate_lane_count,
+    };
+    loom_target_contract_query_result_t query_result =
+        loom_target_contract_query_result_empty();
+    IREE_RETURN_IF_ERROR(
+        loom_target_legalization_query_contract_with_vector_lane_projection(
+            context, op, projection, &query_result));
+    contract_handled_candidate |=
+        query_result.outcome != LOOM_TARGET_CONTRACT_QUERY_UNHANDLED;
+    if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
+      selected_lane_count = iree_max(selected_lane_count, candidate_lane_count);
+    }
+  }
+  if (selected_lane_count == 0) {
+    // Some targets retain structural memory selection in a custom Low planner
+    // instead of exposing candidate rows through the query contract. Preserve
+    // their declared packet policy only when the contract had no opinion about
+    // any candidate. One handled answer makes the contract authoritative.
+    *out_supported = !contract_handled_candidate;
+    return iree_ok_status();
+  }
+
+  inout_shape->chunk_lane_count = selected_lane_count;
+  inout_shape->chunk_count = (lane_count - 1u) / selected_lane_count + 1u;
+  *out_supported = true;
+  return iree_ok_status();
+}
+
 // Uniform producers do not need axis-aware slicing, so their packet plan can
 // cover any static logical shape in row-major lane order.
 static bool loom_vector_packet_uniform_shape_from_type(
@@ -589,10 +644,11 @@ static iree_status_t loom_vector_packet_select_value_shape(
     loom_vector_packetization_t* packetization, loom_value_id_t source,
     loom_vector_packet_shape_t* inout_shape, bool* out_selected);
 
-static bool loom_vector_packet_select_memory_load_shape(
+static iree_status_t loom_vector_packet_select_memory_load_shape(
     const loom_vector_packetization_t* packetization, const loom_op_t* op,
-    loom_vector_packet_shape_t* inout_shape) {
-  const loom_target_legalization_context_t* context = packetization->context;
+    loom_vector_packet_shape_t* inout_shape, bool* out_selected) {
+  *out_selected = false;
+  loom_target_legalization_context_t* context = packetization->context;
   loom_vector_memory_footprint_t footprint = {0};
   if (!loom_vector_memory_footprint_describe(
           loom_vector_packet_fact_context(context), context->module, op,
@@ -601,13 +657,16 @@ static bool loom_vector_packet_select_memory_load_shape(
       !loom_type_equal(footprint.vector_type,
                        loom_module_value_type(context->module,
                                               loom_vector_load_result(op)))) {
-    return false;
+    return iree_ok_status();
   }
   loom_vector_memory_cache_policy_t cache_policy = {0};
-  return loom_vector_memory_cache_policy_from_op(context->module, op,
-                                                 &cache_policy) &&
-         loom_vector_packet_shape_constrain(packetization->policy,
-                                            footprint.vector_type, inout_shape);
+  if (!loom_vector_memory_cache_policy_from_op(context->module, op,
+                                               &cache_policy)) {
+    return iree_ok_status();
+  }
+  return loom_vector_packet_memory_shape_constrain(
+      context, op, packetization->policy, footprint.vector_type, inout_shape,
+      out_selected);
 }
 
 // Selects a regular axis-zero concat as an already captured packet snapshot.
@@ -755,8 +814,8 @@ static iree_status_t loom_vector_packet_select_value_shape(
     return iree_ok_status();
   }
   if (loom_vector_load_isa(op)) {
-    *out_selected = loom_vector_packet_select_memory_load_shape(
-        packetization, op, inout_shape);
+    IREE_RETURN_IF_ERROR(loom_vector_packet_select_memory_load_shape(
+        packetization, op, inout_shape, out_selected));
   } else if (loom_vector_concat_isa(op)) {
     *out_selected = loom_vector_packet_select_snapshot_shape(packetization, op,
                                                              inout_shape);
@@ -2357,7 +2416,13 @@ iree_status_t loom_vector_packet_legalize_load(
   loom_vector_packet_shape_t shape = {0};
   loom_vector_memory_cache_policy_t cache_policy = {0};
   if (!loom_vector_packet_shape_from_type(policy, footprint.vector_type,
-                                          &shape) ||
+                                          &shape)) {
+    return iree_ok_status();
+  }
+  bool packet_supported = false;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_memory_shape_constrain(
+      context, op, policy, footprint.vector_type, &shape, &packet_supported));
+  if (!packet_supported ||
       !loom_vector_memory_cache_policy_from_op(context->module, op,
                                                &cache_policy) ||
       !loom_vector_packet_memory_can_build_chunk_origins(context, &footprint,
@@ -2386,6 +2451,13 @@ iree_status_t loom_vector_packet_legalize_store(
   loom_vector_packet_shape_t shape = {0};
   if (!loom_vector_packet_shape_from_type(policy, store_footprint.vector_type,
                                           &shape)) {
+    return iree_ok_status();
+  }
+  bool packet_supported = false;
+  IREE_RETURN_IF_ERROR(loom_vector_packet_memory_shape_constrain(
+      context, op, policy, store_footprint.vector_type, &shape,
+      &packet_supported));
+  if (!packet_supported) {
     return iree_ok_status();
   }
 

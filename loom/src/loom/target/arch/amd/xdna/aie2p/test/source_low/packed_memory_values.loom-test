@@ -5,9 +5,9 @@
 // RUN: emit source-low target=amd.xdna.aie2p:core output=low
 
 // Indexed vector elements preserve byte codes through integer promotion.
-func.def @uniform_table(%input: buffer, %codebook: buffer, %output: buffer, %position: index) {
+func.def @uniform_table(%input: buffer, %codebook: buffer, %position: index) -> (vector<4xi8>) {
   %aligned = buffer.assume.alignment %codebook {minimum_alignment = 64} : buffer
-  %source, %table_source, %destination = buffer.assume.noalias %input, %aligned, %output : buffer, buffer, buffer
+  %source, %table_source = buffer.assume.noalias %input, %aligned : buffer, buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<32x4xi8>
   %input_values = vector.load %source_view[%position, 0] : view<32x4xi8> -> vector<4xi8>
@@ -16,275 +16,380 @@ func.def @uniform_table(%input: buffer, %codebook: buffer, %output: buffer, %pos
   %table_view = buffer.view %table_source[%c0] : buffer -> view<16xi8>
   %table = vector.load %table_view[0] : view<16xi8> -> vector<16xi8>
   %values = vector.table.lookup %table[%indices] : vector<16xi8>, vector<4xi8> -> vector<4xi8>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<32x4xi8>
-  vector.store %values, %output_view[%position, 0] : vector<4xi8>, view<32x4xi8>
-  func.return
+  func.return %values : vector<4xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_table(%position_bounded: reg<aie2p.er>) asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_table(%position_bounded: reg<aie2p.er>) -> (reg<aie2p.vec256 x2>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
   %table_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 2, source_type = buffer} : reg<aie2p.ep>
-  %116 = mov.i32 2
-  %117 = lshl %position_bounded, %116
-  %118 = mov.address-index %117
-  %119 = lda.i8.index %source_view, %118
-  %122 = add.address-index.immediate %117, 1
+  %120 = mov.i32 2
+  %121 = lshl %position_bounded, %120
+  %122 = mov.address-index %121
   %123 = lda.i8.index %source_view, %122
-  %126 = add.address-index.immediate %117, 2
+  %126 = add.address-index.immediate %121, 1
   %127 = lda.i8.index %source_view, %126
-  %130 = add.address-index.immediate %117, 3
+  %130 = add.address-index.immediate %121, 2
   %131 = lda.i8.index %source_view, %130
-  %132 = mov.short 0
-  %133 = vbcst.8 %132
-  %134 = slice %133[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
-  %135 = vlda.128.i8x16 %table_view, 0
-  %table = concat(%135, %134) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
-  %137 = mov.short 15
-  %138 = and %119, %137
-  %139 = extend.s8 %138
-  %140 = vextract.8.reg %table, %139
-  %141 = and %123, %137
-  %142 = extend.s8 %141
-  %143 = vextract.8.reg %table, %142
-  %144 = and %127, %137
-  %145 = extend.s8 %144
-  %146 = vextract.8.reg %table, %145
-  %147 = and %131, %137
-  %148 = extend.s8 %147
-  %149 = vextract.8.reg %table, %148
-  st.i8.index %140, %output_view, %118
-  st.i8.index %143, %output_view, %122
-  st.i8.index %146, %output_view, %126
-  st.i8.index %149, %output_view, %130
-  return
+  %134 = add.address-index.immediate %121, 3
+  %135 = lda.i8.index %source_view, %134
+  %136 = vbcst.8 %123
+  %137 = mov.short 1
+  %138 = copy %137 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %139 = vinsert.8.reg %136, %138, %127
+  %140 = mov.short 2
+  %141 = copy %140 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %142 = vinsert.8.reg %139, %141, %131
+  %143 = mov.short 3
+  %144 = copy %143 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %input_values = vinsert.8.reg %142, %144, %135
+  %146 = mov.short 15
+  %mask = vbcst.8 %146
+  %indices = vband %input_values, %mask
+  %149 = mov.short 0
+  %150 = vbcst.8 %149
+  %151 = slice %150[1] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %152 = vlda.128.i8x16 %table_view, 0
+  %table = concat(%152, %151) : (reg<aie2p.vec256>, reg<aie2p.vec256>) -> reg<aie2p.vec256 x2>
+  %157 = vbcst.8 %137
+  %158 = vband %indices, %157
+  %159 = vlt.u8x64 %150, %158
+  %161 = vbcst.8 %140
+  %162 = vband %indices, %161
+  %163 = vlt.u8x64 %150, %162
+  %164 = mov.short 4
+  %165 = vbcst.8 %164
+  %166 = vband %indices, %165
+  %167 = vlt.u8x64 %150, %166
+  %168 = mov.short 8
+  %169 = vbcst.8 %168
+  %170 = vband %indices, %169
+  %171 = vlt.u8x64 %150, %170
+  %172 = vextbcst.8 %table, 0
+  %173 = vextbcst.8 %table, 1
+  %174 = vsel.8 %172, %173, %159
+  %175 = vextbcst.8 %table, 2
+  %176 = vextbcst.8 %table, 3
+  %177 = vsel.8 %175, %176, %159
+  %178 = vsel.8 %174, %177, %163
+  %179 = vextbcst.8 %table, 4
+  %180 = vextbcst.8 %table, 5
+  %181 = vsel.8 %179, %180, %159
+  %182 = vextbcst.8 %table, 6
+  %183 = vextbcst.8 %table, 7
+  %184 = vsel.8 %182, %183, %159
+  %185 = vsel.8 %181, %184, %163
+  %186 = vsel.8 %178, %185, %167
+  %187 = vextbcst.8 %table, 8
+  %188 = vextbcst.8 %table, 9
+  %189 = vsel.8 %187, %188, %159
+  %190 = vextbcst.8 %table, 10
+  %191 = vextbcst.8 %table, 11
+  %192 = vsel.8 %190, %191, %159
+  %193 = vsel.8 %189, %192, %163
+  %194 = vextbcst.8 %table, 12
+  %195 = vextbcst.8 %table, 13
+  %196 = vsel.8 %194, %195, %159
+  %197 = vextbcst.8 %table, 14
+  %198 = vextbcst.8 %table, 15
+  %199 = vsel.8 %197, %198, %159
+  %200 = vsel.8 %196, %199, %163
+  %201 = vsel.8 %193, %200, %167
+  %values = vsel.8 %186, %201, %171
+  return %values
 }
 
 // ====
 
-func.def @uniform_i8(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_i8(%input: buffer) -> (vector<8xi8>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<8xi8>
   %value = vector.load %source_view[0] : view<8xi8> -> vector<8xi8>
   %result = vector.addi %value, %value : vector<8xi8>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<8xi8>
-  vector.store %result, %output_view[0] : vector<8xi8>, view<8xi8>
-  func.return
+  func.return %result : vector<8xi8>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_i8() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_i8() -> (reg<aie2p.vec256 x2>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %109 = lda.u8 %source_view, 0
-  %110 = lda.u8 %source_view, 1
-  %111 = lda.u8 %source_view, 2
-  %112 = lda.u8 %source_view, 3
-  %113 = lda.u8 %source_view, 4
-  %114 = lda.u8 %source_view, 5
-  %115 = lda.u8 %source_view, 6
-  %116 = lda.u8 %source_view, 7
-  %117 = add.rr %109, %109
-  %118 = add.rr %110, %110
-  %119 = add.rr %111, %111
-  %120 = add.rr %112, %112
-  %121 = add.rr %113, %113
-  %122 = add.rr %114, %114
-  %123 = add.rr %115, %115
-  %124 = add.rr %116, %116
-  st.s8 %117, %output_view, 0
-  st.s8 %118, %output_view, 1
-  st.s8 %119, %output_view, 2
-  st.s8 %120, %output_view, 3
-  st.s8 %121, %output_view, 4
-  st.s8 %122, %output_view, 5
-  st.s8 %123, %output_view, 6
-  st.s8 %124, %output_view, 7
-  return
+  %26 = lda.u8 %source_view, 0
+  %27 = lda.u8 %source_view, 1
+  %28 = lda.u8 %source_view, 2
+  %29 = lda.u8 %source_view, 3
+  %30 = lda.u8 %source_view, 4
+  %31 = lda.u8 %source_view, 5
+  %32 = lda.u8 %source_view, 6
+  %33 = lda.u8 %source_view, 7
+  %34 = vbcst.8 %26
+  %35 = mov.short 1
+  %36 = copy %35 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %37 = vinsert.8.reg %34, %36, %27
+  %38 = mov.short 2
+  %39 = copy %38 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %40 = vinsert.8.reg %37, %39, %28
+  %41 = mov.short 3
+  %42 = copy %41 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %43 = vinsert.8.reg %40, %42, %29
+  %44 = mov.short 4
+  %45 = copy %44 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %46 = vinsert.8.reg %43, %45, %30
+  %47 = mov.short 5
+  %48 = copy %47 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %49 = vinsert.8.reg %46, %48, %31
+  %50 = mov.short 6
+  %51 = copy %50 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %52 = vinsert.8.reg %49, %51, %32
+  %53 = mov.short 7
+  %54 = copy %53 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %value = vinsert.8.reg %52, %54, %33
+  %result = vadd.8 %value, %value
+  return %result
 }
 
 // ====
 
-func.def @uniform_i16(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_i16(%input: buffer) -> (vector<4xi16>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<4xi16>
   %value = vector.load %source_view[0] : view<4xi16> -> vector<4xi16>
   %result = vector.addi %value, %value : vector<4xi16>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<4xi16>
-  vector.store %result, %output_view[0] : vector<4xi16>, view<4xi16>
-  func.return
+  func.return %result : vector<4xi16>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_i16() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_i16() -> (reg<aie2p.vec256 x2>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %45 = lda.u16 %source_view, 0
-  %46 = lda.u16 %source_view, 2
-  %47 = lda.u16 %source_view, 4
-  %48 = lda.u16 %source_view, 6
-  %49 = add.rr %45, %45
-  %50 = add.rr %46, %46
-  %51 = add.rr %47, %47
-  %52 = add.rr %48, %48
-  st.s16 %49, %output_view, 0
-  st.s16 %50, %output_view, 2
-  st.s16 %51, %output_view, 4
-  st.s16 %52, %output_view, 6
-  return
+  %18 = lda.u16 %source_view, 0
+  %19 = lda.u16 %source_view, 2
+  %20 = lda.u16 %source_view, 4
+  %21 = lda.u16 %source_view, 6
+  %22 = vbcst.16 %18
+  %23 = mov.short 1
+  %24 = copy %23 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %25 = vinsert.16.reg %22, %24, %19
+  %26 = mov.short 2
+  %27 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %28 = vinsert.16.reg %25, %27, %20
+  %29 = mov.short 3
+  %30 = copy %29 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %value = vinsert.16.reg %28, %30, %21
+  %result = vadd.16 %value, %value
+  return %result
 }
 
 // ====
 
-func.def @uniform_bf16(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_bf16(%input: buffer) -> (vector<4xf32>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<4xbf16>
   %value = vector.load %source_view[0] : view<4xbf16> -> vector<4xbf16>
   %result = vector.extf %value : vector<4xbf16> to vector<4xf32>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<4xf32>
-  vector.store %result, %output_view[0] : vector<4xf32>, view<4xf32>
-  func.return
+  func.return %result : vector<4xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_bf16() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_bf16() -> (reg<aie2p.vec256 x2>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %35 = lda.u16 %source_view, 0
-  %36 = lda.u16 %source_view, 2
-  %37 = lda.u16 %source_view, 4
-  %38 = lda.u16 %source_view, 6
-  %39 = mov.short 16
-  %40 = lshl %35, %39
-  %42 = lshl %36, %39
-  %44 = lshl %37, %39
-  %46 = lshl %38, %39
-  st %40, %output_view, 0
-  st %42, %output_view, 4
-  st %44, %output_view, 8
-  st %46, %output_view, 12
-  return
+  %18 = lda.u16 %source_view, 0
+  %19 = lda.u16 %source_view, 2
+  %20 = lda.u16 %source_view, 4
+  %21 = lda.u16 %source_view, 6
+  %22 = vbcst.16 %18
+  %23 = mov.short 1
+  %24 = copy %23 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %25 = vinsert.16.reg %22, %24, %19
+  %26 = mov.short 2
+  %27 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %28 = vinsert.16.reg %25, %27, %20
+  %29 = mov.short 3
+  %30 = copy %29 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %value = vinsert.16.reg %28, %30, %21
+  %32 = slice %value[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %33 = vconv.fp32.bf16x16 %32
+  %result = vmov.accumulator512.to.vector512 %33
+  return %result
 }
 
 // ====
 
-func.def @uniform_f16_extf(%input: buffer, %output: buffer) {
-  %aligned = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
-  %source, %destination = buffer.assume.noalias %aligned, %output : buffer, buffer
+func.def @uniform_f16_extf(%input: buffer) -> (vector<4xf32>) {
+  %source = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
   %c0 = index.constant 0 : offset
   %source_view = buffer.view %source[%c0] : buffer -> view<4xf16>
   %value = vector.load %source_view[0] : view<4xf16> -> vector<4xf16>
   %result = vector.extf %value : vector<4xf16> to vector<4xf32>
-  %output_view = buffer.view %destination[%c0] : buffer -> view<4xf32>
-  vector.store %result, %output_view[0] : vector<4xf32>, view<4xf32>
-  func.return
+  func.return %result : vector<4xf32>
 }
 
 // ----
-low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_f16_extf() asm {
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @uniform_f16_extf() -> (reg<aie2p.vec256 x2>) asm {
   %source_view = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
-  %output_view = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
-  %35 = lda.u16 %source_view, 0
-  %36 = lda.u16 %source_view, 2
-  %37 = lda.u16 %source_view, 4
-  %38 = lda.u16 %source_view, 6
-  %39 = mov.i32 32768
-  %40 = mov.i32 32767
-  %41 = mov.short 16
-  %42 = and %35, %39
-  %43 = lshl %42, %41
-  %44 = and %35, %40
-  %45 = clz %44
-  %46 = add %45, -21
-  %47 = mov.short 0
-  %48 = lt %46, %47
-  %49 = copy %48 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %50 = sel.nez %47, %46, %49
-  %51 = lshl %44, %50
-  %52 = mov.short 13
-  %53 = lshl %51, %52
-  %54 = mov.i32 31744
-  %55 = geu %44, %54
-  %56 = mov.short 112
-  %57 = mov.short 224
-  %58 = copy %55 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %59 = sel.nez %57, %56, %58
-  %60 = sub %59, %50
-  %61 = mov.short 23
-  %62 = lshl %60, %61
-  %63 = add.rr %53, %62
-  %64 = copy %44 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %65 = sel.nez %63, %47, %64
-  %66 = or %43, %65
-  %70 = and %36, %39
-  %71 = lshl %70, %41
-  %72 = and %36, %40
-  %73 = clz %72
-  %74 = add %73, -21
-  %76 = lt %74, %47
-  %77 = copy %76 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %78 = sel.nez %47, %74, %77
-  %79 = lshl %72, %78
-  %81 = lshl %79, %52
-  %83 = geu %72, %54
-  %86 = copy %83 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %87 = sel.nez %57, %56, %86
-  %88 = sub %87, %78
-  %90 = lshl %88, %61
-  %91 = add.rr %81, %90
-  %92 = copy %72 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %93 = sel.nez %91, %47, %92
-  %94 = or %71, %93
-  %98 = and %37, %39
-  %99 = lshl %98, %41
-  %100 = and %37, %40
-  %101 = clz %100
-  %102 = add %101, -21
-  %104 = lt %102, %47
-  %105 = copy %104 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %106 = sel.nez %47, %102, %105
-  %107 = lshl %100, %106
-  %109 = lshl %107, %52
-  %111 = geu %100, %54
-  %114 = copy %111 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %115 = sel.nez %57, %56, %114
-  %116 = sub %115, %106
-  %118 = lshl %116, %61
-  %119 = add.rr %109, %118
-  %120 = copy %100 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %121 = sel.nez %119, %47, %120
-  %122 = or %99, %121
-  %126 = and %38, %39
-  %127 = lshl %126, %41
-  %128 = and %38, %40
-  %129 = clz %128
-  %130 = add %129, -21
-  %132 = lt %130, %47
-  %133 = copy %132 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %134 = sel.nez %47, %130, %133
-  %135 = lshl %128, %134
-  %137 = lshl %135, %52
-  %139 = geu %128, %54
-  %142 = copy %139 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %143 = sel.nez %57, %56, %142
-  %144 = sub %143, %134
-  %146 = lshl %144, %61
-  %147 = add.rr %137, %146
-  %148 = copy %128 : reg<aie2p.er> -> reg<aie2p.mr27_select>
-  %149 = sel.nez %147, %47, %148
-  %150 = or %127, %149
-  st %66, %output_view, 0
-  st %94, %output_view, 4
-  st %122, %output_view, 8
-  st %150, %output_view, 12
-  return
+  %18 = lda.u16 %source_view, 0
+  %19 = lda.u16 %source_view, 2
+  %20 = lda.u16 %source_view, 4
+  %21 = lda.u16 %source_view, 6
+  %22 = vbcst.16 %18
+  %23 = mov.short 1
+  %24 = copy %23 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %25 = vinsert.16.reg %22, %24, %19
+  %26 = mov.short 2
+  %27 = copy %26 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %28 = vinsert.16.reg %25, %27, %20
+  %29 = mov.short 3
+  %30 = copy %29 : reg<aie2p.er> -> reg<aie2p.mr29_insert>
+  %value = vinsert.16.reg %28, %30, %21
+  set.saturation 1
+  set.ups-mode 0
+  %32 = slice %value[0] : reg<aie2p.vec256 x2> -> reg<aie2p.vec256>
+  %33 = mov.shift 0
+  %34 = vups.2x.w-to-b.unsigned %32, %33
+  %35 = vmov.accumulator512.to.vector512 %34
+  %36 = mov.i32 32768
+  %37 = vbcst.32 %36
+  %38 = mov.i32 32767
+  %39 = vbcst.32 %38
+  %40 = mov.i32 1024
+  %41 = vbcst.32 %40
+  %42 = mov.i32 31744
+  %43 = vbcst.32 %42
+  %44 = mov.i32 939524096
+  %45 = vbcst.32 %44
+  %46 = mov.i32 1879048192
+  %47 = vbcst.32 %46
+  %48 = mov.short 0
+  %49 = vbcst.32 %48
+  %50 = vband %35, %37
+  set.saturation 0
+  set.ups-mode 1
+  set.srs-mode 1
+  set.rounding 0
+  %51 = mov.shift 16
+  %52 = vups.2x.x-to-c.unsigned %50, %51
+  %53 = vsrs.2x.c-to-x.unsigned %52, %33
+  %54 = vband %35, %39
+  %55 = mov.shift 13
+  %56 = vups.2x.x-to-c.unsigned %54, %55
+  %57 = vsrs.2x.c-to-x.unsigned %56, %33
+  %58 = vadd.32 %57, %45
+  %59 = vadd.32 %57, %47
+  %60 = vge.u32x16.el.low32 %54, %43
+  %61 = predicate.complete.zero.high32 %60, 0
+  %62 = vsel.32.mask64 %58, %59, %61
+  %64 = vbcst.32 %23
+  %65 = vge.u32x16.el.low32 %54, %64
+  %66 = predicate.complete.zero.high32 %65, 0
+  %67 = mov.shift 23
+  %68 = vups.2x.x-to-c.unsigned %54, %67
+  %69 = vsrs.2x.c-to-x.unsigned %68, %33
+  %70 = mov.i32 855638016
+  %71 = vbcst.32 %70
+  %72 = vadd.32 %69, %71
+  %73 = vsel.32.mask64 %49, %72, %66
+  %75 = vbcst.32 %26
+  %76 = vge.u32x16.el.low32 %54, %75
+  %77 = predicate.complete.zero.high32 %76, 0
+  %78 = mov.shift 22
+  %79 = vups.2x.x-to-c.unsigned %54, %78
+  %80 = vsrs.2x.c-to-x.unsigned %79, %33
+  %81 = mov.i32 864026624
+  %82 = vbcst.32 %81
+  %83 = vadd.32 %80, %82
+  %84 = vsel.32.mask64 %73, %83, %77
+  %85 = mov.short 4
+  %86 = vbcst.32 %85
+  %87 = vge.u32x16.el.low32 %54, %86
+  %88 = predicate.complete.zero.high32 %87, 0
+  %89 = mov.shift 21
+  %90 = vups.2x.x-to-c.unsigned %54, %89
+  %91 = vsrs.2x.c-to-x.unsigned %90, %33
+  %92 = mov.i32 872415232
+  %93 = vbcst.32 %92
+  %94 = vadd.32 %91, %93
+  %95 = vsel.32.mask64 %84, %94, %88
+  %96 = mov.short 8
+  %97 = vbcst.32 %96
+  %98 = vge.u32x16.el.low32 %54, %97
+  %99 = predicate.complete.zero.high32 %98, 0
+  %100 = mov.shift 20
+  %101 = vups.2x.x-to-c.unsigned %54, %100
+  %102 = vsrs.2x.c-to-x.unsigned %101, %33
+  %103 = mov.i32 880803840
+  %104 = vbcst.32 %103
+  %105 = vadd.32 %102, %104
+  %106 = vsel.32.mask64 %95, %105, %99
+  %107 = mov.short 16
+  %108 = vbcst.32 %107
+  %109 = vge.u32x16.el.low32 %54, %108
+  %110 = predicate.complete.zero.high32 %109, 0
+  %111 = mov.shift 19
+  %112 = vups.2x.x-to-c.unsigned %54, %111
+  %113 = vsrs.2x.c-to-x.unsigned %112, %33
+  %114 = mov.i32 889192448
+  %115 = vbcst.32 %114
+  %116 = vadd.32 %113, %115
+  %117 = vsel.32.mask64 %106, %116, %110
+  %118 = mov.short 32
+  %119 = vbcst.32 %118
+  %120 = vge.u32x16.el.low32 %54, %119
+  %121 = predicate.complete.zero.high32 %120, 0
+  %122 = mov.shift 18
+  %123 = vups.2x.x-to-c.unsigned %54, %122
+  %124 = vsrs.2x.c-to-x.unsigned %123, %33
+  %125 = mov.i32 897581056
+  %126 = vbcst.32 %125
+  %127 = vadd.32 %124, %126
+  %128 = vsel.32.mask64 %117, %127, %121
+  %129 = mov.short 64
+  %130 = vbcst.32 %129
+  %131 = vge.u32x16.el.low32 %54, %130
+  %132 = predicate.complete.zero.high32 %131, 0
+  %133 = mov.shift 17
+  %134 = vups.2x.x-to-c.unsigned %54, %133
+  %135 = vsrs.2x.c-to-x.unsigned %134, %33
+  %136 = mov.i32 905969664
+  %137 = vbcst.32 %136
+  %138 = vadd.32 %135, %137
+  %139 = vsel.32.mask64 %128, %138, %132
+  %140 = mov.short 128
+  %141 = vbcst.32 %140
+  %142 = vge.u32x16.el.low32 %54, %141
+  %143 = predicate.complete.zero.high32 %142, 0
+  %144 = vups.2x.x-to-c.unsigned %54, %51
+  %145 = vsrs.2x.c-to-x.unsigned %144, %33
+  %146 = mov.i32 914358272
+  %147 = vbcst.32 %146
+  %148 = vadd.32 %145, %147
+  %149 = vsel.32.mask64 %139, %148, %143
+  %150 = mov.short 256
+  %151 = vbcst.32 %150
+  %152 = vge.u32x16.el.low32 %54, %151
+  %153 = predicate.complete.zero.high32 %152, 0
+  %154 = mov.shift 15
+  %155 = vups.2x.x-to-c.unsigned %54, %154
+  %156 = vsrs.2x.c-to-x.unsigned %155, %33
+  %157 = mov.i32 922746880
+  %158 = vbcst.32 %157
+  %159 = vadd.32 %156, %158
+  %160 = vsel.32.mask64 %149, %159, %153
+  %161 = mov.short 512
+  %162 = vbcst.32 %161
+  %163 = vge.u32x16.el.low32 %54, %162
+  %164 = predicate.complete.zero.high32 %163, 0
+  %165 = mov.shift 14
+  %166 = vups.2x.x-to-c.unsigned %54, %165
+  %167 = vsrs.2x.c-to-x.unsigned %166, %33
+  %168 = mov.i32 931135488
+  %169 = vbcst.32 %168
+  %170 = vadd.32 %167, %169
+  %171 = vsel.32.mask64 %160, %170, %164
+  %172 = vge.u32x16.el.low32 %54, %41
+  %173 = predicate.complete.zero.high32 %172, 0
+  %174 = vsel.32.mask64 %171, %62, %173
+  %result = vbor %174, %53
+  return %result
 }
 
 // ====

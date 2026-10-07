@@ -135,6 +135,13 @@ iree_status_t loom_vector_store_to_scalar_rewrite_op(loom_pass_t* pass,
                                                      loom_op_t* op,
                                                      bool* out_rewritten);
 
+// Rewrites one vector.store into scalar view.store loops while retaining its
+// authored value SSA snapshot. Each scalar write consumes a terminal extract
+// instead of rebuilding producer operations.
+iree_status_t loom_vector_store_captured_to_scalar_rewrite_op(
+    loom_pass_t* pass, loom_rewriter_t* rewriter, loom_op_t* op,
+    bool* out_rewritten);
+
 // Rewrites one vector.fragment.store into scalar view.store loops over the
 // fragment's logical matrix shape. The source fragment is consumed
 // lane-by-lane so target-shaped producers can be erased without first

@@ -1,0 +1,203 @@
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+// An unaligned wide store must retain the GELU result as one SSA snapshot when
+// no native packet width satisfies the memory contract.
+func.def @unaligned_gelu(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<16xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xf32>
+  %value = vector.load %input_view[0] : view<16xf32> -> vector<16xf32>
+  %activated = vector.geluf<tanh, afn> %value : vector<16xf32>
+  vector.store %activated, %output_view[0] : vector<16xf32>, view<16xf32>
+  func.return
+}
+
+// ----
+func.def @unaligned_gelu(%input: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<16xf32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xf32>
+  %23 = view.load %input_view[0] : view<16xf32> -> f32
+  %24 = view.load %input_view[1] : view<16xf32> -> f32
+  %25 = view.load %input_view[2] : view<16xf32> -> f32
+  %26 = view.load %input_view[3] : view<16xf32> -> f32
+  %27 = view.load %input_view[4] : view<16xf32> -> f32
+  %28 = view.load %input_view[5] : view<16xf32> -> f32
+  %29 = view.load %input_view[6] : view<16xf32> -> f32
+  %30 = view.load %input_view[7] : view<16xf32> -> f32
+  %31 = view.load %input_view[8] : view<16xf32> -> f32
+  %32 = view.load %input_view[9] : view<16xf32> -> f32
+  %33 = view.load %input_view[10] : view<16xf32> -> f32
+  %34 = view.load %input_view[11] : view<16xf32> -> f32
+  %35 = view.load %input_view[12] : view<16xf32> -> f32
+  %36 = view.load %input_view[13] : view<16xf32> -> f32
+  %37 = view.load %input_view[14] : view<16xf32> -> f32
+  %38 = view.load %input_view[15] : view<16xf32> -> f32
+  %40 = vector.splat %23 : vector<16xf32>
+  %41 = vector.insert %24 into %40[1] : f32, vector<16xf32>
+  %42 = vector.insert %25 into %41[2] : f32, vector<16xf32>
+  %43 = vector.insert %26 into %42[3] : f32, vector<16xf32>
+  %44 = vector.insert %27 into %43[4] : f32, vector<16xf32>
+  %45 = vector.insert %28 into %44[5] : f32, vector<16xf32>
+  %46 = vector.insert %29 into %45[6] : f32, vector<16xf32>
+  %47 = vector.insert %30 into %46[7] : f32, vector<16xf32>
+  %48 = vector.insert %31 into %47[8] : f32, vector<16xf32>
+  %49 = vector.insert %32 into %48[9] : f32, vector<16xf32>
+  %50 = vector.insert %33 into %49[10] : f32, vector<16xf32>
+  %51 = vector.insert %34 into %50[11] : f32, vector<16xf32>
+  %52 = vector.insert %35 into %51[12] : f32, vector<16xf32>
+  %53 = vector.insert %36 into %52[13] : f32, vector<16xf32>
+  %54 = vector.insert %37 into %53[14] : f32, vector<16xf32>
+  %value = vector.insert %38 into %54[15] : f32, vector<16xf32>
+  %activated = vector.geluf<tanh, afn> %value : vector<16xf32>
+  %7 = vector.extract %activated[0] : vector<16xf32> -> f32
+  %8 = vector.extract %activated[1] : vector<16xf32> -> f32
+  %9 = vector.extract %activated[2] : vector<16xf32> -> f32
+  %10 = vector.extract %activated[3] : vector<16xf32> -> f32
+  %11 = vector.extract %activated[4] : vector<16xf32> -> f32
+  %12 = vector.extract %activated[5] : vector<16xf32> -> f32
+  %13 = vector.extract %activated[6] : vector<16xf32> -> f32
+  %14 = vector.extract %activated[7] : vector<16xf32> -> f32
+  %15 = vector.extract %activated[8] : vector<16xf32> -> f32
+  %16 = vector.extract %activated[9] : vector<16xf32> -> f32
+  %17 = vector.extract %activated[10] : vector<16xf32> -> f32
+  %18 = vector.extract %activated[11] : vector<16xf32> -> f32
+  %19 = vector.extract %activated[12] : vector<16xf32> -> f32
+  %20 = vector.extract %activated[13] : vector<16xf32> -> f32
+  %21 = vector.extract %activated[14] : vector<16xf32> -> f32
+  %22 = vector.extract %activated[15] : vector<16xf32> -> f32
+  view.store %7, %output_view[0] : f32, view<16xf32>
+  view.store %8, %output_view[1] : f32, view<16xf32>
+  view.store %9, %output_view[2] : f32, view<16xf32>
+  view.store %10, %output_view[3] : f32, view<16xf32>
+  view.store %11, %output_view[4] : f32, view<16xf32>
+  view.store %12, %output_view[5] : f32, view<16xf32>
+  view.store %13, %output_view[6] : f32, view<16xf32>
+  view.store %14, %output_view[7] : f32, view<16xf32>
+  view.store %15, %output_view[8] : f32, view<16xf32>
+  view.store %16, %output_view[9] : f32, view<16xf32>
+  view.store %17, %output_view[10] : f32, view<16xf32>
+  view.store %18, %output_view[11] : f32, view<16xf32>
+  view.store %19, %output_view[12] : f32, view<16xf32>
+  view.store %20, %output_view[13] : f32, view<16xf32>
+  view.store %21, %output_view[14] : f32, view<16xf32>
+  view.store %22, %output_view[15] : f32, view<16xf32>
+  func.return
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+// Sixteen-byte alignment admits four i32 lanes per store packet. The final
+// scalar tail retains the exact authored extent.
+func.def @store_i32x17_aligned16(%value: vector<17xi32>, %output: buffer) {
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %aligned[%origin] : buffer -> view<17xi32>
+  vector.store %value, %output_view[0] : vector<17xi32>, view<17xi32>
+  func.return
+}
+
+// ----
+func.def @store_i32x17_aligned16(%value: vector<17xi32>, %output: buffer) {
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 16} : buffer
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %aligned[%origin] : buffer -> view<17xi32>
+  %5 = vector.slice %value[0] : vector<17xi32> -> vector<4xi32>
+  vector.store %5, %output_view[0] : vector<4xi32>, view<17xi32>
+  %6 = vector.slice %value[4] : vector<17xi32> -> vector<4xi32>
+  vector.store %6, %output_view[4] : vector<4xi32>, view<17xi32>
+  %7 = vector.slice %value[8] : vector<17xi32> -> vector<4xi32>
+  vector.store %7, %output_view[8] : vector<4xi32>, view<17xi32>
+  %8 = vector.slice %value[12] : vector<17xi32> -> vector<4xi32>
+  vector.store %8, %output_view[12] : vector<4xi32>, view<17xi32>
+  %11 = vector.extract %value[16] : vector<17xi32> -> i32
+  view.store %11, %output_view[16] : i32, view<17xi32>
+  func.return
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+// Thirty-two-byte alignment admits eight i32 lanes per store packet.
+func.def @store_i32x17_aligned32(%value: vector<17xi32>, %output: buffer) {
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %aligned[%origin] : buffer -> view<17xi32>
+  vector.store %value, %output_view[0] : vector<17xi32>, view<17xi32>
+  func.return
+}
+
+// ----
+func.def @store_i32x17_aligned32(%value: vector<17xi32>, %output: buffer) {
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 32} : buffer
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %aligned[%origin] : buffer -> view<17xi32>
+  %5 = vector.slice %value[0] : vector<17xi32> -> vector<8xi32>
+  vector.store %5, %output_view[0] : vector<8xi32>, view<17xi32>
+  %6 = vector.slice %value[8] : vector<17xi32> -> vector<8xi32>
+  vector.store %6, %output_view[8] : vector<8xi32>, view<17xi32>
+  %9 = vector.extract %value[16] : vector<17xi32> -> i32
+  view.store %9, %output_view[16] : i32, view<17xi32>
+  func.return
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+// Sixty-four-byte alignment admits sixteen i32 lanes per store packet.
+func.def @store_i32x17_aligned64(%value: vector<17xi32>, %output: buffer) {
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %aligned[%origin] : buffer -> view<17xi32>
+  vector.store %value, %output_view[0] : vector<17xi32>, view<17xi32>
+  func.return
+}
+
+// ----
+func.def @store_i32x17_aligned64(%value: vector<17xi32>, %output: buffer) {
+  %aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %aligned[%origin] : buffer -> view<17xi32>
+  %5 = vector.slice %value[0] : vector<17xi32> -> vector<16xi32>
+  vector.store %5, %output_view[0] : vector<16xi32>, view<17xi32>
+  %8 = vector.extract %value[16] : vector<17xi32> -> i32
+  view.store %8, %output_view[16] : i32, view<17xi32>
+  func.return
+}
+
+// ====
+
+// RUN: pass target=amd.xdna.aie2p:core target-legalize{mode=final},canonicalize
+
+// A producer load constrains the common packet shape to the widest width
+// admitted by its own alignment, even when the destination admits wider stores.
+func.def @copy_i32x17_source_aligned16(%input: buffer, %output: buffer) {
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%origin] : buffer -> view<17xi32>
+  %output_view = buffer.view %output_aligned[%origin] : buffer -> view<17xi32>
+  %value = vector.load %input_view[0] : view<17xi32> -> vector<17xi32>
+  vector.store %value, %output_view[0] : vector<17xi32>, view<17xi32>
+  func.return
+}
+
+// ----
+func.def @copy_i32x17_source_aligned16(%input: buffer, %output: buffer) {
+  %input_aligned = buffer.assume.alignment %input {minimum_alignment = 16} : buffer
+  %output_aligned = buffer.assume.alignment %output {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input_aligned[%origin] : buffer -> view<17xi32>
+  %output_view = buffer.view %output_aligned[%origin] : buffer -> view<17xi32>
+  %8 = vector.load %input_view[0] : view<17xi32> -> vector<8xi32>
+  %9 = vector.load %input_view[8] : view<17xi32> -> vector<8xi32>
+  %12 = view.load %input_view[16] : view<17xi32> -> i32
+  vector.store %8, %output_view[0] : vector<8xi32>, view<17xi32>
+  vector.store %9, %output_view[8] : vector<8xi32>, view<17xi32>
+  view.store %12, %output_view[16] : i32, view<17xi32>
+  func.return
+}

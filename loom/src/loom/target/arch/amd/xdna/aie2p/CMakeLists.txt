@@ -824,6 +824,7 @@ loom_check_test_suite(
     "test/target_legalize_report.loom-test"
     "test/vector_float_extrema.loom-test"
     "test/vector_insert_packetization.loom-test"
+    "test/vector_memory_packetization.loom-test"
   RUNNER
     ::loom-check
   TEST_NAME_PREFIX_TO_STRIP

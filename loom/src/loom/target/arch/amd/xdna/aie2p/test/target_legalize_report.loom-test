@@ -114,3 +114,65 @@ func.def @predicate_table_selection(%table: vector<2xi1>, %indices: vector<4xi8>
 // ----
 CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=0 * rows=1 *
 CHECK: COMPILE-REPORT: target_legalization[0] function=predicate_table_selection source_op=vector.table.lookup * action=rewritten * legalizer=aie2p strategy=target * scalarized=false *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+// Unaligned packet fallback is attributed to the authored store for each
+// physical element width instead of hiding scalarization in generated stores.
+func.def @unaligned_store_i8x64(%value: vector<64xi8>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<64xi8>
+  vector.store %value, %output_view[0] : vector<64xi8>, view<64xi8>
+  func.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
+CHECK: COMPILE-REPORT: target_legalization[0] function=unaligned_store_i8x64 source_op=vector.store * action=rewritten * legalizer=aie2p strategy=target * scalarized=true *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @unaligned_store_i16x32(%value: vector<32xi16>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<32xi16>
+  vector.store %value, %output_view[0] : vector<32xi16>, view<32xi16>
+  func.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
+CHECK: COMPILE-REPORT: target_legalization[0] function=unaligned_store_i16x32 source_op=vector.store * action=rewritten * legalizer=aie2p strategy=target * scalarized=true *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @unaligned_store_i32x16(%value: vector<16xi32>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<16xi32>
+  vector.store %value, %output_view[0] : vector<16xi32>, view<16xi32>
+  func.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
+CHECK: COMPILE-REPORT: target_legalization[0] function=unaligned_store_i32x16 source_op=vector.store * action=rewritten * legalizer=aie2p strategy=target * scalarized=true *
+
+// ====
+
+// RUN: with-checks compile-report target=amd.xdna.aie2p:core target-legalize{mode=final}
+
+func.def @unaligned_store_i64x8(%value: vector<8xi64>, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %output_view = buffer.view %output[%origin] : buffer -> view<8xi64>
+  vector.store %value, %output_view[0] : vector<8xi64>, view<8xi64>
+  func.return
+}
+
+// ----
+CHECK: COMPILE-REPORT: target_legalization legal=0 rewritten=1 scalarized=1 target_rewritten=1 reference_rewritten=0 deferred=0 invalid_ir=0 unsupported=0 unhandled=0 rows=1 *
+CHECK: COMPILE-REPORT: target_legalization[0] function=unaligned_store_i64x8 source_op=vector.store * action=rewritten * legalizer=aie2p strategy=target * scalarized=true *

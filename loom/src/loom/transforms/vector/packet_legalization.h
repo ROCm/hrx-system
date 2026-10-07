@@ -48,19 +48,20 @@ iree_status_t loom_vector_packet_legalize_table_lookup(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, bool* out_rewritten);
 
-// Packetizes a dense vector load into target-native widths and concatenates
-// the packets into the original logical vector. Returns false through
-// |out_rewritten| when the access or policy does not admit an exact split.
+// Packetizes a dense vector load into target-admitted native widths and
+// concatenates the packets into the original logical vector. Returns false
+// through |out_rewritten| when the access or policy does not admit an exact
+// split.
 iree_status_t loom_vector_packet_legalize_load(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, bool* out_rewritten);
 
-// Packetizes a dense vector store into target-native widths. Decomposable
-// producer graphs stream packets; other SSA values retain their authored
-// snapshot. Shared snapshots are reified in private storage when retaining the
-// packet tuple across consumers would exceed the static expansion bound.
-// Returns false through |out_rewritten| when the access or policy does not
-// admit an exact packetization.
+// Packetizes a dense vector store into target-admitted native widths.
+// Decomposable producer graphs stream packets; other SSA values retain their
+// authored snapshot. Shared snapshots are reified in private storage when
+// retaining the packet tuple across consumers would exceed the static
+// expansion bound. Returns false through |out_rewritten| when the access or
+// policy does not admit an exact packetization.
 iree_status_t loom_vector_packet_legalize_store(
     loom_target_legalization_context_t* context, loom_op_t* op,
     const loom_target_vector_packet_policy_t* policy, bool* out_rewritten);
