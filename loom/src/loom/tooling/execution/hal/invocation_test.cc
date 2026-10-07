@@ -111,6 +111,31 @@ TEST_F(HalInvocationTest,
   loom_run_hal_dispatch_sequence_deinitialize(&sequence);
 }
 
+TEST_F(HalInvocationTest,
+       DispatchSequenceRejectsOversizedConstantsBeforeDeviceUse) {
+  const loom_run_hal_prepared_candidate_t candidate = {
+      /*.executable=*/reinterpret_cast<iree_hal_executable_t*>(1),
+  };
+  loom_run_hal_dispatch_sequence_step_t step = {
+      /*.candidate=*/&candidate,
+      /*.representation=*/
+      LOOM_RUN_HAL_DISPATCH_SEQUENCE_REPRESENTATION_COMMAND_BUFFER,
+      /*.execution_epoch=*/0,
+  };
+  loom_run_hal_invocation_options_initialize(&step.options);
+  step.options.constant_byte_length = LOOM_RUN_HAL_MAX_CONSTANT_BYTE_LENGTH + 1;
+
+  loom_run_hal_runtime_t runtime = {};
+  loom_run_hal_dispatch_sequence_t sequence = {};
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
+                        loom_run_hal_dispatch_sequence_prepare(
+                            &runtime, /*step_count=*/1, &step,
+                            iree_allocator_system(), &sequence));
+  EXPECT_FALSE(loom_run_hal_dispatch_sequence_is_prepared(&sequence));
+
+  loom_run_hal_dispatch_sequence_deinitialize(&sequence);
+}
+
 TEST_F(HalInvocationTest, ResultOwnsOutputBuilder) {
   loom_run_hal_invocation_result_t result = {};
   loom_run_hal_invocation_result_initialize(iree_allocator_system(), &result);
