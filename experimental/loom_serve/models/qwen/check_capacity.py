@@ -16,45 +16,11 @@ import http.client
 import json
 import socket
 import struct
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlsplit
 
 from experimental.loom_serve.models.qwen import benchmark_service, check_service
-
-
-class Events:
-    def __init__(self):
-        self.condition = threading.Condition()
-        self.values = []
-        self.closed = False
-
-    def record(self, event):
-        with self.condition:
-            if event is None:
-                self.closed = True
-            else:
-                self.values.append(event)
-            self.condition.notify_all()
-
-    def wait(self, kind, session):
-        def match():
-            return next(
-                (
-                    event
-                    for event in self.values
-                    if event.get("event") == kind and event.get("session") == session
-                ),
-                None,
-            )
-
-        with self.condition:
-            self.condition.wait_for(lambda: match() or self.closed)
-            event = match()
-            if event is None:
-                raise RuntimeError(f"server closed before {kind}: {session}")
-            return event
 
 
 def payload(messages, maximum):
@@ -242,7 +208,7 @@ def main():
     ]
     reference = None
     for capacity in (0, 320):
-        events = Events()
+        events = check_service.Events()
         log_path = arguments.output / f"pool-{capacity}.log"
         continuation_epochs = arguments.continuation_epochs if capacity else 1
         with check_service.running_server(
@@ -282,7 +248,10 @@ def main():
             ):
                 raise RuntimeError("workload did not exercise device continuation")
             admissions = [e for e in events.values if e.get("event") == "admit"]
-            if any(e["pool_reserved_tokens"] > capacity for e in admissions):
+            if any(
+                e["pool_reserved_tokens"] + e["pool_resident_tokens"] > capacity
+                for e in admissions
+            ):
                 raise RuntimeError("completion reservations exceeded physical capacity")
             if any(e.get("session") == "cancelled" for e in admissions):
                 raise RuntimeError("cancelled queued request acquired a model row")
@@ -293,8 +262,7 @@ def main():
                 raise RuntimeError("idle eviction did not release physical backing")
             heartbeats = [e for e in events.values if e.get("event") == "heartbeat"]
             if any(
-                max(e["pool"]["reserved_tokens"], e["pool"]["resident_tokens"])
-                > capacity
+                e["pool"]["reserved_tokens"] + e["pool"]["resident_tokens"] > capacity
                 for e in heartbeats
             ):
                 raise RuntimeError("pool accounting exceeded the configured budget")

@@ -810,6 +810,11 @@ iree_host_size_t loom_serve_text_model_context_capacity(
   return model->context_capacity;
 }
 
+iree_host_size_t loom_serve_text_model_checkpoint_capacity(
+    const loom_serve_text_model_t* model) {
+  return model->state.checkpoints.capacity;
+}
+
 loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model) {
   return (loom_serve_text_pool_usage_t){
@@ -824,6 +829,29 @@ iree_host_size_t loom_serve_text_row_pool_usage(
     const loom_serve_text_row_t* row) {
   return (iree_host_size_t)row->state->block_count *
          row->model->state.storage.block_size;
+}
+
+iree_host_size_t loom_serve_text_row_pool_growth(
+    const loom_serve_text_row_t* row, iree_host_size_t extent) {
+  if (!row->model->state.cache.capacity) {
+    return 0;
+  }
+  return loom_serve_text_state_row_growth(
+             row->state, (uint32_t)(extent - row->state->position)) *
+         row->model->state.storage.block_size;
+}
+
+iree_host_size_t loom_serve_text_row_pool_reclaimable(
+    const loom_serve_text_row_t* row) {
+  const loom_serve_text_state_t* state = &row->model->state;
+  iree_host_size_t count = 0;
+  const iree_host_size_t map = (iree_host_size_t)(row->state - state->rows) *
+                               state->storage.blocks_per_row;
+  for (uint32_t i = 0; i < row->state->block_count; ++i) {
+    count += !loom_serve_block_pool_is_shared(&state->cache.pool,
+                                              state->cache.maps[map + i]);
+  }
+  return count * state->storage.block_size;
 }
 
 iree_host_size_t loom_serve_text_model_prefill_capacity(

@@ -211,6 +211,9 @@ const loom_serve_text_chat_policy_t* loom_serve_text_model_chat_policy(
     const loom_serve_text_model_t* model);
 iree_host_size_t loom_serve_text_model_context_capacity(
     const loom_serve_text_model_t* model);
+// Number of explicit endpoint handles reserved at model creation.
+iree_host_size_t loom_serve_text_model_checkpoint_capacity(
+    const loom_serve_text_model_t* model);
 // Copies physical pool accounting at the single owner's completed-stage
 // boundary. Request completion reservations are service policy, not physical
 // ownership.
@@ -222,6 +225,17 @@ loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
     const loom_serve_text_model_t* model);
 // Positions in the row's owned pages; zero for dense comparison storage.
 iree_host_size_t loom_serve_text_row_pool_usage(
+    const loom_serve_text_row_t* row);
+// Additional physical positions required to reach a page-rounded final extent,
+// including detachment of a shared partial tail. The caller supplies an extent
+// at or beyond the resident row's current position. Dense storage returns zero.
+// This completed-boundary query is constant time and does not reserve credit.
+iree_host_size_t loom_serve_text_row_pool_growth(
+    const loom_serve_text_row_t* row, iree_host_size_t extent);
+// Physical positions whose last owner is this row. Reset would release exactly
+// these IDs; other shared pages remain live. Cold admission query walks the
+// row's logical map; it belongs outside ordinary epoch scheduling.
+iree_host_size_t loom_serve_text_row_pool_reclaimable(
     const loom_serve_text_row_t* row);
 // Maximum chunk accepted by row_prefill. Pooled/MTP execution is also bounded
 // by the largest packed shape, which owns mapped target/draft state updates.

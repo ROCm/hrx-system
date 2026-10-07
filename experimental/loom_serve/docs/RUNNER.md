@@ -207,18 +207,20 @@ or whole-machine memory ceiling.
 The current HTTP scheduler still reserves complete request credit and discards
 idle cache under pressure. It does not call these suspension APIs automatically.
 Using them for overcommit needs an explicit host-image budget and wake/eviction
-policy. Shared prefix ownership, marked rewind and file-backed images require
-distinct callers; a suspended private row is not a reusable prefix checkpoint.
+policy. Named HTTP checkpoints separately support shared prefixes and marked
+rewind; a suspended row image is not itself a reusable prefix checkpoint.
+File-backed images still require a storage-route consumer.
 
 ## One real packed epoch
 
 Before scheduling, `text_enqueue` validates a bounded request without assigning
 a device row. `text_admit_pending` selects an idle row for the oldest request,
 prepares its actual retained append, and reserves page-rounded completion and
-speculative capacity. Active guarantees must fit before any idle cache is
-displaced. Physical pages are assigned as epochs grow; idle rows are reclaimed
-in LRU order only when admission needs their pages. A completed response gives
-back unused credit before network output finishes draining.
+speculative capacity. It charges unique resident pages plus remaining growth,
+including shared partial-tail COW. Idle rows may yield in LRU order under
+pressure, while explicit pins and active completion credit remain protected.
+Physical pages are assigned as epochs grow. A completed response gives back
+unused growth credit before network output finishes draining.
 
 Pending requests borrow HTTP payloads until admission, rejection, cancellation,
 or shutdown. Connection and body-byte budgets belong to transport; pending
@@ -350,7 +352,7 @@ owner with actual queues.
 | More rows or wider epochs | Host fixed arrays, descriptor capacities, authored views, scratch sizing, shape selection, and full-sized correctness/performance qualification |
 | Online shape insertion | Stage publication and immutable command-table lifetime; cached code and in-flight bindings must remain valid |
 | Overcommitted pooled sessions | Replace full-completion admission guarantees with explicit held/offloaded residency and a policy for restoring older sessions; kernels still consume only resident pages |
-| Shared prefix cache | Select exact compatible endpoints and own native checkpoint handles; add request markers, lookup and budget/retention policy over the shared-state lifecycle |
+| Automatic shared prefix cache | Discover compatible endpoints and select bounded retention policy over named/native checkpoints; intermediate message markers need source-rendered token boundaries |
 | Continuous device-owned continuation | Extend the bounded two-epoch handoff to admission/completion rings with credit, cancellation and independently retired output slots |
 | Additional prepared weight formats | Model-specific in-place ownership or bounded scratch, all consuming kernel variants, shared target/auxiliary placement, and startup/inference qualification |
 | NPU/GPU or collective execution | Target packages, actual queue/device domains, shared-memory/coherency contracts, and cross-device completion/ownership |
