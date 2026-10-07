@@ -69,12 +69,14 @@ typedef struct loom_serve_text_state_checkpoint_t {
   loom_serve_text_state_t* owner;
   // Exact consumed input frontier.
   iree_host_size_t position;
-  // Retained recurrent slot.
+  // Retained recurrent slot, or UINT32_MAX while suspended.
   uint32_t recurrent_slot;
-  // Number of retained logical pages.
+  // Number of retained physical pages; zero while suspended.
   uint32_t block_count;
   // Logical-order IDs borrowing the owner's fixed checkpoint map bank.
   uint32_t* blocks;
+  // Owned logical DRAM image while suspended, independent of any active row.
+  loom_serve_snapshot_t* snapshot;
 } loom_serve_text_state_checkpoint_t;
 
 // Retained text storage, independent of source compilation and VM invocation.
@@ -217,7 +219,9 @@ iree_status_t loom_serve_text_state_row_try_pin(
     loom_serve_text_state_checkpoint_t** out_checkpoint);
 iree_status_t loom_serve_text_state_row_try_restore(
     loom_serve_text_state_row_t* row,
-    const loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored);
+    loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored);
+iree_status_t loom_serve_text_state_checkpoint_suspend(
+    loom_serve_text_state_checkpoint_t* checkpoint);
 void loom_serve_text_state_checkpoint_release(
     loom_serve_text_state_checkpoint_t* checkpoint);
 iree_status_t loom_serve_text_state_trim(

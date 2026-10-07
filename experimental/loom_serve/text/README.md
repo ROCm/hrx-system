@@ -234,6 +234,19 @@ The common pool metadata adds one host-side 32-bit reference count per physical
 ID, including when checkpoints are disabled. No extra recurrent device reserve
 or pin records are created in that default mode.
 
+`checkpoint_suspend` moves that endpoint's recurrence, logical KV and carry to
+an owned DRAM image. The originating row can be reset and reused; no active row
+slot belongs to the image. Shared live branches remain resident. A later
+`row_try_restore` warms the endpoint into fresh pool IDs and restores any row
+of the same model. It admits both owners' physical ranges before replacing the
+selected row, so denial preserves the old continuation and the cold image.
+`checkpoint_suspended_bytes` exposes host payload separately from device backing;
+warm restore or release frees it. The real-model `epoch_check
+--suspend_checkpoints --checkpoint_capacity=1 --pool_capacity=2048` witness
+covers row/ID reuse, live readers, denied restore, target/MTP continuation and
+zero final mutable commitment. It requires elastic backing. These are explicit
+native operations, not an automatic HTTP eviction policy or disk image format.
+
 A restored branch initially owns no private recurrent destination. Its first
 advance acquires one and the model kernels read the anchor directly. The source
 fork frontier switches subsequent queued epochs to the writer without a host

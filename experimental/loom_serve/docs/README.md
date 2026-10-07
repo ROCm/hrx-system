@@ -54,16 +54,19 @@ pages grow from one shared pool rather than reserving a full context per row.
 Admission reserves each request's complete high-water credit and queues excess
 work. The real HTTP differential covers single, odd, and sixteen-row cohorts;
 the [model guide](../models/qwen/README.md#pooled-kv-and-reserved-admission)
-describes those checks and capacity-pressure/reuse coverage. Recurrent state
-remains private. Explicit [row suspension](RUNNER.md#retained-state-and-physical-capacity)
+describes those checks and capacity-pressure/reuse coverage. Explicit
+[shared endpoints](../text/README.md#explicit-shared-endpoints) retain immutable
+KV/recurrent state; advancing branches receive private writers and partial-tail
+COW without a recurrent-state clone. Explicit
+[suspension](RUNNER.md#retained-state-and-physical-capacity)
 can retain target/draft/recurrent state in DRAM while releasing device backing;
-HTTP admission does not yet choose sessions for this transition. Shared prefixes
-and disk paging are separate from that private-row mechanism.
+native checkpoint images survive reset and reuse of the originating row.
+HTTP admission does not yet choose sessions for this transition. Automatic
+prefix discovery and disk paging require their own policy/storage consumers.
 The host still schedules and reads completion records between epochs.
 The [runner guide](RUNNER.md#extension-boundaries) identifies the exact changes
 needed to move those boundaries. The intended 20–40-agent deployment, NPU
-execution, autonomous device scheduler, and cross-session prefix sharing are
-not demonstrated by this branch.
+execution and autonomous device scheduler are not demonstrated by this branch.
 
 ## Fresh-machine prerequisites
 

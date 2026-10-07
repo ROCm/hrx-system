@@ -299,8 +299,11 @@ iree_status_t loom_serve_text_row_try_pin(
     loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint);
 
 // Restores an endpoint into any row of the same model, replacing that row's
-// continuation. Both owners share immutable state until advancement. Physical
-// admission refusal succeeds with restored=false and leaves the row intact.
+// continuation. A suspended endpoint first materializes into fresh pool IDs.
+// Both owners then share immutable state until advancement. Logical/physical
+// admission refusal succeeds with restored=false and leaves both the row and
+// cold image intact. Admission includes the destination's private storage and
+// requires free capacity before replacing its existing continuation.
 // Metrics continue to count effort already spent; they are not rewound.
 // Source/transfer/platform failures remain terminal, as with model_epoch.
 iree_status_t loom_serve_text_row_try_restore(
@@ -312,6 +315,19 @@ iree_status_t loom_serve_text_row_try_restore(
 // Null is accepted. The handle becomes invalid and may immediately be reused.
 void loom_serve_text_checkpoint_release(
     loom_serve_text_checkpoint_t* checkpoint);
+
+// Captures immutable recurrence, target/draft KV and source-sized carry into a
+// DRAM image, then releases this endpoint's device references. Other branches
+// retain their own references. No active row is occupied by the image. Requires
+// elastic pooled storage; an already suspended endpoint performs no work.
+// model_trim reclaims backing not owned by another row or resident endpoint.
+iree_status_t loom_serve_text_checkpoint_suspend(
+    loom_serve_text_checkpoint_t* checkpoint);
+
+// Retained host payload bytes, separate from device pool accounting. Warm
+// restore or release destroys the image. Resident endpoints report zero.
+iree_host_size_t loom_serve_text_checkpoint_suspended_bytes(
+    const loom_serve_text_checkpoint_t* checkpoint);
 
 // Captures an idle row's retained private/target/draft state into one DRAM
 // image, then returns its physical block IDs. Host frontier, pending prediction

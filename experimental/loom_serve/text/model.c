@@ -950,6 +950,16 @@ void loom_serve_text_checkpoint_release(
   checkpoint->state = NULL;
 }
 
+iree_status_t loom_serve_text_checkpoint_suspend(
+    loom_serve_text_checkpoint_t* checkpoint) {
+  return loom_serve_text_state_checkpoint_suspend(checkpoint->state);
+}
+
+iree_host_size_t loom_serve_text_checkpoint_suspended_bytes(
+    const loom_serve_text_checkpoint_t* checkpoint) {
+  return loom_serve_snapshot_size(checkpoint->state->snapshot);
+}
+
 static iree_status_t text_invoke(loom_serve_text_model_t* model,
                                  iree_vm_function_t function,
                                  iree_vm_variant_span_t arguments,
