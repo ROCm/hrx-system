@@ -1995,6 +1995,24 @@ static void iree_hal_tlsf_pool_advise_asan_reservations(
   }
 }
 
+static void iree_hal_tlsf_pool_query_reservation_views(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_reservation_view_t* out_views) {
+  iree_hal_tlsf_pool_t* pool = (iree_hal_tlsf_pool_t*)base_pool;
+  for (iree_host_size_t i = 0; i < reservation_count; ++i) {
+    iree_hal_tlsf_pool_release_node_t* release_node =
+        (iree_hal_tlsf_pool_release_node_t*)(uintptr_t)reservations[i]
+            .block_handle;
+    iree_hal_pool_buffer_range_query_reservation_view(
+        release_node->range, reservations[i].offset,
+        reservations[i].byte_length,
+        iree_hal_tlsf_pool_reservation_frontier(
+            release_node, pool->reservation_layout.frontier.offset),
+        &out_views[i]);
+  }
+}
+
 static iree_status_t iree_hal_tlsf_pool_materialize_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
     const iree_hal_pool_reservation_request_t* requests,
@@ -2108,6 +2126,7 @@ static const iree_hal_pool_vtable_t iree_hal_tlsf_pool_vtable = {
     .destroy = iree_hal_tlsf_pool_destroy,
     .acquire_reservations = iree_hal_tlsf_pool_acquire_reservations,
     .release_reservations = iree_hal_tlsf_pool_release_reservations,
+    .query_reservation_views = iree_hal_tlsf_pool_query_reservation_views,
     .materialize_reservations = iree_hal_tlsf_pool_materialize_reservations,
     .query_capabilities = iree_hal_tlsf_pool_query_capabilities,
     .validate_asan = iree_hal_tlsf_pool_validate_asan,

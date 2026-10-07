@@ -1020,6 +1020,20 @@ static void iree_hal_slab_cache_buffer_release(void* user_data,
                                            NULL);
 }
 
+static void iree_hal_slab_cache_query_reservation_views(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_reservation_view_t* out_views) {
+  (void)base_pool;
+  for (iree_host_size_t i = 0; i < reservation_count; ++i) {
+    iree_hal_slab_cache_entry_t* entry =
+        (iree_hal_slab_cache_entry_t*)(uintptr_t)reservations[i].block_handle;
+    iree_hal_pool_buffer_range_query_reservation_view(
+        &entry->range, 0, reservations[i].byte_length,
+        iree_hal_slab_cache_entry_frontier(entry), &out_views[i]);
+  }
+}
+
 static iree_status_t iree_hal_slab_cache_materialize_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t count,
     const iree_hal_pool_reservation_request_t* requests,
@@ -1181,6 +1195,7 @@ static const iree_hal_pool_vtable_t iree_hal_slab_cache_vtable = {
     .destroy = iree_hal_slab_cache_destroy,
     .acquire_reservations = iree_hal_slab_cache_acquire_reservations,
     .release_reservations = iree_hal_slab_cache_release_reservations,
+    .query_reservation_views = iree_hal_slab_cache_query_reservation_views,
     .materialize_reservations = iree_hal_slab_cache_materialize_reservations,
     .query_capabilities = iree_hal_slab_cache_query_capabilities,
     .validate_asan = iree_hal_slab_cache_validate_asan,
