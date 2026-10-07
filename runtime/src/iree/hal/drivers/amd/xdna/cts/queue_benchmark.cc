@@ -113,10 +113,6 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
         LoadExecutable(iree_hal_amd_xdna_test_mul_i32_create(),
                        iree_hal_amd_xdna_test_mul_i32_npu4_create(),
                        IREE_SV("mul_i32"), &executables_[0], &functions_[0]));
-    IREE_RETURN_IF_ERROR(
-        LoadExecutable(iree_hal_amd_xdna_test_add_i32_create(),
-                       iree_hal_amd_xdna_test_add_i32_npu4_create(),
-                       IREE_SV("add_i32"), &executables_[1], &functions_[1]));
     for (auto*& buffer : buffers_) {
       IREE_RETURN_IF_ERROR(MakeBuffer(&buffer));
     }
@@ -257,6 +253,15 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
   }
 
   bool WarmStreaming(benchmark::State& state, ProgramSequence sequence) {
+    if (sequence == ProgramSequence::kAlternating && !executables_[1] &&
+        !HandleStatus(state,
+                      LoadExecutable(
+                          iree_hal_amd_xdna_test_add_i32_create(),
+                          iree_hal_amd_xdna_test_add_i32_npu4_create(),
+                          IREE_SV("add_i32"), &executables_[1], &functions_[1]),
+                      "alternate XDNA executable setup failed")) {
+      return false;
+    }
     uint64_t terminal_value = 0;
     return SubmitStreamingBatch(state, sequence, &terminal_value) &&
            HandleStatus(state, Wait(terminal_value),
