@@ -19,7 +19,8 @@ class TextStorageTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
         &types));
-    const iree_host_size_t lengths[] = {11 * 24, 3 * 5 * 16, 16 * 16, 16 * 16,
+    // Origin payloads have model-private layouts, including non-word extents.
+    const iree_host_size_t lengths[] = {11 * 24, 3 * 5 * 16, 73, 129,
                                         32 + 2 * 40};
     for (size_t i = 0; i < IREE_ARRAYSIZE(lengths); ++i) {
       iree_vm_buffer_t* buffer = nullptr;
@@ -32,6 +33,10 @@ class TextStorageTest : public ::testing::Test {
       iree_unaligned_store_le_u64(bytes[0].data + slot * 24, 1 << 20);
       iree_unaligned_store_le_u64(bytes[0].data + slot * 24 + 8, 256);
       iree_unaligned_store_le_u64(bytes[0].data + slot * 24 + 16, 256);
+    }
+    for (uint64_t slot : {3u, 10u}) {
+      iree_unaligned_store_le_u64(bytes[0].data + slot * 24, 512);
+      iree_unaligned_store_le_u64(bytes[0].data + slot * 24 + 8, 256);
     }
     const uint64_t geometry[] = {
         4, 256, 128, 256, 1, 256, 2, 4096, 128, 9, 512, 1, 8192, 64,
@@ -62,11 +67,15 @@ class TextStorageTest : public ::testing::Test {
 };
 
 TEST_F(TextStorageTest, LogicalOrderAndCarrySurviveBootstrapPayloadRelease) {
-  IREE_ASSERT_OK(loom_serve_text_storage_initialize(&types, results, 3, 16, 17,
-                                                    32, &storage, allocator));
+  IREE_ASSERT_OK(loom_serve_text_storage_initialize(&types, results, 3, 17, 32,
+                                                    &storage, allocator));
   EXPECT_EQ(storage.blocks_per_row, 5u);
   EXPECT_EQ(storage.block_size, 4u);
   EXPECT_EQ(storage.region_count, 2u);
+  EXPECT_EQ(storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS].data_length,
+            73u);
+  EXPECT_EQ(storage.bytes[LOOM_SERVE_TEXT_STORAGE_DRAFT_ORIGINS].data_length,
+            129u);
   loom_serve_text_storage_release_payloads(&storage);
   iree_hal_buffer_t* private_views[5] = {};
   const uint32_t blocks[] = {7, 2, 5};
@@ -97,18 +106,60 @@ TEST_F(TextStorageTest, LogicalOrderAndCarrySurviveBootstrapPayloadRelease) {
 
 TEST_F(TextStorageTest, RejectsUnrepresentablePoolGeometry) {
   iree_unaligned_store_le_u64(bytes[4].data, 3);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_storage_initialize(&types, results, 3, 16, 17, 32,
-                                         &storage, allocator));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
 }
 
 TEST_F(TextStorageTest, RejectsPlanesOverlappingPrivateStorage) {
   iree_unaligned_store_le_u64(bytes[4].data + 40, 128);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_text_storage_initialize(&types, results, 3, 16, 17, 32,
-                                         &storage, allocator));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsOriginPayloadOverlappingPageMaps) {
+  // The target payload still fits; the larger draft payload crosses the map.
+  iree_unaligned_store_le_u64(bytes[4].data + 8, 128);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsOriginPayloadBeyondItsAllocation) {
+  iree_unaligned_store_le_u64(bytes[0].data + 3 * 24, 72);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsTruncatedPageMapAllocation) {
+  // Three rows with five pages each need 60 map bytes after byte 256.
+  iree_unaligned_store_le_u64(bytes[0].data + 10 * 24, 315);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, RejectsNullOriginPayload) {
+  iree_vm_variant_reset(&results[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]);
+  results[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS] =
+      iree_vm_buffer_variant_from_ptr_borrowed(&types, nullptr);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_text_storage_initialize(
+                            &types, results, 3, 17, 32, &storage, allocator));
+}
+
+TEST_F(TextStorageTest, AcceptsEmptyOriginPayload) {
+  iree_vm_variant_reset(&results[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS]);
+  iree_vm_buffer_t* empty = nullptr;
+  IREE_ASSERT_OK(iree_vm_buffer_create(0, 8, allocator, &empty));
+  results[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS] =
+      iree_vm_buffer_variant_from_ptr_move(&types, &empty);
+  IREE_ASSERT_OK(loom_serve_text_storage_initialize(&types, results, 3, 17, 32,
+                                                    &storage, allocator));
+  EXPECT_EQ(storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS].data_length,
+            0u);
 }
 
 }  // namespace

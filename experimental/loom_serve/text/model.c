@@ -501,7 +501,7 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_storage_initialize(
-        &model->vm_types, results + 4, model->row_count, TEXT_ROW_CAPACITY,
+        &model->vm_types, results + 4, model->row_count,
         model->context_capacity, model->state.cache.capacity,
         &model->state.storage, model->allocator);
   }

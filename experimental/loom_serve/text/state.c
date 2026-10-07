@@ -174,12 +174,14 @@ iree_status_t loom_serve_text_state_allocate(
     state->epoch.buffers[6] = state->workspace;
     const iree_const_byte_span_t origins =
         state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS];
-    transfers[transfer_count++] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-        .upload = {.source = origins.data,
-                   .target_buffer = state->epoch.buffers[2],
-                   .length = origins.data_length},
-    };
+    if (origins.data_length) {
+      transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload = {.source = origins.data,
+                     .target_buffer = state->epoch.buffers[2],
+                     .length = origins.data_length},
+      };
+    }
   }
   if (iree_status_is_ok(status) &&
       iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
@@ -191,12 +193,14 @@ iree_status_t loom_serve_text_state_allocate(
       iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
     const iree_const_byte_span_t origins =
         state->storage.bytes[LOOM_SERVE_TEXT_STORAGE_DRAFT_ORIGINS];
-    transfers[transfer_count++] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-        .upload = {.source = origins.data,
-                   .target_buffer = state->mtp.row_table,
-                   .length = origins.data_length},
-    };
+    if (origins.data_length) {
+      transfers[transfer_count++] = (iree_hal_transfer_operation_t){
+          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+          .upload = {.source = origins.data,
+                     .target_buffer = state->mtp.row_table,
+                     .length = origins.data_length},
+      };
+    }
   }
   if (iree_status_is_ok(status)) {
     uint64_t completion = 0;

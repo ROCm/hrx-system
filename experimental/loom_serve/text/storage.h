@@ -59,12 +59,14 @@ typedef struct loom_serve_text_storage_t {
 } loom_serve_text_storage_t;
 
 // Moves bootstrap results into storage and validates the external model
-// records. Partial initialization remains safe to deinitialize on failure.
+// records. Origin payload contents and record widths are source-owned; native
+// code only uploads them before the separate page-map extent. Partial
+// initialization remains safe to deinitialize on failure.
 iree_status_t loom_serve_text_storage_initialize(
     const iree_vm_ref_types_t* types, iree_vm_variant_t* results,
-    iree_host_size_t row_count, iree_host_size_t row_capacity,
-    iree_host_size_t context_capacity, iree_host_size_t pool_capacity,
-    loom_serve_text_storage_t* out_storage, iree_allocator_t allocator);
+    iree_host_size_t row_count, iree_host_size_t context_capacity,
+    iree_host_size_t pool_capacity, loom_serve_text_storage_t* out_storage,
+    iree_allocator_t allocator);
 
 // After initialization transfers retire, discard their source payloads while
 // keeping parsed geometry for growth, compaction and retained-state transfers.

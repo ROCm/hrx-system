@@ -25,8 +25,9 @@ build_tools/bin/iree-bazel-run //experimental/loom_serve/text:server -- \
   --prefill_capacity=512 --mtp --mtp_depth=3
 ```
 
-The real Qwen sources currently target gfx1151. Repository build/execution
-policy still applies; a successful build on another host is not a GPU check.
+The real Qwen sources have been exercised on gfx1100 and gfx1151. Repository
+build/execution policy still applies; a successful build on another host is
+not a GPU check.
 The [reproduction packet](../docs/README.md) supplies assets, request examples
 and the generated-tool/retained-session witnesses.
 
@@ -100,14 +101,15 @@ Auxiliary roots may share existing tensors or add draft tensors.
 is looked up in the supplied tokenizer. The current token protocol has one
 terminal token ID. Geometry is not inferred from checkpoint filenames.
 
-Storage records are little-endian i64:
+Native storage records are little-endian i64. Initial origin-table payloads
+are opaque; the model source owns their record format:
 
 | Result | Records and meaning |
 | --- | --- |
 | `allocations` | Eleven `{byte_length, alignment, initial_zero_length}` records, in the order below |
 | `row_views` | `rows * 5` pairs `{offset, length}` into the state arena: control, recurrent, dense attention, input IDs, progress |
-| `target_origins` | 16 pairs of source-defined byte origins, uploaded to the target row table |
-| `draft_origins` | 16 pairs uploaded to the draft row table when enabled |
+| `target_origins` | Source-defined payload uploaded to the target row table |
+| `draft_origins` | Source-defined payload uploaded to the draft row table when enabled |
 | `geometry` | Header `{page_tokens, page_map_byte_origin, draft_carry_stride, feedback_split}`, then zero or more cache-region records described below |
 
 The eleven allocation slots are residual, state arena, packed metadata,
@@ -116,6 +118,15 @@ committed metadata, verification feedback, draft cache, and draft origins/page
 map. The first two are present; packed slots 2–5 exist with epoch shapes;
 draft slots 6–10 exist with MTP. Workspace size and alignment come from command
 reflection, independently of this list.
+
+Each enabled origin payload must fit its table allocation. In pooled mode,
+the payload precedes `page_map_byte_origin`; the following row-major U32 map
+holds `rows * ceil(context / page_tokens)` physical block IDs and must fit
+the same allocation. Native code validates those byte boundaries without
+interpreting the model's origin records. Target and draft payload formats may
+differ. An empty payload needs no initial upload; the source establishes any
+contents its kernels consume. Payloads for disabled allocation slots are not
+uploaded.
 
 Pooled sources append cache regions, each five little-endian i64 values:
 `{allocation_slot, byte_origin, plane_count, plane_stride, block_bytes}`.
