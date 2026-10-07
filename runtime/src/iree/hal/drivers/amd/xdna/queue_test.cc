@@ -1185,6 +1185,44 @@ TEST(XdnaQueueTest, CachedQueueAllocationPublishesContractBeforeDispatch) {
   iree_hal_semaphore_release(allocation_ready);
 }
 
+TEST(XdnaQueueTest, AllocationFailureLeavesEveryOutputUntouched) {
+  QueueHarness harness;
+  ASSERT_NO_FATAL_FAILURE(harness.Initialize());
+  ASSERT_NO_FATAL_FAILURE(harness.SealDeviceGroup());
+  ASSERT_NO_FATAL_FAILURE(harness.RegisterNativeObserver());
+
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(
+      harness.CreateSlabPool(IREE_HAL_BUFFER_USAGE_STORAGE_READ, &pool));
+  std::array<iree_hal_pool_reservation_request_t, 2> requests = {};
+  for (auto& request : requests) {
+    request.params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+    request.allocation_size = 64;
+  }
+  // The first row reaches wrapper creation before validation rejects the
+  // second row, exercising transaction rollback inside the driver.
+  requests[1].params.min_alignment = 3;
+
+  auto* const sentinel0 = reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{1});
+  auto* const sentinel1 = reinterpret_cast<iree_hal_buffer_t*>(uintptr_t{2});
+  std::array<iree_hal_buffer_t*, 2> outputs = {sentinel0, sentinel1};
+  uint64_t value = 1;
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_INVALID_ARGUMENT,
+      iree_hal_queue_alloca(harness.queue, {}, {1, &harness.done, &value}, pool,
+                            requests.size(), requests.data(), outputs.data()));
+  EXPECT_EQ(outputs[0], sentinel0);
+  EXPECT_EQ(outputs[1], sentinel1);
+
+  uint64_t reached_value = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(harness.done, &reached_value));
+  EXPECT_EQ(reached_value, 0u);
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
+  iree_hal_pool_release(pool);
+}
+
 TEST(XdnaQueueTest, QueueAllocationWaitsBeforeGrowingSourcePool) {
   QueueHarness harness;
   ASSERT_NO_FATAL_FAILURE(harness.Initialize());
