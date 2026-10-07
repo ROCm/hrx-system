@@ -107,10 +107,10 @@ are opaque; the model source owns their record format:
 | Result | Records and meaning |
 | --- | --- |
 | `allocations` | Eleven `{byte_length, alignment, initial_zero_length}` records, in the order below |
-| `row_views` | `rows * 5` pairs `{offset, length}` into the state arena: control, recurrent, dense attention, input IDs, progress |
+| `row_views` | `rows * 4` pairs `{offset, length}` into the state arena: control, dense attention, input IDs, progress |
 | `target_origins` | Source-defined payload uploaded to the target row table |
 | `draft_origins` | Source-defined payload uploaded to the draft row table when enabled |
-| `geometry` | Header `{page_tokens, page_map_byte_origin, draft_carry_stride, feedback_split}`, then zero or more cache-region records described below |
+| `geometry` | Header `{page_tokens, page_map_byte_origin, draft_carry_stride, feedback_split, recurrent_origin, recurrent_stride, recurrent_length, recurrent_count}`, then zero or more cache-region records described below |
 
 The eleven allocation slots are residual, state arena, packed metadata,
 target origins/page map, packed input IDs, ordinary selected IDs, draft carry,
@@ -127,6 +127,15 @@ interpreting the model's origin records. Target and draft payload formats may
 differ. An empty payload needs no initial upload; the source establishes any
 contents its kernels consume. Payloads for disabled allocation slots are not
 uploaded.
+
+Recurrent slots occupy `recurrent_length` bytes at
+`recurrent_origin + slot * recurrent_stride` in the state arena. They are
+disjoint from each other and all row-private views, and fit its initialized
+private extent. At least `rows` slots are available. A row acquires a slot on
+activation or restore and releases it after retired reset or successful
+suspension; an idle row owns none. Slot identity is independent of row identity.
+Views are created once, and elastic physical backing is committed on demand.
+Rebinding uses the source encoder below, not native device-record offsets.
 
 Pooled sources append cache regions, each five little-endian i64 values:
 `{allocation_slot, byte_origin, plane_count, plane_stride, block_bytes}`.
@@ -209,12 +218,13 @@ unselected prefill state and resetting a suspended row. File-backed images,
 shared prefixes and automatic eviction require additional policy consumers;
 these explicit DRAM operations do not implement them.
 
-Each row's control/input/progress and recurrent views are present. Dense
+Each row's control/input/progress views are present. Dense
 attention is present only without a physical pool; pooled kernels find it
-through source origins. The recurrent view is the zero-resettable private
-state region, not a hardcoded Gated DeltaNet layout. The current materializer
-requires a nonempty recurrent view even for an attention-only model. Such a
-port must explicitly account for that resettable span in its storage plan;
+through source origins. An active row also borrows its independently owned
+recurrent slot, a zero-initialized state region with no hardcoded Gated
+DeltaNet layout. The current materializer requires a nonempty recurrent slot
+even for an attention-only model. Such a port must explicitly account for that
+resettable span in its storage plan;
 the contract does not allocate a Qwen-sized state behind the model's back.
 This exact contract is implemented by [model.c](model.c) and exercised with
 the real [bootstrap](../models/qwen/prepare.loom) and its
@@ -230,6 +240,14 @@ The signatures and complete source implementation are in
 [control.loom](../models/qwen/control.loom). The host-to-source semantic plan
 is independent of the model's device packet format:
 
+* On ownership changes, `encode_state(bindings:buffer, count:i32,
+  origins:buffer)` consumes `count` little-endian i64 records
+  `{row, read_byte_origin, write_byte_origin, fork_position}` from a sixteen-
+  record bank. It updates the retained opaque target-origin payload in place,
+  preserving other rows and model-specific fields such as KV origins. Native
+  code orders its upload before subsequent work on the existing timeline.
+  Steady-state epochs do not invoke this encoder. The current exclusive slot
+  owner supplies equal read/write origins; shared pins need additional owners.
 * A plan has 32 little-endian i32 records of eight fields:
   `{length, position, row, input_begin, input_count, flags, output_credit,
   first_span}`. The first cohort occupies records 0–15 and the continuation

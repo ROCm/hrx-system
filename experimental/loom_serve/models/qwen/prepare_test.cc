@@ -114,16 +114,16 @@ class PrepareTest : public ::testing::Test {
     expected[3].resize(64);
     for (uint64_t row = 0; row < rows; ++row) {
       const uint64_t base = row * stride;
-      expected[1].insert(expected[1].end(),
-                         {base, 12, base + 256, 156893184, base + 156893440,
-                          attention, base + 156893440 + attention, 2048,
-                          base + 156895488 + attention, 32});
+      expected[1].insert(
+          expected[1].end(),
+          {base, 12, base + 156893440, attention, base + 156893440 + attention,
+           2048, base + 156895488 + attention, 32});
       expected[2][row * 4] = base + 256;
       expected[2][row * 4 + 1] = base + 256;
       expected[2][row * 4 + 2] = pool ? row_bytes : base + 156893440;
       expected[3][row * 4 + 2] = pool ? 0 : row * context * 4096;
     }
-    expected[4] = {64, 2048, 20480, 384};
+    expected[4] = {64, 2048, 20480, 384, 256, stride, 156893184, rows};
     if (pool) {
       expected[4].insert(expected[4].end(),
                          {1, row_bytes, 32, pool * 2048, 131072});

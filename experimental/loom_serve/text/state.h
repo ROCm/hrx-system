@@ -42,8 +42,11 @@ typedef struct loom_serve_text_state_t loom_serve_text_state_t;
 typedef struct loom_serve_text_state_row_t {
   // Borrowed single-owner state arena, outliving this row.
   loom_serve_text_state_t* owner;
-  // Private views in slots 1-5; residual/workspace borrow model-wide storage.
+  // Private views in slots 1, 3-5; recurrence borrows its owned pool slot.
+  // Residual/workspace borrow model-wide storage.
   iree_hal_buffer_t* buffers[TEXT_BINDING_COUNT];
+  // Owned recurrent slot, or UINT32_MAX while empty or suspended.
+  uint32_t recurrent_slot;
   // Number of inputs actually consumed into KV/recurrent state.
   iree_host_size_t position;
   // Owned physical pages, including any in-flight speculative suffix.
@@ -74,6 +77,15 @@ struct loom_serve_text_state_t {
   loom_serve_text_state_row_t* rows;
   // Validated source geometry and retained initialization payloads.
   loom_serve_text_storage_t storage;
+  // Recurrent ownership is independent of row-private control and KV maps.
+  struct {
+    // Free slot IDs; release follows retirement or completed capture.
+    loom_serve_block_pool_t pool;
+    // Owned arena subviews, stable through final queue retirement.
+    iree_hal_buffer_t** buffers;
+    // Rows whose new byte origins need source encoding before packed work.
+    uint32_t dirty_rows;
+  } recurrent;
   // Private-page ownership shared by target and draft cache planes.
   struct {
     // Addressable pooled token capacity; zero selects dense comparison.
@@ -154,6 +166,10 @@ iree_status_t loom_serve_text_state_grow(loom_serve_text_state_t* state,
 
 // Releases only the retired speculative suffix beyond the consumed frontier.
 void loom_serve_text_state_row_trim(loom_serve_text_state_row_t* row);
+// Activates an empty row's recurrent slot and initializes private state on the
+// existing work timeline. An already resident row performs no work.
+iree_status_t loom_serve_text_state_row_activate(
+    loom_serve_text_state_row_t* row);
 iree_status_t loom_serve_text_state_row_reset(loom_serve_text_state_row_t* row);
 iree_status_t loom_serve_text_state_row_suspend(
     loom_serve_text_state_row_t* row);

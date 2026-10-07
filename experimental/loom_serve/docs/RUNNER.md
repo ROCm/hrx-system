@@ -151,7 +151,7 @@ model inactivity. Reloadable parameter groups can deactivate under the shared
 LRU policy. Mutable row state remains owned until its caller resets, suspends
 or destroys it; weight eviction cannot infer permission to discard a session.
 
-Source bootstrap declares cache planes and row-private views.
+Source bootstrap declares cache planes, recurrent slots and row-private views.
 [`text/storage`](../text/storage.h) validates those records once and keeps their
 geometry after the initialization payloads retire. Logical block IDs come from
 the model's private free-ID pool, while their physical slabs share the device
@@ -159,6 +159,14 @@ owner's byte budget with other models' weights and state. These are different
 units: sharing a physical allocation budget does not make block IDs or layouts
 interchangeable across models. Several live ranges can intersect one slab,
 which is committed and charged only once.
+
+Recurrent slot IDs also come from a model-owned free-ID pool. Rows acquire them
+at activation or restore, independently of row identity, and release them only
+after reset retirement or completed suspension. The source VM's `encode_state`
+maps changed ownership into its opaque target-origin payload; C never decodes
+the device record layout. This encoder and upload run on ownership changes,
+not every epoch. The slot pool is exclusive; shared pins add another lifetime
+contract rather than implicitly making these IDs shareable.
 
 At a completed maintenance cut, `model_trim` compacts live blocks, updates all
 row maps, and releases slabs containing no retained range. It uses the same
@@ -170,13 +178,13 @@ An explicit cold transition uses this caller flow:
 1. `row_suspend` captures private/recurrent state, optional MTP carry and
    logical-order target/draft KV into a host image. Its host position, pending
    prediction and metrics remain unchanged. Only successful capture returns
-   the physical block IDs.
+   the physical block IDs and recurrent slot.
 2. `model_trim` can then reclaim backing. Another row may overwrite the old
    IDs; the host image contains no physical-ID identity.
-3. `row_try_resume` obtains fresh IDs, admits their union of missing slabs,
-   restores the state and publishes target/draft maps before the row becomes
-   runnable. Ordinary denial returns `resumed=false` with the image intact.
-   Platform or transfer errors remain terminal.
+3. `row_try_resume` obtains fresh page and recurrent IDs, admits their union of
+   missing slabs, restores the state and publishes target/draft maps before
+   the row becomes runnable. Ordinary denial returns `resumed=false` with the
+   image intact. Platform or transfer errors remain terminal.
 
 The serialized owner excludes competing mutations throughout these transitions.
 The copy helper batches descriptors without intermediate host waits and joins
