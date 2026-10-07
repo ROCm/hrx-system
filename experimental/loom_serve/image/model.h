@@ -44,13 +44,14 @@ typedef struct loom_serve_image_model_options_t {
 //   prepare_request(buffer state, buffer i64_stage_tags, i32 stage_count,
 //                   buffer prompt, i64 seed, f32 strength) -> (i32 stage,
 //                                                             buffer payload)
-//   generate(i32 stage, i64 output_bytes, hal.buffer payload, hal.buffer rgb,
-//            hal.buffer workspace)
+//   generate(i32 stage, i64 output_bytes, hal.buffer payload, hal.buffer rgb)
 // The warm program imports input capabilities and runner.execute_N/feedback.
 // Each command has shared reflected fixed parameter domains and three dynamic
 // bindings: opaque request bytes, output F32 CHW RGB [-1,1], and workspace.
 // All retained stages have identical parameter placement. Input capacity comes
-// from source; workspace extent/alignment comes from compiler reflection.
+// from source; workspace extent/alignment comes from compiler reflection and
+// its queue-ordered allocation is inserted by runner.execute_2. Private storage
+// belongs to the shared execution pool, not this model's residency.
 // Creation indexes parameters and records commands without reading weight
 // payloads. The device owner outlives the model and serializes all model calls.
 // Its physical pool backs parameter roots independently of cached commands.

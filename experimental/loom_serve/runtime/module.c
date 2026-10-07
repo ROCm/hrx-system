@@ -77,6 +77,7 @@ static iree_status_t loom_serve_module_execute(
   }
   iree_hal_buffer_binding_t* bindings =
       (iree_hal_buffer_binding_t*)params->execution.process_storage;
+  const bool has_workspace = stage->transient.required_byte_length != 0;
   iree_status_t status = iree_ok_status();
   for (uint16_t i = 0; i < stage->binding_count && iree_status_is_ok(status);
        ++i) {
@@ -89,15 +90,41 @@ static iree_status_t loom_serve_module_execute(
       status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "runner stage buffer %u is null", i);
     } else {
-      bindings[i] = (iree_hal_buffer_binding_t){
+      const uint16_t slot =
+          i + (has_workspace && i >= stage->transient.binding_index);
+      bindings[slot] = (iree_hal_buffer_binding_t){
           buffer, 0, iree_hal_buffer_byte_length(buffer)};
+    }
+  }
+  iree_hal_buffer_t* workspace = NULL;
+  if (iree_status_is_ok(status) && has_workspace) {
+    const iree_hal_pool_reservation_request_t request = {
+        .params = {.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE,
+                   .access = IREE_HAL_MEMORY_ACCESS_ALL,
+                   .usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                            IREE_HAL_BUFFER_USAGE_TRANSFER,
+                   .min_alignment = stage->transient.minimum_alignment},
+        .allocation_size = stage->transient.required_byte_length,
+    };
+    status =
+        loom_serve_execution_alloca(module->execution, &request, &workspace);
+    if (iree_status_is_ok(status)) {
+      bindings[stage->transient.binding_index] = (iree_hal_buffer_binding_t){
+          workspace, 0, stage->transient.required_byte_length};
     }
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_execute(
         module->execution, stage->command_buffer,
-        (iree_hal_buffer_binding_table_t){stage->binding_count, bindings},
+        (iree_hal_buffer_binding_table_t){stage->binding_count + has_workspace,
+                                          bindings},
         out_value);
+  }
+  if (workspace) {
+    status = iree_status_join(
+        status,
+        loom_serve_execution_dealloca(module->execution, workspace, out_value));
+    iree_hal_buffer_release(workspace);
   }
   return status;
 }
@@ -205,12 +232,22 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
         IREE_STATUS_INVALID_ARGUMENT,
         "runner module requires stages and a representable binding capacity");
   }
+  uint64_t workspace_length = 0;
+  uint64_t workspace_alignment = 0;
   for (iree_host_size_t i = 0; i < options.stages.count; ++i) {
     if (options.stages.values[i].binding_count > options.binding_capacity) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "runner stage exceeds binding capacity");
     }
+    const loom_cmd_program_transient_requirement_t* transient =
+        &options.stages.values[i].transient;
+    workspace_length =
+        iree_max(workspace_length, transient->required_byte_length);
+    workspace_alignment =
+        iree_max(workspace_alignment, transient->minimum_alignment);
   }
+  IREE_RETURN_IF_ERROR(loom_serve_execution_reserve_workspace(
+      execution, workspace_length, workspace_alignment));
   loom_serve_module_t* module = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*module), (void**)&module));
@@ -228,7 +265,7 @@ iree_status_t loom_serve_module_create(const iree_hal_module_types_t* types,
                  .callable_type_count = export_count},
   };
   module->descriptor.process_storage_size =
-      options.binding_capacity * sizeof(iree_hal_buffer_binding_t);
+      (options.binding_capacity + 1) * sizeof(iree_hal_buffer_binding_t);
   iree_status_t status = iree_allocator_clone(
       host_allocator,
       iree_make_const_byte_span(options.stages.values,

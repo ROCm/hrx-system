@@ -41,7 +41,7 @@ struct loom_serve_image_model_t {
   iree_tokenizer_t* tokenizer;
   // Borrowed shared device/timeline owner, outliving the model.
   loom_serve_device_t* owner;
-  // Final input/output/workspace view ownership before host payload release.
+  // Final input/output view ownership before host payload release.
   loom_serve_retirement_t retirement;
   // Shared-device admission group protecting every checkpoint domain together.
   loom_serve_residency_t* residency;
@@ -86,8 +86,8 @@ struct loom_serve_image_model_t {
     // Owned checkpoint/preparation plans in the same domain order.
     loom_serve_weights_t** plans;
   } weights;
-  // Inputs, final RGB and reflected workspace; partial slots are NULL.
-  iree_hal_buffer_binding_t bindings[3];
+  // Inputs and final RGB; private workspace belongs to the shared execution.
+  iree_hal_buffer_binding_t bindings[2];
   // Completed NCHW F32 RGB feedback, overwritten by the next generation.
   iree_byte_span_t output;
 };
@@ -367,13 +367,19 @@ static iree_status_t image_create_control(loom_serve_image_model_t* model,
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       allocator, model->stages.count, sizeof(*stages), (void**)&stages));
   for (uint32_t i = 0; i < model->stages.count; ++i) {
-    stages[i] = (loom_serve_stage_t){model->stages.values[i].command, 3};
+    stages[i] = (loom_serve_stage_t){
+        .command_buffer = model->stages.values[i].command,
+        .binding_count = 2,
+        .transient =
+            loom_serve_jit_stage_program(model->stages.values[i].compiled)
+                ->requirements.transient,
+    };
     iree_unaligned_store_le_u64(
         tags.data + i * sizeof(int64_t),
         (uint64_t)loom_serve_preparation_stage(model->preparation, i)->tag);
   }
   const loom_serve_module_options_t options = {
-      .binding_capacity = 3,
+      .binding_capacity = 2,
       .stages = {model->stages.count, stages},
       .feedback = {1, &model->output},
   };
@@ -474,7 +480,6 @@ static iree_status_t image_model_initialize(
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       allocator, roots, sizeof(*model->weights.plans),
       (void**)&model->weights.plans));
-  const iree_host_size_t binding_count = 3;
   uint64_t parameter_bytes = 0;
   for (uint32_t i = 0; i < roots; ++i) {
     parameter_bytes +=
@@ -537,17 +542,15 @@ static iree_status_t image_model_initialize(
         stage->compiled, iree_hal_queue_family(dispatch), command_mode,
         model->weights.values, &stage->command));
   }
-  for (iree_host_size_t i = 0; i < binding_count && iree_status_is_ok(status);
-       ++i) {
-    const bool workspace = i == 2;
-    const iree_device_size_t length = i == 0      ? model->input_capacity
-                                      : workspace ? workspace_length
-                                                  : model->output.data_length;
+  for (iree_host_size_t i = 0;
+       i < IREE_ARRAYSIZE(model->bindings) && iree_status_is_ok(status); ++i) {
+    const iree_device_size_t length =
+        i == 0 ? model->input_capacity : model->output.data_length;
     iree_hal_buffer_params_t params = {0};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage =
         IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-    params.min_alignment = workspace ? workspace_alignment : 256;
+    params.min_alignment = 256;
     status = iree_hal_allocator_allocate_buffer(
         iree_hal_device_allocator(device), params, length,
         &model->bindings[i].buffer);
@@ -650,10 +653,10 @@ static iree_status_t image_prepare_request(loom_serve_image_model_t* model,
 
 static iree_status_t image_submit(loom_serve_image_model_t* model,
                                   uint32_t stage) {
-  iree_vm_variant_t arguments[2 + 3] = {0};
+  iree_vm_variant_t arguments[2 + IREE_ARRAYSIZE(model->bindings)] = {0};
   arguments[0] = iree_vm_variant_from_i32((int32_t)stage);
   arguments[1] = iree_vm_variant_from_i64((int64_t)model->output.data_length);
-  for (iree_host_size_t i = 0; i < 3; ++i) {
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(model->bindings); ++i) {
     arguments[2 + i] = iree_hal_buffer_variant_from_ptr_borrowed(
         &model->control.hal_types, model->bindings[i].buffer);
   }
@@ -744,11 +747,17 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
     model->input_payload = NULL;
     // Submission overlaps device work. The remaining wait includes queued
     // transfers and final readback, not an isolated GPU execution interval.
+    const iree_hal_pool_stats_t workspace =
+        loom_serve_execution_workspace_statistics(execution);
     fprintf(stderr,
             "{\"event\":\"image_execution\",\"prepare_ns\":%" PRId64
-            ",\"submit_ns\":%" PRId64 ",\"completion_wait_ns\":%" PRId64 "}\n",
+            ",\"submit_ns\":%" PRId64 ",\"completion_wait_ns\":%" PRId64
+            ",\"workspace_committed_bytes\":%" PRIu64
+            ",\"workspace_live_bytes\":%" PRIu64
+            ",\"workspace_reuse_count\":%" PRIu64 "}\n",
             prepare_end - prepare_begin, submit_end - prepare_end,
-            completion_end - submit_end);
+            completion_end - submit_end, (uint64_t)workspace.bytes_committed,
+            (uint64_t)workspace.bytes_reserved, workspace.reuse_count);
   }
   return loom_serve_residency_finish(model->residency, status);
 }
