@@ -106,9 +106,18 @@ class XdnaNativeTest : public ::testing::Test {
                    const std::array<uint32_t, 16>& lhs,
                    const std::array<uint32_t, 16>& rhs) {
     std::array<uint32_t, 48> result;
-    IREE_ASSERT_OK(
-        iree_hal_buffer_map_read(iree_hal_buffer_allocated_buffer(output), 0,
-                                 result.data(), sizeof(result)));
+    iree_hal_buffer_mapping_t mapping;
+    IREE_ASSERT_OK(iree_hal_buffer_map_range(
+        iree_hal_buffer_allocated_buffer(output), IREE_HAL_MAPPING_MODE_SCOPED,
+        IREE_HAL_MEMORY_ACCESS_READ, IREE_HAL_BUFFER_MAP_FLAG_NONE, 0,
+        sizeof(result), &mapping));
+    iree_status_t status =
+        iree_hal_buffer_mapping_invalidate_range(&mapping, 0, sizeof(result));
+    if (iree_status_is_ok(status)) {
+      memcpy(result.data(), mapping.contents.data, sizeof(result));
+    }
+    status = iree_status_join(status, iree_hal_buffer_unmap_range(&mapping));
+    IREE_ASSERT_OK(status);
     for (size_t i = 0; i < 16; ++i) {
       EXPECT_EQ(result[i], 0xA5A5A5A5u) << i;
       EXPECT_EQ(result[16 + i], lhs[i] * rhs[i]) << i;
@@ -217,6 +226,55 @@ TEST_F(XdnaNativeTest, RebindsExecutableAfterCheckedRetirement) {
     IREE_ASSERT_OK(iree_hal_semaphore_wait(
         done, iteration, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     CheckOutput(output, lhs, rhs);
+  }
+}
+
+TEST_F(XdnaNativeTest, ReusesIndependentBindingsAcrossPendingBatches) {
+  ASSERT_NO_FATAL_FAILURE(LoadMultiply());
+  struct Invocation {
+    // Distinct logical input/output storage for each independent invocation.
+    std::array<iree_hal_buffer_t*, 3> buffers = {};
+    // Completion edge independent of the other invocation's timeline.
+    iree_hal_semaphore_t* done = nullptr;
+    // Expected left input, updated only after this invocation completes.
+    std::array<uint32_t, 16> lhs;
+    // Expected right input, updated only after this invocation completes.
+    std::array<uint32_t, 16> rhs;
+  };
+  std::array<Invocation, 2> invocations;
+  for (auto& invocation : invocations) {
+    for (auto& buffer : invocation.buffers) {
+      ASSERT_NO_FATAL_FAILURE(MakeBuffer(&buffer));
+    }
+    ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&invocation.done));
+  }
+  for (uint64_t iteration = 1; iteration <= 4; ++iteration) {
+    for (size_t i = 0; i < invocations.size(); ++i) {
+      auto& invocation = invocations[i];
+      for (size_t j = 0; j < invocation.lhs.size(); ++j) {
+        invocation.lhs[j] = static_cast<uint32_t>(iteration * 97 + i * 13 + j);
+        invocation.rhs[j] = static_cast<uint32_t>(iteration * 31 + i * 17 - j);
+      }
+      IREE_ASSERT_OK(iree_hal_buffer_map_write(invocation.buffers[0], 0,
+                                               invocation.lhs.data(), kBytes));
+      IREE_ASSERT_OK(iree_hal_buffer_map_write(invocation.buffers[1], 0,
+                                               invocation.rhs.data(), kBytes));
+      const iree_hal_buffer_ref_t bindings[] = {
+          iree_hal_make_buffer_ref(invocation.buffers[0], 0, kBytes),
+          iree_hal_make_buffer_ref(invocation.buffers[1], 0, kBytes),
+          iree_hal_make_buffer_ref(invocation.buffers[2], 0, kBytes),
+      };
+      IREE_ASSERT_OK(iree_hal_queue_dispatch(
+          queue_, {}, {1, &invocation.done, &iteration}, executable_, function_,
+          iree_hal_make_static_dispatch_config(1, 1, 1), {},
+          {IREE_ARRAYSIZE(bindings), bindings}, IREE_HAL_DISPATCH_FLAG_NONE));
+    }
+    for (const auto& invocation : invocations) {
+      IREE_ASSERT_OK(iree_hal_semaphore_wait(invocation.done, iteration,
+                                             iree_infinite_timeout(),
+                                             IREE_ASYNC_WAIT_FLAG_NONE));
+      CheckOutput(invocation.buffers[2], invocation.lhs, invocation.rhs);
+    }
   }
 }
 

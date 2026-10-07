@@ -81,6 +81,7 @@ iree_cc_library(
     ::memory
     amdf::headers
     iree::base
+    iree::base::threading
     iree::hal
     iree::hal::drivers::amd::status
     iree::hal::drivers::amd::xdna::image
@@ -177,6 +178,7 @@ iree_cc_test(
     "queue_test.cc"
   DEPS
     ::device
+    ::queue
     amdf::headers
     iree::async
     iree::async::util::proactor_pool

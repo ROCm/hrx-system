@@ -219,6 +219,10 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
   const iree_hal_amd_xdna_image_directory_t* directory =
       iree_hal_amd_xdna_image_directory(image);
   for (uint32_t i = 0; i < entry.allocation_use_count; ++i) {
+    if (iree_any_bit_set(storage[i].flags,
+                         IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED)) {
+      continue;
+    }
     const uint32_t ordinal = iree_hal_amd_xdna_image_tables_allocation_use(
         tables, entry.first_allocation_use + i);
     const iree_xdna_elf_allocation_record_t allocation =
@@ -240,6 +244,10 @@ iree_status_t iree_hal_amd_xdna_executable_storage_load(
     const iree_xdna_elf_relocation_record_t relocation =
         iree_hal_amd_xdna_image_tables_relocation(
             tables, entry.first_static_relocation + i);
+    if (iree_any_bit_set(storage[relocation.destination_use].flags,
+                         IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED)) {
+      continue;
+    }
     iree_hal_amd_xdna_executable_write_address(
         storage[relocation.destination_use].mapping.data +
             relocation.byte_offset,

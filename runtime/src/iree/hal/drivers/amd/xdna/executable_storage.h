@@ -18,6 +18,16 @@
 extern "C" {
 #endif
 
+// Loading policy for a prepared allocation view.
+typedef enum iree_hal_amd_xdna_executable_storage_flag_bits_e {
+  IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_NONE = 0,
+  // Already loaded and statically relocated immutable backing. Loading another
+  // invocation leaves this allocation untouched. Its static relocation sources
+  // must also be shared; the executable establishes that closure before reuse.
+  IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED = 1u << 0,
+} iree_hal_amd_xdna_executable_storage_flag_bits_t;
+typedef uint32_t iree_hal_amd_xdna_executable_storage_flags_t;
+
 // Borrowed backing in entry-relative allocation-use order. The caller resolves
 // each allocation's declared command or DMA address domain and owns its memory,
 // mapping and context. Loading needs exclusive write access; execution retains
@@ -30,6 +40,8 @@ typedef struct iree_hal_amd_xdna_executable_storage_t {
   amdf_memory_t* memory;
   // Native device-access ordinal associated with the command address.
   uint32_t access_ordinal;
+  // Whether loading may write this view or borrows initialized shared backing.
+  iree_hal_amd_xdna_executable_storage_flags_t flags;
   // Byte offset of mapping within memory.
   uint64_t memory_byte_offset;
   // Address of mapping in the allocation's declared native address domain.

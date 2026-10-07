@@ -258,6 +258,32 @@ TEST_F(XdnaExecutableTest, PropagatesSourceFailureAfterPartialLoad) {
                           [](uint8_t byte) { return byte == 0xCC; }));
 }
 
+TEST_F(XdnaExecutableTest, LoadingPrivateStorageDoesNotReadSharedPayload) {
+  IREE_ASSERT_OK(Load());
+  const auto shared_bytes = bytes_[1];
+  storage_[1].flags = IREE_HAL_AMD_XDNA_EXECUTABLE_STORAGE_FLAG_SHARED;
+  FailingSource source = {};
+  source.bytes = ImageFixture().Build();
+  iree_byte_sequence_initialize(&kFailingSourceVtable, source.bytes.size(),
+                                &source.base);
+  const auto target = MakeImageTarget();
+  iree_hal_amd_xdna_image_t* image = nullptr;
+  iree_status_t status = iree_hal_amd_xdna_image_create(
+      &source.base, &target, iree_allocator_system(), &image);
+  iree_byte_sequence_release(&source.base);
+  std::unique_ptr<iree_hal_amd_xdna_image_t,
+                  decltype(&iree_hal_amd_xdna_image_destroy)>
+      image_owner(image, iree_hal_amd_xdna_image_destroy);
+  IREE_ASSERT_OK(status);
+  // Only the two private command loads may access the source. The immutable
+  // catalog has already been published and can have active device readers.
+  source.remaining_reads = 2;
+  IREE_ASSERT_OK(iree_hal_amd_xdna_executable_storage_load(
+      image, 0, storage_.size(), storage_.data()));
+  EXPECT_EQ(source.remaining_reads, 0u);
+  EXPECT_EQ(bytes_[1], shared_bytes);
+}
+
 TEST_F(XdnaExecutableTest, ChecksBindingCountAndLogicalRanges) {
   IREE_ASSERT_OK(Load());
   const auto before = bytes_;
