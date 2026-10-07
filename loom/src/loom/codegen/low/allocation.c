@@ -660,6 +660,19 @@ iree_status_t loom_low_allocate_function(
   }
   iree_arena_deinitialize(&decision_arena);
 
+  uint32_t* first_storage_release_action_by_node = NULL;
+  if (iree_status_is_ok(status) &&
+      state.storage_leases.release_action_count != 0 &&
+      iree_any_bit_set(
+          options->flags,
+          LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX)) {
+    status = loom_low_storage_release_action_index_build(
+        state.storage_leases.release_actions,
+        state.storage_leases.release_action_count,
+        state.storage_leases.lease_table->schedule->node_count, arena,
+        &first_storage_release_action_by_node);
+  }
+
   loom_low_allocation_table_t table = {0};
   if (iree_status_is_ok(status)) {
     table = (loom_low_allocation_table_t){
@@ -724,6 +737,8 @@ iree_status_t loom_low_allocate_function(
         .storage_release_actions = state.storage_leases.release_actions,
         .storage_release_action_count =
             state.storage_leases.release_action_count,
+        .first_storage_release_action_by_node =
+            first_storage_release_action_by_node,
         .spill_count = state.interval_assignment.spill_count,
         .coalesced_copy_count = state.copy_decision_plan.coalesced_count,
         .materialized_copy_count = state.copy_decision_plan.materialized_count,

@@ -25,8 +25,6 @@ typedef struct loom_low_packet_hazard_plan_build_state_t {
   iree_host_size_t record_capacity;
   // Number of records populated so far across all event sources.
   iree_host_size_t record_count;
-  // Storage-release actions grouped by insertion packet.
-  loom_low_storage_release_action_index_t storage_release_action_index;
   // Packet progress records chained by progress class.
   loom_low_packet_progress_class_chain_index_t progress_class_chain_index;
   // Optional prefix range index for repeated long progress queries.
@@ -167,16 +165,11 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
   if (allocation == NULL || allocation->storage_release_action_count == 0) {
     return iree_ok_status();
   }
+  IREE_ASSERT(allocation->first_storage_release_action_by_node != NULL);
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       transient_arena, allocation->storage_release_action_count,
       sizeof(*state->storage_release_observed_progress),
       (void**)&state->storage_release_observed_progress));
-  const iree_host_size_t packet_count = loom_low_packet_count(state->schedule);
-  IREE_RETURN_IF_ERROR(loom_low_storage_release_action_index_build(
-      allocation->storage_release_actions,
-      allocation->storage_release_action_count,
-      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_PACKET, packet_count,
-      transient_arena, &state->storage_release_action_index));
   IREE_RETURN_IF_ERROR(loom_low_packet_progress_class_chain_index_build(
       state->progress, transient_arena, &state->progress_class_chain_index));
   if (loom_low_packet_hazard_plan_should_build_progress_class_range_index(
@@ -207,17 +200,15 @@ static iree_status_t loom_low_packet_hazard_plan_prepare_storage_releases(
 static void loom_low_packet_hazard_plan_emit_storage_release_actions(
     loom_low_packet_hazard_plan_build_state_t* state) {
   const loom_low_allocation_table_t* allocation = state->allocation;
-  if (allocation == NULL ||
-      state->storage_release_action_index.first_action_indices == NULL) {
+  if (allocation == NULL || allocation->storage_release_action_count == 0) {
     return;
   }
-  const loom_low_storage_release_action_index_t* index =
-      &state->storage_release_action_index;
   const loom_low_packet_view_t* packet = state->current_packet;
   for (uint32_t action_index =
-           index->first_action_indices[packet->packet_index];
+           allocation->first_storage_release_action_by_node[packet->node_index];
        action_index != LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
-       action_index = index->next_action_indices[action_index]) {
+       action_index = allocation->storage_release_actions[action_index]
+                          .next_same_insertion_node_action_index) {
     const loom_low_storage_release_action_t* action =
         &allocation->storage_release_actions[action_index];
     const loom_low_storage_lease_record_t* lease_record =

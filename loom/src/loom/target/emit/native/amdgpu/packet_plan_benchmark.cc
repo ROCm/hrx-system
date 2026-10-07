@@ -576,7 +576,8 @@ class PacketPlanFixture {
     frame_options.schedule_flags =
         LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES;
     frame_options.allocation_flags =
-        LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX;
+        LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX |
+        LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX;
     frame_options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
     frame_options.allocation_fixed_values = abi_verify_result.fixed_values;
     frame_options.allocation_fixed_value_count =

@@ -110,8 +110,6 @@ typedef struct loom_amdgpu_wait_plan_builder_t {
   uint32_t* loop_entry_drain_counter_masks;
   // Derived incoming counter epochs indexed by loop block and counter.
   const loom_amdgpu_wait_loop_cyclic_frontier_t* cyclic_frontiers;
-  // Storage-release actions grouped by insertion node.
-  loom_low_storage_release_action_index_t storage_release_action_index;
   // Canonical insertion points within native-instruction boundaries.
   struct {
     // Borrowed address-state overlay built before wait planning.
@@ -329,21 +327,6 @@ static bool loom_amdgpu_wait_plan_reason_is_storage_release(
     default:
       return false;
   }
-}
-
-static iree_status_t loom_amdgpu_wait_plan_build_storage_release_action_index(
-    loom_amdgpu_wait_plan_builder_t* builder) {
-  const loom_low_allocation_table_t* allocation = builder->allocation;
-  if (allocation == NULL || allocation->storage_release_action_count == 0) {
-    return iree_ok_status();
-  }
-  const loom_low_schedule_table_t* schedule = builder->schedule;
-  return loom_low_storage_release_action_index_build(
-      allocation->storage_release_actions,
-      allocation->storage_release_action_count,
-      LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_BY_INSERTION_NODE,
-      schedule->node_count, builder->transient_arena,
-      &builder->storage_release_action_index);
 }
 
 static bool loom_amdgpu_wait_plan_node_forwards_dependencies(
@@ -1954,15 +1937,15 @@ static iree_status_t loom_amdgpu_wait_plan_handle_storage_release_action(
 static iree_status_t loom_amdgpu_wait_plan_handle_storage_release_actions(
     loom_amdgpu_wait_plan_builder_t* builder, uint32_t node_index) {
   const loom_low_allocation_table_t* allocation = builder->allocation;
-  if (allocation == NULL ||
-      builder->storage_release_action_index.first_action_indices == NULL) {
+  if (allocation == NULL || allocation->storage_release_action_count == 0) {
     return iree_ok_status();
   }
-  const loom_low_storage_release_action_index_t* index =
-      &builder->storage_release_action_index;
-  for (uint32_t action_index = index->first_action_indices[node_index];
+  IREE_ASSERT(allocation->first_storage_release_action_by_node != NULL);
+  for (uint32_t action_index =
+           allocation->first_storage_release_action_by_node[node_index];
        action_index != LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE;
-       action_index = index->next_action_indices[action_index]) {
+       action_index = allocation->storage_release_actions[action_index]
+                          .next_same_insertion_node_action_index) {
     const loom_low_storage_release_action_t* action =
         &allocation->storage_release_actions[action_index];
     IREE_RETURN_IF_ERROR(
@@ -3104,9 +3087,6 @@ iree_status_t loom_amdgpu_wait_plan_build(
       &builder.wait_packet_target, transient_arena, &builder.classification);
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_allocate_dependency_heads(&builder);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_amdgpu_wait_plan_build_storage_release_action_index(&builder);
   }
   if (iree_status_is_ok(status)) {
     status = loom_amdgpu_wait_plan_allocate_producer_states(&builder);

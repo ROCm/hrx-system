@@ -32,6 +32,8 @@ typedef struct loom_low_allocation_storage_lease_unit_index_t
 enum loom_low_allocation_flag_bits_e {
   // Retain coalesced branch inputs indexed by destination value ordinal.
   LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX = 1u << 0,
+  // Retain storage-release action chains indexed by insertion schedule node.
+  LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX = 1u << 1,
 };
 typedef uint32_t loom_low_allocation_flags_t;
 
@@ -341,6 +343,10 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_storage_release_action_t* storage_release_actions;
   // Number of records in |storage_release_actions|.
   iree_host_size_t storage_release_action_count;
+  // First storage-release action index per schedule node. Nodes without an
+  // action contain LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE. NULL when the
+  // consumer did not request the retained relation or there are no actions.
+  const uint32_t* first_storage_release_action_by_node;
   // Number of assignments whose location kind is SPILL_SLOT.
   iree_host_size_t spill_count;
   // Number of low.copy ops coalesced into one location.

@@ -106,6 +106,18 @@ class LowPacketHazardPlanTest : public ::testing::Test {
     state->allocation.target.descriptor_set = &state->descriptor_set;
   }
 
+  void SetStorageReleaseActions(loom_low_storage_release_action_t* actions,
+                                iree_host_size_t action_count) {
+    state_.allocation.storage_release_actions = actions;
+    state_.allocation.storage_release_action_count = action_count;
+    uint32_t* first_action_indices = nullptr;
+    IREE_ASSERT_OK(loom_low_storage_release_action_index_build(
+        actions, action_count, state_.schedule.node_count, &arena_,
+        &first_action_indices));
+    state_.allocation.first_storage_release_action_by_node =
+        first_action_indices;
+  }
+
   iree_arena_block_pool_t block_pool_;
   iree_arena_allocator_t arena_;
   PacketHazardPlanTestState state_;
@@ -325,7 +337,7 @@ TEST_F(LowPacketHazardPlanTest,
           /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
       },
   };
-  const loom_low_storage_release_action_t storage_release_actions[1] = {
+  loom_low_storage_release_action_t storage_release_actions[1] = {
       {
           /*.insertion_packet_index=*/2,
           /*.insertion_node_index=*/2,
@@ -334,6 +346,8 @@ TEST_F(LowPacketHazardPlanTest,
           /*.release_class_id=*/kSyntheticProgressPipe,
           /*.release_class_name=*/IREE_SV("synthetic.pipe"),
           /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.next_same_insertion_node_action_index=*/
+          LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
           /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
           /*.release_reason_id=*/kSyntheticHazardStorageRelease,
           /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
@@ -346,9 +360,8 @@ TEST_F(LowPacketHazardPlanTest,
       /*.records=*/storage_leases,
       /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
   };
-  state_.allocation.storage_release_actions = storage_release_actions;
-  state_.allocation.storage_release_action_count =
-      IREE_ARRAYSIZE(storage_release_actions);
+  SetStorageReleaseActions(storage_release_actions,
+                           IREE_ARRAYSIZE(storage_release_actions));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
@@ -411,7 +424,7 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
           /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
       },
   };
-  const loom_low_storage_release_action_t storage_release_actions[1] = {
+  loom_low_storage_release_action_t storage_release_actions[1] = {
       {
           /*.insertion_packet_index=*/2,
           /*.insertion_node_index=*/2,
@@ -420,6 +433,8 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
           /*.release_class_id=*/kSyntheticProgressPipe,
           /*.release_class_name=*/IREE_SV("synthetic.pipe"),
           /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.next_same_insertion_node_action_index=*/
+          LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
           /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
           /*.release_reason_id=*/kSyntheticHazardStorageRelease,
           /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
@@ -432,9 +447,8 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
       /*.records=*/storage_leases,
       /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
   };
-  state_.allocation.storage_release_actions = storage_release_actions;
-  state_.allocation.storage_release_action_count =
-      IREE_ARRAYSIZE(storage_release_actions);
+  SetStorageReleaseActions(storage_release_actions,
+                           IREE_ARRAYSIZE(storage_release_actions));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
@@ -499,6 +513,8 @@ TEST_F(LowPacketHazardPlanTest,
         /*.release_class_id=*/kSyntheticProgressPipe,
         /*.release_class_name=*/IREE_SV("synthetic.pipe"),
         /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+        /*.next_same_insertion_node_action_index=*/
+        LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
         /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
         /*.release_reason_id=*/kSyntheticHazardStorageRelease,
         /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
@@ -511,9 +527,8 @@ TEST_F(LowPacketHazardPlanTest,
       /*.records=*/storage_leases,
       /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
   };
-  state_.allocation.storage_release_actions = storage_release_actions;
-  state_.allocation.storage_release_action_count =
-      IREE_ARRAYSIZE(storage_release_actions);
+  SetStorageReleaseActions(storage_release_actions,
+                           IREE_ARRAYSIZE(storage_release_actions));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},
@@ -556,7 +571,7 @@ TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
           /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
       },
   };
-  const loom_low_storage_release_action_t storage_release_actions[1] = {
+  loom_low_storage_release_action_t storage_release_actions[1] = {
       {
           /*.insertion_packet_index=*/2,
           /*.insertion_node_index=*/2,
@@ -565,6 +580,8 @@ TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
           /*.release_class_id=*/kSyntheticProgressPipe,
           /*.release_class_name=*/IREE_SV("synthetic.pipe"),
           /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
+          /*.next_same_insertion_node_action_index=*/
+          LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
           /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
           /*.release_reason_id=*/kSyntheticHazardStorageRelease,
           /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
@@ -577,9 +594,8 @@ TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
       /*.records=*/storage_leases,
       /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
   };
-  state_.allocation.storage_release_actions = storage_release_actions;
-  state_.allocation.storage_release_action_count =
-      IREE_ARRAYSIZE(storage_release_actions);
+  SetStorageReleaseActions(storage_release_actions,
+                           IREE_ARRAYSIZE(storage_release_actions));
 
   const loom_low_packet_hazard_plan_provider_t hazard_provider = {
       /*.user_data=*/{},

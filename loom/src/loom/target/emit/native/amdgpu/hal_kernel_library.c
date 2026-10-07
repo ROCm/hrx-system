@@ -685,7 +685,8 @@ static iree_status_t loom_amdgpu_hal_kernel_library_build_kernel(
       .schedule_structural_state_reads = schedule_state_reads,
       .schedule_flags = LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES,
       .allocation_flags =
-          LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX,
+          LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX |
+          LOOM_LOW_ALLOCATION_FLAG_RETAIN_STORAGE_RELEASE_ACTION_INDEX,
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
       .memory_accesses = plan->memory_accesses,
       .allocation_fixed_values = plan->abi_verify.fixed_values,
