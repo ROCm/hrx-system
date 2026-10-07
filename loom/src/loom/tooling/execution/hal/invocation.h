@@ -153,16 +153,16 @@ typedef struct loom_run_hal_dispatch_sequence_t {
   iree_allocator_t host_allocator;
   // Prepared representation selected from the target ABI.
   loom_run_hal_dispatch_sequence_representation_t representation;
-  // Payload value to signal on the next sequence submission.
-  uint64_t next_signal_value;
   // Number of flattened buffer bindings required at submission.
   iree_host_size_t binding_count;
-  // Timeline semaphore joining each complete sequence execution.
-  iree_hal_semaphore_t* completion_semaphore;
   // Reusable indirect command-buffer representation.
   struct {
     // Command buffer containing one epoch-ordered dispatch sequence.
     iree_hal_command_buffer_t* command_buffer;
+    // Timeline semaphore joining each command-buffer execution.
+    iree_hal_semaphore_t* completion_semaphore;
+    // Completion payload value assigned to the next execution.
+    uint64_t next_signal_value;
   } command_buffer;
   // Reusable direct queue-dispatch representation.
   struct {
@@ -170,20 +170,27 @@ typedef struct loom_run_hal_dispatch_sequence_t {
     uint8_t* storage;
     // Captured direct dispatch records in source order.
     loom_run_hal_dispatch_sequence_direct_step_t* steps;
-    // Per-step timeline semaphores in source order.
+    // Timeline semaphore pool indexed by the step position within each epoch.
     iree_hal_semaphore_t** semaphores;
-    // Reusable payload values paired with |semaphores|.
+    // Reusable wait payload values paired with |semaphores|.
     uint64_t* payload_values;
     // Flattened captured binding lengths in step and ABI order.
     iree_device_size_t* binding_lengths;
     // Flattened direct buffer refs resolved for the active submission.
     iree_hal_buffer_ref_t* binding_refs;
-    // Number of entries in |steps|, |semaphores|, and |payload_values|.
+    // Number of entries in |steps|.
     iree_host_size_t step_count;
-    // First step in the terminal execution epoch.
-    iree_host_size_t terminal_step_offset;
+    // Number of entries in |semaphores| and |payload_values|.
+    iree_host_size_t semaphore_count;
+    // Number of execution epochs represented by |steps|.
+    iree_host_size_t epoch_count;
     // Number of steps in the terminal execution epoch.
     iree_host_size_t terminal_step_count;
+    // Payload value assigned to the first epoch of the next execution.
+    uint64_t next_epoch_signal_value;
+    // Number of pool slots in the predecessor frontier for the next execution.
+    // The corresponding payloads remain in |payload_values|.
+    iree_host_size_t predecessor_semaphore_count;
   } direct;
 } loom_run_hal_dispatch_sequence_t;
 
@@ -419,8 +426,11 @@ iree_status_t loom_run_hal_dispatch_sequence_batch_prepare_from_plan_ring(
 // supplied through a binding table at execution. Adjacent steps with different
 // execution epochs carry an execution and dispatch-write visibility edge;
 // steps in one epoch may overlap. Each step declares whether its executable
-// ABI requires direct queue dispatch or an indirect command buffer. A sequence
-// mixing those representations is invalid.
+// ABI requires direct queue dispatch or an indirect command buffer. Direct
+// sequences reuse a timeline semaphore pool sized to the widest epoch; each
+// epoch advances the pool payload, and its terminal frontier orders the next
+// execution without a synthetic queue barrier. A sequence mixing direct and
+// indirect representations is invalid.
 iree_status_t loom_run_hal_dispatch_sequence_prepare(
     const loom_run_hal_runtime_t* runtime, iree_host_size_t step_count,
     const loom_run_hal_dispatch_sequence_step_t* steps,
