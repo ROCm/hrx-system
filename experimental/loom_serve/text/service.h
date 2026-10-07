@@ -58,12 +58,14 @@ typedef struct loom_serve_text_service_options_t {
 // and transport are borrowed. Each epoch gathers credited ready rows, executes
 // their known/verifier spans and commits outputs before reusing the workspace.
 // Heartbeats observe a copied snapshot and continue during model waits.
-// Admission charges unique resident pages plus remaining completion growth,
-// including shared partial-tail COW. Excess work waits in a bounded FIFO;
+// Admission owns and physically backs the exact completion high-water, private
+// recurrent writer and partial-tail COW while pinning required parameters.
+// Shared prefixes are counted once. Excess work waits in a bounded FIFO;
 // invalid requests reject before altering retained state. Idle cache yields to
 // admission pressure, but explicit pins remain protected until deletion.
-// Evicted/cancelled rows trigger one compaction/physical trim per admission
-// cohort, outside ordinary decoding. state_trim events report copy, release
+// Evicted/cancelled rows and unused completion credit trigger physical trim
+// outside ordinary decoding. Compaction admits its temporary destination union
+// before moving. state_trim events report copy, release
 // and maintenance costs separately from model epochs.
 // X-Loom-Session selects retained state, not a durable session. Active or
 // queued named sessions reject overlapping requests. X-Loom-Checkpoint selects

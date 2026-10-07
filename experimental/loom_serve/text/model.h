@@ -148,7 +148,37 @@ typedef struct loom_serve_text_pool_usage_t {
   iree_host_size_t capacity;
   // Positions in pages not owned by any row, checkpoint or retiring use.
   iree_host_size_t available;
+  // Owned positions beyond consumed frontiers, reserved for active requests.
+  // These are disjoint from available and from positions retaining live KV.
+  iree_host_size_t pending;
 } loom_serve_text_pool_usage_t;
+
+// Starting frontier of a request-scoped completion reservation.
+typedef enum loom_serve_text_reserve_mode_e {
+  LOOM_SERVE_TEXT_RESERVE_FRESH,
+  LOOM_SERVE_TEXT_RESERVE_CONTINUE,
+  LOOM_SERVE_TEXT_RESERVE_CHECKPOINT,
+} loom_serve_text_reserve_mode_t;
+
+// Admits the complete consumed-position high-water for one request, including
+// caller-computed speculative slack. CHECKPOINT supplies a same-model endpoint;
+// other modes supply NULL. Fresh replaces the selected row, CONTINUE preserves
+// it, and CHECKPOINT restores then branches. False preserves both selected row
+// and checkpoint. Idle owners may be reclaimed by the caller before retrying.
+// Success pins parameters and owns exact target/draft pages, private views and
+// any recurrent writer until release_reservation. Physical backing is committed
+// at this cold boundary, not per epoch. Extent is not a context-size
+// allocation. Only one reservation may own a row. Platform/IO failures remain
+// terminal.
+iree_status_t loom_serve_text_row_try_reserve(
+    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_admitted);
+
+// After all request work retires, returns unused page credit and the parameter
+// pin. Retains the consumed frontier for later continuation. No allocation or
+// wait occurs. Reset/destruction also retire reservation ownership.
+void loom_serve_text_row_release_reservation(loom_serve_text_row_t* row);
 
 typedef struct loom_serve_text_trim_result_t {
   // Logical blocks moved across every target/draft plane.
@@ -159,8 +189,9 @@ typedef struct loom_serve_text_trim_result_t {
   uint64_t released_bytes;
 } loom_serve_text_trim_result_t;
 
-// Retires accepted work, compacts live private blocks, publishes target/draft
-// maps, then releases physical slabs containing no live state. Live rows and
+// Retires accepted work and releases physical slabs containing no owned state.
+// Compacts blocks when the temporary destination union fits the physical pool,
+// then publishes target/draft maps and releases the old backing. Live rows and
 // cached commands survive; reset rows can regrow in the same virtual buffers.
 // This is an explicit maintenance operation, not part of ordinary decoding.
 // Fixed/dense comparison backing is unchanged and reports zero reclamation.
@@ -214,9 +245,8 @@ iree_host_size_t loom_serve_text_model_context_capacity(
 // Number of explicit endpoint handles reserved at model creation.
 iree_host_size_t loom_serve_text_model_checkpoint_capacity(
     const loom_serve_text_model_t* model);
-// Copies physical pool accounting at the single owner's completed-stage
-// boundary. Request completion reservations are service policy, not physical
-// ownership.
+// Copies logical page ownership at the single owner's completed-stage boundary,
+// separating consumed state from assigned request-completion capacity.
 loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model);
 // Mutable virtual state only; immutable weights and shared workspace are

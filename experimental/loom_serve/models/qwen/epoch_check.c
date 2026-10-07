@@ -758,6 +758,28 @@ static iree_status_t qwen_check_run(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(
       qwen_check_epoch(model, &next_shape, rows, 1, final_order, &visible));
 
+  // Every entry point honors the same request boundary, including isolated
+  // dense calls. Rejection leaves the prediction usable after credit release.
+  loom_serve_text_row_t* reserved =
+      loom_serve_text_model_row(model, rows[0].packed);
+  bool admitted = false;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
+      reserved, LOOM_SERVE_TEXT_RESERVE_CONTINUE, NULL,
+      loom_serve_text_row_position(reserved), &admitted));
+  if (!admitted) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "retained-frontier reservation refused");
+  }
+  IREE_RETURN_IF_ERROR(
+      qwen_check_error(loom_serve_text_row_prefill(reserved, 1, rows[0].input),
+                       IREE_STATUS_OUT_OF_RANGE));
+  IREE_RETURN_IF_ERROR(qwen_check_error(loom_serve_text_row_decode(reserved),
+                                        IREE_STATUS_OUT_OF_RANGE));
+  IREE_RETURN_IF_ERROR(
+      qwen_check_error(loom_serve_text_model_epoch(model, 0, 1, &visible),
+                       IREE_STATUS_OUT_OF_RANGE));
+  loom_serve_text_row_release_reservation(reserved);
+
   // Crossing back into the isolated decode family must consume the packed
   // prediction and position, not the old device-local single-row control.
   IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(
@@ -1305,6 +1327,104 @@ static iree_status_t qwen_check_checkpoint_suspension(
   return iree_ok_status();
 }
 
+static iree_status_t qwen_check_reservations(loom_serve_text_model_t* model,
+                                             const int32_t* input) {
+  loom_serve_text_row_t* row = loom_serve_text_model_row(model, 0);
+  loom_serve_text_row_t* reference = loom_serve_text_model_row(model, 7);
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, 127, input));
+  bool admitted = false;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
+      row, LOOM_SERVE_TEXT_RESERVE_FRESH, NULL, 256, &admitted));
+  if (!admitted || loom_serve_text_model_pool_usage(model).pending != 256) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "fresh completion reservation was not retained");
+  }
+  IREE_RETURN_IF_ERROR(qwen_check_error(loom_serve_text_model_deactivate(model),
+                                        IREE_STATUS_FAILED_PRECONDITION));
+  loom_serve_text_trim_result_t trimmed;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  const uint64_t committed =
+      loom_serve_text_model_memory_statistics(model).committed_bytes;
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 0, 127, input));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 0, 7));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(row));
+  if (loom_serve_text_model_memory_statistics(model).committed_bytes !=
+      committed) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "reserved inference changed physical commitment");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 0, 7));
+  loom_serve_text_row_release_reservation(row);
+  if (loom_serve_text_model_pool_usage(model).pending) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "completed request retained unused page credit");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
+      row, LOOM_SERVE_TEXT_RESERVE_CONTINUE, NULL, 256, &admitted));
+  if (!admitted) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "continuation reservation refused");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(row));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 0, 7));
+  loom_serve_text_row_release_reservation(row);
+  // Use a partial tail and release a reserved fork before its first epoch.
+  // Its private writer has no state yet: continuation must reattach the reader.
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(reference));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, 127, input));
+  loom_serve_text_checkpoint_t* checkpoint = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(reference, &checkpoint));
+  if (!checkpoint) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "reservation pin refused");
+  }
+  loom_serve_text_row_t* fork = loom_serve_text_model_row(model, 1);
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
+      fork, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint, 256, &admitted));
+  if (!admitted) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS, "fork reservation refused");
+  }
+  loom_serve_text_row_release_reservation(fork);
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 7));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(fork));
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_decode(reference));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 1, 7));
+  fork = loom_serve_text_model_row(model, 2);
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_try_reserve(
+      fork, LOOM_SERVE_TEXT_RESERVE_CHECKPOINT, checkpoint, 256, &admitted));
+  if (!admitted) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "second fork reservation refused");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 2, 1, input + 127));
+  IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 3, 128, input));
+  IREE_RETURN_IF_ERROR(qwen_check_endpoint(model, 2, 3));
+  // Reset is also a complete reservation owner; it must release the weight pin.
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(fork));
+  loom_serve_text_checkpoint_release(checkpoint);
+  for (iree_host_size_t i = 0; i < 8; ++i) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, i)));
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
+  const loom_serve_text_pool_usage_t pool =
+      loom_serve_text_model_pool_usage(model);
+  if (pool.available != pool.capacity || pool.pending ||
+      loom_serve_text_model_memory_statistics(model).committed_bytes) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "request reservations leaked retained backing");
+  }
+  if (loom_serve_text_model_weight_statistics(model).reserved_bytes) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_deactivate(model));
+  }
+  fprintf(stderr,
+          "PASS: request reservation, allocation-free advancement, "
+          "unadvanced fork release and full reclamation.\n");
+  return iree_ok_status();
+}
+
 static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
                                             iree_allocator_t allocator) {
   const loom_serve_text_pool_usage_t pool =
@@ -1558,6 +1678,7 @@ static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
   fprintf(stderr,
           "PASS: shared prefix, divergent forks, queued continuation, rewind, "
           "pin release and full reclamation.\n");
+  IREE_RETURN_IF_ERROR(qwen_check_reservations(model, input));
   return FLAG_suspend_checkpoints
              ? qwen_check_checkpoint_suspension(model, input)
              : iree_ok_status();

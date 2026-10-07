@@ -58,6 +58,8 @@ typedef struct loom_serve_text_state_row_t {
   iree_host_size_t position;
   // Owned physical pages, including any in-flight speculative suffix.
   uint32_t block_count;
+  // Request high-water in token positions; zero outside a reservation.
+  iree_host_size_t reserved_extent;
   // Owned DRAM image while suspended; no physical KV IDs remain owned.
   loom_serve_snapshot_t* snapshot;
 } loom_serve_text_state_row_t;
@@ -220,6 +222,17 @@ iree_status_t loom_serve_text_state_row_try_pin(
 iree_status_t loom_serve_text_state_row_try_restore(
     loom_serve_text_state_row_t* row,
     loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored);
+// The caller holds the model's parameter pin while this admission and all
+// reserved work run. Extent and starting frontier have passed model validation.
+// Denial changes no selected row or checkpoint contents/ownership.
+iree_status_t loom_serve_text_state_row_try_reserve(
+    loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
+    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_admitted);
+// Returns unused page credit at a retired boundary, preserving the consumed
+// frontier even when a reserved fork was never advanced.
+void loom_serve_text_state_row_release_reservation(
+    loom_serve_text_state_row_t* row);
 iree_status_t loom_serve_text_state_checkpoint_suspend(
     loom_serve_text_state_checkpoint_t* checkpoint);
 void loom_serve_text_state_checkpoint_release(

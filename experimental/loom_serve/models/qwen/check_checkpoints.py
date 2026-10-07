@@ -190,8 +190,9 @@ def cold_endpoint(address, events, messages, base, receipt):
     if control(address, "POST", "/v1/checkpoints/base/suspend", 200) != parked:
         raise RuntimeError("repeated suspension changed the endpoint")
 
-    # A different complete history must reuse the old prefix storage. Waking
-    # into this selected row cannot free it before admitting the replacement.
+    # A different complete history reuses the old prefix storage. The attempted
+    # replacement needs all 1024 positions plus the immutable partial tail;
+    # even recycling this selected row cannot fund that completion guarantee.
     competing = [dict(message) for message in messages]
     competing[0]["content"] = competing[0]["content"].replace("MAPLE", "CEDAR")
     selected = request(address, "cold-selected", competing, 12)
@@ -210,7 +211,7 @@ def cold_endpoint(address, events, messages, base, receipt):
                 "model": "qwen3.8-27b",
                 "messages": history,
                 "stream": True,
-                "max_tokens": 16,
+                "max_tokens": 480,
                 "temperature": 0,
             }
         ),
@@ -275,6 +276,118 @@ def fixed_suspension(command, log):
         control(address, "DELETE", "/v1/checkpoints/fixed", 200)
         same_output(restored, request(address, "", history, 8))
     print(json.dumps({"event": "fixed_suspend_rejected"}), flush=True)
+
+
+def physical_completion(command, messages, output, parameter_bytes):
+    """Admission covers weights, immutable anchors and future private writers."""
+    common = [
+        flag
+        for flag in command
+        if not flag.startswith(("--rows=", "--epoch=", "--memory_bytes="))
+    ] + ["--rows=2", "--epoch=32:2", "--epoch=128:2"]
+    for headroom_mib in (400, 256):
+        budget = parameter_bytes + headroom_mib * 1024 * 1024
+        events = Events()
+        log = output / f"physical-{headroom_mib}.log"
+        with running_server(
+            common + [f"--memory_bytes={budget}"], log, events.record
+        ) as (_, endpoint):
+            if endpoint is None:
+                raise RuntimeError(f"physical-budget server failed startup: {log}")
+            address = urlsplit(f"http://{endpoint}")
+            first = request(address, "root", messages, 12)
+            history = messages + [
+                {"role": "assistant", "content": first["text"]},
+                {"role": "user", "content": "Reply with only the project codeword."},
+            ]
+            receipt = control(
+                address, "POST", "/v1/checkpoints/base", 201, session="root"
+            )
+            body = json.dumps(
+                {
+                    "model": "qwen3.8-27b",
+                    "messages": history,
+                    "stream": True,
+                    "max_tokens": 16,
+                    "temperature": 0,
+                }
+            )
+            if headroom_mib == 256:
+                # Logical KV fits, but the shared recurrent reader plus its
+                # first private writer cannot coexist with these weights.
+                control(
+                    address,
+                    "POST",
+                    "/v1/chat/completions",
+                    503,
+                    session="root",
+                    body=body,
+                    headers={"Content-Type": "application/json"},
+                )
+            parked = control(address, "POST", "/v1/checkpoints/base/suspend", 200)
+            if not parked["host_snapshot_bytes"]:
+                raise RuntimeError("physical pressure fixture did not suspend")
+            if headroom_mib == 400:
+                # Two tiny idle histories hide recurrent-state pressure from
+                # token-only admission. One must yield before opening SSE.
+                for name, token in (("small-a", "A"), ("small-b", "B")):
+                    request(
+                        address,
+                        name,
+                        [{"role": "user", "content": f"Reply with only {token}."}],
+                        8,
+                    )
+                result = request(address, "restored", history, 16, checkpoint="base")
+                admitted = events.wait("admit", "restored")
+                if admitted["restored_bytes"] != parked["host_snapshot_bytes"]:
+                    raise RuntimeError(f"physical wake replayed: {admitted}")
+            else:
+                control(
+                    address,
+                    "POST",
+                    "/v1/chat/completions",
+                    503,
+                    session="root",
+                    body=body,
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Loom-Checkpoint": "base",
+                    },
+                )
+                if (
+                    control(address, "POST", "/v1/checkpoints/base/suspend", 200)
+                    != parked
+                ):
+                    raise RuntimeError("physical denial discarded the cold endpoint")
+            control(address, "DELETE", "/v1/checkpoints/base", 200)
+            if headroom_mib == 256:
+                # Last shared reader is gone; in-place continuation now fits.
+                result = request(address, "root", history, 16)
+            if (
+                result["usage"]["prompt_tokens_details"]["cached_tokens"]
+                != receipt["position"]
+            ):
+                raise RuntimeError("physical pressure discarded the selected frontier")
+            same_output(result, request(address, "", history, 16))
+        heartbeats = [e for e in events.values if e["event"] == "heartbeat"]
+        if not heartbeats or any(
+            e["elastic_parameters"]["released_bytes"] for e in heartbeats
+        ):
+            raise RuntimeError("mutable admission evicted its own required weights")
+        peak = max(e["elastic_state"]["peak_bytes"] for e in heartbeats)
+        if peak > headroom_mib * 1024 * 1024:
+            raise RuntimeError(f"physical completion exceeded its budget: {peak}")
+        print(
+            json.dumps(
+                {
+                    "event": "physical_completion",
+                    "headroom_mib": headroom_mib,
+                    "peak_state_bytes": peak,
+                    "result": result,
+                }
+            ),
+            flush=True,
+        )
 
 
 def main():
@@ -349,10 +462,7 @@ def main():
             body=replay,
             headers={"Content-Type": "application/json"},
         )
-        if (
-            "pinned checkpoints leave insufficient"
-            not in impossible["error"]["message"]
-        ):
+        if "retained state leaves insufficient" not in impossible["error"]["message"]:
             raise RuntimeError(f"independent replay rejected incorrectly: {impossible}")
         bad = {
             "model": "qwen3.8-27b",
@@ -501,6 +611,10 @@ def main():
         raise RuntimeError("cold payload was not visible in heartbeat accounting")
     if heartbeats[-1]["checkpoint_host_bytes"]:
         raise RuntimeError("endpoint release leaked host accounting")
+    parameter_bytes = max(
+        event["elastic_parameters"]["committed_bytes"] for event in heartbeats
+    )
+    physical_completion(command, messages, arguments.output, parameter_bytes)
     print(
         json.dumps({"event": "pass", "branches": branches, "admissions": admits}),
         flush=True,

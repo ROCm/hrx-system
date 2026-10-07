@@ -224,10 +224,12 @@ formulas, not a long-context throughput or quality result.
 
 The HTTP service reserves page-rounded credit for retained input, appended
 input, requested output, and the speculative high-water mark before admission.
-It assigns physical pages only during growth. A request that fits alone but
-cannot fit alongside active guarantees waits in a bounded FIFO without a GPU
-row. An impossible-alone request returns 400 with the required and available
-capacity; rejected admission preserves an existing checkpoint.
+It assigns and backs those exact pages, including the private recurrent writer,
+before accepting the request, and pins weights through completion. This covers
+the requested turn rather than the full context ceiling. A request that fits
+alone but cannot fit alongside active guarantees waits in a bounded FIFO
+without a GPU row. An impossible-alone request returns 400 with the required
+and available capacity; rejected admission preserves an existing checkpoint.
 
 Idle retained rows yield pages in LRU order when needed for admission. Active
 requests keep their completion guarantee. Completion returns surplus credit
@@ -237,10 +239,11 @@ reservation. Idle pages remain available for retained follow-ups until displaced
 waiting storage separately. Same named-session overlap, active or queued,
 returns 409; an exhausted pending queue returns 503.
 
-Logical reservations and physical page ownership are distinct. Overcommitting
-active guarantees requires held/offloaded residency and is not enabled by this
-policy. Direct model API callers still submit bounded epochs; exceeding free
-pages rejects the whole epoch before device submission.
+Consumed KV and reserved future pages are reported separately but both own
+physical backing. Overcommitting active guarantees requires held/offloaded
+residency and is not enabled by this policy. Direct model API callers can use
+`row_try_reserve` or submit bounded epochs without request credit; exceeding
+free pages rejects the whole epoch before device submission.
 
 `check_capacity.py` is the complete HTTP witness. Given a built server, model
 directory, weights, tokenizer, and a new output directory, it compares sequential
