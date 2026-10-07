@@ -219,6 +219,31 @@ def main():
         control(address, "POST", "/v1/checkpoints/extra", 503, session="root")
         control(address, "DELETE", "/v1/checkpoints/absent", 404)
         control(address, "POST", "/v1/checkpoints/bad/name", 400, session="root")
+        replay = json.dumps(
+            {
+                "model": "qwen3.8-27b",
+                "messages": messages,
+                "stream": True,
+                "max_tokens": 32,
+                "temperature": 0,
+            }
+        )
+        # Replaying the original prompt cannot share its completed endpoint.
+        # A refused replacement preserves the selected retained continuation.
+        impossible = control(
+            address,
+            "POST",
+            "/v1/chat/completions",
+            503,
+            session="root",
+            body=replay,
+            headers={"Content-Type": "application/json"},
+        )
+        if (
+            "pinned checkpoints leave insufficient"
+            not in impossible["error"]["message"]
+        ):
+            raise RuntimeError(f"independent replay rejected incorrectly: {impossible}")
         bad = {
             "model": "qwen3.8-27b",
             "messages": [{"role": "user", "content": "Different history"}],
@@ -248,6 +273,22 @@ def main():
             }
         ]
         summary = request(address, "root", temporary, 32)
+        if (
+            summary["usage"]["prompt_tokens_details"]["cached_tokens"]
+            != receipt["position"]
+        ):
+            raise RuntimeError("capacity refusal replaced the selected continuation")
+        # Unrelated admission pressure may evict best-effort session retention;
+        # the explicit pin still has to survive and restore the endpoint below.
+        control(
+            address,
+            "POST",
+            "/v1/chat/completions",
+            503,
+            session="independent",
+            body=replay,
+            headers={"Content-Type": "application/json"},
+        )
         revised = base + [
             {
                 "role": "user",
