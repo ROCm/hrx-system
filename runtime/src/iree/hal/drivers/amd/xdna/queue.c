@@ -15,8 +15,29 @@
 #include "iree/hal/drivers/amd/xdna/queue_service.h"
 #include "iree/hal/drivers/amd/xdna/queue_storage.h"
 #include "iree/hal/drivers/amd/xdna/semaphore.h"
+#include "iree/hal/drivers/amd/xdna/transient_buffer.h"
+#include "iree/hal/pool_wait.h"
 
 typedef struct iree_hal_amd_xdna_operation_t iree_hal_amd_xdna_operation_t;
+
+typedef enum iree_hal_amd_xdna_memory_wait_kind_e {
+  IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE = 0,
+  IREE_HAL_AMD_XDNA_MEMORY_WAIT_FRONTIER,
+  IREE_HAL_AMD_XDNA_MEMORY_WAIT_CAPACITY,
+} iree_hal_amd_xdna_memory_wait_kind_t;
+
+// Cold alloca state used only when the selected pool cannot return immediately
+// usable bytes. Storage comes from the operation capture arena.
+typedef struct iree_hal_amd_xdna_memory_wait_t {
+  // Active asynchronous wait source.
+  iree_hal_amd_xdna_memory_wait_kind_t kind;
+  // Joined prerequisite for every held reservation.
+  iree_async_frontier_t* frontier;
+  // Tracker-owned waiter storage while |kind| is FRONTIER.
+  iree_async_frontier_waiter_t frontier_waiter;
+  // Reusable observe-check-wait helper for pool capacity.
+  iree_hal_pool_wait_t* capacity_wait;
+} iree_hal_amd_xdna_memory_wait_t;
 
 // Arena-owned registration for one deferred semaphore wait.
 typedef struct iree_hal_amd_xdna_wait_entry_t {
@@ -147,6 +168,8 @@ typedef struct iree_hal_amd_xdna_queue_t {
 
 typedef enum iree_hal_amd_xdna_operation_kind_e {
   IREE_HAL_AMD_XDNA_OPERATION_BARRIER,
+  IREE_HAL_AMD_XDNA_OPERATION_ALLOCA,
+  IREE_HAL_AMD_XDNA_OPERATION_DEALLOCA,
   IREE_HAL_AMD_XDNA_OPERATION_TRANSFER,
   IREE_HAL_AMD_XDNA_OPERATION_DISPATCH,
 } iree_hal_amd_xdna_operation_kind_t;
@@ -178,12 +201,16 @@ struct iree_hal_amd_xdna_operation_t {
   iree_async_operation_t admission;
   // Placed callback returning resolved software waits to the queue owner.
   iree_async_operation_t wait_completion;
+  // Placed callback returning pool readiness to the queue owner.
+  iree_async_operation_t memory_completion;
   // Intrusive progress-service admission and placed result handoff.
   iree_hal_amd_xdna_queue_service_item_t service_item;
   // Registered timepoints plus one registration sentinel.
   iree_atomic_int32_t wait_count;
   // First failure transferred from a resolved timepoint callback.
   iree_atomic_intptr_t wait_status;
+  // Terminal hidden-memory-wait status transferred to the proactor owner.
+  iree_atomic_intptr_t memory_status;
   // Borrowed queue kept live by |device|.
   iree_hal_amd_xdna_queue_t* queue;
   // Retained device dominating the queue through arena return.
@@ -203,6 +230,45 @@ struct iree_hal_amd_xdna_operation_t {
   // Active operation payload.
   iree_hal_amd_xdna_operation_kind_t kind;
   union {
+    // Queue-ordered allocation transaction.
+    struct {
+      // Borrowed exact source pool selected by the caller.
+      iree_hal_pool_t* pool;
+      // Number of allocation rows in every trailing array.
+      iree_host_size_t request_count;
+      // Canonical requests copied during public capture.
+      iree_hal_pool_reservation_request_t* requests;
+      // Stable allocation roots returned before physical commitment.
+      iree_hal_buffer_t** transient_buffers;
+      // Pool tokens owned until attached or released.
+      iree_hal_pool_reservation_t* reservations;
+      // Per-reservation reuse prerequisites owned by the pool.
+      iree_hal_pool_acquire_info_t* acquire_infos;
+      // Borrowed prepared views awaiting wrapper staging.
+      iree_hal_pool_reservation_view_t* reservation_views;
+      // Materialized fallback buffers, or all NULL when the pool exposes
+      // reservation views directly.
+      iree_hal_buffer_t** materialized_buffers;
+      // Cold memory readiness sidecar.
+      iree_hal_amd_xdna_memory_wait_t* memory_wait;
+      // Result from the most recent pool acquisition attempt.
+      iree_hal_pool_acquire_result_t acquire_result;
+      // True while this operation owns |reservations|.
+      bool reservations_held;
+    } alloca;
+    // Queue-ordered allocation retirement transaction.
+    struct {
+      // Borrowed common source pool discovered during capture.
+      iree_hal_pool_t* pool;
+      // Number of allocation roots in the transaction.
+      iree_host_size_t buffer_count;
+      // Retained transient allocation roots.
+      iree_hal_buffer_t** transient_buffers;
+      // Detached tokens returned to |pool| after decommit.
+      iree_hal_pool_reservation_t* reservations;
+      // True while captured deallocation marks must be aborted on failure.
+      bool marks_owned;
+    } dealloca;
     // Finite native function invocation.
     struct {
       // Retained executable owning mutable command backing.
@@ -303,24 +369,75 @@ static void iree_hal_amd_xdna_transfer_buffers(
   }
 }
 
+// Returns an unused allocation transaction with each reservation's original
+// prerequisite. Failure to publish a new allocation never proves older use
+// complete.
+static void iree_hal_amd_xdna_operation_release_alloca_reservations(
+    iree_hal_amd_xdna_operation_t* operation) {
+  if (!operation->alloca.reservations_held) {
+    return;
+  }
+  for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+    iree_hal_pool_release_reservations(
+        operation->alloca.pool, 1, &operation->alloca.reservations[i],
+        operation->alloca.acquire_infos[i].reuse_frontier);
+  }
+  operation->alloca.reservations_held = false;
+}
+
 static void iree_hal_amd_xdna_operation_release_resources(
     iree_hal_amd_xdna_operation_t* operation) {
-  if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_DISPATCH) {
-    for (iree_host_size_t i = 0; i < operation->dispatch.binding_count; ++i) {
-      iree_hal_buffer_release(
-          operation->dispatch.bindings[i].buffer_ref.buffer);
-    }
-    iree_hal_amd_xdna_invocation_release(operation->dispatch.invocation);
-    iree_hal_executable_release(operation->dispatch.executable);
-  } else if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_TRANSFER) {
-    for (iree_hal_amd_xdna_transfer_t* transfer = operation->transfer.head;
-         transfer; transfer = transfer->next) {
-      iree_hal_buffer_t* source = NULL;
-      iree_hal_buffer_t* target = NULL;
-      iree_hal_amd_xdna_transfer_buffers(transfer, &source, &target);
-      iree_hal_buffer_release(source);
-      iree_hal_buffer_release(target);
-    }
+  switch (operation->kind) {
+    case IREE_HAL_AMD_XDNA_OPERATION_ALLOCA:
+      if (operation->alloca.materialized_buffers &&
+          operation->alloca.transient_buffers) {
+        for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+          iree_hal_buffer_release(operation->alloca.materialized_buffers[i]);
+          iree_hal_buffer_release(operation->alloca.transient_buffers[i]);
+        }
+      }
+      iree_hal_amd_xdna_operation_release_alloca_reservations(operation);
+      if (operation->alloca.memory_wait) {
+        IREE_ASSERT_TRUE(operation->alloca.memory_wait->kind ==
+                         IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE);
+        if (operation->alloca.memory_wait->capacity_wait) {
+          iree_hal_pool_wait_destroy(
+              operation->alloca.memory_wait->capacity_wait);
+        }
+      }
+      break;
+    case IREE_HAL_AMD_XDNA_OPERATION_DEALLOCA:
+      if (operation->dealloca.transient_buffers) {
+        for (iree_host_size_t i = 0; i < operation->dealloca.buffer_count;
+             ++i) {
+          if (operation->dealloca.marks_owned) {
+            iree_hal_buffer_allocation_abort_dealloca(
+                operation->dealloca.transient_buffers[i]);
+          }
+          iree_hal_buffer_release(operation->dealloca.transient_buffers[i]);
+        }
+      }
+      break;
+    case IREE_HAL_AMD_XDNA_OPERATION_DISPATCH:
+      for (iree_host_size_t i = 0; i < operation->dispatch.binding_count; ++i) {
+        iree_hal_buffer_release(
+            operation->dispatch.bindings[i].buffer_ref.buffer);
+      }
+      iree_hal_amd_xdna_invocation_release(operation->dispatch.invocation);
+      iree_hal_executable_release(operation->dispatch.executable);
+      break;
+    case IREE_HAL_AMD_XDNA_OPERATION_TRANSFER:
+      for (iree_hal_amd_xdna_transfer_t* transfer = operation->transfer.head;
+           transfer; transfer = transfer->next) {
+        iree_hal_buffer_t* source = NULL;
+        iree_hal_buffer_t* target = NULL;
+        iree_hal_amd_xdna_transfer_buffers(transfer, &source, &target);
+        iree_hal_buffer_release(source);
+        iree_hal_buffer_release(target);
+      }
+      break;
+    case IREE_HAL_AMD_XDNA_OPERATION_BARRIER:
+      break;
   }
   iree_hal_semaphore_list_release(operation->waits);
 }
@@ -691,14 +808,226 @@ static void iree_hal_amd_xdna_publisher_execute(
   }
 }
 
+static void iree_hal_amd_xdna_operation_merge_memory_frontiers(
+    iree_hal_amd_xdna_operation_t* operation) {
+  iree_async_frontier_t* target =
+      iree_async_fixed_frontier_as_frontier(&operation->frontier.frontier);
+  for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+    const iree_async_frontier_t* source =
+        operation->alloca.acquire_infos[i].reuse_frontier;
+    if (source && !iree_async_frontier_merge(
+                      target, IREE_HAL_AMD_XDNA_FRONTIER_CAPACITY, source)) {
+      operation->frontier.exact = false;
+    }
+  }
+}
+
+static iree_status_t iree_hal_amd_xdna_operation_prepare_frontier_wait(
+    iree_hal_amd_xdna_operation_t* operation) {
+  iree_hal_amd_xdna_memory_wait_t* wait = operation->alloca.memory_wait;
+  if (!operation->alloca.pool->frontier_tracker) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "XDNA allocation pool returned a reuse frontier without a tracker");
+  }
+
+  iree_host_size_t entry_capacity = 0;
+  for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+    const iree_hal_pool_acquire_info_t* info =
+        &operation->alloca.acquire_infos[i];
+    if (info->result != IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT) {
+      continue;
+    }
+    if (IREE_UNLIKELY(!info->reuse_frontier ||
+                      !info->reuse_frontier->entry_count)) {
+      return iree_make_status(IREE_STATUS_INTERNAL,
+                              "XDNA allocation reservation %" PRIhsz
+                              " requires a wait but has no dependency frontier",
+                              i);
+    }
+    entry_capacity += info->reuse_frontier->entry_count;
+    if (entry_capacity > UINT8_MAX) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "XDNA allocation dependency frontier exceeds %u axes", UINT8_MAX);
+    }
+  }
+
+  if (!wait->frontier) {
+    iree_host_size_t frontier_size = 0;
+    IREE_RETURN_IF_ERROR(
+        iree_async_frontier_size((uint8_t)entry_capacity, &frontier_size));
+    IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_capture_allocate_metadata(
+        &operation->capture, frontier_size, (void**)&wait->frontier));
+  }
+  iree_async_frontier_initialize(wait->frontier, 0);
+  for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+    const iree_hal_pool_acquire_info_t* info =
+        &operation->alloca.acquire_infos[i];
+    if (info->result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT &&
+        !iree_async_frontier_merge(wait->frontier, (uint8_t)entry_capacity,
+                                   info->reuse_frontier)) {
+      return iree_make_status(
+          IREE_STATUS_RESOURCE_EXHAUSTED,
+          "XDNA allocation dependency frontier exceeds %" PRIhsz " axes",
+          entry_capacity);
+    }
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t iree_hal_amd_xdna_operation_prepare_alloca_storage(
+    iree_hal_amd_xdna_operation_t* operation) {
+  iree_status_t status = iree_ok_status();
+  const bool has_reservation_views = iree_hal_pool_query_reservation_views(
+      operation->alloca.pool, operation->alloca.request_count,
+      operation->alloca.reservations, operation->alloca.reservation_views);
+  if (!has_reservation_views) {
+    status = iree_hal_pool_materialize_reservations(
+        operation->alloca.pool, operation->alloca.request_count,
+        operation->alloca.requests, operation->alloca.reservations,
+        IREE_HAL_POOL_MATERIALIZE_FLAG_NONE,
+        operation->alloca.materialized_buffers);
+    if (iree_status_is_ok(status)) {
+      for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+        iree_hal_buffer_t* materialized =
+            operation->alloca.materialized_buffers[i];
+        operation->alloca.reservation_views[i] =
+            (iree_hal_pool_reservation_view_t){
+                .buffer = materialized,
+                .byte_offset = iree_hal_buffer_byte_offset(materialized),
+                .byte_length = iree_hal_buffer_byte_length(materialized),
+                .memory = iree_hal_buffer_memory_view(materialized),
+            };
+      }
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    iree_hal_pool_advise_asan_reservations(
+        operation->alloca.pool, operation->alloca.request_count,
+        operation->alloca.reservations,
+        IREE_HAL_ASAN_RANGE_ADVICE_FLAG_ALLOCATED);
+    for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+      iree_hal_amd_xdna_transient_buffer_attach_reservation(
+          operation->alloca.transient_buffers[i], operation->alloca.pool,
+          &operation->alloca.reservations[i]);
+    }
+    operation->alloca.reservations_held = false;
+    for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+      iree_hal_amd_xdna_transient_buffer_stage_backing(
+          operation->alloca.transient_buffers[i],
+          &operation->alloca.reservation_views[i]);
+      iree_hal_buffer_release(operation->alloca.materialized_buffers[i]);
+      operation->alloca.materialized_buffers[i] = NULL;
+    }
+    for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+      iree_hal_amd_xdna_transient_buffer_commit(
+          operation->alloca.transient_buffers[i]);
+    }
+    iree_hal_amd_xdna_operation_merge_memory_frontiers(operation);
+  } else {
+    for (iree_host_size_t i = 0; i < operation->alloca.request_count; ++i) {
+      iree_hal_buffer_release(operation->alloca.materialized_buffers[i]);
+      operation->alloca.materialized_buffers[i] = NULL;
+    }
+    iree_hal_amd_xdna_operation_release_alloca_reservations(operation);
+  }
+  return status;
+}
+
+static iree_status_t iree_hal_amd_xdna_operation_execute_alloca(
+    iree_hal_amd_xdna_operation_t* operation) {
+  iree_hal_amd_xdna_memory_wait_t* wait = operation->alloca.memory_wait;
+  if (operation->alloca.reservations_held) {
+    operation->alloca.acquire_result = IREE_HAL_POOL_ACQUIRE_OK;
+    return iree_hal_amd_xdna_operation_prepare_alloca_storage(operation);
+  }
+
+  iree_hal_pool_wait_prepare(wait->capacity_wait);
+  iree_status_t status = iree_hal_pool_acquire_reservations(
+      operation->alloca.pool, operation->alloca.request_count,
+      operation->alloca.requests,
+      iree_hal_amd_xdna_frontier_state_as_frontier(&operation->frontier),
+      IREE_HAL_POOL_RESERVE_FLAG_ALLOW_WAIT_FRONTIER,
+      operation->alloca.reservations, operation->alloca.acquire_infos,
+      &operation->alloca.acquire_result);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_pool_wait_abort(wait->capacity_wait);
+    return status;
+  }
+
+  operation->alloca.reservations_held =
+      operation->alloca.acquire_result == IREE_HAL_POOL_ACQUIRE_OK ||
+      operation->alloca.acquire_result == IREE_HAL_POOL_ACQUIRE_OK_FRESH ||
+      operation->alloca.acquire_result == IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT;
+  switch (operation->alloca.acquire_result) {
+    case IREE_HAL_POOL_ACQUIRE_OK:
+    case IREE_HAL_POOL_ACQUIRE_OK_FRESH:
+      iree_hal_pool_wait_abort(wait->capacity_wait);
+      return iree_hal_amd_xdna_operation_prepare_alloca_storage(operation);
+    case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT:
+      iree_hal_pool_wait_abort(wait->capacity_wait);
+      status = iree_hal_amd_xdna_operation_prepare_frontier_wait(operation);
+      if (!iree_status_is_ok(status)) {
+        iree_hal_amd_xdna_operation_release_alloca_reservations(operation);
+      }
+      return status;
+    case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
+    case IREE_HAL_POOL_ACQUIRE_OVER_BUDGET:
+      // Preserve the observation prepared before acquisition. The proactor
+      // owner commits it after the host service acknowledges this item.
+      return iree_ok_status();
+  }
+  iree_hal_pool_wait_abort(wait->capacity_wait);
+  return iree_make_status(IREE_STATUS_INTERNAL,
+                          "unrecognized XDNA pool acquire result %u",
+                          operation->alloca.acquire_result);
+}
+
+static void iree_hal_amd_xdna_operation_execute_dealloca(
+    iree_hal_amd_xdna_operation_t* operation) {
+  for (iree_host_size_t i = 0; i < operation->dealloca.buffer_count; ++i) {
+    iree_hal_pool_t* source_pool = NULL;
+    iree_hal_buffer_allocation_take_dealloca_reservation(
+        operation->dealloca.transient_buffers[i], &source_pool,
+        &operation->dealloca.reservations[i]);
+    IREE_ASSERT_TRUE(source_pool == operation->dealloca.pool);
+  }
+  operation->dealloca.marks_owned = false;
+  for (iree_host_size_t i = 0; i < operation->dealloca.buffer_count; ++i) {
+    iree_hal_buffer_allocation_decommit(
+        operation->dealloca.transient_buffers[i]);
+  }
+  iree_hal_pool_advise_asan_reservations(
+      operation->dealloca.pool, operation->dealloca.buffer_count,
+      operation->dealloca.reservations,
+      IREE_HAL_ASAN_RANGE_ADVICE_FLAG_RELEASED);
+  iree_hal_pool_release_reservations(
+      operation->dealloca.pool, operation->dealloca.buffer_count,
+      operation->dealloca.reservations, /*death_frontier=*/NULL);
+}
+
 static void iree_hal_amd_xdna_host_worker_execute(
     void* user_data, iree_hal_amd_xdna_queue_service_item_t* item) {
   iree_hal_amd_xdna_operation_t* operation =
       iree_hal_amd_xdna_operation_from_service_item(item);
-  for (iree_hal_amd_xdna_transfer_t* transfer = operation->transfer.head;
-       transfer && iree_status_is_ok(operation->status);
-       transfer = transfer->next) {
-    operation->status = iree_hal_amd_xdna_transfer_execute(transfer);
+  switch (operation->kind) {
+    case IREE_HAL_AMD_XDNA_OPERATION_ALLOCA:
+      operation->status = iree_hal_amd_xdna_operation_execute_alloca(operation);
+      break;
+    case IREE_HAL_AMD_XDNA_OPERATION_DEALLOCA:
+      iree_hal_amd_xdna_operation_execute_dealloca(operation);
+      break;
+    case IREE_HAL_AMD_XDNA_OPERATION_TRANSFER:
+      for (iree_hal_amd_xdna_transfer_t* transfer = operation->transfer.head;
+           transfer && iree_status_is_ok(operation->status);
+           transfer = transfer->next) {
+        operation->status = iree_hal_amd_xdna_transfer_execute(transfer);
+      }
+      break;
+    case IREE_HAL_AMD_XDNA_OPERATION_BARRIER:
+    case IREE_HAL_AMD_XDNA_OPERATION_DISPATCH:
+      IREE_BUILTIN_UNREACHABLE();
   }
 }
 
@@ -730,7 +1059,9 @@ static void iree_hal_amd_xdna_queue_enqueue_ready(
     iree_hal_amd_xdna_operation_complete(operation);
     return;
   }
-  if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_TRANSFER) {
+  if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_ALLOCA ||
+      operation->kind == IREE_HAL_AMD_XDNA_OPERATION_DEALLOCA ||
+      operation->kind == IREE_HAL_AMD_XDNA_OPERATION_TRANSFER) {
     iree_hal_amd_xdna_queue_service_enqueue(&queue->host_worker,
                                             &operation->service_item);
     return;
@@ -1073,6 +1404,63 @@ static void iree_hal_amd_xdna_direct_publication_complete(
                                              /*item=*/NULL, operation, status);
 }
 
+static void iree_hal_amd_xdna_memory_wait_resolved(void* user_data,
+                                                   iree_status_t status) {
+  iree_hal_amd_xdna_operation_t* operation = user_data;
+  if (!iree_status_is_ok(status)) {
+    intptr_t expected = 0;
+    if (!iree_atomic_compare_exchange_strong(
+            &operation->memory_status, &expected, (intptr_t)status,
+            iree_memory_order_acq_rel, iree_memory_order_relaxed)) {
+      iree_status_free(status);
+    }
+  }
+  status = iree_async_proactor_submit_one(operation->queue->proactor,
+                                          &operation->memory_completion);
+  if (!iree_status_is_ok(status)) {
+    iree_status_t memory_status = (iree_status_t)iree_atomic_exchange(
+        &operation->memory_status, 0, iree_memory_order_acquire);
+    status = iree_status_join(memory_status, status);
+    iree_hal_amd_xdna_queue_report(operation->queue, iree_status_code(status),
+                                   iree_status_message(status));
+    iree_hal_semaphore_list_fail(operation->signals, status);
+  }
+}
+
+static void iree_hal_amd_xdna_queue_memory_complete(
+    void* user_data, iree_async_operation_t* base_operation,
+    iree_status_t status, iree_async_completion_flags_t flags) {
+  (void)base_operation;
+  (void)flags;
+  iree_hal_amd_xdna_operation_t* operation = user_data;
+  iree_hal_amd_xdna_memory_wait_t* wait = operation->alloca.memory_wait;
+  const iree_hal_amd_xdna_memory_wait_kind_t wait_kind = wait->kind;
+  wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;
+  iree_status_t memory_status = (iree_status_t)iree_atomic_exchange(
+      &operation->memory_status, 0, iree_memory_order_acquire);
+  status = iree_status_join(status, memory_status);
+  if (iree_status_is_ok(status) &&
+      !iree_status_is_ok(operation->queue->failure_status)) {
+    status = iree_status_clone(operation->queue->failure_status);
+  }
+  if (!iree_status_is_ok(status)) {
+    operation->status = status;
+    if (wait_kind == IREE_HAL_AMD_XDNA_MEMORY_WAIT_FRONTIER) {
+      iree_hal_amd_xdna_operation_release_alloca_reservations(operation);
+    }
+    iree_hal_amd_xdna_operation_complete(operation);
+    return;
+  }
+  if (IREE_UNLIKELY(wait_kind == IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE)) {
+    operation->status = iree_make_status(
+        IREE_STATUS_INTERNAL, "XDNA memory wait completed without an owner");
+    iree_hal_amd_xdna_operation_complete(operation);
+    return;
+  }
+  iree_hal_amd_xdna_queue_service_enqueue(&operation->queue->host_worker,
+                                          &operation->service_item);
+}
+
 static void iree_hal_amd_xdna_host_worker_complete(
     void* user_data, iree_hal_amd_xdna_queue_service_t* service,
     iree_hal_amd_xdna_queue_service_item_t* item, iree_status_t status) {
@@ -1085,6 +1473,44 @@ static void iree_hal_amd_xdna_host_worker_complete(
     operation->status = iree_status_clone(queue->failure_status);
   }
   iree_hal_amd_xdna_queue_service_acknowledge(service, item);
+
+  if (operation->kind == IREE_HAL_AMD_XDNA_OPERATION_ALLOCA &&
+      iree_status_is_ok(operation->status)) {
+    iree_hal_amd_xdna_memory_wait_t* wait = operation->alloca.memory_wait;
+    iree_async_operation_initialize(
+        &operation->memory_completion, IREE_ASYNC_OPERATION_TYPE_NOP,
+        IREE_ASYNC_OPERATION_FLAG_NONE, iree_hal_amd_xdna_queue_memory_complete,
+        operation);
+    switch (operation->alloca.acquire_result) {
+      case IREE_HAL_POOL_ACQUIRE_OK:
+      case IREE_HAL_POOL_ACQUIRE_OK_FRESH:
+        break;
+      case IREE_HAL_POOL_ACQUIRE_OK_NEEDS_WAIT: {
+        wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_FRONTIER;
+        status = iree_async_frontier_tracker_wait(
+            operation->alloca.pool->frontier_tracker, wait->frontier,
+            iree_hal_amd_xdna_memory_wait_resolved, operation,
+            &wait->frontier_waiter);
+        if (iree_status_is_ok(status)) {
+          return;
+        }
+        wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_NONE;
+        iree_hal_amd_xdna_operation_release_alloca_reservations(operation);
+        operation->status = status;
+        break;
+      }
+      case IREE_HAL_POOL_ACQUIRE_EXHAUSTED:
+      case IREE_HAL_POOL_ACQUIRE_OVER_BUDGET:
+        wait->kind = IREE_HAL_AMD_XDNA_MEMORY_WAIT_CAPACITY;
+        iree_hal_pool_wait_commit(
+            wait->capacity_wait, iree_infinite_timeout(),
+            (iree_hal_pool_wait_callback_t){
+                .fn = iree_hal_amd_xdna_memory_wait_resolved,
+                .user_data = operation,
+            });
+        return;
+    }
+  }
   iree_hal_amd_xdna_operation_complete(operation);
 }
 
@@ -1249,10 +1675,9 @@ static void iree_hal_amd_xdna_queue_shutdown_on_proactor(
     if (!amdf_status_is_ok(status)) {
       iree_hal_amd_xdna_context_report(queue->context, status,
                                        "kernel_queue_destroy");
-      // BUSY preserves the native queue and its borrowed notification target.
-      if (status == amdf_make_api_status(AMDF_STATUS_CODE_BUSY)) {
-        return;
-      }
+      // Failure does not prove that the native queue released its borrowed
+      // notification target. Retain the complete reachable owner graph.
+      return;
     }
     queue->handle = NULL;
   }
@@ -1395,6 +1820,7 @@ static iree_status_t iree_hal_amd_xdna_operation_create(
         operation);
     iree_atomic_store(&operation->wait_count, 0, iree_memory_order_relaxed);
     iree_atomic_store(&operation->wait_status, 0, iree_memory_order_relaxed);
+    iree_atomic_store(&operation->memory_status, 0, iree_memory_order_relaxed);
     *out_operation = operation;
   } else {
     iree_hal_semaphore_list_release(operation->signals);
@@ -1686,9 +2112,7 @@ static void iree_hal_amd_xdna_queue_destroy(iree_hal_queue_t* base) {
     if (!amdf_status_is_ok(status)) {
       iree_hal_amd_xdna_context_report(queue->context, status,
                                        "kernel_queue_destroy");
-      if (status == amdf_make_api_status(AMDF_STATUS_CODE_BUSY)) {
-        return;
-      }
+      return;
     }
     queue->handle = NULL;
   }
@@ -1911,24 +2335,293 @@ static iree_status_t iree_hal_amd_xdna_queue_timestamp(
                           "XDNA queue does not support timestamp");
 }
 
+static bool iree_hal_amd_xdna_pool_supports_queue_families(
+    iree_hal_queue_family_affinity_t supported,
+    iree_hal_queue_family_affinity_t requested) {
+  if (iree_hal_queue_family_affinity_is_any(supported)) {
+    return true;
+  }
+  return !iree_hal_queue_family_affinity_is_any(requested) &&
+         iree_all_bits_set(supported, requested);
+}
+
+static iree_status_t iree_hal_amd_xdna_validate_alloca_request(
+    const iree_hal_pool_capabilities_t* capabilities, iree_host_size_t index,
+    const iree_hal_pool_reservation_request_t* request) {
+  const iree_device_size_t alignment =
+      request->params.min_alignment ? request->params.min_alignment : 1;
+  if (IREE_UNLIKELY(!iree_device_size_is_power_of_two(alignment))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz " alignment %" PRIdsz
+                            " is not a power of two",
+                            index, alignment);
+  }
+  if (IREE_UNLIKELY(!iree_all_bits_set(capabilities->memory_type,
+                                       request->params.type))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz
+                            " memory type is not supported by the source pool",
+                            index);
+  }
+  if (IREE_UNLIKELY(!iree_all_bits_set(capabilities->allowed_access,
+                                       request->params.access))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz
+                            " access is not supported by the source pool",
+                            index);
+  }
+  if (IREE_UNLIKELY(!iree_all_bits_set(capabilities->supported_usage,
+                                       request->params.usage))) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz
+                            " usage is not supported by the source pool",
+                            index);
+  }
+  if (IREE_UNLIKELY(!iree_hal_amd_xdna_pool_supports_queue_families(
+          capabilities->queue_family_affinity,
+          request->params.queue_family_affinity))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "allocation request %" PRIhsz
+        " queue family affinity is not supported by the source pool",
+        index);
+  }
+  if (IREE_UNLIKELY(capabilities->min_allocation_size &&
+                    request->allocation_size <
+                        capabilities->min_allocation_size)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz " size %" PRIdsz
+                            " is smaller than source pool minimum %" PRIdsz,
+                            index, request->allocation_size,
+                            capabilities->min_allocation_size);
+  }
+  if (IREE_UNLIKELY(capabilities->max_allocation_size &&
+                    request->allocation_size >
+                        capabilities->max_allocation_size)) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                            "allocation request %" PRIhsz " size %" PRIdsz
+                            " exceeds source pool maximum %" PRIdsz,
+                            index, request->allocation_size,
+                            capabilities->max_allocation_size);
+  }
+  if (IREE_UNLIKELY(capabilities->max_allocation_alignment &&
+                    alignment > capabilities->max_allocation_alignment)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "allocation request %" PRIhsz " alignment %" PRIdsz
+                            " exceeds source pool maximum %" PRIdsz,
+                            index, alignment,
+                            capabilities->max_allocation_alignment);
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t iree_hal_amd_xdna_queue_alloca(
-    iree_hal_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_hal_pool_t* pool, iree_host_size_t request_count,
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
+    iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
     iree_hal_buffer_t** out_buffers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "XDNA queue does not support alloca");
+  iree_hal_amd_xdna_queue_t* queue = (iree_hal_amd_xdna_queue_t*)base;
+  iree_hal_pool_capabilities_t capabilities;
+  iree_hal_pool_query_capabilities(pool, &capabilities);
+
+  iree_arena_allocator_t scratch_arena;
+  iree_arena_initialize(&queue->storage.metadata_block_pool, &scratch_arena);
+  iree_hal_buffer_t** transient_buffers = NULL;
+  iree_status_t status = iree_arena_allocate_array(
+      &scratch_arena, request_count, sizeof(*transient_buffers),
+      (void**)&transient_buffers);
+  if (!iree_status_is_ok(status)) {
+    iree_arena_deinitialize(&scratch_arena);
+    return status;
+  }
+  memset(transient_buffers, 0, request_count * sizeof(*transient_buffers));
+
+  iree_hal_amd_xdna_operation_t* operation = NULL;
+  status = iree_hal_amd_xdna_operation_create(
+      queue, waits, signals, IREE_HAL_AMD_XDNA_OPERATION_ALLOCA, &operation);
+  if (!iree_status_is_ok(status)) {
+    iree_arena_deinitialize(&scratch_arena);
+    return status;
+  }
+  operation->alloca.pool = pool;
+  operation->alloca.request_count = request_count;
+
+  iree_host_size_t storage_size = 0;
+  iree_host_size_t requests_offset = 0;
+  iree_host_size_t buffers_offset = 0;
+  iree_host_size_t reservations_offset = 0;
+  iree_host_size_t infos_offset = 0;
+  iree_host_size_t views_offset = 0;
+  iree_host_size_t materialized_offset = 0;
+  status = IREE_STRUCT_LAYOUT(
+      0, &storage_size,
+      IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_request_t,
+                        &requests_offset),
+      IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*, &buffers_offset),
+      IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_t,
+                        &reservations_offset),
+      IREE_STRUCT_FIELD(request_count, iree_hal_pool_acquire_info_t,
+                        &infos_offset),
+      IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_view_t,
+                        &views_offset),
+      IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*,
+                        &materialized_offset));
+  uint8_t* storage = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_xdna_queue_capture_allocate_metadata(
+        &operation->capture, storage_size, (void**)&storage);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(storage, 0, storage_size);
+    operation->alloca.requests =
+        (iree_hal_pool_reservation_request_t*)(storage + requests_offset);
+    operation->alloca.transient_buffers =
+        (iree_hal_buffer_t**)(storage + buffers_offset);
+    operation->alloca.reservations =
+        (iree_hal_pool_reservation_t*)(storage + reservations_offset);
+    operation->alloca.acquire_infos =
+        (iree_hal_pool_acquire_info_t*)(storage + infos_offset);
+    operation->alloca.reservation_views =
+        (iree_hal_pool_reservation_view_t*)(storage + views_offset);
+    operation->alloca.materialized_buffers =
+        (iree_hal_buffer_t**)(storage + materialized_offset);
+  }
+
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_xdna_queue_capture_allocate_metadata(
+        &operation->capture, sizeof(*operation->alloca.memory_wait),
+        (void**)&operation->alloca.memory_wait);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(operation->alloca.memory_wait, 0,
+           sizeof(*operation->alloca.memory_wait));
+    status = iree_hal_pool_wait_create(
+        pool, iree_arena_allocator(&operation->capture.metadata_arena),
+        &operation->alloca.memory_wait->capacity_wait);
+  }
+
+  for (iree_host_size_t i = 0; i < request_count && iree_status_is_ok(status);
+       ++i) {
+    iree_hal_pool_reservation_request_t* request =
+        &operation->alloca.requests[i];
+    *request = requests[i];
+    if (pool->memory_contract) {
+      request->params = pool->memory_contract->buffer_params;
+      request->params.min_alignment = requests[i].params.min_alignment;
+    } else {
+      iree_hal_buffer_params_canonicalize(&request->params);
+      if (iree_any_bit_set(request->params.type,
+                           IREE_HAL_MEMORY_TYPE_OPTIMAL)) {
+        request->params.type &= ~IREE_HAL_MEMORY_TYPE_OPTIMAL;
+        request->params.type |= capabilities.memory_type;
+      }
+    }
+    status =
+        iree_hal_amd_xdna_validate_alloca_request(&capabilities, i, request);
+    if (!iree_status_is_ok(status)) {
+      break;
+    }
+    const iree_hal_buffer_placement_t placement = {
+        .device = operation->device,
+        .queue_family_affinity = request->params.queue_family_affinity,
+        .flags = IREE_HAL_BUFFER_PLACEMENT_FLAG_ASYNCHRONOUS,
+    };
+    status = iree_hal_amd_xdna_transient_buffer_create(
+        placement, request->params, request->allocation_size,
+        request->allocation_size, pool, &queue->storage.metadata_block_pool,
+        &operation->alloca.transient_buffers[i]);
+    if (iree_status_is_ok(status)) {
+      transient_buffers[i] = operation->alloca.transient_buffers[i];
+      // One reference is returned to the caller and one keeps the wrapper live
+      // until terminal operation completion.
+      iree_hal_buffer_retain(operation->alloca.transient_buffers[i]);
+    }
+  }
+
+  if (iree_status_is_ok(status)) {
+    status =
+        iree_async_proactor_submit_one(queue->proactor, &operation->admission);
+  }
+  if (iree_status_is_ok(status)) {
+    memcpy(out_buffers, transient_buffers,
+           request_count * sizeof(*out_buffers));
+  } else {
+    for (iree_host_size_t i = 0; i < request_count; ++i) {
+      iree_hal_buffer_release(transient_buffers[i]);
+    }
+    iree_hal_amd_xdna_operation_discard(operation);
+  }
+  iree_arena_deinitialize(&scratch_arena);
+  return status;
 }
 
 static iree_status_t iree_hal_amd_xdna_queue_dealloca(
-    iree_hal_queue_t* queue,
-    const iree_hal_semaphore_list_t wait_semaphore_list,
-    const iree_hal_semaphore_list_t signal_semaphore_list,
-    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers) {
-  return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
-                          "XDNA queue does not support dealloca");
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_host_size_t buffer_count,
+    iree_hal_buffer_t* const* buffers) {
+  iree_hal_amd_xdna_queue_t* queue = (iree_hal_amd_xdna_queue_t*)base;
+  iree_hal_amd_xdna_operation_t* operation = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_create(
+      queue, waits, signals, IREE_HAL_AMD_XDNA_OPERATION_DEALLOCA, &operation));
+  operation->dealloca.buffer_count = buffer_count;
+
+  iree_host_size_t storage_size = 0;
+  iree_host_size_t buffers_offset = 0;
+  iree_host_size_t reservations_offset = 0;
+  iree_status_t status = IREE_STRUCT_LAYOUT(
+      0, &storage_size,
+      IREE_STRUCT_FIELD(buffer_count, iree_hal_buffer_t*, &buffers_offset),
+      IREE_STRUCT_FIELD(buffer_count, iree_hal_pool_reservation_t,
+                        &reservations_offset));
+  uint8_t* storage = NULL;
+  if (iree_status_is_ok(status)) {
+    status = iree_hal_amd_xdna_queue_capture_allocate_metadata(
+        &operation->capture, storage_size, (void**)&storage);
+  }
+  if (iree_status_is_ok(status)) {
+    memset(storage, 0, storage_size);
+    operation->dealloca.transient_buffers =
+        (iree_hal_buffer_t**)(storage + buffers_offset);
+    operation->dealloca.reservations =
+        (iree_hal_pool_reservation_t*)(storage + reservations_offset);
+    for (iree_host_size_t i = 0; i < buffer_count; ++i) {
+      operation->dealloca.transient_buffers[i] = buffers[i];
+      iree_hal_buffer_retain(buffers[i]);
+    }
+  }
+
+  iree_host_size_t marked_count = 0;
+  while (marked_count < buffer_count && iree_status_is_ok(status)) {
+    iree_hal_pool_t* source_pool = NULL;
+    status = iree_hal_buffer_allocation_begin_dealloca(buffers[marked_count],
+                                                       &source_pool);
+    if (iree_status_is_ok(status)) {
+      if (marked_count == 0) {
+        operation->dealloca.pool = source_pool;
+      } else if (source_pool != operation->dealloca.pool) {
+        iree_hal_buffer_allocation_abort_dealloca(buffers[marked_count]);
+        status = iree_make_status(
+            IREE_STATUS_INVALID_ARGUMENT,
+            "XDNA deallocation transaction spans multiple source pools");
+        break;
+      }
+      ++marked_count;
+    }
+  }
+  if (!iree_status_is_ok(status)) {
+    for (iree_host_size_t i = 0; i < marked_count; ++i) {
+      iree_hal_buffer_allocation_abort_dealloca(buffers[i]);
+    }
+  } else {
+    operation->dealloca.marks_owned = true;
+    status =
+        iree_async_proactor_submit_one(queue->proactor, &operation->admission);
+  }
+  if (!iree_status_is_ok(status)) {
+    iree_hal_amd_xdna_operation_discard(operation);
+  }
+  return status;
 }
 
 static iree_status_t iree_hal_amd_xdna_queue_read(

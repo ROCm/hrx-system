@@ -192,6 +192,19 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "transient_buffer",
+    srcs = ["transient_buffer.c"],
+    hdrs = ["transient_buffer.h"],
+    deps = [
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "queue",
     srcs = ["queue.c"],
     hdrs = ["queue.h"],
@@ -202,6 +215,7 @@ iree_runtime_cc_library(
         ":queue_service",
         ":queue_storage",
         ":semaphore",
+        ":transient_buffer",
         "//libamdf:headers",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
@@ -306,6 +320,8 @@ iree_runtime_cc_test(
         "//runtime/src/iree/base",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/drivers/amd/xdna/image/testing:image_fixture",
+        "//runtime/src/iree/hal/memory:slab_cache",
+        "//runtime/src/iree/hal/memory:tlsf_pool",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],
