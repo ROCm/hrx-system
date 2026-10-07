@@ -75,10 +75,10 @@ iree_status_t loom_xdna_register_field_info(
     loom_xdna_register_field_id_t field_id,
     loom_xdna_register_field_info_t* out_info);
 
-// Returns one address-pattern dimension by ordinal.
-iree_status_t loom_xdna_register_field_dimension(
-    loom_xdna_register_field_id_t field_id, iree_host_size_t ordinal,
-    loom_xdna_register_dimension_info_t* out_info);
+// Returns one address-pattern dimension by ordinal. The field identifier and
+// dimension ordinal are compiler-owned selections from the generated corpus.
+loom_xdna_register_dimension_info_t loom_xdna_register_field_dimension(
+    loom_xdna_register_field_id_t field_id, iree_host_size_t ordinal);
 
 // Encodes one raw semantic value into positioned 32-bit register bits.
 //

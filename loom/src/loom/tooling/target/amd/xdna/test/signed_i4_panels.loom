@@ -1,0 +1,274 @@
+// Three changing 8x8 panels cross the capacity-two FIFO reuse boundary.
+// Weights are signed two's-complement nibbles, low nibble first; activations
+// are signed bytes. The result is an exact 8x8 i32 dot product without scales.
+aie2p.target<array> @array_target
+
+pipeline.def<kernel> public retain target(@array_target) @signed_i4_panels() run(%packed_weights: buffer, %activations: buffer, %output: buffer) {
+  %weights_aligned, %activations_aligned, %output_aligned = buffer.assume.alignment %packed_weights, %activations, %output {minimum_alignment = 64} : buffer, buffer, buffer
+  %memory = pipeline.memory<workgroup>[0, 3] : pool
+  %origin = index.constant 0 : offset
+  %weight_storage_bytes = index.constant 64 : offset
+  %activation_storage_bytes = index.constant 128 : offset
+  %output_storage_bytes = index.constant 512 : offset
+  %capacity = index.constant 2 : index
+  %weight_storage = buffer.alloca<workgroup> pool(%memory) align(64) %weight_storage_bytes : buffer
+  %weight_slots = buffer.view %weight_storage[%origin] : buffer -> view<2x32xi8>
+  %weight_records = channel.bind<fifo> %weight_slots, %capacity : view<2x32xi8>, index -> channel<tile<32xi8>>
+  %activation_storage = buffer.alloca<workgroup> pool(%memory) align(64) %activation_storage_bytes : buffer
+  %activation_slots = buffer.view %activation_storage[%origin] : buffer -> view<2x64xi8>
+  %activation_records = channel.bind<fifo> %activation_slots, %capacity : view<2x64xi8>, index -> channel<tile<64xi8>>
+  %output_storage = buffer.alloca<workgroup> pool(%memory) align(64) %output_storage_bytes : buffer
+  %output_slots = buffer.view %output_storage[%origin] : buffer -> view<2x8x8xi32>
+  %output_records = channel.bind<fifo> %output_slots, %capacity : view<2x8x8xi32>, index -> channel<tile<8x8xi32>>
+  %first_record = index.constant 0 : index
+  %record_step = index.constant 1 : index
+  %record_count = index.constant 3 : index
+  %packed_record_bytes = index.constant 32 : index
+  %activation_record_bytes = index.constant 64 : index
+  %output_record_bytes = index.constant 256 : index
+  pipeline.strand workers([0, 2], [1, 1], [1, 1]) {
+    scf.for %record = [%first_record to %record_count step %record_step] {
+      %weight_position = index.mul %record, %packed_record_bytes : index
+      %weight_offset = index.cast %weight_position : index to offset
+      %weight_external = buffer.view %weights_aligned[%weight_offset] : buffer -> view<32xi8>
+      %weight_write, %weight_destination = channel.reserve %weight_records : channel<tile<32xi8>> -> (write<tile<32xi8>>, view<32xi8>)
+      %weight_ingress = kernel.async.copy %weight_external to %weight_destination {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<32xi8> to view<32xi8> -> kernel.async.token
+      %weight_incoming = kernel.async.group %weight_ingress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %weight_incoming {newer_groups = 0} : kernel.async.group
+      channel.publish %weight_write : write<tile<32xi8>>
+      %activation_position = index.mul %record, %activation_record_bytes : index
+      %activation_offset = index.cast %activation_position : index to offset
+      %activation_external = buffer.view %activations_aligned[%activation_offset] : buffer -> view<64xi8>
+      %activation_write, %activation_destination = channel.reserve %activation_records : channel<tile<64xi8>> -> (write<tile<64xi8>>, view<64xi8>)
+      %activation_ingress = kernel.async.copy %activation_external to %activation_destination {cache_scope = cu, cache_temporal = regular, direction = global_to_workgroup} : view<64xi8> to view<64xi8> -> kernel.async.token
+      %activation_incoming = kernel.async.group %activation_ingress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %activation_incoming {newer_groups = 0} : kernel.async.group
+      channel.publish %activation_write : write<tile<64xi8>>
+      %output_read, %output_source = channel.acquire %output_records : channel<tile<8x8xi32>> -> (read<tile<8x8xi32>>, view<8x8xi32>)
+      %output_position = index.mul %record, %output_record_bytes : index
+      %output_offset = index.cast %output_position : index to offset
+      %output_external = buffer.view %output_aligned[%output_offset] : buffer -> view<8x8xi32>
+      %egress = kernel.async.copy %output_source to %output_external {cache_scope = cu, cache_temporal = regular, direction = workgroup_to_global} : view<8x8xi32> to view<8x8xi32> -> kernel.async.token
+      %outgoing = kernel.async.group %egress : kernel.async.token -> kernel.async.group
+      kernel.async.wait %outgoing {newer_groups = 0} : kernel.async.group
+      channel.release %output_read : read<tile<8x8xi32>>
+    }
+  }
+  pipeline.strand workers([0, 3], [1, 1], [1, 1]) {
+    %output_channels = index.constant 8 : index
+    %token_count = index.constant 8 : index
+    %reduction_width = index.constant 8 : index
+    scf.for %record = [%first_record to %record_count step %record_step] {
+      %weight_read, %weight_source = channel.acquire %weight_records : channel<tile<32xi8>> -> (read<tile<32xi8>>, view<32xi8>)
+      %activation_read, %activation_source = channel.acquire %activation_records : channel<tile<64xi8>> -> (read<tile<64xi8>>, view<64xi8>)
+      %output_write, %output_destination = channel.reserve %output_records : channel<tile<8x8xi32>> -> (write<tile<8x8xi32>>, view<8x8xi32>)
+      %packed = vector.load %weight_source[0] : view<32xi8> -> vector<32xi8>
+      %weights = vector.bitunpacks<4> %packed : vector<32xi8> -> vector<64xi8>
+      %activation_values = vector.load %activation_source[0] : view<64xi8> -> vector<64xi8>
+      %weight_fragment = vector.fragment<lhs> %weights shape [%output_channels, %reduction_width] : vector<64xi8>
+      %activation_fragment = vector.fragment<rhs> %activation_values shape [%reduction_width, %token_count] : vector<64xi8>
+      %accumulator_seed = vector.constant 0 : vector<64xi32>
+      %initial = vector.fragment<init> %accumulator_seed shape [%output_channels, %token_count] : vector<64xi32>
+      %product = vector.mma %weight_fragment, %activation_fragment, %initial : vector<64xi8>, vector<64xi8>, vector<64xi32>
+      vector.fragment.store<result> %product, %output_destination[0, 0] shape [%output_channels, %token_count] : vector<64xi32>, view<8x8xi32>
+      channel.publish %output_write : write<tile<8x8xi32>>
+      channel.release %activation_read : read<tile<64xi8>>
+      channel.release %weight_read : read<tile<32xi8>>
+    }
+  }
+}
+
+// The VM oracle extracts each signed nibble and accumulates scalar integer
+// products. It shares neither the vector unpack nor fragment/MMA machinery.
+func.def @signed_i4_panel_oracle(%packed_weights: buffer, %activations: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %weights = buffer.view %packed_weights[%origin] : buffer -> view<3x8x4xi8>
+  %inputs = buffer.view %activations[%origin] : buffer -> view<3x8x8xi8>
+  %results = buffer.view %output[%origin] : buffer -> view<3x8x8xi32>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_count = index.constant 3 : index
+  %panel_width = index.constant 8 : index
+  %pair_width = index.constant 2 : index
+  %nibble_width = scalar.constant 4 : i32
+  %nibble_mask = scalar.constant 15 : i32
+  %sign_bit = scalar.constant 8 : i32
+  %initial_sum = scalar.constant 0 : i32
+  scf.for %record = [%begin to %record_count step %step] {
+    scf.for %channel = [%begin to %panel_width step %step] {
+      scf.for %token = [%begin to %panel_width step %step] {
+        %sum = scf.for %reduction = [%begin to %panel_width step %step](%partial = %initial_sum : i32) -> (i32) {
+          %byte_index = index.div %reduction, %pair_width : index
+          %nibble_index = index.rem %reduction, %pair_width : index
+          %nibble_index_word = index.cast %nibble_index : index to i32
+          %shift = scalar.muli %nibble_index_word, %nibble_width : i32
+          %packed = view.load %weights[%record, %channel, %byte_index] : view<3x8x4xi8> -> i8
+          %packed_word = scalar.extui %packed : i8 to i32
+          %shifted = scalar.shrui %packed_word, %shift : i32
+          %nibble = scalar.andi %shifted, %nibble_mask : i32
+          %biased_weight = scalar.xori %nibble, %sign_bit : i32
+          %weight = scalar.subi %biased_weight, %sign_bit : i32
+          %activation_byte = view.load %inputs[%record, %reduction, %token] : view<3x8x8xi8> -> i8
+          %activation = scalar.extsi %activation_byte : i8 to i32
+          %product = scalar.muli %weight, %activation : i32
+          %next = scalar.addi %partial, %product : i32
+          scf.yield %next : i32
+        }
+        view.store %sum, %results[%record, %channel, %token] : i32, view<3x8x8xi32>
+      }
+    }
+  }
+  func.return
+}
+
+// Trial zero reproduces the original three panel formulas. Further trials
+// change every record while each weight panel still covers all sixteen codes.
+func.def @generate_signed_i4_records(%trial: index, %packed_weights: buffer, %activations: buffer) {
+  %origin = index.constant 0 : offset
+  %weights = buffer.view %packed_weights[%origin] : buffer -> view<3x8x4xi8>
+  %inputs = buffer.view %activations[%origin] : buffer -> view<3x8x8xi8>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %record_count = index.constant 3 : index
+  %panel_width = index.constant 8 : index
+  %packed_columns = index.constant 4 : index
+  %trial_word = index.cast %trial : index to i32
+  %weight_row_factor = scalar.constant 5 : i32
+  %weight_column_factor = scalar.constant 3 : i32
+  %weight_pair_factor = scalar.constant 6 : i32
+  %weight_record_factor = scalar.constant 7 : i32
+  %weight_trial_factor = scalar.constant 11 : i32
+  %activation_row_factor = scalar.constant 17 : i32
+  %activation_column_factor = scalar.constant 29 : i32
+  %activation_record_factor = scalar.constant 41 : i32
+  %activation_trial_factor = scalar.constant 53 : i32
+  %nibble_mask = scalar.constant 15 : i32
+  %nibble_width = scalar.constant 4 : i32
+  %weight_bias = scalar.constant 8 : i32
+  %byte_mask = scalar.constant 255 : i32
+  %activation_bias = scalar.constant 128 : i32
+  %minimum_activation = scalar.constant -128 : i8
+  %maximum_activation = scalar.constant 127 : i8
+  %weight_trial = scalar.muli %trial_word, %weight_trial_factor : i32
+  %activation_trial = scalar.muli %trial_word, %activation_trial_factor : i32
+  scf.for %record = [%begin to %record_count step %step] {
+    %record_word = index.cast %record : index to i32
+    %weight_record = scalar.muli %record_word, %weight_record_factor : i32
+    %weight_record_base = scalar.addi %weight_record, %weight_trial : i32
+    %activation_record = scalar.muli %record_word, %activation_record_factor : i32
+    %activation_record_base = scalar.addi %activation_record, %activation_trial : i32
+    scf.for %row = [%begin to %panel_width step %step] {
+      %row_word = index.cast %row : index to i32
+      %weight_row = scalar.muli %row_word, %weight_row_factor : i32
+      %weight_row_base = scalar.addi %weight_row, %weight_record_base : i32
+      scf.for %pair = [%begin to %packed_columns step %step] {
+        %pair_word = index.cast %pair : index to i32
+        %column_term = scalar.muli %pair_word, %weight_pair_factor : i32
+        %low_sum = scalar.addi %weight_row_base, %column_term : i32
+        %high_sum = scalar.addi %low_sum, %weight_column_factor : i32
+        %low_remainder = scalar.andi %low_sum, %nibble_mask : i32
+        %high_remainder = scalar.andi %high_sum, %nibble_mask : i32
+        %low_signed = scalar.subi %low_remainder, %weight_bias : i32
+        %high_signed = scalar.subi %high_remainder, %weight_bias : i32
+        %low_bits = scalar.andi %low_signed, %nibble_mask : i32
+        %high_bits = scalar.andi %high_signed, %nibble_mask : i32
+        %high_positioned = scalar.shli %high_bits, %nibble_width : i32
+        %packed_word = scalar.ori %low_bits, %high_positioned : i32
+        %packed_byte = scalar.trunci %packed_word : i32 to i8
+        view.store %packed_byte, %weights[%record, %row, %pair] : i8, view<3x8x4xi8>
+      }
+      %activation_row = scalar.muli %row_word, %activation_row_factor : i32
+      %activation_row_base = scalar.addi %activation_row, %activation_record_base : i32
+      scf.for %column = [%begin to %panel_width step %step] {
+        %column_word = index.cast %column : index to i32
+        %activation_column = scalar.muli %column_word, %activation_column_factor : i32
+        %activation_sum = scalar.addi %activation_row_base, %activation_column : i32
+        %activation_remainder = scalar.andi %activation_sum, %byte_mask : i32
+        %activation_signed = scalar.subi %activation_remainder, %activation_bias : i32
+        %activation_byte = scalar.trunci %activation_signed : i32 to i8
+        view.store %activation_byte, %inputs[%record, %row, %column] : i8, view<3x8x8xi8>
+      }
+    }
+    view.store %minimum_activation, %inputs[%record, 0, 0] : i8, view<3x8x8xi8>
+    view.store %maximum_activation, %inputs[%record, 7, 7] : i8, view<3x8x8xi8>
+  }
+  func.return
+}
+
+// Poison every output byte with the complement of its scalar result. An
+// omitted write cannot accidentally match the oracle, including a zero dot.
+func.def @poison_signed_i4_output(%packed_weights: buffer, %activations: buffer, %output: buffer) {
+  func.call @signed_i4_panel_oracle(%packed_weights, %activations, %output) : (buffer, buffer, buffer)
+  %origin = index.constant 0 : offset
+  %words = buffer.view %output[%origin] : buffer -> view<192xi32>
+  %begin = index.constant 0 : index
+  %end = index.constant 192 : index
+  %step = index.constant 1 : index
+  %all_bits = scalar.constant -1 : i32
+  scf.for %position = [%begin to %end step %step] {
+    %expected = view.load %words[%position] : view<192xi32> -> i32
+    %poison = scalar.xori %expected, %all_bits : i32
+    view.store %poison, %words[%position] : i32, view<192xi32>
+  }
+  func.return
+}
+
+check.scenario public @signed_i4_code_coverage {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %weight_storage = check.generate.iota offset(-128) step(1) period(256) : tensor<224xi8>
+    %activation_storage = check.generate.iota offset(-128) step(1) period(256) : tensor<320xi8>
+    %output_storage = check.generate.iota offset(-559038737) step(1) : tensor<224xi32>
+    %weights = check.tensor.view %weight_storage offset(64) : tensor<224xi8> -> tensor<96xi8>
+    %activations = check.tensor.view %activation_storage offset(64) : tensor<320xi8> -> tensor<192xi8>
+    %output = check.tensor.view %output_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    check.generate<@generate_signed_i4_records>(%trial, %weights, %activations) : (index, tensor<96xi8>, tensor<192xi8>) -> ()
+    check.generate<@poison_signed_i4_output>(%weights, %activations, %output) : (tensor<96xi8>, tensor<192xi8>, tensor<192xi32>) -> ()
+    check.compare<@signed_i4_panels, @signed_i4_panel_oracle>(%weights, %activations, %output) : (tensor<96xi8>, tensor<192xi8>, tensor<192xi32>) -> () {
+      check.expect.bitwise actual(%weight_storage) expected(%weight_storage) : tensor<224xi8>
+      check.expect.bitwise actual(%activation_storage) expected(%activation_storage) : tensor<320xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<224xi32>
+    }
+  }
+  check.return
+}
+
+check.scenario public @signed_i4_random_panels {
+  check.trial[8](%trial: index, %entropy: check.entropy) {
+    %weight_entropy = check.entropy.fork %entropy name("weights") : check.entropy
+    %activation_entropy = check.entropy.fork %entropy name("activations") : check.entropy
+    %weight_seed = check.entropy.read %weight_entropy[%trial] : check.entropy -> i64
+    %activation_seed = check.entropy.read %activation_entropy[%trial] : check.entropy -> i64
+    %weight_storage = check.generate.random.uniform seed(%weight_seed) range(-128 to 127) : tensor<224xi8>
+    %activation_storage = check.generate.random.uniform seed(%activation_seed) range(-128 to 127) : tensor<320xi8>
+    %output_storage = check.generate.iota offset(305419896) step(-1) : tensor<224xi32>
+    %weights = check.tensor.view %weight_storage offset(64) : tensor<224xi8> -> tensor<96xi8>
+    %activations = check.tensor.view %activation_storage offset(64) : tensor<320xi8> -> tensor<192xi8>
+    %output = check.tensor.view %output_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    check.generate<@poison_signed_i4_output>(%weights, %activations, %output) : (tensor<96xi8>, tensor<192xi8>, tensor<192xi32>) -> ()
+    check.compare<@signed_i4_panels, @signed_i4_panel_oracle>(%weights, %activations, %output) : (tensor<96xi8>, tensor<192xi8>, tensor<192xi32>) -> () {
+      check.expect.bitwise actual(%weight_storage) expected(%weight_storage) : tensor<224xi8>
+      check.expect.bitwise actual(%activation_storage) expected(%activation_storage) : tensor<320xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<224xi32>
+    }
+  }
+  check.return
+}
+
+// The two read-only bindings overlap one backing allocation. The shorter
+// packed-weight span ends midway through the activation payload.
+check.scenario public @signed_i4_aliased_inputs {
+  check.trial[4](%trial: index, %entropy: check.entropy) {
+    %seed = check.entropy.read %entropy[%trial] : check.entropy -> i64
+    %input_storage = check.generate.random.uniform seed(%seed) range(-128 to 127) : tensor<320xi8>
+    %output_storage = check.generate.iota offset(-559038737) step(-1) : tensor<224xi32>
+    %weights = check.tensor.view %input_storage offset(64) : tensor<320xi8> -> tensor<96xi8>
+    %activations = check.tensor.view %input_storage offset(64) : tensor<320xi8> -> tensor<192xi8>
+    %output = check.tensor.view %output_storage offset(64) : tensor<224xi32> -> tensor<192xi32>
+    check.generate<@poison_signed_i4_output>(%weights, %activations, %output) : (tensor<96xi8>, tensor<192xi8>, tensor<192xi32>) -> ()
+    check.compare<@signed_i4_panels, @signed_i4_panel_oracle>(%weights, %activations, %output) : (tensor<96xi8>, tensor<192xi8>, tensor<192xi32>) -> () {
+      check.expect.bitwise actual(%input_storage) expected(%input_storage) : tensor<320xi8>
+      check.expect.bitwise actual(%output_storage) expected(%output_storage) : tensor<224xi32>
+    }
+  }
+  check.return
+}

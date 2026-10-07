@@ -864,6 +864,8 @@ loom_check_test_suite(
     "test/native_admission.loom-test"
     "test/native_bindings.loom-test"
     "test/native_completion.loom-test"
+    "test/native_dma_offsets.loom-test"
+    "test/native_endpoint_addresses.loom-test"
     "test/native_repetition.loom-test"
     "test/native_strands.loom-test"
     "test/source_low/bf16_vectors.loom-test"

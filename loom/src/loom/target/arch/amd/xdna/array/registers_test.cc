@@ -28,8 +28,8 @@ TEST(XdnaRegisterFactsTest, ExposesCrossVerifiedSemanticCorpus) {
   EXPECT_EQ(info.provenance_bits, LOOM_XDNA_PROVENANCE_AIE_RT |
                                       LOOM_XDNA_PROVENANCE_REGISTER_DATABASE);
 
-  loom_xdna_register_dimension_info_t dimension = {};
-  IREE_ASSERT_OK(loom_xdna_register_field_dimension(field_id, 0, &dimension));
+  const loom_xdna_register_dimension_info_t dimension =
+      loom_xdna_register_field_dimension(field_id, 0);
   EXPECT_TRUE(
       iree_string_view_equal(dimension.name, IREE_SV("buffer_descriptor")));
   EXPECT_EQ(dimension.count, 16u);
@@ -104,6 +104,57 @@ TEST(XdnaRegisterFactsTest, ResolvesTwoDimensionalStreamSlotPattern) {
       loom_xdna_npu2_array_family(), field_id, {0, 1}, IREE_ARRAYSIZE(indices),
       indices, &address));
   EXPECT_EQ(address, (UINT64_C(1) << 20) | 0xB02D8);
+}
+
+TEST(XdnaRegisterFactsTest, DescribesCompleteStreamRegisterBanks) {
+  const struct {
+    // Representative tile of each switch kind at a nonzero column.
+    loom_xdna_tile_coordinate_t coordinate;
+    // Generated fields selecting master, slave and filter register banks.
+    loom_xdna_register_field_id_t fields[3];
+    // Port count of each bank's first indexed dimension.
+    uint16_t port_counts[3];
+    // Absolute address of the last valid word in each bank.
+    uint32_t last_addresses[3];
+  } cases[] = {
+      {{2, 0},
+       {LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_SLOT_ENABLE},
+       {22, 23, 23},
+       {0x0403F054, 0x0403F158, 0x0403F36C}},
+      {{2, 1},
+       {LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_MASTER_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_SLAVE_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_SLAVE_SLOT_ENABLE},
+       {17, 18, 18},
+       {0x041B0040, 0x041B0144, 0x041B031C}},
+      {{2, 2},
+       {LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_MASTER_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_CONFIG_ENABLE,
+        LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_SLOT_ENABLE},
+       {23, 25, 25},
+       {0x0423F058, 0x0423F160, 0x0423F38C}},
+  };
+  for (const auto& test_case : cases) {
+    const auto slots =
+        loom_xdna_register_field_dimension(test_case.fields[2], 1);
+    EXPECT_EQ(slots.count, 4u);
+    EXPECT_EQ(slots.stride, 4u);
+    for (size_t bank = 0; bank < IREE_ARRAYSIZE(test_case.fields); ++bank) {
+      SCOPED_TRACE(test_case.fields[bank]);
+      const auto ports =
+          loom_xdna_register_field_dimension(test_case.fields[bank], 0);
+      EXPECT_EQ(ports.count, test_case.port_counts[bank]);
+      EXPECT_EQ(ports.stride, bank == 2 ? 16u : 4u);
+      const uint16_t indices[] = {static_cast<uint16_t>(ports.count - 1),
+                                  static_cast<uint16_t>(slots.count - 1)};
+      EXPECT_EQ(loom_xdna_register_field_address_admitted(
+                    loom_xdna_npu2_array_family(), test_case.fields[bank],
+                    test_case.coordinate, indices),
+                test_case.last_addresses[bank]);
+    }
+  }
 }
 
 TEST(XdnaRegisterFactsTest, EncodesCoreTraceFieldsAtExactHardwareAddresses) {
