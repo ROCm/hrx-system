@@ -1,10 +1,10 @@
-template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset)
+template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset, %next_history_origin: offset)
 
 template.decl @qwen38.gdn_conv_prepare_prefill.parallel_body(%publish_history: i1, %head: index, %token: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %next_conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer)
 
 template.decl @qwen38.gdn_norm_gate_prefill.body(%output_is_f16: i1, %head0: index, %token0: index, %lane0: index, %token_count: index, %rms_epsilon: f32, %raw_output: buffer, %norm_weight: buffer, %z: buffer, %output: buffer)
 
-template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset)
+template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset, %next_state_origin: offset)
 
 // Qwen3.8-27B batched Gated DeltaNet primitives.
 //
@@ -37,7 +37,10 @@ func.def inline @qwen38_gdn_conv_step(%current: f32, %history0: f32, %history1: 
 // only Q/K norm reductions rendezvous the workgroup at each causal step. The
 // two exported wrappers specialize whether the final histories are published,
 // keeping speculative verification and committed execution on one source body.
-template.def<@qwen38.gdn_conv_prepare_prefill.body> device @qwen38_gdn_conv_prepare_prefill_body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset) {
+// Read and write origins may match or name disjoint slots of the same slab.
+// Each destination is exclusive for the whole cohort, including all readers
+// of an immutable source. The final store publishes directly from registers.
+template.def<@qwen38.gdn_conv_prepare_prefill.body> device @qwen38_gdn_conv_prepare_prefill_body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset, %next_history_origin: offset) {
   %token_count_index = index.constant 0 : index
   %token_count_view = buffer.view %token_count_data[%control_origin] : buffer -> view<1xi32>
   %token_count_i32 = view.load %token_count_view[%token_count_index] : view<1xi32> -> i32
@@ -172,16 +175,17 @@ template.def<@qwen38.gdn_conv_prepare_prefill.body> device @qwen38_gdn_conv_prep
   }
 
   scf.if %publish_history {
-    view.store %final_qk_history0, %history_view[%qk_history_base] : f32, view<30720xf32>
-    view.store %final_qk_history1, %history_view[%qk_history1_index] : f32, view<30720xf32>
-    view.store %final_qk_history2, %history_view[%qk_history2_index] : f32, view<30720xf32>
-    view.store %final_v0_history0, %history_view[%v0_history_base] : f32, view<30720xf32>
-    view.store %final_v0_history1, %history_view[%v0_history1_index] : f32, view<30720xf32>
-    view.store %final_v0_history2, %history_view[%v0_history2_index] : f32, view<30720xf32>
+    %next_history_view = buffer.view %conv_history[%next_history_origin] : buffer -> view<30720xf32>
+    view.store %final_qk_history0, %next_history_view[%qk_history_base] : f32, view<30720xf32>
+    view.store %final_qk_history1, %next_history_view[%qk_history1_index] : f32, view<30720xf32>
+    view.store %final_qk_history2, %next_history_view[%qk_history2_index] : f32, view<30720xf32>
+    view.store %final_v0_history0, %next_history_view[%v0_history_base] : f32, view<30720xf32>
+    view.store %final_v0_history1, %next_history_view[%v0_history1_index] : f32, view<30720xf32>
+    view.store %final_v0_history2, %next_history_view[%v0_history2_index] : f32, view<30720xf32>
     scf.if %has_value1 {
-      view.store %final_v1_history0, %history_view[%v1_history_base] : f32, view<30720xf32>
-      view.store %final_v1_history1, %history_view[%v1_history1_index] : f32, view<30720xf32>
-      view.store %final_v1_history2, %history_view[%v1_history2_index] : f32, view<30720xf32>
+      view.store %final_v1_history0, %next_history_view[%v1_history_base] : f32, view<30720xf32>
+      view.store %final_v1_history1, %next_history_view[%v1_history1_index] : f32, view<30720xf32>
+      view.store %final_v1_history2, %next_history_view[%v1_history2_index] : f32, view<30720xf32>
     }
   }
   template.return
@@ -201,7 +205,7 @@ kernel.def export("qwen38_gdn_conv_prepare_prefill") @qwen38_gdn_conv_prepare_pr
   %publish_history = scalar.constant true : i1
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
-  template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish_history, %head, %thread, %token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm, %origin, %token_begin, %origin) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+  template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish_history, %head, %thread, %token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm, %origin, %token_begin, %origin, %origin) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
   kernel.return
 }
 
@@ -219,7 +223,7 @@ kernel.def export("qwen38_gdn_conv_prepare_prefill_read_only") @qwen38_gdn_conv_
   %publish_history = scalar.constant false : i1
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
-  template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish_history, %head, %thread, %token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm, %origin, %token_begin, %origin) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+  template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish_history, %head, %thread, %token_count_data, %l2_epsilon, %qkv_input, %conv_weight, %conv_history, %qkv_silu, %qk_inverse_norm, %origin, %token_begin, %origin, %origin) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
   kernel.return
 }
 
@@ -534,7 +538,10 @@ kernel.def export("qwen38_gdn_capture_transition_depth4") @qwen38_gdn_capture_tr
 // load/store and preserving the exact causal recurrence. The two wrappers
 // specialize whether the final states are published without duplicating the
 // arithmetic or reduction order.
-template.def<@qwen38.gdn_recurrent_prefill_x4.body> device @qwen38_gdn_recurrent_prefill_x4_body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset) {
+// Read and write slots obey the convolution body's cohort-wide exclusivity
+// contract. Every workgroup loads its complete fragment before advancing it;
+// a fork writes the new state directly without a preceding full-state copy.
+template.def<@qwen38.gdn_recurrent_prefill_x4.body> device @qwen38_gdn_recurrent_prefill_x4_body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset, %next_state_origin: offset) {
   %token_count_index = index.constant 0 : index
   %token_count_view = buffer.view %token_count_data[%control_origin] : buffer -> view<1xi32>
   %token_count_i32 = view.load %token_count_view[%token_count_index] : view<1xi32> -> i32
@@ -679,10 +686,11 @@ template.def<@qwen38.gdn_recurrent_prefill_x4.body> device @qwen38_gdn_recurrent
   }
 
   scf.if %publish_state {
-    vector.scatter %final_state0, %state_view[%state_index0][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
-    vector.scatter %final_state1, %state_view[%state_index1][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
-    vector.scatter %final_state2, %state_view[%state_index2][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
-    vector.scatter %final_state3, %state_view[%state_index3][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+    %next_state_view = buffer.view %state[%next_state_origin] : buffer -> view<786432xf32>
+    vector.scatter %final_state0, %next_state_view[%state_index0][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+    vector.scatter %final_state1, %next_state_view[%state_index1][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+    vector.scatter %final_state2, %next_state_view[%state_index2][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
+    vector.scatter %final_state3, %next_state_view[%state_index3][%state_column_offsets] : vector<4xf32>, view<786432xf32>, vector<4xindex>
   }
   template.return
 }
@@ -704,7 +712,7 @@ kernel.def export("qwen38_gdn_recurrent_prefill_x4") @qwen38_gdn_recurrent_prefi
   %publish_state = scalar.constant true : i1
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
-  template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish_state, %value_head, %column_tile, %lane, %token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %state, %raw_output, %origin, %token_begin, %origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+  template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish_state, %value_head, %column_tile, %lane, %token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %state, %raw_output, %origin, %token_begin, %origin, %origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
   kernel.return
 }
 
@@ -725,7 +733,7 @@ kernel.def export("qwen38_gdn_recurrent_prefill_x4_read_only") @qwen38_gdn_recur
   %publish_state = scalar.constant false : i1
   %origin = index.constant 0 : offset
   %token_begin = index.constant 0 : index
-  template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish_state, %value_head, %column_tile, %lane, %token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %state, %raw_output, %origin, %token_begin, %origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+  template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish_state, %value_head, %column_tile, %lane, %token_count_data, %qkv_silu, %qk_inverse_norm, %alpha, %beta, %ssm_a, %dt_bias, %state, %raw_output, %origin, %token_begin, %origin, %origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
   kernel.return
 }
 

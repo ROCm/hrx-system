@@ -1,0 +1,231 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset, %next_history_origin: offset)
+
+template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset, %next_state_origin: offset)
+
+kernel.decl @qwen38_gdn_conv_prepare_prefill(%token_count: index) launch(%control: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %history: buffer, %output: buffer, %inverse_norm: buffer)
+kernel.decl @qwen38_gdn_recurrent_prefill_x4(%token_count: index) launch(%control: buffer, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer)
+
+// Two workgroup cohorts read one immutable full-layer source and publish to
+// disjoint destinations in that same allocation. A zero read stride selects
+// sharing; a slot-sized read stride selects subsequent in-place continuation.
+kernel.def @fork_convolution() {
+  %heads = index.constant 16 : index
+  %branches = index.constant 2 : index
+  %threads = index.constant 256 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %branches, %one) workgroup_size(%threads, %one, %one) : index
+} launch(%publish: i1, %control: buffer, %epsilon: f32, %input: buffer, %weight: buffer, %state: buffer, %output: buffer, %inverse_norm: buffer, %read_origin: offset, %read_stride: offset, %write_origin: offset) {
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 15)] : index
+  %branch = kernel.workgroup.id<y> : index
+  %thread0 = kernel.workitem.id<x> : index
+  %thread = index.assume %thread0 [range(%thread0, 0, 255)] : index
+  %four = index.constant 4 : index
+  %word_bytes = index.constant 4 : offset
+  %slot_bytes = index.constant 3269120 : offset
+  %control_origin = index.scale %branch, %word_bytes : index, offset -> offset
+  %token_begin = index.mul %branch, %four : index
+  %read_relative = index.scale %branch, %read_stride : index, offset -> offset
+  %read = index.add %read_origin, %read_relative : offset
+  %write_relative = index.scale %branch, %slot_bytes : index, offset -> offset
+  %write = index.add %write_origin, %write_relative : offset
+  template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish, %head, %thread, %control, %epsilon, %input, %weight, %state, %output, %inverse_norm, %control_origin, %token_begin, %read, %write) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+  kernel.return
+}
+
+kernel.def @fork_recurrent() {
+  %heads = index.constant 48 : index
+  %columns = index.constant 32 : index
+  %branches = index.constant 2 : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%heads, %columns, %branches) workgroup_size(%columns, %one, %one) : index
+} launch(%publish: i1, %control: buffer, %qkv: buffer, %inverse_norm: buffer, %alpha: buffer, %beta: buffer, %a: buffer, %bias: buffer, %state: buffer, %output: buffer, %read_origin: offset, %read_stride: offset, %write_origin: offset) {
+  %head0 = kernel.workgroup.id<x> : index
+  %head = index.assume %head0 [range(%head0, 0, 47)] : index
+  %column0 = kernel.workgroup.id<y> : index
+  %column = index.assume %column0 [range(%column0, 0, 31)] : index
+  %branch = kernel.workgroup.id<z> : index
+  %lane0 = kernel.workitem.id<x> : index
+  %lane = index.assume %lane0 [range(%lane0, 0, 31)] : index
+  %four = index.constant 4 : index
+  %word_bytes = index.constant 4 : offset
+  %slot_bytes = index.constant 3269120 : offset
+  %control_origin = index.scale %branch, %word_bytes : index, offset -> offset
+  %token_begin = index.mul %branch, %four : index
+  %read_relative = index.scale %branch, %read_stride : index, offset -> offset
+  %read = index.add %read_origin, %read_relative : offset
+  %write_relative = index.scale %branch, %slot_bytes : index, offset -> offset
+  %write = index.add %write_origin, %write_relative : offset
+  template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish, %head, %column, %lane, %control, %qkv, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output, %control_origin, %token_begin, %read, %write) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
+  kernel.return
+}
+
+// Complete layer geometry: 48x128x128 recurrent values and 10,240 three-value
+// histories. Branches consume three and one inputs with distinct activations.
+// Destinations start with different data, not copies of their shared source.
+check.case public @gdn_shared_read_only {
+  %publish = check.literal value(true) : i1
+  %verify = check.literal value(false) : i1
+  %read_state = check.literal value(256) : offset
+  %read_history = check.literal value(3145984) : offset
+  %write_state = check.literal value(3269376) : offset
+  %write_history = check.literal value(6415104) : offset
+  %shared = check.literal value(0) : offset
+  %private = check.literal value(3269120) : offset
+  %epsilon = check.literal value(9.9999999999999995e-07) : f32
+  %control = check.generate.iota offset(3) step(-2) : tensor<2xi32>
+  %input = check.generate.iota offset(-0.5) step(1.52587890625e-05) period(65521) : tensor<8x10240xf32>
+  %weight = check.generate.iota offset(-0.125) step(0.0001220703125) period(2048) : tensor<40960xf32>
+  %alpha = check.generate.iota offset(-0.25) step(0.0013020833333333333) : tensor<8x48xf32>
+  %beta = check.generate.iota offset(0.5) step(-0.00065104166666666663) : tensor<8x48xf32>
+  %a = check.generate.fill value(-0.5) : tensor<48xf32>
+  %bias = check.generate.iota offset(0.0625) step(0.001953125) : tensor<48xf32>
+  %state = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<2451840xf32>
+  %untouched = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<2451840xf32>
+  %reference0 = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<817280xf32>
+  %reference1 = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<817280xf32>
+  %qkv = check.generate.fill value(9.125) : tensor<8x10240xf32>
+  %expected_qkv = check.generate.fill value(9.125) : tensor<8x10240xf32>
+  %norm = check.generate.fill value(9.125) : tensor<8x32xf32>
+  %expected_norm = check.generate.fill value(9.125) : tensor<8x32xf32>
+  %output = check.generate.fill value(9.125) : tensor<8x6144xf32>
+  %expected_output = check.generate.fill value(9.125) : tensor<8x6144xf32>
+  %count0 = check.literal value(3) : index
+  %control0 = check.tensor.view %control offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %input0 = check.tensor.view %input offset(0) : tensor<8x10240xf32> -> tensor<3x10240xf32>
+  %qkv0 = check.tensor.view %expected_qkv offset(0) : tensor<8x10240xf32> -> tensor<3x10240xf32>
+  %norm0 = check.tensor.view %expected_norm offset(0) : tensor<8x32xf32> -> tensor<3x32xf32>
+  %alpha0 = check.tensor.view %alpha offset(0) : tensor<8x48xf32> -> tensor<3x48xf32>
+  %beta0 = check.tensor.view %beta offset(0) : tensor<8x48xf32> -> tensor<3x48xf32>
+  %output0 = check.tensor.view %expected_output offset(0) : tensor<8x6144xf32> -> tensor<3x6144xf32>
+  %reference_state0 = check.tensor.view %reference0 offset(256) : tensor<817280xf32> -> tensor<786432xf32>
+  %reference_history0 = check.tensor.view %reference0 offset(3145984) : tensor<817280xf32> -> tensor<30720xf32>
+  %reference_payload0 = check.tensor.view %reference0 offset(256) : tensor<817280xf32> -> tensor<817152xf32>
+  %destination0 = check.tensor.view %state offset(3269376) : tensor<2451840xf32> -> tensor<817152xf32>
+  %count1 = check.literal value(1) : index
+  %control1 = check.tensor.view %control offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %input1 = check.tensor.view %input offset(163840) : tensor<8x10240xf32> -> tensor<1x10240xf32>
+  %qkv1 = check.tensor.view %expected_qkv offset(163840) : tensor<8x10240xf32> -> tensor<1x10240xf32>
+  %norm1 = check.tensor.view %expected_norm offset(512) : tensor<8x32xf32> -> tensor<1x32xf32>
+  %alpha1 = check.tensor.view %alpha offset(768) : tensor<8x48xf32> -> tensor<1x48xf32>
+  %beta1 = check.tensor.view %beta offset(768) : tensor<8x48xf32> -> tensor<1x48xf32>
+  %output1 = check.tensor.view %expected_output offset(98304) : tensor<8x6144xf32> -> tensor<1x6144xf32>
+  %reference_state1 = check.tensor.view %reference1 offset(256) : tensor<817280xf32> -> tensor<786432xf32>
+  %reference_history1 = check.tensor.view %reference1 offset(3145984) : tensor<817280xf32> -> tensor<30720xf32>
+  %reference_payload1 = check.tensor.view %reference1 offset(256) : tensor<817280xf32> -> tensor<817152xf32>
+  %destination1 = check.tensor.view %state offset(6538496) : tensor<2451840xf32> -> tensor<817152xf32>
+  %source = check.tensor.view %state offset(256) : tensor<2451840xf32> -> tensor<817152xf32>
+  %initial_source = check.tensor.view %untouched offset(256) : tensor<2451840xf32> -> tensor<817152xf32>
+
+  // Verification computes both branches without publishing any state.
+  kernel.launch @fork_convolution(%verify, %control, %epsilon, %input, %weight, %state, %qkv, %norm, %read_history, %shared, %write_history) : (i1, tensor<2xi32>, f32, tensor<8x10240xf32>, tensor<40960xf32>, tensor<2451840xf32>, tensor<8x10240xf32>, tensor<8x32xf32>, offset, offset, offset)
+  kernel.launch @fork_recurrent(%verify, %control, %qkv, %norm, %alpha, %beta, %a, %bias, %state, %output, %read_state, %shared, %write_state) : (i1, tensor<2xi32>, tensor<8x10240xf32>, tensor<8x32xf32>, tensor<8x48xf32>, tensor<8x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<2451840xf32>, tensor<8x6144xf32>, offset, offset, offset)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%count0](%control0, %epsilon, %input0, %weight, %reference_history0, %qkv0, %norm0) : [index](tensor<1xi32>, f32, tensor<3x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<3x10240xf32>, tensor<3x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count0](%control0, %qkv0, %norm0, %alpha0, %beta0, %a, %bias, %reference_state0, %output0) : [index](tensor<1xi32>, tensor<3x10240xf32>, tensor<3x32xf32>, tensor<3x48xf32>, tensor<3x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<3x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%count1](%control1, %epsilon, %input1, %weight, %reference_history1, %qkv1, %norm1) : [index](tensor<1xi32>, f32, tensor<1x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<1x10240xf32>, tensor<1x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count1](%control1, %qkv1, %norm1, %alpha1, %beta1, %a, %bias, %reference_state1, %output1) : [index](tensor<1xi32>, tensor<1x10240xf32>, tensor<1x32xf32>, tensor<1x48xf32>, tensor<1x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<1x6144xf32>)
+  check.expect.bitwise actual(%qkv) expected(%expected_qkv) : tensor<8x10240xf32>
+  check.expect.bitwise actual(%norm) expected(%expected_norm) : tensor<8x32xf32>
+  check.expect.bitwise actual(%output) expected(%expected_output) : tensor<8x6144xf32>
+  check.expect.bitwise actual(%source) expected(%initial_source) : tensor<817152xf32>
+  check.expect.bitwise actual(%state) expected(%untouched) : tensor<2451840xf32>
+  check.return
+}
+
+// Expectations observe final buffers. Keep read-only verification separate
+// from this fork followed by in-place continuation.
+check.case public @gdn_shared_read_private_write {
+  %publish = check.literal value(true) : i1
+  %verify = check.literal value(false) : i1
+  %read_state = check.literal value(256) : offset
+  %read_history = check.literal value(3145984) : offset
+  %write_state = check.literal value(3269376) : offset
+  %write_history = check.literal value(6415104) : offset
+  %shared = check.literal value(0) : offset
+  %private = check.literal value(3269120) : offset
+  %epsilon = check.literal value(9.9999999999999995e-07) : f32
+  %control = check.generate.iota offset(3) step(-2) : tensor<2xi32>
+  %input = check.generate.iota offset(-0.5) step(1.52587890625e-05) period(65521) : tensor<8x10240xf32>
+  %weight = check.generate.iota offset(-0.125) step(0.0001220703125) period(2048) : tensor<40960xf32>
+  %alpha = check.generate.iota offset(-0.25) step(0.0013020833333333333) : tensor<8x48xf32>
+  %beta = check.generate.iota offset(0.5) step(-0.00065104166666666663) : tensor<8x48xf32>
+  %a = check.generate.fill value(-0.5) : tensor<48xf32>
+  %bias = check.generate.iota offset(0.0625) step(0.001953125) : tensor<48xf32>
+  %state = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<2451840xf32>
+  %untouched = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<2451840xf32>
+  %reference0 = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<817280xf32>
+  %reference1 = check.generate.iota offset(-0.03125) step(9.5367431640625e-07) period(8191) : tensor<817280xf32>
+  %qkv = check.generate.fill value(9.125) : tensor<8x10240xf32>
+  %expected_qkv = check.generate.fill value(9.125) : tensor<8x10240xf32>
+  %norm = check.generate.fill value(9.125) : tensor<8x32xf32>
+  %expected_norm = check.generate.fill value(9.125) : tensor<8x32xf32>
+  %output = check.generate.fill value(9.125) : tensor<8x6144xf32>
+  %expected_output = check.generate.fill value(9.125) : tensor<8x6144xf32>
+  %count0 = check.literal value(3) : index
+  %control0 = check.tensor.view %control offset(0) : tensor<2xi32> -> tensor<1xi32>
+  %input0 = check.tensor.view %input offset(0) : tensor<8x10240xf32> -> tensor<3x10240xf32>
+  %qkv0 = check.tensor.view %expected_qkv offset(0) : tensor<8x10240xf32> -> tensor<3x10240xf32>
+  %norm0 = check.tensor.view %expected_norm offset(0) : tensor<8x32xf32> -> tensor<3x32xf32>
+  %alpha0 = check.tensor.view %alpha offset(0) : tensor<8x48xf32> -> tensor<3x48xf32>
+  %beta0 = check.tensor.view %beta offset(0) : tensor<8x48xf32> -> tensor<3x48xf32>
+  %output0 = check.tensor.view %expected_output offset(0) : tensor<8x6144xf32> -> tensor<3x6144xf32>
+  %reference_state0 = check.tensor.view %reference0 offset(256) : tensor<817280xf32> -> tensor<786432xf32>
+  %reference_history0 = check.tensor.view %reference0 offset(3145984) : tensor<817280xf32> -> tensor<30720xf32>
+  %reference_payload0 = check.tensor.view %reference0 offset(256) : tensor<817280xf32> -> tensor<817152xf32>
+  %destination0 = check.tensor.view %state offset(3269376) : tensor<2451840xf32> -> tensor<817152xf32>
+  %count1 = check.literal value(1) : index
+  %control1 = check.tensor.view %control offset(4) : tensor<2xi32> -> tensor<1xi32>
+  %input1 = check.tensor.view %input offset(163840) : tensor<8x10240xf32> -> tensor<1x10240xf32>
+  %qkv1 = check.tensor.view %expected_qkv offset(163840) : tensor<8x10240xf32> -> tensor<1x10240xf32>
+  %norm1 = check.tensor.view %expected_norm offset(512) : tensor<8x32xf32> -> tensor<1x32xf32>
+  %alpha1 = check.tensor.view %alpha offset(768) : tensor<8x48xf32> -> tensor<1x48xf32>
+  %beta1 = check.tensor.view %beta offset(768) : tensor<8x48xf32> -> tensor<1x48xf32>
+  %output1 = check.tensor.view %expected_output offset(98304) : tensor<8x6144xf32> -> tensor<1x6144xf32>
+  %reference_state1 = check.tensor.view %reference1 offset(256) : tensor<817280xf32> -> tensor<786432xf32>
+  %reference_history1 = check.tensor.view %reference1 offset(3145984) : tensor<817280xf32> -> tensor<30720xf32>
+  %reference_payload1 = check.tensor.view %reference1 offset(256) : tensor<817280xf32> -> tensor<817152xf32>
+  %destination1 = check.tensor.view %state offset(6538496) : tensor<2451840xf32> -> tensor<817152xf32>
+  %source = check.tensor.view %state offset(256) : tensor<2451840xf32> -> tensor<817152xf32>
+  %initial_source = check.tensor.view %untouched offset(256) : tensor<2451840xf32> -> tensor<817152xf32>
+
+  // Fork commits directly into two destinations; the source stays immutable.
+  kernel.launch @fork_convolution(%publish, %control, %epsilon, %input, %weight, %state, %qkv, %norm, %read_history, %shared, %write_history) : (i1, tensor<2xi32>, f32, tensor<8x10240xf32>, tensor<40960xf32>, tensor<2451840xf32>, tensor<8x10240xf32>, tensor<8x32xf32>, offset, offset, offset)
+  kernel.launch @fork_recurrent(%publish, %control, %qkv, %norm, %alpha, %beta, %a, %bias, %state, %output, %read_state, %shared, %write_state) : (i1, tensor<2xi32>, tensor<8x10240xf32>, tensor<8x32xf32>, tensor<8x48xf32>, tensor<8x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<2451840xf32>, tensor<8x6144xf32>, offset, offset, offset)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%count0](%control0, %epsilon, %input0, %weight, %reference_history0, %qkv0, %norm0) : [index](tensor<1xi32>, f32, tensor<3x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<3x10240xf32>, tensor<3x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count0](%control0, %qkv0, %norm0, %alpha0, %beta0, %a, %bias, %reference_state0, %output0) : [index](tensor<1xi32>, tensor<3x10240xf32>, tensor<3x32xf32>, tensor<3x48xf32>, tensor<3x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<3x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%count1](%control1, %epsilon, %input1, %weight, %reference_history1, %qkv1, %norm1) : [index](tensor<1xi32>, f32, tensor<1x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<1x10240xf32>, tensor<1x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count1](%control1, %qkv1, %norm1, %alpha1, %beta1, %a, %bias, %reference_state1, %output1) : [index](tensor<1xi32>, tensor<1x10240xf32>, tensor<1x32xf32>, tensor<1x48xf32>, tensor<1x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<1x6144xf32>)
+
+  // Both branches then continue in place without reading the shared source.
+  kernel.launch @fork_convolution(%publish, %control, %epsilon, %input, %weight, %state, %qkv, %norm, %write_history, %private, %write_history) : (i1, tensor<2xi32>, f32, tensor<8x10240xf32>, tensor<40960xf32>, tensor<2451840xf32>, tensor<8x10240xf32>, tensor<8x32xf32>, offset, offset, offset)
+  kernel.launch @fork_recurrent(%publish, %control, %qkv, %norm, %alpha, %beta, %a, %bias, %state, %output, %write_state, %private, %write_state) : (i1, tensor<2xi32>, tensor<8x10240xf32>, tensor<8x32xf32>, tensor<8x48xf32>, tensor<8x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<2451840xf32>, tensor<8x6144xf32>, offset, offset, offset)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%count0](%control0, %epsilon, %input0, %weight, %reference_history0, %qkv0, %norm0) : [index](tensor<1xi32>, f32, tensor<3x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<3x10240xf32>, tensor<3x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count0](%control0, %qkv0, %norm0, %alpha0, %beta0, %a, %bias, %reference_state0, %output0) : [index](tensor<1xi32>, tensor<3x10240xf32>, tensor<3x32xf32>, tensor<3x48xf32>, tensor<3x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<3x6144xf32>)
+  kernel.launch @qwen38_gdn_conv_prepare_prefill[%count1](%control1, %epsilon, %input1, %weight, %reference_history1, %qkv1, %norm1) : [index](tensor<1xi32>, f32, tensor<1x10240xf32>, tensor<40960xf32>, tensor<30720xf32>, tensor<1x10240xf32>, tensor<1x32xf32>)
+  kernel.launch @qwen38_gdn_recurrent_prefill_x4[%count1](%control1, %qkv1, %norm1, %alpha1, %beta1, %a, %bias, %reference_state1, %output1) : [index](tensor<1xi32>, tensor<1x10240xf32>, tensor<1x32xf32>, tensor<1x48xf32>, tensor<1x48xf32>, tensor<48xf32>, tensor<48xf32>, tensor<786432xf32>, tensor<1x6144xf32>)
+  check.expect.bitwise actual(%qkv) expected(%expected_qkv) : tensor<8x10240xf32>
+  check.expect.bitwise actual(%norm) expected(%expected_norm) : tensor<8x32xf32>
+  check.expect.bitwise actual(%output) expected(%expected_output) : tensor<8x6144xf32>
+  check.expect.bitwise actual(%destination0) expected(%reference_payload0) : tensor<817152xf32>
+  check.expect.bitwise actual(%destination1) expected(%reference_payload1) : tensor<817152xf32>
+  check.expect.bitwise actual(%source) expected(%initial_source) : tensor<817152xf32>
+  %guard0 = check.tensor.view %state offset(0) : tensor<2451840xf32> -> tensor<64xf32>
+  %expected_guard0 = check.tensor.view %untouched offset(0) : tensor<2451840xf32> -> tensor<64xf32>
+  check.expect.bitwise actual(%guard0) expected(%expected_guard0) : tensor<64xf32>
+  %guard1 = check.tensor.view %state offset(3268864) : tensor<2451840xf32> -> tensor<128xf32>
+  %expected_guard1 = check.tensor.view %untouched offset(3268864) : tensor<2451840xf32> -> tensor<128xf32>
+  check.expect.bitwise actual(%guard1) expected(%expected_guard1) : tensor<128xf32>
+  %guard2 = check.tensor.view %state offset(6537984) : tensor<2451840xf32> -> tensor<128xf32>
+  %expected_guard2 = check.tensor.view %untouched offset(6537984) : tensor<2451840xf32> -> tensor<128xf32>
+  check.expect.bitwise actual(%guard2) expected(%expected_guard2) : tensor<128xf32>
+  %guard3 = check.tensor.view %state offset(9807104) : tensor<2451840xf32> -> tensor<64xf32>
+  %expected_guard3 = check.tensor.view %untouched offset(9807104) : tensor<2451840xf32> -> tensor<64xf32>
+  check.expect.bitwise actual(%guard3) expected(%expected_guard3) : tensor<64xf32>
+  check.return
+}

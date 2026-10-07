@@ -6,6 +6,8 @@
 
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//loom/build_tools/bazel:build_defs.bzl", "loom_cc_binary", "loom_cc_test", "loom_config_compatible_with")
+load("//loom/build_tools/bazel:defs.bzl", "loom_test")
+load("//loom/target/amdgpu:execution_profiles.bzl", "AMDGPU_ACCESS_PROFILE", "AMDGPU_HARDWARE_PROFILE")
 
 package(
     default_visibility = ["//visibility:private"],
@@ -24,6 +26,25 @@ filegroup(
         "programs/qwen38/*.loom",
     ]),
     visibility = ["//visibility:public"],
+)
+
+loom_test(
+    name = "gdn_state_test",
+    srcs = [
+        "kernels/qwen38/gdn_common.loom",
+        "kernels/qwen38/gdn_prefill.loom",
+        "kernels/qwen38/gdn_spans.loom",
+        "kernels/qwen38/gdn_speculation.loom",
+        "kernels/qwen38/spans.loom",
+        "tests/gdn_fork.loom",
+        "tests/gdn_spans.loom",
+        "tests/gdn_speculation.loom",
+    ],
+    benchmark_smoke = False,
+    execution_profiles = [
+        AMDGPU_HARDWARE_PROFILE,
+        AMDGPU_ACCESS_PROFILE,
+    ],
 )
 
 loom_cc_test(

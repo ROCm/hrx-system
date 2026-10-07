@@ -9,9 +9,9 @@ func.decl @qwen38_span_binding(%epoch: buffer, %span: index) -> (offset, index, 
 
 func.decl @qwen38_row_gdn_origin(%rows: buffer, %row: index, %layer_origin: offset) -> (offset)
 
-template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset)
+template.decl @qwen38.gdn_conv_prepare_prefill.body(%publish_history: i1, %head: index, %thread: index, %token_count_data: buffer, %l2_epsilon: f32, %qkv_input: buffer, %conv_weight: buffer, %conv_history: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %control_origin: offset, %token_begin: index, %history_origin: offset, %next_history_origin: offset)
 
-template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset)
+template.decl @qwen38.gdn_recurrent_prefill_x4.body(%publish_state: i1, %value_head: index, %column_tile: index, %lane: index, %token_count_data: buffer, %qkv_silu: buffer, %qk_inverse_norm: buffer, %alpha: buffer, %beta: buffer, %ssm_a: buffer, %dt_bias: buffer, %state: buffer, %raw_output: buffer, %control_origin: offset, %token_begin: index, %state_origin: offset, %next_state_origin: offset)
 
 // One workgroup advances one span/head's convolution history. Its register
 // recurrence has no cross-span predecessor and needs no history snapshot or
@@ -34,7 +34,7 @@ kernel.def export("qwen38_gdn_conv_spans") @qwen38_gdn_conv_spans(%span_capacity
     %control_origin, %token_begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
     %history_origin = func.call @qwen38_row_gdn_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
     %publish = scalar.constant true : i1
-    template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish, %head, %thread, %epoch, %epsilon, %qkv, %weight, %state, %output, %inverse_norm, %control_origin, %token_begin, %history_origin) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+    template.apply<@qwen38.gdn_conv_prepare_prefill.body>(%publish, %head, %thread, %epoch, %epsilon, %qkv, %weight, %state, %output, %inverse_norm, %control_origin, %token_begin, %history_origin, %history_origin) : (i1, index, index, buffer, f32, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
   }
   kernel.return
 }
@@ -62,7 +62,7 @@ kernel.def export("qwen38_gdn_recurrent_spans") @qwen38_gdn_recurrent_spans(%spa
     %control_origin, %token_begin, %row = func.call @qwen38_span_binding(%epoch, %span) : (buffer, index) -> (offset, index, index)
     %state_origin = func.call @qwen38_row_gdn_origin(%rows, %row, %layer_origin) : (buffer, index, offset) -> (offset)
     %publish = scalar.constant true : i1
-    template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish, %head, %column, %lane, %epoch, %qkv, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output, %control_origin, %token_begin, %state_origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset)
+    template.apply<@qwen38.gdn_recurrent_prefill_x4.body>(%publish, %head, %column, %lane, %epoch, %qkv, %inverse_norm, %alpha, %beta, %a, %bias, %state, %output, %control_origin, %token_begin, %state_origin, %state_origin) : (i1, index, index, index, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, buffer, offset, index, offset, offset)
   }
   kernel.return
 }
