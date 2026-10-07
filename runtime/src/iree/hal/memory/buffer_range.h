@@ -7,7 +7,7 @@
 #ifndef IREE_HAL_MEMORY_BUFFER_RANGE_H_
 #define IREE_HAL_MEMORY_BUFFER_RANGE_H_
 
-#include "iree/hal/buffer.h"
+#include "iree/hal/pool.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -41,6 +41,14 @@ iree_status_t iree_hal_pool_buffer_range_initialize(
 // Releases the retained source after every child reservation has retired.
 void iree_hal_pool_buffer_range_deinitialize(
     iree_hal_pool_buffer_range_t* range);
+
+// Resolves a trusted live subrange to its existing prepared storage. The
+// returned view borrows |range| and |reuse_frontier| for the reservation
+// lifetime and performs no allocation or retention.
+void iree_hal_pool_buffer_range_query_reservation_view(
+    const iree_hal_pool_buffer_range_t* range, iree_device_size_t offset,
+    iree_device_size_t length, const iree_async_frontier_t* reuse_frontier,
+    iree_hal_pool_reservation_view_t* out_view);
 
 // Materializes a reservation with narrowed permissions and exact reuse history.
 // Offsets are relative to the managed range. Transfers the callback on success.

@@ -201,6 +201,27 @@ typedef struct iree_hal_pool_acquire_info_t {
   iree_hal_pool_acquire_result_t result;
 } iree_hal_pool_acquire_info_t;
 
+// Borrowed prepared storage already owned by a live pool reservation.
+//
+// This lets a caller-provided allocation root publish the reservation's
+// target-visible memory without constructing a redundant HAL buffer object.
+// The source pool and reservation retain every borrowed field. Callers retain
+// |buffer| only when they need it to outlive the reservation query itself and
+// release that reference before returning the reservation.
+typedef struct iree_hal_pool_reservation_view_t {
+  // Borrowed buffer providing the native implementation for this range.
+  iree_hal_buffer_t* buffer;
+
+  // Allocation-relative byte offset forwarded to |buffer|'s implementation.
+  iree_device_size_t byte_offset;
+
+  // User-visible byte length of the prepared range.
+  iree_device_size_t byte_length;
+
+  // Exact prepared memory facts at this range's byte zero.
+  iree_hal_buffer_memory_view_t memory;
+} iree_hal_pool_reservation_view_t;
+
 // Controls how a concrete buffer object/view is materialized for a reservation.
 typedef uint32_t iree_hal_pool_materialize_flags_t;
 enum iree_hal_pool_materialize_flag_bits_e {
@@ -407,7 +428,9 @@ static inline iree_hal_pool_epoch_query_t iree_hal_pool_epoch_query_null(void) {
 //
 //   1. acquire_reservations() at submit time: finds free blocks, checks death
 //      frontier dominance, and returns reservations with offsets and lengths.
-//   2. materialize_reservations() without ownership transfer: creates backing
+//   2. query_reservation_views() publishes existing prepared storage directly
+//      into caller-provided roots when supported. Other pools use
+//      materialize_reservations() without ownership transfer to create backing
 //      buffer views whose lifetimes are independent from the reservations.
 //   3. release_reservations() at the queue implementation's dealloca retirement
 //      point: returns the blocks to pool reuse metadata, tagged with a death
@@ -541,6 +564,24 @@ IREE_API_EXPORT void iree_hal_pool_advise_asan_reservations(
     iree_hal_pool_t* pool, iree_host_size_t reservation_count,
     const iree_hal_pool_reservation_t* reservations,
     iree_hal_asan_range_advice_flags_t flags);
+
+// Queries existing prepared storage for a live reservation transaction.
+//
+// Returns true and assigns every output when the concrete pool already owns a
+// stable backing buffer for each reservation. The query performs no allocation,
+// retention, materialization, native work, or synchronization. Each returned
+// memory view includes the reservation's exact reuse prerequisite.
+//
+// Returns false without modifying outputs when this pool must materialize a
+// provider-specific buffer object. Callers then use
+// iree_hal_pool_materialize_reservations().
+//
+// |reservations| must be a successful live transaction produced by |pool|.
+// The pool and transaction must outlive every use of the borrowed outputs.
+IREE_API_EXPORT bool iree_hal_pool_query_reservation_views(
+    iree_hal_pool_t* pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_reservation_view_t* out_views);
 
 // Materializes concrete buffer objects or views for a reservation transaction.
 //
@@ -681,6 +722,13 @@ typedef struct iree_hal_pool_vtable_t {
       iree_hal_pool_t* pool, iree_host_size_t reservation_count,
       const iree_hal_pool_reservation_t* reservations,
       const iree_async_frontier_t* death_frontier);
+
+  // Queries existing prepared storage without constructing buffer objects.
+  // Optional; NULL when provider-specific materialization is required.
+  void(IREE_API_PTR* query_reservation_views)(
+      iree_hal_pool_t* pool, iree_host_size_t reservation_count,
+      const iree_hal_pool_reservation_t* reservations,
+      iree_hal_pool_reservation_view_t* out_views);
 
   // Materializes concrete buffer objects or views for a reservation set.
   iree_status_t(IREE_API_PTR* materialize_reservations)(

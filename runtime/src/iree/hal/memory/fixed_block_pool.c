@@ -1235,6 +1235,24 @@ static void iree_hal_fixed_block_pool_buffer_release(
   }
 }
 
+static void iree_hal_fixed_block_pool_query_reservation_views(
+    iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
+    const iree_hal_pool_reservation_t* reservations,
+    iree_hal_pool_reservation_view_t* out_views) {
+  (void)base_pool;
+  for (iree_host_size_t i = 0; i < reservation_count; ++i) {
+    iree_hal_fixed_block_pool_block_t* block =
+        (iree_hal_fixed_block_pool_block_t*)(uintptr_t)reservations[i]
+            .block_handle;
+    iree_hal_fixed_block_pool_slab_t* slab = block->slab;
+    iree_hal_pool_buffer_range_query_reservation_view(
+        &slab->range, reservations[i].offset, reservations[i].byte_length,
+        iree_hal_memory_fixed_block_allocator_block_death_frontier(
+            slab->allocator, (uint32_t)(block - slab->blocks)),
+        &out_views[i]);
+  }
+}
+
 static iree_status_t iree_hal_fixed_block_pool_materialize_reservations(
     iree_hal_pool_t* base_pool, iree_host_size_t reservation_count,
     const iree_hal_pool_reservation_request_t* requests,
@@ -1447,6 +1465,8 @@ static const iree_hal_pool_vtable_t iree_hal_fixed_block_pool_vtable = {
     .destroy = iree_hal_fixed_block_pool_destroy,
     .acquire_reservations = iree_hal_fixed_block_pool_acquire_reservations,
     .release_reservations = iree_hal_fixed_block_pool_release_reservations,
+    .query_reservation_views =
+        iree_hal_fixed_block_pool_query_reservation_views,
     .materialize_reservations =
         iree_hal_fixed_block_pool_materialize_reservations,
     .query_capabilities = iree_hal_fixed_block_pool_query_capabilities,
