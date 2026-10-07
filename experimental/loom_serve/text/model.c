@@ -21,11 +21,8 @@
 #include "experimental/loom_serve/runtime/module.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/runtime/program.h"
-#include "experimental/loom_serve/runtime/retirement.h"
 #include "experimental/loom_serve/runtime/weights.h"
-#include "experimental/loom_serve/storage/block_pool.h"
-#include "experimental/loom_serve/storage/relocation.h"
-#include "experimental/loom_serve/storage/snapshot.h"
+#include "experimental/loom_serve/text/state.h"
 #include "experimental/loom_serve/text/storage.h"
 #include "iree/base/internal/path.h"
 #include "iree/io/file_contents.h"
@@ -36,14 +33,6 @@
 #include "iree/vm/sync.h"
 
 enum {
-  TEXT_RESIDUAL = 0,
-  TEXT_CONTROL = 1,
-  TEXT_RECURRENT = 2,
-  TEXT_ATTENTION = 3,
-  TEXT_TOKENS = 4,
-  TEXT_PROGRESS = 5,
-  TEXT_WORKSPACE = 6,
-  TEXT_BINDING_COUNT = 7,
   TEXT_TOKEN_CAPACITY = 512,
   TEXT_ROW_CAPACITY = LOOM_SERVE_TEXT_ROW_CAPACITY,
   TEXT_HOST_PLAN = 0,
@@ -85,8 +74,6 @@ struct loom_serve_text_model_t {
   iree_hal_queue_t* transfer;
   // Borrowed stage/input timelines with independently retired feedback.
   loom_serve_execution_t* execution;
-  // Final state-view ownership enclosing borrowed host payloads and mappings.
-  loom_serve_retirement_t retirement;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
   // Shared source index and compiler for this model residency.
@@ -115,38 +102,8 @@ struct loom_serve_text_model_t {
   iree_host_size_t row_count;
   // Fixed row records, owned by this model.
   loom_serve_text_row_t* rows;
-  // Private recurrent/control spans followed by pooled KV, or dense row KV.
-  iree_hal_buffer_t* row_arena;
-  // Validated source geometry and cold initialization payloads.
-  loom_serve_text_storage_t storage;
-  // Private-page ownership shared by target and draft cache planes.
-  struct {
-    // Addressable token capacity shared by rows; zero selects dense comparison.
-    iree_host_size_t capacity;
-    // Fixed free-ID metadata; owned IDs are returned only after retirement.
-    loom_serve_block_pool_t pool;
-    // Fixed row-major host maps, retained through queued uploads.
-    uint32_t* maps;
-    // Cold relocation plan indexed by physical ID, reused at maintenance cuts.
-    uint32_t* destinations;
-  } cache;
-  // Elastic physical backing, separate from logical row/block ownership.
-  struct {
-    // Physical allocation domain borrowed from the shared device owner.
-    loom_serve_memory_pool_t* pool;
-    // Mutable state accounting, excluding parameters sharing the same pool.
-    loom_serve_memory_statistics_t statistics;
-    // Optional virtual reservations in source allocation order.
-    loom_serve_virtual_buffer_t*
-        buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    // Always-live initialized prefixes outside row-owned private storage.
-    iree_device_size_t
-        private_lengths[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-  } memory;
-  // Model-wide residual storage, serialized by the execution timeline.
-  iree_hal_buffer_t* residual;
-  // Model-wide packed transient storage for the larger stage.
-  iree_hal_buffer_t* workspace;
+  // Retained device state, mappings and final queue ownership.
+  loom_serve_text_state_t state;
   // Environment owning canonical VM reference types.
   iree_vm_environment_t* environment;
   // Canonical byte-buffer reference types borrowed from the environment.
@@ -176,32 +133,6 @@ struct loom_serve_text_model_t {
     // Stable writable mappings, valid for the corresponding buffer lifetime.
     iree_byte_span_t bytes[TEXT_HOST_BUFFER_COUNT];
   } host;
-  // Reusable packed-epoch bindings and transfer payloads. Device buffers at
-  // slots 1, 2, 4 and 5 are owned; other slots borrow model-wide storage.
-  struct {
-    // Residual, metadata, origins, state arena, input IDs, output IDs,
-    // workspace.
-    iree_hal_buffer_t* buffers[TEXT_BINDING_COUNT];
-  } epoch;
-  // Optional draft residency and private proposal work. Warm stages consume
-  // committed target residuals before the next target invocation can reuse
-  // them.
-  struct {
-    // Whether the requested residency includes speculative state.
-    bool enabled;
-    // Normalized committed target hidden, indexed by retained row.
-    iree_hal_buffer_t* carry;
-    // Device-produced accepted span metadata consumed by MTP catch-up.
-    iree_hal_buffer_t* committed;
-    // Device-produced feedback, whose record layout belongs to source.
-    iree_hal_buffer_t* results;
-    // Owned view of the second result bank and its original-span tags.
-    iree_hal_buffer_t* next_results;
-    // Private one-layer attention cache shared by proposal and catch-up.
-    iree_hal_buffer_t* cache;
-    // Immutable resident-row origins consumed by proposal and catch-up.
-    iree_hal_buffer_t* row_table;
-  } mtp;
   // Tokenizer owning its parsed vocabulary and encoding data.
   iree_tokenizer_t* tokenizer;
   // Token identifying the end of a generated assistant turn.
@@ -211,16 +142,10 @@ struct loom_serve_text_model_t {
 struct loom_serve_text_row_t {
   // Borrowed owning model; all row operations use its single invocation.
   loom_serve_text_model_t* model;
-  // Private spans in the row arena; residual/workspace entries borrow model.
-  iree_hal_buffer_t* buffers[TEXT_BINDING_COUNT];
-  // Number of input tokens actually consumed into KV/recurrent state.
-  iree_host_size_t position;
-  // Owned physical pages, including any in-flight speculative suffix.
-  uint32_t block_count;
+  // Borrowed retained row state, owned by the model-wide state arena.
+  loom_serve_text_state_row_t* state;
   // Whether the latest completed work selected a token at the current position.
   bool has_prediction;
-  // Owned DRAM image while suspended; no physical KV IDs remain owned.
-  loom_serve_snapshot_t* snapshot;
   // Completed stage counts and end-to-end host durations.
   loom_serve_text_metrics_t metrics;
   // Host payloads remain alive until the model drains accepted transfers.
@@ -307,20 +232,6 @@ static iree_status_t text_check_layouts(loom_serve_text_model_t* runner) {
   return iree_ok_status();
 }
 
-static iree_status_t text_allocate_buffer(loom_serve_text_model_t* runner,
-                                          iree_device_size_t length,
-                                          iree_device_size_t minimum_alignment,
-                                          iree_hal_buffer_t** out_buffer) {
-  iree_hal_buffer_params_t params = {0};
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
-  params.min_alignment = minimum_alignment;
-  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
-      iree_hal_device_allocator(runner->device), params, length, out_buffer));
-  return loom_serve_retirement_track(&runner->retirement, out_buffer,
-                                     runner->allocator);
-}
-
 // Weight placement and preparation are cold model-wide work. Session rows
 // never own weights and every compiled shape retains views of this residency.
 static iree_status_t text_prepare_weights(loom_serve_text_model_t* model,
@@ -352,10 +263,11 @@ static iree_status_t text_prepare_weights(loom_serve_text_model_t* model,
       source_directory, checkpoint->policy, model->allocator, &policy_path);
   if (iree_status_is_ok(status)) {
     status = loom_serve_weights_create(
-        model->device, model->transfer, model->dispatch, model->memory.pool,
-        model->jit, model->command_mode, model->shared_stage_count, root_count,
-        roots, checkpoint->path, iree_make_cstring_view(policy_path),
-        &model->weights, model->allocator);
+        model->device, model->transfer, model->dispatch,
+        loom_serve_device_memory_pool(model->device_owner), model->jit,
+        model->command_mode, model->shared_stage_count, root_count, roots,
+        checkpoint->path, iree_make_cstring_view(policy_path), &model->weights,
+        model->allocator);
   }
   iree_allocator_free(model->allocator, policy_path);
   iree_allocator_free(model->allocator, roots);
@@ -372,17 +284,19 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
       2 * TEXT_ROW_CAPACITY * 8 * sizeof(int32_t),
       2 * TEXT_TOKEN_CAPACITY * sizeof(int32_t),
       runner->shape_count
-          ? iree_hal_buffer_byte_length(runner->epoch.buffers[1])
+          ? iree_hal_buffer_byte_length(runner->state.epoch.buffers[1])
           : 0,
       runner->shape_count
-          ? iree_hal_buffer_byte_length(runner->epoch.buffers[4])
+          ? iree_hal_buffer_byte_length(runner->state.epoch.buffers[4])
           : 0,
       runner->shape_count
-          ? iree_hal_buffer_byte_length(runner->epoch.buffers[5])
+          ? iree_hal_buffer_byte_length(runner->state.epoch.buffers[5])
           : 0,
-      runner->mtp.enabled ? runner->storage.feedback_split : 0,
-      runner->mtp.enabled
-          ? iree_hal_buffer_byte_length(runner->mtp.next_results)
+      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)
+          ? runner->state.storage.feedback_split
+          : 0,
+      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)
+          ? iree_hal_buffer_byte_length(runner->state.mtp.next_results)
           : 0,
       TEXT_ROW_CAPACITY * 12 * sizeof(int32_t),
   };
@@ -588,8 +502,8 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_storage_initialize(
         &model->vm_types, results + 4, model->row_count, TEXT_ROW_CAPACITY,
-        model->context_capacity, model->cache.capacity, &model->storage,
-        model->allocator);
+        model->context_capacity, model->state.cache.capacity,
+        &model->state.storage, model->allocator);
   }
   if (iree_status_is_ok(status)) {
     status = text_load_tokenizer(
@@ -600,185 +514,6 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
   iree_allocator_free(allocator, path);
-  return status;
-}
-
-// Source allocation slots name the same exported roots during creation,
-// maintenance and execution. Every root carries model retirement tracking.
-static iree_hal_buffer_t** text_allocation(loom_serve_text_model_t* model,
-                                           iree_host_size_t index) {
-  iree_hal_buffer_t** allocations[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT] = {
-      &model->residual,         &model->row_arena,
-      &model->epoch.buffers[1], &model->epoch.buffers[2],
-      &model->epoch.buffers[4], &model->epoch.buffers[5],
-      &model->mtp.carry,        &model->mtp.committed,
-      &model->mtp.results,      &model->mtp.cache,
-      &model->mtp.row_table,
-  };
-  return allocations[index];
-}
-
-static iree_status_t text_allocate_state(loom_serve_text_model_t* model) {
-  if (model->cache.capacity) {
-    IREE_RETURN_IF_ERROR(loom_serve_block_pool_initialize(
-        (uint32_t)(model->cache.capacity / model->storage.block_size),
-        model->allocator, &model->cache.pool));
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        model->allocator, model->row_count * model->storage.blocks_per_row,
-        sizeof(*model->cache.maps), (void**)&model->cache.maps));
-    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-        model->allocator, model->cache.pool.capacity,
-        sizeof(*model->cache.destinations),
-        (void**)&model->cache.destinations));
-  }
-  uint64_t workspace_length = 0;
-  uint64_t workspace_alignment = 0;
-  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
-    workspace_length = iree_max(
-        workspace_length,
-        model->stages[i].program.requirements.transient.required_byte_length);
-    workspace_alignment = iree_max(
-        workspace_alignment,
-        model->stages[i].program.requirements.transient.minimum_alignment);
-  }
-  // Workspace contents are undefined on entry. Retained state belongs to the
-  // source-declared allocations below, never to command transient storage.
-  IREE_RETURN_IF_ERROR(text_allocate_buffer(
-      model, workspace_length, workspace_alignment, &model->workspace));
-  // Binding roles are the private adapter contract. Sizes, views, initial
-  // contents and zero extents are produced by the model's source bootstrap.
-  const uint32_t zero = 0;
-  iree_hal_transfer_operation_t
-      transfers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT + 2] = {0};
-  iree_host_size_t transfer_count = 0;
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT &&
-                               iree_status_is_ok(status);
-       ++i) {
-    iree_hal_buffer_t** allocation = text_allocation(model, i);
-    const uint8_t* record =
-        model->storage.bytes[LOOM_SERVE_TEXT_STORAGE_ALLOCATIONS].data + i * 24;
-    const uint64_t length = iree_unaligned_load_le_u64(record);
-    const uint64_t alignment = iree_unaligned_load_le_u64(record + 8);
-    const uint64_t clear_length = iree_unaligned_load_le_u64(record + 16);
-    const bool required =
-        i < 2 || (i < 6 ? model->shape_count != 0 : model->mtp.enabled);
-    if ((length != 0) != required || clear_length > length ||
-        length > INT64_MAX || !alignment ||
-        !iree_is_power_of_two_uint64(alignment)) {
-      status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                "invalid source allocation record %zu", i);
-    } else if (length) {
-      bool elastic = false;
-      for (iree_host_size_t j = 0; j < model->storage.region_count; ++j) {
-        elastic |= model->storage.regions[j].allocation == i;
-      }
-      if (model->memory.pool && model->cache.capacity && elastic) {
-        status = loom_serve_virtual_buffer_create(
-            model->memory.pool, length, alignment, &model->memory.statistics,
-            &model->memory.buffers[i]);
-        if (iree_status_is_ok(status)) {
-          *allocation =
-              loom_serve_virtual_buffer_handle(model->memory.buffers[i]);
-          iree_hal_buffer_retain(*allocation);
-          status = loom_serve_retirement_track(&model->retirement, allocation,
-                                               model->allocator);
-          if (iree_status_is_ok(status) && clear_length && i != 1) {
-            model->memory.private_lengths[i] = clear_length;
-            status = loom_serve_virtual_buffer_commit(model->memory.buffers[i],
-                                                      0, clear_length);
-          }
-        }
-      } else {
-        status = text_allocate_buffer(model, length, alignment, allocation);
-      }
-    }
-    if (iree_status_is_ok(status) && clear_length &&
-        !(i == 1 && model->memory.buffers[i])) {
-      transfers[transfer_count++] = (iree_hal_transfer_operation_t){
-          .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-          .fill = {.target_buffer = *allocation,
-                   .length = clear_length,
-                   .pattern = &zero,
-                   .pattern_length = sizeof(zero)},
-      };
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_allocator_malloc_array(model->allocator, model->row_count,
-                                    sizeof(*model->rows), (void**)&model->rows);
-  }
-  for (iree_host_size_t i = 0;
-       i < model->row_count && iree_status_is_ok(status); ++i) {
-    loom_serve_text_row_t* row = &model->rows[i];
-    row->model = model;
-    row->buffers[TEXT_RESIDUAL] = model->residual;
-    row->buffers[TEXT_WORKSPACE] = model->workspace;
-    for (iree_host_size_t binding = TEXT_CONTROL;
-         binding <= TEXT_PROGRESS && iree_status_is_ok(status); ++binding) {
-      const uint8_t* view =
-          model->storage.bytes[LOOM_SERVE_TEXT_STORAGE_VIEWS].data +
-          (i * 5 + binding - TEXT_CONTROL) * 16;
-      const uint64_t offset = iree_unaligned_load_le_u64(view);
-      const uint64_t length = iree_unaligned_load_le_u64(view + 8);
-      const bool required = binding != TEXT_ATTENTION || !model->cache.capacity;
-      if ((length != 0) != required) {
-        status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                                  "invalid source view for row %zu binding %zu",
-                                  i, binding);
-      } else if (length) {
-        status =
-            iree_hal_buffer_subspan(model->row_arena, offset, length,
-                                    model->allocator, &row->buffers[binding]);
-      }
-    }
-  }
-  if (iree_status_is_ok(status) && model->shape_count) {
-    model->epoch.buffers[0] = model->residual;
-    model->epoch.buffers[3] = model->row_arena;
-    model->epoch.buffers[6] = model->workspace;
-    const iree_const_byte_span_t origins =
-        model->storage.bytes[LOOM_SERVE_TEXT_STORAGE_TARGET_ORIGINS];
-    transfers[transfer_count++] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-        .upload = {.source = origins.data,
-                   .target_buffer = model->epoch.buffers[2],
-                   .length = origins.data_length},
-    };
-  }
-  if (iree_status_is_ok(status) && model->mtp.enabled) {
-    status = iree_hal_buffer_subspan(
-        model->mtp.results, model->storage.feedback_split,
-        IREE_HAL_WHOLE_BUFFER, model->allocator, &model->mtp.next_results);
-  }
-  if (iree_status_is_ok(status) && model->mtp.enabled) {
-    const iree_const_byte_span_t origins =
-        model->storage.bytes[LOOM_SERVE_TEXT_STORAGE_DRAFT_ORIGINS];
-    transfers[transfer_count++] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-        .upload = {.source = origins.data,
-                   .target_buffer = model->mtp.row_table,
-                   .length = origins.data_length},
-    };
-  }
-  if (iree_status_is_ok(status)) {
-    uint64_t completion = 0;
-    status = loom_serve_execution_transfer(model->execution, transfer_count,
-                                           transfers, &completion);
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_execution_wait(model->execution, completion);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    fprintf(stderr,
-            "Residency: %zu rows, %.3f GiB retained arena, %.3f GiB shared "
-            "workspace, %zu-token context, %zu-token prefill capacity.\n",
-            model->row_count,
-            iree_hal_buffer_byte_length(model->row_arena) / 1073741824.0,
-            workspace_length / 1073741824.0, model->context_capacity,
-            model->prefill_capacity);
-  }
   return status;
 }
 
@@ -794,8 +529,6 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
           : IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT;
   model->shape_count = options->epoch_count;
   model->context_capacity = options->context_capacity;
-  model->cache.capacity = options->pool_capacity;
-  model->mtp.enabled = options->enable_mtp;
   if (model->shape_count) {
     IREE_RETURN_IF_ERROR(iree_allocator_clone(
         model->allocator,
@@ -815,7 +548,6 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   model->dispatch = loom_serve_device_dispatch_queue(model->device_owner);
   model->transfer = loom_serve_device_transfer_queue(model->device_owner);
   model->execution = loom_serve_device_execution(model->device_owner);
-  model->memory.pool = loom_serve_device_memory_pool(model->device_owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       model->device, model->dispatch, options->source_directory,
       &options->kernel_sanitizer, model->allocator, &model->jit));
@@ -855,9 +587,35 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
         model->command_mode, stage->fixed_buffers, &stage->command);
   }
   IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(text_allocate_state(model));
+  uint64_t workspace_length = 0;
+  uint64_t workspace_alignment = 0;
+  for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
+    workspace_length = iree_max(
+        workspace_length,
+        model->stages[i].program.requirements.transient.required_byte_length);
+    workspace_alignment = iree_max(
+        workspace_alignment,
+        model->stages[i].program.requirements.transient.minimum_alignment);
+  }
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_state_allocate(&model->state, model->device_owner,
+                                     workspace_length, workspace_alignment));
+  IREE_RETURN_IF_ERROR(
+      iree_allocator_malloc_array(model->allocator, model->row_count,
+                                  sizeof(*model->rows), (void**)&model->rows));
+  for (iree_host_size_t i = 0; i < model->row_count; ++i) {
+    model->rows[i].model = model;
+    model->rows[i].state = &model->state.rows[i];
+  }
+  fprintf(stderr,
+          "Residency: %zu rows, %.3f GiB retained arena, %.3f GiB shared "
+          "workspace, %zu-token context, %zu-token prefill capacity.\n",
+          model->row_count,
+          iree_hal_buffer_byte_length(model->state.row_arena) / 1073741824.0,
+          workspace_length / 1073741824.0, model->context_capacity,
+          model->prefill_capacity);
   IREE_RETURN_IF_ERROR(text_create_program(model, options->source_directory));
-  loom_serve_text_storage_release_payloads(&model->storage);
+  loom_serve_text_storage_release_payloads(&model->state.storage);
   return iree_ok_status();
 }
 
@@ -895,9 +653,9 @@ iree_status_t loom_serve_text_model_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*model), (void**)&model));
   model->allocator = host_allocator;
-  loom_serve_retirement_initialize(&model->retirement);
   model->device_owner = device;
   model->row_count = options->row_count;
+  loom_serve_text_state_initialize(options, &model->state, host_allocator);
   iree_status_t status = text_initialize(model, options);
   if (iree_status_is_ok(status)) {
     *out_model = model;
@@ -918,30 +676,6 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   loom_serve_program_destroy(model->program);
   iree_vm_module_release(model->native_module);
   loom_serve_preparation_destroy(model->preparation);
-  if (model->rows) {
-    for (iree_host_size_t i = 0; i < model->row_count; ++i) {
-      loom_serve_snapshot_destroy(model->rows[i].snapshot);
-      for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
-           ++binding) {
-        iree_hal_buffer_release(model->rows[i].buffers[binding]);
-      }
-    }
-  }
-  iree_allocator_free(model->allocator, model->cache.destinations);
-  loom_serve_block_pool_deinitialize(&model->cache.pool);
-  iree_hal_buffer_release(model->epoch.buffers[1]);
-  iree_hal_buffer_release(model->epoch.buffers[2]);
-  iree_hal_buffer_release(model->epoch.buffers[4]);
-  iree_hal_buffer_release(model->epoch.buffers[5]);
-  iree_hal_buffer_release(model->mtp.carry);
-  iree_hal_buffer_release(model->mtp.committed);
-  iree_hal_buffer_release(model->mtp.results);
-  iree_hal_buffer_release(model->mtp.next_results);
-  iree_hal_buffer_release(model->mtp.cache);
-  iree_hal_buffer_release(model->mtp.row_table);
-  iree_hal_buffer_release(model->row_arena);
-  iree_hal_buffer_release(model->residual);
-  iree_hal_buffer_release(model->workspace);
   for (iree_host_size_t i = 0; i < model->stage_count; ++i) {
     iree_hal_command_buffer_release(model->stages[i].command);
     loom_serve_jit_stage_destroy(model->stages[i].compiled);
@@ -953,25 +687,19 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_allocator_free(model->allocator, model->shapes);
   iree_allocator_free(model->allocator, model->stages);
   loom_serve_jit_destroy(model->jit);
-  // A failed semaphore does not retire borrowed transfer payloads. Final queue
-  // ownership of their device counterparts does, including nested row views.
-  loom_serve_retirement_deinitialize(&model->retirement);
-  loom_serve_text_storage_deinitialize(&model->storage);
+  // State retirement encloses all borrowed host packets and row payloads,
+  // including when the initial execution drain returned a failure.
+  iree_status_t memory_status =
+      loom_serve_text_state_deinitialize(&model->state);
   iree_vm_buffer_release(model->control_state);
   for (iree_host_size_t i = 0; i < TEXT_HOST_BUFFER_COUNT; ++i) {
     iree_vm_buffer_release(model->host.buffers[i]);
   }
   iree_vm_environment_free(model->environment);
   iree_allocator_free(model->allocator, model->rows);
-  iree_allocator_free(model->allocator, model->cache.maps);
   loom_serve_residency_destroy(model->residency);
-  iree_status_t memory_status = loom_serve_weights_destroy(model->weights);
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
-       ++i) {
-    memory_status = iree_status_join(
-        memory_status,
-        loom_serve_virtual_buffer_destroy(model->memory.buffers[i]));
-  }
+  memory_status = iree_status_join(memory_status,
+                                   loom_serve_weights_destroy(model->weights));
   // A failed platform unmap/free must not destroy the allocation domain still
   // owning those handles. The terminal error stops the process's serving run.
   if (!iree_status_is_ok(memory_status)) {
@@ -989,7 +717,7 @@ loom_serve_text_row_t* loom_serve_text_model_row(loom_serve_text_model_t* model,
 
 loom_serve_memory_statistics_t loom_serve_text_model_memory_statistics(
     const loom_serve_text_model_t* model) {
-  return model->memory.statistics;
+  return model->state.memory.statistics;
 }
 
 loom_serve_memory_statistics_t loom_serve_text_model_weight_statistics(
@@ -1010,115 +738,6 @@ iree_status_t loom_serve_text_model_deactivate(loom_serve_text_model_t* model) {
   return loom_serve_residency_deactivate(model->residency);
 }
 
-iree_status_t loom_serve_text_model_trim(
-    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result) {
-  *out_result = (loom_serve_text_trim_result_t){0};
-  if (!model->memory.pool) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
-  const uint64_t released_before =
-      loom_serve_memory_pool_statistics(model->memory.pool).released_bytes;
-  out_result->moved_blocks = loom_serve_block_pool_plan_compaction(
-      &model->cache.pool, model->cache.destinations);
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       out_result->moved_blocks && i < model->storage.region_count &&
-       iree_status_is_ok(status);
-       ++i) {
-    const loom_serve_text_cache_region_t* region = &model->storage.regions[i];
-    uint64_t copied_bytes = 0;
-    status = loom_serve_block_region_relocate(
-        model->execution, model->memory.buffers[region->allocation],
-        *text_allocation(model, region->allocation), &region->blocks,
-        model->cache.pool.capacity, model->cache.destinations, &copied_bytes);
-    out_result->copied_bytes += copied_bytes;
-  }
-  // Even a rejected later copy batch leaves earlier submissions owning their
-  // sources/destinations. Observe retirement before publishing or returning.
-  status =
-      iree_status_join(status, loom_serve_execution_drain(model->execution));
-  if (iree_status_is_ok(status) && out_result->moved_blocks) {
-    for (iree_host_size_t i = 0; i < model->row_count; ++i) {
-      uint32_t* blocks = model->cache.maps + i * model->storage.blocks_per_row;
-      for (uint32_t j = 0; j < model->rows[i].block_count; ++j) {
-        blocks[j] = model->cache.destinations[blocks[j]];
-      }
-    }
-    const iree_device_size_t length = model->row_count *
-                                      model->storage.blocks_per_row *
-                                      sizeof(*model->cache.maps);
-    const iree_hal_transfer_operation_t uploads[] = {
-        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-         .upload = {.source = model->cache.maps,
-                    .target_buffer = model->epoch.buffers[2],
-                    .target_offset = model->storage.map_origin,
-                    .length = length}},
-        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-         .upload = {.source = model->cache.maps,
-                    .target_buffer = model->mtp.row_table,
-                    .target_offset = model->storage.map_origin,
-                    .length = length}},
-    };
-    uint64_t completion = 0;
-    status = loom_serve_execution_transfer(
-        model->execution, model->mtp.enabled ? 2 : 1, uploads, &completion);
-    status =
-        iree_status_join(status, loom_serve_execution_drain(model->execution));
-  }
-  if (iree_status_is_ok(status)) {
-    loom_serve_block_pool_commit_compaction(&model->cache.pool);
-    for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT;
-         ++i) {
-      if (!model->memory.buffers[i]) {
-        continue;
-      }
-      loom_serve_virtual_buffer_begin_trim(model->memory.buffers[i]);
-      if (model->memory.private_lengths[i]) {
-        loom_serve_virtual_buffer_keep(model->memory.buffers[i], 0,
-                                       model->memory.private_lengths[i]);
-      }
-    }
-    for (iree_host_size_t i = 0;
-         model->memory.buffers[1] && i < model->row_count; ++i) {
-      if (!model->rows[i].position || model->rows[i].snapshot) {
-        continue;
-      }
-      for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
-           ++binding) {
-        iree_hal_buffer_t* view = model->rows[i].buffers[binding];
-        if (view) {
-          loom_serve_virtual_buffer_keep(model->memory.buffers[1],
-                                         iree_hal_buffer_byte_offset(view),
-                                         iree_hal_buffer_byte_length(view));
-        }
-      }
-    }
-    const uint32_t live =
-        model->cache.pool.capacity - model->cache.pool.available;
-    for (iree_host_size_t i = 0; live && i < model->storage.region_count; ++i) {
-      const loom_serve_text_cache_region_t* region = &model->storage.regions[i];
-      for (iree_host_size_t plane = 0; plane < region->blocks.count; ++plane) {
-        loom_serve_virtual_buffer_keep(
-            model->memory.buffers[region->allocation],
-            region->blocks.origin + plane * region->blocks.stride,
-            live * region->blocks.block_bytes);
-      }
-    }
-  }
-  for (iree_host_size_t i = 0; i < LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT &&
-                               iree_status_is_ok(status);
-       ++i) {
-    if (model->memory.buffers[i]) {
-      status = loom_serve_virtual_buffer_trim(model->memory.buffers[i]);
-    }
-  }
-  out_result->released_bytes =
-      loom_serve_memory_pool_statistics(model->memory.pool).released_bytes -
-      released_before;
-  return status;
-}
-
 iree_tokenizer_t* loom_serve_text_model_tokenizer(
     loom_serve_text_model_t* model) {
   return model->tokenizer;
@@ -1137,16 +756,17 @@ iree_host_size_t loom_serve_text_model_context_capacity(
 loom_serve_text_pool_usage_t loom_serve_text_model_pool_usage(
     const loom_serve_text_model_t* model) {
   return (loom_serve_text_pool_usage_t){
-      .block_size = model->storage.block_size,
-      .capacity = model->cache.capacity,
-      .available = (iree_host_size_t)model->cache.pool.available *
-                   model->storage.block_size,
+      .block_size = model->state.storage.block_size,
+      .capacity = model->state.cache.capacity,
+      .available = (iree_host_size_t)model->state.cache.pool.available *
+                   model->state.storage.block_size,
   };
 }
 
 iree_host_size_t loom_serve_text_row_pool_usage(
     const loom_serve_text_row_t* row) {
-  return (iree_host_size_t)row->block_count * row->model->storage.block_size;
+  return (iree_host_size_t)row->state->block_count *
+         row->model->state.storage.block_size;
 }
 
 iree_host_size_t loom_serve_text_model_prefill_capacity(
@@ -1164,202 +784,31 @@ const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
   return model->shapes;
 }
 
-// Only a retired frontier may release pages. A rejected suffix within the
-// retained last page stays private; subsequent appends overwrite it before use.
-static void text_trim_blocks(loom_serve_text_row_t* row) {
-  loom_serve_text_model_t* model = row->model;
-  if (!model->cache.capacity) {
-    return;
-  }
-  const uint32_t keep =
-      (uint32_t)((row->position + model->storage.block_size - 1) /
-                 model->storage.block_size);
-  const iree_host_size_t row_index = (iree_host_size_t)(row - model->rows);
-  loom_serve_block_pool_release(
-      &model->cache.pool, row->block_count - keep,
-      model->cache.maps + row_index * model->storage.blocks_per_row + keep);
-  row->block_count = keep;
+iree_status_t loom_serve_text_model_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result) {
+  return loom_serve_text_state_trim(&model->state, out_result);
 }
 
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row) {
-  // Elastic rows initialize at activation. Reset needs no access to their
-  // possibly unmapped private views, including a suspended row's old slots.
-  if (row->model->memory.buffers[1]) {
-    IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
-    loom_serve_snapshot_destroy(row->snapshot);
-    row->snapshot = NULL;
-    row->position = 0;
-    text_trim_blocks(row);
-    row->has_prediction = false;
-    memset(&row->transfer, 0, sizeof(row->transfer));
-    memset(&row->metrics, 0, sizeof(row->metrics));
-    return iree_ok_status();
-  }
-  const uint32_t zero = 0;
-  iree_hal_transfer_operation_t fills[] = {
-      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-       .fill = {.target_buffer = row->buffers[TEXT_RECURRENT],
-                .length =
-                    iree_hal_buffer_byte_length(row->buffers[TEXT_RECURRENT]),
-                .pattern = &zero,
-                .pattern_length = sizeof(zero)}},
-      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-       .fill = {.target_buffer = row->buffers[TEXT_PROGRESS],
-                .length = sizeof(row->transfer.progress),
-                .pattern = &zero,
-                .pattern_length = sizeof(zero)}},
-  };
-  uint64_t completion = 0;
-  iree_status_t status = loom_serve_execution_transfer(
-      row->model->execution, IREE_ARRAYSIZE(fills), fills, &completion);
-  if (iree_status_is_ok(status) && row->model->mtp.enabled) {
-    const iree_hal_transfer_operation_t clear_carry = {
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-        .fill = {.target_buffer = row->model->mtp.carry,
-                 .target_offset = (uint64_t)(row - row->model->rows) *
-                                  row->model->storage.carry_stride,
-                 .length = row->model->storage.carry_stride,
-                 .pattern = &zero,
-                 .pattern_length = sizeof(zero)},
-    };
-    status = loom_serve_execution_transfer(row->model->execution, 1,
-                                           &clear_carry, &completion);
-  }
-  if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_wait(row->model->execution, completion);
-  }
-  if (iree_status_is_ok(status)) {
-    row->position = 0;
-    text_trim_blocks(row);
-    row->has_prediction = false;
-    memset(&row->transfer, 0, sizeof(row->transfer));
-    memset(&row->metrics, 0, sizeof(row->metrics));
-  }
-  return status;
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_reset(row->state));
+  row->has_prediction = false;
+  memset(&row->transfer, 0, sizeof(row->transfer));
+  memset(&row->metrics, 0, sizeof(row->metrics));
+  return iree_ok_status();
 }
 
 iree_host_size_t loom_serve_text_row_suspended_bytes(
     const loom_serve_text_row_t* row) {
-  return loom_serve_snapshot_size(row->snapshot);
+  return loom_serve_snapshot_size(row->state->snapshot);
 }
 
 iree_status_t loom_serve_text_row_suspend(loom_serve_text_row_t* row) {
-  loom_serve_text_model_t* model = row->model;
-  if (!model->memory.buffers[1]) {
-    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                            "session suspension requires elastic pooled state");
-  }
-  if (row->snapshot || !row->position) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
-  const iree_host_size_t index = (iree_host_size_t)(row - model->rows);
-  uint32_t* blocks = model->cache.maps + index * model->storage.blocks_per_row;
-  iree_host_size_t range_count = 0;
-  loom_serve_snapshot_range_t* ranges = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_text_storage_plan_snapshot(
-      &model->storage, index, &row->buffers[TEXT_CONTROL], model->mtp.enabled,
-      row->block_count, blocks, &range_count, &ranges, model->allocator));
-  iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-    buffers[i] = *text_allocation(model, i);
-  }
-  iree_status_t status = loom_serve_snapshot_capture(
-      model->execution, IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
-      &row->snapshot, model->allocator);
-  if (iree_status_is_ok(status)) {
-    loom_serve_block_pool_release(&model->cache.pool, row->block_count, blocks);
-    row->block_count = 0;
-  }
-  iree_allocator_free(model->allocator, ranges);
-  return status;
+  return loom_serve_text_state_row_suspend(row->state);
 }
 
 iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
                                              bool* out_resumed) {
-  *out_resumed = false;
-  if (!row->snapshot) {
-    *out_resumed = true;
-    return iree_ok_status();
-  }
-  loom_serve_text_model_t* model = row->model;
-  const uint32_t needed =
-      (uint32_t)((row->position + model->storage.block_size - 1) /
-                 model->storage.block_size);
-  if (needed > model->cache.pool.available) {
-    return iree_ok_status();
-  }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
-  const iree_host_size_t index = (iree_host_size_t)(row - model->rows);
-  const iree_host_size_t map_index = index * model->storage.blocks_per_row;
-  uint32_t* blocks = model->cache.maps + map_index;
-  loom_serve_block_pool_acquire(&model->cache.pool, needed, blocks);
-  row->block_count = needed;
-  iree_host_size_t range_count = 0;
-  loom_serve_snapshot_range_t* ranges = NULL;
-  iree_status_t status = loom_serve_text_storage_plan_snapshot(
-      &model->storage, index, &row->buffers[TEXT_CONTROL], model->mtp.enabled,
-      needed, blocks, &range_count, &ranges, model->allocator);
-  loom_serve_memory_range_t* commitments = NULL;
-  if (iree_status_is_ok(status)) {
-    status =
-        iree_allocator_malloc_array(model->allocator, range_count,
-                                    sizeof(*commitments), (void**)&commitments);
-  }
-  iree_host_size_t commitment_count = 0;
-  bool admitted = false;
-  if (iree_status_is_ok(status)) {
-    for (iree_host_size_t i = 0; i < range_count; ++i) {
-      const loom_serve_snapshot_range_t* range = &ranges[i];
-      loom_serve_virtual_buffer_t* buffer =
-          model->memory.buffers[range->buffer_index];
-      if (buffer) {
-        commitments[commitment_count++] =
-            (loom_serve_memory_range_t){buffer, range->offset, range->length};
-      }
-    }
-    status = loom_serve_memory_pool_try_commit(
-        model->memory.pool, commitment_count, commitments, &admitted);
-  }
-  if (iree_status_is_ok(status) && admitted) {
-    iree_hal_buffer_t* buffers[LOOM_SERVE_TEXT_STORAGE_ALLOCATION_COUNT];
-    for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-      buffers[i] = *text_allocation(model, i);
-    }
-    status = loom_serve_snapshot_restore(row->snapshot, model->execution,
-                                         IREE_ARRAYSIZE(buffers), buffers,
-                                         range_count, ranges);
-  }
-  if (iree_status_is_ok(status) && admitted) {
-    const iree_hal_transfer_operation_t uploads[] = {
-        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-         .upload = {.source = blocks,
-                    .target_buffer = model->epoch.buffers[2],
-                    .target_offset = model->storage.map_origin + map_index * 4,
-                    .length = needed * sizeof(*blocks)}},
-        {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-         .upload = {.source = blocks,
-                    .target_buffer = model->mtp.row_table,
-                    .target_offset = model->storage.map_origin + map_index * 4,
-                    .length = needed * sizeof(*blocks)}},
-    };
-    uint64_t completion = 0;
-    status = loom_serve_execution_transfer(
-        model->execution, model->mtp.enabled ? 2 : 1, uploads, &completion);
-    status =
-        iree_status_join(status, loom_serve_execution_drain(model->execution));
-  }
-  if (iree_status_is_ok(status) && admitted) {
-    loom_serve_snapshot_destroy(row->snapshot);
-    row->snapshot = NULL;
-    *out_resumed = true;
-  } else if (iree_status_is_ok(status)) {
-    loom_serve_block_pool_release(&model->cache.pool, needed, blocks);
-    row->block_count = 0;
-  }
-  iree_allocator_free(model->allocator, commitments);
-  iree_allocator_free(model->allocator, ranges);
-  return status;
+  return loom_serve_text_state_row_try_resume(row->state, out_resumed);
 }
 
 static iree_status_t text_invoke(loom_serve_text_model_t* model,
@@ -1383,7 +832,7 @@ static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
   };
   for (iree_host_size_t i = 0; i < TEXT_BINDING_COUNT; ++i) {
     arguments[i + 2] = iree_hal_buffer_variant_from_ptr_borrowed(
-        &model->types, row->buffers[i]);
+        &model->types, row->state->buffers[i]);
   }
   iree_vm_variant_t results[1] = {0};
   iree_status_t status = text_invoke(model, model->step,
@@ -1392,11 +841,11 @@ static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   const iree_hal_transfer_operation_t downloads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-       .download = {.source_buffer = row->buffers[TEXT_TOKENS],
+       .download = {.source_buffer = row->state->buffers[TEXT_TOKENS],
                     .target = row->transfer.tokens,
                     .length = sizeof(int32_t)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
-       .download = {.source_buffer = row->buffers[TEXT_PROGRESS],
+       .download = {.source_buffer = row->state->buffers[TEXT_PROGRESS],
                     .target = row->transfer.progress,
                     .length = sizeof(row->transfer.progress)}},
   };
@@ -1409,106 +858,6 @@ static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
     status = loom_serve_execution_feedback_wait(model->execution, completion);
   }
   return loom_serve_residency_finish(model->residency, status);
-}
-
-// The whole epoch has passed its capacity check. Publish only newly assigned
-// map entries on the existing ordered transfer path. The fixed host maps stay
-// alive until completion, including partial submission failure and destruction.
-static iree_status_t text_grow_blocks(loom_serve_text_model_t* model,
-                                      iree_host_size_t span_count,
-                                      const loom_serve_text_span_t* spans,
-                                      const uint32_t* extents) {
-  if (!model->cache.capacity) {
-    return iree_ok_status();
-  }
-  iree_hal_transfer_operation_t uploads[2 * TEXT_ROW_CAPACITY] = {0};
-  iree_host_size_t upload_count = 0;
-  for (iree_host_size_t i = 0; i < span_count; ++i) {
-    const loom_serve_text_span_t* span = &spans[i];
-    loom_serve_text_row_t* row = &model->rows[span->row_index];
-    const uint32_t needed = (uint32_t)((row->position + extents[i] +
-                                        model->storage.block_size - 1) /
-                                       model->storage.block_size);
-    const uint32_t count = needed - row->block_count;
-    if (!count) {
-      continue;
-    }
-    if (model->memory.buffers[1] && !row->position) {
-      // Cold row activation initializes only that row's private views. The
-      // logical row address stays fixed even when its physical slabs trim.
-      iree_hal_transfer_operation_t fills[6] = {0};
-      iree_host_size_t fill_count = 0;
-      const uint32_t zero = 0;
-      for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
-           ++binding) {
-        iree_hal_buffer_t* view = row->buffers[binding];
-        if (!view) {
-          continue;
-        }
-        IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_commit(
-            model->memory.buffers[1], iree_hal_buffer_byte_offset(view),
-            iree_hal_buffer_byte_length(view)));
-        fills[fill_count++] = (iree_hal_transfer_operation_t){
-            .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-            .fill = {.target_buffer = view,
-                     .length = iree_hal_buffer_byte_length(view),
-                     .pattern = &zero,
-                     .pattern_length = sizeof(zero)},
-        };
-      }
-      if (model->mtp.enabled) {
-        fills[fill_count++] = (iree_hal_transfer_operation_t){
-            .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
-            .fill = {
-                .target_buffer = model->mtp.carry,
-                .target_offset = span->row_index * model->storage.carry_stride,
-                .length = model->storage.carry_stride,
-                .pattern = &zero,
-                .pattern_length = sizeof(zero)}};
-      }
-      uint64_t completion = 0;
-      IREE_RETURN_IF_ERROR(loom_serve_execution_transfer(
-          model->execution, fill_count, fills, &completion));
-    }
-    const iree_host_size_t map_index =
-        span->row_index * model->storage.blocks_per_row + row->block_count;
-    uint32_t* blocks = model->cache.maps + map_index;
-    loom_serve_block_pool_acquire(&model->cache.pool, count, blocks);
-    row->block_count = needed;
-    for (iree_host_size_t j = 0;
-         model->memory.pool && j < model->storage.region_count; ++j) {
-      const loom_serve_text_cache_region_t* cache_region =
-          &model->storage.regions[j];
-      const loom_serve_block_region_t* region = &cache_region->blocks;
-      for (iree_host_size_t plane = 0; plane < region->count; ++plane) {
-        for (iree_host_size_t block = 0; block < count; ++block) {
-          IREE_RETURN_IF_ERROR(loom_serve_virtual_buffer_commit(
-              model->memory.buffers[cache_region->allocation],
-              region->origin + plane * region->stride +
-                  blocks[block] * region->block_bytes,
-              region->block_bytes));
-        }
-      }
-    }
-    uploads[upload_count++] = (iree_hal_transfer_operation_t){
-        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-        .upload = {.source = blocks,
-                   .target_buffer = model->epoch.buffers[2],
-                   .target_offset =
-                       model->storage.map_origin + map_index * sizeof(*blocks),
-                   .length = count * sizeof(*blocks)},
-    };
-    if (model->mtp.enabled) {
-      uploads[upload_count] = uploads[upload_count - 1];
-      uploads[upload_count++].upload.target_buffer = model->mtp.row_table;
-    }
-  }
-  if (!upload_count) {
-    return iree_ok_status();
-  }
-  uint64_t completion = 0;
-  return loom_serve_execution_transfer(model->execution, upload_count, uploads,
-                                       &completion);
 }
 
 // The semantic host record is {length, position, row, input_begin, input_count,
@@ -1532,7 +881,7 @@ static iree_host_size_t text_prepare_plan(loom_serve_text_model_t* model,
             : 0;
     const uint32_t fields[] = {
         (uint32_t)span->token_count,
-        (uint32_t)model->rows[span->row_index].position,
+        (uint32_t)model->rows[span->row_index].state->position,
         (uint32_t)span->row_index,
         (uint32_t)input_begin,
         (uint32_t)input_count,
@@ -1592,7 +941,7 @@ static iree_status_t text_epoch(
                               "invalid text epoch span %zu", i);
     }
     const uint32_t resident_bit = 1u << span->row_index;
-    if (model->rows[span->row_index].snapshot) {
+    if (model->rows[span->row_index].state->snapshot) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "epoch row %zu is suspended", span->row_index);
     }
@@ -1601,8 +950,8 @@ static iree_status_t text_epoch(
                               "epoch repeats resident row %zu",
                               span->row_index);
     }
-    if (span->token_count >
-        model->context_capacity - model->rows[span->row_index].position) {
+    if (span->token_count > model->context_capacity -
+                                model->rows[span->row_index].state->position) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "epoch span %zu exceeds remaining context", i);
     }
@@ -1662,7 +1011,8 @@ static iree_status_t text_epoch(
       const loom_serve_text_span_t* prior = &spans[first];
       const uint32_t limit = continuation->output_limits[i];
       const iree_host_size_t remaining =
-          model->context_capacity - model->rows[span->row_index].position;
+          model->context_capacity -
+          model->rows[span->row_index].state->position;
       if (limit) {
         if (limit > 8 || span->token_count != 4 ||
             span->flags != (LOOM_SERVE_TEXT_SPAN_FLAG_SELECT |
@@ -1698,20 +1048,22 @@ static iree_status_t text_epoch(
   }
 
   uint32_t required_blocks = 0;
-  for (iree_host_size_t i = 0; model->cache.capacity && i < span_count; ++i) {
+  for (iree_host_size_t i = 0; model->state.cache.capacity && i < span_count;
+       ++i) {
     const loom_serve_text_row_t* row = &model->rows[spans[i].row_index];
-    required_blocks += (uint32_t)((row->position + extents[i] +
-                                   model->storage.block_size - 1) /
-                                  model->storage.block_size) -
-                       row->block_count;
+    required_blocks += (uint32_t)((row->state->position + extents[i] +
+                                   model->state.storage.block_size - 1) /
+                                  model->state.storage.block_size) -
+                       row->state->block_count;
   }
-  if (required_blocks > model->cache.pool.available) {
+  if (required_blocks > model->state.cache.pool.available) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "epoch needs %u KV blocks; %u are available",
-                            required_blocks, model->cache.pool.available);
+                            required_blocks, model->state.cache.pool.available);
   }
   IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
-  iree_status_t status = text_grow_blocks(model, span_count, spans, extents);
+  iree_status_t status =
+      loom_serve_text_state_grow(&model->state, span_count, spans, extents);
 
   const iree_host_size_t input_count =
       text_prepare_plan(model, span_count, spans, output_limits, NULL, 0, 0);
@@ -1748,11 +1100,11 @@ static iree_status_t text_epoch(
   const iree_hal_transfer_operation_t uploads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = model->host.bytes[TEXT_HOST_METADATA].data,
-                  .target_buffer = model->epoch.buffers[1],
+                  .target_buffer = model->state.epoch.buffers[1],
                   .length = model->host.bytes[TEXT_HOST_METADATA].data_length}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = model->host.bytes[TEXT_HOST_TOKENS].data,
-                  .target_buffer = model->epoch.buffers[4],
+                  .target_buffer = model->state.epoch.buffers[4],
                   .length = model->host.bytes[TEXT_HOST_TOKENS].data_length}},
   };
   uint64_t completion = 0;
@@ -1761,11 +1113,13 @@ static iree_status_t text_epoch(
         model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion);
   }
   iree_hal_buffer_t* buffers[] = {
-      model->residual,         model->epoch.buffers[1], model->epoch.buffers[2],
-      model->row_arena,        model->epoch.buffers[4], model->epoch.buffers[5],
-      model->workspace,        model->mtp.carry,        model->mtp.committed,
-      model->mtp.results,      model->mtp.cache,        model->mtp.row_table,
-      model->mtp.next_results,
+      model->state.residual,         model->state.epoch.buffers[1],
+      model->state.epoch.buffers[2], model->state.row_arena,
+      model->state.epoch.buffers[4], model->state.epoch.buffers[5],
+      model->state.workspace,        model->state.mtp.carry,
+      model->state.mtp.committed,    model->state.mtp.results,
+      model->state.mtp.cache,        model->state.mtp.row_table,
+      model->state.mtp.next_results,
   };
   iree_vm_variant_t arguments[9 + IREE_ARRAYSIZE(buffers)] = {
       iree_vm_buffer_variant_from_ptr_borrowed(&model->vm_types,
@@ -1835,8 +1189,8 @@ static iree_status_t text_epoch(
       out_results[i] = result;
     }
     loom_serve_text_row_t* row = &model->rows[spans[i].row_index];
-    row->position += result.consumed_count;
-    text_trim_blocks(row);
+    row->state->position += result.consumed_count;
+    loom_serve_text_state_row_trim(row->state);
     row->has_prediction = result.output_count != 0;
     if (row->has_prediction) {
       row->transfer.tokens[0] = result.tokens[result.output_count - 1];
@@ -1860,7 +1214,7 @@ iree_status_t loom_serve_text_model_verify(
     const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_result_t* out_results) {
-  if (!model->mtp.enabled) {
+  if (!iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "MTP artifacts were not loaded");
   }
@@ -1873,12 +1227,13 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
                                           const int32_t* token_ids) {
   loom_serve_text_model_t* model = row->model;
   if (!count || count > model->prefill_capacity ||
-      count > model->context_capacity - row->position) {
+      count > model->context_capacity - row->state->position) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "prefill chunk exceeds stage or context capacity");
   }
   const iree_time_t start = iree_time_now();
-  if (model->mtp.enabled || model->cache.capacity) {
+  if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
+      model->state.cache.capacity) {
     iree_host_size_t shape_index = 0;
     // The public prefill capacity is bounded by the largest prepared shape.
     while (model->shapes[shape_index].token_capacity < count) {
@@ -1900,16 +1255,16 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
   memset(row->transfer.tokens, 0, sizeof(row->transfer.tokens));
   memcpy(row->transfer.tokens, token_ids, count * sizeof(int32_t));
   row->transfer.control[0] = (int32_t)count;
-  row->transfer.control[1] = (int32_t)row->position;
+  row->transfer.control[1] = (int32_t)row->state->position;
   row->transfer.control[2] = model->eos_token;
   const iree_hal_transfer_operation_t uploads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = row->transfer.control,
-                  .target_buffer = row->buffers[TEXT_CONTROL],
+                  .target_buffer = row->state->buffers[TEXT_CONTROL],
                   .length = sizeof(row->transfer.control)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = row->transfer.tokens,
-                  .target_buffer = row->buffers[TEXT_TOKENS],
+                  .target_buffer = row->state->buffers[TEXT_TOKENS],
                   .length = sizeof(row->transfer.tokens)}},
   };
   uint64_t completion = 0;
@@ -1919,7 +1274,7 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
     status = text_step(row, 1);
   }
   if (iree_status_is_ok(status)) {
-    row->position += count;
+    row->state->position += count;
     row->has_prediction = true;
     row->metrics.prefill_tokens += count;
     ++row->metrics.prefill_steps;
@@ -1933,12 +1288,14 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "decode requires a selected prediction");
   }
-  if (row->position == row->model->context_capacity) {
+  if (row->state->position == row->model->context_capacity) {
     return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                             "text context is full");
   }
   const iree_time_t start = iree_time_now();
-  if (row->model->mtp.enabled || row->model->cache.capacity) {
+  if (iree_any_bit_set(row->model->state.flags,
+                       LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
+      row->model->state.cache.capacity) {
     const int32_t token = row->transfer.tokens[0];
     const loom_serve_text_span_t span = {
         (iree_host_size_t)(row - row->model->rows),
@@ -1953,17 +1310,17 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
   }
   // The host row owns the input position and prediction regardless of which
   // schedule produced it. The isolated decode command consumes that snapshot.
-  row->transfer.control[0] = (int32_t)row->position;
+  row->transfer.control[0] = (int32_t)row->state->position;
   row->transfer.control[1] = row->transfer.progress[0];
   row->transfer.control[2] = row->model->eos_token;
   const iree_hal_transfer_operation_t uploads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = row->transfer.control,
-                  .target_buffer = row->buffers[TEXT_CONTROL],
+                  .target_buffer = row->state->buffers[TEXT_CONTROL],
                   .length = sizeof(row->transfer.control)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {.source = row->transfer.tokens,
-                  .target_buffer = row->buffers[TEXT_TOKENS],
+                  .target_buffer = row->state->buffers[TEXT_TOKENS],
                   .length = sizeof(int32_t)}},
   };
   uint64_t completion = 0;
@@ -1973,7 +1330,7 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
     status = text_step(row, 0);
   }
   if (iree_status_is_ok(status)) {
-    ++row->position;
+    ++row->state->position;
     ++row->metrics.decode_steps;
     row->metrics.decode_duration += iree_time_now() - start;
   }
@@ -1990,7 +1347,7 @@ bool loom_serve_text_row_is_eos(const loom_serve_text_row_t* row) {
 
 iree_host_size_t loom_serve_text_row_position(
     const loom_serve_text_row_t* row) {
-  return row->position;
+  return row->state->position;
 }
 
 loom_serve_text_metrics_t loom_serve_text_row_metrics(
