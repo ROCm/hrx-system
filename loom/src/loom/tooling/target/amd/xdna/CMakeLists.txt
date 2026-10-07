@@ -27,6 +27,26 @@ endif()
 if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA AND LOOM_TARGET_ARCH_VM)
 iree_execution_test_suite(
   NAME
+    channel_lifetimes_test
+  MANIFESTS
+    "test/channel_lifetimes.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/test/channel_lifetimes.loom"
+  LABELS
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+  TIMEOUT
+    60
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA AND LOOM_TARGET_ARCH_VM)
+iree_execution_test_suite(
+  NAME
     hal_execution_test
   MANIFESTS
     "test/hal_execution.test.json"
@@ -39,6 +59,28 @@ iree_execution_test_suite(
     "runtime-resource=amd-xdna"
   RESOURCE_GROUP
     gpu-device
+  TIMEOUT
+    60
+)
+endif()
+
+if(LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA AND LOOM_EXECUTE_IREE_HAL AND IREE_HAL_DRIVER_XDNA AND LOOM_TARGET_ARCH_VM)
+iree_execution_test_suite(
+  NAME
+    signed_i4_panels_test
+  MANIFESTS
+    "test/signed_i4_panels.test.json"
+  TOOLS
+    "iree-test-loom=loom::tools::iree-test-loom"
+  DATA
+    "${PROJECT_SOURCE_DIR}/loom/src/loom/tooling/target/amd/xdna/test/signed_i4_panels.loom"
+  LABELS
+    "iree-run-requirement=libamdf.resource.xdna"
+    "runtime-resource=amd-xdna"
+  RESOURCE_GROUP
+    gpu-device
+  TIMEOUT
+    60
 )
 endif()
 

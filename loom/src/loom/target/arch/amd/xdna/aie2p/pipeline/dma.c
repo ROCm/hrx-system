@@ -215,6 +215,30 @@ static iree_status_t loom_aie2p_native_dma_wait_helper(
   return loom_aie2p_worker_return(&builder, NULL, 0);
 }
 
+static iree_status_t loom_aie2p_native_dma_external_offset(
+    loom_builder_t* builder, const loom_view_region_table_t* regions,
+    const loom_view_region_t* view, loom_value_id_t* out_value) {
+  // The authored coordinate retains whole-expression predicates that need not
+  // hold for each independently expanded affine term.
+  if (view->begin_value_id != LOOM_VALUE_ID_INVALID) {
+    *out_value = view->begin_value_id;
+    return iree_ok_status();
+  }
+  const loom_symbolic_expr_t* expression = &view->begin_byte_offset;
+  loom_value_id_t base_value_id = LOOM_VALUE_ID_INVALID;
+  if (loom_symbolic_expr_is_linear(&view->projection_byte_offset)) {
+    const loom_view_region_t* base = NULL;
+    if (loom_view_region_table_try_lookup(regions, view->base_view_value_id,
+                                          &base) &&
+        base->begin_value_id != LOOM_VALUE_ID_INVALID) {
+      base_value_id = base->begin_value_id;
+      expression = &view->projection_byte_offset;
+    }
+  }
+  return loom_view_materialize_offset_expression(
+      builder, expression, base_value_id, view->view_value_id, out_value);
+}
+
 iree_status_t loom_aie2p_native_emit_transfers(
     loom_aie2p_native_context_t* context, loom_rewriter_t* rewriter,
     const loom_pipeline_realization_t* realization,
@@ -232,10 +256,9 @@ iree_status_t loom_aie2p_native_emit_transfers(
     if (!loom_symbolic_expr_is_constant(
             &transfer->external_view->begin_byte_offset)) {
       loom_value_id_t offset;
-      IREE_RETURN_IF_ERROR(loom_view_materialize_offset_expression(
-          builder, &transfer->external_view->begin_byte_offset,
-          LOOM_VALUE_ID_INVALID, transfer->external_view->view_value_id,
-          &offset));
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_dma_external_offset(
+          builder, &source->asynchronous.movement.view_regions,
+          transfer->external_view, &offset));
       loom_builder_set_before(builder, transfer->source->request.op);
       loom_op_t *integer, *narrowed;
       IREE_RETURN_IF_ERROR(loom_index_cast_build(

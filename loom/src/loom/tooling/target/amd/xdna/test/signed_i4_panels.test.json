@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "name": "signed-I4 resident panels match an independent scalar oracle through the HAL",
+      "run": {
+        "tool": "iree-test-loom",
+        "args": [
+          "{srcdir}/signed_i4_panels.loom",
+          "--device=xdna"
+        ]
+      },
+      "stdout": {
+        "contains": [
+          "\"failed_sample_count\":0",
+          "\"trial_count\":16",
+          "\"failed_trial_count\":0",
+          "\"scenario\":\"signed_i4_code_coverage\"",
+          "\"scenario\":\"signed_i4_random_panels\"",
+          "\"scenario\":\"signed_i4_aliased_inputs\"",
+          "\"failure_count\":0"
+        ]
+      }
+    }
+  ]
+}

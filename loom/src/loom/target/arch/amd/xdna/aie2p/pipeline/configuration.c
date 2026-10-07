@@ -181,22 +181,46 @@ static iree_status_t loom_aie2p_native_config_set_lock(
           LOOM_XDNA_REGISTER_FIELD_COMPUTE_MEMORY_LOCK_VALUE_VALUE, value));
 }
 
+static iree_status_t loom_aie2p_native_config_bank(
+    loom_aie2p_native_configuration_t* config,
+    const loom_aie2p_native_register_bank_t* bank, loom_value_id_t zero) {
+  const iree_host_size_t operand_count = bank->word_count + 1;
+  loom_value_id_t* operands;
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(config->context->pass->arena, operand_count,
+                                sizeof(*operands), (void**)&operands));
+  IREE_RETURN_IF_ERROR(
+      loom_aie2p_native_config_constant(config, bank->address, &operands[0]));
+  for (iree_host_size_t i = 0; i < bank->word_count; ++i) {
+    operands[i + 1] = zero;
+    if (bank->words[i]) {
+      IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(
+          config, bank->words[i], &operands[i + 1]));
+    }
+  }
+  loom_op_t* op;
+  return loom_low_build_resolved_descriptor_op(
+      &config->builder, config->descriptors,
+      &config->descriptors->descriptors
+           [AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_BLOCK32],
+      0, operands, operand_count, loom_named_attr_slice_empty(), NULL, 0, NULL,
+      0, LOOM_LOCATION_UNKNOWN, &op);
+}
+
 static iree_status_t loom_aie2p_native_config_routes(
     loom_aie2p_native_configuration_t* config) {
   const loom_aie2p_native_context_t* context = config->context;
-  // The three tile kinds use the same switch word layout. These identifiers
-  // select their distinct physical address patterns.
-  static const loom_xdna_register_field_id_t fields[][3] = {
-      {LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_MASTER_CONFIG_ENABLE,
-       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_CONFIG_ENABLE,
-       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_STREAM_SLAVE_SLOT_ENABLE},
-      {LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_MASTER_CONFIG_ENABLE,
-       LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_SLAVE_CONFIG_ENABLE,
-       LOOM_XDNA_REGISTER_FIELD_MEMORY_TILE_STREAM_SLAVE_SLOT_ENABLE},
-      {LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_MASTER_CONFIG_ENABLE,
-       LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_CONFIG_ENABLE,
-       LOOM_XDNA_REGISTER_FIELD_CORE_STREAM_SLAVE_SLOT_ENABLE},
-  };
+  if (context->switches) {
+    loom_value_id_t zero;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_config_constant(config, 0, &zero));
+    for (const loom_aie2p_native_switch_t* state = context->switches; state;
+         state = state->next) {
+      for (unsigned i = 0; i < LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT; ++i) {
+        IREE_RETURN_IF_ERROR(
+            loom_aie2p_native_config_bank(config, &state->banks[i], zero));
+      }
+    }
+  }
   static const loom_xdna_register_field_id_t mux_fields[8] = {
       0,
       0,
@@ -214,67 +238,17 @@ static iree_status_t loom_aie2p_native_config_routes(
       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH4,
       LOOM_XDNA_REGISTER_FIELD_SHIM_NOC_DEMUX_CONFIG_SOUTH5};
   for (iree_host_size_t i = 0; i < context->routing.route_count; ++i) {
-    const loom_aie2p_native_route_t* selected = &context->routes[i];
-    const loom_aie2p_array_route_plan_t* edge = selected->edge;
-    if (edge->switch_kind == LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX) {
-      const loom_xdna_register_field_id_t field =
-          edge->source_port == LOOM_XDNA_STREAM_PORT_DMA
-              ? mux_fields[edge->destination_channel]
-              : demux_fields[edge->source_channel];
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_config_register(
-          config, edge->coordinate, field, NULL, 0, 1,
-          AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_MASK32));
+    const loom_aie2p_array_route_plan_t* edge = &context->routing.routes[i];
+    if (edge->switch_kind != LOOM_AIE2P_ARRAY_SWITCH_KIND_SHIM_MUX) {
       continue;
     }
-    const loom_xdna_tile_kind_t kind =
-        context
-            ->tiles[edge->coordinate.column * context->family->row_count +
-                    edge->coordinate.row]
-            .facts->kind;
-    const uint16_t master =
-        loom_xdna_array_stream_port_range(context->family, kind,
-                                          LOOM_XDNA_STREAM_DIRECTION_MASTER,
-                                          edge->destination_port)
-            ->ordinal +
-        edge->destination_channel;
-    const uint16_t slave =
-        loom_xdna_array_stream_port_range(context->family, kind,
-                                          LOOM_XDNA_STREAM_DIRECTION_SLAVE,
-                                          edge->source_port)
-            ->ordinal +
-        edge->source_channel;
-    uint32_t master_bits = UINT32_C(1) << 31;
-    uint32_t slave_bits = UINT32_C(1) << 31;
-    if (selected->packet == UINT8_MAX) {
-      master_bits |= slave;
-    } else {
-      const uint32_t arbiter = selected->selection & 7;
-      const uint32_t master_select = selected->selection >> 3;
-      // Control requests and one-word completion packets retain their header
-      // at every hop, including TileControl and the receiving core.
-      master_bits |=
-          UINT32_C(1) << 30 | arbiter | (UINT32_C(1) << (master_select + 3));
-      slave_bits |= UINT32_C(1) << 30;
-      const uint16_t slot[] = {slave, selected->slot};
-      const uint32_t slot_bits = (uint32_t)selected->packet << 24 |
-                                 UINT32_C(31) << 16 | UINT32_C(1) << 8 |
-                                 master_select << 4 | arbiter;
-      IREE_RETURN_IF_ERROR(loom_aie2p_native_config_write(
-          config,
-          loom_xdna_register_field_address_admitted(
-              context->family, fields[kind - 1][2], edge->coordinate, slot),
-          slot_bits));
-    }
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_config_write(
-        config,
-        loom_xdna_register_field_address_admitted(
-            context->family, fields[kind - 1][0], edge->coordinate, &master),
-        master_bits));
-    IREE_RETURN_IF_ERROR(loom_aie2p_native_config_write(
-        config,
-        loom_xdna_register_field_address_admitted(
-            context->family, fields[kind - 1][1], edge->coordinate, &slave),
-        slave_bits));
+    const loom_xdna_register_field_id_t field =
+        edge->source_port == LOOM_XDNA_STREAM_PORT_DMA
+            ? mux_fields[edge->destination_channel]
+            : demux_fields[edge->source_channel];
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_config_register(
+        config, edge->coordinate, field, NULL, 0, 1,
+        AIE2P_CONFIGURATION_DESCRIPTOR_REF_CONFIGURATION_WRITE_MASK32));
   }
   return iree_ok_status();
 }

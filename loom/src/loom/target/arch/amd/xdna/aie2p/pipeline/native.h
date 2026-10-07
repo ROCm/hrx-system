@@ -122,18 +122,40 @@ typedef struct loom_aie2p_native_dma_path_t {
   bool ingress;
 } loom_aie2p_native_dma_path_t;
 
-// One configured stream-switch edge after physical routing and packet
-// admission.
+// One physical route edge carrying the packet identity used during admission.
 typedef struct loom_aie2p_native_route_t {
   // Corresponding edge in the canonical route builder.
   const loom_aie2p_array_route_plan_t* edge;
   // Packet ID, or UINT8_MAX for an unframed circuit.
   uint8_t packet;
-  // Unique arbiter/selection pair: low three bits arbiter, high two selection.
-  uint8_t selection;
-  // Rule slot on this source slave.
-  uint8_t slot;
 } loom_aie2p_native_route_t;
+
+typedef enum loom_aie2p_native_switch_bank_e {
+  LOOM_AIE2P_NATIVE_SWITCH_BANK_MASTERS = 0,
+  LOOM_AIE2P_NATIVE_SWITCH_BANK_SLAVES,
+  LOOM_AIE2P_NATIVE_SWITCH_BANK_FILTERS,
+  LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT,
+} loom_aie2p_native_switch_bank_t;
+
+// Complete valid register bank, with zero words for every disabled entry.
+typedef struct loom_aie2p_native_register_bank_t {
+  // Absolute address in the native transaction's 32-bit register space.
+  uint32_t address;
+  // Number of contiguous register words, excluding reserved address holes.
+  uint32_t word_count;
+  // Desired values retained by route admission in the pass arena.
+  uint32_t* words;
+} loom_aie2p_native_register_bank_t;
+
+// A native pipeline owns route selection on each traversed switch. Its first
+// invocation replaces complete banks after prior work has drained; externally
+// prefixed routes are not an undeclared input to this materialization.
+typedef struct loom_aie2p_native_switch_t {
+  // Next routed switch in first-use order, excluding untouched tiles.
+  struct loom_aie2p_native_switch_t* next;
+  // Master, slave, and packet-filter banks from the generated register facts.
+  loom_aie2p_native_register_bank_t banks[LOOM_AIE2P_NATIVE_SWITCH_BANK_COUNT];
+} loom_aie2p_native_switch_t;
 
 typedef struct loom_aie2p_native_transfer_t {
   // Next transfer in the worker's retained issue order.
@@ -243,8 +265,10 @@ typedef struct loom_aie2p_native_context_t {
   iree_host_size_t binding_count;
   // Physical interconnect allocation shared by payload and control routes.
   loom_aie2p_array_route_builder_t routing;
-  // Packet admission for every physical route edge.
+  // Packet identity for every physical route edge.
   loom_aie2p_native_route_t* routes;
+  // Complete desired routing state for each traversed switch.
+  loom_aie2p_native_switch_t* switches;
   // Typed ordinary helper emitter.
   loom_aie2p_worker_builder_t code;
 } loom_aie2p_native_context_t;

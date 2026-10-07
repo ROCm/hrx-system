@@ -58,15 +58,24 @@ protocols and device-only cross-engine scheduling. An execution record names
 the actual selected cases, image, target and native transport.
 
 `pipeline_completion_test` compiles [owned-channel programs](testdata/pipeline_completion.loom)
-for both NPU4 and NPU5 and selects the live device's image. Its three exports
-publish two reservations in reverse order, release a later read while DMA
-still uses an earlier record, and rotate an owned read through an ordinary
-loop. Each program runs three times through the same immutable native command.
-The [case bodies](pipeline_completion_test.cc) check exact FIFO results,
-poisoned output replacement, untouched binding bytes, guards, command
-immutability and native retirement. These finite programs return each completed
-prefix before admitting more work, so two physical slots suffice. They do not
-require independent reuse of a later slot while its predecessor remains owned.
+for both NPU4 and NPU5 and selects the live device's image. Its seven cases cover
+strided autonomous ingress, a single admission into a multi-slot channel, fixed
+and rotating projected records, reverse publication order, a read held through
+DMA, and loop-carried read ownership. Three generations vary input values or
+output binding assignments. The [case bodies](pipeline_completion_test.cc)
+check exact results, poisoned output
+replacement, untouched binding bytes, guards, command immutability during
+execution and native retirement. The finite publication/retirement cases return
+completed prefixes before admitting more work; they do not require independent
+reuse of a later slot while its predecessor remains owned.
+
+Compiler-owned execution coverage uses the normal HAL-backed Loom tooling.
+The [channel lifetime scenarios](../../../loom/src/loom/tooling/target/amd/xdna/test/channel_lifetimes.loom)
+check shared-buffer route replacement and interleaved rings with a held bias.
+The [signed-I4 panel scenarios](../../../loom/src/loom/tooling/target/amd/xdna/test/signed_i4_panels.loom)
+compare resident matrix arithmetic against an independent scalar oracle.
+Both run through `iree-test-loom --device=xdna`, with resource ownership and
+completion supplied by the XDNA HAL instead of a separate native runner.
 
 ### Benchmark smoke invocation
 

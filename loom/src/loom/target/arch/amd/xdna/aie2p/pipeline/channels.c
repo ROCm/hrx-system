@@ -17,8 +17,6 @@ typedef struct loom_aie2p_native_endpoint_t {
   const loom_aie2p_native_channel_access_t* access;
   // Initial physical slot address helper.
   loom_symbol_ref_t base;
-  // Backing buffer address, defined in the worker entry block.
-  loom_value_id_t buffer;
   // Mutable state indices for directions owned by this worker. Fixed-slot
   // endpoints use zero displacement and require no threaded state.
   struct {
@@ -208,10 +206,16 @@ static iree_status_t loom_aie2p_native_channel_action(
       results[0] = record;
       view_result = 1;
     }
+    // Materialize at the borrow so disjoint channel phases do not retain every
+    // endpoint address across the worker lifetime. Normal CSE can still share
+    // a dominating base while the offset carrier preserves record identity.
     const loom_type_t buffer_type = loom_type_buffer();
+    loom_value_id_t buffer;
+    IREE_RETURN_IF_ERROR(loom_aie2p_native_invoke(builder, endpoint->base, NULL,
+                                                  0, &buffer_type, &buffer));
     loom_op_t* aligned;
     IREE_RETURN_IF_ERROR(loom_buffer_assume_alignment_build(
-        builder, &endpoint->buffer, 1, endpoint->alignment, &buffer_type, 1,
+        builder, &buffer, 1, endpoint->alignment, &buffer_type, 1,
         action->op->location, &aligned));
     loom_op_t* view;
     IREE_RETURN_IF_ERROR(loom_buffer_view_build(
@@ -321,12 +325,8 @@ iree_status_t loom_aie2p_native_emit_worker(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, endpoint_count * 2, sizeof(*state), (void**)&state));
   iree_host_size_t state_count = 0;
-  const loom_type_t buffer_type = loom_type_buffer();
   for (iree_host_size_t i = 0; i < endpoint_count; ++i) {
     loom_aie2p_native_endpoint_t* endpoint = &emitter.endpoints[i];
-    IREE_RETURN_IF_ERROR(
-        loom_aie2p_native_invoke(&rewriter->builder, endpoint->base, NULL, 0,
-                                 &buffer_type, &endpoint->buffer));
     const loom_aie2p_native_channel_t* channel = endpoint->access->channel;
     if (channel->cursor.reader.worker == worker_index &&
         channel->cursor.reader.advances) {
