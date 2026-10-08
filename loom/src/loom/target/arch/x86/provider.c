@@ -6,6 +6,7 @@
 
 #include "loom/target/arch/x86/provider.h"
 
+#include "iree/base/cpu_data.h"
 #include "loom/ir/module.h"
 #include "loom/pass/builder.h"
 #include "loom/target/arch/x86/call_abi.h"
@@ -26,6 +27,48 @@ typedef struct loom_x86_target_profile_t {
   // Native target catalog row projected into family facts.
   uint8_t selector;
 } loom_x86_target_profile_t;
+
+typedef struct loom_x86_cpu_profile_policy_t {
+  // Required named instruction features from iree_cpu_data_t::fields[0].
+  uint64_t required_field0_bits;
+  // Automatic-selection priority, or zero when native execution is unavailable.
+  uint8_t automatic_priority;
+} loom_x86_cpu_profile_policy_t;
+
+// Returns native execution requirements for |selector|. These include both
+// descriptor instructions and the register transport emitted around them.
+// SIMD128 transport uses VEX moves, AVX2 contracts include FMA, and the core
+// AVX-512 contract composes AVX2 with AVX-512F/BW/DQ/VL. Packed-dot rows remain
+// unavailable until every descriptor they expose has a direct native encoding
+// and a representable CPU feature.
+static loom_x86_cpu_profile_policy_t loom_x86_cpu_profile_policy(
+    uint8_t selector) {
+  loom_x86_cpu_profile_policy_t policy = {0};
+  switch (selector) {
+    case LOOM_X86_TARGET_KIND_SCALAR:
+      policy.automatic_priority = 1;
+      break;
+    case LOOM_X86_TARGET_KIND_SIMD128:
+      policy.required_field0_bits = IREE_CPU_DATA0_X86_64_AVX;
+      policy.automatic_priority = 2;
+      break;
+    case LOOM_X86_TARGET_KIND_AVX2:
+      policy.required_field0_bits = IREE_CPU_DATA0_X86_64_AVX |
+                                    IREE_CPU_DATA0_X86_64_FMA |
+                                    IREE_CPU_DATA0_X86_64_AVX2;
+      policy.automatic_priority = 3;
+      break;
+    case LOOM_X86_TARGET_KIND_AVX512:
+      policy.required_field0_bits =
+          IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
+          IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVX512F |
+          IREE_CPU_DATA0_X86_64_AVX512VL | IREE_CPU_DATA0_X86_64_AVX512DQ |
+          IREE_CPU_DATA0_X86_64_AVX512BW;
+      policy.automatic_priority = 4;
+      break;
+  }
+  return policy;
+}
 
 static iree_status_t loom_x86_profile_project_facts(
     const loom_target_profile_t* base_profile, iree_arena_allocator_t* arena,
@@ -73,20 +116,33 @@ static const loom_target_profile_t* loom_x86_select_cpu_profile(
   if (cpu_data->architecture != IREE_CPU_ARCHITECTURE_X86_64) {
     return NULL;
   }
-  // Native ABI transport and byte emission currently implement scalar GPRs.
-  // SIMD profile selection requires native vector transport and OS-enabled
-  // feature requirements before those representations can be executed.
-  if (requirement && (requirement->fact_type != &loom_x86_target_fact_type ||
-                      requirement->selector != LOOM_X86_TARGET_KIND_SCALAR)) {
+  if (requirement && requirement->fact_type != &loom_x86_target_fact_type) {
     return NULL;
   }
+
+  const loom_x86_target_profile_t* selected = NULL;
+  uint8_t selected_priority = 0;
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kProfiles); ++i) {
-    if (kProfiles[i].selector == LOOM_X86_TARGET_KIND_SCALAR &&
-        (!profile || profile == &kProfiles[i].base)) {
+    const loom_x86_target_profile_t* candidate = &kProfiles[i];
+    if ((profile && profile != &candidate->base) ||
+        (requirement && requirement->selector != candidate->selector)) {
+      continue;
+    }
+    const loom_x86_cpu_profile_policy_t policy =
+        loom_x86_cpu_profile_policy(candidate->selector);
+    if (policy.automatic_priority == 0 ||
+        !iree_all_bits_set(cpu_data->fields[0], policy.required_field0_bits)) {
+      continue;
+    }
+    if (profile || requirement) {
       return &kProfiles[i].base;
     }
+    if (policy.automatic_priority > selected_priority) {
+      selected = candidate;
+      selected_priority = policy.automatic_priority;
+    }
   }
-  return NULL;
+  return selected ? &selected->base : NULL;
 }
 
 static iree_status_t loom_x86_materialize_definition(

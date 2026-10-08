@@ -163,6 +163,7 @@ loom_cc_library(
     ::math_policy
     ::pass_registry
     iree::base
+    iree::base::cpu_data
     loom::ir
     loom::pass::builder
     loom::target::arch::x86::descriptors::low_registry
@@ -182,8 +183,10 @@ loom_cc_test(
     "provider_test.cc"
   DEPS
     ::provider
+    iree::base::cpu_data
     iree::testing::gtest
     iree::testing::gtest_main
+    loom::target::arch::x86::ops
   LABELS
     "iree-build-requirement=loom.target.arch.x86"
 )

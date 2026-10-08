@@ -67,7 +67,8 @@ void InitializeFakeDevice(const iree_hal_device_spec_t* device_spec,
 
 iree_status_t CreateCpuDeviceSpec(bool include_cpu_facet,
                                   bool include_loader_target,
-                                  DeviceSpecPtr* out_device_spec) {
+                                  DeviceSpecPtr* out_device_spec,
+                                  uint64_t cpu_field0_bits = 0) {
   out_device_spec->reset();
   iree_hal_device_spec_builder_t builder;
   iree_hal_device_spec_builder_initialize(iree_allocator_system(), &builder);
@@ -79,7 +80,7 @@ iree_status_t CreateCpuDeviceSpec(bool include_cpu_facet,
         /*.cpu_data=*/
         {
             /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-            /*.fields=*/{},
+            /*.fields=*/{cpu_field0_bits},
         },
         /*.flags=*/IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
     };
@@ -214,6 +215,35 @@ TEST(LoomcCpuIreeHalTargetTest, SelectsNativeProfileAndLoaderTogether) {
   ASSERT_NE(native_profile->target_bundle->snapshot, nullptr);
   EXPECT_EQ(native_profile->target_bundle->snapshot->default_pointer_bitwidth,
             64u);
+}
+
+TEST(LoomcCpuIreeHalTargetTest, SelectsStrongestProfileFromDeviceFacts) {
+  const uint64_t cpu_field0_bits =
+      IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
+      IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVX512F |
+      IREE_CPU_DATA0_X86_64_AVX512VL | IREE_CPU_DATA0_X86_64_AVX512DQ |
+      IREE_CPU_DATA0_X86_64_AVX512BW;
+  DeviceSpecPtr device_spec;
+  IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
+                                     /*include_loader_target=*/true,
+                                     &device_spec, cpu_field0_bits));
+  FakeHalDevice device = {};
+  InitializeFakeDevice(device_spec.get(), &device);
+  TargetEnvironmentPtr target_environment = CreateConfiguredTargetEnvironment();
+  loomc_result_t* result = nullptr;
+  TargetProfilePtr profile =
+      SelectCpuTarget(target_environment.get(), &device, &result);
+  ResultPtr result_ptr(result);
+
+  ASSERT_NE(result_ptr.get(), nullptr);
+  EXPECT_TRUE(loomc_result_succeeded(result_ptr.get()));
+  ASSERT_NE(profile.get(), nullptr);
+  const loom_target_profile_t* native_profile =
+      loomc_target_profile_get_interop_view(profile.get());
+  ASSERT_NE(native_profile, nullptr);
+  ASSERT_NE(native_profile->target_bundle, nullptr);
+  EXPECT_TRUE(iree_string_view_equal(native_profile->target_bundle->name,
+                                     IREE_SV("x86-avx512")));
 }
 
 TEST(LoomcCpuIreeHalTargetTest, ReportsMissingLoaderAsTargetDiagnostic) {
