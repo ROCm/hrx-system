@@ -294,13 +294,28 @@ TEST_P(SourceDecisionServiceTest, SharesRouterWithEmbeddingsAndRawUtilities) {
   EXPECT_NE(Read(Send("", "/healthz", "GET")).find("\"status\":\"ready\""),
             std::string::npos);
   const std::string catalog = Read(Send("", "/v1/models", "GET"));
-  EXPECT_NE(catalog.find("decisions"), std::string::npos);
-  EXPECT_NE(catalog.find("vectors"), std::string::npos);
+  EXPECT_NE(
+      catalog.find(
+          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false}})"),
+      std::string::npos);
+  EXPECT_NE(
+      catalog.find(
+          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true}})"),
+      std::string::npos);
   EXPECT_NE(Read(tokenize).find(R"({"tokens":[0,1,0]})"), std::string::npos);
   EXPECT_NE(Read(decision).find(R"("noul":0.666666687)"), std::string::npos);
   const std::string vectors = Read(embedding);
   EXPECT_NE(vectors.find(R"("embedding":[1,1])"), std::string::npos);
   EXPECT_NE(vectors.find(R"("embedding":[6,3])"), std::string::npos);
+  const std::string snapshot = Read(Send("", "/v1/status", "GET"));
+  EXPECT_NE(
+      snapshot.find(
+          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false,"status":{"phase":"idle","queued_requests":0,"active_requests":0}}})"),
+      std::string::npos);
+  EXPECT_NE(
+      snapshot.find(
+          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true,"status":{"phase":"idle","queued_requests":0,"active_requests":0}}})"),
+      std::string::npos);
   EXPECT_EQ(Read(Send(R"({"model":"decisions","content":"a"})", "/tokenize"))
                 .find("HTTP/1.1 404"),
             0u);

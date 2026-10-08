@@ -228,19 +228,29 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_NE(active.find("\"active_request\":2"), std::string::npos);
   EXPECT_NE(active.find("\"completed\":0"), std::string::npos);
 
-  const int health = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
-  EXPECT_GE(health, 0);
-  EXPECT_EQ(connect(health, reinterpret_cast<const sockaddr*>(address->storage),
-                    address->length),
-            0);
-  const std::string health_request =
-      "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n";
-  EXPECT_EQ(
-      send(health, health_request.data(), health_request.size(), MSG_NOSIGNAL),
-      static_cast<ssize_t>(health_request.size()));
-  EXPECT_NE(read_response(health).find("\"status\":\"ready\""),
-            std::string::npos);
-  EXPECT_EQ(close(health), 0);
+  for (const std::string target : {"/healthz", "/readyz", "/v1/status"}) {
+    const int probe = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    EXPECT_GE(probe, 0);
+    EXPECT_EQ(
+        connect(probe, reinterpret_cast<const sockaddr*>(address->storage),
+                address->length),
+        0);
+    const std::string probe_request =
+        "GET " + target + " HTTP/1.1\r\nHost: local\r\n\r\n";
+    EXPECT_EQ(
+        send(probe, probe_request.data(), probe_request.size(), MSG_NOSIGNAL),
+        static_cast<ssize_t>(probe_request.size()));
+    const std::string response = read_response(probe);
+    if (target == "/v1/status") {
+      EXPECT_NE(
+          response.find(
+              R"({"object":"model","id":"image-witness","loom":{"kind":"image","endpoint":"/v1/images/generations","tokenize":false,"status":{"phase":"generating","queued_requests":0,"active_requests":1}}})"),
+          std::string::npos);
+    } else {
+      EXPECT_NE(response.find("\"status\":\"ready\""), std::string::npos);
+    }
+    EXPECT_EQ(close(probe), 0);
+  }
 
   if (completion_mode == CompletionMode::kShutdown) {
     EXPECT_EQ(kill(getpid(), SIGTERM), 0);

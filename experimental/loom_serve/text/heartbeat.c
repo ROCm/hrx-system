@@ -9,10 +9,17 @@
 #include <stdio.h>
 #include <string.h>
 
-static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
+loom_serve_text_heartbeat_snapshot_t loom_serve_text_heartbeat_read(
+    loom_serve_text_heartbeat_t* heartbeat) {
   iree_slim_mutex_lock(&heartbeat->mutex);
   const loom_serve_text_heartbeat_snapshot_t state = heartbeat->snapshot;
   iree_slim_mutex_unlock(&heartbeat->mutex);
+  return state;
+}
+
+static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
+  const loom_serve_text_heartbeat_snapshot_t state =
+      loom_serve_text_heartbeat_read(heartbeat);
   const iree_time_t now = iree_time_now();
   const double seconds = (now - heartbeat->previous.time) / 1e9;
   fprintf(

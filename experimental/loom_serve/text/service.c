@@ -2042,6 +2042,16 @@ static iree_status_t text_accept(void* self,
              : text_admit_pending(service, flags);
 }
 
+static loom_serve_http_service_snapshot_t text_snapshot(void* self) {
+  loom_serve_text_service_t* service = self;
+  const loom_serve_text_heartbeat_snapshot_t state =
+      loom_serve_text_heartbeat_read(&service->heartbeat);
+  return (loom_serve_http_service_snapshot_t){
+      .phase = state.phase,
+      .queued_requests = service->pending.count,
+      .active_requests = state.active_rows};
+}
+
 loom_serve_http_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
   return (loom_serve_http_service_t){
@@ -2052,7 +2062,10 @@ loom_serve_http_service_t loom_serve_text_service_interface(
       .is_active = text_is_active,
       .accept = text_accept,
       .advance = text_advance,
-      .tokenizer = loom_serve_text_model_tokenizer(service->model)};
+      .tokenizer = loom_serve_text_model_tokenizer(service->model),
+      .kind = "text",
+      .endpoint = "/v1/chat/completions",
+      .snapshot = text_snapshot};
 }
 
 iree_status_t loom_serve_text_service_run(

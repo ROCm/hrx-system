@@ -519,12 +519,21 @@ static iree_status_t image_accept(void* self,
   return iree_ok_status();
 }
 
+static loom_serve_http_service_snapshot_t image_snapshot(void* self) {
+  const loom_serve_image_service_t* service = self;
+  static const char* const phases[] = {"idle", "preparing", "waiting",
+                                       "generating", "encoding"};
+  return (loom_serve_http_service_snapshot_t){
+      .phase = phases[service->phase],
+      .queued_requests = service->pending_count,
+      .active_requests = service->active ? 1 : 0};
+}
+
 // Heartbeat work is a scheduler turn, woken by an asynchronous timer. These
 // phases describe ownership, not individual completed device dispatches.
 static void image_heartbeat(loom_serve_image_service_t* service) {
   const iree_time_t now = iree_time_now();
-  static const char* const phases[] = {"idle", "preparing", "waiting",
-                                       "generating", "encoding"};
+  const loom_serve_http_service_snapshot_t state = image_snapshot(service);
   fprintf(stderr,
           "{\"event\":\"image_heartbeat\",\"time_ns\":%" PRId64
           ",\"active_request\":%" PRIu64
@@ -533,7 +542,7 @@ static void image_heartbeat(loom_serve_image_service_t* service) {
           ",\"stopping\":%s}\n",
           now, service->active,
           service->active ? (now - service->active_start) / 1e6 : 0.0,
-          phases[service->phase], service->pending_count, service->completed,
+          state.phase, state.queued_requests, service->completed,
           service->stopping ? "true" : "false");
 }
 
@@ -647,7 +656,10 @@ loom_serve_http_service_t loom_serve_image_service_interface(
                                      .is_active = image_is_active,
                                      .accept = image_accept,
                                      .advance = image_advance,
-                                     .tokenizer = service->generator.tokenizer};
+                                     .tokenizer = service->generator.tokenizer,
+                                     .kind = "image",
+                                     .endpoint = "/v1/images/generations",
+                                     .snapshot = image_snapshot};
 }
 
 void loom_serve_image_service_destroy(loom_serve_image_service_t* service) {

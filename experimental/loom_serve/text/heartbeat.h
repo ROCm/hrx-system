@@ -103,6 +103,11 @@ typedef struct loom_serve_text_heartbeat_t {
 void loom_serve_text_heartbeat_initialize(
     loom_serve_text_heartbeat_t* heartbeat);
 
+// Copies the last published counters without accessing model/session state.
+// Safe while a finite CPU task owns mutable rows or device work is pending.
+loom_serve_text_heartbeat_snapshot_t loom_serve_text_heartbeat_read(
+    loom_serve_text_heartbeat_t* heartbeat);
+
 // Configures borrowed I/O and name storage before the first advance. Zero
 // interval disables reporting. The owner installs the timer observer before
 // advancing, then clears it only after all accepted work has been consumed.

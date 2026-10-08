@@ -166,7 +166,17 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
     }
   }
   Start();
-  EXPECT_NE(Read(Send("GET", "/v1/models")).find("fixture-image"),
+  EXPECT_NE(
+      Read(Send("GET", "/v1/models"))
+          .find(
+              R"({"object":"model","id":"fixture-image","loom":{"kind":"image","endpoint":"/v1/images/generations","tokenize":true}})"),
+      std::string::npos);
+  EXPECT_NE(
+      Read(Send("GET", "/v1/status"))
+          .find(
+              R"("status":{"phase":"idle","queued_requests":0,"active_requests":0})"),
+      std::string::npos);
+  EXPECT_NE(Read(Send("GET", "/readyz")).find(R"({"status":"ready"})"),
             std::string::npos);
   EXPECT_NE(Read(Send("POST", "/tokenize",
                       R"({"model":"fixture-image","content":"aba"})"))

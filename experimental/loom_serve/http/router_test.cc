@@ -92,6 +92,14 @@ struct ModelService {
     return !service->wait_for_shared_activity && !service->pending.empty();
   }
 
+  static loom_serve_http_service_snapshot_t Snapshot(void* self) {
+    auto* service = static_cast<ModelService*>(self);
+    std::lock_guard<std::mutex> lock(service->mutex);
+    return {.phase = service->waiting ? "held" : "idle",
+            .queued_requests = service->pending.size() - service->waiting,
+            .active_requests = service->waiting ? 1u : 0u};
+  }
+
   static iree_status_t Accept(void* self,
                               loom_serve_http_connection_t* connection,
                               const loom_serve_http_request_t* request,
@@ -159,6 +167,20 @@ struct ModelService {
     }
     return status;
   }
+
+  loom_serve_http_service_t Interface(const iree_tokenizer_t* tokenizer) {
+    return {.name = iree_make_cstring_view(name),
+            .self = this,
+            .set_observer = SetObserver,
+            .is_pending = IsPending,
+            .is_active = IsActive,
+            .accept = Accept,
+            .advance = Advance,
+            .tokenizer = tokenizer,
+            .kind = "fixture",
+            .endpoint = "/v1/test",
+            .snapshot = Snapshot};
+  }
 };
 
 class HttpRouterTest : public ::testing::TestWithParam<int> {
@@ -187,18 +209,8 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
         iree_allocator_system(), &tokenizer_b_));
     owner_ = std::thread([this] {
       const loom_serve_http_service_t services[] = {
-          {IREE_SV("a"), &a_, ModelService::SetObserver,
-           ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance, tokenizer_a_},
-          {IREE_SV("b"), &b_, ModelService::SetObserver,
-           ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance, tokenizer_b_},
-          {IREE_SV("held"), &held_, ModelService::SetObserver,
-           ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance, tokenizer_a_},
-          {IREE_SV("other"), &other_, ModelService::SetObserver,
-           ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance, nullptr}};
+          a_.Interface(tokenizer_a_), b_.Interface(tokenizer_b_),
+          held_.Interface(tokenizer_a_), other_.Interface(nullptr)};
       status_ = loom_serve_http_router_run(executor_, server_,
                                            IREE_ARRAYSIZE(services), services,
                                            4, iree_allocator_system());
@@ -298,6 +310,13 @@ TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
   }
   EXPECT_NE(Read(Send("GET", "/healthz")).find("\"status\":\"ready\""),
             std::string::npos);
+  EXPECT_NE(Read(Send("GET", "/readyz")).find(R"({"status":"ready"})"),
+            std::string::npos);
+  const auto snapshot = Read(Send("GET", "/v1/status"));
+  EXPECT_NE(
+      snapshot.find(
+          R"({"object":"model","id":"held","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1}}})"),
+      std::string::npos);
   for (int i = 0; i < 12; ++i) {
     const auto response = Read(clients[i]);
     EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
@@ -362,8 +381,15 @@ TEST_P(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
   EXPECT_NE(Read(Send("GET", "/healthz")).find(R"({"status":"ready"})"),
             std::string::npos);
   const auto models = Read(Send("GET", "/v1/models"));
-  EXPECT_NE(models.find(R"({"object":"model","id":"a"})"), std::string::npos);
-  EXPECT_NE(models.find(R"({"object":"model","id":"b"})"), std::string::npos);
+  EXPECT_NE(
+      models.find(
+          R"({"object":"model","id":"a","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true}})"),
+      std::string::npos);
+  EXPECT_NE(
+      models.find(
+          R"({"object":"model","id":"other","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":false}})"),
+      std::string::npos);
+  EXPECT_EQ(models.find("\"status\":"), std::string::npos);
   const std::string body_a = R"({"model":"\u0061","messages":["first"]})";
   const std::string body_b = R"({"model":"b","messages":["second"]})";
   const int a = Send("POST", "/v1/chat/completions", body_a);

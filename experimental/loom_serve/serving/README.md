@@ -217,6 +217,54 @@ and [source fixture](../models/fixtures/decision/README.md) for full request,
 response, capacity and model-authoring semantics. An endpoint implementation
 does not imply support for a learned decision checkpoint.
 
+## Operational discovery
+
+`GET /v1/models` includes a `loom` object on each deployment with its `kind`,
+primary inference `endpoint`, and `tokenize` capability. These fields describe
+the registered native modality and loaded tokenizer, not checkpoint identity,
+quality, or support for every optional request field. Primary endpoints exclude
+the raw utilities and text checkpoint controls documented above.
+
+`GET /v1/status` returns the same list with a copied `loom.status` object:
+
+~~~json
+{
+  "object": "model",
+  "id": "illustrator",
+  "loom": {
+    "kind": "image",
+    "endpoint": "/v1/images/generations",
+    "tokenize": true,
+    "status": {
+      "phase": "generating",
+      "queued_requests": 2,
+      "active_requests": 1
+    }
+  }
+}
+~~~
+
+This operational schema is experimental. Counts describe scheduler ownership,
+not GPU utilization. Image and finite-vector active requests include preparation,
+parameter-capacity waiting, device work and encoding; reset peers still count
+until their accepted work retires. Text active requests hold admitted rows;
+the source-preparing FIFO head is still queued. Phase labels belong to each
+modality. Text uses published counters while a CPU task owns mutable rows;
+image and finite-vector heartbeats consume the same phase/count queries.
+Snapshots neither activate a model nor wait for CPU/device completion, and
+transport copies the response so a slow status peer retains no model buffers.
+Unmeasured device times and whole-device memory totals are not reported as zero.
+
+`GET /readyz` and `/healthz` return `{"status":"ready"}` after model
+construction and router registration. Readiness means the server can route
+requests; cold weights, capacity waiters and a full model queue do not make the
+entire listener unready. Before registration no application response is served.
+Once shutdown stops application admission, the router serves no further probes;
+the listener is released after accepted asynchronous callbacks drain. It does
+not promise a final 503 response during wind-down. These endpoints do not
+promise that a particular request will fit. Existing JSONL stderr output has
+its own sink behavior; these HTTP snapshots do not make that sink asynchronous.
+
 ## Scheduling and memory ownership
 
 The transport proactor handles network I/O independently. One application

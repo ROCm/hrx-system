@@ -380,9 +380,18 @@ static bool finite_is_pending(void* self) {
          loom_serve_http_timer_is_pending(&service->timer);
 }
 
-static iree_status_t finite_heartbeat(loom_serve_finite_service_t* service) {
+static loom_serve_http_service_snapshot_t finite_snapshot(void* self) {
+  const loom_serve_finite_service_t* service = self;
   static const char* const phases[] = {"idle",    "preparing", "batching",
                                        "waiting", "running",   "encoding"};
+  return (loom_serve_http_service_snapshot_t){
+      .phase = phases[service->phase],
+      .queued_requests = service->pending_count,
+      .active_requests = service->cohort_count};
+}
+
+static iree_status_t finite_heartbeat(loom_serve_finite_service_t* service) {
+  const loom_serve_http_service_snapshot_t state = finite_snapshot(service);
   iree_string_builder_t* output = &service->response;
   iree_string_builder_reset(output);
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
@@ -395,7 +404,7 @@ static iree_status_t finite_heartbeat(loom_serve_finite_service_t* service) {
       output,
       ",\"phase\":\"%s\",\"queued\":%zu,\"cohort_requests\":%zu,"
       "\"batches\":%" PRIu64 "}\n",
-      phases[service->phase], service->pending_count, service->cohort_count,
+      state.phase, state.queued_requests, state.active_requests,
       service->batches));
   const iree_string_view_t line = iree_string_builder_view(output);
   fprintf(stderr, "%.*s", (int)line.size, line.data);
@@ -624,7 +633,10 @@ loom_serve_http_service_t loom_serve_finite_service_interface(
       .is_active = finite_is_active,
       .accept = finite_accept,
       .advance = finite_advance,
-      .tokenizer = loom_serve_finite_model_tokenizer(service->model)};
+      .tokenizer = loom_serve_finite_model_tokenizer(service->model),
+      .kind = service->protocol->name,
+      .endpoint = service->protocol->endpoint,
+      .snapshot = finite_snapshot};
 }
 
 void loom_serve_finite_service_destroy(loom_serve_finite_service_t* service) {

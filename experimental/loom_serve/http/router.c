@@ -302,6 +302,36 @@ static loom_serve_http_service_flags_t router_service_flags(
   return 0;
 }
 
+static iree_status_t router_describe_service(
+    const loom_serve_http_service_t* service, bool include_status,
+    iree_string_builder_t* output) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      output, "{\"object\":\"model\",\"id\":"));
+  IREE_RETURN_IF_ERROR(router_quote(output, service->name));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"loom\":{\"kind\":"));
+  IREE_RETURN_IF_ERROR(
+      router_quote(output, iree_make_cstring_view(service->kind)));
+  IREE_RETURN_IF_ERROR(
+      iree_string_builder_append_cstring(output, ",\"endpoint\":"));
+  IREE_RETURN_IF_ERROR(
+      router_quote(output, iree_make_cstring_view(service->endpoint)));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output, ",\"tokenize\":%s", service->tokenizer ? "true" : "false"));
+  if (include_status) {
+    const loom_serve_http_service_snapshot_t state =
+        service->snapshot(service->self);
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(output, ",\"status\":{\"phase\":"));
+    IREE_RETURN_IF_ERROR(
+        router_quote(output, iree_make_cstring_view(state.phase)));
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+        output, ",\"queued_requests\":%zu,\"active_requests\":%zu}",
+        state.queued_requests, state.active_requests));
+  }
+  return iree_string_builder_append_cstring(output, "}}");
+}
+
 static iree_status_t router_accept(router_t* router,
                                    loom_serve_http_connection_t* connection,
                                    const loom_serve_http_request_t* request) {
@@ -309,13 +339,17 @@ static iree_status_t router_accept(router_t* router,
   const loom_serve_http_service_t* services = router->services;
   iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
-  if (get && iree_string_view_equal(request->target, IREE_SV("/healthz"))) {
+  if (get && (iree_string_view_equal(request->target, IREE_SV("/healthz")) ||
+              iree_string_view_equal(request->target, IREE_SV("/readyz")))) {
     router_send(connection,
                 IREE_SV("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         "Connection: close\r\n\r\n{\"status\":\"ready\"}"));
     return iree_ok_status();
   }
-  if (get && iree_string_view_equal(request->target, IREE_SV("/v1/models"))) {
+  const bool include_status =
+      iree_string_view_equal(request->target, IREE_SV("/v1/status"));
+  if (get && (include_status ||
+              iree_string_view_equal(request->target, IREE_SV("/v1/models")))) {
     iree_string_builder_reset(output);
     iree_status_t status = iree_string_builder_append_cstring(
         output,
@@ -323,14 +357,11 @@ static iree_status_t router_accept(router_t* router,
         "Connection: close\r\n\r\n{\"object\":\"list\",\"data\":[");
     for (iree_host_size_t i = 0; i < service_count && iree_status_is_ok(status);
          ++i) {
-      status = iree_string_builder_append_cstring(
-          output, i ? ",{\"object\":\"model\",\"id\":"
-                    : "{\"object\":\"model\",\"id\":");
-      if (iree_status_is_ok(status)) {
-        status = router_quote(output, services[i].name);
+      if (i) {
+        status = iree_string_builder_append_cstring(output, ",");
       }
       if (iree_status_is_ok(status)) {
-        status = iree_string_builder_append_cstring(output, "}");
+        status = router_describe_service(&services[i], include_status, output);
       }
     }
     if (iree_status_is_ok(status)) {

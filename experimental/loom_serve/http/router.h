@@ -25,6 +25,19 @@ typedef enum loom_serve_http_service_flag_bits_e {
 } loom_serve_http_service_flag_bits_t;
 typedef uint32_t loom_serve_http_service_flags_t;
 
+// Copied scheduler ownership, not hardware utilization. Finite active requests
+// include preparation, capacity waiting and encoding; text active requests
+// hold admitted rows. No request content or borrowed mutable buffers escape.
+typedef struct loom_serve_http_service_snapshot_t {
+  // Modality-owned phase label with process lifetime.
+  const char* phase;
+  // Requests waiting outside the active invocation/cohort.
+  iree_host_size_t queued_requests;
+  // Requests retained by the active invocation/cohort, including reset peers
+  // whose accepted work still has to retire.
+  iree_host_size_t active_requests;
+} loom_serve_http_service_snapshot_t;
+
 // One named service borrowing a model on serialized task-owner turns. Network
 // progress is independent; these callbacks never run concurrently. Names are
 // deployment identifiers, not source model identities or checkpoint paths.
@@ -59,11 +72,21 @@ typedef struct loom_serve_http_service_t {
   // Optional immutable input tokenizer, borrowed through router return. Raw
   // utilities use independent CPU states and never call this model's methods.
   const iree_tokenizer_t* tokenizer;
+  // Immutable modality name with process lifetime, independent of the model.
+  const char* kind;
+  // Primary inference endpoint with process lifetime; excludes utilities and
+  // modality-specific control routes such as text checkpoints.
+  const char* endpoint;
+  // Copies published ownership on the serialized owner without invoking model
+  // work or reading state still borrowed by a CPU/device task.
+  loom_serve_http_service_snapshot_t (*snapshot)(void* self);
 } loom_serve_http_service_t;
 
 // Routes JSON request bodies by their model field and checkpoint operations by
 // X-Loom-Model. A checkpoint request may omit its selector with exactly one
-// service. GET /v1/models lists deployment names; GET /healthz is model-free.
+// service. GET /v1/models lists deployment names and namespaced capabilities;
+// GET /v1/status adds copied scheduler ownership. /healthz and /readyz are
+// model-free: constructors have completed, not necessarily weight activation.
 // At most request_capacity claims are accepted before advancing each service
 // once, with rotating service priority on the borrowed executor. Owner turns
 // return workers while waiting for network, CPU or device readiness. The outer
