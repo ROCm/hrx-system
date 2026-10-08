@@ -174,7 +174,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   EXPECT_NE(
       Read(Send("GET", "/v1/status"))
           .find(
-              R"("status":{"phase":"idle","queued_requests":0,"active_requests":0})"),
+              R"("status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000})"),
       std::string::npos);
   EXPECT_NE(Read(Send("GET", "/readyz")).find(R"({"status":"ready"})"),
             std::string::npos);

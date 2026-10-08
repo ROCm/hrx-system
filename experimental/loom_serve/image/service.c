@@ -20,6 +20,8 @@
 typedef struct image_job_t {
   // Monotonic process-local request identity; zero denotes no active job.
   uint64_t id;
+  // Immutable monotonic receipt time, preserved through queue and invocation.
+  iree_time_t arrival_time;
   // Owned decoded input, stable until the CPU preparation task retires.
   loom_serve_image_request_t request;
 } image_job_t;
@@ -507,6 +509,7 @@ static iree_status_t image_accept(void* self,
                         IREE_SV("image admission queue is full"));
   }
   pending.job.id = ++service->sequence;
+  pending.job.arrival_time = iree_time_now();
   fprintf(stderr,
           "{\"event\":\"image_accepted\",\"request\":%" PRIu64
           ",\"seed\":%" PRIu64 "}\n",
@@ -521,12 +524,18 @@ static iree_status_t image_accept(void* self,
 
 static loom_serve_http_service_snapshot_t image_snapshot(void* self) {
   const loom_serve_image_service_t* service = self;
+  const iree_time_t now = iree_time_now();
   static const char* const phases[] = {"idle", "preparing", "waiting",
                                        "generating", "encoding"};
   return (loom_serve_http_service_snapshot_t){
       .phase = phases[service->phase],
       .queued_requests = service->pending_count,
-      .active_requests = service->active ? 1 : 0};
+      .active_requests = service->active ? 1 : 0,
+      .oldest_queued_age = service->pending_count
+                               ? now - service->pending[0].job.arrival_time
+                               : 0,
+      .oldest_active_age =
+          service->active ? now - service->job.arrival_time : 0};
 }
 
 // Heartbeat work is a scheduler turn, woken by an asynchronous timer. These
@@ -539,10 +548,13 @@ static void image_heartbeat(loom_serve_image_service_t* service) {
           ",\"active_request\":%" PRIu64
           ",\"active_ms\":%.3f,"
           "\"phase\":\"%s\",\"queued\":%zu,\"completed\":%" PRIu64
+          ",\"oldest_queued_age_seconds\":%.9f,"
+          "\"oldest_active_age_seconds\":%.9f"
           ",\"stopping\":%s}\n",
           now, service->active,
           service->active ? (now - service->active_start) / 1e6 : 0.0,
           state.phase, state.queued_requests, service->completed,
+          state.oldest_queued_age / 1e9, state.oldest_active_age / 1e9,
           service->stopping ? "true" : "false");
 }
 

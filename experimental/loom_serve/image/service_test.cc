@@ -13,6 +13,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstdlib>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -245,8 +246,14 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
     if (target == "/v1/status") {
       EXPECT_NE(
           response.find(
-              R"({"object":"model","id":"image-witness","loom":{"kind":"image","endpoint":"/v1/images/generations","tokenize":false,"status":{"phase":"generating","queued_requests":0,"active_requests":1}}})"),
+              R"({"object":"model","id":"image-witness","loom":{"kind":"image","endpoint":"/v1/images/generations","tokenize":false,"status":{"phase":"generating","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":)"),
           std::string::npos);
+      const std::string key = "\"oldest_active_age_seconds\":";
+      const auto offset = response.find(key);
+      if (offset != std::string::npos) {
+        EXPECT_GT(std::strtod(response.c_str() + offset + key.size(), nullptr),
+                  0.0);
+      }
     } else if (target == "/metrics") {
       EXPECT_NE(response.find("loom_serve_model_active_requests{"
                               "model=\"image-witness\",kind=\"image\"} 1\n"),
@@ -254,6 +261,15 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
       EXPECT_NE(response.find("loom_serve_model_phase{model=\"image-witness\","
                               "kind=\"image\",phase=\"generating\"} 1\n"),
                 std::string::npos);
+      const std::string key =
+          "loom_serve_model_oldest_active_age_seconds{model=\"image-witness\","
+          "kind=\"image\"} ";
+      const auto offset = response.find(key);
+      EXPECT_NE(offset, std::string::npos);
+      if (offset != std::string::npos) {
+        EXPECT_GT(std::strtod(response.c_str() + offset + key.size(), nullptr),
+                  0.0);
+      }
     } else {
       EXPECT_NE(response.find("\"status\":\"ready\""), std::string::npos);
     }

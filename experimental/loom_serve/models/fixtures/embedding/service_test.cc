@@ -403,16 +403,30 @@ TEST_P(SourceEmbeddingServiceTest,
             kSlabBytes);
   const int cancelled = Send(R"({"model":"fixture","input":["a","bbb"]})");
   auto* connection = Accept();
+  const auto queued = interface_.snapshot(interface_.self);
+  EXPECT_EQ(queued.queued_requests, 1u);
+  EXPECT_EQ(queued.active_requests, 0u);
+  EXPECT_GE(queued.oldest_queued_age, 0);
+  EXPECT_EQ(queued.oldest_active_age, 0);
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
   constexpr auto kShared = LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
   EXPECT_TRUE(Step(kShared));  // Prepare requests.
   EXPECT_TRUE(Step(kShared));  // Prepare cohort.
   EXPECT_TRUE(Step(kShared));  // Consume preparation; admission denied.
+  const auto waiting = interface_.snapshot(interface_.self);
+  EXPECT_STREQ(waiting.phase, "waiting");
+  EXPECT_EQ(waiting.queued_requests, 0u);
+  EXPECT_EQ(waiting.oldest_queued_age, 0);
+  EXPECT_EQ(waiting.active_requests, 1u);
+  EXPECT_GT(waiting.oldest_active_age, 0);
+  EXPECT_GE(waiting.oldest_active_age, queued.oldest_queued_age);
   const uint64_t wakes = wakes_.load();
   for (int i = 0; i < 3; ++i) {
     EXPECT_FALSE(Step(kShared));
     EXPECT_FALSE(interface_.is_active(interface_.self));
+    EXPECT_GE(interface_.snapshot(interface_.self).oldest_active_age,
+              waiting.oldest_active_age);
   }
   // No new CPU process or device submission occurred during those turns. The
   // source packet and result association were retained, not prepared again.
@@ -440,6 +454,9 @@ TEST_P(SourceEmbeddingServiceTest,
       loom_serve_residency_try_admit(retained_residency, &admission));
   ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
   loom_serve_residency_release(retained_residency);
+  const auto cancelled_state = interface_.snapshot(interface_.self);
+  EXPECT_EQ(cancelled_state.oldest_queued_age, 0);
+  EXPECT_EQ(cancelled_state.oldest_active_age, 0);
   const int request = Send(R"({"model":"fixture","input":["a","bbb"]})");
   Accept();
   EXPECT_TRUE(Step(kShared));
@@ -448,6 +465,11 @@ TEST_P(SourceEmbeddingServiceTest,
   loom_serve_residency_release(retained_residency);
   Drain();
   const std::string result = Read(request);
+  const auto idle = interface_.snapshot(interface_.self);
+  EXPECT_EQ(idle.queued_requests, 0u);
+  EXPECT_EQ(idle.active_requests, 0u);
+  EXPECT_EQ(idle.oldest_queued_age, 0);
+  EXPECT_EQ(idle.oldest_active_age, 0);
   EXPECT_EQ(result.find("HTTP/1.1 200"), 0u);
   EXPECT_NE(result.find(R"("index":0,"embedding":[2,2,2,4])"),
             std::string::npos);

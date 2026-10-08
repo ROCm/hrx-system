@@ -16,6 +16,8 @@
 #include "loom/util/json.h"
 
 typedef struct finite_job_t {
+  // Immutable monotonic receipt time, preserved through every cohort phase.
+  iree_time_t arrival_time;
   // Owned raw JSON, independent of a reset transport while CPU preparation
   // runs.
   iree_string_view_t body;
@@ -382,12 +384,17 @@ static bool finite_is_pending(void* self) {
 
 static loom_serve_http_service_snapshot_t finite_snapshot(void* self) {
   const loom_serve_finite_service_t* service = self;
+  const iree_time_t now = iree_time_now();
   static const char* const phases[] = {"idle",    "preparing", "batching",
                                        "waiting", "running",   "encoding"};
   return (loom_serve_http_service_snapshot_t){
       .phase = phases[service->phase],
       .queued_requests = service->pending_count,
-      .active_requests = service->cohort_count};
+      .active_requests = service->cohort_count,
+      .oldest_queued_age =
+          service->pending_count ? now - service->pending[0]->arrival_time : 0,
+      .oldest_active_age =
+          service->cohort_count ? now - service->cohort[0]->arrival_time : 0};
 }
 
 static iree_status_t finite_heartbeat(loom_serve_finite_service_t* service) {
@@ -403,9 +410,12 @@ static iree_status_t finite_heartbeat(loom_serve_finite_service_t* service) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
       ",\"phase\":\"%s\",\"queued\":%zu,\"cohort_requests\":%zu,"
-      "\"batches\":%" PRIu64 "}\n",
+      "\"batches\":%" PRIu64
+      ",\"oldest_queued_age_seconds\":%.9f,"
+      "\"oldest_active_age_seconds\":%.9f}\n",
       state.phase, state.queued_requests, state.active_requests,
-      service->batches));
+      service->batches, state.oldest_queued_age / 1e9,
+      state.oldest_active_age / 1e9));
   const iree_string_view_t line = iree_string_builder_view(output);
   fprintf(stderr, "%.*s", (int)line.size, line.data);
   return iree_ok_status();
@@ -607,6 +617,7 @@ static iree_status_t finite_accept(void* self,
       (void**)&body);
   if (iree_status_is_ok(status)) {
     job->body = iree_make_string_view(body, request->body.size);
+    job->arrival_time = iree_time_now();
     service->pending[service->pending_count++] = job;
   } else {
     finite_job_destroy(service, job);

@@ -310,11 +310,11 @@ TEST_P(SourceDecisionServiceTest, SharesRouterWithEmbeddingsAndRawUtilities) {
   const std::string snapshot = Read(Send("", "/v1/status", "GET"));
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false,"status":{"phase":"idle","queued_requests":0,"active_requests":0}}})"),
+          R"({"object":"model","id":"decisions","loom":{"kind":"decision","endpoint":"/v1/systemone","tokenize":false,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000}}})"),
       std::string::npos);
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true,"status":{"phase":"idle","queued_requests":0,"active_requests":0}}})"),
+          R"({"object":"model","id":"vectors","loom":{"kind":"embedding","endpoint":"/v1/embeddings","tokenize":true,"status":{"phase":"idle","queued_requests":0,"active_requests":0,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":0.000000000}}})"),
       std::string::npos);
   EXPECT_EQ(Read(Send(R"({"model":"decisions","content":"a"})", "/tokenize"))
                 .find("HTTP/1.1 404"),

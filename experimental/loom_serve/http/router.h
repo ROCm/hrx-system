@@ -36,6 +36,11 @@ typedef struct loom_serve_http_service_snapshot_t {
   // Requests retained by the active invocation/cohort, including reset peers
   // whose accepted work still has to retire.
   iree_host_size_t active_requests;
+  // Nanoseconds since the oldest queued request was accepted; zero if empty.
+  iree_duration_t oldest_queued_age;
+  // Nanoseconds since the oldest active request was accepted, including prior
+  // queue residence; zero if empty. This is ownership age, not device time.
+  iree_duration_t oldest_active_age;
 } loom_serve_http_service_snapshot_t;
 
 // One named service borrowing a model on serialized task-owner turns. Network

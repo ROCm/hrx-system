@@ -27,6 +27,8 @@ static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
       "{\"model\":%.*s,\"event\":\"heartbeat\",\"phase\":\"%s\",\"phase_ms\":"
       "%.3f,"
       "\"since_completion_ms\":%.3f,\"active_rows\":%zu,"
+      "\"oldest_queued_age_seconds\":%.9f,"
+      "\"oldest_active_age_seconds\":%.9f,"
       "\"queued_requests\":%zu,\"pool\":{\"capacity_tokens\":%zu,"
       "\"reserved_tokens\":%zu,\"resident_tokens\":%zu},"
       "\"checkpoint_host_bytes\":%zu,"
@@ -56,8 +58,11 @@ static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
       "\"interval_output_tokens_per_second\":%.3f}\n",
       (int)heartbeat->name_json.size, heartbeat->name_json.data, state.phase,
       (now - state.phase_start) / 1e6, (now - state.last_completion) / 1e6,
-      state.active_rows, state.queued_requests, state.pool.capacity,
-      state.pool.reserved, state.pool.resident, state.checkpoint_host_bytes,
+      state.active_rows,
+      state.queued_requests ? (now - state.oldest_queued_arrival) / 1e9 : 0.0,
+      state.active_rows ? (now - state.oldest_active_arrival) / 1e9 : 0.0,
+      state.queued_requests, state.pool.capacity, state.pool.reserved,
+      state.pool.resident, state.checkpoint_host_bytes,
       state.state_memory.reserved_bytes, state.state_memory.committed_bytes,
       state.state_memory.peak_bytes, state.state_memory.released_bytes,
       state.weight_memory.reserved_bytes, state.weight_memory.committed_bytes,

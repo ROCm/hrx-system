@@ -467,7 +467,10 @@ TEST_P(SourceTextServiceTest,
                                     IREE_TIME_INFINITE_FUTURE);
     }
   }
-  EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 1u);
+  const auto queued = interface.snapshot(interface.self);
+  EXPECT_EQ(queued.queued_requests, 1u);
+  EXPECT_GE(queued.oldest_queued_age, 0);
+  EXPECT_EQ(queued.oldest_active_age, 0);
   const linger reset = {1, 0};
   ASSERT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
             0);
@@ -486,7 +489,10 @@ TEST_P(SourceTextServiceTest,
   bool progress = false;
   IREE_ASSERT_OK(interface.advance(interface.self, 0, &progress));
   EXPECT_TRUE(progress);
-  EXPECT_EQ(interface.snapshot(interface.self).queued_requests, 0u);
+  const auto cancelled = interface.snapshot(interface.self);
+  EXPECT_EQ(cancelled.queued_requests, 0u);
+  EXPECT_EQ(cancelled.oldest_queued_age, 0);
+  EXPECT_EQ(cancelled.oldest_active_age, 0);
   EXPECT_FALSE(interface.is_pending(interface.self));
   EXPECT_FALSE(interface.is_active(interface.self));
   EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available, 256u);

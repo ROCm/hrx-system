@@ -328,8 +328,12 @@ static iree_status_t router_describe_service(
     IREE_RETURN_IF_ERROR(
         router_quote(output, iree_make_cstring_view(state.phase)));
     IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-        output, ",\"queued_requests\":%zu,\"active_requests\":%zu}",
-        state.queued_requests, state.active_requests));
+        output,
+        ",\"queued_requests\":%zu,\"active_requests\":%zu,"
+        "\"oldest_queued_age_seconds\":%.9f,\"oldest_active_age_seconds\":%."
+        "9f}",
+        state.queued_requests, state.active_requests,
+        state.oldest_queued_age / 1e9, state.oldest_active_age / 1e9));
   }
   return iree_string_builder_append_cstring(output, "}}");
 }
@@ -375,8 +379,7 @@ static iree_status_t router_metric_label(iree_string_builder_t* output,
 
 static iree_status_t router_metric_sample(
     iree_string_builder_t* output, const char* metric,
-    const loom_serve_http_service_t* service, const char* phase,
-    iree_host_size_t value) {
+    const loom_serve_http_service_t* service, const char* phase, double value) {
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output, "loom_serve_model_%s{model=", metric));
   IREE_RETURN_IF_ERROR(router_metric_label(output, service->name));
@@ -388,7 +391,7 @@ static iree_status_t router_metric_sample(
     IREE_RETURN_IF_ERROR(
         router_metric_label(output, iree_make_cstring_view(phase)));
   }
-  return iree_string_builder_append_format(output, "} %zu\n", value);
+  return iree_string_builder_append_format(output, "} %.9g\n", value);
 }
 
 static iree_status_t router_metrics(router_t* router) {
@@ -435,6 +438,35 @@ static iree_status_t router_metrics(router_t* router) {
        i < router->service_count && iree_status_is_ok(status); ++i) {
     status = router_metric_sample(output, "phase", &router->services[i],
                                   router->snapshots[i].phase, 1);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(
+        output,
+        "# HELP loom_serve_model_oldest_queued_age_seconds Time since the "
+        "oldest "
+        "queued request was accepted, or zero if empty.\n"
+        "# TYPE loom_serve_model_oldest_queued_age_seconds gauge\n");
+  }
+  for (iree_host_size_t i = 0;
+       i < router->service_count && iree_status_is_ok(status); ++i) {
+    status = router_metric_sample(output, "oldest_queued_age_seconds",
+                                  &router->services[i], NULL,
+                                  router->snapshots[i].oldest_queued_age / 1e9);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(
+        output,
+        "# HELP loom_serve_model_oldest_active_age_seconds Time since the "
+        "oldest "
+        "active request was accepted, including prior queue residence, or zero "
+        "if empty.\n"
+        "# TYPE loom_serve_model_oldest_active_age_seconds gauge\n");
+  }
+  for (iree_host_size_t i = 0;
+       i < router->service_count && iree_status_is_ok(status); ++i) {
+    status = router_metric_sample(output, "oldest_active_age_seconds",
+                                  &router->services[i], NULL,
+                                  router->snapshots[i].oldest_active_age / 1e9);
   }
   return status;
 }

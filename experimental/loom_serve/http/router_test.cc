@@ -101,9 +101,12 @@ struct ModelService {
   static loom_serve_http_service_snapshot_t Snapshot(void* self) {
     auto* service = static_cast<ModelService*>(self);
     std::lock_guard<std::mutex> lock(service->mutex);
+    const size_t queued = service->pending.size() - service->waiting;
     return {.phase = service->waiting ? "held" : "idle",
-            .queued_requests = service->pending.size() - service->waiting,
-            .active_requests = service->waiting ? 1u : 0u};
+            .queued_requests = queued,
+            .active_requests = service->waiting ? 1u : 0u,
+            .oldest_queued_age = queued ? 12500000000ll : 0,
+            .oldest_active_age = service->waiting ? 2250000000ll : 0};
   }
 
   static iree_status_t Accept(void* self,
@@ -343,6 +346,20 @@ loom_serve_model_phase{model="b",kind="fixture",phase="idle"} 1
 loom_serve_model_phase{model="held",kind="fixture",phase="held"} 1
 loom_serve_model_phase{model="other",kind="fixture",phase="idle"} 1
 loom_serve_model_phase{model="quoted\"\\name",kind="fixture",phase="idle"} 1
+# HELP loom_serve_model_oldest_queued_age_seconds Time since the oldest queued request was accepted, or zero if empty.
+# TYPE loom_serve_model_oldest_queued_age_seconds gauge
+loom_serve_model_oldest_queued_age_seconds{model="a",kind="fixture"} 0
+loom_serve_model_oldest_queued_age_seconds{model="b",kind="fixture"} 12.5
+loom_serve_model_oldest_queued_age_seconds{model="held",kind="fixture"} 0
+loom_serve_model_oldest_queued_age_seconds{model="other",kind="fixture"} 0
+loom_serve_model_oldest_queued_age_seconds{model="quoted\"\\name",kind="fixture"} 0
+# HELP loom_serve_model_oldest_active_age_seconds Time since the oldest active request was accepted, including prior queue residence, or zero if empty.
+# TYPE loom_serve_model_oldest_active_age_seconds gauge
+loom_serve_model_oldest_active_age_seconds{model="a",kind="fixture"} 0
+loom_serve_model_oldest_active_age_seconds{model="b",kind="fixture"} 0
+loom_serve_model_oldest_active_age_seconds{model="held",kind="fixture"} 2.25
+loom_serve_model_oldest_active_age_seconds{model="other",kind="fixture"} 0
+loom_serve_model_oldest_active_age_seconds{model="quoted\"\\name",kind="fixture"} 0
 )");
   // Scraping changes no model ownership and does not wait on the held work.
   EXPECT_NE(
@@ -363,6 +380,13 @@ loom_serve_model_phase{model="quoted\"\\name",kind="fixture",phase="idle"} 1
                       "kind=\"fixture\",phase=\"idle\"} 1\n"),
             std::string::npos);
   EXPECT_EQ(idle.find("phase=\"held\""), std::string::npos);
+  EXPECT_NE(
+      idle.find("loom_serve_model_oldest_active_age_seconds{model=\"held\","
+                "kind=\"fixture\"} 0\n"),
+      std::string::npos);
+  EXPECT_NE(idle.find("loom_serve_model_oldest_queued_age_seconds{model=\"b\","
+                      "kind=\"fixture\"} 0\n"),
+            std::string::npos);
 }
 
 TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
@@ -382,7 +406,7 @@ TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
   const auto snapshot = Read(Send("GET", "/v1/status"));
   EXPECT_NE(
       snapshot.find(
-          R"({"object":"model","id":"held","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1}}})"),
+          R"({"object":"model","id":"held","loom":{"kind":"fixture","endpoint":"/v1/test","tokenize":true,"status":{"phase":"held","queued_requests":0,"active_requests":1,"oldest_queued_age_seconds":0.000000000,"oldest_active_age_seconds":2.250000000}}})"),
       std::string::npos);
   for (int i = 0; i < 12; ++i) {
     const auto response = Read(clients[i]);

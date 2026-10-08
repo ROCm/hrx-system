@@ -310,10 +310,14 @@ static void text_observe(loom_serve_text_service_t* service,
   const loom_serve_text_pool_usage_t pool =
       loom_serve_text_model_pool_usage(service->model);
   iree_host_size_t active = 0, prefill = 0, decode = 0, backpressured = 0;
+  iree_time_t oldest_active_arrival = IREE_TIME_INFINITE_FUTURE;
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     const loom_serve_text_session_t* session = &service->sessions[i];
     if (session->request.connection) {
       ++active;
+      const iree_time_t arrival =
+          session->request.start_time - session->request.queue_duration;
+      oldest_active_arrival = iree_min(oldest_active_arrival, arrival);
       prefill += session->request.phase == LOOM_SERVE_TEXT_REQUEST_PREFILL;
       decode += session->request.phase == LOOM_SERVE_TEXT_REQUEST_DECODE;
       backpressured +=
@@ -329,6 +333,9 @@ static void text_observe(loom_serve_text_service_t* service,
   }
   state->active_rows = active;
   state->queued_requests = service->pending.count;
+  state->oldest_active_arrival = oldest_active_arrival;
+  state->oldest_queued_arrival =
+      service->pending.count ? service->pending.values[0].arrival_time : 0;
   state->pool.capacity = pool.capacity;
   state->pool.reserved = pool.pending;
   state->pool.resident = pool.capacity - pool.available - pool.pending;
@@ -2046,10 +2053,16 @@ static loom_serve_http_service_snapshot_t text_snapshot(void* self) {
   loom_serve_text_service_t* service = self;
   const loom_serve_text_heartbeat_snapshot_t state =
       loom_serve_text_heartbeat_read(&service->heartbeat);
+  const iree_time_t now = iree_time_now();
   return (loom_serve_http_service_snapshot_t){
       .phase = state.phase,
       .queued_requests = service->pending.count,
-      .active_requests = state.active_rows};
+      .active_requests = state.active_rows,
+      .oldest_queued_age = service->pending.count
+                               ? now - service->pending.values[0].arrival_time
+                               : 0,
+      .oldest_active_age =
+          state.active_rows ? now - state.oldest_active_arrival : 0};
 }
 
 loom_serve_http_service_t loom_serve_text_service_interface(

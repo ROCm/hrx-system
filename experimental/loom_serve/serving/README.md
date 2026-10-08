@@ -242,7 +242,9 @@ the raw utilities and text checkpoint controls documented above.
     "status": {
       "phase": "generating",
       "queued_requests": 2,
-      "active_requests": 1
+      "active_requests": 1,
+      "oldest_queued_age_seconds": 0.25,
+      "oldest_active_age_seconds": 2.5
     }
   }
 }
@@ -255,6 +257,13 @@ until their accepted work retires. Text active requests hold admitted rows;
 the source-preparing FIFO head is still queued. Phase labels belong to each
 modality. Text uses published counters while a CPU task owns mutable rows;
 image and finite-vector heartbeats consume the same phase/count queries.
+The age gauges use monotonic time since application acceptance for the oldest
+request in each ownership class; empty classes report zero. Active age includes
+prior queue residence and continues through preparation, capacity waiting and
+output encoding. Cancellation ends the age only when that ownership retires.
+These values distinguish prolonged ownership from fresh arrivals without
+exposing request IDs or content; they are not device timings or completed-request
+latency distributions. Heartbeats publish ages from the same receipt timestamps.
 Snapshots neither activate a model nor wait for CPU/device completion, and
 transport copies the response so a slow status peer retains no model buffers.
 Unmeasured device times and whole-device memory totals are not reported as zero.
@@ -268,6 +277,8 @@ and returns `Content-Type: text/plain; version=0.0.4; charset=utf-8`. For exampl
 loom_serve_model_queued_requests{model="illustrator",kind="image"} 2
 loom_serve_model_active_requests{model="illustrator",kind="image"} 1
 loom_serve_model_phase{model="illustrator",kind="image",phase="generating"} 1
+loom_serve_model_oldest_queued_age_seconds{model="illustrator",kind="image"} 0.25
+loom_serve_model_oldest_active_age_seconds{model="illustrator",kind="image"} 2.5
 ~~~
 
 These are gauges, not cumulative request counters. The phase family contains

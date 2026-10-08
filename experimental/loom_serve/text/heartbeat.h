@@ -26,6 +26,11 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
   iree_host_size_t active_rows;
   // Claimed requests waiting without a device row or completion reservation.
   iree_host_size_t queued_requests;
+  // Monotonic receipt time of the oldest admitted request, if active_rows > 0.
+  iree_time_t oldest_active_arrival;
+  // Monotonic receipt time of the oldest queued request, if queued_requests >
+  // 0.
+  iree_time_t oldest_queued_arrival;
   // Pool accounting in token positions; reserved and resident are disjoint.
   struct {
     // Addressable token capacity; zero selects dense comparison storage.
