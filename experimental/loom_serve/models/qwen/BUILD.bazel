@@ -109,6 +109,7 @@ loom_cc_test(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        "//experimental/loom_serve/runtime:input",
         "//experimental/loom_serve/runtime:preparation",
         "//experimental/loom_serve/scheduling:packing",
         "//experimental/loom_serve/text:model",

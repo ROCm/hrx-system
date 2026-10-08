@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "experimental/loom_serve/runtime/input.h"
 #include "experimental/loom_serve/runtime/preparation.h"
 #include "experimental/loom_serve/text/model.h"
 #include "experimental/loom_serve/text/schedule.h"
@@ -31,18 +32,22 @@ class PrepareTest : public ::testing::Test {
     IREE_ASSERT_OK(iree_vm_ref_types_resolve(
         iree_vm_environment_lookup_ref_type_table(environment, IREE_SV("vm")),
         &types));
+    IREE_ASSERT_OK(loom_serve_input_module_create(environment, nullptr, &input,
+                                                  allocator));
   }
 
   void TearDown() override {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     loom_serve_preparation_destroy(preparation);
+    iree_vm_module_release(input);
     iree_vm_environment_free(environment);
   }
 
   void Prepare(iree_host_size_t rows, iree_host_size_t pool, bool mtp,
                const std::vector<loom_serve_packing_shape_t>& shapes,
                iree_host_size_t context = 16384, iree_host_size_t prefill = 512,
-               iree_host_size_t pins = 0) {
+               iree_host_size_t pins = 0,
+               iree_status_code_t expected = IREE_STATUS_OK) {
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
     loom_serve_preparation_destroy(preparation);
     preparation = nullptr;
@@ -78,10 +83,10 @@ class PrepareTest : public ::testing::Test {
     iree_status_t status = loom_serve_preparation_create(
         environment, iree_make_cstring_view(FLAG_prepare_source),
         IREE_SV("prepare"), iree_vm_variant_span_from_array(arguments),
-        iree_vm_variant_span_from_array(results), iree_vm_module_span_empty(),
-        &preparation, allocator);
+        iree_vm_variant_span_from_array(results), {&input, 1}, &preparation,
+        allocator);
     iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
-    IREE_ASSERT_OK(status);
+    IREE_ASSERT_STATUS_IS(expected, status);
   }
 
   void CheckStorage(uint64_t rows, uint64_t context, uint64_t pool, bool packed,
@@ -158,6 +163,8 @@ class PrepareTest : public ::testing::Test {
   iree_vm_environment_t* environment = nullptr;
   // Canonical VM buffer type borrowed from the environment.
   iree_vm_ref_types_t types = {};
+  // Actual source input-validation capability; no tokenizer is needed.
+  iree_vm_module_t* input = nullptr;
   // Independently owned declarations after bootstrap teardown.
   loom_serve_preparation_t* preparation = nullptr;
   // Returned capacities, control state, terminal marker and storage records.
@@ -308,6 +315,21 @@ TEST_F(PrepareTest, CheckpointCapacityReservesIndependentSlotsAndCarry) {
             Prepare(rows, 65536, mtp, {{32, rows}}, 262144, 32, pins));
         CheckStorage(rows, 262144, 65536, true, mtp, pins);
       }
+    }
+  }
+}
+
+TEST_F(PrepareTest, SourceRejectsTokenShapesBeyondItsPacketCapacity) {
+  for (bool mtp : {false, true}) {
+    for (size_t capacity : {513u, 1024u, 262144u}) {
+      SCOPED_TRACE(capacity);
+      ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, mtp, {{32, 1}}, 262144, capacity,
+                                      0, IREE_STATUS_INVALID_ARGUMENT));
+      EXPECT_EQ(preparation, nullptr);
+      ASSERT_NO_FATAL_FAILURE(Prepare(1, 64, mtp, {{32, 1}, {capacity, 1}},
+                                      262144, 32, 0,
+                                      IREE_STATUS_INVALID_ARGUMENT));
+      EXPECT_EQ(preparation, nullptr);
     }
   }
 }

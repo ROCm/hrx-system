@@ -1,3 +1,4 @@
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
 func.decl import("prepare") @stage(%root: buffer, %tag: i64) -> (i32)
 func.decl import("prepare") @config_i64(%stage: i32, %key: buffer, %value: i64)
 func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: buffer, %path: buffer, %policy: buffer)
@@ -22,6 +23,8 @@ global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
 global.rodata.def @terminal = bytes("3c7c696d5f656e647c3e")
 // Empty path component.
 global.rodata.def @empty = bytes("")
+// Qwen token packets support at most 512 tokens per epoch.
+global.rodata.def @token_capacity_error = bytes("5177656e20746f6b656e207061636b65747320737570706f7274206174206d6f73742035313220746f6b656e73207065722065706f6368")
 // runner.qwen38.prefill_token_count
 global.rodata.def @prefill_key = bytes("72756e6e65722e7177656e33382e70726566696c6c5f746f6b656e5f636f756e74")
 // runner.qwen38.span_capacity
@@ -295,6 +298,10 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %zero64 = scalar.constant 0 : i64
   %one64 = scalar.constant 1 : i64
   %capacity = scalar.constant 512 : i64
+  %prefill_fits = scalar.cmpi ule, %prefill, %capacity : i64
+  %prefill_fits32 = scalar.extui %prefill_fits : i1 to i32
+  %capacity_error = global.load @token_capacity_error : buffer
+  func.call @require(%prefill_fits32, %capacity_error) : (i32, buffer) -> ()
   %bounded = scalar.assume %shape_count [range(%shape_count, 0, 2147483647)] : i64
   %count = index.cast %bounded : i64 to index
   %view = buffer.view %shapes[%origin] : buffer -> view<[%count]x2xi64>
@@ -306,6 +313,9 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %maximum = scf.for %i = [%zero to %count step %one](%previous = %zero64 : i64) -> (i64) {
     %tokens = view.load %view[%i, 0] : view<[%count]x2xi64> -> i64
     %spans = view.load %view[%i, 1] : view<[%count]x2xi64> -> i64
+    %fits = scalar.cmpi ule, %tokens, %capacity : i64
+    %fits32 = scalar.extui %fits : i1 to i32
+    func.call @require(%fits32, %capacity_error) : (i32, buffer) -> ()
     %target = func.call @declare_stage(%epoch_root, %tokens, %spans, %capacity, %one64, %context, %pool, %one32, %weights) : (buffer, i64, i64, i64, i64, i64, i64, i32, buffer) -> (i32)
     %larger = scalar.cmpi ugt, %tokens, %previous : i64
     %next = scf.select %larger, %tokens, %previous : i64

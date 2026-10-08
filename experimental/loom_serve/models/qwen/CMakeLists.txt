@@ -257,6 +257,7 @@ loom_cc_test(
   DEPS
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::input
     iree::experimental::loom_serve::runtime::preparation
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::text::model
