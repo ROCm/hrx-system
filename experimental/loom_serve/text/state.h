@@ -215,7 +215,10 @@ iree_status_t loom_serve_text_state_row_suspend(
     loom_serve_text_state_row_t* row);
 iree_status_t loom_serve_text_state_row_try_resume(
     loom_serve_text_state_row_t* row, bool* out_resumed);
-iree_status_t loom_serve_text_state_row_try_pin(
+// Retains the retired row's exact endpoint and queues its optional carry copy.
+// The owner excludes mutation through successful execution readiness. Failure
+// retains acquired IDs for state teardown; capacity denial returns NULL.
+iree_status_t loom_serve_text_state_row_submit_pin(
     loom_serve_text_state_row_t* row,
     loom_serve_text_state_checkpoint_t** out_checkpoint);
 iree_status_t loom_serve_text_state_row_try_restore(
@@ -237,7 +240,14 @@ bool loom_serve_text_state_row_complete_reserve(
 // frontier even when a reserved fork was never advanced.
 void loom_serve_text_state_row_release_reservation(
     loom_serve_text_state_row_t* row);
-iree_status_t loom_serve_text_state_checkpoint_suspend(
+// Captures a retired endpoint without releasing its source IDs. The caller
+// excludes state mutation until successful readiness and completion
+// consumption.
+iree_status_t loom_serve_text_state_checkpoint_submit_suspend(
+    loom_serve_text_state_checkpoint_t* checkpoint);
+// Releases captured source IDs after successful readiness. Already-cold
+// endpoints retain their image without releasing any IDs twice.
+void loom_serve_text_state_checkpoint_complete_suspend(
     loom_serve_text_state_checkpoint_t* checkpoint);
 void loom_serve_text_state_checkpoint_release(
     loom_serve_text_state_checkpoint_t* checkpoint);

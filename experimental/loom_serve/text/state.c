@@ -832,7 +832,7 @@ static iree_status_t text_copy_carry(loom_serve_text_state_t* state,
   return loom_serve_execution_transfer(state->execution, 1, &copy, &completion);
 }
 
-iree_status_t loom_serve_text_state_row_try_pin(
+iree_status_t loom_serve_text_state_row_submit_pin(
     loom_serve_text_state_row_t* row,
     loom_serve_text_state_checkpoint_t** out_checkpoint) {
   *out_checkpoint = NULL;
@@ -840,7 +840,6 @@ iree_status_t loom_serve_text_state_row_try_pin(
   if (!state->checkpoints.pool.available) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(state->execution));
   uint32_t index = 0;
   loom_serve_block_pool_acquire(&state->checkpoints.pool, 1, &index);
   loom_serve_text_state_checkpoint_t* checkpoint =
@@ -858,8 +857,6 @@ iree_status_t loom_serve_text_state_row_try_pin(
                                &checkpoint->recurrent_slot);
   iree_status_t status =
       text_copy_carry(state, row_index, state->row_count + index);
-  status =
-      iree_status_join(status, loom_serve_execution_drain(state->execution));
   if (iree_status_is_ok(status)) {
     *out_checkpoint = checkpoint;
   }
@@ -898,7 +895,7 @@ static iree_status_t text_checkpoint_plan_snapshot(
       state->allocator);
 }
 
-iree_status_t loom_serve_text_state_checkpoint_suspend(
+iree_status_t loom_serve_text_state_checkpoint_submit_suspend(
     loom_serve_text_state_checkpoint_t* checkpoint) {
   loom_serve_text_state_t* state = checkpoint->owner;
   if (!state->memory.buffers[1]) {
@@ -909,7 +906,6 @@ iree_status_t loom_serve_text_state_checkpoint_suspend(
   if (checkpoint->snapshot) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(state->execution));
   iree_host_size_t range_count = 0;
   loom_serve_snapshot_range_t* ranges = NULL;
   IREE_RETURN_IF_ERROR(
@@ -921,18 +917,22 @@ iree_status_t loom_serve_text_state_checkpoint_suspend(
   iree_status_t status = loom_serve_snapshot_capture(
       state->execution, IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
       &checkpoint->snapshot, state->allocator);
-  status =
-      iree_status_join(status, loom_serve_execution_drain(state->execution));
-  if (iree_status_is_ok(status)) {
-    loom_serve_block_pool_release(&state->cache.pool, checkpoint->block_count,
-                                  checkpoint->blocks);
-    checkpoint->block_count = 0;
-    loom_serve_block_pool_release(&state->recurrent.pool, 1,
-                                  &checkpoint->recurrent_slot);
-    checkpoint->recurrent_slot = UINT32_MAX;
-  }
   iree_allocator_free(state->allocator, ranges);
   return status;
+}
+
+void loom_serve_text_state_checkpoint_complete_suspend(
+    loom_serve_text_state_checkpoint_t* checkpoint) {
+  if (checkpoint->recurrent_slot == UINT32_MAX) {
+    return;
+  }
+  loom_serve_text_state_t* state = checkpoint->owner;
+  loom_serve_block_pool_release(&state->cache.pool, checkpoint->block_count,
+                                checkpoint->blocks);
+  checkpoint->block_count = 0;
+  loom_serve_block_pool_release(&state->recurrent.pool, 1,
+                                &checkpoint->recurrent_slot);
+  checkpoint->recurrent_slot = UINT32_MAX;
 }
 
 static iree_host_size_t text_row_private_ranges(

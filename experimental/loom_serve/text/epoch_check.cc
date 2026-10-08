@@ -20,6 +20,7 @@
 #include "experimental/loom_serve/text/flags.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/hal/api.h"
 #include "iree/task/executor.h"
 
 namespace {
@@ -32,7 +33,8 @@ using Spans = std::array<loom_serve_text_span_t, kSpanCount>;
 using Results = std::array<loom_serve_text_result_t, kSpanCount>;
 
 struct ModelWork {
-  enum class Operation { kEpoch, kTrim, kReserve };
+  enum class Operation { kEpoch, kTrim, kReserve, kPin, kSuspend, kReset };
+  enum class Cancellation { kNone, kBeforeSubmission, kAfterSubmission };
   // Model operation submitted and completed by the same task protocol.
   Operation operation = Operation::kEpoch;
   // Borrowed source model; the outer caller retires all tasks before teardown.
@@ -70,6 +72,23 @@ struct ModelWork {
     // Simulated request cancellation, applied only after retirement.
     bool cancel = false;
   } reservation;
+  // Endpoint ownership remains private until successful readiness.
+  struct {
+    // Borrowed retired source row for pinning.
+    loom_serve_text_row_t* row = nullptr;
+    // Pending or ready endpoint, retained by the model until released.
+    loom_serve_text_checkpoint_t* value = nullptr;
+    // Caller abandonment before admission or while work owns storage.
+    Cancellation cancellation = Cancellation::kNone;
+    // Fails feedback readiness while the capture work branch remains valid.
+    bool fail_readiness = false;
+    // Successful readiness was consumed by the owner.
+    bool completed = false;
+    // Free token slots before capture, checked through failed readiness.
+    size_t available = 0;
+  } checkpoint;
+  // Borrowed row whose ownership is cleared at a retired boundary.
+  loom_serve_text_row_t* reset_row = nullptr;
   // Row frontiers before submission, checked again before publication.
   std::array<size_t, kSpanCount> positions = {};
   // Task submitting the source-owned device sequence.
@@ -178,8 +197,37 @@ struct ModelWork {
         }
         break;
       }
+      case Operation::kPin:
+        if (self->checkpoint.cancellation != Cancellation::kBeforeSubmission) {
+          status = loom_serve_text_row_submit_pin(
+              self->checkpoint.row, &self->checkpoint.value, &self->frontier);
+        }
+        pending = self->checkpoint.value != nullptr;
+        break;
+      case Operation::kSuspend:
+        self->checkpoint.available =
+            loom_serve_text_model_pool_usage(self->model).available;
+        status = loom_serve_text_checkpoint_submit_suspend(
+            self->checkpoint.value, &self->frontier);
+        if (iree_status_is_ok(status) &&
+            loom_serve_text_model_pool_usage(self->model).available !=
+                self->checkpoint.available) {
+          status = iree_make_status(IREE_STATUS_DATA_LOSS,
+                                    "capture released IDs before completion");
+        }
+        break;
+      case Operation::kReset:
+        loom_serve_text_row_reset_retired(self->reset_row);
+        pending = false;
+        break;
     }
     if (iree_status_is_ok(status) && pending) {
+      if (self->checkpoint.fail_readiness) {
+        // Fail the observed feedback branch, not the queued capture. Outer
+        // destruction must still join that work before releasing its source.
+        iree_hal_semaphore_fail(self->frontier.semaphores[1],
+                                iree_status_from_code(IREE_STATUS_CANCELLED));
+      }
       for (size_t i = 0; i < self->semaphores.size(); ++i) {
         self->semaphores[i] = reinterpret_cast<iree_async_semaphore_t*>(
             self->frontier.semaphores[i]);
@@ -214,7 +262,8 @@ struct ModelWork {
                                 iree_task_process_drain_result_t* result) {
     auto* self = static_cast<ModelWork*>(process->user_data);
     std::lock_guard<std::mutex> lock(self->mutex);
-    for (size_t i = 0; self->operation != Operation::kReserve &&
+    for (size_t i = 0; (self->operation == Operation::kEpoch ||
+                        self->operation == Operation::kTrim) &&
                        i < kSpanCount && iree_status_is_ok(self->status);
          ++i) {
       auto* row =
@@ -245,6 +294,19 @@ struct ModelWork {
           }
           break;
         }
+        case Operation::kPin:
+        case Operation::kSuspend:
+          if (self->operation == Operation::kSuspend) {
+            loom_serve_text_checkpoint_complete_suspend(self->checkpoint.value);
+          }
+          if (self->checkpoint.cancellation == Cancellation::kAfterSubmission) {
+            loom_serve_text_checkpoint_release(
+                std::exchange(self->checkpoint.value, nullptr));
+          }
+          self->checkpoint.completed = true;
+          break;
+        case Operation::kReset:
+          break;
       }
     }
     result->did_work = true;
@@ -373,7 +435,9 @@ static iree_status_t Compare(const char* label, ModelWork& epoch) {
 }
 
 static iree_status_t Run(loom_serve_text_model_t* model,
-                         iree_allocator_t allocator) {
+                         iree_allocator_t allocator,
+                         iree_status_code_t* out_terminal_code) {
+  *out_terminal_code = IREE_STATUS_OK;
   const iree_string_view_t prompts[] = {
       IREE_SV(
           "Repeat these words: amber cedar maple violet birch willow falcon."),
@@ -403,7 +467,11 @@ static iree_status_t Run(loom_serve_text_model_t* model,
     return iree_make_status(IREE_STATUS_DATA_LOSS,
                             "cancelled activation retained reservation credit");
   }
-  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(cancelled.reservation.row));
+  ModelWork reset;
+  reset.operation = ModelWork::Operation::kReset;
+  reset.model = model;
+  reset.reset_row = cancelled.reservation.row;
+  IREE_RETURN_IF_ERROR(reset.Run());
   fprintf(stdout,
           "{\"event\":\"admission_check\","
           "\"case\":\"cancel-after-activation\"}\n");
@@ -504,8 +572,11 @@ static iree_status_t Run(loom_serve_text_model_t* model,
         loom_serve_text_model_row(model, index));
   }
   for (size_t row : {7u, 6u}) {
-    IREE_RETURN_IF_ERROR(
-        loom_serve_text_row_reset(loom_serve_text_model_row(model, row)));
+    ModelWork release;
+    release.operation = ModelWork::Operation::kReset;
+    release.model = model;
+    release.reset_row = loom_serve_text_model_row(model, row);
+    IREE_RETURN_IF_ERROR(release.Run());
   }
   ModelWork trim;
   trim.operation = ModelWork::Operation::kTrim;
@@ -538,13 +609,56 @@ static iree_status_t Run(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(Compare("decode-after-compaction", decode));
   if (compactable && loom_serve_text_model_checkpoint_capacity(model)) {
     auto* source = loom_serve_text_model_row(model, kRows[0]);
-    loom_serve_text_checkpoint_t* checkpoint = nullptr;
-    IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(source, &checkpoint));
+    const size_t available = loom_serve_text_model_pool_usage(model).available;
+    for (auto cancellation : {ModelWork::Cancellation::kBeforeSubmission,
+                              ModelWork::Cancellation::kAfterSubmission}) {
+      ModelWork abandoned;
+      abandoned.operation = ModelWork::Operation::kPin;
+      abandoned.model = model;
+      abandoned.checkpoint.row = source;
+      abandoned.checkpoint.cancellation = cancellation;
+      IREE_RETURN_IF_ERROR(abandoned.Run());
+      if (!abandoned.checkpoint.completed || abandoned.checkpoint.value ||
+          loom_serve_text_model_pool_usage(model).available != available) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "cancelled pin changed pool ownership");
+      }
+    }
+    ModelWork pin;
+    pin.operation = ModelWork::Operation::kPin;
+    pin.model = model;
+    pin.checkpoint.row = source;
+    IREE_RETURN_IF_ERROR(pin.Run());
+    auto* checkpoint = pin.checkpoint.value;
     if (!checkpoint) {
       return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                               "fixture cannot pin endpoint");
     }
-    IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_suspend(checkpoint));
+    if (loom_serve_text_model_checkpoint_capacity(model) == 1) {
+      ModelWork denied;
+      denied.operation = ModelWork::Operation::kPin;
+      denied.model = model;
+      denied.checkpoint.row = source;
+      IREE_RETURN_IF_ERROR(denied.Run());
+      if (denied.checkpoint.value) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "pin exceeded configured endpoint capacity");
+      }
+    }
+    // The second submission exercises an already-cold endpoint without
+    // returning its physical IDs twice or replacing its retained image.
+    for (size_t iteration = 0; iteration < 2; ++iteration) {
+      ModelWork capture;
+      capture.operation = ModelWork::Operation::kSuspend;
+      capture.model = model;
+      capture.checkpoint.value = checkpoint;
+      IREE_RETURN_IF_ERROR(capture.Run());
+      if (!capture.checkpoint.completed ||
+          !loom_serve_text_checkpoint_suspended_bytes(checkpoint)) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "capture did not publish a cold endpoint");
+      }
+    }
     ModelWork restoring;
     restoring.operation = ModelWork::Operation::kReserve;
     restoring.model = model;
@@ -574,11 +688,65 @@ static iree_status_t Run(loom_serve_text_model_t* model,
                               "cold admission changed continuation");
     }
     loom_serve_text_row_release_reservation(restoring.reservation.row);
-    loom_serve_text_checkpoint_release(checkpoint);
+    ModelWork abandoned_capture;
+    abandoned_capture.operation = ModelWork::Operation::kSuspend;
+    abandoned_capture.model = model;
+    abandoned_capture.checkpoint.value = checkpoint;
+    abandoned_capture.checkpoint.cancellation =
+        ModelWork::Cancellation::kAfterSubmission;
+    IREE_RETURN_IF_ERROR(abandoned_capture.Run());
+    if (!abandoned_capture.checkpoint.completed ||
+        abandoned_capture.checkpoint.value) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "cancelled capture retained its endpoint");
+    }
     fprintf(stdout,
             "{\"event\":\"admission_check\","
             "\"case\":\"cold-checkpoint-continuation\","
             "\"output_tokens\":2}\n");
+    fflush(stdout);
+
+    // Keep a sole endpoint owner after both branches retire. A failed ALL wait
+    // must leave its original IDs retained, even if capture itself succeeds.
+    ModelWork terminal_pin;
+    terminal_pin.operation = ModelWork::Operation::kPin;
+    terminal_pin.model = model;
+    terminal_pin.checkpoint.row = source;
+    IREE_RETURN_IF_ERROR(terminal_pin.Run());
+    if (!terminal_pin.checkpoint.value) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "fixture cannot pin terminal endpoint");
+    }
+    for (auto* row : {source, restoring.reservation.row}) {
+      ModelWork release;
+      release.operation = ModelWork::Operation::kReset;
+      release.model = model;
+      release.reset_row = row;
+      IREE_RETURN_IF_ERROR(release.Run());
+    }
+    ModelWork failed_capture;
+    failed_capture.operation = ModelWork::Operation::kSuspend;
+    failed_capture.model = model;
+    failed_capture.checkpoint.value = terminal_pin.checkpoint.value;
+    failed_capture.checkpoint.fail_readiness = true;
+    auto failure = failed_capture.Run();
+    if (!iree_status_is_cancelled(failure)) {
+      return iree_status_join(
+          failure,
+          iree_make_status(IREE_STATUS_DATA_LOSS,
+                           "capture did not observe failed readiness"));
+    }
+    iree_status_free(failure);
+    if (failed_capture.checkpoint.completed ||
+        loom_serve_text_model_pool_usage(model).available !=
+            failed_capture.checkpoint.available) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "failed readiness published or released capture");
+    }
+    *out_terminal_code = IREE_STATUS_CANCELLED;
+    fprintf(stdout,
+            "{\"event\":\"checkpoint_check\","
+            "\"case\":\"failed-readiness-retains-source\"}\n");
     fflush(stdout);
   }
   return iree_ok_status();
@@ -592,6 +760,7 @@ int main(int argc, char** argv) {
   loom_serve_host_t* host = nullptr;
   loom_serve_device_t* device = nullptr;
   loom_serve_text_model_t* model = nullptr;
+  iree_status_code_t terminal_code = IREE_STATUS_OK;
   auto status = loom_serve_host_create(1, &host, allocator);
   if (iree_status_is_ok(status)) {
     status = loom_serve_device_create_from_flags(host, &device, allocator);
@@ -602,9 +771,18 @@ int main(int argc, char** argv) {
                                                      allocator);
   }
   if (iree_status_is_ok(status)) {
-    status = Run(model, allocator);
+    status = Run(model, allocator, &terminal_code);
   }
-  status = iree_status_join(status, loom_serve_text_model_destroy(model));
+  auto destruction = loom_serve_text_model_destroy(model);
+  if (iree_status_code(destruction) == terminal_code) {
+    iree_status_free(destruction);
+  } else {
+    status = iree_status_join(
+        status, iree_status_join(
+                    destruction,
+                    iree_make_status(IREE_STATUS_DATA_LOSS,
+                                     "model teardown lost terminal status")));
+  }
   status = iree_status_join(status, loom_serve_device_destroy(device));
   loom_serve_host_release(host);
   if (!iree_status_is_ok(status)) {
@@ -613,7 +791,8 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   fprintf(stdout,
-          "PASS: one-worker text admission, epochs and compaction preserve "
+          "PASS: one-worker text admission, epochs, compaction and checkpoints "
+          "preserve "
           "ownership, output and row publication.\n");
   return EXIT_SUCCESS;
 }

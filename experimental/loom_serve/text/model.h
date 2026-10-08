@@ -385,17 +385,33 @@ iree_status_t loom_serve_text_model_verify(
     const loom_serve_text_continuation_t* continuation,
     loom_serve_text_result_t* out_results);
 
-// Releases the row's recurrent/KV references and clears its host frontier.
+// Releases the row's recurrent/KV references, request pin and host frontier at
+// a successfully completed model boundary. No allocation or wait occurs.
 // Physical backing stays warm until model_trim. Attention beyond the new prefix
 // is inaccessible and need not clear before its pages are assigned again.
+void loom_serve_text_row_reset_retired(loom_serve_text_row_t* row);
+
+// Synchronous outer-thread join followed by reset_retired.
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row);
 
 // Retains the exact consumed endpoint without copying recurrent state or KV.
 // The pending prediction, if any, remains unconsumed. Requires a nonempty
-// resident row. Capacity refusal succeeds with a null output and no mutation.
-// A returned handle belongs to the caller until release and borrows the model;
-// model destruction invalidates outstanding handles. Optional source-sized
-// draft carry is copied on the existing queue timeline before returning.
+// idle resident row at a successfully completed model boundary. Capacity
+// refusal succeeds with a null output, empty frontier and no mutation.
+// Optional source-sized draft carry is copied on the existing queue timeline.
+// A returned handle is pending: the owner excludes model mutation and waits
+// asynchronously for successful ALL readiness before publishing, querying,
+// restoring or releasing it. No completion call is needed. Cancellation also
+// defers release until readiness. Submission/readiness failure is terminal and
+// retains accepted ownership for outer model destruction. The ready handle
+// belongs to the caller until release and borrows the model; destruction
+// invalidates all outstanding handles.
+iree_status_t loom_serve_text_row_submit_pin(
+    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Synchronous outer-thread join over pin submission. Publishes a ready handle
+// only on successful completion; capacity denial and failure leave NULL.
 iree_status_t loom_serve_text_row_try_pin(
     loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint);
 
@@ -417,11 +433,23 @@ iree_status_t loom_serve_text_row_try_restore(
 void loom_serve_text_checkpoint_release(
     loom_serve_text_checkpoint_t* checkpoint);
 
-// Captures immutable recurrence, target/draft KV and source-sized carry into a
-// DRAM image, then releases this endpoint's device references. Other branches
-// retain their own references. No active row is occupied by the image. Requires
-// elastic pooled storage; an already suspended endpoint performs no work.
-// model_trim reclaims backing not owned by another row or resident endpoint.
+// Queues capture of immutable recurrence, target/draft KV and source-sized
+// carry into DRAM at a successfully completed model boundary. Source IDs stay
+// retained until complete_suspend. Requires elastic pooled storage; an already
+// suspended endpoint submits no transfer. The owner excludes model mutation
+// until successful ALL readiness and completion, including on cancellation.
+// Submission/readiness failure retains source backing for outer destruction.
+iree_status_t loom_serve_text_checkpoint_submit_suspend(
+    loom_serve_text_checkpoint_t* checkpoint,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes successful ALL readiness and releases this endpoint's device IDs.
+// Other branches retain their own references. No allocation or wait occurs.
+// The DRAM image occupies no active row. model_trim can reclaim dead backing.
+void loom_serve_text_checkpoint_complete_suspend(
+    loom_serve_text_checkpoint_t* checkpoint);
+
+// Synchronous outer-thread join over capture submission/completion.
 iree_status_t loom_serve_text_checkpoint_suspend(
     loom_serve_text_checkpoint_t* checkpoint);
 

@@ -937,8 +937,7 @@ iree_status_t loom_serve_text_model_trim(
   return status;
 }
 
-iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row) {
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+void loom_serve_text_row_reset_retired(loom_serve_text_row_t* row) {
   const bool reserved = row->state->reserved_extent != 0;
   loom_serve_text_state_row_reset(row->state);
   if (reserved) {
@@ -947,6 +946,11 @@ iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row) {
   row->has_prediction = false;
   memset(&row->transfer, 0, sizeof(row->transfer));
   memset(&row->metrics, 0, sizeof(row->metrics));
+}
+
+iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row) {
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  loom_serve_text_row_reset_retired(row);
   return iree_ok_status();
 }
 
@@ -968,9 +972,11 @@ iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
   return loom_serve_text_state_row_try_resume(row->state, out_resumed);
 }
 
-iree_status_t loom_serve_text_row_try_pin(
-    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint) {
+iree_status_t loom_serve_text_row_submit_pin(
+    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint,
+    loom_serve_execution_frontier_t* out_frontier) {
   *out_checkpoint = NULL;
+  *out_frontier = (loom_serve_execution_frontier_t){0};
   if (!row->state->position || row->state->snapshot ||
       row->state->reserved_extent) {
     return iree_make_status(
@@ -978,7 +984,8 @@ iree_status_t loom_serve_text_row_try_pin(
         "checkpoint requires an idle nonempty resident row");
   }
   loom_serve_text_state_checkpoint_t* state = NULL;
-  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_try_pin(row->state, &state));
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_state_row_submit_pin(row->state, &state));
   if (!state) {
     return iree_ok_status();
   }
@@ -991,7 +998,24 @@ iree_status_t loom_serve_text_row_try_pin(
                                      .has_prediction = row->has_prediction,
                                      .token = row->transfer.tokens[0]};
   *out_checkpoint = checkpoint;
+  *out_frontier = loom_serve_execution_frontier(row->model->execution);
   return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_row_try_pin(
+    loom_serve_text_row_t* row, loom_serve_text_checkpoint_t** out_checkpoint) {
+  *out_checkpoint = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  loom_serve_text_checkpoint_t* checkpoint = NULL;
+  loom_serve_execution_frontier_t frontier;
+  iree_status_t status =
+      loom_serve_text_row_submit_pin(row, &checkpoint, &frontier);
+  status = iree_status_join(status,
+                            loom_serve_execution_drain(row->model->execution));
+  if (iree_status_is_ok(status)) {
+    *out_checkpoint = checkpoint;
+  }
+  return status;
 }
 
 iree_status_t loom_serve_text_row_try_restore(
@@ -1118,9 +1142,33 @@ void loom_serve_text_checkpoint_release(
   checkpoint->state = NULL;
 }
 
+iree_status_t loom_serve_text_checkpoint_submit_suspend(
+    loom_serve_text_checkpoint_t* checkpoint,
+    loom_serve_execution_frontier_t* out_frontier) {
+  *out_frontier = (loom_serve_execution_frontier_t){0};
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_state_checkpoint_submit_suspend(checkpoint->state));
+  *out_frontier = loom_serve_execution_frontier(checkpoint->model->execution);
+  return iree_ok_status();
+}
+
+void loom_serve_text_checkpoint_complete_suspend(
+    loom_serve_text_checkpoint_t* checkpoint) {
+  loom_serve_text_state_checkpoint_complete_suspend(checkpoint->state);
+}
+
 iree_status_t loom_serve_text_checkpoint_suspend(
     loom_serve_text_checkpoint_t* checkpoint) {
-  return loom_serve_text_state_checkpoint_suspend(checkpoint->state);
+  loom_serve_execution_t* execution = checkpoint->model->execution;
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(execution));
+  loom_serve_execution_frontier_t frontier;
+  iree_status_t status =
+      loom_serve_text_checkpoint_submit_suspend(checkpoint, &frontier);
+  status = iree_status_join(status, loom_serve_execution_drain(execution));
+  if (iree_status_is_ok(status)) {
+    loom_serve_text_checkpoint_complete_suspend(checkpoint);
+  }
+  return status;
 }
 
 iree_host_size_t loom_serve_text_checkpoint_suspended_bytes(

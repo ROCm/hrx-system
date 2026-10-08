@@ -226,6 +226,7 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host
+    iree::hal
     iree::task
   TESTONLY
 )
