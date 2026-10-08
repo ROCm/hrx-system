@@ -337,13 +337,23 @@ class LowAllocationStorageIdentityTest : public LowAllocationStorageLeaseTest {
     }
     scenario->unit_liveness.values = scenario->unit_values;
     scenario->unit_liveness.point_count = point_count;
+    IREE_ASSERT_OK(iree_arena_allocate_array(
+        &arena_, point_count, sizeof(uint32_t),
+        reinterpret_cast<void**>(&scenario->unit_liveness.end_points)));
+    for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
+      for (uint32_t unit = 0; unit < unit_counts[i]; ++unit) {
+        scenario->unit_liveness
+            .end_points[scenario->unit_values[i].unit_point_start + unit] =
+            i == 0 ? 1 : 2;
+      }
+    }
     IREE_ASSERT_OK(loom_low_allocation_storage_identity_initialize(
         &scenario->lease_table, &scenario->placement, &scenario->unit_liveness,
         &arena_, &scenario->storage_identity));
     IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
         &scenario->lease_table, scenario->module, scenario->function_op,
         &scenario->value_domain, &scenario->liveness,
-        &scenario->storage_identity, /*storage_segments=*/nullptr, &arena_,
+        &scenario->storage_identity, &scenario->unit_liveness, &arena_,
         &scenario->state));
   }
 
@@ -535,7 +545,7 @@ TEST_F(LowAllocationStorageIdentityTest,
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &empty_lease_table, scenario.module, scenario.function_op,
       &scenario.value_domain, &scenario.liveness, &no_lease_identity,
-      /*storage_segments=*/nullptr, &arena_, &no_lease_state));
+      &scenario.unit_liveness, &arena_, &no_lease_state));
   EXPECT_EQ(no_lease_state.identity_origins, nullptr);
 
   // Leases without structural aliases keep the original lease-only footprint.
@@ -552,7 +562,7 @@ TEST_F(LowAllocationStorageIdentityTest,
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &scenario.lease_table, scenario.module, scenario.function_op,
       &scenario.value_domain, &scenario.liveness, &no_alias_identity,
-      /*storage_segments=*/nullptr, &arena_, &no_alias_state));
+      &scenario.unit_liveness, &arena_, &no_alias_state));
   EXPECT_EQ(no_alias_state.identity_origins, nullptr);
 
   DeinitializeScenario(&scenario);
@@ -591,6 +601,8 @@ TEST_F(LowAllocationStorageIdentityTest,
         scenario.value_ids[value_ordinal], /*descriptor_reg_class_id=*/1,
         /*start_point=*/1, /*end_point=*/2, location_base, location_count);
     result.unit_count = kStorageIdentityUnitCounts[value_ordinal];
+    result.unit_point_start =
+        scenario.unit_values[value_ordinal].unit_point_start;
     return result;
   };
 
@@ -617,6 +629,17 @@ TEST_F(LowAllocationStorageIdentityTest,
                                candidate(kIdentityLower, 17, 2), true);
   ExpectConflictOnScanAndIndex(&scenario, &descriptor_set,
                                candidate(kIdentityReconstructed, 20, 4), false);
+
+  // The repeated aggregate has mismatched contents only in its upper half.
+  // If those units are unused, its live lower half is still the leased content.
+  const uint32_t repeated_start =
+      scenario.unit_values[kIdentityRepeated].unit_point_start;
+  scenario.unit_liveness.end_points[repeated_start + 2] = 1;
+  scenario.unit_liveness.end_points[repeated_start + 3] = 1;
+  ExpectConflictOnScanAndIndex(&scenario, &descriptor_set,
+                               candidate(kIdentityRepeated, 16, 4), false);
+  scenario.unit_liveness.end_points[repeated_start + 2] = 2;
+  scenario.unit_liveness.end_points[repeated_start + 3] = 2;
 
   const loom_low_allocation_assignment_t reconstructed =
       candidate(kIdentityReconstructed, 16, 4);
@@ -707,6 +730,7 @@ TEST_F(LowAllocationStorageIdentityTest, RequiresExactExplicitRegisterViews) {
                  /*start_point=*/1, /*end_point=*/2,
                  /*location_base=*/0, /*location_count=*/1);
   candidate.unit_count = 1;
+  candidate.unit_point_start = scenario.unit_values[1].unit_point_start;
   EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
@@ -723,8 +747,22 @@ TEST_F(LowAllocationStorageIdentityTest, RequiresExactExplicitRegisterViews) {
 
   // An unrelated SSA value in the exact wide view remains a real conflict.
   candidate.value_id = scenario.value_ids[2];
+  candidate.unit_point_start = scenario.unit_values[2].unit_point_start;
   candidate.descriptor_reg_class_id = 0;
   candidate.location_base = 0;
+  EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
+      &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
+      /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+      LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
+
+  // An empty candidate unit does not occupy its explicit register. Restoring
+  // demand must conflict even though the leased source's SSA lifetime ended.
+  scenario.unit_liveness.end_points[candidate.unit_point_start] = 1;
+  EXPECT_FALSE(loom_low_allocation_storage_lease_state_conflicts(
+      &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
+      /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
+      LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
+  scenario.unit_liveness.end_points[candidate.unit_point_start] = 2;
   EXPECT_TRUE(loom_low_allocation_storage_lease_state_conflicts(
       &scenario.state, &descriptor_set, &scenario.liveness, &candidate,
       /*ignored_value_ids=*/nullptr, /*ignored_value_count=*/0,
@@ -752,9 +790,14 @@ TEST_F(LowAllocationStorageLeaseTest,
       {/*start_point=*/10, /*end_point=*/15},
       {/*start_point=*/16, /*end_point=*/20},
   };
+  uint32_t unit_end_points[] = {20, 20};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.storage_segments.entries = storage_segments;
   uint32_t expiration_entry = 0;
   loom_low_allocation_storage_lease_state_t state = {};
-  state.storage_segments = storage_segments;
+  state.unit_liveness = &unit_liveness;
   state.availability_expiration_heap = &expiration_entry;
 
   auto candidate = Assignment(
@@ -765,6 +808,14 @@ TEST_F(LowAllocationStorageLeaseTest,
   EXPECT_TRUE(loom_low_allocation_storage_lease_state_can_order_candidate(
       &state, &descriptor_set, &candidate,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
+
+  for (const uint32_t end_point : {10, 15}) {
+    unit_end_points[0] = end_point;
+    EXPECT_FALSE(loom_low_allocation_storage_lease_state_can_order_candidate(
+        &state, &descriptor_set, &candidate,
+        LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
+  }
+  unit_end_points[0] = 20;
 
   candidate.liveness_segments = {/*start=*/0, /*count=*/1};
   EXPECT_TRUE(loom_low_allocation_storage_lease_state_can_order_candidate(
@@ -800,13 +851,14 @@ TEST_F(LowAllocationStorageLeaseTest,
   unit_values[1].unit_point_start = 1;
   const uint32_t identity_origins[] = {0, 0};
   state.value_domain = &value_domain;
-  state.unit_liveness_values = unit_values;
+  unit_liveness.values = unit_values;
   state.identity_origins = identity_origins;
   candidate.value_id = value_ids[0];
   EXPECT_TRUE(loom_low_allocation_storage_lease_state_can_order_candidate(
       &state, &descriptor_set, &candidate,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
   candidate.value_id = value_ids[1];
+  candidate.unit_point_start = 1;
   EXPECT_FALSE(loom_low_allocation_storage_lease_state_can_order_candidate(
       &state, &descriptor_set, &candidate,
       LOOM_LOW_ALLOCATION_STORAGE_RELEASE_FORBIDDEN));
@@ -906,10 +958,15 @@ TEST_P(LowAllocationStorageLeaseReleasePointTest,
       StorageLeaseTable(&schedule, records, IREE_ARRAYSIZE(records));
   const loom_low_allocation_storage_identity_t storage_identity = {};
 
+  uint32_t unit_end_points[] = {point.program_point + 1};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.storage_segments.entries = liveness.segments;
   loom_low_allocation_storage_lease_state_t state = {};
   IREE_ASSERT_OK(loom_low_allocation_storage_lease_state_initialize(
       &lease_table, module, function_op, &value_domain, &liveness,
-      &storage_identity, liveness.segments, &arena_, &state));
+      &storage_identity, &unit_liveness, &arena_, &state));
 
   const loom_low_allocation_assignment_t leased_assignment = Assignment(
       /*value_id=*/value_ids[0], /*descriptor_reg_class_id=*/0,
@@ -1063,13 +1120,14 @@ TEST_F(LowAllocationStorageLeaseTest, RejectsLeaseOutsideAllocationLiveness) {
       StorageLeaseTable(&schedule, records, IREE_ARRAYSIZE(records));
   const loom_low_allocation_storage_identity_t storage_identity = {};
 
+  const loom_low_allocation_unit_liveness_t unit_liveness = {};
   loom_low_allocation_storage_lease_state_t state = {};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_FAILED_PRECONDITION,
       loom_low_allocation_storage_lease_state_initialize(
           &lease_table, module, function_op, &allocation_value_domain,
-          &allocation_liveness, &storage_identity, allocation_liveness.segments,
-          &arena_, &state));
+          &allocation_liveness, &storage_identity, &unit_liveness, &arena_,
+          &state));
 
   loom_local_value_domain_release(&allocation_value_domain);
   loom_module_free(module);
@@ -1084,6 +1142,11 @@ TEST_F(LowAllocationStorageLeaseTest,
   loom_liveness_analysis_t liveness = {};
   liveness.segments = segments;
   liveness.segment_count = IREE_ARRAYSIZE(segments);
+  uint32_t unit_end_points[] = {10};
+  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  unit_liveness.end_points = unit_end_points;
+  unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
+  unit_liveness.storage_segments.entries = segments;
 
   for (const auto kind : {LOOM_LOW_STORAGE_LEASE_SOURCE_READ,
                           LOOM_LOW_STORAGE_LEASE_RESULT_WRITE}) {
@@ -1114,8 +1177,8 @@ TEST_F(LowAllocationStorageLeaseTest,
       uint8_t instance_written = 1;
       loom_low_allocation_storage_lease_state_t state = {};
       state.lease_table = &table;
-      state.storage_segments = liveness.segments;
       state.assignments = &leased_assignment;
+      state.unit_liveness = &unit_liveness;
       state.instances = &lease;
       state.instance_written = &instance_written;
       state.instance_count = 1;

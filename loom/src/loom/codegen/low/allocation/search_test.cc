@@ -497,6 +497,7 @@ uint32_t FindFreeLocationWithStorageLease(
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   storage_leases.lease_table = &lease_table;
   storage_leases.value_domain = &value_domain;
+  storage_leases.unit_liveness = &unit_liveness;
   storage_leases.instances = lease_instances;
   storage_leases.instance_written = lease_instance_written;
   storage_leases.pressure_release_record_count = iree_any_bit_set(
@@ -1184,6 +1185,7 @@ TEST_F(LowAllocationSearchTest,
   loom_low_allocation_storage_lease_state_t storage_leases = {};
   storage_leases.lease_table = &lease_table;
   storage_leases.value_domain = &value_domain;
+  storage_leases.unit_liveness = &unit_liveness;
   storage_leases.instances = lease_instances;
   storage_leases.instance_written = lease_instance_written;
   loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {

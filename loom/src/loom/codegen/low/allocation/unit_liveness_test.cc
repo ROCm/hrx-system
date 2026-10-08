@@ -4,8 +4,6 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "loom/codegen/low/allocation/unit_liveness.h"
-
 #include <array>
 #include <tuple>
 
@@ -13,6 +11,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/liveness.h"
+#include "loom/codegen/low/allocation/unit_liveness_builder.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/ir/context.h"
 #include "loom/ir/local_value_domain.h"

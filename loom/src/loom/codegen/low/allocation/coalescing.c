@@ -1289,10 +1289,77 @@ loom_low_allocation_coalescing_assign_concat_source_relation(
     return iree_ok_status();
   }
 
+  // An unmaterialized assembly can reserve its eventual edge destination
+  // directly when every component relinquishes storage at that handoff.
+  // Keeping live components or captured parts needs ordinary edge transport.
+  const loom_low_placement_relation_t* reservation_edge = NULL;
+  const loom_liveness_interval_t* reservation_interval = result_interval;
+  const loom_low_placement_relation_range_t outgoing =
+      loom_low_placement_relation_range_for_source_value_ordinal(
+          context->placement, relation->result_ordinal);
+  if (outgoing.count == 1) {
+    const loom_low_placement_relation_t* edge =
+        &context->placement
+             ->relations[context->placement->relation_indices_by_source_ordinal
+                             [outgoing.start]];
+    if (loom_low_placement_cause_is_edge(edge->cause) &&
+        edge->source_unit_offset == 0 && edge->result_unit_offset == 0 &&
+        edge->unit_count == result_interval->unit_count &&
+        loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
+            context, edge->result_ordinal) == NULL) {
+      const loom_liveness_interval_t* destination =
+          loom_liveness_interval_for_value_ordinal(context->liveness,
+                                                   edge->result_ordinal);
+      if (destination != NULL &&
+          destination->unit_count == result_interval->unit_count &&
+          loom_liveness_value_class_equal(destination->value_class,
+                                          result_interval->value_class) &&
+          context->search_context->unit_liveness->values[edge->result_ordinal]
+                  .acquisition_start_point >= edge->write_point &&
+          loom_low_allocation_target_constraints_fixed_value_for_value(
+              context->target_constraints, destination->value_id) == NULL) {
+        reservation_edge = edge;
+        reservation_interval = destination;
+      }
+    }
+  }
+  bool can_redirect_reservation = reservation_edge != NULL;
+  if (can_redirect_reservation) {
+    const loom_low_placement_relation_range_t destination_uses =
+        loom_low_placement_relation_range_for_source_value_ordinal(
+            context->placement, reservation_edge->result_ordinal);
+    for (uint32_t i = 0; i < destination_uses.count; ++i) {
+      const loom_low_placement_relation_t* downstream =
+          &context->placement->relations
+               [context->placement->relation_indices_by_source_ordinal
+                    [destination_uses.start + i]];
+      if (loom_low_placement_cause_is_edge(downstream->cause) &&
+          loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
+              context, downstream->result_ordinal) != NULL) {
+        can_redirect_reservation = false;
+        break;
+      }
+    }
+  }
   for (uint32_t result_index = 0; result_index < result_range.count;
        ++result_index) {
     const loom_low_placement_relation_t* sibling_relation =
         &context->placement->relations[result_range.start + result_index];
+    if (sibling_relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT &&
+        iree_any_bit_set(sibling_relation->flags,
+                         LOOM_LOW_PLACEMENT_RELATION_FLAG_MATERIALIZE_PART |
+                             LOOM_LOW_PLACEMENT_RELATION_FLAG_CAPTURED_PART)) {
+      can_redirect_reservation = false;
+    }
+    if (can_redirect_reservation &&
+        sibling_relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT &&
+        loom_low_allocation_unit_liveness_storage_component_live_at_point(
+            context->search_context->unit_liveness, context->liveness,
+            context->placement, sibling_relation->source_ordinal,
+            sibling_relation->source_unit_offset, sibling_relation->unit_count,
+            reservation_edge->write_point)) {
+      can_redirect_reservation = false;
+    }
     if (sibling_relation == relation ||
         sibling_relation->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT ||
         !loom_low_placement_relation_can_alias(sibling_relation) ||
@@ -1302,6 +1369,7 @@ loom_low_allocation_coalescing_assign_concat_source_relation(
     const loom_low_allocation_assignment_t* sibling_assignment =
         loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
             context, sibling_relation->source_ordinal);
+    can_redirect_reservation &= sibling_assignment == NULL;
     if (!sibling_assignment ||
         !loom_low_allocation_assignment_is_register_like(sibling_assignment) ||
         sibling_assignment->descriptor_reg_class_id !=
@@ -1346,10 +1414,17 @@ loom_low_allocation_coalescing_assign_concat_source_relation(
       context, &result_range, inline_ignored_value_ids,
       IREE_ARRAYSIZE(inline_ignored_value_ids), &ignored_value_ids,
       &ignored_value_count));
+  loom_low_placement_relation_t reservation_relation = *relation;
+  if (can_redirect_reservation) {
+    reservation_relation.result_ordinal = reservation_edge->result_ordinal;
+  } else {
+    reservation_interval = result_interval;
+  }
   loom_low_allocation_assignment_t reservation;
   IREE_RETURN_IF_ERROR(loom_low_allocation_concat_reservation_find(
-      context->search_context, interval, relation, result_interval,
-      &result_range, ignored_value_ids, ignored_value_count, &reservation));
+      context->search_context, interval, &reservation_relation,
+      reservation_interval, &result_range, ignored_value_ids,
+      ignored_value_count, &reservation));
   if (reservation.value_id == LOOM_VALUE_ID_INVALID) {
     return iree_ok_status();
   }
@@ -1364,10 +1439,11 @@ loom_low_allocation_coalescing_assign_concat_source_relation(
   }
   result_assignment =
       loom_low_allocation_coalescing_current_assignment_for_value_ordinal(
-          context, relation->result_ordinal);
+          context, reservation_relation.result_ordinal);
   IREE_RETURN_IF_ERROR(
       loom_low_allocation_coalescing_assign_concat_source_from_result(
-          context, interval, relation, result_assignment, out_assigned));
+          context, interval, &reservation_relation, result_assignment,
+          out_assigned));
   return iree_ok_status();
 }
 

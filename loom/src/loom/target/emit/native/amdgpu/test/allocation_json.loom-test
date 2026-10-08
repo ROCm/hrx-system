@@ -25,10 +25,10 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @spill_retry_requires_prog
 
 // ====
 
-// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_fixed_value_split strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
+// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_fixed_value_demand strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_fixed_value_split(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_fixed_value_demand(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   %fixed = v_add_u32 %seed0, %seed1
   %guard = v_add_u32 %seed0, %seed0
   %lo = v_mov_b32 11
@@ -40,17 +40,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_fix
 }
 
 // ----
-// The fixed value is split by one materialized copy without spilling.
-// Assignment insertion order is not part of this report contract.
-CHECK: *"copy_decision_count":1,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":1,*
-CHECK: *"kind":"materialized","source_value":{"id":*,"name":"fixed","type":"reg<amdgpu.vgpr>"},"result_value":{"id":*,"name":"fixed_split","type":"reg<amdgpu.vgpr>"}*
+// Unused aggregate units do not force a copy of the fixed value.
+CHECK: *"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,*
 
 // ====
 
-// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_non_entry_fixed_value_split strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
+// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_non_entry_fixed_value_demand strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_non_entry_fixed_value_split(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_non_entry_fixed_value_demand(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.br ^body
 ^body:
   %fixed = v_add_u32 %seed0, %seed1
@@ -64,17 +62,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_non
 }
 
 // ----
-// The fixed value is split by one materialized copy without spilling.
-// Assignment insertion order is not part of this report contract.
-CHECK: *"copy_decision_count":1,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":1,*
-CHECK: *"kind":"materialized","source_value":{"id":*,"name":"fixed","type":"reg<amdgpu.vgpr>"},"result_value":{"id":*,"name":"fixed_split","type":"reg<amdgpu.vgpr>"}*
+// Unused aggregate units do not force a copy of the fixed value.
+CHECK: *"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,*
 
 // ====
 
-// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_block_arg_fixed_value_split strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
+// RUN: with-checks emit amdgpu-allocation-json @gfx11_allocation_json_block_arg_fixed_value_demand strategy=source amdgpu.vgpr=3 fixed=%fixed:physical_register:1:1
 amdgpu.target<gfx1100> @gfx11_target
 
-low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_block_arg_fixed_value_split(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_block_arg_fixed_value_demand(%seed0: reg<amdgpu.vgpr>, %seed1: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
   low.br ^body(%seed1: reg<amdgpu.vgpr>)
 ^body(%fixed: reg<amdgpu.vgpr>):
   %guard = v_add_u32 %seed0, %seed0
@@ -87,10 +83,8 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_allocation_json_blo
 }
 
 // ----
-// The fixed value is split by one materialized copy without spilling.
-// Assignment insertion order is not part of this report contract.
-CHECK: *"copy_decision_count":1,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":1,*
-CHECK: *"kind":"materialized","source_value":{"id":*,"name":"fixed","type":"reg<amdgpu.vgpr>"},"result_value":{"id":*,"name":"fixed_split","type":"reg<amdgpu.vgpr>"}*
+// Unused aggregate units do not force a copy of the fixed value.
+CHECK: *"copy_decision_count":0,"spill_count":0,"spill_plan_count":0,"coalesced_copy_count":0,"materialized_copy_count":0,*
 
 // ====
 

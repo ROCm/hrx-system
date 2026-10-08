@@ -19,7 +19,7 @@
 #include "loom/codegen/low/allocation/placement.h"
 #include "loom/codegen/low/allocation/storage_lease.h"
 #include "loom/codegen/low/allocation/target_constraints.h"
-#include "loom/codegen/low/allocation/unit_liveness.h"
+#include "loom/codegen/low/allocation/unit_liveness_builder.h"
 #include "loom/codegen/low/allocation/write_interference.h"
 #include "loom/codegen/low/function.h"
 #include "loom/codegen/low/schedule/types.h"
@@ -87,7 +87,7 @@ loom_low_allocation_make_interval_assignment_context(
       .function_op = state->function_op,
       .target = &state->target,
       .liveness = &state->liveness,
-      .value_domain = &model->value_domain,
+      .value_domain = &model->context.value_domain,
       .schedule = state->options->schedule,
       .placement = &state->placement,
       .preferences = &state->preferences,
@@ -156,8 +156,7 @@ static iree_status_t loom_low_allocation_repair_fragmentation(
     status = loom_low_allocation_storage_lease_state_initialize(
         &state->options->storage_leases, state->module, state->function_op,
         value_domain, &state->liveness, &state->storage_identity,
-        state->unit_liveness.storage_segments.entries, &scratch_arena,
-        &scratch_storage_leases);
+        &state->unit_liveness, &scratch_arena, &scratch_storage_leases);
   }
 
   loom_low_allocation_interval_assignment_result_t scratch_result = {0};
@@ -448,42 +447,43 @@ iree_status_t loom_low_allocate_function(
     const loom_low_allocation_options_t* options, iree_arena_allocator_t* arena,
     loom_low_allocation_table_t* out_table) {
   *out_table = (loom_low_allocation_table_t){
-      .module = model->module,
-      .function_op = model->function_op,
-      .entry_preamble_end = model->requirements.entry_preamble_end,
-      .target = model->target,
-      .error_count = model->error_count,
+      .module = model->context.module,
+      .function_op = model->context.function_op,
+      .entry_preamble_end = model->context.requirements.entry_preamble_end,
+      .target = model->context.target,
+      .error_count = model->context.error_count,
       .cfg_graph = model->cfg_graph,
   };
   const uint8_t allocation_mode =
-      loom_low_function_allocation(model->function_op);
+      loom_low_function_allocation(model->context.function_op);
   IREE_ASSERT(
       allocation_mode == 0 || allocation_mode == LOOM_LOW_ALLOCATION_VIRTUAL,
       "allocation synthesis requires an admitted virtual function");
-  if (model->error_count != 0) {
+  if (model->context.error_count != 0) {
     return iree_ok_status();
   }
-  IREE_ASSERT(loom_local_value_domain_is_acquired(&model->value_domain));
-  IREE_ASSERT(iree_any_bit_set(model->value_domain.flags,
+  IREE_ASSERT(
+      loom_local_value_domain_is_acquired(&model->context.value_domain));
+  IREE_ASSERT(iree_any_bit_set(model->context.value_domain.flags,
                                LOOM_LOCAL_VALUE_DOMAIN_FLAG_REGION_TREE));
 
   loom_low_allocation_build_state_t state = {
-      .module = model->module,
+      .module = model->context.module,
       .options = options,
       .arena = arena,
-      .body = model->body,
-      .function_op = model->function_op,
-      .target = model->target,
+      .body = model->context.body,
+      .function_op = model->context.function_op,
+      .target = model->context.target,
   };
   iree_arena_allocator_t decision_arena;
   iree_arena_initialize(arena->block_pool, &decision_arena);
   iree_status_t status = loom_low_allocation_target_constraints_initialize(
-      model->module, model->function_op, &state.target, options->budgets,
-      options->budget_count, options->reserved_ranges,
+      model->context.module, model->context.function_op, &state.target,
+      options->budgets, options->budget_count, options->reserved_ranges,
       options->reserved_range_count, options->emitter, arena,
       &state.target_constraints);
 
-  const loom_local_value_domain_t* value_domain = &model->value_domain;
+  const loom_local_value_domain_t* value_domain = &model->context.value_domain;
   const loom_liveness_order_t operation_order =
       options->schedule != NULL ? options->schedule->operation_order
                                 : loom_liveness_order_empty();
@@ -497,8 +497,9 @@ iree_status_t loom_low_allocate_function(
         options->schedule != NULL ? options->schedule->placement_pair_uses
                                   : loom_low_placement_pair_use_list_empty();
     status = loom_low_allocation_placement_build(
-        &state.target_constraints, state.body, value_domain, &state.liveness,
-        options->fixed_values, options->fixed_value_count, placement_pair_uses,
+        &state.target_constraints, state.body, value_domain,
+        model->context.storage_origins, &state.liveness, options->fixed_values,
+        options->fixed_value_count, placement_pair_uses,
         options->instruction_preferences, arena, &decision_arena,
         &state.placement, &state.preferences);
   }
@@ -542,15 +543,16 @@ iree_status_t loom_low_allocate_function(
     }
     status = loom_low_allocation_write_interference_finalize(
         state.unit_liveness.write_interference, &state.liveness,
-        &model->cfg_graph, &state.placement, &decision_arena, arena);
+        &model->cfg_graph, &state.placement, &state.unit_liveness,
+        &decision_arena, arena);
   }
   const iree_arena_checkpoint_t interval_assignment_checkpoint =
       iree_arena_checkpoint_save(arena);
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
     status = loom_low_allocation_storage_lease_state_initialize(
-        &options->storage_leases, model->module, model->function_op,
-        value_domain, &state.liveness, &state.storage_identity,
-        state.unit_liveness.storage_segments.entries, arena,
+        &options->storage_leases, model->context.module,
+        model->context.function_op, value_domain, &state.liveness,
+        &state.storage_identity, &state.unit_liveness, arena,
         &state.storage_leases);
   }
   if (iree_status_is_ok(status) && state.target_constraints.error_count == 0) {
@@ -593,7 +595,7 @@ iree_status_t loom_low_allocate_function(
             .cfg_graph = &model->cfg_graph,
             .descriptor_set = state.target.descriptor_set,
             .liveness = &state.liveness,
-            .value_domain = &model->value_domain,
+            .value_domain = &model->context.value_domain,
             .placement = &state.placement,
             .target_constraints = &state.target_constraints,
             .unit_liveness = &state.unit_liveness,
@@ -665,9 +667,9 @@ iree_status_t loom_low_allocate_function(
   loom_low_allocation_table_t table = {0};
   if (iree_status_is_ok(status)) {
     table = (loom_low_allocation_table_t){
-        .module = model->module,
-        .function_op = model->function_op,
-        .entry_preamble_end = model->requirements.entry_preamble_end,
+        .module = model->context.module,
+        .function_op = model->context.function_op,
+        .entry_preamble_end = model->context.requirements.entry_preamble_end,
         .target = state.target,
         .storage_transport = options->storage_transport,
         .liveness = state.liveness,
@@ -675,7 +677,8 @@ iree_status_t loom_low_allocate_function(
         .placement = state.placement,
         .fixed_values = state.target_constraints.fixed_values,
         .fixed_value_count = state.target_constraints.fixed_value_count,
-        .allocation_mode = loom_low_function_allocation(model->function_op),
+        .allocation_mode =
+            loom_low_function_allocation(model->context.function_op),
         .error_count = state.target_constraints.error_count,
         .assignments = state.interval_assignment.assignments,
         .assignment_count = state.interval_assignment.assignment_count,

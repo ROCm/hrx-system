@@ -26,7 +26,7 @@
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation.h"
 #include "loom/codegen/low/allocation/placement.h"
-#include "loom/codegen/low/allocation/unit_liveness.h"
+#include "loom/codegen/low/allocation/unit_liveness_builder.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/schedule/run.h"
 #include "loom/codegen/low/storage_lease.h"
@@ -695,21 +695,21 @@ class AllocationBenchmark {
     }
     if (phase_ == Phase::kPlacement || phase_ == Phase::kUnitLiveness) {
       IREE_CHECK_OK(loom_liveness_analyze_local_value_domain_with_dataflow(
-          &model_.value_domain, &model_.liveness_dataflow,
+          &model_.context.value_domain, &model_.liveness_dataflow,
           loom_liveness_order_empty(), &base_arena_, &liveness_));
     }
     if (phase_ == Phase::kUnitLiveness) {
       loom_low_placement_preference_index_t preferences = {};
       loom_low_allocation_target_constraints_t constraints = {};
       IREE_CHECK_OK(loom_low_allocation_target_constraints_initialize(
-          module_, function_, &model_.target, nullptr, 0,
+          module_, function_, &model_.context.target, nullptr, 0,
           reserved_ranges_.data(), reserved_ranges_.size(), {}, &base_arena_,
           &constraints));
       IREE_CHECK_OK(loom_low_allocation_placement_build(
-          &constraints, model_.body, &model_.value_domain, &liveness_,
-          fixed_values_.data(), fixed_values_.size(),
-          loom_low_placement_pair_use_list_empty(), {}, &base_arena_,
-          &base_arena_, &placement_, &preferences));
+          &constraints, model_.context.body, &model_.context.value_domain,
+          model_.context.storage_origins, &liveness_, fixed_values_.data(),
+          fixed_values_.size(), loom_low_placement_pair_use_list_empty(), {},
+          &base_arena_, &base_arena_, &placement_, &preferences));
     }
   }
 
@@ -734,12 +734,12 @@ class AllocationBenchmark {
     if (phase_ == Phase::kModel) {
       loom_low_function_model_t model = {};
       InitializeModel(&arena, &model);
-      result.value_count = model.value_domain.value_count;
+      result.value_count = model.context.value_domain.value_count;
       loom_low_function_model_deinitialize(&model);
     } else if (phase_ == Phase::kLiveness) {
       loom_liveness_analysis_t liveness = {};
       IREE_CHECK_OK(loom_liveness_analyze_local_value_domain_with_dataflow(
-          &model_.value_domain, &model_.liveness_dataflow,
+          &model_.context.value_domain, &model_.liveness_dataflow,
           loom_liveness_order_empty(), &arena, &liveness));
       result.value_count = liveness.value_count;
       benchmark::DoNotOptimize(liveness.intervals);
@@ -748,14 +748,14 @@ class AllocationBenchmark {
       loom_low_placement_preference_index_t preferences = {};
       loom_low_allocation_target_constraints_t constraints = {};
       IREE_CHECK_OK(loom_low_allocation_target_constraints_initialize(
-          module_, function_, &model_.target, nullptr, 0,
+          module_, function_, &model_.context.target, nullptr, 0,
           reserved_ranges_.data(), reserved_ranges_.size(), {}, &arena,
           &constraints));
       IREE_CHECK_OK(loom_low_allocation_placement_build(
-          &constraints, model_.body, &model_.value_domain, &liveness_,
-          fixed_values_.data(), fixed_values_.size(),
-          loom_low_placement_pair_use_list_empty(), {}, &arena, &arena,
-          &placement, &preferences));
+          &constraints, model_.context.body, &model_.context.value_domain,
+          model_.context.storage_origins, &liveness_, fixed_values_.data(),
+          fixed_values_.size(), loom_low_placement_pair_use_list_empty(), {},
+          &arena, &arena, &placement, &preferences));
       result.value_count = placement.value_count;
       benchmark::DoNotOptimize(placement.relations);
     } else if (phase_ == Phase::kUnitLiveness) {
@@ -763,8 +763,9 @@ class AllocationBenchmark {
       iree_arena_initialize(&analysis_pool_, &decision_arena);
       loom_low_allocation_unit_liveness_t unit_liveness = {};
       IREE_CHECK_OK(loom_low_allocation_unit_liveness_initialize(
-          &model_.target, &placement_, &model_.value_domain, &liveness_,
-          &model_.cfg_graph, {}, &arena, &decision_arena, &unit_liveness));
+          &model_.context.target, &placement_, &model_.context.value_domain,
+          &liveness_, &model_.cfg_graph, {}, &arena, &decision_arena,
+          &unit_liveness));
       result.value_count = liveness_.value_count;
       benchmark::DoNotOptimize(unit_liveness.end_points);
       iree_arena_deinitialize(&decision_arena);
@@ -783,7 +784,7 @@ class AllocationBenchmark {
           loom_low_allocate_function(&model_, &options, &arena, &allocation));
       Require(allocation.error_count == 0, "Allocation failed");
       Require(allocation.spill_count == 0, "Unexpected spill");
-      result.value_count = model_.value_domain.value_count;
+      result.value_count = model_.context.value_domain.value_count;
       result.copy_count = allocation.copy_decision_count;
       result.materialized_copy_count = allocation.materialized_copy_count;
       result.storage_lease_count = allocation.storage_lease_instance_count;
@@ -882,7 +883,7 @@ class AllocationBenchmark {
     IREE_CHECK_OK(loom_low_function_model_initialize(
         module_, function_, nullptr, &registry_.registry, {},
         LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, arena, model));
-    Require(model->error_count == 0, "Function model failed");
+    Require(model->context.error_count == 0, "Function model failed");
   }
 
   // Shipping compiler boundary measured by each Run invocation.

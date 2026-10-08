@@ -1654,18 +1654,19 @@ static iree_status_t loom_low_schedule_build(
                             (int)options->strategy);
   }
   *out_table = (loom_low_schedule_table_t){
-      .module = model->module,
-      .function_op = model->function_op,
-      .target = model->target,
-      .error_count = model->error_count,
+      .module = model->context.module,
+      .function_op = model->context.function_op,
+      .target = model->context.target,
+      .error_count = model->context.error_count,
   };
-  if (model->error_count != 0) {
+  if (model->context.error_count != 0) {
     return iree_ok_status();
   }
-  IREE_ASSERT(loom_local_value_domain_is_acquired(&model->value_domain));
+  IREE_ASSERT(
+      loom_local_value_domain_is_acquired(&model->context.value_domain));
 
   loom_low_schedule_build_state_t state = {
-      .module = model->module,
+      .module = model->context.module,
       .options = options,
       .pressure_cliffs = options->residency.model != NULL
                              ? &options->residency.model->direct_resources
@@ -1678,10 +1679,11 @@ static iree_status_t loom_low_schedule_build(
               : NULL,
       .arena = arena,
       .scratch_arena = scratch_arena,
-      .function_op = model->function_op,
-      .body = model->body,
-      .target = model->target,
-      .value_domain = &model->value_domain,
+      .function_op = model->context.function_op,
+      .body = model->context.body,
+      .target = model->context.target,
+      .value_domain = &model->context.value_domain,
+      .storage_origins = model->context.storage_origins,
       .cfg_graph = &model->cfg_graph,
   };
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
@@ -1694,7 +1696,7 @@ static iree_status_t loom_low_schedule_build(
       loom_low_schedule_initialize_pair_affinity_index(&state));
   IREE_RETURN_IF_ERROR(loom_low_schedule_verify_structural_models(&state));
 
-  const iree_host_size_t node_count = model->requirements.node_count;
+  const iree_host_size_t node_count = model->context.requirements.node_count;
   const bool retain_liveness =
       iree_any_bit_set(options->flags,
                        LOOM_LOW_SCHEDULE_FLAG_RETAIN_LIVENESS) ||
@@ -1720,7 +1722,7 @@ static iree_status_t loom_low_schedule_build(
   }
   if (iree_status_is_ok(status) && retain_liveness) {
     status = loom_liveness_analyze_local_value_domain_with_dataflow(
-        &model->value_domain, &model->liveness_dataflow,
+        &model->context.value_domain, &model->liveness_dataflow,
         loom_liveness_order_empty(), arena, &liveness);
   }
   if (iree_status_is_ok(status)) {
@@ -1782,13 +1784,13 @@ static iree_status_t loom_low_schedule_build(
 
   if (iree_status_is_ok(status)) {
     *out_table = (loom_low_schedule_table_t){
-        .module = model->module,
-        .function_op = model->function_op,
+        .module = model->context.module,
+        .function_op = model->context.function_op,
         .target = state.target,
         .memory_accesses = options->memory_accesses,
-        .requirements = model->requirements,
-        .value_ids = model->value_domain.value_ids,
-        .value_count = model->value_domain.value_count,
+        .requirements = model->context.requirements,
+        .value_ids = model->context.value_domain.value_ids,
+        .value_count = model->context.value_domain.value_count,
         .value_producer_nodes =
             iree_any_bit_set(options->flags,
                              LOOM_LOW_SCHEDULE_FLAG_RETAIN_VALUE_PRODUCER_NODES)

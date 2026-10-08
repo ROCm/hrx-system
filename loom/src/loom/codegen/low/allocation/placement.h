@@ -26,6 +26,7 @@ extern "C" {
 iree_status_t loom_low_allocation_placement_build(
     loom_low_allocation_target_constraints_t* target_constraints,
     const loom_region_t* region, const loom_local_value_domain_t* value_domain,
+    const loom_value_ordinal_t* storage_origins,
     const loom_liveness_analysis_t* liveness,
     const loom_low_allocation_fixed_value_t* fixed_values,
     iree_host_size_t fixed_value_count,

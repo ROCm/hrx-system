@@ -136,7 +136,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_succes
 
 // ====
 
-// Fixed-input splits preserve the entry declarations and dominate body uses.
+// Input preparation preserves resource extents and dominates body uses.
 // RUN: with-checks emit amdgpu-allocation-json @split_preamble_operand strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
@@ -156,7 +156,7 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_preamb
 
 // ----
 CHECK: *"spill_count":0,*
-CHECK: *"name":"current_split",*
+CHECK: *"name":"current_input",*
 
 // ====
 

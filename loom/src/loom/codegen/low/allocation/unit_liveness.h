@@ -14,19 +14,44 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
-#include "loom/codegen/low/allocation/call.h"
 #include "loom/codegen/low/placement.h"
-#include "loom/codegen/low/target_binding.h"
 #include "loom/ir/ir.h"
-#include "loom/ir/local_value_domain.h"
-#include "loom/util/cfg_graph.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Indexed physical write point retained by the unit-liveness producer.
-typedef struct loom_low_allocation_clobber_t loom_low_allocation_clobber_t;
+typedef struct loom_low_allocation_clobber_t {
+  // Shared register storage identity; explicit physical units use key zero.
+  // Descriptor storage keys occupy 17 bits. Sharing this word keeps ordinary
+  // instruction clobber rows unchanged in size when calls are absent.
+  uint32_t storage_key : 31;
+  // Calls permit a new result at this point; implicit instruction writes do
+  // not. Both exclude values whose last read preceded the write point.
+  uint32_t permits_definition : 1;
+  // Atomic physical unit or linear register location within storage_key.
+  uint32_t location;
+  // Program point overwritten by the implicit instruction output.
+  uint32_t point;
+} loom_low_allocation_clobber_t;
+
+static_assert(sizeof(loom_low_allocation_clobber_t) == 12,
+              "physical clobber rows must remain compact");
+
+// Shared construction and query ordering for physical clobber rows.
+static inline bool loom_low_allocation_clobber_less(
+    const loom_low_allocation_clobber_t* lhs,
+    const loom_low_allocation_clobber_t* rhs) {
+  if (lhs->storage_key != rhs->storage_key) {
+    return lhs->storage_key < rhs->storage_key;
+  }
+  if (lhs->location != rhs->location) {
+    return lhs->location < rhs->location;
+  }
+  return lhs->point < rhs->point;
+}
+
 typedef struct loom_low_allocation_write_interference_t
     loom_low_allocation_write_interference_t;
 
@@ -128,28 +153,6 @@ bool loom_low_allocation_unit_liveness_storage_is_ignored(
     loom_value_id_t value_id, const loom_value_id_t* ignored_value_ids,
     uint16_t ignored_value_count);
 
-// Initializes |out_unit_liveness| from value-granular liveness and IR use
-// structure over the canonical |cfg_graph|. The resulting points refine
-// register intervals down to target allocation units across CFG boundaries,
-// low.slice uses, descriptor early-clobber hazards, and structured backedges.
-// Native result units occupy their definition point even without readers.
-// Structural transports write only units with nonempty destination lifetimes.
-// The complete register-unit extent is bounded before point allocation;
-// retained-read construction consumes subsets of this same bounded domain.
-// Published point arrays are owned by |result_arena|; query metadata and
-// physical access indexes are owned by |decision_arena| through final physical
-// numbering. The arenas must be distinct. Construction scratch borrows the
-// result arena's tail and is released before returning.
-iree_status_t loom_low_allocation_unit_liveness_initialize(
-    const loom_low_resolved_target_t* target,
-    const loom_low_placement_table_t* placement,
-    const loom_local_value_domain_t* value_domain,
-    const loom_liveness_analysis_t* liveness, const loom_cfg_graph_t* cfg_graph,
-    loom_low_call_contract_provider_t call_contracts,
-    iree_arena_allocator_t* result_arena,
-    iree_arena_allocator_t* decision_arena,
-    loom_low_allocation_unit_liveness_t* out_unit_liveness);
-
 // Returns true when an implicit physical write overlaps |candidate|'s refined
 // per-unit storage lifetime and sparse live segments. Write points remain
 // reusable before and after the instruction; no register is globally reserved.
@@ -183,19 +186,6 @@ loom_low_allocation_unit_liveness_storage_segment_range_for_value_ordinal(
     const loom_liveness_analysis_t* liveness,
     loom_value_ordinal_t value_ordinal);
 
-// Completes physical lifetime facts for mandatory tied-storage components.
-// Each ancestor acquires storage by its earliest mandatory descendant start.
-// Component origins retain every member's physical unit lifetime and sparse
-// segments so destructive-reuse refinement can query exact old-content
-// observations before deciding which optional relations remain aliasable.
-// Published segments use |result_arena|; query ranges use |decision_arena|.
-iree_status_t loom_low_allocation_unit_liveness_retain_tied_storage(
-    loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_liveness_analysis_t* liveness,
-    const loom_low_placement_table_t* placement,
-    iree_arena_allocator_t* result_arena,
-    iree_arena_allocator_t* decision_arena);
-
 // Returns true when any unit in |unit_offset, unit_count| of |value_ordinal|'s
 // required tied component retains concrete storage across |program_point|.
 // The retained component origin owns the complete per-unit ends and sparse
@@ -207,14 +197,6 @@ bool loom_low_allocation_unit_liveness_storage_component_live_at_point(
     const loom_low_placement_table_t* placement,
     loom_value_ordinal_t value_ordinal, uint32_t unit_offset,
     uint32_t unit_count, uint32_t program_point);
-
-// Propagates storage starts across the final structural placement relations.
-// Sources flow into tied results, and contiguous aggregate parts carry source
-// starts into accepted result reservations. Call after optional alias
-// permissions have been refined.
-void loom_low_allocation_unit_liveness_propagate_storage_relations(
-    loom_low_allocation_unit_liveness_t* unit_liveness,
-    const loom_low_placement_table_t* placement);
 
 #ifdef __cplusplus
 }  // extern "C"

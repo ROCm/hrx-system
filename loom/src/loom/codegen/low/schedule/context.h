@@ -166,8 +166,6 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED = 1u << 6,
   // At least one occurrence in the current candidate reads after result writes.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ = 1u << 7,
-  // The read-head slot names the canonical required physical storage identity.
-  LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_IDENTITY_ALIAS = 1u << 8,
 };
 typedef uint16_t loom_low_schedule_value_flags_t;
 
@@ -244,6 +242,8 @@ typedef struct loom_low_schedule_build_state_t {
   loom_low_register_type_resolver_t register_type_resolver;
   // Active function-local value domain for this scheduling run.
   const loom_local_value_domain_t* value_domain;
+  // Canonical physical-storage identities borrowed from function preparation.
+  const loom_value_ordinal_t* storage_origins;
   // Shared read-only control-flow graph for the function body.
   const loom_cfg_graph_t* cfg_graph;
   // Dense per-local-value scheduler records indexed by value ordinal.
@@ -387,9 +387,8 @@ typedef struct loom_low_schedule_build_state_t {
   } descriptor_operands;
   // Per-block readers of values whose storage may be consumed by tied ops.
   struct {
-    // Outstanding read lists, dense by local value ordinal. An ordinal marked
-    // STORAGE_IDENTITY_ALIAS instead stores its immutable canonical ordinal;
-    // only canonical identities own lists and enter touched_ordinals.
+    // Outstanding read lists, dense by canonical physical-storage ordinal.
+    // Only canonical identities own lists and enter touched_ordinals.
     uint32_t* heads;
     // Read records used by heads.
     loom_low_schedule_storage_read_record_t* records;

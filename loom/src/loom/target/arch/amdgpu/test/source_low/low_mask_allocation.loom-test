@@ -182,7 +182,8 @@ low.func.def target<amdgpu.rdna4.core>(@target) @rdna4_keeps_default_carry_sched
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @memory_replaces_mask(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @memory_replaces_mask(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %loaded = s_load_dwordx2_offset_only %pointer
   %result = s_or_b64 %loaded, %pointer
@@ -203,7 +204,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @memory_repla
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @memory_replaces_lower_word(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @memory_replaces_lower_word(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %loaded = s_load_dword_offset_only %pointer
   %pointer_word = slice %pointer[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -251,7 +253,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @copy_cycle_preserves_dead_mas
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @copy_cycle_after_partial_mask_overwrite(%mask: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.sgpr x2>, %left: reg<amdgpu.sgpr>, %right: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @copy_cycle_after_partial_mask_overwrite(%incoming_mask: reg<amdgpu.sgpr x2>, %pointer: reg<amdgpu.sgpr x2>, %left: reg<amdgpu.sgpr>, %right: reg<amdgpu.sgpr>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32 %value, %value, %mask
   %first = v_add_f32 %selected, %value
   %loaded = s_load_dword_offset_only %pointer

@@ -12,6 +12,7 @@
 #include "iree/base/internal/arena.h"
 #include "loom/codegen/low/allocation/assignment_map.h"
 #include "loom/codegen/low/allocation/move.h"
+#include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/ir/local_value_domain.h"
@@ -54,15 +55,20 @@ void loom_low_allocation_write_interference_note_fixed(
     const loom_low_allocation_assignment_t* assignment);
 
 // Finalizes path-sensitive constraints and per-point temporary exclusions.
-// This consumes canonical liveness order, root CFG and structural placements;
-// the same operation covers scheduled and source-order allocation.
+// This consumes canonical liveness order, root CFG, structural placements and
+// completed per-unit physical lifetimes; the same operation covers scheduled
+// and source-order allocation. Required ties retain storage independently of
+// the semantic lifetime of their first SSA name.
+// The completed |unit_liveness| is borrowed through all subsequent queries;
+// it and its per-unit ends remain unchanged for that lifetime.
 // Persistent indexes use |arena|; construction scratch borrows and restores
 // |scratch_arena|'s tail. The two arenas must be distinct.
 iree_status_t loom_low_allocation_write_interference_finalize(
     loom_low_allocation_write_interference_t* interference,
     const loom_liveness_analysis_t* liveness, const loom_cfg_graph_t* cfg_graph,
-    const loom_low_placement_table_t* placement, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena);
+    const loom_low_placement_table_t* placement,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena);
 
 // Records a published assignment before the next candidate query. A successful
 // query's inferred locations remain a valid positive witness when publication

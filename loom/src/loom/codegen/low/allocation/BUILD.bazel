@@ -54,6 +54,7 @@ loom_cc_test(
         ":target_constraints",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/codegen/low:storage_identity",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
@@ -540,6 +541,7 @@ loom_cc_library(
     hdrs = ["storage_lease.h"],
     deps = [
         ":assignment",
+        ":live_range",
         ":storage",
         ":storage_lease_index",
         ":table",
@@ -791,6 +793,7 @@ loom_cc_library(
         ":assignment",
         ":assignment_map",
         ":move",
+        ":unit_liveness",
         ":write_interference_flow",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
@@ -813,11 +816,13 @@ loom_cc_test(
     deps = [
         ":placement",
         ":target_constraints",
+        ":unit_liveness_builder",
         ":write_interference",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/codegen/low:placement",
         "//loom/src/loom/codegen/low:read_retention",
+        "//loom/src/loom/codegen/low:storage_identity",
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
@@ -847,9 +852,27 @@ loom_cc_library(
     hdrs = ["unit_liveness.h"],
     deps = [
         ":assignment",
+        ":live_range",
+        ":storage",
+        "//loom/src/loom/analysis:liveness",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//loom/src/loom/codegen/low:placement",
+        "//loom/src/loom/ir",
+        "//loom/src/loom/target:registers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
+    name = "unit_liveness_builder",
+    srcs = ["unit_liveness_builder.c"],
+    hdrs = ["unit_liveness_builder.h"],
+    deps = [
         ":call",
         ":live_range",
         ":storage",
+        ":unit_liveness",
         ":write_interference",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:descriptors",
@@ -884,6 +907,7 @@ loom_cc_test(
     deps = [
         ":destructive_reuse",
         ":unit_liveness",
+        ":unit_liveness_builder",
         "//loom/src/loom/codegen/low:placement",
         "//runtime/src/iree/base/internal:arena",
         "//runtime/src/iree/testing:gtest",
@@ -896,6 +920,7 @@ loom_cc_test(
     srcs = ["unit_liveness_test.cc"],
     deps = [
         ":unit_liveness",
+        ":unit_liveness_builder",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/codegen/low:builder",
         "//loom/src/loom/ir",

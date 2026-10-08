@@ -24,41 +24,10 @@ static bool loom_low_schedule_storage_relation_is_handoff(
          relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_LOW_SCF_YIELD;
 }
 
-// Required physical aliases form a forest independent of block layout.
-// Alias slots are immutable after construction and cannot own reader lists.
-static void loom_low_schedule_storage_identities_flatten(
-    loom_low_schedule_build_state_t* state) {
-  uint32_t* heads = state->storage_reads.heads;
-  for (loom_value_ordinal_t value = 0; value < state->value_domain->value_count;
-       ++value) {
-    if (!iree_any_bit_set(
-            state->values[value].flags,
-            LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_IDENTITY_ALIAS)) {
-      continue;
-    }
-    loom_value_ordinal_t origin = heads[value];
-    while (
-        iree_any_bit_set(state->values[origin].flags,
-                         LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_IDENTITY_ALIAS)) {
-      origin = heads[origin];
-    }
-    loom_value_ordinal_t member = value;
-    while (heads[member] != origin) {
-      const loom_value_ordinal_t parent = heads[member];
-      heads[member] = origin;
-      member = parent;
-    }
-    state->values[origin].flags |=
-        state->values[value].flags &
-        LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
-  }
-}
-
 static void loom_low_schedule_storage_lifetimes_populate(
     loom_low_schedule_build_state_t* state) {
   loom_low_schedule_storage_lifetimes_t* lifetimes = &state->storage_lifetimes;
   uint32_t handoff_count = 0;
-  bool has_storage_aliases = false;
   for (uint32_t node_index = 0;
        node_index < state->storage_relations.node_count; ++node_index) {
     const loom_low_schedule_node_t* node = &state->nodes[node_index];
@@ -70,13 +39,6 @@ static void loom_low_schedule_storage_lifetimes_populate(
       const loom_low_schedule_storage_relation_t* relation =
           loom_low_schedule_storage_relation_index_at(&state->storage_relations,
                                                       i);
-      if (relation->cause == LOOM_LOW_STORAGE_RELATION_CAUSE_TIED_RESULT) {
-        state->storage_reads.heads[relation->destination_ordinal] =
-            relation->source_ordinal;
-        state->values[relation->destination_ordinal].flags |=
-            LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_IDENTITY_ALIAS;
-        has_storage_aliases = true;
-      }
       if (lifetimes->roots != NULL &&
           loom_low_schedule_storage_relation_carries_lifetime(relation)) {
         const loom_value_ordinal_t root =
@@ -116,9 +78,6 @@ static void loom_low_schedule_storage_lifetimes_populate(
         }
       }
     }
-  }
-  if (has_storage_aliases) {
-    loom_low_schedule_storage_identities_flatten(state);
   }
 }
 
@@ -217,6 +176,13 @@ iree_status_t loom_low_schedule_storage_lifetimes_initialize(
   }
   if (needs_lifetime_roots || handoff_count != 0) {
     loom_low_schedule_storage_lifetimes_populate(state);
+  }
+  if (state->storage_origins != NULL) {
+    for (loom_value_ordinal_t value = 0; value < value_count; ++value) {
+      state->values[state->storage_origins[value]].flags |=
+          state->values[value].flags &
+          LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_READ_TRACKED;
+    }
   }
   return iree_ok_status();
 }

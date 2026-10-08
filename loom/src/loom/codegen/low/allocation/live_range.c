@@ -281,8 +281,10 @@ bool loom_low_allocation_live_range_assignments_conflict(
                 ? loom_low_allocation_live_range_assignment_unit_start_point(
                       unit_start_points, unit_point_count, rhs, rhs_unit)
                 : rhs->start_point;
-        if (lhs_unit_start_point < rhs_unit_end_point &&
-            rhs_unit_start_point < lhs_unit_end_point) {
+        const uint32_t overlap_start_point =
+            iree_max(lhs_unit_start_point, rhs_unit_start_point);
+        if (overlap_start_point < lhs_unit_end_point &&
+            overlap_start_point < rhs_unit_end_point) {
           return true;
         }
       }
@@ -306,6 +308,10 @@ bool loom_low_allocation_live_range_assignments_conflict(
       iree_any_bit_set(lhs->flags | rhs->flags,
                        LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS);
   if (!has_refined_unit_starts) {
+    // Unmaterialized aggregate units can have empty lifetimes. Intersect the
+    // ranges explicitly so an enclosing lifetime cannot make them conflict.
+    const uint32_t overlap_start_point =
+        iree_max(lhs->start_point, rhs->start_point);
     for (uint64_t location = overlap_begin; location < overlap_end;
          ++location) {
       const uint32_t lhs_unit_offset =
@@ -318,8 +324,8 @@ bool loom_low_allocation_live_range_assignments_conflict(
       const uint32_t rhs_unit_end_point =
           loom_low_allocation_live_range_assignment_unit_end_point(
               unit_end_points, unit_point_count, rhs, rhs_unit_offset);
-      if (lhs->start_point >= rhs_unit_end_point ||
-          rhs->start_point >= lhs_unit_end_point) {
+      if (overlap_start_point >= lhs_unit_end_point ||
+          overlap_start_point >= rhs_unit_end_point) {
         continue;
       }
       return true;
@@ -341,8 +347,10 @@ bool loom_low_allocation_live_range_assignments_conflict(
     const uint32_t rhs_unit_start_point =
         loom_low_allocation_live_range_assignment_unit_start_point(
             unit_start_points, unit_point_count, rhs, rhs_unit_offset);
-    if (lhs_unit_start_point >= rhs_unit_end_point ||
-        rhs_unit_start_point >= lhs_unit_end_point) {
+    const uint32_t overlap_start_point =
+        iree_max(lhs_unit_start_point, rhs_unit_start_point);
+    if (overlap_start_point >= lhs_unit_end_point ||
+        overlap_start_point >= rhs_unit_end_point) {
       continue;
     }
     return true;

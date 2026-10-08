@@ -12,6 +12,7 @@
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/codegen/low/builder.h"
+#include "loom/codegen/low/storage_identity.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
@@ -179,8 +180,11 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
         module, function, &target, nullptr, 0, nullptr, 0, {}, &module->arena,
         &constraints));
+    loom_value_ordinal_t* storage_origins = nullptr;
+    IREE_ASSERT_OK(loom_low_storage_identity_build(&domain, 0, &module->arena,
+                                                   &storage_origins));
     IREE_ASSERT_OK(loom_low_allocation_placement_build(
-        &constraints, body, &domain, &liveness, nullptr, 0, {},
+        &constraints, body, &domain, storage_origins, &liveness, nullptr, 0, {},
         {preference_indices, &preference}, &module->arena, &module->arena,
         &placement, &preferences));
     // Explicit physical IDs are not linear bank coordinates. This target
@@ -379,8 +383,11 @@ TEST(LowPlacementTest, RetainsOperandConstraintsAcrossExactTiesOnly) {
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
         module, function, &target, nullptr, 0, nullptr, 0, {}, &module->arena,
         &constraints));
+    loom_value_ordinal_t* storage_origins = nullptr;
+    IREE_ASSERT_OK(loom_low_storage_identity_build(&domain, 0, &module->arena,
+                                                   &storage_origins));
     IREE_ASSERT_OK(loom_low_allocation_placement_build(
-        &constraints, body, &domain, &liveness, nullptr, 0, {},
+        &constraints, body, &domain, storage_origins, &liveness, nullptr, 0, {},
         {preference_indices, instruction_preferences}, &module->arena,
         &module->arena, &placement, &preferences));
     ASSERT_EQ(preferences.use_count, 3u);
@@ -605,9 +612,12 @@ class LowPlacementStorageTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_initialize(
         module_, function_, &target, nullptr, 0, nullptr, 0, {}, &result_arena_,
         &constraints));
+    loom_value_ordinal_t* storage_origins = nullptr;
+    IREE_RETURN_IF_ERROR(loom_low_storage_identity_build(
+        &domain_, 0, &result_arena_, &storage_origins));
     return loom_low_allocation_placement_build(
-        &constraints, body_, &domain_, &liveness_, nullptr, 0, {}, {},
-        &result_arena_, &result_arena_, out_table, &preferences);
+        &constraints, body_, &domain_, storage_origins, &liveness_, nullptr, 0,
+        {}, {}, &result_arena_, &result_arena_, out_table, &preferences);
   }
 
   void ExpectRelations(const loom_low_placement_table_t& table) {

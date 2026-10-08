@@ -3,7 +3,8 @@
 // An ordinary scalar VALU source clears the previous lane-mask read.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %broadcast = v_mov_b32_copy %word
@@ -23,7 +24,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // An ordinary scalar VALU source clears the previous lane-mask read.
 amdgpu.target<gfx1100> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %broadcast = v_mov_b32_copy %word
@@ -43,7 +45,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3.core>(@target) @reuse(%value: 
 // An ordinary scalar VALU source clears the previous lane-mask read.
 amdgpu.target<gfx1170> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna4m.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4m.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %broadcast = v_mov_b32_copy %word
@@ -66,7 +69,9 @@ low.func.def schedule(locked) target<amdgpu.rdna4m.core>(@target) @reuse(%value:
 // the current predicate read still protects a later overwrite.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %next_mask: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %incoming_next_mask: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
+  %next_mask = low.assume %incoming_next_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %sum, %carry = v_add_co_ci_u32 %value, %value, %next_mask
   %replacement = s_or_b64 %source, %source
@@ -86,7 +91,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // A reset after an overwrite cannot erase its already-required wait.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %replacement = s_or_b64 %source, %source
   %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
@@ -107,7 +113,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // An EXEC-only VALU read does not reset the lane-mask state.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %vector = v_add_f32 %value, %value
   %replacement = s_or_b64 %source, %source
@@ -127,7 +134,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // A literal VALU operand is not a scalar register read.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %vector = v_add_f32_lit %value, 1069547520
   %replacement = s_or_b64 %source, %source
@@ -147,7 +155,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // The implicit native M0 input resets the previous mask read.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %m0: reg<amdgpu.m0>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %m0: reg<amdgpu.m0>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %interpolated = v_interp_p10_f32 %value, %value, %value, %m0
   %replacement = s_or_b64 %source, %source
@@ -166,7 +175,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // Reading VCC resets ordinary SGPR mask history and publishes the VCC mask.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %vcc_mask: reg<amdgpu.vcc>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %vcc_mask: reg<amdgpu.vcc>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %vcc_selected = v_cndmask_b32_src0_inline_vcc %value, %vcc_mask {false_value = 0}
   %replacement = s_or_b64 %source, %source
@@ -216,7 +226,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // A successor reset kills mask reads arriving from a predecessor.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   low.br ^consume
 ^consume:
@@ -239,7 +250,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // A join must retain an incoming mask read when only one path resets it.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   low.cond_br %condition, ^clear, ^skip : reg<amdgpu.scc>
 ^clear:
@@ -271,7 +283,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // A join has no incoming mask read when every path resets it.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>, %condition: reg<amdgpu.scc>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   low.cond_br %condition, ^clear, ^other : reg<amdgpu.scc>
 ^clear:
@@ -331,7 +344,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // Other wave and processor contracts retain their own hazard behavior.
 amdgpu.target<gfx1151> @target {subgroup_size = 32}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %broadcast = v_mov_b32_copy %word
@@ -351,7 +365,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // Other wave and processor contracts retain their own hazard behavior.
 amdgpu.target<gfx942> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %broadcast = v_mov_b32_copy %word
@@ -371,7 +386,8 @@ low.func.def schedule(locked) target<amdgpu.cdna3.core>(@target) @reuse(%value: 
 // Other wave and processor contracts retain their own hazard behavior.
 amdgpu.target<gfx1200> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna4.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %word = slice %source[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
   %broadcast = v_mov_b32_copy %word

@@ -2,10 +2,10 @@
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-// The live inputs occupy v0:v47. Reserving v48:v55 for the concat has the
-// same gfx1151 residency as placing its first source at v48:v51, so the
-// interleaved blocker moves above the reservation and both sources remain
-// directly assembled without repair moves.
+// The live inputs occupy v0:v47. Only the concat's first word is consumed;
+// the unused aggregate parts do not reserve storage across the blocker.
+// Every native LDS result still keeps its complete asynchronous write lease.
+// All three loads fit the same residency tier without repair moves.
 low.func.def target<amdgpu.rdna3_5.core>(@target) @concat_reservation_preserves_residency(%pressure: reg<amdgpu.vgpr x47>, %address: reg<amdgpu.vgpr>, %output: reg<amdgpu.sgpr x2>) asm {
   %first = ds_read_b128 %address
   %blocker = ds_read_b128 %address {offset = 16}
@@ -48,12 +48,12 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @concat_reservation_preserves_
 
 // ----
   ds_read_b128 v[48:51], v47 offset:0
-  ds_read_b128 v[56:59], v47 offset:16
-  ds_read_b128 v[52:55], v47 offset:32
+  ds_read_b128 v[52:55], v47 offset:16
+  ds_read_b128 v[56:59], v47 offset:32
   s_waitcnt vmcnt(63) lgkmcnt(2)
   global_store_b32 v47, v48, s[0:1] offset:0
   s_waitcnt vmcnt(63) lgkmcnt(1)
-  global_store_b32 v47, v56, s[0:1] offset:4
+  global_store_b32 v47, v52, s[0:1] offset:4
   global_store_b128 v47, v[0:3], s[0:1] offset:16
   global_store_b128 v47, v[4:7], s[0:1] offset:32
   global_store_b128 v47, v[8:11], s[0:1] offset:48

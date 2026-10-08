@@ -1134,7 +1134,7 @@ static iree_status_t loom_check_emit_resolve_entry_locations(
     const loom_low_function_model_t* model,
     const loom_check_emit_entry_locations_t* entry,
     iree_arena_allocator_t* arena, loom_low_allocation_options_t* options) {
-  const loom_block_t* block = loom_region_const_block(model->body, 0);
+  const loom_block_t* block = loom_region_const_block(model->context.body, 0);
   if (block->arg_count == 0) {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                             "entry argument exceeds the function arity");
@@ -1143,7 +1143,8 @@ static iree_status_t loom_check_emit_resolve_entry_locations(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, block->arg_count, sizeof(*locations), (void**)&locations));
   memset(locations, 0, block->arg_count * sizeof(*locations));
-  const loom_low_descriptor_set_t* descriptors = model->target.descriptor_set;
+  const loom_low_descriptor_set_t* descriptors =
+      model->context.target.descriptor_set;
   for (iree_host_size_t i = 0; i < entry->count; ++i) {
     const uint32_t ordinal = entry->specs[i].argument_ordinal;
     const loom_low_allocation_abi_location_t* location =
@@ -1157,7 +1158,8 @@ static iree_status_t loom_check_emit_resolve_entry_locations(
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "duplicate entry argument %u", ordinal);
     }
-    const loom_type_t type = loom_block_arg_type(model->module, block, ordinal);
+    const loom_type_t type =
+        loom_block_arg_type(model->context.module, block, ordinal);
     if (!loom_low_type_is_register(type)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "entry argument %u must have a register type",
@@ -1242,7 +1244,7 @@ static iree_status_t loom_check_emit_build_low_allocation_table(
       module, low_function,
       /*function_target_facts=*/NULL, descriptor_registry, emitter,
       LOOM_LOW_FUNCTION_MODEL_FLAG_REGION_TREE, analysis_arena, &model);
-  if (iree_status_is_ok(status) && model.error_count == 0 &&
+  if (iree_status_is_ok(status) && model.context.error_count == 0 &&
       entry->count != 0) {
     status = loom_check_emit_resolve_entry_locations(&model, entry,
                                                      analysis_arena, &options);

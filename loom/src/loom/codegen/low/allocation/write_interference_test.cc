@@ -7,13 +7,16 @@
 #include "loom/codegen/low/allocation/write_interference.h"
 
 #include <cstring>
+#include <vector>
 
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/placement.h"
+#include "loom/codegen/low/allocation/unit_liveness_builder.h"
 #include "loom/codegen/low/builder.h"
 #include "loom/codegen/low/read_retention.h"
+#include "loom/codegen/low/storage_identity.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/target/registers.h"
@@ -23,7 +26,10 @@ namespace loom {
 namespace {
 
 enum class WriteKind { None, Copy, Instruction };
-enum class BindingKind { Free, AliasedDestination, ForcedWrite };
+enum class BindingKind { Free, FixedSource, AliasedDestination, ForcedWrite };
+enum class TieKind { Nonwriting, Destructive, Mixed };
+enum class ObservationKind { Whole, Partial, Sparse };
+enum class SourceCopyKind { SingleUnit, WholeValue };
 
 class WriteInterferenceTest : public ::testing::Test {
  protected:
@@ -41,11 +47,13 @@ class WriteInterferenceTest : public ::testing::Test {
                                         iree_allocator_system(), &module_));
     iree_arena_block_pool_initialize(4096, {this, Allocate}, &pool_);
     iree_arena_initialize(&pool_, &decision_);
+    iree_arena_initialize(&pool_, &result_);
     iree_arena_initialize(&pool_, &scratch_);
   }
 
   void TearDown() override {
     iree_arena_deinitialize(&scratch_);
+    iree_arena_deinitialize(&result_);
     iree_arena_deinitialize(&decision_);
     iree_arena_block_pool_deinitialize(&pool_);
     EXPECT_EQ(live_allocations_, 0u);
@@ -79,23 +87,20 @@ class WriteInterferenceTest : public ::testing::Test {
     return status;
   }
 
-  // A retained read, memory result and wide copy produce one conditional row
-  // per copied unit. The source is defined after the retained input dies, so
-  // zero-copy placements also satisfy ordinary liveness. Liveness/placement
-  // come from their production producers instead of hand-authored tables.
-  void Initialize(uint32_t width, WriteKind kind) {
-    kind_ = kind;
+  void InitializeTarget(uint32_t width) {
     register_class_.name_string_ref = LOOM_STRING_REF(0, 1);
     register_class_.alloc_unit_bits = 32;
     register_class_.allocatable_count = 32768;
     register_class_.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
     operands_[0].role = LOOM_LOW_OPERAND_ROLE_PREDICATE;
     operands_[1].role = LOOM_LOW_OPERAND_ROLE_RESULT;
+    operands_[2].role = operands_[3].role = LOOM_LOW_OPERAND_ROLE_OPERAND;
     for (auto& operand : operands_) {
       operand.source_value_index = 0;
       operand.reg_class_alt_count = 1;
       operand.unit_count = width;
     }
+    operands_[3].unit_count = 1;
     alternative_.reg_class_id = 0;
     alternative_.register_part_id = LOOM_LOW_REGISTER_PART_NONE;
     for (uint16_t i = 0; i < 3; ++i) {
@@ -109,6 +114,16 @@ class WriteInterferenceTest : public ::testing::Test {
         LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_ALU;
     views_[2].instruction_class_flags =
         LOOM_LOW_INSTRUCTION_CLASS_FLAG_SCALAR_MEMORY;
+    descriptors_[3].operand_start = 1;
+    descriptors_[3].operand_count = 2;
+    descriptors_[3].result_count = 1;
+    descriptors_[4].operand_start = 2;
+    descriptors_[4].operand_count = 1;
+    descriptors_[5].operand_start = 3;
+    descriptors_[5].operand_count = 1;
+    views_[3] = views_[1];
+    views_[4] = views_[0];
+    views_[5] = views_[1];
     descriptor_set_.stable_id = 1;
     descriptor_set_.string_pool = {"r", 1};
     descriptor_set_.reg_classes = &register_class_;
@@ -116,10 +131,10 @@ class WriteInterferenceTest : public ::testing::Test {
     descriptor_set_.reg_class_alts = &alternative_;
     descriptor_set_.reg_class_alt_count = 1;
     descriptor_set_.operands = operands_;
-    descriptor_set_.operand_count = 2;
+    descriptor_set_.operand_count = IREE_ARRAYSIZE(operands_);
     descriptor_set_.descriptors = descriptors_;
     descriptor_set_.descriptor_views = views_;
-    descriptor_set_.descriptor_count = 3;
+    descriptor_set_.descriptor_count = IREE_ARRAYSIZE(descriptors_);
     rule_.register_class = IREE_SV("r");
     rule_.subgroup_size = 64;
     rule_.reader_classes = views_[0].instruction_class_flags;
@@ -129,28 +144,41 @@ class WriteInterferenceTest : public ::testing::Test {
     facts_.read_retention = &rule_;
     target_.target_facts = &facts_;
     target_.descriptor_set = &descriptor_set_;
+  }
 
+  loom_builder_t CreateFunction(uint32_t width) {
     loom_type_t type = loom_low_register_type(1, 0, width);
-    IREE_ASSERT_OK(loom_module_intern_type(module_, type, &type));
+    IREE_CHECK_OK(loom_module_intern_type(module_, type, &type));
     loom_builder_t builder;
     loom_builder_initialize(module_, &module_->arena,
                             loom_module_block(module_), &builder);
     loom_string_id_t name;
-    IREE_ASSERT_OK(
+    IREE_CHECK_OK(
         loom_builder_intern_string(&builder, IREE_SV("kernel"), &name));
     loom_symbol_id_t symbol;
-    IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol));
-    loom_op_t* function = nullptr;
-    IREE_ASSERT_OK(loom_low_func_def_build(
+    IREE_CHECK_OK(loom_module_add_symbol(module_, name, &symbol));
+    IREE_CHECK_OK(loom_low_func_def_build(
         &builder, 0, 0, 0, 0, 0, 0, 0, 0, name, {}, 0, {}, {},
         LOOM_STRING_ID_INVALID, {}, loom_symbol_ref_t{0, symbol}, &type, 1,
-        nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function));
-    loom_region_t* body = loom_low_func_def_body(function);
-    loom_builder_enter_region(&builder, function, body);
+        nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &function_));
+    loom_region_t* body = loom_low_func_def_body(function_);
+    loom_builder_enter_region(&builder, function_, body);
     values_[0] = loom_region_entry_arg_id(body, 0);
+    return builder;
+  }
+
+  // A retained read, memory result and wide copy produce one conditional row
+  // per copied unit. The source is defined after the retained input dies, so
+  // zero-copy placements also satisfy ordinary liveness. Liveness/placement
+  // come from their production producers instead of hand-authored tables.
+  void Initialize(uint32_t width, WriteKind kind) {
+    InitializeTarget(width);
+    loom_builder_t builder = CreateFunction(width);
+    const loom_type_t type = loom_module_value_type(module_, values_[0]);
+    loom_op_t* reader = nullptr;
     IREE_ASSERT_OK(loom_low_build_resolved_descriptor_op(
         &builder, &descriptor_set_, &descriptors_[0], 0, values_, 1, {},
-        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &reader_));
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &reader));
     loom_op_t* writer = nullptr;
     if (kind == WriteKind::Copy) {
       loom_op_t* source = nullptr;
@@ -173,6 +201,113 @@ class WriteInterferenceTest : public ::testing::Test {
     loom_op_t* return_op = nullptr;
     IREE_ASSERT_OK(loom_low_return_build(&builder, nullptr, 0,
                                          LOOM_LOCATION_UNKNOWN, &return_op));
+    Analyze();
+    if (kind == WriteKind::Copy) {
+      ASSERT_EQ(placement_.relation_count, 1u);
+      ASSERT_EQ(placement_.relations[0].unit_count, width);
+    }
+  }
+
+  void Observe(loom_builder_t* builder, loom_value_id_t value,
+               uint32_t descriptor) {
+    loom_op_t* op = nullptr;
+    IREE_ASSERT_OK(loom_low_build_resolved_descriptor_op(
+        builder, &descriptor_set_, &descriptors_[descriptor], 0, &value, 1, {},
+        nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &op));
+  }
+
+  loom_value_id_t Slice(loom_builder_t* builder, loom_value_id_t value,
+                        uint32_t offset) {
+    loom_type_t type = loom_low_register_type(1, 0, 1);
+    IREE_CHECK_OK(loom_module_intern_type(module_, type, &type));
+    loom_op_t* op = nullptr;
+    IREE_CHECK_OK(loom_low_slice_build(builder, value, offset, type,
+                                       LOOM_LOCATION_UNKNOWN, &op));
+    return loom_low_slice_result(op);
+  }
+
+  // The first SSA name dies in the tie chain. Only its last member is read
+  // after the slice, so the slice's source reservation must use the complete
+  // physical component rather than the origin's semantic interval.
+  uint32_t InitializeLiveSource(
+      TieKind ties, ObservationKind observation, uint32_t width = 4,
+      SourceCopyKind copy_kind = SourceCopyKind::SingleUnit) {
+    InitializeTarget(width);
+    rule_.reset_register_classes = &rule_.register_class;
+    rule_.reset_register_class_count = 1;
+    loom_builder_t builder = CreateFunction(width);
+    const loom_type_t type = loom_module_value_type(module_, values_[0]);
+    loom_value_id_t source = values_[0];
+    loom_value_id_t condition = LOOM_VALUE_ID_INVALID;
+    if (observation == ObservationKind::Sparse) {
+      condition = Slice(&builder, source, 0);
+    }
+    if (observation == ObservationKind::Partial) {
+      Observe(&builder, source, 0);
+    }
+    for (uint32_t i = 0; i < 3; ++i) {
+      loom_op_t* op = nullptr;
+      if (ties == TieKind::Destructive || (ties == TieKind::Mixed && i == 1)) {
+        const loom_tied_result_t tied_result = {0, 0};
+        IREE_CHECK_OK(loom_low_build_resolved_descriptor_op(
+            &builder, &descriptor_set_, &descriptors_[3], 0, &source, 1, {},
+            &type, 1, &tied_result, 1, LOOM_LOCATION_UNKNOWN, &op));
+      } else {
+        IREE_CHECK_OK(loom_low_assume_build(&builder, &source, 1, nullptr, 0,
+                                            &type, 1, LOOM_LOCATION_UNKNOWN,
+                                            &op));
+      }
+      source = loom_op_results(op)[0];
+    }
+    loom_block_t* read_block = nullptr;
+    if (observation == ObservationKind::Sparse) {
+      loom_region_t* body = loom_low_func_def_body(function_);
+      loom_block_t* copy_block = nullptr;
+      IREE_CHECK_OK(loom_region_append_block(module_, body, &copy_block));
+      IREE_CHECK_OK(loom_region_append_block(module_, body, &read_block));
+      loom_op_t* branch = nullptr;
+      IREE_CHECK_OK(loom_low_cond_br_build(&builder, condition, copy_block,
+                                           read_block, LOOM_LOCATION_UNKNOWN,
+                                           &branch));
+      loom_builder_set_block(&builder, copy_block);
+    } else if (observation == ObservationKind::Partial) {
+      // A non-predicate read resets hardware retention. Only subsequent odd
+      // source-word reads should constrain the slice's possible placements.
+      Observe(&builder, source, 4);
+    }
+    loom_value_id_t copied = LOOM_VALUE_ID_INVALID;
+    if (copy_kind == SourceCopyKind::WholeValue) {
+      loom_op_t* copy = nullptr;
+      IREE_CHECK_OK(loom_low_copy_build(&builder, source, false, type,
+                                        LOOM_LOCATION_UNKNOWN, &copy));
+      copied = loom_low_copy_result(copy);
+    } else {
+      copied = Slice(&builder, source, 0);
+    }
+    if (observation == ObservationKind::Partial) {
+      for (uint32_t unit = 1; unit < width; unit += 2) {
+        const loom_value_id_t part = Slice(&builder, source, unit);
+        Observe(&builder, part, 5);
+      }
+    } else if (observation == ObservationKind::Whole) {
+      Observe(&builder, source, 0);
+    }
+    Observe(&builder, copied, copy_kind == SourceCopyKind::WholeValue ? 4 : 5);
+    loom_op_t* return_op = nullptr;
+    IREE_CHECK_OK(loom_low_return_build(&builder, nullptr, 0,
+                                        LOOM_LOCATION_UNKNOWN, &return_op));
+    if (read_block != nullptr) {
+      loom_builder_set_block(&builder, read_block);
+      Observe(&builder, source, 0);
+      IREE_CHECK_OK(loom_low_return_build(&builder, nullptr, 0,
+                                          LOOM_LOCATION_UNKNOWN, &return_op));
+    }
+    Analyze();
+    return loom_local_value_domain_ordinal(&domain_, copied);
+  }
+
+  void Analyze() {
+    loom_region_t* body = loom_low_func_def_body(function_);
     IREE_ASSERT_OK(loom_local_value_domain_acquire_for_region(
         module_, body, &module_->arena, &domain_));
     IREE_ASSERT_OK(loom_liveness_analyze_local_value_domain(
@@ -182,46 +317,48 @@ class WriteInterferenceTest : public ::testing::Test {
     loom_low_placement_preference_index_t preferences = {};
     loom_low_allocation_target_constraints_t constraints = {};
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
-        module_, function, &target_, nullptr, 0, nullptr, 0, {},
+        module_, function_, &target_, nullptr, 0, nullptr, 0, {},
         &module_->arena, &constraints));
+    loom_value_ordinal_t* storage_origins = nullptr;
+    IREE_ASSERT_OK(loom_low_storage_identity_build(&domain_, 0, &module_->arena,
+                                                   &storage_origins));
     IREE_ASSERT_OK(loom_low_allocation_placement_build(
-        &constraints, body, &domain_, &liveness_, nullptr, 0, {}, {},
-        &module_->arena, &module_->arena, &placement_, &preferences));
-    if (kind == WriteKind::Copy) {
-      ASSERT_EQ(placement_.relation_count, 1u);
-      ASSERT_EQ(placement_.relations[0].unit_count, width);
-    }
-    for (uint32_t i = 0; i < value_count; ++i) {
-      ASSERT_EQ(loom_local_value_domain_ordinal(&domain_, values_[i]), i);
+        &constraints, body, &domain_, storage_origins, &liveness_, nullptr, 0,
+        {}, {}, &module_->arena, &module_->arena, &placement_, &preferences));
+    assignments_.resize(domain_.value_count);
+    assignment_indices_.resize(domain_.value_count);
+    for (uint32_t i = 0; i < domain_.value_count; ++i) {
       assignment_indices_[i] = i;
       const auto* interval =
           loom_liveness_interval_for_value_ordinal(&liveness_, i);
       ASSERT_NE(interval, nullptr);
       auto& assignment = assignments_[i];
-      assignment.value_id = values_[i];
+      assignment.value_id = domain_.value_ids[i];
       assignment.descriptor_reg_class_id =
           interval->value_class.register_class_id;
       assignment.start_point = interval->start_point;
       assignment.end_point = interval->end_point + 1;
-      assignment.unit_count = assignment.location_count = width;
+      assignment.unit_count = assignment.location_count = interval->unit_count;
       assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
     }
-    assignments_[0].location_base = width + 10;
+    assignments_[0].location_base = assignments_[0].unit_count + 10;
     map_.module = module_;
     map_.liveness = &liveness_;
-    map_.assignments = assignments_;
-    map_.assignment_count = value_count;
-    map_.assignment_indices_by_value_ordinal = assignment_indices_;
+    map_.assignments = assignments_.data();
+    map_.assignment_count = domain_.value_count;
+    map_.assignment_indices_by_value_ordinal = assignment_indices_.data();
   }
 
   void ResetArenas(iree_host_size_t failure_index = SIZE_MAX) {
     failure_index_ = SIZE_MAX;
     iree_arena_deinitialize(&scratch_);
+    iree_arena_deinitialize(&result_);
     iree_arena_deinitialize(&decision_);
     iree_arena_block_pool_deinitialize(&pool_);
     ASSERT_EQ(live_allocations_, 0u);
     iree_arena_block_pool_initialize(4096, {this, Allocate}, &pool_);
     iree_arena_initialize(&pool_, &decision_);
+    iree_arena_initialize(&pool_, &result_);
     iree_arena_initialize(&pool_, &scratch_);
     IREE_ASSERT_OK(iree_arena_allocate(&scratch_, 16, (void**)&sentinel_));
     memset(sentinel_, 0x5A, 16);
@@ -232,21 +369,18 @@ class WriteInterferenceTest : public ::testing::Test {
   }
 
   iree_status_t BuildTable(BindingKind binding = BindingKind::Free) {
-    IREE_RETURN_IF_ERROR(loom_low_allocation_write_interference_create(
-        &target_, &placement_, &liveness_, &decision_, &table_));
-    IREE_RETURN_IF_ERROR(loom_low_allocation_write_interference_note_operand(
-        table_, &domain_, &descriptor_set_, &descriptors_[0], reader_, 0,
-        loom_liveness_operation_at(&liveness_, 0)->start_point + 1,
-        &decision_));
-    if (kind_ != WriteKind::None) {
-      const auto* descriptor = &descriptors_[kind_ == WriteKind::Copy ? 2 : 1];
-      IREE_RETURN_IF_ERROR(loom_low_allocation_write_interference_note_operand(
-          table_, &domain_, &descriptor_set_, descriptor,
-          loom_liveness_operation_at(&liveness_, 1)->op, 0,
-          loom_liveness_operation_at(&liveness_, 1)->start_point + 1,
-          &decision_));
-    }
-    if (binding != BindingKind::Free) {
+    IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_initialize(
+        &target_, &placement_, &domain_, &liveness_, &graph_, {}, &result_,
+        &decision_, &unit_liveness_));
+    IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_retain_tied_storage(
+        &unit_liveness_, &liveness_, &placement_, &result_, &decision_));
+    loom_low_allocation_unit_liveness_propagate_storage_relations(
+        &unit_liveness_, &placement_);
+    table_ = unit_liveness_.write_interference;
+    if (binding == BindingKind::FixedSource) {
+      loom_low_allocation_write_interference_note_fixed(table_, 0,
+                                                        &assignments_[0]);
+    } else if (binding != BindingKind::Free) {
       assignments_[2].location_base = assignments_[0].location_base;
       for (uint32_t ordinal : {0u, 2u}) {
         loom_low_allocation_write_interference_note_fixed(
@@ -258,7 +392,8 @@ class WriteInterferenceTest : public ::testing::Test {
       }
     }
     return loom_low_allocation_write_interference_finalize(
-        table_, &liveness_, &graph_, &placement_, &decision_, &scratch_);
+        table_, &liveness_, &graph_, &placement_, &unit_liveness_, &decision_,
+        &scratch_);
   }
 
   void ExpectScratchPreserved() {
@@ -301,6 +436,8 @@ class WriteInterferenceTest : public ::testing::Test {
   iree_arena_block_pool_t pool_ = {};
   // Persistent retained-row and query-index owner.
   iree_arena_allocator_t decision_ = {};
+  // Published per-unit points and tied-component physical segments.
+  iree_arena_allocator_t result_ = {};
   // Temporary construction owner restored after finalization.
   iree_arena_allocator_t scratch_ = {};
   // Pre-existing caller state in the construction arena.
@@ -313,18 +450,16 @@ class WriteInterferenceTest : public ::testing::Test {
   iree_host_size_t failure_index_ = SIZE_MAX;
   // Outstanding successful backing allocations in the tested pool.
   iree_host_size_t live_allocations_ = 0;
-  // Selected transfer semantics.
-  WriteKind kind_ = WriteKind::None;
   // Linear physical bank with room for all tested placements.
   loom_low_reg_class_t register_class_ = {};
   // Shared register alternative for the read and write descriptors.
   loom_low_reg_class_alt_t alternative_ = {};
-  // Retained input and unconditional result operand contracts.
-  loom_low_operand_t operands_[2] = {};
-  // Reader, interfering ALU result and asynchronously completed memory result.
-  loom_low_descriptor_t descriptors_[3] = {};
+  // Retained input, result, ordinary wide input and scalar input contracts.
+  loom_low_operand_t operands_[4] = {};
+  // Retained reader, ALU result, memory result, destructive tie, reset and use.
+  loom_low_descriptor_t descriptors_[6] = {};
   // Per-descriptor read and write instruction class facts.
-  loom_low_descriptor_view_t views_[3] = {};
+  loom_low_descriptor_view_t views_[6] = {};
   // Descriptor ownership and dense row domains.
   loom_low_descriptor_set_t descriptor_set_ = {};
   // Retained-read rule for the fixture's linear bank.
@@ -333,8 +468,8 @@ class WriteInterferenceTest : public ::testing::Test {
   loom_target_facts_t facts_ = {};
   // Bound target and descriptor set used by the production constructor.
   loom_low_resolved_target_t target_ = {};
-  // Actual descriptor-backed retained read.
-  loom_op_t* reader_ = nullptr;
+  // Function whose real IR supplies liveness and placement facts.
+  loom_op_t* function_ = nullptr;
   // Retained input, optional memory result and optional destination.
   loom_value_id_t values_[3] = {};
   // Real liveness facts consumed by retained-write construction.
@@ -343,10 +478,12 @@ class WriteInterferenceTest : public ::testing::Test {
   loom_cfg_graph_t graph_ = {};
   // Structural facts in the same local ordinal domain.
   loom_low_placement_table_t placement_ = {};
+  // Completed physical lifetimes from the production event producer.
+  loom_low_allocation_unit_liveness_t unit_liveness_ = {};
   // Current physical assignments, mutable between independent queries.
-  loom_low_allocation_assignment_t assignments_[3] = {};
+  std::vector<loom_low_allocation_assignment_t> assignments_;
   // Published assignment indices, or UINT32_MAX for unassigned endpoints.
-  uint32_t assignment_indices_[3] = {};
+  std::vector<uint32_t> assignment_indices_;
   // Assignment consumer view with module ordinal ownership intact.
   loom_low_allocation_assignment_map_t map_ = {};
   // Published constructor result; usable only after successful finalization.
@@ -356,6 +493,75 @@ class WriteInterferenceTest : public ::testing::Test {
 class WriteInterferenceBoundaryTest
     : public WriteInterferenceTest,
       public ::testing::WithParamInterface<uint32_t> {};
+
+class WriteInterferenceTieTest : public WriteInterferenceTest,
+                                 public ::testing::WithParamInterface<TieKind> {
+};
+
+TEST_P(WriteInterferenceTieTest, LaterMemberRetainsTheWholePhysicalSource) {
+  const uint32_t copied =
+      InitializeLiveSource(GetParam(), ObservationKind::Whole);
+  const uint32_t source_base = assignments_[0].location_base;
+  for (BindingKind binding : {BindingKind::Free, BindingKind::FixedSource}) {
+    ResetArenas();
+    IREE_ASSERT_OK(BuildTable(binding));
+    assignment_indices_[0] =
+        binding == BindingKind::FixedSource ? UINT32_MAX : 0;
+    EXPECT_EQ(Query(copied, source_base), LOOM_VALUE_ORDINAL_INVALID);
+    EXPECT_EQ(Query(copied, source_base + 1), 0u);
+    EXPECT_EQ(Query(copied, source_base + 3), 0u);
+    EXPECT_EQ(Query(copied, source_base + 4), LOOM_VALUE_ORDINAL_INVALID);
+  }
+}
+
+TEST_P(WriteInterferenceTieTest, DeadUnitsBetweenLiveRangesRemainReusable) {
+  const uint32_t copied =
+      InitializeLiveSource(GetParam(), ObservationKind::Partial);
+  const uint32_t source_base = assignments_[0].location_base;
+  ResetArenas();
+  IREE_ASSERT_OK(BuildTable());
+  EXPECT_EQ(Query(copied, source_base), LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_EQ(Query(copied, source_base + 1), 0u);
+  EXPECT_EQ(Query(copied, source_base + 2), LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_EQ(Query(copied, source_base + 3), 0u);
+}
+
+TEST_P(WriteInterferenceTieTest, OtherBranchUseDoesNotFillThePhysicalHole) {
+  const uint32_t copied =
+      InitializeLiveSource(GetParam(), ObservationKind::Sparse);
+  const uint32_t source_base = assignments_[0].location_base;
+  ResetArenas();
+  IREE_ASSERT_OK(BuildTable());
+  EXPECT_EQ(Query(copied, source_base), LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_EQ(Query(copied, source_base + 1), LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_EQ(Query(copied, source_base + 3), LOOM_VALUE_ORDINAL_INVALID);
+}
+
+INSTANTIATE_TEST_SUITE_P(RequiredStorageFamilies, WriteInterferenceTieTest,
+                         ::testing::Values(TieKind::Nonwriting,
+                                           TieKind::Destructive,
+                                           TieKind::Mixed));
+
+class WriteInterferenceFragmentedTest
+    : public WriteInterferenceTest,
+      public ::testing::WithParamInterface<uint32_t> {};
+
+TEST_P(WriteInterferenceFragmentedTest,
+       WideCopyWithAlternatingLiveSourceUnits) {
+  const uint32_t width = GetParam();
+  const uint32_t copied =
+      InitializeLiveSource(TieKind::Mixed, ObservationKind::Partial, width,
+                           SourceCopyKind::WholeValue);
+  const uint32_t source_base = assignments_[0].location_base;
+  ResetArenas();
+  IREE_ASSERT_OK(BuildTable());
+  EXPECT_EQ(Query(copied, source_base), LOOM_VALUE_ORDINAL_INVALID);
+  EXPECT_EQ(Query(copied, source_base + 1), 0u);
+  EXPECT_EQ(Query(copied, source_base + width), LOOM_VALUE_ORDINAL_INVALID);
+}
+
+INSTANTIATE_TEST_SUITE_P(Widths, WriteInterferenceFragmentedTest,
+                         ::testing::Values(16u, 64u, 256u));
 
 TEST_P(WriteInterferenceBoundaryTest,
        StableQueriesAcrossSegmentsAndScratchReuse) {

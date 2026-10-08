@@ -383,14 +383,14 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @write_on_disjoint_path(%condi
 // ----
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  v_fmac_f32 v0, v2, v2
-  global_store_b32 v3, v0, s[0:1] offset:0
+  v_fmac_f32 v0, v1, v1
+  global_store_b32 v2, v0, s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 .Lbb2:
   v_mov_b32 v1, v0
 .Lbb3:
-  global_store_b64 v3, v[0:1], s[0:1] offset:0
+  global_store_b64 v2, v[0:1], s[0:1] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -415,8 +415,8 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @write_after_transport(%seed: 
   v_mov_b32 v4, v0
   v_mov_b32 v5, v0
 .Lbb1:
-  global_store_b64 v3, v[4:5], s[0:1] offset:0
-  v_fmac_f32 v0, v2, v2
-  global_store_b32 v3, v0, s[0:1] offset:8
+  global_store_b64 v2, v[4:5], s[0:1] offset:0
+  v_fmac_f32 v0, v1, v1
+  global_store_b32 v2, v0, s[0:1] offset:8
   s_waitcnt_vscnt vscnt(0)
   s_endpgm

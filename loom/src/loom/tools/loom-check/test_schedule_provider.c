@@ -892,7 +892,8 @@ static iree_status_t loom_check_test_schedule_append_transport(
   }
   iree_status_t status = iree_ok_status();
   for (uint32_t ordinal = 0;
-       ordinal < model->value_domain.value_count && iree_status_is_ok(status);
+       ordinal < model->context.value_domain.value_count &&
+       iree_status_is_ok(status);
        ++ordinal) {
     const uint32_t index = transport->bindings_by_value_ordinal[ordinal];
     if (index == UINT32_MAX) {
@@ -901,20 +902,21 @@ static iree_status_t loom_check_test_schedule_append_transport(
     const loom_low_storage_transport_binding_t* binding =
         &transport->bindings[index];
     const loom_value_t* value = loom_module_value(
-        model->module, model->value_domain.value_ids[ordinal]);
+        model->context.module, model->context.value_domain.value_ids[ordinal]);
     const iree_string_view_t name =
         value->name_id == LOOM_STRING_ID_INVALID
             ? iree_string_view_empty()
-            : loom_string_table_get(&model->module->strings, value->name_id);
+            : loom_string_table_get(&model->context.module->strings,
+                                    value->name_id);
     iree_string_view_t space;
     loom_low_storage_space_set_names(
         loom_low_storage_space_set_for(binding->space), 1, &space);
-    status =
-        iree_string_view_is_empty(name)
-            ? iree_string_builder_append_format(
-                  output, "stored %%%u", model->value_domain.value_ids[ordinal])
-            : iree_string_builder_append_format(output, "stored %%%.*s",
-                                                (int)name.size, name.data);
+    status = iree_string_view_is_empty(name)
+                 ? iree_string_builder_append_format(
+                       output, "stored %%%u",
+                       model->context.value_domain.value_ids[ordinal])
+                 : iree_string_builder_append_format(output, "stored %%%.*s",
+                                                     (int)name.size, name.data);
     if (iree_status_is_ok(status)) {
       status = iree_string_builder_append_format(output, ": %.*s+%" PRIu64 "\n",
                                                  (int)space.size, space.data,
@@ -979,7 +981,7 @@ static iree_status_t loom_check_test_schedule_build(
   if (iree_status_is_ok(status) && out_schedule->error_count == 0 &&
       !iree_string_view_is_empty(options->pressure_register_class)) {
     status = loom_liveness_analyze_local_value_domain_with_dataflow(
-        &model.value_domain, &model.liveness_dataflow,
+        &model.context.value_domain, &model.liveness_dataflow,
         out_schedule->operation_order, request->case_arena,
         out_scheduled_liveness);
   }

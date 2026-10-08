@@ -15,6 +15,7 @@
 #include "loom/codegen/low/allocation/assignment.h"
 #include "loom/codegen/low/allocation/storage_lease_index.h"
 #include "loom/codegen/low/allocation/table.h"
+#include "loom/codegen/low/allocation/unit_liveness.h"
 #include "loom/codegen/low/descriptors.h"
 #include "loom/codegen/low/storage_lease.h"
 #include "loom/ir/ir.h"
@@ -24,16 +25,12 @@
 extern "C" {
 #endif
 
-typedef struct loom_low_allocation_unit_liveness_t
-    loom_low_allocation_unit_liveness_t;
 typedef struct loom_low_placement_table_t loom_low_placement_table_t;
 
 // Decision-lifetime structural content identity shared by every interval
 // assignment attempt for one function. Empty lease tables and placement graphs
 // without structural aliases leave this table inert.
 typedef struct loom_low_allocation_storage_identity_t {
-  // Borrowed per-value unit ranges used to address |origins|.
-  const struct loom_low_allocation_unit_liveness_value_t* unit_values;
   // Canonical content origins indexed by allocation unit.
   const uint32_t* origins;
 } loom_low_allocation_storage_identity_t;
@@ -63,10 +60,8 @@ typedef struct loom_low_allocation_storage_lease_state_t {
   const loom_low_storage_lease_table_t* lease_table;
   // Borrowed value domain used to map value IDs to allocation-local ordinals.
   const loom_local_value_domain_t* value_domain;
-  // Borrowed allocation-owned physical reservations for candidate ranges.
-  const loom_liveness_segment_t* storage_segments;
-  // Borrowed per-value unit ranges used to address |identity_origins|.
-  const struct loom_low_allocation_unit_liveness_value_t* unit_liveness_values;
+  // Borrowed allocation-owned physical lifetimes for candidate units.
+  const loom_low_allocation_unit_liveness_t* unit_liveness;
   // Borrowed canonical content origins indexed by allocation unit.
   // NULL when this function has no structural aliases to compare with leases.
   const uint32_t* identity_origins;
@@ -110,13 +105,13 @@ iree_status_t loom_low_allocation_storage_lease_state_initialize(
     const loom_local_value_domain_t* value_domain,
     const loom_liveness_analysis_t* liveness,
     const loom_low_allocation_storage_identity_t* storage_identity,
-    const loom_liveness_segment_t* storage_segments,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
     iree_arena_allocator_t* arena,
     loom_low_allocation_storage_lease_state_t* out_state);
 
 // Returns true when |candidate| conflicts with materialized storage leases
-// under |policy|. Complete candidate storage segments exclude lifetime holes;
-// an empty segment range retains the whole-assignment lifetime.
+// under |policy|. Per-unit demand excludes unmaterialized storage; complete
+// candidate storage segments additionally exclude lifetime holes.
 bool loom_low_allocation_storage_lease_state_conflicts(
     const loom_low_allocation_storage_lease_state_t* state,
     const loom_low_descriptor_set_t* descriptor_set,

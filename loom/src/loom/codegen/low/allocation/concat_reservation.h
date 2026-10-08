@@ -19,8 +19,11 @@ extern "C" {
 
 // Selects a future concat result reservation or a current source assignment
 // when that avoids a lower residency tier. The source and result intervals
-// share a value class; |result_range| contains the result's retained placement
-// relations and |ignored_value_ids| contains its concat sources.
+// share a value class; |result_range| contains the assembly's retained
+// placement relations and |ignored_value_ids| contains its concat sources. The
+// result may instead be the assembly's exclusive whole-value edge destination,
+// when the caller proves that source storage is consumed before destination
+// acquisition.
 //
 // A value_id of INVALID means no placement was selected. This query does not
 // publish the assignment: the allocator retains ownership of active storage,

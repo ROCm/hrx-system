@@ -106,8 +106,8 @@ typedef struct loom_low_placement_build_state_t {
   loom_value_ordinal_t* storage_value_order;
   // Number of populated entries in |storage_value_order|.
   loom_value_ordinal_t storage_value_order_count;
-  // Direct tied parents during collection, then flattened component origins.
-  loom_value_ordinal_t* tied_storage_origins_by_value_ordinal;
+  // Canonical physical-storage identities borrowed from function preparation.
+  const loom_value_ordinal_t* tied_storage_origins_by_value_ordinal;
   // Combined operand requirements, dense by liveness interval when needed.
   loom_low_placement_operand_constraints_t* operand_constraints_by_interval;
   // Number of relation records counted or populated.
@@ -243,20 +243,6 @@ static iree_status_t loom_low_placement_collect_relation(
     }
   }
   if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT) {
-    if (state->tied_storage_origins_by_value_ordinal == NULL) {
-      const loom_value_ordinal_t value_count = state->value_domain->value_count;
-      IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          state->arena, value_count,
-          sizeof(*state->tied_storage_origins_by_value_ordinal),
-          (void**)&state->tied_storage_origins_by_value_ordinal));
-      for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
-        state->tied_storage_origins_by_value_ordinal[i] = i;
-      }
-    }
-    // Each verified tied result has one source. Retain that parent while it is
-    // known; flatten only after all relations have been collected.
-    state->tied_storage_origins_by_value_ordinal[relation->result_ordinal] =
-        relation->source_ordinal;
     if (iree_any_bit_set(relation->flags,
                          LOOM_LOW_PLACEMENT_RELATION_FLAG_WRITES_STORAGE)) {
       ++state->storage.write_relation_count;
@@ -273,35 +259,6 @@ static iree_status_t loom_low_placement_collect_relation(
   }
   ++state->relation_count;
   return iree_ok_status();
-}
-
-static loom_value_ordinal_t loom_low_placement_tied_storage_origin(
-    loom_value_ordinal_t* origins, loom_value_ordinal_t ordinal) {
-  loom_value_ordinal_t origin = ordinal;
-  while (origins[origin] != origin) {
-    origin = origins[origin];
-  }
-  while (origins[ordinal] != origin) {
-    const loom_value_ordinal_t parent = origins[ordinal];
-    origins[ordinal] = origin;
-    ordinal = parent;
-  }
-  return origin;
-}
-
-// Verified ties preserve matching whole values, and each result has one tied
-// source. Retain the resulting forest independently of value ordinal order,
-// before indexing location constraints or assigning any component member.
-static void loom_low_placement_flatten_tied_storage_origins(
-    loom_low_placement_build_state_t* state) {
-  loom_value_ordinal_t* origins = state->tied_storage_origins_by_value_ordinal;
-  if (origins == NULL) {
-    return;
-  }
-  const loom_value_ordinal_t value_count = state->value_domain->value_count;
-  for (loom_value_ordinal_t i = 0; i < value_count; ++i) {
-    origins[i] = loom_low_placement_tied_storage_origin(origins, i);
-  }
 }
 
 static loom_value_ordinal_t loom_low_placement_relation_index_ordinal(
@@ -1432,7 +1389,6 @@ static iree_status_t loom_low_placement_build(
         sizeof(*state->storage.write_relation_indices),
         (void**)&state->storage.write_relation_indices));
   }
-  loom_low_placement_flatten_tied_storage_origins(state);
   // Every exact tied component uses one base. Retain its strongest packet
   // requirement once, before fixed-input validation or allocation can place
   // any member. Optional copy and slice relations do not constrain the source.
@@ -1546,6 +1502,7 @@ static iree_status_t loom_low_placement_build(
 iree_status_t loom_low_allocation_placement_build(
     loom_low_allocation_target_constraints_t* target_constraints,
     const loom_region_t* region, const loom_local_value_domain_t* value_domain,
+    const loom_value_ordinal_t* storage_origins,
     const loom_liveness_analysis_t* liveness,
     const loom_low_allocation_fixed_value_t* fixed_values,
     iree_host_size_t fixed_value_count,
@@ -1572,6 +1529,7 @@ iree_status_t loom_low_allocation_placement_build(
       .region = region,
       .descriptor_set = target_constraints->target->descriptor_set,
       .value_domain = value_domain,
+      .tied_storage_origins_by_value_ordinal = storage_origins,
       .liveness = liveness,
       .pair_uses = pair_uses,
       .instruction_preferences = instruction_preferences,

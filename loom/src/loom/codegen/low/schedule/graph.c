@@ -627,10 +627,8 @@ static iree_status_t loom_low_schedule_record_storage_read(
 static loom_value_ordinal_t loom_low_schedule_storage_read_identity(
     const loom_low_schedule_build_state_t* state,
     loom_value_ordinal_t value_ordinal) {
-  return iree_any_bit_set(state->values[value_ordinal].flags,
-                          LOOM_LOW_SCHEDULE_VALUE_FLAG_STORAGE_IDENTITY_ALIAS)
-             ? state->storage_reads.heads[value_ordinal]
-             : value_ordinal;
+  return state->storage_origins != NULL ? state->storage_origins[value_ordinal]
+                                        : value_ordinal;
 }
 
 static iree_status_t loom_low_schedule_add_storage_read(

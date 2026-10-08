@@ -88,14 +88,30 @@ typedef struct loom_low_write_retained_t {
 // copy equation while its source remains present, or completed interference
 // once the source is also retired. Component incidence needs only destination
 // and retained origins after classification; those identities remain live.
+// An absent retained value instead denotes ordinary copy-source liveness,
+// whose per-unit facts are borrowed rather than expanded into range products.
 typedef struct loom_low_write_constraint_t {
   // Canonical origin receiving the physical write.
   loom_value_ordinal_t destination;
   // First written unit within the destination.
   uint32_t destination_offset;
-  // Retained input range, or count zero after equation/completion
-  // classification.
-  loom_low_write_retained_t retained;
+  // Storage observation requiring an overlapping copy to be a no-op.
+  union {
+    // Hardware-retained range, or count zero after equation/completion.
+    loom_low_write_retained_t retained;
+    // Ordinary source storage live at the copy's write point. These rows are
+    // published after hardware completion classification and never retired by
+    // a hardware wait: waiting does not preserve overwritten live contents.
+    struct {
+      // Always INVALID: the observed storage belongs to |source|, not a
+      // hardware-retained reader. This discriminates the union.
+      loom_value_ordinal_t retained_value;
+      // Source component's allocation-unit extent.
+      uint32_t width;
+      // Copy write point already proved inside the component's sparse segments.
+      uint32_t point;
+    } source_lifetime;
+  };
   // Copy source, or INVALID for an unconditional or completed write.
   loom_value_ordinal_t source;
   // Write extent before completion, interpreted by source presence.
@@ -106,6 +122,16 @@ typedef struct loom_low_write_constraint_t {
     uint32_t source_offset;
   } units;
 } loom_low_write_constraint_t;
+
+static_assert(sizeof(loom_low_write_constraint_t) == 28,
+              "physical write constraints must remain compact");
+
+static loom_value_ordinal_t loom_low_write_constraint_observed_value(
+    const loom_low_write_constraint_t* row) {
+  return row->retained.value == LOOM_VALUE_ORDINAL_INVALID
+             ? row->source
+             : row->retained.value;
+}
 
 static uint32_t loom_low_write_constraint_write_count(
     const loom_low_write_constraint_t* row) {
@@ -145,6 +171,9 @@ struct loom_low_allocation_write_interference_t {
   uint8_t* reset_classes;
   // Canonical storage and endpoint indices by local value ordinal.
   loom_low_write_value_t* values;
+  // Completed physical lifetimes, borrowed through allocation decisions and
+  // final numbering. Source rows index the original per-unit ends directly.
+  const loom_low_allocation_unit_liveness_t* unit_liveness;
   // Number of entries in |values|.
   iree_host_size_t value_count;
   // Collected instruction effects and retained ranges by write point.
@@ -572,6 +601,21 @@ static uint32_t loom_low_write_record_point(
     }
   }
   return next_constraint;
+}
+
+static bool loom_low_write_access_has_live_source(
+    const loom_low_allocation_write_interference_t* table,
+    const loom_liveness_analysis_t* liveness,
+    const loom_low_placement_table_t* placement,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_write_access_t* access, uint32_t point) {
+  if (access->source == LOOM_VALUE_ORDINAL_INVALID ||
+      table->values[access->source].construction.retained_start == UINT32_MAX) {
+    return false;
+  }
+  return loom_low_allocation_unit_liveness_storage_component_live_at_point(
+      unit_liveness, liveness, placement, access->source, 0,
+      table->values[access->source].construction.width, point);
 }
 
 // Weighted identities record base(value) - base(parent). Equations arise only
@@ -1043,13 +1087,14 @@ static iree_status_t loom_low_write_index_constraints(
         ++table->values[row->destination].constraints.count;
         ++table->values[row->source].constraints.count;
       } else {
+        const loom_value_ordinal_t observed =
+            loom_low_write_constraint_observed_value(row);
         ++table->values[row->destination].constraints.count;
-        if (row->retained.value != row->destination) {
-          ++table->values[row->retained.value].constraints.count;
+        if (observed != row->destination) {
+          ++table->values[observed].constraints.count;
         }
         if (row->source != LOOM_VALUE_ORDINAL_INVALID &&
-            row->source != row->destination &&
-            row->source != row->retained.value) {
+            row->source != row->destination && row->source != observed) {
           ++table->values[row->source].constraints.count;
         }
       }
@@ -1081,7 +1126,9 @@ static iree_status_t loom_low_write_index_constraints(
       }
       const loom_value_ordinal_t values[] = {
           row->destination,
-          row->retained.count == 0 ? row->source : row->retained.value,
+          row->retained.count == 0
+              ? row->source
+              : loom_low_write_constraint_observed_value(row),
           row->retained.count == 0 ? LOOM_VALUE_ORDINAL_INVALID : row->source,
       };
       for (uint32_t i = 0; i < IREE_ARRAYSIZE(values); ++i) {
@@ -1101,8 +1148,9 @@ static iree_status_t loom_low_write_index_constraints(
 static iree_status_t loom_low_write_finalize_impl(
     loom_low_allocation_write_interference_t* table,
     const loom_liveness_analysis_t* liveness, const loom_cfg_graph_t* cfg_graph,
-    const loom_low_placement_table_t* placement, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena) {
+    const loom_low_placement_table_t* placement,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena) {
   for (iree_host_size_t r = 0; r < placement->relation_count; ++r) {
     const loom_low_placement_relation_t* relation = &placement->relations[r];
     if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT ||
@@ -1115,6 +1163,44 @@ static iree_status_t loom_low_write_finalize_impl(
     if (interval->value_class.type_kind != LOOM_TYPE_REGISTER ||
         interval->value_class.register_class_id != table->register_class) {
       continue;
+    }
+    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT &&
+        !iree_any_bit_set(relation->flags,
+                          LOOM_LOW_PLACEMENT_RELATION_FLAG_MATERIALIZE_PART)) {
+      continue;
+    }
+    if (relation->cause == LOOM_LOW_PLACEMENT_CAUSE_LOW_BRANCH) {
+      const loom_low_placement_relation_range_t range =
+          loom_low_placement_relation_range_for_value_ordinal(
+              placement, relation->source_ordinal);
+      uint32_t covered = 0;
+      for (uint32_t i = 0; i < range.count; ++i) {
+        const loom_low_placement_relation_t* part =
+            &placement->relations[range.start + i];
+        if (part->cause != LOOM_LOW_PLACEMENT_CAUSE_LOW_CONCAT) {
+          continue;
+        }
+        const loom_low_placement_concat_source_t source =
+            loom_low_placement_concat_source(placement, range.start + i);
+        IREE_RETURN_IF_ERROR(loom_low_write_append_access(
+            table, relation->write_point,
+            (loom_low_write_access_t){
+                .value = table->values[relation->result_ordinal].origin,
+                .source = table->values[source.value_ordinal].origin,
+                .offset = relation->result_unit_offset +
+                          part->result_unit_offset -
+                          relation->source_unit_offset,
+                .source_offset = source.unit_offset,
+                .count = part->unit_count,
+                .flags = LOOM_LOW_WRITE_ACCESS_WRITE |
+                         LOOM_LOW_WRITE_ACCESS_INTERFERE},
+            arena));
+        covered += part->unit_count;
+      }
+      if (covered != 0) {
+        IREE_ASSERT_EQ(covered, relation->unit_count);
+        continue;
+      }
     }
     IREE_RETURN_IF_ERROR(loom_low_write_append_access(
         table, relation->write_point,
@@ -1234,10 +1320,52 @@ static iree_status_t loom_low_write_finalize_impl(
   // Immutable snapshots and collected access extents determine the exact row
   // count. All segments are allocated before row publication; no payload moves
   // during construction or subsequent classification and candidate queries.
+  const uint32_t retained_constraint_count = table->constraint_count;
+  for (uint32_t point = 1; point < table->point_count; ++point) {
+    for (uint32_t a = table->events[point].access; a != UINT32_MAX;
+         a = table->accesses[a].next) {
+      const loom_low_write_access_t* access = &table->accesses[a];
+      if (!loom_low_write_access_has_live_source(
+              table, liveness, placement, unit_liveness, access, point)) {
+        continue;
+      }
+      if (access->count > UINT32_MAX - table->constraint_count) {
+        return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                                "live-source constraint count exceeds u32");
+      }
+      table->constraint_count += access->count;
+    }
+  }
+  const uint32_t total_constraint_count = table->constraint_count;
   IREE_RETURN_IF_ERROR(loom_low_write_allocate_constraints(table, arena));
+  table->constraint_count = retained_constraint_count;
   uint32_t next_constraint = 0;
   for (uint32_t p = 1; p < table->point_count; ++p) {
     next_constraint = loom_low_write_record_point(table, p, next_constraint);
+  }
+  for (uint32_t point = 1; point < table->point_count; ++point) {
+    for (uint32_t a = table->events[point].access; a != UINT32_MAX;
+         a = table->accesses[a].next) {
+      const loom_low_write_access_t* access = &table->accesses[a];
+      if (!loom_low_write_access_has_live_source(
+              table, liveness, placement, unit_liveness, access, point)) {
+        continue;
+      }
+      const uint32_t width = table->values[access->source].construction.width;
+      for (uint32_t unit = 0; unit < access->count; ++unit) {
+        loom_low_write_constraint_t* row =
+            loom_low_write_constraint_at(table, next_constraint++);
+        *row = (loom_low_write_constraint_t){
+            .destination = access->value,
+            .destination_offset = access->offset + unit,
+            .source_lifetime = {.retained_value = LOOM_VALUE_ORDINAL_INVALID,
+                                .width = width,
+                                .point = point},
+            .source = access->source,
+            .units.source_offset = access->source_offset + unit,
+        };
+      }
+    }
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       arena, table->value_count, sizeof(*table->inferred_bases),
@@ -1249,6 +1377,8 @@ static iree_status_t loom_low_write_finalize_impl(
   // hold component member links and tails, then become query workspace.
   IREE_RETURN_IF_ERROR(loom_low_write_classify_completion(
       table, liveness, placement, scratch_arena));
+  IREE_ASSERT_EQ(next_constraint, total_constraint_count);
+  table->constraint_count = total_constraint_count;
   // Retired ranges and sources retain the closure result; no workspace escapes.
   iree_arena_checkpoint_restore(&construction_checkpoint);
   IREE_RETURN_IF_ERROR(loom_low_write_index_constraints(table, arena));
@@ -1261,15 +1391,18 @@ static iree_status_t loom_low_write_finalize_impl(
 iree_status_t loom_low_allocation_write_interference_finalize(
     loom_low_allocation_write_interference_t* table,
     const loom_liveness_analysis_t* liveness, const loom_cfg_graph_t* cfg_graph,
-    const loom_low_placement_table_t* placement, iree_arena_allocator_t* arena,
-    iree_arena_allocator_t* scratch_arena) {
+    const loom_low_placement_table_t* placement,
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    iree_arena_allocator_t* arena, iree_arena_allocator_t* scratch_arena) {
   if (table == NULL || table->retained_unit_count == 0) {
     return iree_ok_status();
   }
+  table->unit_liveness = unit_liveness;
   const iree_arena_checkpoint_t scratch_checkpoint =
       iree_arena_checkpoint_save(scratch_arena);
-  const iree_status_t status = loom_low_write_finalize_impl(
-      table, liveness, cfg_graph, placement, arena, scratch_arena);
+  const iree_status_t status =
+      loom_low_write_finalize_impl(table, liveness, cfg_graph, placement,
+                                   unit_liveness, arena, scratch_arena);
   iree_arena_checkpoint_restore(&scratch_checkpoint);
   return status;
 }
@@ -1359,6 +1492,27 @@ static bool loom_low_write_infer_conflicts(
   return false;
 }
 
+static bool loom_low_write_constraint_overlaps(
+    const loom_low_allocation_write_interference_t* table,
+    const loom_low_write_constraint_t* row, int64_t destination,
+    int64_t observed) {
+  const int64_t offset = destination + row->destination_offset - observed;
+  if (row->retained.value != LOOM_VALUE_ORDINAL_INVALID) {
+    return loom_low_write_ranges_overlap(
+        offset - row->retained.offset,
+        loom_low_write_constraint_write_count(row), row->retained.count);
+  }
+  // Each copy row writes one unit. Its overlapped source unit directly indexes
+  // the completed lifetime result; sparse presence was proved at construction.
+  if (offset < 0 || offset >= row->source_lifetime.width) {
+    return false;
+  }
+  const uint32_t point_start =
+      table->unit_liveness->values[row->source].unit_point_start;
+  return table->unit_liveness->end_points[point_start + (uint32_t)offset] >
+         row->source_lifetime.point;
+}
+
 static loom_value_ordinal_t loom_low_write_origin_conflicting_read(
     loom_low_allocation_write_interference_t* table,
     const loom_low_allocation_assignment_map_t* assignments,
@@ -1377,23 +1531,22 @@ static loom_value_ordinal_t loom_low_write_origin_conflicting_read(
           table->indexed_constraints[range.start + i];
       const int64_t destination = loom_low_write_location(
           table, assignments, row->destination, origin, base, proposal);
+      const loom_value_ordinal_t observed =
+          loom_low_write_constraint_observed_value(row);
       if (row->retained.count != 0) {
         if (destination >= LOOM_LOW_WRITE_LOCATION_UNKNOWN) {
           continue;
         }
         const int64_t retained = loom_low_write_location(
-            table, assignments, row->retained.value, origin, base, proposal);
+            table, assignments, observed, origin, base, proposal);
         if (retained >= LOOM_LOW_WRITE_LOCATION_UNKNOWN ||
-            !loom_low_write_ranges_overlap(
-                destination + row->destination_offset - retained -
-                    row->retained.offset,
-                loom_low_write_constraint_write_count(row),
-                row->retained.count)) {
+            !loom_low_write_constraint_overlaps(table, row, destination,
+                                                retained)) {
           continue;
         }
         if (row->source == LOOM_VALUE_ORDINAL_INVALID) {
           conflicts = true;
-          retained_origin = row->retained.value;
+          retained_origin = observed;
           continue;
         }
       } else if (destination == LOOM_LOW_WRITE_LOCATION_SPILLED) {
@@ -1423,7 +1576,7 @@ static loom_value_ordinal_t loom_low_write_origin_conflicting_read(
             &pending_count);
       }
       if (conflicts) {
-        retained_origin = row->retained.value;
+        retained_origin = observed;
       }
     }
   }

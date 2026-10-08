@@ -26,23 +26,23 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @loop_preserves_tuple_componen
 }
 
 // ----
-  v_dual_mov_b32 v1, 1 :: v_dual_mov_b32 v4, 0
+  v_dual_mov_b32 v1, 1 :: v_dual_mov_b32 v2, 0
   s_mov_b32 s1, 0
   s_delay_alu instid0(VALU_DEP_1)
-  v_mov_b32 v2, v4
+  v_mov_b32 v3, v2
 .Lbb1:
   s_cmp_lt_i32 s1, s0
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  v_add_u32 v2, v2, v1
+  v_add_u32 v3, v3, v1
   s_add_u32 s1, s1, 1
   s_branch .Lbb1
 .Lbb3:
-  v_mov_b32 v3, v4
+  v_mov_b32 v1, v2
 .Lbb4:
-  global_store_b64 v0, v[3:4], s[2:3] offset:0
-  global_store_b32 v0, v2, s[2:3] offset:8
+  global_store_b64 v0, v[1:2], s[2:3] offset:0
+  global_store_b32 v0, v3, s[2:3] offset:8
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -257,21 +257,21 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @disjoint_tuple_observation(%c
 }
 
 // ----
-  v_mov_b32 v3, 1
+  v_mov_b32 v1, 1
   s_mov_b32 s1, 0
   s_cbranch_scc0 .Lbb5
 .Lbb1:
-  v_mov_b32 v1, v0
+  v_mov_b32 v3, v0
 .Lbb2:
   s_cmp_lt_i32 s1, s0
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb4
 .Lbb3:
-  v_add_u32 v1, v1, v3
+  v_add_u32 v3, v3, v1
   s_add_u32 s1, s1, 1
   s_branch .Lbb2
 .Lbb4:
-  global_store_b32 v2, v1, s[2:3] offset:0
+  global_store_b32 v2, v3, s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 .Lbb5:
@@ -377,16 +377,16 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @recreated_tuple_keeps_outer_c
 }
 
 // ----
-  v_dual_mov_b32 v1, 1 :: v_dual_mov_b32 v4, 0
+  v_dual_mov_b32 v1, 1 :: v_dual_mov_b32 v2, 0
   s_mov_b32 s4, 0
 .Lbb1:
   s_cmp_lt_i32 s4, s0
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb6
 .Lbb2:
-  v_mov_b32 v2, v4
+  v_mov_b32 v3, v2
 .Lbb3:
-  v_add_u32 v2, v2, v1
+  v_add_u32 v3, v3, v1
   s_add_u32 s4, s4, 1
   s_cmp_lt_i32 s4, s1
   s_delay_alu instid0(SALU_CYCLE_1)
@@ -396,9 +396,9 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @recreated_tuple_keeps_outer_c
 .Lbb5:
   s_branch .Lbb1
 .Lbb6:
-  v_mov_b32 v3, v4
+  v_mov_b32 v1, v2
 .Lbb7:
-  global_store_b64 v0, v[3:4], s[2:3] offset:0
+  global_store_b64 v0, v[1:2], s[2:3] offset:0
   s_waitcnt_vscnt vscnt(0)
   s_endpgm
 
@@ -483,20 +483,19 @@ low.func.def target<amdgpu.cdna3.core>(@target) @wave64_loop_preserves_tuple_com
   v_mov_b32 v1, 1
   v_mov_b32 v2, 0
   s_mov_b32 s1, 0
-  v_mov_b32 v3, v2
+  v_mov_b32 v4, v2
 .Lbb1:
   s_cmp_lt_i32 s1, s0
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  v_add_u32 v3, v3, v1
+  v_add_u32 v4, v4, v1
   s_add_u32 s1, s1, 1
   s_branch .Lbb1
 .Lbb3:
-  v_mov_b32 v4, v2
-  v_mov_b32 v5, v2
+  v_mov_b32 v3, v2
 .Lbb4:
-  global_store_dwordx2 v0, v[4:5], s[2:3] offset:0
-  global_store_dword v0, v3, s[2:3] offset:8
+  global_store_dwordx2 v0, v[2:3], s[2:3] offset:0
+  global_store_dword v0, v4, s[2:3] offset:8
   s_waitcnt vmcnt(0) lgkmcnt(15)
   s_endpgm
 

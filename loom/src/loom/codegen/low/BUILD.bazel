@@ -330,6 +330,7 @@ loom_cc_library(
         ":descriptors",
         ":function",
         ":function_requirements",
+        ":storage_identity",
         ":target_binding",
         "//loom/src/loom/analysis:liveness_dataflow",
         "//loom/src/loom/error:emitter",
@@ -472,6 +473,18 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "storage_identity",
+    srcs = ["storage_identity.c"],
+    hdrs = ["storage_identity.h"],
+    deps = [
+        ":storage_relation",
+        "//loom/src/loom/ir",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_library(
     name = "storage_relation",
     srcs = ["storage_relation.c"],
     hdrs = ["storage_relation.h"],
@@ -600,6 +613,7 @@ loom_cc_library(
         "//loom/src/loom/codegen/low/allocation:table",
         "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/codegen/low/allocation:unit_liveness",
+        "//loom/src/loom/codegen/low/allocation:unit_liveness_builder",
         "//loom/src/loom/codegen/low/allocation:write_interference",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/error:emitter",
@@ -629,6 +643,7 @@ loom_cc_benchmark(
         "//loom/src/loom/codegen/low/allocation:placement",
         "//loom/src/loom/codegen/low/allocation:target_constraints",
         "//loom/src/loom/codegen/low/allocation:unit_liveness",
+        "//loom/src/loom/codegen/low/allocation:unit_liveness_builder",
         "//loom/src/loom/codegen/low/schedule",
         "//loom/src/loom/format/text:parser",
         "//loom/src/loom/ir",
@@ -925,7 +940,9 @@ loom_cc_library(
         ":memory_access",
         ":packet",
         ":planning_statistics",
+        ":read_retention",
         ":rematerialization",
+        ":representation_binding",
         ":storage_layout",
         ":storage_lease",
         ":storage_transport",

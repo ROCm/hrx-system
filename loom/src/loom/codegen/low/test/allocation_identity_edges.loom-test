@@ -88,7 +88,8 @@ low.func.def schedule(locked) target<test.low.core>(@target) @permuted(%conditio
 }
 
 // ----
-CHECK: *"name":"swapped","type":"reg<test.i32 x2>"*,"location":{"kind":"target_id","base":3,"count":2}*
+CHECK: *"name":"first","type":"reg<test.i32>"*,"location":{"kind":"target_id","base":3,"count":1}*
+CHECK: *"name":"second","type":"reg<test.i32>"*,"location":{"kind":"target_id","base":1,"count":1}*
 
 // ====
 // Preserving one unit does not establish identity for the whole edge.
@@ -133,5 +134,5 @@ low.func.def schedule(locked) target<test.low.core>(@target) @destructive(%condi
 }
 
 // ----
-CHECK: *"name":"reassembled","type":"reg<test.i32 x4>"*,"location":{"kind":"target_id","base":5,"count":4}*
+CHECK: *"name":"changed","type":"reg<test.i32 x4>"*,"location":{"kind":"target_id","base":5,"count":4}*
 CHECK: *"coalesced_copy_count":0,"materialized_copy_count":1,*

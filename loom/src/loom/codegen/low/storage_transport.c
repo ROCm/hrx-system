@@ -80,7 +80,7 @@ static iree_status_t loom_low_storage_transport_append(
   const bool is_store = loom_low_spill_isa(traffic);
   const loom_value_id_t value_id = is_store ? loom_low_spill_value(traffic)
                                             : loom_low_reload_result(traffic);
-  const loom_module_t* module = builder->model->module;
+  const loom_module_t* module = builder->model->context.module;
   const loom_value_t* value = loom_module_value(module, value_id);
   // The callable conventions consuming this plan use scalar register cells.
   if (loom_low_register_type_unit_count(value->type) != 1 ||
@@ -91,7 +91,7 @@ static iree_status_t loom_low_storage_transport_append(
     return iree_ok_status();
   }
   const loom_low_storage_layout_t* layout =
-      &builder->model->requirements.storage_layout;
+      &builder->model->context.requirements.storage_layout;
   loom_low_storage_layout_reference_t reference;
   loom_low_storage_layout_lookup_reference(
       &layout->index, layout->records,
@@ -109,7 +109,7 @@ static iree_status_t loom_low_storage_transport_append(
   // physical cells may join a boundary; ordinary emission retains the target's
   // authored-span diagnostic for an access that does not fit.
   const uint32_t cell_bytes =
-      builder->model->target.descriptor_set->reg_classes[register_class]
+      builder->model->context.target.descriptor_set->reg_classes[register_class]
           .alloc_unit_bits /
       8;
   if (cell_bytes > reference.byte_length - relative_offset) {
@@ -117,11 +117,11 @@ static iree_status_t loom_low_storage_transport_append(
   }
   if (!builder->indices) {
     IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-        builder->arena, builder->model->value_domain.value_count,
+        builder->arena, builder->model->context.value_domain.value_count,
         sizeof(*builder->indices), (void**)&builder->indices));
-    memset(
-        builder->indices, 0xFF,
-        builder->model->value_domain.value_count * sizeof(*builder->indices));
+    memset(builder->indices, 0xFF,
+           builder->model->context.value_domain.value_count *
+               sizeof(*builder->indices));
   }
   if (builder->count == builder->capacity) {
     IREE_RETURN_IF_ERROR(
@@ -129,8 +129,8 @@ static iree_status_t loom_low_storage_transport_append(
                               builder->count + 1, sizeof(*builder->bindings),
                               &builder->capacity, (void**)&builder->bindings));
   }
-  const loom_value_ordinal_t ordinal =
-      loom_local_value_domain_ordinal(&builder->model->value_domain, value_id);
+  const loom_value_ordinal_t ordinal = loom_local_value_domain_ordinal(
+      &builder->model->context.value_domain, value_id);
   builder->indices[ordinal] = (uint32_t)builder->count;
   builder->bindings[builder->count++] = (loom_low_storage_transport_binding_t){
       .space = reference.reservation.space,
@@ -167,20 +167,22 @@ iree_status_t loom_low_storage_transport_build(
     iree_arena_allocator_t* arena,
     const loom_low_storage_transport_t** out_plan) {
   *out_plan = NULL;
-  if (!synchronous_spaces || !model->requirements.storage_layout.record_count) {
+  if (!synchronous_spaces ||
+      !model->context.requirements.storage_layout.record_count) {
     return iree_ok_status();
   }
   loom_low_storage_transport_builder_t builder = {
       .model = model, .spaces = synchronous_spaces, .arena = arena};
-  const loom_block_t* entry = loom_region_const_entry_block(model->body);
+  const loom_block_t* entry =
+      loom_region_const_entry_block(model->context.body);
   uint32_t ordinal = 0;
   iree_status_t status = iree_ok_status();
   for (uint16_t b = 0;
-       b < model->body->block_count && iree_status_is_ok(status); ++b) {
-    loom_block_t* block = model->body->blocks[b];
+       b < model->context.body->block_count && iree_status_is_ok(status); ++b) {
+    loom_block_t* block = model->context.body->blocks[b];
     const loom_op_t* read_begin = NULL;
     const loom_op_t* store_boundary =
-        block == entry ? model->function_op : NULL;
+        block == entry ? model->context.function_op : NULL;
     uint32_t store_boundary_ordinal = UINT32_MAX;
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
@@ -203,12 +205,13 @@ iree_status_t loom_low_storage_transport_build(
         }
         read_begin = NULL;
         if (store_boundary && loom_low_spill_isa(op)) {
-          const loom_value_t* value =
-              loom_module_value(model->module, loom_low_spill_value(op));
-          const bool matches = loom_value_is_block_arg(value)
-                                   ? store_boundary == model->function_op &&
-                                         loom_value_def_block(value) == entry
-                                   : loom_value_def_op(value) == store_boundary;
+          const loom_value_t* value = loom_module_value(
+              model->context.module, loom_low_spill_value(op));
+          const bool matches =
+              loom_value_is_block_arg(value)
+                  ? store_boundary == model->context.function_op &&
+                        loom_value_def_block(value) == entry
+                  : loom_value_def_op(value) == store_boundary;
           if (matches) {
             status = loom_low_storage_transport_append(
                 &builder, op, store_boundary, store_boundary_ordinal);

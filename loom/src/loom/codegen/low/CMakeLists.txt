@@ -319,6 +319,7 @@ loom_cc_library(
     ::descriptors
     ::function
     ::function_requirements
+    ::storage_identity
     ::target_binding
     iree::base
     iree::base::internal::arena
@@ -480,6 +481,21 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    storage_identity
+  HDRS
+    "storage_identity.h"
+  SRCS
+    "storage_identity.c"
+  DEPS
+    ::storage_relation
+    iree::base
+    iree::base::internal::arena
+    loom::ir
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     storage_relation
   HDRS
     "storage_relation.h"
@@ -624,6 +640,7 @@ loom_cc_library(
     loom::codegen::low::allocation::table
     loom::codegen::low::allocation::target_constraints
     loom::codegen::low::allocation::unit_liveness
+    loom::codegen::low::allocation::unit_liveness_builder
     loom::codegen::low::allocation::write_interference
     loom::codegen::low::schedule
     loom::error::emitter
@@ -654,6 +671,7 @@ loom_cc_benchmark(
     loom::codegen::low::allocation::placement
     loom::codegen::low::allocation::target_constraints
     loom::codegen::low::allocation::unit_liveness
+    loom::codegen::low::allocation::unit_liveness_builder
     loom::codegen::low::schedule
     loom::format::text::parser
     loom::ir
@@ -994,7 +1012,9 @@ loom_cc_library(
     ::memory_access
     ::packet
     ::planning_statistics
+    ::read_retention
     ::rematerialization
+    ::representation_binding
     ::storage_layout
     ::storage_lease
     ::storage_transport

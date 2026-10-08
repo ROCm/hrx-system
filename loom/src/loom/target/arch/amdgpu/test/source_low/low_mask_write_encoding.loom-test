@@ -3,7 +3,8 @@
 // Scalar overwrite drains only scalar destinations before address arithmetic.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %replacement = s_or_b64 %source, %source
   %result = s_and_b64 %replacement, %source
@@ -24,7 +25,8 @@ low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value
 // VALU overwrite uses va_sdst instead of a full ALU drain.
 amdgpu.target<gfx1151> @target {subgroup_size = 64}
 
-low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @reuse(%value: reg<amdgpu.vgpr>, %incoming_mask: reg<amdgpu.sgpr x2>, %source: reg<amdgpu.sgpr x2>) asm {
+  %mask = low.assume %incoming_mask [] : reg<amdgpu.sgpr x2>
   %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
   %replacement = v_cmp_eq_i32 %value, %value
   %again = v_cndmask_b32_src0_inline %selected, %replacement {false_value = 0}
