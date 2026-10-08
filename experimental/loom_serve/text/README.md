@@ -5,6 +5,8 @@ executables. They have no dependency on a model package or embedded source
 catalog. `--model=/path/to/package` is required. Model files are JIT inputs,
 not build inputs to these binaries.
 
+The [tiny source fixture](../models/fixtures/text/README.md) exercises retained
+rows, shared pages and HTTP continuations with a generated 76-byte checkpoint.
 The [Qwen package](../models/qwen/README.md) is the real-weight implementation
 of this contract. Its numerical kernels, stage composition, storage geometry,
 checkpoint policy, tokenizer framing and chat policy live in Loom source.
@@ -95,6 +97,8 @@ prepare(prefill:i64, context:i64, pool:i64, rows:i64, pins:i64, mtp:i32,
 `shapes` contains little-endian i64 `{token_capacity, span_capacity}`
 pairs. The source declares command roots, configuration overrides and
 checkpoint bindings through the [preparation capability](../runtime/preparation.h).
+The existing `input.require` capability accepts source-specific configuration
+checks during bootstrap; tokenization is available only in the warm program.
 The first `shared_stage_count` stages have identical target parameter
 placement and six persistent bindings. All stages use one checkpoint domain,
 with at most seven explicit dynamic bindings plus private workspace when present.

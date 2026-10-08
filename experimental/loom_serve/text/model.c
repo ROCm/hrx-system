@@ -523,12 +523,17 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
       iree_vm_buffer_variant_from_ptr_move(&model->vm_types, &weights),
   };
   iree_vm_variant_t results[4 + LOOM_SERVE_TEXT_STORAGE_RESULT_COUNT] = {0};
+  iree_vm_module_t* input = NULL;
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_input_module_create(model->environment, NULL, &input,
+                                            allocator);
+  }
   if (iree_status_is_ok(status)) {
     status = loom_serve_preparation_create(
         model->environment, iree_make_cstring_view(path), IREE_SV("prepare"),
         iree_vm_variant_span_from_array(arguments),
-        iree_vm_variant_span_from_array(results), iree_vm_module_span_empty(),
-        &model->preparation, allocator);
+        iree_vm_variant_span_from_array(results),
+        (iree_vm_module_span_t){&input, 1}, &model->preparation, allocator);
   }
   int64_t prefill_capacity = 0;
   int32_t shared_stage_count = 0;
@@ -602,6 +607,7 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_module_release(input);
   iree_allocator_free(allocator, path);
   return status;
 }

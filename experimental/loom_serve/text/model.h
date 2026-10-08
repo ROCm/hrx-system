@@ -51,14 +51,16 @@ typedef struct loom_serve_text_options_t {
   // size. Nonzero selects paged packed execution; zero uses dense addressing.
   // This is independent of the logical context ceiling and requires epochs.
   iree_host_size_t pool_capacity;
-  // Number of cached packed-epoch stages; zero selects isolated execution.
+  // Number of host packed token/span shape buckets; zero selects isolated
+  // execution. Source may map several buckets to the same command.
   iree_host_size_t epoch_count;
-  // Borrowed shapes specialized from the shared catalog during creation.
+  // Borrowed scheduling shapes supplied to the source bootstrap.
   const loom_serve_packing_shape_t* epoch_shapes;
   // Prepare MTP proposal, catch-up, and verification using shared target
   // weights.
   bool enable_mtp;
   // Device assertion classes/reporting applied to every JIT kernel pipeline.
+  // Initialize structure type and size even when no checks are enabled.
   loomc_sanitizer_options_t kernel_sanitizer;
   // Parameter file indexed here and streamed on activation.
   iree_string_view_t weights_path;

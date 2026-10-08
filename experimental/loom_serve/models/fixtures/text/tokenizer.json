@@ -1,0 +1,8 @@
+{
+  "added_tokens": [
+    {"id": 3, "content": "#", "single_word": false, "lstrip": false,
+     "rstrip": false, "normalized": false, "special": true}
+  ],
+  "decoder": {"type": "ByteFallback"},
+  "model": {"type": "BPE", "vocab": {"a": 0, "b": 1, "x": 2, "#": 3}, "merges": []}
+}

@@ -8,9 +8,10 @@ server has no fixture switch or canned-response path.
 
 This is a small first-output and authoring witness. It establishes model-package
 and transport contracts, not learned-model quality, memory pressure, neural
-throughput or NPU support. Text has a separate [retained-row contract](../../text/README.md)
-and real [Qwen package](../qwen/README.md); this catalog does not simulate text
-generation through a finite-vector endpoint.
+throughput or NPU support. The separate [retained-text fixture](text/README.md)
+uses the actual [retained-row contract](../../text/README.md) and a generated
+76-byte checkpoint. It can be added to this catalog; text generation is not
+simulated through a finite-vector endpoint.
 
 ## Launch
 
@@ -94,7 +95,7 @@ admission and drains accepted work before model and device destruction.
 | Text-conditioned finite image | [Image package](image/README.md), then [Krea](../krea/README.md) | [Image model](../../image/model.h) |
 | Ragged inputs to final embedding vectors | [Embedding package](embedding/README.md) | [Finite model](../../finite/README.md), [embedding records](../../embedding/protocol.h) |
 | Structured questions to choice/score/noul probabilities | [Decision package](decision/README.md) | [Finite model](../../finite/README.md), [SystemOne records](../../decision/protocol.h) |
-| Retained autoregressive sessions | [Qwen package](../qwen/README.md) | [Text model and source entries](../../text/README.md) |
+| Retained autoregressive sessions | [Tiny text package](text/README.md), then [Qwen](../qwen/README.md) | [Text model and source entries](../../text/README.md) |
 
 Copying a source package establishes its ABI skeleton, not its mathematics.
 The port replaces kernel math, tensor names/layouts, source preparation and
