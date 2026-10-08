@@ -77,7 +77,8 @@ static bool loom_low_allocation_edge_alias_has_indirect_observations(
          unit_liveness->observations.value_links[storage_ordinal] != 0;
 }
 
-static iree_status_t loom_low_allocation_edge_alias_storage_range_used_after(
+static iree_status_t
+loom_low_allocation_edge_alias_storage_range_used_after_boundary(
     const loom_low_allocation_edge_alias_context_t* context,
     const loom_block_t* origin_block, uint64_t first_observation_ordinal,
     loom_value_id_t value_id, uint32_t unit_offset, uint32_t unit_count,
@@ -142,6 +143,16 @@ static iree_status_t loom_low_allocation_edge_alias_storage_range_used_after(
   return iree_ok_status();
 }
 
+iree_status_t loom_low_allocation_edge_alias_storage_range_used_after_operation(
+    const loom_low_allocation_edge_alias_context_t* context,
+    const loom_op_t* operation, loom_value_ordinal_t value_ordinal,
+    uint32_t unit_offset, uint32_t unit_count, bool* out_used_after) {
+  return loom_low_allocation_edge_alias_storage_range_used_after_boundary(
+      context, operation->parent_block, operation->block_ordinal + 1,
+      loom_low_placement_value_id(context->placement, value_ordinal),
+      unit_offset, unit_count, out_used_after);
+}
+
 static iree_status_t
 loom_low_allocation_edge_alias_destination_may_survive_candidate_definition(
     const loom_low_allocation_edge_alias_context_t* context,
@@ -185,7 +196,7 @@ loom_low_allocation_edge_alias_destination_may_survive_candidate_definition(
           loom_low_allocation_edge_alias_has_indirect_observations(
               context, loom_low_allocation_edge_alias_storage_origin(
                            context, relation->result_ordinal))) {
-        return loom_low_allocation_edge_alias_storage_range_used_after(
+        return loom_low_allocation_edge_alias_storage_range_used_after_boundary(
             context, loom_value_def_block(candidate_value),
             /*first_observation_ordinal=*/0, destination_value_id,
             destination_unit_offset, destination_unit_count, out_may_survive);
@@ -197,7 +208,7 @@ loom_low_allocation_edge_alias_destination_may_survive_candidate_definition(
   if (candidate_op == NULL || candidate_op->parent_block == NULL) {
     return iree_ok_status();
   }
-  return loom_low_allocation_edge_alias_storage_range_used_after(
+  return loom_low_allocation_edge_alias_storage_range_used_after_boundary(
       context, candidate_op->parent_block, candidate_op->block_ordinal + 1,
       destination_value_id, destination_unit_offset, destination_unit_count,
       out_may_survive);
@@ -261,7 +272,7 @@ iree_status_t loom_low_allocation_edge_alias_allows_counterpart_overlap(
                 destination_unit_count, relation->write_point);
       } else {
         IREE_RETURN_IF_ERROR(
-            loom_low_allocation_edge_alias_storage_range_used_after(
+            loom_low_allocation_edge_alias_storage_range_used_after_boundary(
                 context, relation->op->parent_block,
                 relation->op->block_ordinal + 1, source_value_id,
                 source_unit_offset, destination_unit_count,

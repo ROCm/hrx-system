@@ -19,6 +19,7 @@ loom_check_test_suite(
         "allocation_aliases.loom-test",
         "allocation_arguments.loom-test",
         "allocation_concat.loom-test",
+        "allocation_concat_loops.loom-test",
         "allocation_copy_sources.loom-test",
         "allocation_destructive_concat.loom-test",
         "allocation_destructive_paths.loom-test",

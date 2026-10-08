@@ -104,8 +104,7 @@ typedef struct loom_low_allocation_unit_use_t {
   uint16_t block_index;
 } loom_low_allocation_unit_use_t;
 
-// Sparse unit demands collected by the existing use-point producer. Only
-// multi-unit values need refinement beyond the canonical value dataflow.
+// Sparse physical-storage demands that refine canonical value dataflow.
 typedef struct loom_low_allocation_unit_use_index_t {
   // Mutable lifetime result receiving the recorded uses.
   loom_low_allocation_unit_liveness_t* unit_liveness;
@@ -147,6 +146,16 @@ static bool loom_low_allocation_unit_use_is_defined_in_block(
          definition_point <= block->end_point;
 }
 
+static iree_status_t loom_low_allocation_unit_use_index_allocate_heads(
+    loom_low_allocation_unit_use_index_t* index) {
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(index->arena, index->unit_liveness->point_count,
+                                sizeof(*index->heads), (void**)&index->heads));
+  memset(index->heads, 0xFF,
+         index->unit_liveness->point_count * sizeof(*index->heads));
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_allocation_unit_use_index_initialize(
     const loom_cfg_graph_t* cfg_graph, const loom_liveness_analysis_t* liveness,
     loom_low_allocation_unit_liveness_t* unit_liveness,
@@ -166,12 +175,7 @@ static iree_status_t loom_low_allocation_unit_use_index_initialize(
       cfg_graph->edge_count == 0) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      arena, unit_liveness->point_count, sizeof(*out_index->heads),
-      (void**)&out_index->heads));
-  memset(out_index->heads, 0xFF,
-         unit_liveness->point_count * sizeof(*out_index->heads));
-  return iree_ok_status();
+  return loom_low_allocation_unit_use_index_allocate_heads(out_index);
 }
 
 static iree_status_t loom_low_allocation_unit_use_index_refine_storage_segment(
@@ -247,6 +251,20 @@ loom_low_allocation_unit_use_index_record(
     *head = entry_index;
   }
   return iree_ok_status();
+}
+
+static iree_status_t loom_low_allocation_unit_use_index_record_decomposed_use(
+    loom_low_allocation_unit_use_index_t* index, uint32_t definition_point,
+    iree_host_size_t unit_start, uint32_t unit_count) {
+  if (index->liveness->block_count < 2 || index->cfg_graph->edge_count == 0) {
+    return iree_ok_status();
+  }
+  if (index->heads == NULL) {
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_unit_use_index_allocate_heads(index));
+  }
+  return loom_low_allocation_unit_use_index_record(index, definition_point,
+                                                   unit_start, unit_count);
 }
 
 static iree_status_t loom_low_allocation_unit_use_index_extend_boundaries(
@@ -506,6 +524,20 @@ loom_low_allocation_unit_liveness_note_contiguous_part_uses_at_point(
       // already represented by its direct SSA use at the edge.
       continue;
     }
+    const loom_liveness_interval_t* source_interval =
+        loom_liveness_interval_for_value_ordinal(liveness,
+                                                 source.value_ordinal);
+    // Canonical SSA uses describe the concat definition, not later decomposed
+    // edge reads. Retain each source component through every predecessor path
+    // that can reach this edge. Multi-unit sources may already be indexed by
+    // note_unit_use_at_point; the sparse index deduplicates them.
+    IREE_RETURN_IF_ERROR(
+        loom_low_allocation_unit_use_index_record_decomposed_use(
+            unit_use_index, source_interval->definition_point,
+            (iree_host_size_t)unit_liveness->values[source.value_ordinal]
+                    .unit_point_start +
+                source.unit_offset,
+            relation->unit_count));
     IREE_RETURN_IF_ERROR(
         loom_low_allocation_unit_liveness_initialize_observation_links(
             unit_liveness, placement, arena));
