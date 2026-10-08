@@ -62,6 +62,7 @@ loom_cc_library(
         ":request",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/http:timer",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",
         "//loom/src/loom/util:json",

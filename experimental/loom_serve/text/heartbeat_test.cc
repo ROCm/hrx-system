@@ -41,7 +41,7 @@ class TextHeartbeatTest : public ::testing::Test {
 
   void Initialize() {
     loom_serve_text_heartbeat_initialize(&heartbeat_);
-    heartbeat_.observer = {Wake, this};
+    loom_serve_http_timer_set_observer(&heartbeat_.timer, {Wake, this});
   }
 
   void Configure(iree_duration_t interval) {
@@ -93,16 +93,6 @@ class TextHeartbeatTest : public ::testing::Test {
   std::atomic<uint32_t> wake_count_{0};
 };
 
-TEST_F(TextHeartbeatTest, DisabledReportingAcceptsNoWork) {
-  Configure(IREE_DURATION_ZERO);
-  bool progress = false;
-  IREE_ASSERT_OK(
-      loom_serve_text_heartbeat_advance(&heartbeat_, false, &progress));
-  EXPECT_FALSE(progress);
-  EXPECT_FALSE(loom_serve_text_heartbeat_is_pending(&heartbeat_));
-  EXPECT_EQ(wake_count_.load(), 0u);
-}
-
 TEST_F(TextHeartbeatTest, TimerReadinessPublishesCopiedCounters) {
   Configure(iree_make_duration_ms(1));
   heartbeat_.snapshot.prefill_tokens = 42;
@@ -120,40 +110,6 @@ TEST_F(TextHeartbeatTest, TimerReadinessPublishesCopiedCounters) {
       loom_serve_text_heartbeat_advance(&heartbeat_, false, &progress));
   EXPECT_TRUE(progress);
   EXPECT_EQ(heartbeat_.previous.prefill, 49u);
-}
-
-TEST_F(TextHeartbeatTest, FarFutureTimerStopsWithoutWaitingForItsDeadline) {
-  Configure(iree_make_duration_ms(3600000));
-  bool progress = false;
-  IREE_ASSERT_OK(
-      loom_serve_text_heartbeat_advance(&heartbeat_, false, &progress));
-  EXPECT_TRUE(loom_serve_text_heartbeat_is_pending(&heartbeat_));
-  IREE_ASSERT_OK(Stop());
-  EXPECT_FALSE(loom_serve_text_heartbeat_is_pending(&heartbeat_));
-}
-
-TEST_F(TextHeartbeatTest, ExpiredTimerStopsWithoutRearming) {
-  Configure(iree_make_duration_ms(1));
-  const uint32_t previous_count = wake_count_.load(std::memory_order_acquire);
-  bool progress = false;
-  IREE_ASSERT_OK(
-      loom_serve_text_heartbeat_advance(&heartbeat_, false, &progress));
-  AwaitWake(previous_count);
-  IREE_ASSERT_OK(Stop());
-  EXPECT_FALSE(loom_serve_text_heartbeat_is_pending(&heartbeat_));
-}
-
-TEST_F(TextHeartbeatTest, CancellationReceiptPermitsAddressReuse) {
-  for (int iteration = 0; iteration < 32; ++iteration) {
-    SCOPED_TRACE(iteration);
-    Configure(iteration % 2 ? 1 : iree_make_duration_ms(3600000));
-    bool progress = false;
-    IREE_ASSERT_OK(
-        loom_serve_text_heartbeat_advance(&heartbeat_, false, &progress));
-    IREE_ASSERT_OK(Stop());
-    loom_serve_text_heartbeat_deinitialize(&heartbeat_);
-    Initialize();
-  }
 }
 
 }  // namespace

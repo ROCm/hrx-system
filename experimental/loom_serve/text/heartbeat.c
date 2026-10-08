@@ -9,12 +9,6 @@
 #include <stdio.h>
 #include <string.h>
 
-enum {
-  TEXT_HEARTBEAT_TIMER = 1u << 0,
-  TEXT_HEARTBEAT_STOP = 1u << 1,
-  TEXT_HEARTBEAT_CANCEL = 1u << 2,
-};
-
 static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
   iree_slim_mutex_lock(&heartbeat->mutex);
   const loom_serve_text_heartbeat_snapshot_t state = heartbeat->snapshot;
@@ -81,74 +75,11 @@ static void text_heartbeat_report(loom_serve_text_heartbeat_t* heartbeat) {
   heartbeat->previous.output = state.output_tokens;
 }
 
-static void text_heartbeat_cancel_retired(void* user_data) {
-  loom_serve_text_heartbeat_t* heartbeat = user_data;
-  iree_slim_mutex_lock(&heartbeat->mutex);
-  heartbeat->events.pending &= ~TEXT_HEARTBEAT_CANCEL;
-  heartbeat->events.ready = true;
-  heartbeat->observer.wake(heartbeat->observer.user_data);
-  iree_slim_mutex_unlock(&heartbeat->mutex);
-}
-
-static void text_heartbeat_timer_completed(
-    void* user_data, iree_async_operation_t* operation, iree_status_t status,
-    iree_async_completion_flags_t flags) {
-  (void)operation;
-  (void)flags;
-  loom_serve_text_heartbeat_t* heartbeat = user_data;
-  iree_slim_mutex_lock(&heartbeat->mutex);
-  heartbeat->events.status = iree_status_join(heartbeat->events.status, status);
-  heartbeat->events.pending &= ~TEXT_HEARTBEAT_TIMER;
-  heartbeat->events.ready = true;
-  const bool cancel_pending =
-      iree_any_bit_set(heartbeat->events.pending, TEXT_HEARTBEAT_CANCEL);
-  if (!cancel_pending) {
-    heartbeat->observer.wake(heartbeat->observer.user_data);
-  }
-  iree_slim_mutex_unlock(&heartbeat->mutex);
-  if (cancel_pending) {
-    // The receipt may publish the last borrowed access. No access follows it.
-    iree_async_proactor_cancel_request_target_retired(
-        heartbeat->proactor, &heartbeat->timer.cancellation);
-  }
-}
-
-static void text_heartbeat_stop_received(void* user_data,
-                                         iree_async_operation_t* operation,
-                                         iree_status_t status,
-                                         iree_async_completion_flags_t flags) {
-  (void)operation;
-  (void)flags;
-  loom_serve_text_heartbeat_t* heartbeat = user_data;
-  iree_slim_mutex_lock(&heartbeat->mutex);
-  const bool cancel =
-      iree_status_is_ok(status) &&
-      iree_any_bit_set(heartbeat->events.pending, TEXT_HEARTBEAT_TIMER);
-  heartbeat->events.status = iree_status_join(heartbeat->events.status, status);
-  if (cancel) {
-    heartbeat->events.pending |= TEXT_HEARTBEAT_CANCEL;
-  }
-  iree_slim_mutex_unlock(&heartbeat->mutex);
-  if (cancel) {
-    // This poll-owner callback owns a private live timer and an idle receipt.
-    IREE_CHECK_OK(iree_async_proactor_request_cancel(
-        heartbeat->proactor, &heartbeat->timer.operation.base,
-        &heartbeat->timer.cancellation));
-  }
-  iree_slim_mutex_lock(&heartbeat->mutex);
-  heartbeat->events.pending &= ~TEXT_HEARTBEAT_STOP;
-  heartbeat->events.ready = true;
-  heartbeat->observer.wake(heartbeat->observer.user_data);
-  iree_slim_mutex_unlock(&heartbeat->mutex);
-}
-
 void loom_serve_text_heartbeat_initialize(
     loom_serve_text_heartbeat_t* heartbeat) {
   *heartbeat = (loom_serve_text_heartbeat_t){0};
   iree_slim_mutex_initialize(&heartbeat->mutex);
-  iree_async_cancel_request_initialize(
-      (iree_async_cancel_callback_t){text_heartbeat_cancel_retired, heartbeat},
-      &heartbeat->timer.cancellation);
+  loom_serve_http_timer_initialize(&heartbeat->timer);
   heartbeat->snapshot.phase = "starting";
   heartbeat->snapshot.phase_start = iree_time_now();
   heartbeat->snapshot.last_completion = heartbeat->snapshot.phase_start;
@@ -159,80 +90,30 @@ void loom_serve_text_heartbeat_configure(loom_serve_text_heartbeat_t* heartbeat,
                                          iree_async_proactor_t* proactor,
                                          iree_string_view_t name_json,
                                          iree_duration_t interval) {
-  heartbeat->proactor = proactor;
   heartbeat->name_json = name_json;
-  heartbeat->interval = interval;
+  loom_serve_http_timer_configure(&heartbeat->timer, proactor, interval);
 }
 
 bool loom_serve_text_heartbeat_is_pending(
     loom_serve_text_heartbeat_t* heartbeat) {
-  iree_slim_mutex_lock(&heartbeat->mutex);
-  const bool pending = heartbeat->events.pending || heartbeat->events.ready;
-  iree_slim_mutex_unlock(&heartbeat->mutex);
-  return pending;
+  return loom_serve_http_timer_is_pending(&heartbeat->timer);
 }
 
 iree_status_t loom_serve_text_heartbeat_advance(
     loom_serve_text_heartbeat_t* heartbeat, bool stopping, bool* out_progress) {
-  iree_slim_mutex_lock(&heartbeat->mutex);
-  iree_status_t status = heartbeat->events.status;
-  heartbeat->events.status = iree_ok_status();
-  *out_progress = heartbeat->events.ready;
-  heartbeat->events.ready = false;
-  const uint32_t pending = heartbeat->events.pending;
-  iree_slim_mutex_unlock(&heartbeat->mutex);
-  stopping |= !iree_status_is_ok(status);
-  if (stopping && !heartbeat->stopping) {
-    heartbeat->stopping = true;
-    *out_progress = true;
-    if (iree_any_bit_set(pending, TEXT_HEARTBEAT_TIMER)) {
-      iree_async_nop_operation_t* stop = &heartbeat->timer.stop;
-      memset(stop, 0, sizeof(*stop));
-      iree_async_operation_initialize(&stop->base,
-                                      IREE_ASYNC_OPERATION_TYPE_NOP,
-                                      IREE_ASYNC_OPERATION_FLAG_NONE,
-                                      text_heartbeat_stop_received, heartbeat);
-      iree_slim_mutex_lock(&heartbeat->mutex);
-      heartbeat->events.pending |= TEXT_HEARTBEAT_STOP;
-      iree_slim_mutex_unlock(&heartbeat->mutex);
-      iree_status_t stop_status =
-          iree_async_proactor_submit_one(heartbeat->proactor, &stop->base);
-      if (!iree_status_is_ok(stop_status)) {
-        iree_slim_mutex_lock(&heartbeat->mutex);
-        heartbeat->events.pending &= ~TEXT_HEARTBEAT_STOP;
-        iree_slim_mutex_unlock(&heartbeat->mutex);
-      }
-      status = iree_status_join(status, stop_status);
-    }
-  }
-  if (!heartbeat->stopping && !pending && heartbeat->interval) {
+  bool tick = false;
+  iree_status_t status = loom_serve_http_timer_advance(
+      &heartbeat->timer, stopping, out_progress, &tick);
+  if (tick) {
     text_heartbeat_report(heartbeat);
-    *out_progress = true;
-    iree_async_timer_operation_t* timer = &heartbeat->timer.operation;
-    memset(timer, 0, sizeof(*timer));
-    iree_async_operation_initialize(
-        &timer->base, IREE_ASYNC_OPERATION_TYPE_TIMER,
-        IREE_ASYNC_OPERATION_FLAG_CANCELLATION_IS_SUCCESS,
-        text_heartbeat_timer_completed, heartbeat);
-    timer->deadline_ns = iree_time_now() + heartbeat->interval;
-    iree_slim_mutex_lock(&heartbeat->mutex);
-    heartbeat->events.pending |= TEXT_HEARTBEAT_TIMER;
-    iree_slim_mutex_unlock(&heartbeat->mutex);
-    status = iree_async_proactor_submit_one(heartbeat->proactor, &timer->base);
-    if (!iree_status_is_ok(status)) {
-      iree_slim_mutex_lock(&heartbeat->mutex);
-      heartbeat->events.pending &= ~TEXT_HEARTBEAT_TIMER;
-      iree_slim_mutex_unlock(&heartbeat->mutex);
-      heartbeat->stopping = true;
-    }
   }
   return status;
 }
 
 void loom_serve_text_heartbeat_deinitialize(
     loom_serve_text_heartbeat_t* heartbeat) {
-  IREE_ASSERT(!loom_serve_text_heartbeat_is_pending(heartbeat));
-  if (heartbeat->interval) {
+  loom_serve_http_timer_deinitialize(&heartbeat->timer);
+  if (heartbeat->timer.interval) {
     text_heartbeat_report(heartbeat);
   }
   iree_slim_mutex_deinitialize(&heartbeat->mutex);

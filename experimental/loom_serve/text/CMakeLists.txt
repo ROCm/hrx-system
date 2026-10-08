@@ -140,10 +140,9 @@ loom_cc_library(
   SRCS
     "heartbeat.c"
   DEPS
-    iree::async
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::storage::memory
   PUBLIC
@@ -160,7 +159,7 @@ loom_cc_test(
     iree::async::util::proactor_pool
     iree::base
     iree::base::threading
-    iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::timer
     iree::testing::gtest
     iree::testing::gtest_main
 )
@@ -206,6 +205,7 @@ loom_cc_library(
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host

@@ -10,8 +10,8 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "experimental/loom_serve/http/timer.h"
 #include "experimental/loom_serve/image/output.h"
-#include "iree/async/operations/scheduling.h"
 #include "iree/async/operations/semaphore.h"
 #include "iree/base/internal/base64.h"
 #include "iree/base/threading/mutex.h"
@@ -101,13 +101,8 @@ typedef struct image_service_t {
     // Toll-free async semaphore handles used by the public proactor API.
     iree_async_semaphore_t* semaphores[2];
   } device;
-  // One accepted heartbeat timer, retained through its final callback.
-  struct {
-    // Absolute reporting deadline; its callback only publishes a task wake.
-    iree_async_timer_operation_t operation;
-    // Protected by events.mutex; false after final callback publication.
-    bool pending;
-  } timer;
+  // Periodic readiness and owned cancellation, independent of device waits.
+  loom_serve_http_timer_t timer;
   // Bounded FIFO of owned host requests, excluding the active image.
   image_pending_t* pending;
   // Number of occupied FIFO entries.
@@ -118,8 +113,6 @@ typedef struct image_service_t {
   uint64_t active;
   // Admission time of the active image, including generation and encoding.
   iree_time_t active_start;
-  // Next reporting deadline, or infinite when periodic reporting is disabled.
-  iree_time_t next_heartbeat;
   // Last assigned request identity.
   uint64_t sequence;
   // Successfully generated images, including results discarded after reset.
@@ -578,9 +571,6 @@ static iree_status_t image_admit(image_service_t* service,
 // phases describe ownership, not individual completed device dispatches.
 static void image_heartbeat(image_service_t* service) {
   const iree_time_t now = iree_time_now();
-  if (now < service->next_heartbeat) {
-    return;
-  }
   static const char* const phases[] = {"idle", "preparing", "generating",
                                        "encoding"};
   fprintf(stderr,
@@ -593,7 +583,6 @@ static void image_heartbeat(image_service_t* service) {
           service->active ? (now - service->active_start) / 1e6 : 0.0,
           phases[service->phase], service->pending_count, service->completed,
           service->stopping ? "true" : "false");
-  service->next_heartbeat = now + service->options->heartbeat_interval;
 }
 
 static iree_status_t image_ready(image_service_t* service) {
@@ -624,46 +613,6 @@ static void image_stop(image_service_t* service) {
     image_cancel(service->connection, service->active, "shutdown");
     service->connection = NULL;
   }
-}
-
-static void image_timer_completed(void* user_data,
-                                  iree_async_operation_t* operation,
-                                  iree_status_t status,
-                                  iree_async_completion_flags_t flags) {
-  (void)operation;
-  (void)flags;
-  image_service_t* service = user_data;
-  iree_slim_mutex_lock(&service->events.mutex);
-  service->events.status = iree_status_join(service->events.status, status);
-  service->timer.pending = false;
-  image_wake(service);
-  iree_slim_mutex_unlock(&service->events.mutex);
-}
-
-static iree_status_t image_schedule_timer(image_service_t* service) {
-  iree_slim_mutex_lock(&service->events.mutex);
-  const bool pending = service->timer.pending;
-  iree_slim_mutex_unlock(&service->events.mutex);
-  if (pending || !service->options->heartbeat_interval ||
-      (service->stopping && !service->active)) {
-    return iree_ok_status();
-  }
-  memset(&service->timer.operation, 0, sizeof(service->timer.operation));
-  iree_async_operation_initialize(
-      &service->timer.operation.base, IREE_ASYNC_OPERATION_TYPE_TIMER,
-      IREE_ASYNC_OPERATION_FLAG_NONE, image_timer_completed, service);
-  service->timer.operation.deadline_ns = service->next_heartbeat;
-  iree_slim_mutex_lock(&service->events.mutex);
-  service->timer.pending = true;
-  iree_slim_mutex_unlock(&service->events.mutex);
-  iree_status_t status = iree_async_proactor_submit_one(
-      service->proactor, &service->timer.operation.base);
-  if (!iree_status_is_ok(status)) {
-    iree_slim_mutex_lock(&service->events.mutex);
-    service->timer.pending = false;
-    iree_slim_mutex_unlock(&service->events.mutex);
-  }
-  return status;
 }
 
 static iree_status_t image_drain(iree_task_process_t* process,
@@ -700,21 +649,22 @@ static iree_status_t image_drain(iree_task_process_t* process,
     progress = true;
     service->status = image_admit(service, connection, request);
   }
-  image_heartbeat(service);
-  if (iree_status_is_ok(service->status)) {
-    service->status = image_schedule_timer(service);
+  bool timer_progress = false;
+  bool tick = false;
+  service->status = iree_status_join(
+      service->status,
+      loom_serve_http_timer_advance(&service->timer,
+                                    service->stopping && !service->active,
+                                    &timer_progress, &tick));
+  progress |= timer_progress;
+  if (tick) {
+    image_heartbeat(service);
   }
   if (!service->stopping && !iree_status_is_ok(service->status)) {
     image_stop(service);
     progress = true;
   }
-  iree_slim_mutex_lock(&service->events.mutex);
-  const bool timer_pending = service->timer.pending;
-  if (service->stopping && !service->active && !timer_pending) {
-    service->status = iree_status_join(service->status, service->events.status);
-    service->events.status = iree_ok_status();
-  }
-  iree_slim_mutex_unlock(&service->events.mutex);
+  const bool timer_pending = loom_serve_http_timer_is_pending(&service->timer);
   if (service->stopping && !service->active && !timer_pending) {
     loom_serve_http_server_set_observer(service->server,
                                         (loom_serve_http_observer_t){0});
@@ -761,9 +711,8 @@ iree_status_t loom_serve_image_service_run(
                              .server = server,
                              .options = options,
                              .executor = loom_serve_host_executor(host)};
-  service.next_heartbeat =
-      options->heartbeat_interval ? iree_time_now() : IREE_TIME_INFINITE_FUTURE;
   iree_slim_mutex_initialize(&service.events.mutex);
+  loom_serve_http_timer_initialize(&service.timer);
   iree_notification_initialize(&service.events.notification);
   iree_string_builder_initialize(host_allocator, &service.response);
   iree_string_builder_initialize(host_allocator, &service.cpu.response);
@@ -778,6 +727,10 @@ iree_status_t loom_serve_image_service_run(
                                           0, &service.proactor);
   }
   if (iree_status_is_ok(status)) {
+    loom_serve_http_timer_configure(&service.timer, service.proactor,
+                                    options->heartbeat_interval);
+    loom_serve_http_timer_set_observer(
+        &service.timer, (loom_serve_http_observer_t){image_wake, &service});
     status = image_ready(&service);
   }
   if (iree_status_is_ok(status)) {
@@ -788,6 +741,7 @@ iree_status_t loom_serve_image_service_run(
                             iree_infinite_timeout());
     status = service.status;
   }
+  loom_serve_http_timer_deinitialize(&service.timer);
   iree_string_builder_deinitialize(&service.cpu.response);
   iree_string_builder_deinitialize(&service.response);
   iree_allocator_free(host_allocator, service.pending);

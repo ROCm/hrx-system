@@ -7,9 +7,8 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_TEXT_HEARTBEAT_H_
 #define EXPERIMENTAL_LOOM_SERVE_TEXT_HEARTBEAT_H_
 
-#include "experimental/loom_serve/http/server.h"
+#include "experimental/loom_serve/http/timer.h"
 #include "experimental/loom_serve/runtime/device.h"
-#include "iree/async/operations/scheduling.h"
 #include "iree/base/threading/mutex.h"
 
 #ifdef __cplusplus
@@ -79,36 +78,12 @@ typedef struct loom_serve_text_heartbeat_snapshot_t {
 } loom_serve_text_heartbeat_snapshot_t;
 
 typedef struct loom_serve_text_heartbeat_t {
-  // Protects copied statistics and callback publication, never model work.
+  // Protects copied statistics, never model work.
   iree_slim_mutex_t mutex;
-  // Borrowed host I/O owner, outliving every accepted operation.
-  iree_async_proactor_t* proactor;
-  // Borrowed nonblocking service wake target, protected by mutex.
-  loom_serve_http_observer_t observer;
+  // Periodic readiness and callback lifetime, independent of model counters.
+  loom_serve_http_timer_t timer;
   // Borrowed prequoted deployment name, stable through deinitialization.
   iree_string_view_t name_json;
-  // Immutable reporting period in nanoseconds.
-  iree_duration_t interval;
-  // Owner has requested shutdown; no further timers are armed.
-  bool stopping;
-  // Callback publication consumed by the serialized service owner.
-  struct {
-    // Intrusive timer, stop handoff and cancellation receipt ownership bits.
-    uint32_t pending;
-    // A callback outcome awaits consumption, even after its operation retired.
-    bool ready;
-    // Owned callback failures, returned exactly once by advance.
-    iree_status_t status;
-  } events;
-  // Private timer and the two lifetimes required for prompt shutdown.
-  struct {
-    // One deadline, reused only after successful terminal callback return.
-    iree_async_timer_operation_t operation;
-    // Poll-owner handoff for requesting cancellation without blocking a worker.
-    iree_async_nop_operation_t stop;
-    // Receipt retiring any native cancellation key before timer storage dies.
-    iree_async_cancel_request_t cancellation;
-  } timer;
   // Previous report, accessed only by serialized service turns.
   struct {
     // Report timestamp in monotonic nanoseconds.
@@ -129,7 +104,7 @@ void loom_serve_text_heartbeat_initialize(
     loom_serve_text_heartbeat_t* heartbeat);
 
 // Configures borrowed I/O and name storage before the first advance. Zero
-// interval disables reporting. The owner installs observer under mutex before
+// interval disables reporting. The owner installs the timer observer before
 // advancing, then clears it only after all accepted work has been consumed.
 void loom_serve_text_heartbeat_configure(loom_serve_text_heartbeat_t* heartbeat,
                                          iree_async_proactor_t* proactor,

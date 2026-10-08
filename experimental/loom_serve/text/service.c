@@ -1858,9 +1858,7 @@ static void text_set_observer(void* self, loom_serve_http_observer_t observer) {
   iree_slim_mutex_lock(&service->completion.mutex);
   service->completion.observer = observer;
   iree_slim_mutex_unlock(&service->completion.mutex);
-  iree_slim_mutex_lock(&service->heartbeat.mutex);
-  service->heartbeat.observer = observer;
-  iree_slim_mutex_unlock(&service->heartbeat.mutex);
+  loom_serve_http_timer_set_observer(&service->heartbeat.timer, observer);
 }
 
 static bool text_is_pending(void* self) {
