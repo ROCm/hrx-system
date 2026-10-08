@@ -31,14 +31,13 @@ typedef struct loom_serve_memory_statistics_t {
   uint64_t released_bytes;
 } loom_serve_memory_statistics_t;
 
-// Retains allocator. Zero slab_size selects the allocator's recommended
+// Retains the device allocator. Zero slab_size selects its recommended
 // granularity; explicit sizes must be multiples of its minimum granularity.
 // limit_bytes bounds physical commitment, not virtual reservation. Zero means
 // no serving-imposed limit; allocation failure still propagates. Each buffer
 // borrows this pool, and must be destroyed before pool destruction.
 iree_status_t loom_serve_memory_pool_create(
-    iree_hal_allocator_t* device_allocator,
-    iree_hal_queue_family_affinity_t queue_affinity,
+    iree_hal_device_t* device, iree_hal_queue_family_affinity_t queue_affinity,
     iree_device_size_t slab_size, uint64_t limit_bytes,
     loom_serve_memory_pool_t** out_pool, iree_allocator_t host_allocator);
 

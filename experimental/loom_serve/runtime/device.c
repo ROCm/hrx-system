@@ -106,8 +106,7 @@ iree_status_t loom_serve_device_create(
   if (iree_status_is_ok(status) &&
       options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
     status = loom_serve_memory_pool_create(
-        iree_hal_device_allocator(device->handle),
-        IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, options->slab_size,
+        device->handle, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, options->slab_size,
         options->memory_limit, &device->memory_pool, host_allocator);
   }
   if (iree_status_is_ok(status)) {

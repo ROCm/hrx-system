@@ -23,6 +23,10 @@ struct loom_serve_memory_pool_t {
   loom_serve_memory_statistics_t statistics;
   // Borrowed owner of cold capacity reclamation, separate from slab mechanics.
   loom_serve_memory_reclaimer_t reclaimer;
+  // The legacy ROCr backend needs a native mapping publication after VMM edits.
+  bool legacy_amdgpu_mapping_publication;
+  // New mappings cannot be admitted until the cold publication succeeds.
+  bool legacy_amdgpu_mappings_pending;
 };
 
 typedef struct memory_slab_t {
@@ -57,11 +61,11 @@ static iree_hal_buffer_params_t memory_params(void) {
 }
 
 iree_status_t loom_serve_memory_pool_create(
-    iree_hal_allocator_t* device_allocator,
-    iree_hal_queue_family_affinity_t queue_affinity,
+    iree_hal_device_t* device, iree_hal_queue_family_affinity_t queue_affinity,
     iree_device_size_t slab_size, uint64_t limit_bytes,
     loom_serve_memory_pool_t** out_pool, iree_allocator_t host_allocator) {
   *out_pool = NULL;
+  iree_hal_allocator_t* device_allocator = iree_hal_device_allocator(device);
   iree_device_size_t minimum = 0, recommended = 0;
   IREE_RETURN_IF_ERROR(iree_hal_allocator_virtual_memory_query_granularity(
       device_allocator, memory_params(), &minimum, &recommended));
@@ -83,6 +87,8 @@ iree_status_t loom_serve_memory_pool_create(
   pool->slab_size = slab_size;
   pool->minimum_alignment = minimum;
   pool->limit_bytes = limit_bytes ? limit_bytes : UINT64_MAX;
+  pool->legacy_amdgpu_mapping_publication =
+      iree_string_view_equal(iree_hal_device_id(device), IREE_SV("amdgpu"));
   *out_pool = pool;
   return iree_ok_status();
 }
@@ -216,10 +222,38 @@ static iree_status_t memory_slab_commit(loom_serve_virtual_buffer_t* buffer,
         IREE_HAL_VIRTUAL_MEMORY_ACCESS_SCOPE_DEVICE,
         IREE_HAL_MEMORY_PROTECTION_READ_WRITE);
   }
+  if (iree_status_is_ok(status) && pool->legacy_amdgpu_mapping_publication) {
+    pool->legacy_amdgpu_mappings_pending = true;
+  }
   if (!iree_status_is_ok(status)) {
     status = iree_status_join(status, memory_slab_release(buffer, index));
   }
   return status;
+}
+
+// Temporary bridge for the ROCr-backed AMDGPU allocator: its GEM_VA mapping
+// path can complete page-table writes without making the changed translations
+// visible to existing compute queues. An ordinary native allocation takes the
+// KFD map path, including compute TLB publication. The extent exceeds ROCr's
+// fragment allocator so this cannot be satisfied from an already mapped slab.
+// No device work references the buffer; it is released before admission.
+// This costs one transient 64-MiB allocation per cold commitment transaction,
+// never per epoch or when all requested slabs are already committed. The
+// replacement native allocator must supply mapping readiness itself, at which
+// point this bridge and its two pool fields are removed together.
+static iree_status_t memory_publish_legacy_amdgpu_mappings(
+    loom_serve_memory_pool_t* pool) {
+  if (!pool->legacy_amdgpu_mappings_pending) {
+    return iree_ok_status();
+  }
+  iree_hal_buffer_params_t params = memory_params();
+  params.queue_family_affinity = pool->queue_affinity;
+  iree_hal_buffer_t* publication = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
+      pool->device_allocator, params, 64 * 1024 * 1024, &publication));
+  iree_hal_buffer_release(publication);
+  pool->legacy_amdgpu_mappings_pending = false;
+  return iree_ok_status();
 }
 
 iree_status_t loom_serve_memory_pool_try_commit(
@@ -258,6 +292,10 @@ iree_status_t loom_serve_memory_pool_try_commit(
       }
     }
   }
+  // Publish partial progress too: a later request can reuse successfully added
+  // slabs after an allocation failure. Failed publication remains pending.
+  status =
+      iree_status_join(status, memory_publish_legacy_amdgpu_mappings(pool));
   *out_admitted = iree_status_is_ok(status) && admitted;
   return status;
 }

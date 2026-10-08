@@ -7,6 +7,7 @@
 #include "experimental/loom_serve/storage/memory.h"
 
 #include <array>
+#include <vector>
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
@@ -190,6 +191,84 @@ TEST_F(MemoryTest, CohortAdmissionCountsUniqueSlabsAndLeavesDenialUntouched) {
   EXPECT_TRUE(admitted);
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes,
             3 * kSlabSize);
+}
+
+TEST_F(MemoryTest, RecommittedSlabsPublishEveryWordOfTheNewGeneration) {
+  constexpr size_t kGenerationCount = 4;
+  constexpr uint64_t kOrigin = uint64_t{1} << 32;
+  constexpr size_t kWordsPerSlab = kSlabSize / sizeof(uint32_t);
+  const std::array<loom_serve_virtual_buffer_t**, 2> destinations = {&first,
+                                                                     &second};
+  for (size_t i = 0; i < destinations.size(); ++i) {
+    IREE_ASSERT_OK(loom_serve_virtual_buffer_create(
+        pool, kOrigin + 4 * kSlabSize, 256, &statistics[i], destinations[i]));
+  }
+  const std::array<iree_hal_buffer_t*, 2> handles = {
+      loom_serve_virtual_buffer_handle(first),
+      loom_serve_virtual_buffer_handle(second)};
+  // Prepare every generation before the first mapping turnover. Comparing or
+  // filling a large host image between remap and device access would perturb
+  // the publication boundary this case exercises.
+  std::array<std::vector<uint32_t>, kGenerationCount> expected;
+  for (size_t generation = 0; generation < kGenerationCount; ++generation) {
+    expected[generation].resize(2 * kWordsPerSlab);
+    for (size_t word = 0; word < expected[generation].size(); ++word) {
+      expected[generation][word] =
+          static_cast<uint32_t>((generation + 1) << 28) |
+          static_cast<uint32_t>(word);
+    }
+  }
+  std::vector<uint32_t> observed(2 * kWordsPerSlab);
+  std::vector<uint32_t> captured(2 * kWordsPerSlab);
+  uint64_t completion = 0;
+  for (size_t generation = 0; generation < kGenerationCount; ++generation) {
+    SCOPED_TRACE(generation);
+    const uint64_t offset = kOrigin + (generation % 2) * 2 * kSlabSize;
+    const std::array<loom_serve_memory_range_t, 2> ranges = {{
+        {first, offset, kSlabSize},
+        {second, offset, kSlabSize},
+    }};
+    std::array<iree_hal_transfer_operation_t, 2> uploads = {};
+    std::array<iree_hal_transfer_operation_t, 2> downloads = {};
+    for (size_t i = 0; i < handles.size(); ++i) {
+      uploads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+      uploads[i].upload = {expected[generation].data() + i * kWordsPerSlab,
+                           handles[i], offset, kSlabSize};
+      downloads[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+      downloads[i].download = {handles[i], offset,
+                               observed.data() + i * kWordsPerSlab, kSlabSize};
+    }
+    bool admitted = false;
+    IREE_ASSERT_OK(loom_serve_memory_pool_try_commit(pool, ranges.size(),
+                                                     ranges.data(), &admitted));
+    ASSERT_TRUE(admitted);
+    IREE_ASSERT_OK(loom_serve_execution_transfer(execution, uploads.size(),
+                                                 uploads.data(), &completion));
+    IREE_ASSERT_OK(loom_serve_execution_transfer(
+        execution, downloads.size(), downloads.data(), &completion));
+    IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
+    ASSERT_EQ(observed, expected[generation]);
+    if (generation) {
+      ASSERT_EQ(captured, expected[generation - 1]);
+    }
+    // Capture and immediately relinquish both physical slabs, as in a cold
+    // session suspension. The next iteration reuses the retained VA roots.
+    for (size_t i = 0; i < handles.size(); ++i) {
+      downloads[i].download.target = captured.data() + i * kWordsPerSlab;
+    }
+    IREE_ASSERT_OK(loom_serve_execution_transfer(
+        execution, downloads.size(), downloads.data(), &completion));
+    IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
+    for (auto* buffer : {first, second}) {
+      loom_serve_virtual_buffer_begin_trim(buffer);
+      IREE_ASSERT_OK(loom_serve_virtual_buffer_trim(buffer));
+    }
+  }
+  ASSERT_EQ(captured, expected.back());
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, 0u);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).peak_bytes, 2 * kSlabSize);
+  EXPECT_EQ(loom_serve_memory_pool_statistics(pool).released_bytes,
+            kGenerationCount * 2 * kSlabSize);
 }
 
 TEST_F(MemoryTest, DeviceTrimPreservesLiveWorkspaceAndMutableState) {
