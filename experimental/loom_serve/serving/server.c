@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "experimental/loom_serve/embedding/service.h"
+#include "experimental/loom_serve/finite/model.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
@@ -44,6 +46,13 @@ typedef union serving_model_t {
     // Owned HTTP admission borrowing the model and deployment name.
     loom_serve_image_service_t* service;
   } image;
+  // Finite vector deployment sharing source commands across request cohorts.
+  struct {
+    // Owned source-JIT model borrowing the shared device.
+    loom_serve_finite_model_t* model;
+    // Owned batched HTTP admission borrowing the model and route name.
+    loom_serve_embedding_service_t* service;
+  } embedding;
 } serving_model_t;
 
 static iree_status_t serving_create_text(
@@ -118,6 +127,27 @@ static iree_status_t serving_create_image(
   return iree_ok_status();
 }
 
+static iree_status_t serving_create_embedding(
+    loom_serve_device_t* device,
+    const loom_serve_model_configuration_t* configuration,
+    serving_model_t* model, loom_serve_http_service_t* out_service,
+    iree_allocator_t allocator) {
+  const loom_serve_finite_model_options_t options = {
+      .source_directory = configuration->source,
+      .asset_directory = configuration->finite.assets,
+      .options = configuration->finite.options};
+  IREE_RETURN_IF_ERROR(loom_serve_finite_model_create(
+      device, &options, &model->embedding.model, allocator));
+  IREE_RETURN_IF_ERROR(loom_serve_embedding_service_create(
+      loom_serve_device_host(device), model->embedding.model,
+      configuration->name, configuration->pending_requests,
+      (iree_duration_t)FLAG_heartbeat_ms * 1000000, &model->embedding.service,
+      allocator));
+  *out_service =
+      loom_serve_embedding_service_interface(model->embedding.service);
+  return iree_ok_status();
+}
+
 static iree_status_t serving_ready(loom_serve_http_server_t* server,
                                    iree_host_size_t model_count) {
   char storage[IREE_ASYNC_ADDRESS_MAX_FORMAT_LENGTH];
@@ -177,11 +207,20 @@ int main(int argc, char** argv) {
   for (iree_host_size_t i = 0;
        i < configuration.model_count && iree_status_is_ok(status); ++i) {
     const loom_serve_model_configuration_t* entry = &configuration.models[i];
-    status = entry->kind == LOOM_SERVE_MODEL_KIND_TEXT
-                 ? serving_create_text(device, entry, &models[i], &services[i],
-                                       allocator)
-                 : serving_create_image(device, entry, &models[i], &services[i],
-                                        allocator);
+    switch (entry->kind) {
+      case LOOM_SERVE_MODEL_KIND_TEXT:
+        status = serving_create_text(device, entry, &models[i], &services[i],
+                                     allocator);
+        break;
+      case LOOM_SERVE_MODEL_KIND_IMAGE:
+        status = serving_create_image(device, entry, &models[i], &services[i],
+                                      allocator);
+        break;
+      case LOOM_SERVE_MODEL_KIND_EMBEDDING:
+        status = serving_create_embedding(device, entry, &models[i],
+                                          &services[i], allocator);
+        break;
+    }
   }
   if (iree_status_is_ok(status)) {
     loom_serve_http_server_options_t options =
@@ -204,16 +243,28 @@ int main(int argc, char** argv) {
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
     if (configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_TEXT) {
       loom_serve_text_service_destroy(models[i].text.service, terminal_code);
-    } else {
+    } else if (configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
       loom_serve_image_service_destroy(models[i].image.service);
+    } else {
+      loom_serve_embedding_service_destroy(models[i].embedding.service);
     }
   }
   status = iree_status_join(status, loom_serve_http_server_destroy(server));
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
-    status = iree_status_join(
-        status, configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_TEXT
-                    ? loom_serve_text_model_destroy(models[i].text.model)
-                    : loom_serve_image_model_destroy(models[i].image.model));
+    iree_status_t model_status = iree_ok_status();
+    switch (configuration.models[i].kind) {
+      case LOOM_SERVE_MODEL_KIND_TEXT:
+        model_status = loom_serve_text_model_destroy(models[i].text.model);
+        break;
+      case LOOM_SERVE_MODEL_KIND_IMAGE:
+        model_status = loom_serve_image_model_destroy(models[i].image.model);
+        break;
+      case LOOM_SERVE_MODEL_KIND_EMBEDDING:
+        model_status =
+            loom_serve_finite_model_destroy(models[i].embedding.model);
+        break;
+    }
+    status = iree_status_join(status, model_status);
   }
   status = iree_status_join(status, loom_serve_device_destroy(device));
   loom_serve_host_release(host);

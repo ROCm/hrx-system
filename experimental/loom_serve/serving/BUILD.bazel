@@ -32,6 +32,8 @@ loom_cc_binary(
     ]),
     deps = [
         ":configuration",
+        "//experimental/loom_serve/embedding:service",
+        "//experimental/loom_serve/finite:model",
         "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/image:model",

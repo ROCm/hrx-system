@@ -1,0 +1,246 @@
+
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+func.decl import("input") @require(%condition: i32, %diagnostic: buffer)
+func.decl import("runner") @execute_2(%stage: i32, %input: hal.buffer, %output: hal.buffer) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+global.rodata.def @invalid = bytes("6669787475726520726571756972657320312d333120746f6b656e732070657220726f772c2064696d656e73696f6e732032206f7220342c20616e64206120726571756573742077697468696e2062617463685f756e697473")
+
+func.def @check(%condition: i1) {
+  %condition32 = scalar.extui %condition : i1 to i32
+  %error = global.load @invalid : buffer
+  func.call @require(%condition32, %error) : (i32, buffer) -> ()
+  func.return
+}
+
+// Prepared layout: i64 [row_count, dimensions], then fixed 136-byte records
+// containing one i64 length and 32 i32 token positions. Only live IDs are read.
+func.def public @prepare_request(%state: buffer, %request: buffer) -> (buffer, i64, i64) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %four_bytes = index.constant 4 : offset
+  %eight_bytes = index.constant 8 : offset
+  %header_bytes = index.constant 16 : offset
+  %stride = index.constant 136 : offset
+  %zero64 = scalar.constant 0 : i64
+  %one64 = scalar.constant 1 : i64
+  %two64 = scalar.constant 2 : i64
+  %four64 = scalar.constant 4 : i64
+  %header = buffer.view %request[%origin] : buffer -> view<2xi64>
+  %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
+  %limit = view.load %state_view[0] : view<1xi64> -> i64
+  %requested = view.load %header[0] : view<2xi64> -> i64
+  %row_count = view.load %header[1] : view<2xi64> -> i64
+  %default = scalar.cmpi eq, %requested, %zero64 : i64
+  %dimensions = scf.select %default, %four64, %requested : i64
+  %d2 = scalar.cmpi eq, %dimensions, %two64 : i64
+  %d4 = scalar.cmpi eq, %dimensions, %four64 : i64
+  %valid_dimensions = scalar.ori %d2, %d4 : i1
+  func.call @check(%valid_dimensions) : (i1) -> ()
+  %positive = scalar.cmpi ugt, %row_count, %zero64 : i64
+  %bounded = scalar.cmpi ule, %row_count, %limit : i64
+  %valid_rows = scalar.andi %positive, %bounded : i1
+  func.call @check(%valid_rows) : (i1) -> ()
+  %bounded_rows = scalar.assume %row_count [range(%row_count, 1, 256)] : i64
+  %nonnegative_1 = scalar.assume %bounded_rows [range(%bounded_rows, 0, 9223372036854775807)] : i64
+  %rows = index.cast %nonnegative_1 : i64 to index
+  %input_records = buffer.view %request[%header_bytes] : buffer -> view<[%rows]x3xi64>
+  %records_bytes = index.scale %rows, %stride : index, offset -> offset
+  %prepared_bytes = index.add %header_bytes, %records_bytes : offset
+  %prepared = buffer.alloca<private> align(8) %prepared_bytes : buffer
+  %prepared_header = buffer.view %prepared[%origin] : buffer -> view<2xi64>
+  view.store %row_count, %prepared_header[0] : i64, view<2xi64>
+  view.store %dimensions, %prepared_header[1] : i64, view<2xi64>
+  %units = scf.for %row = [%zero to %rows step %one](%used = %zero64 : i64) -> (i64) {
+    %kind = view.load %input_records[%row, 0] : view<[%rows]x3xi64> -> i64
+    %begin = view.load %input_records[%row, 1] : view<[%rows]x3xi64> -> i64
+    %length = view.load %input_records[%row, 2] : view<[%rows]x3xi64> -> i64
+    %nonnegative_2 = scalar.assume %begin [range(%begin, 0, 9223372036854775807)] : i64
+    %offset = index.cast %nonnegative_2 : i64 to offset
+    %nonnegative_3 = scalar.assume %length [range(%length, 0, 9223372036854775807)] : i64
+    %extent = index.cast %nonnegative_3 : i64 to offset
+    %data = buffer.alloca<private> align(8) %extent : buffer
+    buffer.copy %request[%offset], %data[%origin], %extent
+    %is_text = scalar.cmpi eq, %kind, %zero64 : i64
+    %ids, %count = scf.if %is_text -> (buffer, i64) {
+      %flags = scalar.constant 0 : i32
+      %capacity = scalar.constant 32 : i64
+      %encoded, %tokens = func.call @encode(%data, %flags, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+      scf.yield %encoded, %tokens : buffer, i64
+    } else {
+      %tokens = scalar.divui %length, %four64 : i64
+      scf.yield %data, %tokens : buffer, i64
+    }
+    %maximum = scalar.constant 31 : i64
+    %nonempty = scalar.cmpi ugt, %count, %zero64 : i64
+    %fits = scalar.cmpi ule, %count, %maximum : i64
+    %valid = scalar.andi %nonempty, %fits : i1
+    func.call @check(%valid) : (i1) -> ()
+    %bounded_count = scalar.assume %count [range(%count, 1, 31)] : i64
+    %nonnegative_4 = scalar.assume %bounded_count [range(%bounded_count, 0, 9223372036854775807)] : i64
+    %tokens = index.cast %nonnegative_4 : i64 to index
+    %id_view = buffer.view %ids[%origin] : buffer -> view<[%tokens]xi32>
+    %vocabulary = scalar.constant 3 : i32
+    scf.for %i = [%zero to %tokens step %one] {
+      %id = view.load %id_view[%i] : view<[%tokens]xi32> -> i32
+      %valid_id = scalar.cmpi ult, %id, %vocabulary : i32
+      func.call @check(%valid_id) : (i1) -> ()
+      scf.yield
+    }
+    %record_offset_scaled = index.scale %row, %stride : index, offset -> offset
+    %record_offset = index.add %record_offset_scaled, %header_bytes : offset
+    %record = buffer.view %prepared[%record_offset] : buffer -> view<1xi64>
+    view.store %count, %record[0] : i64, view<1xi64>
+    %target = index.add %record_offset, %eight_bytes : offset
+    %id_bytes = index.scale %tokens, %four_bytes : index, offset -> offset
+    buffer.copy %ids[%origin], %prepared[%target], %id_bytes
+    %cost = scalar.addi %count, %one64 : i64
+    %next = scalar.addi %used, %cost : i64
+    scf.yield %next : i64
+  }
+  %fits = scalar.cmpi ule, %units, %limit : i64
+  func.call @check(%fits) : (i1) -> ()
+  func.return %prepared, %units, %zero64 : buffer, i64, i64
+}
+
+// Result rows are physically reversed to exercise the native indexed plan.
+// There is no per-input command loop: both kernels process the entire cohort.
+func.def public @prepare_batch(%state: buffer, %tags: buffer, %ranges: buffer, %packed: buffer) -> (i32, buffer, buffer) {
+  %origin = index.constant 0 : offset
+  %zero = index.constant 0 : index
+  %one = index.constant 1 : index
+  %two = index.constant 2 : index
+  %three = index.constant 3 : index
+  %four = index.constant 4 : index
+  %zero32 = scalar.constant 0 : i32
+  %zero64 = scalar.constant 0 : i64
+  %four64 = scalar.constant 4 : i64
+  %sixteen64 = scalar.constant 16 : i64
+  %twenty64 = scalar.constant 20 : i64
+  %four_bytes = index.constant 4 : offset
+  %eight_bytes = index.constant 8 : offset
+  %sixteen_bytes = index.constant 16 : offset
+  %twentyfour_bytes = index.constant 24 : offset
+  %thirtytwo_bytes = index.constant 32 : offset
+  %stride = index.constant 136 : offset
+  %range_bytes = buffer.length %ranges
+  %range_length = index.cast %range_bytes : offset to i64
+  %request_count_value = scalar.divui %range_length, %sixteen64 : i64
+  %bounded_requests = scalar.assume %request_count_value [range(%request_count_value, 1, 256)] : i64
+  %request_count = index.cast %bounded_requests : i64 to index
+  %range_view = buffer.view %ranges[%origin] : buffer -> view<[%request_count]x2xi64>
+  %rows64, %scalars64 = scf.for %i = [%zero to %request_count step %one](%rows = %zero64 : i64, %scalars = %zero64 : i64) -> (i64, i64) {
+    %offset64 = view.load %range_view[%i, 0] : view<[%request_count]x2xi64> -> i64
+    %nonnegative_5 = scalar.assume %offset64 [range(%offset64, 0, 9223372036854775807)] : i64
+    %offset = index.cast %nonnegative_5 : i64 to offset
+    %header = buffer.view %packed[%offset] : buffer -> view<2xi64>
+    %count = view.load %header[0] : view<2xi64> -> i64
+    %dimensions = view.load %header[1] : view<2xi64> -> i64
+    %values = scalar.muli %count, %dimensions : i64
+    %next_rows = scalar.addi %rows, %count : i64
+    %next_scalars = scalar.addi %scalars, %values : i64
+    scf.yield %next_rows, %next_scalars : i64, i64
+  }
+  // Every accepted sequence has positive cost and the host admits at most the
+  // source limit (<=256). The sum therefore fits a positive bounded index.
+  %nonnegative_6 = scalar.assume %rows64 [range(%rows64, 1, 256)] : i64
+  %rows = index.cast %nonnegative_6 : i64 to index
+  %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
+  %units64 = view.load %state_view[0] : view<1xi64> -> i64
+  %nonnegative_7 = scalar.assume %units64 [range(%units64, 1, 256)] : i64
+  %units = index.cast %nonnegative_7 : i64 to index
+  %payload_data64 = scalar.muli %units64, %twenty64 : i64
+  %payload_bytes64 = scalar.addi %payload_data64, %sixteen64 : i64
+  %nonnegative_8 = scalar.assume %payload_bytes64 [range(%payload_bytes64, 0, 9223372036854775807)] : i64
+  %payload_bytes = index.cast %nonnegative_8 : i64 to offset
+  %payload = buffer.alloca<private> align(8) %payload_bytes : buffer
+  %payload_words_value = scalar.divui %payload_bytes64, %four64 : i64
+  %bounded_words = scalar.assume %payload_words_value [range(%payload_words_value, 1, 1284)] : i64
+  %payload_words = index.cast %bounded_words : i64 to index
+  %all = buffer.view %payload[%origin] : buffer -> view<[%payload_words]xi32>
+  scf.for %i = [%zero to %payload_words step %one] {
+    view.store %zero32, %all[%i] : i32, view<[%payload_words]xi32>
+    scf.yield
+  }
+  %header = buffer.view %payload[%origin] : buffer -> view<4xi32>
+  %rows32 = index.cast %rows : index to i32
+  view.store %rows32, %header[0] : i32, view<4xi32>
+  %token_base_scaled = index.scale %units, %sixteen_bytes : index, offset -> offset
+  %token_base = index.add %token_base_scaled, %sixteen_bytes : offset
+  %request_bytes = index.scale %request_count, %twentyfour_bytes : index, offset -> offset
+  %plan_row_base = index.add %thirtytwo_bytes, %request_bytes : offset
+  %row_bytes = index.scale %rows, %sixteen_bytes : index, offset -> offset
+  %plan_bytes = index.add %plan_row_base, %row_bytes : offset
+  %plan = buffer.alloca<private> align(8) %plan_bytes : buffer
+  %plan_header = buffer.view %plan[%origin] : buffer -> view<4xi64>
+  %output_bytes64 = scalar.muli %units64, %sixteen64 : i64
+  %feedback_bytes64 = scalar.muli %scalars64, %four64 : i64
+  %request_count64 = index.cast %request_count : index to i64
+  view.store %output_bytes64, %plan_header[0] : i64, view<4xi64>
+  view.store %feedback_bytes64, %plan_header[1] : i64, view<4xi64>
+  view.store %request_count64, %plan_header[2] : i64, view<4xi64>
+  view.store %rows64, %plan_header[3] : i64, view<4xi64>
+  %requests = buffer.view %plan[%thirtytwo_bytes] : buffer -> view<[%request_count]x3xi64>
+  %maximum_row = index.sub %rows, %one : index
+  %end_row, %end_token, %end_output = scf.for %i = [%zero to %request_count step %one](%row_begin = %zero : index, %token_begin = %zero : index, %output_end = %scalars64 : i64) -> (index, index, i64) {
+    %source64 = view.load %range_view[%i, 0] : view<[%request_count]x2xi64> -> i64
+    %nonnegative_9 = scalar.assume %source64 [range(%source64, 0, 9223372036854775807)] : i64
+    %source = index.cast %nonnegative_9 : i64 to offset
+    %source_header = buffer.view %packed[%source] : buffer -> view<2xi64>
+    %count64 = view.load %source_header[0] : view<2xi64> -> i64
+    %dimensions64 = view.load %source_header[1] : view<2xi64> -> i64
+    %nonnegative_10 = scalar.assume %count64 [range(%count64, 0, 9223372036854775807)] : i64
+    %count = index.cast %nonnegative_10 : i64 to index
+    %dimensions32 = scalar.trunci %dimensions64 : i64 to i32
+    %begin64 = index.cast %row_begin : index to i64
+    view.store %begin64, %requests[%i, 0] : i64, view<[%request_count]x3xi64>
+    view.store %count64, %requests[%i, 1] : i64, view<[%request_count]x3xi64>
+    %records_base = index.add %source, %sixteen_bytes : offset
+    %next_token, %next_output, %usage = scf.for %j = [%zero to %count step %one](%cursor = %token_begin : index, %remaining = %output_end : i64, %usage_before = %zero64 : i64) -> (index, i64, i64) {
+      %row_value = index.add %row_begin, %j : index
+      %row = index.assume %row_value [range(%row_value, 0, %maximum_row)] : index
+      %record_offset_scaled = index.scale %j, %stride : index, offset -> offset
+      %record_offset = index.add %record_offset_scaled, %records_base : offset
+      %record = buffer.view %packed[%record_offset] : buffer -> view<1xi64>
+      %length64 = view.load %record[0] : view<1xi64> -> i64
+      %nonnegative_11 = scalar.assume %length64 [range(%length64, 0, 9223372036854775807)] : i64
+      %length = index.cast %nonnegative_11 : i64 to index
+      %length32 = scalar.trunci %length64 : i64 to i32
+      %cursor32 = index.cast %cursor : index to i32
+      %output = scalar.subi %remaining, %dimensions64 : i64
+      %output32 = scalar.trunci %output : i64 to i32
+      %relative_row = index.scale %row, %sixteen_bytes : index, offset -> offset
+      %metadata_offset = index.add %relative_row, %sixteen_bytes : offset
+      %metadata = buffer.view %payload[%metadata_offset] : buffer -> view<4xi32>
+      view.store %cursor32, %metadata[0] : i32, view<4xi32>
+      view.store %length32, %metadata[1] : i32, view<4xi32>
+      view.store %dimensions32, %metadata[2] : i32, view<4xi32>
+      view.store %output32, %metadata[3] : i32, view<4xi32>
+      %source_ids = index.add %record_offset, %eight_bytes : offset
+      %target_ids_scaled = index.scale %cursor, %four_bytes : index, offset -> offset
+      %target_ids = index.add %target_ids_scaled, %token_base : offset
+      %length_bytes = index.scale %length, %four_bytes : index, offset -> offset
+      buffer.copy %packed[%source_ids], %payload[%target_ids], %length_bytes
+      %output_bytes = scalar.muli %output, %four64 : i64
+      %result_offset = index.add %relative_row, %plan_row_base : offset
+      %result_record = buffer.view %plan[%result_offset] : buffer -> view<2xi64>
+      view.store %output_bytes, %result_record[0] : i64, view<2xi64>
+      view.store %dimensions64, %result_record[1] : i64, view<2xi64>
+      %next = index.add %cursor, %length : index
+      %usage_after = scalar.addi %usage_before, %length64 : i64
+      scf.yield %next, %output, %usage_after : index, i64, i64
+    }
+    view.store %usage, %requests[%i, 2] : i64, view<[%request_count]x3xi64>
+    %next_row = index.add %row_begin, %count : index
+    scf.yield %next_row, %next_token, %next_output : index, index, i64
+  }
+  func.return %zero32, %payload, %plan : i32, buffer, buffer
+}
+
+func.def public @run(%stage: i32, %feedback_bytes: i64, %input: hal.buffer, %output: hal.buffer) {
+  %work = func.call @execute_2(%stage, %input, %output) : (i32, hal.buffer, hal.buffer) -> (i64)
+  %slot = scalar.constant 0 : i32
+  %offset = scalar.constant 0 : i64
+  %done = func.call @feedback(%slot, %output, %offset, %feedback_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return
+}

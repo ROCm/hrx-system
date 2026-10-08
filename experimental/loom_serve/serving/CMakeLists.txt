@@ -34,6 +34,8 @@ loom_cc_binary(
     iree::async
     iree::base
     iree::base::tooling::flags
+    iree::experimental::loom_serve::embedding::service
+    iree::experimental::loom_serve::finite::model
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::image::model

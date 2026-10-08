@@ -1,0 +1,59 @@
+config.decl @fixture.units : %value: index where [range(%value, 1, 256)]
+amdgpu.target<gfx11-generic> @weighted_target {subgroup_size = 32}
+kernel.decl @pool() launch(%input: buffer, %hidden: buffer)
+kernel.decl @project() launch(%input: buffer, %hidden: buffer, %output: buffer)
+
+// A replacement package can add immutable parameters without changing the
+// native finite-vector ABI. This head scales all live vectors on device.
+kernel.def target(@weighted_target) @scale() {
+  %units = config.get @fixture.units : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%units, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: buffer, %output: buffer, %scale: view<1xf32>) {
+  %origin = index.constant 0 : offset
+  %row = kernel.workgroup.id<x> : index
+  %units = config.get @fixture.units : index
+  %header = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %count32 = view.load %header[0] : view<4xi32> -> i32
+  %count = index.cast %count32 : i32 to index
+  %live = index.cmp ult, %row, %count : index
+  scf.if %live {
+    %sixteen = index.constant 16 : offset
+    %metadata = buffer.view %input[%sixteen] : buffer -> view<[%units]x4xi32>
+    %width32 = view.load %metadata[%row, 2] : view<[%units]x4xi32> -> i32
+    %offset32 = view.load %metadata[%row, 3] : view<[%units]x4xi32> -> i32
+    %bounded_width = scalar.assume %width32 [range(%width32, 2, 4)] : i32
+    %width = index.cast %bounded_width : i32 to index
+    %bounded_offset = scalar.assume %offset32 [range(%offset32, 0, 1023)] : i32
+    %offset = index.cast %bounded_offset : i32 to index
+    %four = index.constant 4 : index
+    %capacity = index.mul %units, %four : index
+    %result = buffer.view %output[%origin] : buffer -> view<[%capacity]xf32>
+    %factor = view.load %scale[0] : view<1xf32> -> f32
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    scf.for %i = [%zero to %width step %one] {
+      %maximum = index.sub %capacity, %one : index
+      %position_value = index.add %offset, %i : index
+      %position = index.assume %position_value [range(%position_value, 0, %maximum)] : index
+      %value = view.load %result[%position] : view<[%capacity]xf32> -> f32
+      %scaled = scalar.mulf %value, %factor : f32
+      view.store %scaled, %result[%position] : f32, view<[%capacity]xf32>
+      scf.yield
+    }
+    scf.yield
+  }
+  kernel.return
+}
+
+command.program.def public @weighted_embed() launch(%weights: buffer, %input: buffer, %output: buffer) {
+  %factor = command.parameter %weights, "factor" : view<1xf32>
+  %units = config.get @fixture.units : index
+  %sixteen = index.constant 16 : offset
+  %length = index.scale %units, %sixteen : index, offset -> offset
+  %hidden = buffer.alloca<global> align(16) %length : buffer
+  kernel.launch @pool(%input, %hidden) : (buffer, buffer)
+  kernel.launch @project(%input, %hidden, %output) : (buffer, buffer, buffer)
+  kernel.launch @scale(%input, %output, %factor) : (buffer, buffer, view<1xf32>)
+  command.return
+}

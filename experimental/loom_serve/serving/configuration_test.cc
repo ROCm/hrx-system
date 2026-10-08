@@ -95,6 +95,40 @@ TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
   loom_serve_configuration_deinitialize(&configuration);
 }
 
+TEST(ConfigurationTest, EmbeddingPolicyStaysSourceOwned) {
+  std::string json = R"({"models":[
+    {"kind":"embedding","name":"query","source":"encoder","assets":"weights",
+     "options":{"task":"query","batch_units":128}},
+    {"kind":"embedding","name":"document","source":"encoder","assets":"weights"}
+  ]})";
+  loom_serve_configuration_t configuration;
+  IREE_ASSERT_OK(loom_serve_configuration_initialize(
+      iree_make_cstring_view(json.c_str()), &configuration,
+      iree_allocator_system()));
+  json.assign(json.size(), 'x');
+  ASSERT_EQ(configuration.model_count, 2u);
+  const auto& model = configuration.models[0];
+  EXPECT_EQ(model.kind, LOOM_SERVE_MODEL_KIND_EMBEDDING);
+  EXPECT_EQ(std::string(model.finite.assets.data, model.finite.assets.size),
+            "weights");
+  EXPECT_EQ(std::string(model.finite.options.data, model.finite.options.size),
+            R"({"task":"query","batch_units":128})");
+  const auto& defaults = configuration.models[1].finite.options;
+  EXPECT_EQ(std::string(defaults.data, defaults.size), "{}");
+  loom_serve_configuration_deinitialize(&configuration);
+  for (const char* extra : {R"(,"width":32)", R"(,"rows":8)",
+                            R"(,"options":[])", R"(,"weights":"wrong")"}) {
+    const std::string bad =
+        std::string(
+            R"({"models":[{"kind":"embedding","name":"m","source":"s","assets":"a")") +
+        extra + "}]}";
+    iree::Status status(loom_serve_configuration_initialize(
+        iree_make_cstring_view(bad.c_str()), &configuration,
+        iree_allocator_system()));
+    EXPECT_FALSE(status.ok());
+  }
+}
+
 TEST(ConfigurationTest,
      RejectsAmbiguousOrUnsupportedCatalogsAndCleansPartialState) {
   for (

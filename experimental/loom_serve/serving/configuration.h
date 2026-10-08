@@ -16,6 +16,7 @@ extern "C" {
 typedef enum loom_serve_model_kind_e {
   LOOM_SERVE_MODEL_KIND_TEXT = 1,
   LOOM_SERVE_MODEL_KIND_IMAGE = 2,
+  LOOM_SERVE_MODEL_KIND_EMBEDDING = 3,
 } loom_serve_model_kind_t;
 
 typedef struct loom_serve_text_configuration_t {
@@ -54,6 +55,13 @@ typedef struct loom_serve_image_configuration_t {
   uint32_t text_tokens;
 } loom_serve_image_configuration_t;
 
+typedef struct loom_serve_finite_configuration_t {
+  // Owned asset directory passed to source prepare.
+  iree_string_view_t assets;
+  // Owned JSON object interpreted by source prepare, not the native scheduler.
+  iree_string_view_t options;
+} loom_serve_finite_configuration_t;
+
 // One source-defined deployment. Entries have independent logical state and
 // admission capacity; the executable supplies their shared device. Paths are
 // interpreted relative to the process working directory.
@@ -64,7 +72,8 @@ typedef struct loom_serve_model_configuration_t {
   iree_string_view_t name;
   // Owned source package directory path.
   iree_string_view_t source;
-  // Maximum host requests waiting for admission without device ownership.
+  // Bounded host request credit. Text/image exclude the active invocation;
+  // finite vector services include all requests in the active cohort.
   iree_host_size_t pending_requests;
   // Only the member selected by kind is initialized and owned.
   union {
@@ -72,6 +81,8 @@ typedef struct loom_serve_model_configuration_t {
     loom_serve_text_configuration_t text;
     // Finite image deployment geometry and checkpoint inputs.
     loom_serve_image_configuration_t image;
+    // Finite vector deployment assets and source-defined policy.
+    loom_serve_finite_configuration_t finite;
   };
 } loom_serve_model_configuration_t;
 
@@ -85,12 +96,13 @@ typedef struct loom_serve_configuration_t {
 } loom_serve_configuration_t;
 
 // Parses one complete JSON/JSONC {"models":[...]} catalog. Every model declares
-// kind="text" or "image", name and source. Text entries require weights and
-// tokenizer; image entries require a checkpoint directory. Unknown/duplicate
-// fields, fields from another modality, duplicate names and invalid native
-// options reject before model creation.
-// Model-specific geometry is validated by its source during creation. Strings
-// are decoded and owned independently of input. Failure releases partial state.
+// kind="text", "image" or "embedding", name and source. Text entries require
+// weights and tokenizer; image entries require a checkpoint directory.
+// Embedding entries require assets and accept a source-owned options object.
+// Unknown/duplicate fields, fields from another modality, duplicate names and
+// invalid native options reject before model creation. Model-specific geometry
+// is validated by its source during creation. Strings are decoded and owned
+// independently of input. Failure releases partial state.
 iree_status_t loom_serve_configuration_initialize(
     iree_string_view_t json, loom_serve_configuration_t* out_configuration,
     iree_allocator_t host_allocator);

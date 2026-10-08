@@ -210,7 +210,11 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
       {"height", IREE_JSON_VALUE_TYPE_NUMBER,
        .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
       {"text_tokens", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_IMAGE}};
+       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+      {"assets", IREE_JSON_VALUE_TYPE_STRING,
+       .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
+      {"options", IREE_JSON_VALUE_TYPE_OBJECT,
+       .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, configuration_field_visit, &context));
@@ -218,9 +222,12 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
     model->kind = LOOM_SERVE_MODEL_KIND_TEXT;
   } else if (iree_string_view_equal(fields[0].value, IREE_SV("image"))) {
     model->kind = LOOM_SERVE_MODEL_KIND_IMAGE;
+  } else if (iree_string_view_equal(fields[0].value, IREE_SV("embedding"))) {
+    model->kind = LOOM_SERVE_MODEL_KIND_EMBEDDING;
   } else {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "catalog model kind must be 'text' or 'image'");
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "catalog model kind must be text, image or embedding");
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
     if (fields[i].value.data && fields[i].kind &&
@@ -251,11 +258,21 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
                               "duplicate model name");
     }
   }
-  return model->kind == LOOM_SERVE_MODEL_KIND_TEXT
-             ? configuration_text(fields, &model->text,
-                                  configuration->allocator)
-             : configuration_image(fields, &model->image,
-                                   configuration->allocator);
+  if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
+    return configuration_text(fields, &model->text, configuration->allocator);
+  } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
+    return configuration_image(fields, &model->image, configuration->allocator);
+  }
+  IREE_RETURN_IF_ERROR(configuration_string(&fields[19], &model->finite.assets,
+                                            configuration->allocator));
+  const iree_string_view_t options =
+      fields[20].value.data ? fields[20].value : IREE_SV("{}");
+  char* data = NULL;
+  IREE_RETURN_IF_ERROR(iree_allocator_clone(
+      configuration->allocator,
+      iree_make_const_byte_span(options.data, options.size), (void**)&data));
+  model->finite.options = iree_make_string_view(data, options.size);
+  return iree_ok_status();
 }
 
 void loom_serve_configuration_deinitialize(
@@ -274,6 +291,11 @@ void loom_serve_configuration_deinitialize(
                           (void*)model->image.checkpoint.data);
       iree_allocator_free(configuration->allocator,
                           (void*)model->image.adapter.data);
+    } else if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING) {
+      iree_allocator_free(configuration->allocator,
+                          (void*)model->finite.assets.data);
+      iree_allocator_free(configuration->allocator,
+                          (void*)model->finite.options.data);
     }
   }
   iree_allocator_free(configuration->allocator, configuration->models);

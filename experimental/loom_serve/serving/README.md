@@ -1,7 +1,7 @@
 # Serving multiple source models
 
-`//experimental/loom_serve/serving:server` serves named text and image deployments through
-one loopback HTTP listener. All deployments borrow one device, parameter
+`//experimental/loom_serve/serving:server` serves named text, image and embedding
+deployments through one loopback HTTP listener. All deployments borrow one device, parameter
 residency cache and private command workspace backing. Each owns its work and
 feedback timelines, source-JIT programs and weights. Text deployments own their
 logical KV pool, sessions and checkpoints; image deployments own their finite
@@ -20,9 +20,10 @@ application caller joins final scheduler release; no task waits for device work.
 
 The catalog selects source packages and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the
-Loom sources described by the [text model contract](../text/README.md) and
-[image model contract](../image/model.h). Neither modality requires model-specific
-C in the executable.
+Loom sources described by the [text model contract](../text/README.md),
+[image model contract](../image/model.h), and
+[finite-vector contract](../finite/README.md). None of these modalities requires
+model-specific C in the executable.
 
 ## Launch
 
@@ -67,6 +68,14 @@ Create a JSON or JSONC catalog, for example:
       "height": 384,
       "text_tokens": 512,
       "pending_requests": 4
+    },
+    {
+      "kind": "embedding",
+      "name": "vectors",
+      "source": "experimental/loom_serve/models/fixtures/embedding",
+      "assets": "experimental/loom_serve/models/fixtures/embedding",
+      "options": {"batch_units": 64},
+      "pending_requests": 16
     }
   ]
 }
@@ -78,6 +87,10 @@ Unknown, duplicate and wrong-modality fields reject instead of silently changing
 configuration. Image `checkpoint` is an asset directory, whereas text `weights`
 is a checkpoint file; an image's optional `adapter` is interpreted by its source.
 A model source can impose additional shape/storage constraints.
+Embedding `assets` names the package's asset directory; `options` is passed
+unchanged as JSON to its cold source program. There are no native model-specific
+embedding configuration fields. The example uses a deterministic ABI fixture,
+not a learned embedding model.
 
 ~~~sh
 build_tools/bin/iree-bazel-run --config=opt \
@@ -92,6 +105,8 @@ sets the shared CPU worker maximum (eight by default). Connections
 and HTTP body storage have independent bounds through `--connections` and
 `--request_body_bytes`. Each model's `pending_requests` defaults to 32 and
 text `max_tokens` to 512. Image defaults are 384-square pixels and 512 text tokens.
+For embedding deployments, `pending_requests` bounds all accepted requests,
+including the active cohort. For text/image it bounds the waiting queue.
 The budget must fit each model's weights plus live retained state; this example's
 36 GiB fits either model separately, not all deployments together.
 Other defaults and accepted ranges are in
@@ -171,6 +186,27 @@ The response contains one base64 PNG. The configured image shape is fixed;
 Without an adapter only the default strength of one is accepted. A text model
 does not accept image requests, or vice versa.
 
+Embeddings use `POST /v1/embeddings`:
+
+~~~json
+{"model":"vectors","input":["a","bbb"],"dimensions":2,"encoding_format":"float"}
+~~~
+
+The input may be a string, ordered string batch, token-ID sequence or batch of
+token-ID sequences. The result is an `object:"list"` with ordered embedding
+objects, per-request indices and input-token usage. The default wire encoding
+is float; base64 contains little-endian IEEE754 F32 values. `dimensions` is an
+optional source-supported output width, not a native truncation request. An
+optional string `user` is accepted as client metadata. Source programs own
+framing, input limits, projection and normalization; unknown options reject
+instead of selecting undocumented model behavior.
+
+Different HTTP requests can share a source-selected cohort without sharing
+response identity. A cancelled peer loses only its own response. The native
+encoder receives compact final vectors, not hidden activations. See the
+[fixture](../models/fixtures/embedding/README.md) for exact predictable outputs
+and the source replacement/parameter-pressure test.
+
 ## Scheduling and memory ownership
 
 The transport proactor handles network I/O independently. One application
@@ -192,6 +228,9 @@ mapping calls still execute synchronously on the owner.
 Text admission pins parameters and physically reserves its completion high-water.
 Image preparation retains host input without pins while waiting for admission;
 an admitted invocation pins parameters through successful model completion.
+Embedding preparation similarly retains a source-built cohort without pins
+while waiting. Its input, output and private command workspace are queue-pooled;
+the output's final feedback reader participates in retirement before reuse.
 Other models retry queued admission as the owner advances. If the
 budget fits only one model, another model waits until those parameter pins
 release; the shared LRU can then evict idle weights and stream the requested
