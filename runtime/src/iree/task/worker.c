@@ -1139,17 +1139,15 @@ static void iree_task_worker_pump_until_exit(iree_task_worker_t* worker) {
       break;
     }
 
-    // Scan compute slots first (wake_budget > 1 cooperative drain). If compute
-    // work was found, skip the immediate list — workers doing tile execution
-    // shouldn't contend on the immediate list's mutex. Only check the
-    // immediate list when no compute work is available, so exactly one idle
-    // worker picks up the wake_budget == 1 control process.
-    bool did_work = false;
-    if (iree_task_worker_drain_compute_slots(worker)) {
+    // Interleave finite control work with cooperative compute passes. A live
+    // compute process may depend on an immediate CPU job even on one worker.
+    // Empty immediate-list pops only read the atomic head without locking.
+    const bool compute_work = iree_task_worker_drain_compute_slots(worker);
+    bool did_work = compute_work;
+    while (iree_task_worker_drain_process(worker)) {
       did_work = true;
-    } else {
-      while (iree_task_worker_drain_process(worker)) {
-        did_work = true;
+      if (compute_work) {
+        break;
       }
     }
 

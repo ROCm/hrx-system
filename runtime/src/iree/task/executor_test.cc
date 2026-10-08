@@ -933,6 +933,79 @@ static void warm_retainer_completion(iree_task_process_t* process,
   context->Notify();
 }
 
+// A persistent scheduler can keep doing useful work while a finite CPU job
+// must run to release one of its dependencies. The only worker must interleave
+// both classes rather than draining compute until it becomes idle.
+struct InterleavedControlContext : public TestWaiter {
+  // Compute has run at least one turn before control work is submitted.
+  std::atomic<bool> started{false};
+  // Published by the finite control process and observed by compute turns.
+  std::atomic<bool> control_ran{false};
+  // Both processes have reached final executor release.
+  std::atomic<int> released{0};
+};
+
+static iree_status_t interleaved_compute_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
+  (void)worker_context;
+  auto* context = static_cast<InterleavedControlContext*>(process->user_data);
+  if (!context->started.exchange(true, std::memory_order_release)) {
+    context->Notify();
+  }
+  result->did_work = true;
+  result->completed = context->control_ran.load(std::memory_order_acquire);
+  return iree_ok_status();
+}
+
+static iree_status_t interleaved_control_drain(
+    iree_task_process_t* process,
+    const iree_task_worker_context_t* worker_context,
+    iree_task_process_drain_result_t* result) {
+  (void)worker_context;
+  auto* context = static_cast<InterleavedControlContext*>(process->user_data);
+  context->control_ran.store(true, std::memory_order_release);
+  result->did_work = true;
+  result->completed = true;
+  return iree_ok_status();
+}
+
+static void interleaved_process_release(iree_task_process_t* process) {
+  auto* context = static_cast<InterleavedControlContext*>(process->user_data);
+  context->released.fetch_add(1, std::memory_order_release);
+  context->Notify();
+}
+
+TEST(ExecutorProcessTest, ReadyComputeInterleavesImmediateControlOnOneWorker) {
+  for (const int wake_budget : {1, 4}) {
+    SCOPED_TRACE(wake_budget);
+    iree_task_executor_t* executor = CreateExecutor(1);
+    InterleavedControlContext context;
+    iree_task_process_t compute;
+    iree_task_process_initialize(interleaved_compute_drain, 0, wake_budget,
+                                 &compute);
+    if (wake_budget == 1) {
+      iree_task_process_set_flags(&compute,
+                                  IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT);
+    }
+    compute.user_data = &context;
+    compute.release_fn = interleaved_process_release;
+    iree_task_executor_schedule_process(executor, &compute);
+    context.WaitUntil(
+        [&] { return context.started.load(std::memory_order_acquire); });
+
+    iree_task_process_t control;
+    iree_task_process_initialize(interleaved_control_drain, 0, 1, &control);
+    control.user_data = &context;
+    control.release_fn = interleaved_process_release;
+    iree_task_executor_schedule_process(executor, &control);
+    context.WaitUntil(
+        [&] { return context.released.load(std::memory_order_acquire) == 2; });
+    iree_task_executor_release(executor);
+  }
+}
+
 TEST(ExecutorProcessTest, ComputeSlotSingleProcess) {
   iree_task_executor_t* executor = CreateExecutor(4);
 
