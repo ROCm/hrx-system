@@ -66,10 +66,9 @@ build:opt --host_cxxopt=-O3
 
 # Use one pinned mimalloc instance for the build-selected IREE allocator.
 # Global C++ allocation follows the same provider through the process ABI.
-# Sanitizer configurations own allocation instrumentation and are incompatible
-# with this provider.
+# Sanitizer configurations override this request and retain system allocation.
 build:mimalloc --//runtime/config/base:allocator_system=mimalloc
-build:mimalloc --custom_malloc=//third_party:mimalloc_new_delete
+build:mimalloc --custom_malloc=//third_party:allocator_new_delete
 
 # Windows compiler presets select one compiler policy; registered toolchains
 # match it to the host and destination. Native Windows defaults to clang-cl.

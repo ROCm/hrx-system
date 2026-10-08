@@ -156,10 +156,14 @@ alias(
 )
 
 # Executable link policy selects the C++ ABI adapter through --custom_malloc.
-# Every cc_binary is therefore a potential configured consumer.
+# Sanitizers retain the standard allocation boundary even when mimalloc was
+# also requested.
 alias(
-    name = "mimalloc_new_delete",
-    actual = "//build_tools/third_party/mimalloc:new_delete",
+    name = "allocator_new_delete",
+    actual = select({
+        "//runtime/config/base:allocator_system_mimalloc": "//build_tools/third_party/mimalloc:new_delete",
+        "//conditions:default": "@bazel_tools//tools/cpp:malloc",
+    }),
     visibility = ["//visibility:public"],
 )
 

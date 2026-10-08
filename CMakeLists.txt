@@ -162,6 +162,17 @@ include("${CMAKE_CURRENT_LIST_DIR}/build_tools/vulkan/vulkan.cmake")
 include("${CMAKE_CURRENT_LIST_DIR}/build_tools/d3d12/d3d12.cmake")
 
 iree_setup_toolchain()
+
+# Sanitizer runtimes own allocation interposition. Preserve the requested cache
+# value while overriding the active provider for all downstream consumers.
+if(IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc" AND
+   (IREE_ENABLE_ASAN OR IREE_ENABLE_MSAN OR IREE_ENABLE_TSAN OR
+    IREE_ENABLE_UBSAN))
+  message(STATUS
+    "Sanitizer instrumentation overrides IREE_ALLOCATOR_SYSTEM=mimalloc with libc")
+  set(IREE_ALLOCATOR_SYSTEM "libc")
+endif()
+
 hrx_configure_ipo()
 set(IREE_DEFAULT_EXECUTABLE_LINK_LIBRARIES "")
 if(IREE_ALLOCATOR_SYSTEM STREQUAL "mimalloc")

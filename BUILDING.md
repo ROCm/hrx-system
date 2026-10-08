@@ -123,8 +123,9 @@ iree-cmake-configure -DIREE_ALLOCATOR_SYSTEM=mimalloc
 ```
 
 Explicit allocator arguments retain their caller-selected implementation. The
-mimalloc provider is incompatible with sanitizer configurations because those
-runtimes own allocation instrumentation.
+mimalloc configuration composes with ASAN, MSAN, TSAN, and UBSAN. Sanitizer
+instrumentation owns the process allocation boundary in those builds, so the
+effective shared default remains libc and global C++ allocation is not replaced.
 
 Cross-built executables run on their destination OS. Transfer the executable,
 dependent libraries, debug artifacts, and consumer runfiles to that host.

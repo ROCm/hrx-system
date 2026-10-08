@@ -4,6 +4,10 @@
 # See https://llvm.org/LICENSE.txt for license information.
 # SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+# CMake allocator options are declared in runtime/project.cmake.
+# bazel-to-cmake: skip
+
+load("@bazel_skylib//lib:selects.bzl", "selects")
 load("@bazel_skylib//rules:common_settings.bzl", "string_flag")
 
 package(default_visibility = ["//visibility:public"])
@@ -26,8 +30,19 @@ config_setting(
 )
 
 config_setting(
-    name = "allocator_system_mimalloc",
+    name = "allocator_system_mimalloc_requested",
     flag_values = {
         ":allocator_system": "mimalloc",
     },
+)
+
+# Sanitizer instrumentation owns the process allocation boundary. Treat a
+# simultaneous mimalloc request as libc policy without depending on the order
+# in which Bazel expands --config flags.
+selects.config_setting_group(
+    name = "allocator_system_mimalloc",
+    match_all = [
+        ":allocator_system_mimalloc_requested",
+        "//build_tools/bazel:sanitizer_disabled",
+    ],
 )

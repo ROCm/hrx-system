@@ -97,6 +97,13 @@ config_setting(
 )
 
 config_setting(
+    name = "sanitizer_disabled",
+    flag_values = {
+        ":sanitizer": "false",
+    },
+)
+
+config_setting(
     name = "asan_output",
     values = {
         "cc_output_directory_tag": "asan",
