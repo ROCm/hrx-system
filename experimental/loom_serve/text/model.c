@@ -938,8 +938,9 @@ iree_status_t loom_serve_text_model_trim(
 }
 
 iree_status_t loom_serve_text_row_reset(loom_serve_text_row_t* row) {
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
   const bool reserved = row->state->reserved_extent != 0;
-  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_reset(row->state));
+  loom_serve_text_state_row_reset(row->state);
   if (reserved) {
     loom_serve_residency_release(row->model->residency);
   }
@@ -1018,11 +1019,12 @@ iree_status_t loom_serve_text_row_try_restore(
   return iree_ok_status();
 }
 
-iree_status_t loom_serve_text_row_try_reserve(
+iree_status_t loom_serve_text_row_submit_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
-    bool* out_admitted) {
-  *out_admitted = false;
+    bool* out_submitted, loom_serve_execution_frontier_t* out_frontier) {
+  *out_submitted = false;
+  *out_frontier = (loom_serve_execution_frontier_t){0};
   const iree_host_size_t block_size = row->model->state.storage.block_size;
   const iree_host_size_t maximum =
       ((row->model->context_capacity + block_size - 1) / block_size) *
@@ -1050,14 +1052,11 @@ iree_status_t loom_serve_text_row_try_reserve(
   if (!pinned) {
     return iree_ok_status();
   }
-  // Request reservation can release its pin without ever submitting an epoch.
-  // This synchronous entry therefore completes activation before admitting a
-  // cancellable reservation. Epoch admission itself only enqueues readiness.
-  IREE_RETURN_IF_ERROR(loom_serve_residency_await(row->model->residency));
-  iree_status_t status = loom_serve_text_state_row_try_reserve(
-      row->state, mode, checkpoint ? checkpoint->state : NULL, extent,
-      out_admitted);
-  if (iree_status_is_ok(status) && *out_admitted) {
+  // Even state-capacity denial retains the activation pin until completion.
+  // Cancellation likewise leaves this operation intact until it retires.
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_submit_reserve(
+      row->state, mode, checkpoint ? checkpoint->state : NULL, extent));
+  if (row->state->reserved_extent) {
     if (mode == LOOM_SERVE_TEXT_RESERVE_FRESH) {
       row->has_prediction = false;
       memset(&row->transfer, 0, sizeof(row->transfer));
@@ -1070,8 +1069,34 @@ iree_status_t loom_serve_text_row_try_reserve(
       row->transfer.progress[7] = checkpoint->has_prediction &&
                                   checkpoint->token == row->model->eos_token;
     }
-  } else {
-    status = loom_serve_residency_finish(row->model->residency, status);
+  }
+  *out_submitted = true;
+  *out_frontier = loom_serve_execution_frontier(row->model->execution);
+  return iree_ok_status();
+}
+
+bool loom_serve_text_row_complete_reserve(loom_serve_text_row_t* row) {
+  const bool admitted = loom_serve_text_state_row_complete_reserve(row->state);
+  if (!admitted) {
+    loom_serve_residency_release(row->model->residency);
+  }
+  return admitted;
+}
+
+iree_status_t loom_serve_text_row_try_reserve(
+    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_admitted) {
+  *out_admitted = false;
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  bool submitted = false;
+  loom_serve_execution_frontier_t frontier;
+  iree_status_t status = loom_serve_text_row_submit_reserve(
+      row, mode, checkpoint, extent, &submitted, &frontier);
+  status = iree_status_join(status,
+                            loom_serve_execution_drain(row->model->execution));
+  if (iree_status_is_ok(status) && submitted) {
+    *out_admitted = loom_serve_text_row_complete_reserve(row);
   }
   return status;
 }

@@ -32,7 +32,7 @@ using Spans = std::array<loom_serve_text_span_t, kSpanCount>;
 using Results = std::array<loom_serve_text_result_t, kSpanCount>;
 
 struct ModelWork {
-  enum class Operation { kEpoch, kTrim };
+  enum class Operation { kEpoch, kTrim, kReserve };
   // Model operation submitted and completed by the same task protocol.
   Operation operation = Operation::kEpoch;
   // Borrowed source model; the outer caller retires all tasks before teardown.
@@ -53,6 +53,23 @@ struct ModelWork {
   Results results = {};
   // Compaction accounting remains owned through submission and completion.
   loom_serve_text_trim_result_t trim_result = {};
+  // Request admission inputs and results remain owned across readiness.
+  struct {
+    // Borrowed destination row, retained by model.
+    loom_serve_text_row_t* row = nullptr;
+    // Starting frontier requested by the caller.
+    loom_serve_text_reserve_mode_t mode = LOOM_SERVE_TEXT_RESERVE_FRESH;
+    // Borrowed same-model endpoint for CHECKPOINT mode.
+    loom_serve_text_checkpoint_t* checkpoint = nullptr;
+    // Requested consumed-position high-water, in tokens.
+    size_t extent = 0;
+    // Submission acquired a pin and requires completion consumption.
+    bool submitted = false;
+    // Successful completion produced a runnable reservation.
+    bool admitted = false;
+    // Simulated request cancellation, applied only after retirement.
+    bool cancel = false;
+  } reservation;
   // Row frontiers before submission, checked again before publication.
   std::array<size_t, kSpanCount> positions = {};
   // Task submitting the source-owned device sequence.
@@ -128,11 +145,41 @@ struct ModelWork {
                               const iree_task_worker_context_t*,
                               iree_task_process_drain_result_t* result) {
     auto* self = static_cast<ModelWork*>(process->user_data);
-    auto status = self->operation == Operation::kEpoch
-                      ? self->SubmitCopies()
-                      : loom_serve_text_model_submit_trim(
-                            self->model, &self->trim_result, &self->frontier);
-    if (iree_status_is_ok(status)) {
+    auto status = iree_ok_status();
+    bool pending = true;
+    switch (self->operation) {
+      case Operation::kEpoch:
+        status = self->SubmitCopies();
+        break;
+      case Operation::kTrim:
+        status = loom_serve_text_model_submit_trim(
+            self->model, &self->trim_result, &self->frontier);
+        break;
+      case Operation::kReserve: {
+        auto& reservation = self->reservation;
+        status = loom_serve_text_row_submit_reserve(
+            reservation.row, reservation.mode, reservation.checkpoint,
+            reservation.extent, &reservation.submitted, &self->frontier);
+        pending = reservation.submitted;
+        if (iree_status_is_ok(status) && pending &&
+            loom_serve_device_memory_pool(
+                loom_serve_text_model_device(self->model))) {
+          // Before completion consumption, even a cancelled or denied request
+          // must retain its activation pin. This call cannot unmap weights.
+          auto deactivation = loom_serve_text_model_deactivate(self->model);
+          if (iree_status_is_failed_precondition(deactivation)) {
+            iree_status_free(deactivation);
+          } else {
+            status = iree_status_join(
+                deactivation,
+                iree_make_status(IREE_STATUS_DATA_LOSS,
+                                 "pending reservation did not pin weights"));
+          }
+        }
+        break;
+      }
+    }
+    if (iree_status_is_ok(status) && pending) {
       for (size_t i = 0; i < self->semaphores.size(); ++i) {
         self->semaphores[i] = reinterpret_cast<iree_async_semaphore_t*>(
             self->frontier.semaphores[i]);
@@ -146,7 +193,7 @@ struct ModelWork {
       self->wait.mode = IREE_ASYNC_WAIT_MODE_ALL;
       status = iree_async_proactor_submit_one(self->proactor, &self->wait.base);
     }
-    if (!iree_status_is_ok(status)) {
+    if (!iree_status_is_ok(status) || !pending) {
       Ready(self, nullptr, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
     }
     result->did_work = true;
@@ -167,7 +214,9 @@ struct ModelWork {
                                 iree_task_process_drain_result_t* result) {
     auto* self = static_cast<ModelWork*>(process->user_data);
     std::lock_guard<std::mutex> lock(self->mutex);
-    for (size_t i = 0; i < kSpanCount && iree_status_is_ok(self->status); ++i) {
+    for (size_t i = 0; self->operation != Operation::kReserve &&
+                       i < kSpanCount && iree_status_is_ok(self->status);
+         ++i) {
       auto* row =
           loom_serve_text_model_row(self->model, self->spans[i].row_index);
       if (loom_serve_text_row_position(row) != self->positions[i]) {
@@ -177,11 +226,26 @@ struct ModelWork {
       }
     }
     if (iree_status_is_ok(self->status)) {
-      self->status = self->operation == Operation::kEpoch
-                         ? loom_serve_text_model_complete_epoch(
-                               self->model, self->results.data())
-                         : loom_serve_text_model_complete_trim(
-                               self->model, &self->trim_result);
+      switch (self->operation) {
+        case Operation::kEpoch:
+          self->status = loom_serve_text_model_complete_epoch(
+              self->model, self->results.data());
+          break;
+        case Operation::kTrim:
+          self->status = loom_serve_text_model_complete_trim(
+              self->model, &self->trim_result);
+          break;
+        case Operation::kReserve: {
+          auto& reservation = self->reservation;
+          reservation.admitted =
+              reservation.submitted &&
+              loom_serve_text_row_complete_reserve(reservation.row);
+          if (reservation.admitted && reservation.cancel) {
+            loom_serve_text_row_release_reservation(reservation.row);
+          }
+          break;
+        }
+      }
     }
     result->did_work = true;
     result->completed = true;
@@ -325,6 +389,25 @@ static iree_status_t Run(loom_serve_text_model_t* model,
         kTokenCapacity, inputs[i].data(), &counts[i], allocator));
   }
   const size_t prefix = counts[0] / 2;
+  // Activate cold weights, then cancel before any epoch consumes the row.
+  // Completion owns the pin even after the client has abandoned the request.
+  ModelWork cancelled;
+  cancelled.operation = ModelWork::Operation::kReserve;
+  cancelled.model = model;
+  cancelled.reservation.row = loom_serve_text_model_row(model, 4);
+  cancelled.reservation.extent = 1;
+  cancelled.reservation.cancel = true;
+  IREE_RETURN_IF_ERROR(cancelled.Run());
+  if (!cancelled.reservation.admitted ||
+      loom_serve_text_row_pool_usage(cancelled.reservation.row)) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "cancelled activation retained reservation credit");
+  }
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(cancelled.reservation.row));
+  fprintf(stdout,
+          "{\"event\":\"admission_check\","
+          "\"case\":\"cancel-after-activation\"}\n");
+  fflush(stdout);
   // Low physical IDs belong to independent ballast rows. Releasing them after
   // the target/reference work guarantees a fragmented live pool for trim.
   const Spans ballast = {{{7, counts[0], inputs[0].data(), 0},
@@ -333,6 +416,18 @@ static iree_status_t Run(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(SelectShape(model, ballast, &ballast_shape));
   IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(
       model, ballast_shape, ballast.size(), ballast.data()));
+  for (size_t i = 0; i < kSpanCount; ++i) {
+    ModelWork fresh;
+    fresh.operation = ModelWork::Operation::kReserve;
+    fresh.model = model;
+    fresh.reservation.row = loom_serve_text_model_row(model, kRows[i]);
+    fresh.reservation.extent = counts[i] + 32;
+    IREE_RETURN_IF_ERROR(fresh.Run());
+    if (!fresh.reservation.admitted) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "fixture cannot admit fresh reservation");
+    }
+  }
   ModelWork prefill;
   prefill.model = model;
   prefill.spans = {{{kRows[0], prefix, inputs[0].data(), 0},
@@ -347,6 +442,21 @@ static iree_status_t Run(loom_serve_text_model_t* model,
                   {kRows[0], counts[0] - prefix, inputs[0].data() + prefix,
                    LOOM_SERVE_TEXT_SPAN_FLAG_SELECT}}};
   IREE_RETURN_IF_ERROR(Compare("prefill-decode", mixed));
+  for (size_t i = 0; i < kSpanCount; ++i) {
+    auto* row = loom_serve_text_model_row(model, kRows[i]);
+    loom_serve_text_row_release_reservation(row);
+    ModelWork continuing;
+    continuing.operation = ModelWork::Operation::kReserve;
+    continuing.model = model;
+    continuing.reservation.row = row;
+    continuing.reservation.mode = LOOM_SERVE_TEXT_RESERVE_CONTINUE;
+    continuing.reservation.extent = counts[i] + 32;
+    IREE_RETURN_IF_ERROR(continuing.Run());
+    if (!continuing.reservation.admitted) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "fixture cannot admit continuing reservation");
+    }
+  }
   if (loom_serve_text_mtp_from_flags()) {
     for (size_t pass = 0; pass < 2; ++pass) {
       std::array<int32_t, kSpanCount> anchors = {};
@@ -389,6 +499,10 @@ static iree_status_t Run(loom_serve_text_model_t* model,
           Compare(pass ? "mtp-continuation" : "mtp", speculative));
     }
   }
+  for (size_t index : kRows) {
+    loom_serve_text_row_release_reservation(
+        loom_serve_text_model_row(model, index));
+  }
   for (size_t row : {7u, 6u}) {
     IREE_RETURN_IF_ERROR(
         loom_serve_text_row_reset(loom_serve_text_model_row(model, row)));
@@ -421,7 +535,53 @@ static iree_status_t Run(loom_serve_text_model_t* model,
     decode.spans[i] = {kRows[i], 1, &anchors[i],
                        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
   }
-  return Compare("decode-after-compaction", decode);
+  IREE_RETURN_IF_ERROR(Compare("decode-after-compaction", decode));
+  if (compactable && loom_serve_text_model_checkpoint_capacity(model)) {
+    auto* source = loom_serve_text_model_row(model, kRows[0]);
+    loom_serve_text_checkpoint_t* checkpoint = nullptr;
+    IREE_RETURN_IF_ERROR(loom_serve_text_row_try_pin(source, &checkpoint));
+    if (!checkpoint) {
+      return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                              "fixture cannot pin endpoint");
+    }
+    IREE_RETURN_IF_ERROR(loom_serve_text_checkpoint_suspend(checkpoint));
+    ModelWork restoring;
+    restoring.operation = ModelWork::Operation::kReserve;
+    restoring.model = model;
+    restoring.reservation.row = loom_serve_text_model_row(model, 4);
+    restoring.reservation.mode = LOOM_SERVE_TEXT_RESERVE_CHECKPOINT;
+    restoring.reservation.checkpoint = checkpoint;
+    restoring.reservation.extent = loom_serve_text_row_position(source) + 4;
+    IREE_RETURN_IF_ERROR(restoring.Run());
+    if (!restoring.reservation.admitted ||
+        loom_serve_text_checkpoint_suspended_bytes(checkpoint)) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "cold checkpoint reservation was not restored");
+    }
+    const int32_t anchor = loom_serve_text_row_token(source);
+    ModelWork fork;
+    fork.model = model;
+    fork.spans = {{{4, 1, &anchor, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+                   {kRows[0], 1, &anchor, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT}}};
+    IREE_RETURN_IF_ERROR(SelectShape(model, fork.spans, &fork.shape));
+    IREE_RETURN_IF_ERROR(fork.Run());
+    if (fork.results[0].output_count != 1 ||
+        fork.results[1].output_count != 1 ||
+        fork.results[0].tokens[0] != fork.results[1].tokens[0] ||
+        loom_serve_text_row_position(restoring.reservation.row) !=
+            loom_serve_text_row_position(source)) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "cold admission changed continuation");
+    }
+    loom_serve_text_row_release_reservation(restoring.reservation.row);
+    loom_serve_text_checkpoint_release(checkpoint);
+    fprintf(stdout,
+            "{\"event\":\"admission_check\","
+            "\"case\":\"cold-checkpoint-continuation\","
+            "\"output_tokens\":2}\n");
+    fflush(stdout);
+  }
+  return iree_ok_status();
 }
 
 }  // namespace
@@ -453,7 +613,7 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   fprintf(stdout,
-          "PASS: one-worker text epochs and compaction preserve copied plans, "
-          "output and row publication.\n");
+          "PASS: one-worker text admission, epochs and compaction preserve "
+          "ownership, output and row publication.\n");
   return EXIT_SUCCESS;
 }

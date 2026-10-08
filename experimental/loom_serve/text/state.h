@@ -209,7 +209,8 @@ uint32_t loom_serve_text_state_row_growth(
 // existing work timeline. An already resident row performs no work.
 iree_status_t loom_serve_text_state_row_activate(
     loom_serve_text_state_row_t* row);
-iree_status_t loom_serve_text_state_row_reset(loom_serve_text_state_row_t* row);
+// Releases the row's logical ownership at its successfully retired boundary.
+void loom_serve_text_state_row_reset(loom_serve_text_state_row_t* row);
 iree_status_t loom_serve_text_state_row_suspend(
     loom_serve_text_state_row_t* row);
 iree_status_t loom_serve_text_state_row_try_resume(
@@ -220,13 +221,18 @@ iree_status_t loom_serve_text_state_row_try_pin(
 iree_status_t loom_serve_text_state_row_try_restore(
     loom_serve_text_state_row_t* row,
     loom_serve_text_state_checkpoint_t* checkpoint, bool* out_restored);
-// The caller holds the model's parameter pin while this admission and all
-// reserved work run. Extent and starting frontier have passed model validation.
-// Denial changes no selected row or checkpoint contents/ownership.
-iree_status_t loom_serve_text_state_row_try_reserve(
+// Starts at a successfully retired row boundary with a model parameter pin.
+// Extent and starting frontier have passed model validation. Denial changes no
+// selected row or checkpoint contents/ownership. Success installs ownership
+// before submitting transfers; all maps and backing survive until completion.
+iree_status_t loom_serve_text_state_row_submit_reserve(
     loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
-    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
-    bool* out_admitted);
+    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent);
+// After successful readiness, releases the copied tail source. The recurrent
+// reader survives until the first epoch or cancellation. False denotes state
+// capacity denial, not a transfer failure.
+bool loom_serve_text_state_row_complete_reserve(
+    loom_serve_text_state_row_t* row);
 // Returns unused page credit at a retired boundary, preserving the consumed
 // frontier even when a reserved fork was never advanced.
 void loom_serve_text_state_row_release_reservation(

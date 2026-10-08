@@ -677,16 +677,13 @@ iree_status_t loom_serve_text_state_row_activate(
   return text_row_initialize(row);
 }
 
-iree_status_t loom_serve_text_state_row_reset(
-    loom_serve_text_state_row_t* row) {
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->owner->execution));
+void loom_serve_text_state_row_reset(loom_serve_text_state_row_t* row) {
   loom_serve_snapshot_release(row->snapshot);
   row->snapshot = NULL;
   row->position = 0;
   row->reserved_extent = 0;
   loom_serve_text_state_row_trim(row);
   text_row_release_recurrent(row);
-  return iree_ok_status();
 }
 
 iree_status_t loom_serve_text_state_row_suspend(
@@ -1046,7 +1043,7 @@ iree_status_t loom_serve_text_state_row_try_restore(
       return iree_ok_status();
     }
   }
-  IREE_RETURN_IF_ERROR(loom_serve_text_state_row_reset(row));
+  loom_serve_text_state_row_reset(row);
   row->position = checkpoint->position;
   row->recurrent.slot = checkpoint->recurrent_slot;
   row->buffers[TEXT_RECURRENT] = state->recurrent.buffers[row->recurrent.slot];
@@ -1213,11 +1210,9 @@ static void text_release_reverse(loom_serve_block_pool_t* pool, uint32_t count,
   }
 }
 
-iree_status_t loom_serve_text_state_row_try_reserve(
+iree_status_t loom_serve_text_state_row_submit_reserve(
     loom_serve_text_state_row_t* row, loom_serve_text_reserve_mode_t mode,
-    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent,
-    bool* out_admitted) {
-  *out_admitted = false;
+    loom_serve_text_state_checkpoint_t* checkpoint, iree_host_size_t extent) {
   loom_serve_text_state_t* state = row->owner;
   const iree_host_size_t index = (iree_host_size_t)(row - state->rows);
   const iree_host_size_t position = checkpoint ? checkpoint->position
@@ -1265,7 +1260,6 @@ iree_status_t loom_serve_text_state_row_try_reserve(
       recurrent_needed > state->recurrent.pool.available + recurrent_reusable) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(state->execution));
   uint32_t* blocks = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       state->allocator, iree_max(1u, count + (cold ? prefix : 0)),
@@ -1355,9 +1349,7 @@ iree_status_t loom_serve_text_state_row_try_reserve(
   // terminal and the installed owners retain every accepted-work resource.
   bool installed = false;
   if (iree_status_is_ok(status) && admitted) {
-    status = loom_serve_text_state_row_reset(row);
-  }
-  if (iree_status_is_ok(status) && admitted) {
+    loom_serve_text_state_row_reset(row);
     if (cold) {
       checkpoint->recurrent_slot = restored.recurrent_slot;
       checkpoint->block_count = prefix;
@@ -1425,12 +1417,6 @@ iree_status_t loom_serve_text_state_row_try_reserve(
                                                                          : 1,
           uploads, &completion);
     }
-    status =
-        iree_status_join(status, loom_serve_execution_drain(state->execution));
-    if (iree_status_is_ok(status) && tail != UINT32_MAX) {
-      loom_serve_block_pool_release(&state->cache.pool, 1, &row->retiring_tail);
-      row->retiring_tail = UINT32_MAX;
-    }
   }
   if (!installed) {
     loom_serve_block_pool_release(&state->recurrent.pool, 1, &writer);
@@ -1453,8 +1439,17 @@ iree_status_t loom_serve_text_state_row_try_reserve(
   iree_allocator_free(state->allocator, restore_ranges);
   iree_allocator_free(state->allocator, ranges);
   iree_allocator_free(state->allocator, blocks);
-  *out_admitted = iree_status_is_ok(status) && admitted;
   return status;
+}
+
+bool loom_serve_text_state_row_complete_reserve(
+    loom_serve_text_state_row_t* row) {
+  if (row->retiring_tail != UINT32_MAX) {
+    loom_serve_block_pool_release(&row->owner->cache.pool, 1,
+                                  &row->retiring_tail);
+    row->retiring_tail = UINT32_MAX;
+  }
+  return row->reserved_extent != 0;
 }
 
 // The whole epoch has passed its capacity check. Publish only newly assigned

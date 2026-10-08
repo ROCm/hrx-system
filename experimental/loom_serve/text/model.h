@@ -165,16 +165,36 @@ typedef enum loom_serve_text_reserve_mode_e {
   LOOM_SERVE_TEXT_RESERVE_CHECKPOINT,
 } loom_serve_text_reserve_mode_t;
 
-// Admits the complete consumed-position high-water for one request, including
+// Submits the complete consumed-position high-water for one request, including
 // caller-computed speculative slack. CHECKPOINT supplies a same-model endpoint;
 // other modes supply NULL. Fresh replaces the selected row, CONTINUE preserves
-// it, and CHECKPOINT restores then branches. False preserves both selected row
-// and checkpoint. Idle owners may be reclaimed by the caller before retrying.
-// Success pins parameters and owns exact target/draft pages, private views and
-// any recurrent writer until release_reservation. Physical backing is committed
-// at this cold boundary, not per epoch. Extent is not a context-size
-// allocation. Only one reservation may own a row. Platform/IO failures remain
-// terminal.
+// it, and CHECKPOINT restores then branches. Starts at a successfully completed
+// model frontier. No model-completion wait occurs; native allocation/remapping
+// remains synchronous cold work. Only one reservation may own a row.
+//
+// submitted=false means parameter capacity denied admission without a pin or
+// state change. submitted=true owns a parameter pin through successful ALL
+// readiness on the borrowed frontier and complete_reserve, even if subsequent
+// state admission was denied. The owner excludes model mutation until then;
+// request cancellation defers storage release until completion. Submission or
+// readiness failure is terminal and retains ownership for outer destruction.
+// Checkpoint semantic inputs are copied before return. Physical backing is
+// committed at this cold boundary, not per epoch; extent is not a context-size
+// allocation.
+iree_status_t loom_serve_text_row_submit_reserve(
+    loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
+    const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
+    bool* out_submitted, loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes a submitted reservation after successful ALL readiness. True owns
+// the parameter pin and exact target/draft pages, private views and recurrent
+// writer until release_reservation. False releases the activation-only pin and
+// preserves both selected row and checkpoint. Idle owners may be reclaimed
+// before retrying. No allocation or wait occurs. An already-cancelled request
+// completes normally, then releases any admitted reservation.
+bool loom_serve_text_row_complete_reserve(loom_serve_text_row_t* row);
+
+// Synchronous outer-thread wrapper over reservation submission/completion.
 iree_status_t loom_serve_text_row_try_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
