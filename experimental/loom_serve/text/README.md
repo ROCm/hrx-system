@@ -321,6 +321,17 @@ The service owns those claim/admission policies and serializes session CPU work
 against the model's shared VM invocation. Scratch builders are shared by the
 exclusive model owner, not multiplied per retained session.
 
+Source request rendering/tokenization and completed-token response formatting
+run as finite jobs on the shared host task executor. The HTTP claim, input
+array, decoder and model VM remain exclusively borrowed until the job's release
+callback publishes readiness. New headers can queue or reject while that job
+runs, but no control operation, reservation release or subsequent command can
+interleave its source invocation. Bad input becomes a client rejection after
+release; cancellation and shutdown likewise retain storage until release.
+Pure prompt epochs with no selected output need no response job. Device and
+pool bookkeeping stays on the application owner, which is still the outer
+router loop; the heartbeat reporter has not yet moved to proactor timing.
+
 The native real-model witness is
 `models/qwen:epoch_check --checkpoints --checkpoint_capacity=1
 --pool_capacity=65536 --context_capacity=1024 --prefill_capacity=128

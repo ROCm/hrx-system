@@ -193,6 +193,7 @@ loom_cc_library(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::scheduling::packing
+    iree::task
     iree::tokenizer
     iree::vm
     loom::util::json
