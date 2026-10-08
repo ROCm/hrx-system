@@ -235,8 +235,15 @@ iree_status_t loom_serve_text_state_checkpoint_suspend(
     loom_serve_text_state_checkpoint_t* checkpoint);
 void loom_serve_text_state_checkpoint_release(
     loom_serve_text_state_checkpoint_t* checkpoint);
-iree_status_t loom_serve_text_state_trim(
+// Starts at a successfully completed model frontier and enqueues relocation
+// followed by map uploads. The owner excludes mutation through completion;
+// old block ownership and backing remain live if any accepted work fails.
+iree_status_t loom_serve_text_state_submit_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result);
+// Commits logical relocation and releases old backing after successful ALL
+// readiness. result is the unchanged submission record, completed in place.
+iree_status_t loom_serve_text_state_complete_trim(
+    loom_serve_text_state_t* state, loom_serve_text_trim_result_t* result);
 
 #ifdef __cplusplus
 }  // extern "C"

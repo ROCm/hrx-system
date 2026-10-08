@@ -437,13 +437,12 @@ static void text_plan_compaction_copies(const loom_serve_text_state_t* state,
   }
 }
 
-iree_status_t loom_serve_text_state_trim(
+iree_status_t loom_serve_text_state_submit_trim(
     loom_serve_text_state_t* state, loom_serve_text_trim_result_t* out_result) {
   *out_result = (loom_serve_text_trim_result_t){0};
   if (!state->memory.buffers[1]) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(state->execution));
   const uint64_t released_before =
       loom_serve_memory_pool_statistics(state->memory.pool).released_bytes;
   IREE_RETURN_IF_ERROR(text_trim_backing(state));
@@ -479,10 +478,9 @@ iree_status_t loom_serve_text_state_trim(
         state->cache.pool.capacity, copy_destinations, &copied_bytes);
     out_result->copied_bytes += copied_bytes;
   }
-  // Even a rejected later copy batch leaves earlier submissions owning their
-  // sources/destinations. Observe retirement before publishing or returning.
-  status =
-      iree_status_join(status, loom_serve_execution_drain(state->execution));
+  // Map uploads follow every accepted copy on the model timeline. Keep both
+  // source and destination backing until successful completion; the owner
+  // excludes any other mutation of these host maps in the meantime.
   if (iree_status_is_ok(status) && out_result->moved_blocks) {
     for (iree_host_size_t i = 0; i < state->row_count; ++i) {
       uint32_t* blocks = state->cache.maps + i * state->storage.blocks_per_row;
@@ -521,18 +519,27 @@ iree_status_t loom_serve_text_state_trim(
         state->execution,
         iree_any_bit_set(state->flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ? 2 : 1,
         uploads, &completion);
-    status =
-        iree_status_join(status, loom_serve_execution_drain(state->execution));
-  }
-  if (iree_status_is_ok(status) && out_result->moved_blocks) {
-    loom_serve_block_pool_commit_compaction(&state->cache.pool,
-                                            state->cache.destinations);
-    status = text_trim_backing(state);
   }
   out_result->released_bytes =
       loom_serve_memory_pool_statistics(state->memory.pool).released_bytes -
       released_before;
   iree_allocator_free(state->allocator, copy_destinations);
+  return status;
+}
+
+iree_status_t loom_serve_text_state_complete_trim(
+    loom_serve_text_state_t* state, loom_serve_text_trim_result_t* result) {
+  if (!result->moved_blocks) {
+    return iree_ok_status();
+  }
+  loom_serve_block_pool_commit_compaction(&state->cache.pool,
+                                          state->cache.destinations);
+  const uint64_t released_before =
+      loom_serve_memory_pool_statistics(state->memory.pool).released_bytes;
+  iree_status_t status = text_trim_backing(state);
+  result->released_bytes +=
+      loom_serve_memory_pool_statistics(state->memory.pool).released_bytes -
+      released_before;
   return status;
 }
 

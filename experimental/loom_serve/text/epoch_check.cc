@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-// Real-weight epoch ownership witness using one shared JIT/serving worker.
+// Real-weight epoch and maintenance ownership with one JIT/serving worker.
 
 #include <array>
 #include <condition_variable>
@@ -31,7 +31,10 @@ constexpr std::array<size_t, kSpanCount> kReferenceRows = {1, 0};
 using Spans = std::array<loom_serve_text_span_t, kSpanCount>;
 using Results = std::array<loom_serve_text_result_t, kSpanCount>;
 
-struct Epoch {
+struct ModelWork {
+  enum class Operation { kEpoch, kTrim };
+  // Model operation submitted and completed by the same task protocol.
+  Operation operation = Operation::kEpoch;
   // Borrowed source model; the outer caller retires all tasks before teardown.
   loom_serve_text_model_t* model = nullptr;
   // Borrowed executor with one worker shared by compilation and serving.
@@ -48,6 +51,8 @@ struct Epoch {
   const loom_serve_text_continuation_t* continuation = nullptr;
   // Semantic progress produced only by successful completion.
   Results results = {};
+  // Compaction accounting remains owned through submission and completion.
+  loom_serve_text_trim_result_t trim_result = {};
   // Row frontiers before submission, checked again before publication.
   std::array<size_t, kSpanCount> positions = {};
   // Task submitting the source-owned device sequence.
@@ -122,8 +127,11 @@ struct Epoch {
   static iree_status_t Submit(iree_task_process_t* process,
                               const iree_task_worker_context_t*,
                               iree_task_process_drain_result_t* result) {
-    auto* self = static_cast<Epoch*>(process->user_data);
-    auto status = self->SubmitCopies();
+    auto* self = static_cast<ModelWork*>(process->user_data);
+    auto status = self->operation == Operation::kEpoch
+                      ? self->SubmitCopies()
+                      : loom_serve_text_model_submit_trim(
+                            self->model, &self->trim_result, &self->frontier);
     if (iree_status_is_ok(status)) {
       for (size_t i = 0; i < self->semaphores.size(); ++i) {
         self->semaphores[i] = reinterpret_cast<iree_async_semaphore_t*>(
@@ -148,7 +156,7 @@ struct Epoch {
 
   static void Ready(void* user_data, iree_async_operation_t*,
                     iree_status_t status, iree_async_completion_flags_t) {
-    auto* self = static_cast<Epoch*>(user_data);
+    auto* self = static_cast<ModelWork*>(user_data);
     std::lock_guard<std::mutex> lock(self->mutex);
     self->status = iree_status_join(self->status, status);
     iree_task_executor_schedule_process(self->executor, &self->complete);
@@ -157,7 +165,7 @@ struct Epoch {
   static iree_status_t Complete(iree_task_process_t* process,
                                 const iree_task_worker_context_t*,
                                 iree_task_process_drain_result_t* result) {
-    auto* self = static_cast<Epoch*>(process->user_data);
+    auto* self = static_cast<ModelWork*>(process->user_data);
     std::lock_guard<std::mutex> lock(self->mutex);
     for (size_t i = 0; i < kSpanCount && iree_status_is_ok(self->status); ++i) {
       auto* row =
@@ -169,8 +177,11 @@ struct Epoch {
       }
     }
     if (iree_status_is_ok(self->status)) {
-      self->status = loom_serve_text_model_complete_epoch(self->model,
-                                                          self->results.data());
+      self->status = self->operation == Operation::kEpoch
+                         ? loom_serve_text_model_complete_epoch(
+                               self->model, self->results.data())
+                         : loom_serve_text_model_complete_trim(
+                               self->model, &self->trim_result);
     }
     result->did_work = true;
     result->completed = true;
@@ -178,7 +189,7 @@ struct Epoch {
   }
 
   static void Release(iree_task_process_t* process) {
-    auto* self = static_cast<Epoch*>(process->user_data);
+    auto* self = static_cast<ModelWork*>(process->user_data);
     std::lock_guard<std::mutex> lock(self->mutex);
     ++self->released;
     self->condition.notify_one();
@@ -227,7 +238,7 @@ static iree_status_t SelectShape(loom_serve_text_model_t* model,
                           count);
 }
 
-static iree_status_t Compare(const char* label, Epoch& epoch) {
+static iree_status_t Compare(const char* label, ModelWork& epoch) {
   IREE_RETURN_IF_ERROR(SelectShape(epoch.model, epoch.spans, &epoch.shape));
   IREE_RETURN_IF_ERROR(epoch.Run());
   Spans reference = epoch.spans;
@@ -314,7 +325,15 @@ static iree_status_t Run(loom_serve_text_model_t* model,
         kTokenCapacity, inputs[i].data(), &counts[i], allocator));
   }
   const size_t prefix = counts[0] / 2;
-  Epoch prefill;
+  // Low physical IDs belong to independent ballast rows. Releasing them after
+  // the target/reference work guarantees a fragmented live pool for trim.
+  const Spans ballast = {{{7, counts[0], inputs[0].data(), 0},
+                          {6, counts[1], inputs[1].data(), 0}}};
+  size_t ballast_shape = 0;
+  IREE_RETURN_IF_ERROR(SelectShape(model, ballast, &ballast_shape));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(
+      model, ballast_shape, ballast.size(), ballast.data()));
+  ModelWork prefill;
   prefill.model = model;
   prefill.spans = {{{kRows[0], prefix, inputs[0].data(), 0},
                     {kRows[1], counts[1], inputs[1].data(),
@@ -322,7 +341,7 @@ static iree_status_t Run(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(Compare("partial-prefill", prefill));
   int32_t token =
       loom_serve_text_row_token(loom_serve_text_model_row(model, kRows[1]));
-  Epoch mixed;
+  ModelWork mixed;
   mixed.model = model;
   mixed.spans = {{{kRows[1], 1, &token, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
                   {kRows[0], counts[0] - prefix, inputs[0].data() + prefix,
@@ -332,7 +351,7 @@ static iree_status_t Run(loom_serve_text_model_t* model,
     for (size_t pass = 0; pass < 2; ++pass) {
       std::array<int32_t, kSpanCount> anchors = {};
       uint32_t limits[kSpanCount] = {4, 4};
-      Epoch speculative;
+      ModelWork speculative;
       speculative.model = model;
       speculative.limits = limits;
       for (size_t i = 0; i < kSpanCount; ++i) {
@@ -370,8 +389,31 @@ static iree_status_t Run(loom_serve_text_model_t* model,
           Compare(pass ? "mtp-continuation" : "mtp", speculative));
     }
   }
+  for (size_t row : {7u, 6u}) {
+    IREE_RETURN_IF_ERROR(
+        loom_serve_text_row_reset(loom_serve_text_model_row(model, row)));
+  }
+  ModelWork trim;
+  trim.operation = ModelWork::Operation::kTrim;
+  trim.model = model;
+  trim.spans = mixed.spans;
+  IREE_RETURN_IF_ERROR(trim.Run());
+  const bool compactable =
+      loom_serve_device_memory_pool(loom_serve_text_model_device(model)) &&
+      loom_serve_text_model_pool_usage(model).capacity;
+  if ((trim.trim_result.moved_blocks != 0) != compactable) {
+    return iree_make_status(IREE_STATUS_DATA_LOSS,
+                            "compaction did not match the backing policy");
+  }
+  fprintf(stdout,
+          "{\"event\":\"maintenance_check\",\"case\":\"async-trim\","
+          "\"moved_blocks\":%u,\"copied_bytes\":%" PRIu64
+          ",\"released_bytes\":%" PRIu64 "}\n",
+          trim.trim_result.moved_blocks, trim.trim_result.copied_bytes,
+          trim.trim_result.released_bytes);
+  fflush(stdout);
   std::array<int32_t, kSpanCount> anchors = {};
-  Epoch decode;
+  ModelWork decode;
   decode.model = model;
   for (size_t i = 0; i < kSpanCount; ++i) {
     anchors[i] =
@@ -379,7 +421,7 @@ static iree_status_t Run(loom_serve_text_model_t* model,
     decode.spans[i] = {kRows[i], 1, &anchors[i],
                        LOOM_SERVE_TEXT_SPAN_FLAG_SELECT};
   }
-  return Compare("decode-after-reuse", decode);
+  return Compare("decode-after-compaction", decode);
 }
 
 }  // namespace
@@ -411,7 +453,7 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   fprintf(stdout,
-          "PASS: one-worker text epochs preserve copied plans, output "
-          "and row publication.\n");
+          "PASS: one-worker text epochs and compaction preserve copied plans, "
+          "output and row publication.\n");
   return EXIT_SUCCESS;
 }

@@ -26,7 +26,7 @@ extern "C" {
 // Packed epochs separate submission from successful completion; no row-local
 // VM or thread is required. The owner excludes other model mutation until
 // completion, but independent models may execute concurrently. Synchronous
-// convenience and maintenance calls join only on an outer application thread.
+// convenience calls join only on an outer application thread.
 // This runner-private interface exposes model work and shared source policy,
 // not network sessions. Input-capacity rejection submits no work. An execution
 // or submission failure ends the run: destroy drains accepted work before any
@@ -194,13 +194,29 @@ typedef struct loom_serve_text_trim_result_t {
   uint64_t released_bytes;
 } loom_serve_text_trim_result_t;
 
-// Retires accepted work and releases physical slabs containing no owned state.
-// Compacts blocks when the temporary destination union fits the physical pool,
-// then publishes target/draft maps and releases the old backing. Live rows and
-// cached commands survive; reset rows can regrow in the same virtual buffers.
-// This is an explicit maintenance operation, not part of ordinary decoding.
-// Fixed/dense comparison backing is unchanged and reports zero reclamation.
-// Execution/platform failure ends the run, as with model_epoch.
+// Starts maintenance at a successfully completed model frontier, releasing
+// unowned slabs and enqueuing compaction when the temporary destination union
+// fits. Target/draft map uploads follow the copies on the model timeline; no
+// model-completion wait occurs. Native allocation/remapping calls are still
+// synchronous cold operations. The owner excludes other model mutation until
+// the returned borrowed frontier succeeds and complete_trim consumes the
+// result. Live rows and cached commands survive; reset rows can regrow in the
+// same VA. Fixed/dense backing is unchanged and reports zero reclamation.
+// Submission failure is terminal and preserves accepted work for outer model
+// destruction.
+iree_status_t loom_serve_text_model_submit_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// After successful ALL readiness, commits block ownership and reclaims old
+// backing. Consumes the unchanged submission record and adds final reclaimed
+// bytes. Failed readiness never calls this entry. No model-completion wait
+// occurs; native unmapping/allocation failures remain terminal.
+iree_status_t loom_serve_text_model_complete_trim(
+    loom_serve_text_model_t* model, loom_serve_text_trim_result_t* result);
+
+// Synchronous outer-thread wrapper over submission and completion. Explicit
+// maintenance, not ordinary decoding or a task-worker entry point.
 iree_status_t loom_serve_text_model_trim(
     loom_serve_text_model_t* model, loom_serve_text_trim_result_t* out_result);
 
