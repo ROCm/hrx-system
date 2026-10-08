@@ -60,6 +60,7 @@ loom_cc_library(
         ":request",
         "//experimental/loom_serve/runtime:execution",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/tokenizer",
     ],
 )
 

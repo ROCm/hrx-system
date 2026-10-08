@@ -8,11 +8,39 @@
 
 #include <stdio.h>
 
+#include "experimental/loom_serve/http/tokenization.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
 #include "loom/util/json.h"
 
+typedef struct router_tokenization_t {
+  // Owner-only list link, bounded by the transport's connection credit.
+  struct router_tokenization_t* next;
+  // Independent finite CPU process, never waiting on model or device work.
+  iree_task_process_t process;
+  // Borrowed tokenizer, immutable and live through final process release.
+  const iree_tokenizer_t* tokenizer;
+  // Claim keeping the request JSON alive while CPU work uses its views.
+  loom_serve_http_connection_t* connection;
+  // Borrowed immutable request, live until the owner sends or aborts.
+  const loom_serve_http_request_t* request;
+  // Completed HTTP bytes copied by transport before this job is freed.
+  iree_string_builder_t output;
+  // Allocator owning this job and independent tokenizer scratch.
+  iree_allocator_t allocator;
+  // Nonblocking router wake, valid until all accepted jobs retire.
+  loom_serve_http_observer_t observer;
+  // Joins release publication's final access before owner destruction.
+  iree_slim_mutex_t mutex;
+  // Owned outcome, transferred by completion and consumed after release.
+  iree_status_t status;
+  // The executor and its callbacks have relinquished job storage.
+  bool released;
+} router_tokenization_t;
+
 typedef struct router_t {
+  // Allocator for independently owned utility jobs and routing output.
+  iree_allocator_t allocator;
   // Shared application workers, borrowed through final process release.
   iree_task_executor_t* executor;
   // Transport owning network readiness and claimed request storage.
@@ -37,6 +65,8 @@ typedef struct router_t {
   iree_status_t status;
   // Routing JSON scratch, used only by the exclusive turn owner.
   iree_string_builder_t output;
+  // Accepted utility jobs, each holding one transport claim until CPU release.
+  router_tokenization_t* tokenizations;
   // Final process retirement, independent of drain completion.
   struct {
     // Joins the release callback's last access before stack storage dies.
@@ -47,6 +77,11 @@ typedef struct router_t {
     bool released;
   } retirement;
 } router_t;
+
+static void router_wake(void* user_data) {
+  router_t* router = user_data;
+  iree_task_executor_schedule_process(router->executor, &router->process);
+}
 
 static iree_status_t router_quote(iree_string_builder_t* output,
                                   iree_string_view_t value) {
@@ -91,6 +126,127 @@ static iree_status_t router_reject(loom_serve_http_connection_t* connection,
     loom_serve_http_connection_abort(connection);
   }
   return status;
+}
+
+static iree_status_t router_tokenization_run(
+    iree_task_process_t* process, const iree_task_worker_context_t* context,
+    iree_task_process_drain_result_t* result) {
+  (void)context;
+  router_tokenization_t* job = process->user_data;
+  result->did_work = true;
+  result->completed = true;
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(
+      &job->output,
+      "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+      "Connection: close\r\n\r\n"));
+  if (iree_string_view_equal(job->request->target, IREE_SV("/tokenize"))) {
+    return loom_serve_http_tokenize(job->tokenizer, job->request->body,
+                                    &job->output, job->allocator);
+  }
+  return loom_serve_http_detokenize(job->tokenizer, job->request->body,
+                                    &job->output, job->allocator);
+}
+
+static void router_tokenization_completed(iree_task_process_t* process,
+                                          iree_status_t status) {
+  router_tokenization_t* job = process->user_data;
+  iree_slim_mutex_lock(&job->mutex);
+  job->status = status;
+  iree_slim_mutex_unlock(&job->mutex);
+}
+
+static void router_tokenization_released(iree_task_process_t* process) {
+  router_tokenization_t* job = process->user_data;
+  iree_slim_mutex_lock(&job->mutex);
+  job->released = true;
+  job->observer.wake(job->observer.user_data);
+  iree_slim_mutex_unlock(&job->mutex);
+}
+
+static iree_status_t router_tokenization_accept(
+    router_t* router, const iree_tokenizer_t* tokenizer,
+    loom_serve_http_connection_t* connection,
+    const loom_serve_http_request_t* request) {
+  if (!tokenizer) {
+    return router_reject(connection, 404, "Not Found",
+                         IREE_SV("model has no tokenizer capability"),
+                         &router->output);
+  }
+  router_tokenization_t* job = NULL;
+  iree_status_t status =
+      iree_allocator_malloc(router->allocator, sizeof(*job), (void**)&job);
+  if (!iree_status_is_ok(status)) {
+    loom_serve_http_connection_abort(connection);
+    return status;
+  }
+  job->allocator = router->allocator;
+  job->tokenizer = tokenizer;
+  job->connection = connection;
+  job->request = request;
+  job->observer = (loom_serve_http_observer_t){router_wake, router};
+  iree_slim_mutex_initialize(&job->mutex);
+  iree_string_builder_initialize(router->allocator, &job->output);
+  iree_task_process_initialize(router_tokenization_run, 0, 1, &job->process);
+  job->process.user_data = job;
+  job->process.completion_fn = router_tokenization_completed;
+  job->process.release_fn = router_tokenization_released;
+  job->next = router->tokenizations;
+  router->tokenizations = job;
+  iree_task_executor_schedule_process(router->executor, &job->process);
+  return iree_ok_status();
+}
+
+static void router_tokenizations_collect(router_t* router, bool* out_progress) {
+  router_tokenization_t** link = &router->tokenizations;
+  while (*link) {
+    router_tokenization_t* job = *link;
+    iree_slim_mutex_lock(&job->mutex);
+    const bool released = job->released;
+    iree_slim_mutex_unlock(&job->mutex);
+    if (!released) {
+      link = &job->next;
+      continue;
+    }
+    *out_progress = true;
+    *link = job->next;
+    iree_status_t status = job->status;
+    if (!iree_status_is_ok(status)) {
+      const bool invalid = iree_status_is_invalid_argument(status);
+      const bool too_large = iree_status_is_out_of_range(status);
+      iree_string_view_t message = iree_status_message(status);
+      if (!message.size) {
+        message = IREE_SV("tokenization failed");
+      }
+      iree_status_t response_status = iree_ok_status();
+      if (router->stopping) {
+        loom_serve_http_connection_abort(job->connection);
+      } else {
+        response_status = router_reject(job->connection,
+                                        too_large ? 413
+                                        : invalid ? 400
+                                                  : 500,
+                                        too_large ? "Content Too Large"
+                                        : invalid ? "Bad Request"
+                                                  : "Internal Server Error",
+                                        message, &job->output);
+      }
+      // A utility owns only independent CPU state. Its failure cannot poison
+      // a model timeline or authorize cancellation of another request.
+      fprintf(stderr, "Tokenization request failed: ");
+      iree_status_fprint(stderr, status);
+      iree_status_free(status);
+      status = response_status;
+    } else if (router->stopping) {
+      loom_serve_http_connection_abort(job->connection);
+    } else {
+      router_send(job->connection, iree_string_builder_view(&job->output));
+    }
+    router->status = iree_status_join(router->status, status);
+    router->stopping |= !iree_status_is_ok(router->status);
+    iree_string_builder_deinitialize(&job->output);
+    iree_slim_mutex_deinitialize(&job->mutex);
+    iree_allocator_free(router->allocator, job);
+  }
 }
 
 static iree_status_t router_model_visit(void* user_data, iree_string_view_t key,
@@ -146,11 +302,12 @@ static loom_serve_http_service_flags_t router_service_flags(
   return 0;
 }
 
-static iree_status_t router_accept(loom_serve_http_connection_t* connection,
-                                   const loom_serve_http_request_t* request,
-                                   iree_host_size_t service_count,
-                                   const loom_serve_http_service_t* services,
-                                   iree_string_builder_t* output) {
+static iree_status_t router_accept(router_t* router,
+                                   loom_serve_http_connection_t* connection,
+                                   const loom_serve_http_request_t* request) {
+  const iree_host_size_t service_count = router->service_count;
+  const loom_serve_http_service_t* services = router->services;
+  iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
   if (get && iree_string_view_equal(request->target, IREE_SV("/healthz"))) {
     router_send(connection,
@@ -225,6 +382,12 @@ static iree_status_t router_accept(loom_serve_http_connection_t* connection,
   }
   for (iree_host_size_t i = 0; i < service_count; ++i) {
     if (iree_string_view_equal(name, services[i].name)) {
+      if (post &&
+          (iree_string_view_equal(request->target, IREE_SV("/tokenize")) ||
+           iree_string_view_equal(request->target, IREE_SV("/detokenize")))) {
+        return router_tokenization_accept(router, services[i].tokenizer,
+                                          connection, request);
+      }
       return services[i].accept(
           services[i].self, connection, request,
           router_service_flags(i, service_count, services));
@@ -234,14 +397,10 @@ static iree_status_t router_accept(loom_serve_http_connection_t* connection,
                        IREE_SV("model is not registered"), output);
 }
 
-static void router_wake(void* user_data) {
-  router_t* router = user_data;
-  iree_task_executor_schedule_process(router->executor, &router->process);
-}
-
 static void router_advance(router_t* router, bool* out_progress) {
   router->stopping |= loom_serve_http_server_is_stopping(router->server);
   *out_progress = false;
+  router_tokenizations_collect(router, out_progress);
   for (iree_host_size_t i = 0;
        i < router->request_capacity && !router->stopping; ++i) {
     const loom_serve_http_request_t* request = NULL;
@@ -250,8 +409,7 @@ static void router_advance(router_t* router, bool* out_progress) {
     if (!connection) {
       break;
     }
-    router->status = router_accept(connection, request, router->service_count,
-                                   router->services, &router->output);
+    router->status = router_accept(router, connection, request);
     router->stopping = !iree_status_is_ok(router->status) ||
                        loom_serve_http_server_is_stopping(router->server);
     *out_progress = true;
@@ -273,7 +431,7 @@ static void router_advance(router_t* router, bool* out_progress) {
     *out_progress |= progress;
   }
   router->cursor = (router->cursor + 1) % router->service_count;
-  bool pending = false;
+  bool pending = router->tokenizations != NULL;
   for (iree_host_size_t i = 0; i < router->service_count; ++i) {
     pending |= router->services[i].is_pending(router->services[i].self);
   }
@@ -347,7 +505,8 @@ iree_status_t loom_serve_http_router_run(
       }
     }
   }
-  router_t router = {.executor = executor,
+  router_t router = {.allocator = host_allocator,
+                     .executor = executor,
                      .server = server,
                      .services = services,
                      .service_count = service_count,

@@ -16,11 +16,13 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "iree/async/proactor.h"
 #include "iree/task/topology.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
+#include "iree/tokenizer/format/huggingface/tokenizer_json.h"
 
 namespace {
 
@@ -175,20 +177,28 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     options.port = 0;
     IREE_ASSERT_OK(loom_serve_http_server_create(&options, &server_,
                                                  iree_allocator_system()));
+    IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+        IREE_SV(R"({"model":{"type":"BPE","vocab":{"a":0,"b":1},
+                              "merges":[]},"decoder":{"type":"ByteFallback"}})"),
+        iree_allocator_system(), &tokenizer_a_));
+    IREE_ASSERT_OK(iree_tokenizer_from_huggingface_json(
+        IREE_SV(R"({"model":{"type":"BPE","vocab":{"a":1,"b":0},
+                              "merges":[]}})"),
+        iree_allocator_system(), &tokenizer_b_));
     owner_ = std::thread([this] {
       const loom_serve_http_service_t services[] = {
           {IREE_SV("a"), &a_, ModelService::SetObserver,
            ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance},
+           ModelService::Accept, ModelService::Advance, tokenizer_a_},
           {IREE_SV("b"), &b_, ModelService::SetObserver,
            ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance},
+           ModelService::Accept, ModelService::Advance, tokenizer_b_},
           {IREE_SV("held"), &held_, ModelService::SetObserver,
            ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance},
+           ModelService::Accept, ModelService::Advance, tokenizer_a_},
           {IREE_SV("other"), &other_, ModelService::SetObserver,
            ModelService::IsPending, ModelService::IsActive,
-           ModelService::Accept, ModelService::Advance}};
+           ModelService::Accept, ModelService::Advance, nullptr}};
       status_ = loom_serve_http_router_run(executor_, server_,
                                            IREE_ARRAYSIZE(services), services,
                                            4, iree_allocator_system());
@@ -208,6 +218,8 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
       }
     }
     IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
+    iree_tokenizer_free(tokenizer_b_);
+    iree_tokenizer_free(tokenizer_a_);
     iree_task_executor_release(executor_);
   }
   int Send(const std::string& method, const std::string& target,
@@ -251,6 +263,11 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   loom_serve_http_server_t* server_ = nullptr;
   // Shared task workers, joined only after the router's final release.
   iree_task_executor_t* executor_ = nullptr;
+  // Immutable tokenizers outliving accepted jobs, with intentionally distinct
+  // IDs.
+  iree_tokenizer_t* tokenizer_a_ = nullptr;
+  // Second model's vocabulary proves utilities use the selected deployment.
+  iree_tokenizer_t* tokenizer_b_ = nullptr;
   // First model dependency used only by serialized router turns.
   ModelService a_{"a"};
   // Second model dependency used only by serialized router turns.
@@ -268,6 +285,78 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   // Expected terminal result; service errors are not hidden by shutdown.
   iree_status_code_t expected_code_ = IREE_STATUS_OK;
 };
+
+TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
+  const int held = Send("POST", "/v1/test", R"({"model":"held"})");
+  held_.WaitSubmitted();
+  std::vector<int> clients;
+  for (int i = 0; i < 12; ++i) {
+    const char* name = i % 2 ? "b" : "held";
+    clients.push_back(
+        Send("POST", "/tokenize",
+             std::string("{\"model\":\"") + name + "\",\"content\":\"aab\"}"));
+  }
+  EXPECT_NE(Read(Send("GET", "/healthz")).find("\"status\":\"ready\""),
+            std::string::npos);
+  for (int i = 0; i < 12; ++i) {
+    const auto response = Read(clients[i]);
+    EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+    EXPECT_NE(response.find(i % 2 ? R"({"tokens":[1,1,0]})"
+                                  : R"({"tokens":[0,0,1]})"),
+              std::string::npos);
+  }
+  const auto decoded =
+      Read(Send("POST", "/detokenize", R"({"model":"held","tokens":[1,0,0]})"));
+  // No utility reached the model dependency or required its device frontier.
+  held_.Release();
+  EXPECT_NE(decoded.find(R"({"content":"baa"})"), std::string::npos);
+  if (decoded.find("HTTP/1.1 200") == 0) {
+    EXPECT_NE(Read(held).find("held:/v1/test:"), std::string::npos);
+  } else {
+    // A broken utility may stop the owner; release its held claim in teardown
+    // instead of circularly waiting for a response after that failure.
+    EXPECT_EQ(close(held), 0);
+  }
+}
+
+TEST_P(HttpRouterTest, UtilityRejectionsAndResetPeersPreserveTheOwner) {
+  EXPECT_EQ(
+      Read(Send("POST", "/tokenize", R"({"model":"other","content":"a"})"))
+          .find("HTTP/1.1 404"),
+      0u);
+  // This deployment has an encoder but no decoder. Its CPU failure belongs
+  // to this request and must leave every model and later utility usable.
+  EXPECT_EQ(Read(Send("POST", "/detokenize", R"({"model":"b","tokens":[0]})"))
+                .find("HTTP/1.1 500"),
+            0u);
+  EXPECT_EQ(Read(Send("POST", "/tokenize",
+                      R"({"model":"a","content":"a","with_pieces":true})"))
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_EQ(Read(Send("POST", "/detokenize", R"({"model":"a","tokens":[2]})"))
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_EQ(Read(Send("POST", "/tokenize",
+                      "{\"model\":\"a\",\"content\":\"" +
+                          std::string(256 * 1024 + 1, 'a') + "\"}"))
+                .find("HTTP/1.1 413"),
+            0u);
+  for (int i = 0; i < 8; ++i) {
+    const int client = Send("POST", "/tokenize",
+                            "{\"model\":\"a\",\"content\":\"" +
+                                std::string(64 * 1024, 'a') + "\"}");
+    const linger reset = {1, 0};
+    EXPECT_EQ(setsockopt(client, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+              0);
+    EXPECT_EQ(close(client), 0);
+  }
+  EXPECT_NE(Read(Send("POST", "/tokenize", R"({"model":"a","content":"ab"})"))
+                .find(R"({"tokens":[0,1]})"),
+            std::string::npos);
+  EXPECT_NE(
+      Read(Send("POST", "/v1/test", R"({"model":"b"})")).find("b:/v1/test:"),
+      std::string::npos);
+}
 
 TEST_P(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
   EXPECT_NE(Read(Send("GET", "/healthz")).find(R"({"status":"ready"})"),

@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/image/request.h"
 #include "experimental/loom_serve/runtime/execution.h"
+#include "iree/tokenizer/tokenizer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -38,6 +39,9 @@ typedef struct loom_serve_image_generator_t {
   // Consumes successful completion and releases model pins. Borrowed F32 CHW
   // RGB in [-1,1] remains live until the next invocation or model destruction.
   iree_const_byte_span_t (*complete)(void* self);
+  // Optional immutable input tokenizer, live through the model lifetime. Raw
+  // HTTP utilities borrow it independently of the serialized invocation.
+  const iree_tokenizer_t* tokenizer;
 } loom_serve_image_generator_t;
 
 #ifdef __cplusplus

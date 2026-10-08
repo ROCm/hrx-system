@@ -844,5 +844,6 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .discard_prepared_request = image_generator_discard,
       .try_acquire = image_generator_acquire,
       .submit = image_generator_submit,
-      .complete = image_generator_complete};
+      .complete = image_generator_complete,
+      .tokenizer = model->tokenizer};
 }

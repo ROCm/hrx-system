@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/http/server.h"
 #include "iree/task/executor.h"
+#include "iree/tokenizer/tokenizer.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -55,6 +56,9 @@ typedef struct loom_serve_http_service_t {
   // STOPPING consumes accepted readiness without launching another model unit.
   iree_status_t (*advance)(void* self, loom_serve_http_service_flags_t flags,
                            bool* out_progress);
+  // Optional immutable input tokenizer, borrowed through router return. Raw
+  // utilities use independent CPU states and never call this model's methods.
+  const iree_tokenizer_t* tokenizer;
 } loom_serve_http_service_t;
 
 // Routes JSON request bodies by their model field and checkpoint operations by
@@ -64,11 +68,14 @@ typedef struct loom_serve_http_service_t {
 // once, with rotating service priority on the borrowed executor. Owner turns
 // return workers while waiting for network, CPU or device readiness. The outer
 // caller waits only for final process release; this function is not a task.
-// Shutdown/failure stops admission and drains accepted asynchronous callbacks
-// before detaching their wake targets.
-// Return leaves outstanding claims owned by services; the caller destroys them
-// before the borrowed transport. Failed readiness is not queue retirement:
-// model owners perform the outer device join, never a router callback.
+// POST /tokenize and /detokenize use the selected service's optional tokenizer
+// on independent finite CPU tasks. Transport connection credit bounds utility
+// jobs; each retains its request claim until task release, even on
+// cancellation. Shutdown/failure stops admission and drains accepted
+// asynchronous callbacks before detaching their wake targets. Return leaves
+// outstanding claims owned by services; the caller destroys them before the
+// borrowed transport. Failed readiness is not queue retirement: model owners
+// perform the outer device join, never a router callback.
 iree_status_t loom_serve_http_router_run(
     iree_task_executor_t* executor, loom_serve_http_server_t* server,
     iree_host_size_t service_count, const loom_serve_http_service_t* services,

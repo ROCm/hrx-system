@@ -2021,8 +2021,14 @@ static iree_status_t text_accept(void* self,
 loom_serve_http_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service) {
   return (loom_serve_http_service_t){
-      service->name,  service,     text_set_observer, text_is_pending,
-      text_is_active, text_accept, text_advance};
+      .name = service->name,
+      .self = service,
+      .set_observer = text_set_observer,
+      .is_pending = text_is_pending,
+      .is_active = text_is_active,
+      .accept = text_accept,
+      .advance = text_advance,
+      .tokenizer = loom_serve_text_model_tokenizer(service->model)};
 }
 
 iree_status_t loom_serve_text_service_run(

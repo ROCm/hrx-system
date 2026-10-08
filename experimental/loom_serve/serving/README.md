@@ -99,6 +99,39 @@ Other defaults and accepted ranges are in
 
 ## Requests and retained state
 
+`POST /tokenize` and `POST /detokenize` use a deployment's already loaded input
+tokenizer without activating weights, taking a model row, or waiting for an
+inference epoch. Independent finite CPU tasks share the application executor;
+one model's device work does not hold these utilities behind its completion.
+This raw-text profile uses llama.cpp's field names and defaults, plus the
+required catalog `model` selector:
+
+~~~json
+{"model":"scout","content":"Hello!","add_special":false,"parse_special":true}
+~~~
+
+The response is `{"tokens":[...]}`. Detokenization accepts
+`{"model":"scout","tokens":[...]}` and returns `{"content":"..."}`, using the
+tokenizer's decoder and preserving special tokens. It can also be used with an
+image deployment's prompt tokenizer. These operations do not apply chat
+templates or model-specific prompt framing. Empty text/arrays are valid.
+
+Each utility request allows at most 262,144 tokens and 1 MiB of decoded text,
+independently of inference context capacity and the transport JSON body limit.
+Limits include inserted special tokens and decoded output; exceeding one returns
+413 without a truncated success. Tokens must be integer IDs present in the
+selected vocabulary. Unknown/duplicate/wrongly typed fields return 400. An
+unknown model or absent tokenizer returns 404; a tokenizer execution error
+(including an unconfigured decoder) returns 500 for that request without
+stopping other models.
+
+The optional llama.cpp `with_pieces=true` mode is not supported: that protocol
+requires raw token bytes, whereas the public tokenizer decoder combines partial
+UTF-8 and replaces incomplete sequences on finalization. It returns 400 instead
+of substituting vocabulary spellings or silently changing the response shape.
+`with_pieces=false` is accepted. vLLM's `prompt`/`add_special_tokens` profile and
+chat-tokenization fields are not aliases for this raw profile.
+
 `GET /v1/models` lists deployment names. Chat requests use those names, not
 the model source's intrinsic identity:
 

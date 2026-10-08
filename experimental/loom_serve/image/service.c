@@ -641,7 +641,8 @@ loom_serve_http_service_t loom_serve_image_service_interface(
                                      .is_pending = image_is_pending,
                                      .is_active = image_is_active,
                                      .accept = image_accept,
-                                     .advance = image_advance};
+                                     .advance = image_advance,
+                                     .tokenizer = service->generator.tokenizer};
 }
 
 void loom_serve_image_service_destroy(loom_serve_image_service_t* service) {

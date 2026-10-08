@@ -65,6 +65,24 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    tokenization
+  HDRS
+    "tokenization.h"
+  SRCS
+    "tokenization.c"
+  DEPS
+    iree::base
+    iree::base::internal::json
+    iree::base::internal::unicode
+    iree::tokenizer
+    iree::tokenizer::vocab
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     router
   HDRS
     "router.h"
@@ -73,13 +91,29 @@ loom_cc_library(
   DEPS
     ::request
     ::server
+    ::tokenization
     iree::base
     iree::base::internal::json
     iree::base::threading
     iree::task
+    iree::tokenizer
     loom::util::json
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    tokenization_test
+  SRCS
+    "tokenization_test.cc"
+  DEPS
+    ::tokenization
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
 )
 
 loom_cc_library(
@@ -116,6 +150,8 @@ loom_cc_test(
     iree::task
     iree::testing::gtest
     iree::testing::gtest_main
+    iree::tokenizer
+    iree::tokenizer::format::huggingface::tokenizer_json
 )
 endif()
 

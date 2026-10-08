@@ -168,6 +168,14 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   Start();
   EXPECT_NE(Read(Send("GET", "/v1/models")).find("fixture-image"),
             std::string::npos);
+  EXPECT_NE(Read(Send("POST", "/tokenize",
+                      R"({"model":"fixture-image","content":"aba"})"))
+                .find(R"({"tokens":[0,1,0]})"),
+            std::string::npos);
+  EXPECT_NE(Read(Send("POST", "/detokenize",
+                      R"({"model":"fixture-image","tokens":[1,0,1]})"))
+                .find(R"({"content":"bab"})"),
+            std::string::npos);
   // A rejected request must leave the same listener/model usable.
   EXPECT_EQ(Read(Send("POST", "/v1/images/generations",
                       R"({"model":"fixture-image","prompt":"ab","n":2})"))
