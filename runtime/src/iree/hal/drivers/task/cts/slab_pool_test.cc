@@ -110,8 +110,8 @@ class TaskSlabPoolTest : public CtsTestBase<> {
         semaphores, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
-  // Producers have completed before this call. Join descendants enqueued by
-  // whole-range returns as well as the returns already pending on the owner.
+  // Joins queued child/cache returns, including work they enqueue. A pending
+  // frontier callback can still enqueue native source retirement afterward.
   void JoinMaintenance(iree_hal_pool_t* pool) {
     iree_hal_memory_maintenance_call(
         pool->maintenance,

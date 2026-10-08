@@ -67,6 +67,8 @@ class VulkanSlabPoolTest : public CtsTestBase<> {
         semaphores, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
   }
 
+  // Joins queued child/cache returns, including work they enqueue. A pending
+  // frontier callback can still enqueue native source retirement afterward.
   void JoinMaintenance(iree_hal_pool_t* source) {
     iree_hal_memory_maintenance_call(
         source->maintenance,
@@ -495,8 +497,11 @@ TEST_P(VulkanSlabPoolTest, SharedBackingAcrossFamiliesAndAllocationPolicies) {
   EXPECT_EQ(cache_stats.ready_count, 1u);
   iree_hal_pool_trim(cache, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
   JoinMaintenance(source);
-  iree_hal_pool_query_stats(source, &stats);
+  iree_hal_pool_query_stats(cache, &stats);
   EXPECT_EQ(stats.bytes_committed, 0u);
+  iree_hal_pool_query_stats(source, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
+  EXPECT_EQ(stats.bytes_reserved, 0u);
   IREE_ASSERT_OK(iree_hal_slab_cache_query_stats(cache, &cache_stats));
   EXPECT_EQ(cache_stats.ready_count, 0u);
 }

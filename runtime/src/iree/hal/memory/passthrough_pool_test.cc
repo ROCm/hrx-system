@@ -36,8 +36,8 @@ static iree_hal_memory_maintenance_t* test_maintenance() {
   return maintenance;
 }
 
-// An ordered observation point for tests of asynchronous native retirement.
-// Pool trim itself never waits for work on a shared maintenance executor.
+// Joins native retirement already queued on the maintenance executor. Pending
+// frontier callbacks may enqueue more work after this observation point.
 static void WaitForMaintenance() {
   struct Barrier : iree_hal_memory_maintenance_entry_t {
     // Protects completion and the callback's final notification access.
@@ -101,6 +101,9 @@ typedef struct iree_hal_test_opaque_slab_provider_t {
 
   // Number of wrap_buffer calls received by the provider.
   iree_atomic_int32_t wrap_count;
+
+  // Number of native slabs freed by release_slab.
+  iree_atomic_int32_t release_count;
 
   // One-based wrap call index that returns an injected error, or zero.
   int32_t fail_wrap_at;
@@ -174,6 +177,7 @@ static void iree_hal_test_opaque_slab_provider_release_slab(
       (iree_hal_test_opaque_slab_provider_t*)base_provider;
   iree_allocator_free_aligned(provider->host_allocator,
                               (void*)(uintptr_t)slab->provider_handle);
+  iree_atomic_fetch_add(&provider->release_count, 1, iree_memory_order_relaxed);
 }
 
 static iree_status_t iree_hal_test_opaque_slab_provider_wrap_buffer(
@@ -1006,6 +1010,61 @@ TEST_F(PassthroughPoolTest,
   EXPECT_EQ(iree_async_frontier_tracker_advance(tracker_,
                                                 frontier.entries[0].axis, 1),
             0u);
+}
+
+TEST_F(PassthroughPoolTest, MaintenanceDrainDoesNotJoinPendingRetirement) {
+  iree_hal_slab_provider_t* slab_provider = nullptr;
+  IREE_ASSERT_OK(
+      iree_hal_test_opaque_slab_provider_create(allocator_, &slab_provider));
+  auto* provider =
+      reinterpret_cast<iree_hal_test_opaque_slab_provider_t*>(slab_provider);
+  iree_hal_pool_t* pool = nullptr;
+  IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
+      {}, slab_provider, notification_, tracker_, test_maintenance(),
+      allocator_, &pool));
+  iree_async_single_frontier_t frontier = {};
+  frontier.entry_count = 1;
+  frontier.entries[0] = {iree_async_axis_make_queue(1, 0, 0, 0, 0), 1};
+  IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
+      tracker_, frontier.entries[0].axis, nullptr));
+
+  const auto request = MakeReservationRequest(256, 16);
+  iree_hal_pool_reservation_t reservation;
+  iree_hal_pool_acquire_info_t info;
+  iree_hal_pool_acquire_result_t result;
+  IREE_ASSERT_OK(iree_hal_pool_acquire_reservations(
+      pool, 1, &request, nullptr, IREE_HAL_POOL_RESERVE_FLAG_NONE, &reservation,
+      &info, &result));
+  iree_hal_buffer_t* buffer = nullptr;
+  IREE_ASSERT_OK(MaterializeOneReservation(pool, request.params, &reservation,
+                                           IREE_HAL_POOL_MATERIALIZE_FLAG_NONE,
+                                           &buffer));
+  ReleaseOneReservation(pool, &reservation,
+                        iree_async_fixed_frontier_as_const_frontier(&frontier));
+  iree_hal_buffer_release(buffer);
+
+  // Execution and caller views have retired, but their frontier publication
+  // has not. Draining cold work cannot join a producer that has not enqueued
+  // its native release yet.
+  WaitForMaintenance();
+  iree_hal_pool_stats_t stats;
+  iree_hal_pool_query_stats(pool, &stats);
+  EXPECT_EQ(stats.reservation_count, 0u);
+  EXPECT_EQ(stats.bytes_reserved, 0u);
+  EXPECT_EQ(stats.bytes_committed, 256u);
+  EXPECT_EQ(stats.slab_count, 1u);
+  EXPECT_EQ(
+      iree_atomic_load(&provider->release_count, iree_memory_order_relaxed), 0);
+
+  // Caller-quiescent final release joins the physical free, including when
+  // the completion thread has not dispatched the frontier callback.
+  iree_hal_pool_release(pool);
+  EXPECT_EQ(
+      iree_atomic_load(&provider->release_count, iree_memory_order_relaxed), 1);
+  EXPECT_EQ(iree_async_frontier_tracker_advance(tracker_,
+                                                frontier.entries[0].axis, 1),
+            0u);
+  iree_hal_slab_provider_release(slab_provider);
 }
 
 TEST_F(PassthroughPoolTest, FrontierDispatchRacesFinalPoolRelease) {
