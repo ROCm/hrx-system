@@ -81,7 +81,7 @@ typedef struct loom_serve_text_state_checkpoint_t {
 } loom_serve_text_state_checkpoint_t;
 
 // Retained text storage, independent of source compilation and VM invocation.
-// All mutations use the device owner's serialized execution domain. External
+// All mutations use the model's serialized execution domain. External
 // model input is validated before growth; source geometry is validated once by
 // storage_initialize. Borrowed views remain valid until deinitialize retires
 // every exported root, including failed queued uses.
@@ -90,7 +90,7 @@ struct loom_serve_text_state_t {
   iree_allocator_t allocator;
   // Borrowed device, outliving this state and all virtual reservations.
   iree_hal_device_t* device;
-  // Borrowed shared execution timelines for state and model work.
+  // Borrowed model timelines shared by its state maintenance and model work.
   loom_serve_execution_t* execution;
   // Final queue ownership enclosing host payloads and virtual backing.
   loom_serve_retirement_t retirement;
@@ -179,7 +179,8 @@ void loom_serve_text_state_initialize(const loom_serve_text_options_t* options,
                                       loom_serve_text_state_t* out_state,
                                       iree_allocator_t allocator);
 iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
-                                             loom_serve_device_t* device);
+                                             loom_serve_device_t* device,
+                                             loom_serve_execution_t* execution);
 
 // The model first drains execution and releases its VM and command references.
 // This releases views, joins actual queue ownership, then frees maps, rows and

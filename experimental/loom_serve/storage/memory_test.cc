@@ -30,17 +30,18 @@ class MemoryTest : public ::testing::Test {
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
     pool = loom_serve_device_memory_pool(device);
+    IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
   }
 
   void TearDown() override {
     iree_hal_buffer_release(workspace);
-    IREE_ASSERT_OK(
-        loom_serve_execution_drain(loom_serve_device_execution(device)));
+    IREE_ASSERT_OK(loom_serve_execution_drain(execution));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(first));
     IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(second));
     const auto statistics = loom_serve_memory_pool_statistics(pool);
     EXPECT_EQ(statistics.committed_bytes, 0u);
     EXPECT_EQ(statistics.reserved_bytes, 0u);
+    loom_serve_execution_release(execution);
     IREE_EXPECT_OK(loom_serve_device_destroy(device));
   }
 
@@ -60,12 +61,11 @@ class MemoryTest : public ::testing::Test {
                       .length = sizeof(observed)}},
     };
     uint64_t completion = 0;
-    IREE_ASSERT_OK(loom_serve_execution_transfer(
-        loom_serve_device_execution(device), 1, operations, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_transfer(
-        loom_serve_device_execution(device), 1, operations + 1, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_wait(
-        loom_serve_device_execution(device), completion));
+    IREE_ASSERT_OK(
+        loom_serve_execution_transfer(execution, 1, operations, &completion));
+    IREE_ASSERT_OK(loom_serve_execution_transfer(execution, 1, operations + 1,
+                                                 &completion));
+    IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
     for (const auto word : observed) {
       EXPECT_EQ(word, value);
     }
@@ -81,10 +81,9 @@ class MemoryTest : public ::testing::Test {
                      .target = observed.data(),
                      .length = sizeof(observed)}};
     uint64_t completion = 0;
-    IREE_ASSERT_OK(loom_serve_execution_transfer(
-        loom_serve_device_execution(device), 1, &download, &completion));
-    IREE_ASSERT_OK(loom_serve_execution_wait(
-        loom_serve_device_execution(device), completion));
+    IREE_ASSERT_OK(
+        loom_serve_execution_transfer(execution, 1, &download, &completion));
+    IREE_ASSERT_OK(loom_serve_execution_wait(execution, completion));
     for (const auto word : observed) {
       EXPECT_EQ(word, value);
     }
@@ -94,8 +93,10 @@ class MemoryTest : public ::testing::Test {
   static constexpr uint64_t kSlabSize = 2 * 1024 * 1024;
   // Offset deliberately crossing the 32-bit byte-address boundary.
   static constexpr uint64_t kHighOffset = (uint64_t{1} << 32) + 512;
-  // Device and timeline owner enclosing all physical and virtual storage.
+  // Device owner enclosing all physical and virtual storage.
   loom_serve_device_t* device = nullptr;
+  // Owned model timeline for transfers and workspace allocations.
+  loom_serve_execution_t* execution = nullptr;
   // One physical budget shared by the independent reservations.
   loom_serve_memory_pool_t* pool = nullptr;
   // Independent accounting groups competing for the same physical budget.
@@ -196,7 +197,6 @@ TEST_F(MemoryTest, DeviceTrimPreservesLiveWorkspaceAndMutableState) {
                                                   &statistics[0], &first));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, 256));
   RoundTrip(loom_serve_virtual_buffer_handle(first), 0, 0xABCDEF01);
-  auto* execution = loom_serve_device_execution(device);
   IREE_ASSERT_OK(
       loom_serve_execution_reserve_workspace(execution, kSlabSize, 256));
   const iree_hal_pool_reservation_request_t request = {

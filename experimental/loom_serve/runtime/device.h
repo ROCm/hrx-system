@@ -15,8 +15,8 @@
 extern "C" {
 #endif
 
-// One serving device, its async I/O services, semaphore domain and ordered
-// execution timelines. One host owner serializes model calls and physical
+// One serving device, its async I/O services, semaphore domain and shared
+// workspace backing. One host owner serializes model calls and physical
 // residency transitions. Model programs and logical state remain independent;
 // their virtual reservations share this owner's physical allocation budget.
 typedef struct loom_serve_device_t loom_serve_device_t;
@@ -49,12 +49,12 @@ iree_status_t loom_serve_device_create(
     loom_serve_device_t** out_device, iree_allocator_t host_allocator);
 
 // Releases the device and its host reference, without an implicit device wait.
-// The caller first drains execution while all borrowed host I/O is alive and
-// releases all model/JIT/VM resources referencing this domain. Those resources
-// must not outlive the owner. NULL is permitted.
-// Profiling belongs to the device, not individual models. Outstanding virtual
-// reservations preserve the owner and return failure rather than dangling a
-// physical domain after a model cleanup failure.
+// The caller first drains every model domain while borrowed host I/O is alive
+// and releases all model/JIT/VM resources referencing this domain. Those
+// resources must not outlive the owner. NULL is permitted. Profiling belongs to
+// the device, not individual models. Outstanding virtual reservations preserve
+// the owner and return failure rather than dangling a physical domain after a
+// model cleanup failure.
 iree_status_t loom_serve_device_destroy(loom_serve_device_t* device);
 
 // Serving-managed backing across every model sharing this device. Virtual
@@ -85,7 +85,7 @@ iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
                                      uint64_t target_bytes);
 
 // Borrowed handles valid through owner destruction. The group establishes the
-// semaphore namespace; the exact queues are also used by the execution object.
+// semaphore namespace; execution domains retain the exact queues.
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device);
 // Borrowed application host, which outlives this device and its models.
 loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device);
@@ -95,8 +95,11 @@ iree_hal_queue_t* loom_serve_device_dispatch_queue(
     const loom_serve_device_t* device);
 iree_hal_queue_t* loom_serve_device_transfer_queue(
     const loom_serve_device_t* device);
-loom_serve_execution_t* loom_serve_device_execution(
-    const loom_serve_device_t* device);
+// Creates an owned model timeline over this device's shared workspace. It must
+// be drained and released before the device owner. Sharing physical backing
+// introduces no dependency edges between models.
+iree_status_t loom_serve_device_create_execution(
+    loom_serve_device_t* device, loom_serve_execution_t** out_execution);
 // Borrowed shared physical owner, or NULL for explicitly fixed backing.
 loom_serve_memory_pool_t* loom_serve_device_memory_pool(
     const loom_serve_device_t* device);

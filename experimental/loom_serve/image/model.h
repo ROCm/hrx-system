@@ -51,7 +51,8 @@ typedef struct loom_serve_image_model_options_t {
 // All retained stages have identical parameter placement. Input capacity comes
 // from source; workspace extent/alignment comes from compiler reflection and
 // its queue-ordered allocation is inserted by runner.execute_2. Private storage
-// belongs to the shared execution pool, not this model's residency.
+// belongs to the shared workspace pool, not this model's residency. This model
+// owns independent work and feedback timelines over the device queues.
 // Creation indexes parameters and records commands without reading weight
 // payloads. The device owner outlives the model and serializes all model calls.
 // Its physical pool backs parameter roots independently of cached commands.

@@ -20,11 +20,11 @@ extern "C" {
 typedef struct loom_serve_residency_cache_t loom_serve_residency_cache_t;
 typedef struct loom_serve_residency_t loom_serve_residency_t;
 
-// Borrows pool and execution. NULL pool supports fixed-backed consumers but
+// Borrows pool. NULL pool supports fixed-backed consumers but
 // cannot reclaim their storage. Installs the pool's sole pressure policy.
 iree_status_t loom_serve_residency_cache_create(
-    loom_serve_memory_pool_t* pool, loom_serve_execution_t* execution,
-    loom_serve_residency_cache_t** out_cache, iree_allocator_t host_allocator);
+    loom_serve_memory_pool_t* pool, loom_serve_residency_cache_t** out_cache,
+    iree_allocator_t host_allocator);
 
 // All registered residencies must have been destroyed. Removes pressure policy.
 void loom_serve_residency_cache_destroy(loom_serve_residency_cache_t* cache);
@@ -38,11 +38,12 @@ iree_status_t loom_serve_residency_cache_trim(
 // Registers the weight plans consumed together by one model invocation. Copies
 // the pointer array, not the plans. Plans belong to this cache's physical pool,
 // are initially inactive, belong exclusively to this registration, and outlive
-// it. All calls on the cache and registered models are serialized by their
-// shared host owner.
+// it. Borrows the model's execution domain for synchronous error retirement;
+// the shared cache never waits on unrelated model timelines. All calls on the
+// cache and registered models are serialized by their shared host owner.
 iree_status_t loom_serve_residency_create(
-    loom_serve_residency_cache_t* cache, iree_host_size_t weight_count,
-    loom_serve_weights_t* const* weights,
+    loom_serve_residency_cache_t* cache, loom_serve_execution_t* execution,
+    iree_host_size_t weight_count, loom_serve_weights_t* const* weights,
     loom_serve_residency_t** out_residency, iree_allocator_t host_allocator);
 
 // Unregisters after all consumers have retired, including failed operations.

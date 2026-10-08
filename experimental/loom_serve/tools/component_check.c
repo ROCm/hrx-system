@@ -45,6 +45,8 @@ IREE_FLAG(bool, report_only, false,
 typedef struct component_check_t {
   // Shared device/queues outliving all accepted work and borrowed payloads.
   loom_serve_device_t* owner;
+  // Owned model timeline, drained before releasing borrowed input/output.
+  loom_serve_execution_t* execution;
   // Cold source compiler, unused during execution.
   loom_serve_jit_t* jit;
   // Compiled command reflection and executable ownership.
@@ -159,6 +161,8 @@ static iree_status_t component_initialize(component_check_t* check,
       loom_serve_device_create(host, &device_options, &check->owner, allocator);
   loom_serve_host_release(host);
   IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_device_create_execution(check->owner, &check->execution));
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(check->owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
@@ -382,7 +386,7 @@ static iree_status_t component_compare(component_check_t* check,
 
 static iree_status_t component_run(component_check_t* check,
                                    iree_allocator_t allocator) {
-  loom_serve_execution_t* execution = loom_serve_device_execution(check->owner);
+  loom_serve_execution_t* execution = check->execution;
   const iree_host_size_t inputs = check->file_count - 1;
   iree_status_t status = iree_ok_status();
   for (int iteration = 0; iteration < 2 && iree_status_is_ok(status);
@@ -433,10 +437,9 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = component_run(&check, allocator);
   }
-  if (check.owner) {
-    status = iree_status_join(
-        status,
-        loom_serve_execution_drain(loom_serve_device_execution(check.owner)));
+  if (check.execution) {
+    status =
+        iree_status_join(status, loom_serve_execution_drain(check.execution));
   }
   iree_hal_command_buffer_release(check.command);
   loom_serve_jit_stage_destroy(check.stage);
@@ -460,6 +463,7 @@ int main(int argc, char** argv) {
   iree_allocator_free(allocator, check.files);
   iree_allocator_free(allocator, check.output);
   loom_serve_jit_destroy(check.jit);
+  loom_serve_execution_release(check.execution);
   status = iree_status_join(status, loom_serve_device_destroy(check.owner));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);

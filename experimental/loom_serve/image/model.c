@@ -39,8 +39,10 @@ struct loom_serve_image_model_t {
   iree_host_size_t input_capacity;
   // Immutable tokenizer reused by each independent request encoder.
   iree_tokenizer_t* tokenizer;
-  // Borrowed shared device/timeline owner, outliving the model.
+  // Borrowed shared device/backing owner, outliving the model.
   loom_serve_device_t* owner;
+  // Owned model work and feedback timelines, independent of other models.
+  loom_serve_execution_t* execution;
   // Final input/output view ownership before host payload release.
   loom_serve_retirement_t retirement;
   // Shared-device admission group protecting every checkpoint domain together.
@@ -86,7 +88,7 @@ struct loom_serve_image_model_t {
     // Owned checkpoint/preparation plans in the same domain order.
     loom_serve_weights_t** plans;
   } weights;
-  // Inputs and final RGB; private workspace belongs to the shared execution.
+  // Inputs and final RGB; private command workspace uses shared device backing.
   iree_hal_buffer_binding_t bindings[2];
   // Completed NCHW F32 RGB feedback, overwritten by the next generation.
   iree_byte_span_t output;
@@ -97,9 +99,8 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
     return iree_ok_status();
   }
   iree_status_t status = iree_ok_status();
-  if (model->owner) {
-    status =
-        loom_serve_execution_drain(loom_serve_device_execution(model->owner));
+  if (model->execution) {
+    status = loom_serve_execution_drain(model->execution);
   }
   loom_serve_program_destroy(model->control.program);
   iree_vm_buffer_release(model->control.tags);
@@ -120,6 +121,7 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
   loom_serve_retirement_deinitialize(&model->retirement);
   iree_vm_buffer_release(model->input_payload);
   loom_serve_residency_destroy(model->residency);
+  loom_serve_execution_release(model->execution);
   for (iree_host_size_t i = 0; model->weights.plans && i < model->weights.count;
        ++i) {
     status = iree_status_join(
@@ -391,9 +393,9 @@ static iree_status_t image_create_control(loom_serve_image_model_t* model,
   if (iree_status_is_ok(status)) {
     iree_vm_buffer_release(model->control.tags);
     model->control.tags = read_only_tags;
-    status = loom_serve_module_create(&model->control.hal_types,
-                                      loom_serve_device_execution(model->owner),
-                                      options, allocator, &native_modules[0]);
+    status =
+        loom_serve_module_create(&model->control.hal_types, model->execution,
+                                 options, allocator, &native_modules[0]);
   }
   iree_allocator_free(allocator, stages);
   if (iree_status_is_ok(status)) {
@@ -535,8 +537,9 @@ static iree_status_t image_model_initialize(
   }
   IREE_RETURN_IF_ERROR(status);
   IREE_RETURN_IF_ERROR(loom_serve_residency_create(
-      loom_serve_device_residency_cache(model->owner), model->weights.count,
-      model->weights.plans, &model->residency, allocator));
+      loom_serve_device_residency_cache(model->owner), model->execution,
+      model->weights.count, model->weights.plans, &model->residency,
+      allocator));
   for (uint32_t i = 0; i < model->stages.count; ++i) {
     image_model_stage_t* stage = &model->stages.values[i];
     IREE_RETURN_IF_ERROR(loom_serve_jit_stage_record(
@@ -581,7 +584,11 @@ iree_status_t loom_serve_image_model_create(
   model->allocator = host_allocator;
   loom_serve_retirement_initialize(&model->retirement);
   model->owner = device;
-  iree_status_t status = image_model_initialize(model, options);
+  iree_status_t status =
+      loom_serve_device_create_execution(device, &model->execution);
+  if (iree_status_is_ok(status)) {
+    status = image_model_initialize(model, options);
+  }
   if (iree_status_is_ok(status)) {
     *out_model = model;
   } else {
@@ -721,7 +728,7 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
   upload.upload.source = input.data;
   upload.upload.target_buffer = model->bindings[0].buffer;
   upload.upload.length = input.data_length;
-  loom_serve_execution_t* execution = loom_serve_device_execution(model->owner);
+  loom_serve_execution_t* execution = model->execution;
   uint64_t completion = 0;
   if (iree_status_is_ok(status)) {
     status = loom_serve_execution_transfer(execution, 1, &upload, &completion);

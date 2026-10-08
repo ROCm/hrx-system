@@ -25,11 +25,11 @@ struct loom_serve_device_t {
   iree_hal_queue_t* dispatch;
   // Exact transfer queue borrowed from the device.
   iree_hal_queue_t* transfer;
-  // Owned work and feedback timelines retaining both exact queues.
-  loom_serve_execution_t* execution;
+  // Shared private command backing, independent of model timelines.
+  loom_serve_workspace_t* workspace;
   // Owned physical domain shared by all model reservations; NULL when fixed.
   loom_serve_memory_pool_t* memory_pool;
-  // Parameter admission and eviction policy borrowing execution and memory.
+  // Parameter admission and eviction policy borrowing shared memory.
   loom_serve_residency_cache_t* residency_cache;
   // Device-wide profiling session enclosing every resident model.
   iree_hal_profiling_from_flags_t* profiling;
@@ -78,8 +78,8 @@ static iree_status_t loom_serve_device_initialize(loom_serve_device_t* device,
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "device needs dispatch and transfer queues");
   }
-  return loom_serve_execution_create(device->dispatch, device->transfer,
-                                     device->allocator, &device->execution);
+  return loom_serve_workspace_create(device->dispatch, &device->workspace,
+                                     device->allocator);
 }
 
 iree_status_t loom_serve_device_create(
@@ -112,8 +112,7 @@ iree_status_t loom_serve_device_create(
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_residency_cache_create(
-        device->memory_pool, device->execution, &device->residency_cache,
-        host_allocator);
+        device->memory_pool, &device->residency_cache, host_allocator);
   }
   if (iree_status_is_ok(status)) {
     status = iree_hal_begin_device_group_profiling_from_flags(
@@ -139,7 +138,7 @@ iree_status_t loom_serve_device_destroy(loom_serve_device_t* device) {
   iree_status_t status = iree_hal_end_profiling_from_flags(device->profiling);
   loom_serve_residency_cache_destroy(device->residency_cache);
   loom_serve_memory_pool_destroy(device->memory_pool);
-  loom_serve_execution_release(device->execution);
+  loom_serve_workspace_release(device->workspace);
   iree_hal_device_group_release(device->group);
   iree_hal_device_release(device->handle);
   iree_async_frontier_tracker_release(device->frontier_tracker);
@@ -151,8 +150,7 @@ iree_status_t loom_serve_device_destroy(loom_serve_device_t* device) {
 loom_serve_device_memory_statistics_t loom_serve_device_memory_statistics(
     const loom_serve_device_t* device) {
   loom_serve_device_memory_statistics_t statistics = {
-      .workspace =
-          loom_serve_execution_workspace_statistics(device->execution)};
+      .workspace = loom_serve_workspace_statistics(device->workspace)};
   if (device->memory_pool) {
     statistics.retained =
         loom_serve_memory_pool_statistics(device->memory_pool);
@@ -169,7 +167,7 @@ iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
           target_bytes - memory.workspace.bytes_committed) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_serve_execution_trim_workspace(device->execution));
+  IREE_RETURN_IF_ERROR(loom_serve_workspace_trim(device->workspace));
   memory = loom_serve_device_memory_statistics(device);
   const uint64_t retained_target =
       memory.workspace.bytes_committed < target_bytes
@@ -202,9 +200,11 @@ iree_hal_queue_t* loom_serve_device_transfer_queue(
   return device->transfer;
 }
 
-loom_serve_execution_t* loom_serve_device_execution(
-    const loom_serve_device_t* device) {
-  return device->execution;
+iree_status_t loom_serve_device_create_execution(
+    loom_serve_device_t* device, loom_serve_execution_t** out_execution) {
+  return loom_serve_execution_create(device->dispatch, device->transfer,
+                                     device->workspace, device->allocator,
+                                     out_execution);
 }
 
 loom_serve_memory_pool_t* loom_serve_device_memory_pool(

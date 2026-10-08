@@ -83,6 +83,7 @@ loom_cc_test(
         ":host",
         ":jit",
         ":module",
+        ":workspace",
         "//loom/binding/c:loomc",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",
@@ -100,16 +101,28 @@ loom_cc_test(
 )
 
 loom_cc_library(
-    name = "execution",
-    srcs = ["execution.c"],
-    hdrs = ["execution.h"],
+    name = "workspace",
+    srcs = ["workspace.c"],
+    hdrs = ["workspace.h"],
     deps = [
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
         "//runtime/src/iree/base/threading",
-        "//runtime/src/iree/base/threading:thread",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/hal/memory:tlsf_pool",
+    ],
+)
+
+loom_cc_library(
+    name = "execution",
+    srcs = ["execution.c"],
+    hdrs = ["execution.h"],
+    deps = [
+        ":workspace",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/base/threading:thread",
+        "//runtime/src/iree/hal",
     ],
 )
 
@@ -121,6 +134,7 @@ loom_cc_library(
         ":execution",
         ":host",
         ":residency",
+        ":workspace",
         "//experimental/loom_serve/storage:memory",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async/util:proactor_pool",

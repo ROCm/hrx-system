@@ -31,6 +31,8 @@ IREE_FLAG(int32_t, rows, 576, "Image token count, a positive multiple of 16.");
 typedef struct projection_check_t {
   // Shared device and queues, destroyed after all model and host I/O storage.
   loom_serve_device_t* owner;
+  // Owned model timeline, drained before releasing borrowed input/output.
+  loom_serve_execution_t* execution;
   // Compiler used only during cold setup.
   loom_serve_jit_t* jit;
   // Independently compiled base and adapter command roots.
@@ -104,6 +106,8 @@ static iree_status_t projection_initialize(projection_check_t* check,
       loom_serve_device_create(host, &device_options, &check->owner, allocator);
   loom_serve_host_release(host);
   IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(
+      loom_serve_device_create_execution(check->owner, &check->execution));
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(check->owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
@@ -219,7 +223,7 @@ static iree_status_t projection_compare(projection_check_t* check, int phase) {
 }
 
 static iree_status_t projection_run(projection_check_t* check) {
-  loom_serve_execution_t* execution = loom_serve_device_execution(check->owner);
+  loom_serve_execution_t* execution = check->execution;
   iree_status_t status = iree_ok_status();
   for (int phase = 0; phase < 4 && iree_status_is_ok(status); ++phase) {
     check->strength = phase == 2 ? 1.0f : 0.0f;
@@ -279,10 +283,9 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = projection_run(&check);
   }
-  if (check.owner) {
-    status = iree_status_join(
-        status,
-        loom_serve_execution_drain(loom_serve_device_execution(check.owner)));
+  if (check.execution) {
+    status =
+        iree_status_join(status, loom_serve_execution_drain(check.execution));
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(check.commands); ++i) {
     iree_hal_command_buffer_release(check.commands[i]);
@@ -300,6 +303,7 @@ int main(int argc, char** argv) {
   iree_allocator_free(allocator, check.output);
   iree_allocator_free(allocator, check.baseline);
   loom_serve_jit_destroy(check.jit);
+  loom_serve_execution_release(check.execution);
   status = iree_status_join(status, loom_serve_device_destroy(check.owner));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);

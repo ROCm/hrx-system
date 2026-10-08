@@ -31,7 +31,7 @@ class RelocationTest : public ::testing::Test {
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
     pool = loom_serve_device_memory_pool(device);
-    execution = loom_serve_device_execution(device);
+    IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
   }
 
   void TearDown() override {
@@ -39,12 +39,13 @@ class RelocationTest : public ::testing::Test {
     iree_hal_buffer_release(view);
     loom_serve_retirement_deinitialize(&retirement);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(buffer));
+    loom_serve_execution_release(execution);
     IREE_EXPECT_OK(loom_serve_device_destroy(device));
   }
 
   // Device owner enclosing all queue work and memory.
   loom_serve_device_t* device = nullptr;
-  // Borrowed work/feedback retirement domain.
+  // Owned model work/feedback retirement domain.
   loom_serve_execution_t* execution = nullptr;
   // Physical owner of the sparse plane reservation.
   loom_serve_memory_pool_t* pool = nullptr;

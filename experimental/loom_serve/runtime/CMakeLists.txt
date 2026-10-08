@@ -84,6 +84,7 @@ loom_cc_test(
     ::host
     ::jit
     ::module
+    ::workspace
     iree::async
     iree::async::util::proactor_pool
     iree::base
@@ -108,18 +109,33 @@ endif()
 
 loom_cc_library(
   NAME
+    workspace
+  HDRS
+    "workspace.h"
+  SRCS
+    "workspace.c"
+  DEPS
+    iree::base
+    iree::base::internal
+    iree::base::threading
+    iree::hal
+    iree::hal::memory::tlsf_pool
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     execution
   HDRS
     "execution.h"
   SRCS
     "execution.c"
   DEPS
+    ::workspace
     iree::base
-    iree::base::internal
     iree::base::threading
     iree::base::threading::thread
     iree::hal
-    iree::hal::memory::tlsf_pool
   PUBLIC
 )
 
@@ -134,6 +150,7 @@ loom_cc_library(
     ::execution
     ::host
     ::residency
+    ::workspace
     iree::async
     iree::async::util::proactor_pool
     iree::base

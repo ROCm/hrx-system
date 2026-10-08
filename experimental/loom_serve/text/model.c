@@ -74,7 +74,7 @@ struct loom_serve_text_model_t {
   iree_hal_queue_t* dispatch;
   // Borrowed exact transfer queue, retained by execution.
   iree_hal_queue_t* transfer;
-  // Borrowed stage/input timelines with independently retired feedback.
+  // Owned model stage/input timeline with independently retired feedback.
   loom_serve_execution_t* execution;
   // Cold recording policy for every reusable stage in this residency.
   iree_hal_command_buffer_mode_t command_mode;
@@ -603,7 +603,8 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   model->group = loom_serve_device_group(model->device_owner);
   model->dispatch = loom_serve_device_dispatch_queue(model->device_owner);
   model->transfer = loom_serve_device_transfer_queue(model->device_owner);
-  model->execution = loom_serve_device_execution(model->device_owner);
+  IREE_RETURN_IF_ERROR(loom_serve_device_create_execution(model->device_owner,
+                                                          &model->execution));
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
       model->device, model->dispatch,
       loom_serve_host_task_pool(loom_serve_device_host(model->device_owner)),
@@ -635,8 +636,8 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   IREE_RETURN_IF_ERROR(text_check_layouts(model));
   IREE_RETURN_IF_ERROR(text_prepare_weights(model, options->source_directory));
   IREE_RETURN_IF_ERROR(loom_serve_residency_create(
-      loom_serve_device_residency_cache(model->device_owner), 1,
-      &model->weights, &model->residency, model->allocator));
+      loom_serve_device_residency_cache(model->device_owner), model->execution,
+      1, &model->weights, &model->residency, model->allocator));
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {
     text_stage_t* stage = &model->stages[i];
@@ -651,8 +652,8 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
         workspace_length,
         model->stages[i].program.requirements.transient.required_byte_length);
   }
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_state_allocate(&model->state, model->device_owner));
+  IREE_RETURN_IF_ERROR(loom_serve_text_state_allocate(
+      &model->state, model->device_owner, model->execution));
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc_array(model->allocator, model->row_count,
                                   sizeof(*model->rows), (void**)&model->rows));
@@ -759,6 +760,7 @@ iree_status_t loom_serve_text_model_destroy(loom_serve_text_model_t* model) {
   iree_allocator_free(model->allocator, model->rows);
   iree_allocator_free(model->allocator, model->checkpoints);
   loom_serve_residency_destroy(model->residency);
+  loom_serve_execution_release(model->execution);
   memory_status = iree_status_join(memory_status,
                                    loom_serve_weights_destroy(model->weights));
   // A failed platform unmap/free must not destroy the allocation domain still

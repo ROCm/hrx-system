@@ -106,7 +106,8 @@ class JitTest : public ::testing::TestWithParam<int> {
     IREE_ASSERT_OK(status);
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
-    execution_ = loom_serve_device_execution(device_owner_);
+    IREE_ASSERT_OK(
+        loom_serve_device_create_execution(device_owner_, &execution_));
     directory_ = std::filesystem::path(FLAG_jit_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
         device_, dispatch_,
@@ -116,6 +117,15 @@ class JitTest : public ::testing::TestWithParam<int> {
   }
 
   void TearDown() override {
+    // Even an assertion before the explicit release must retire the held work
+    // while fixture-owned uploads and feedback are still alive.
+    if (held_.gate) {
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(held_.gate, 1, nullptr));
+    }
+    iree_hal_buffer_release(held_.buffer);
+    if (held_.execution) {
+      IREE_EXPECT_OK(loom_serve_execution_drain(held_.execution));
+    }
     if (execution_) {
       IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
     }
@@ -132,6 +142,9 @@ class JitTest : public ::testing::TestWithParam<int> {
     }
     iree_hal_buffer_release(buffer_);
     loom_serve_jit_destroy(jit_);
+    loom_serve_execution_release(held_.execution);
+    iree_hal_semaphore_release(held_.gate);
+    loom_serve_execution_release(execution_);
     IREE_EXPECT_OK(loom_serve_device_destroy(device_owner_));
   }
 
@@ -222,8 +235,19 @@ class JitTest : public ::testing::TestWithParam<int> {
   iree_hal_device_t* device_ = nullptr;
   // Exact dispatch queue borrowed from device.
   iree_hal_queue_t* dispatch_ = nullptr;
-  // Production submission/feedback timelines borrowed from device_owner_.
+  // Owned model submission/feedback timelines over shared device backing.
   loom_serve_execution_t* execution_ = nullptr;
+  // Independent model with an externally gated dependency and retained I/O.
+  struct {
+    // Owned model timeline sharing the fixture's workspace owner.
+    loom_serve_execution_t* execution = nullptr;
+    // Owned external predecessor, released only after independent output.
+    iree_hal_semaphore_t* gate = nullptr;
+    // Private root, released after its dealloca is accepted.
+    iree_hal_buffer_t* buffer = nullptr;
+    // Borrowed feedback backing kept alive through teardown.
+    std::array<int32_t, 8> output = {};
+  } held_;
   // Portable source location from runfiles.
   std::string directory_;
   // Model-resident compiler shared by both variants.
@@ -337,9 +361,9 @@ TEST_P(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
   ASSERT_EQ(transients_[0].required_byte_length, 64u);
   ASSERT_EQ(transients_[1].required_byte_length, 4160u);
   IREE_ASSERT_OK(PrepareVm());
-  EXPECT_EQ(
-      loom_serve_execution_workspace_statistics(execution_).bytes_committed,
-      0u);
+  EXPECT_EQ(loom_serve_device_memory_statistics(device_owner_)
+                .workspace.bytes_committed,
+            0u);
   loom_serve_jit_destroy(jit_);
   jit_ = nullptr;
   iree_vm_function_t selected_step;
@@ -377,20 +401,160 @@ TEST_P(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
   IREE_ASSERT_OK(
       loom_serve_execution_feedback(execution_, 1, &download, &completion));
   IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
-  const auto statistics = loom_serve_execution_workspace_statistics(execution_);
+  const auto statistics =
+      loom_serve_device_memory_statistics(device_owner_).workspace;
   EXPECT_EQ(statistics.reservation_count, 0u);
   EXPECT_EQ(statistics.reserve_count, 4u);
   EXPECT_EQ(statistics.release_count, 4u);
   EXPECT_GT(statistics.reuse_count, 0u);
   EXPECT_GT(statistics.bytes_committed, 0u);
-  IREE_ASSERT_OK(loom_serve_execution_trim_workspace(execution_));
-  EXPECT_EQ(
-      loom_serve_execution_workspace_statistics(execution_).bytes_committed,
-      0u);
+  // A different model has no dependency edge to the retired producer. HAL's
+  // completed-frontier query must recover reuse without a device-wide chain.
+  IREE_ASSERT_OK(
+      loom_serve_device_create_execution(device_owner_, &held_.execution));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                          IREE_HAL_BUFFER_USAGE_TRANSFER,
+                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+                 .min_alignment = 16},
+      .allocation_size = 4160};
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(held_.execution, &request, &held_.buffer));
+  iree_hal_transfer_operation_t transfers[] = {
+      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
+       .upload = {input_.data(), held_.buffer, 0, sizeof(input_)}},
+      {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+       .download = {held_.buffer, 0, held_.output.data(),
+                    sizeof(held_.output)}},
+  };
+  IREE_ASSERT_OK(loom_serve_execution_transfer(held_.execution, 1, transfers,
+                                               &completion));
+  IREE_ASSERT_OK(loom_serve_execution_transfer(held_.execution, 1,
+                                               transfers + 1, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_dealloca(held_.execution, held_.buffer,
+                                               &completion));
+  iree_hal_buffer_release(held_.buffer);
+  held_.buffer = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(held_.execution));
+  EXPECT_EQ(held_.output, input_);
+  const auto shared =
+      loom_serve_device_memory_statistics(device_owner_).workspace;
+  EXPECT_EQ(shared.bytes_committed, statistics.bytes_committed);
+  EXPECT_GT(shared.reuse_count, statistics.reuse_count);
+  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
+  EXPECT_EQ(loom_serve_device_memory_statistics(device_owner_)
+                .workspace.bytes_committed,
+            0u);
   // Feedback owns the final output independently of private workspace reuse.
   for (int32_t value : output_) {
     EXPECT_EQ(value, expected);
   }
+}
+
+TEST_P(JitTest, IndependentModelCompletesWhileSharedWorkspaceGrows) {
+  IREE_ASSERT_OK(Compile("5", 0));
+  IREE_ASSERT_OK(Compile("7", 1, IREE_SV("temporary_advance"), "4160"));
+  IREE_ASSERT_OK(
+      loom_serve_device_create_execution(device_owner_, &held_.execution));
+  IREE_ASSERT_OK(
+      loom_serve_execution_reserve_workspace(held_.execution, 64, 16));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                          IREE_HAL_BUFFER_USAGE_TRANSFER,
+                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+                 .min_alignment = 16},
+      .allocation_size = 64};
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(held_.execution, &request, &held_.buffer));
+  iree_hal_transfer_operation_t upload = {};
+  upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+  upload.upload = {input_.data(), held_.buffer, 0, sizeof(input_)};
+  uint64_t completion = 0;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(held_.execution, 1, &upload, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_wait(held_.execution, completion));
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_create(device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+                                IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &held_.gate));
+  uint64_t gate_value = 1;
+  IREE_ASSERT_OK(loom_serve_execution_barrier(held_.execution,
+                                              {1, &held_.gate, &gate_value}));
+  const iree_hal_buffer_binding_t binding = {held_.buffer, 0, sizeof(input_)};
+  IREE_ASSERT_OK(loom_serve_execution_execute(held_.execution, commands_[0],
+                                              {1, &binding}, &completion));
+  iree_hal_transfer_operation_t download = {};
+  download.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  download.download = {held_.buffer, 0, held_.output.data(),
+                       sizeof(held_.output)};
+  IREE_ASSERT_OK(loom_serve_execution_feedback(held_.execution, 1, &download,
+                                               &completion));
+  auto held_frontier = loom_serve_execution_frontier(held_.execution);
+  // Feedback is an independent branch. Explicitly join its read before freeing
+  // storage that another model may immediately reuse.
+  IREE_ASSERT_OK(loom_serve_execution_barrier(
+      held_.execution,
+      {1, &held_frontier.semaphores[1], &held_frontier.values[1]}));
+  IREE_ASSERT_OK(loom_serve_execution_dealloca(held_.execution, held_.buffer,
+                                               &completion));
+  iree_hal_buffer_release(held_.buffer);
+  held_.buffer = nullptr;
+
+  // Real VM registration grows slab geometry while the old pool has a live
+  // consumer. Neither registration nor the second model may join that consumer.
+  IREE_ASSERT_OK(PrepareVm());
+  iree_vm_function_t selected_step;
+  IREE_ASSERT_OK(iree_vm_process_lookup_function(
+      process_, IREE_SV("model"), IREE_SV("selected_step"), &selected_step));
+  iree_hal_buffer_params_t params = {};
+  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
+  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
+  IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device_), params, sizeof(input_), &buffer_));
+  upload.upload.target_buffer = buffer_;
+  IREE_ASSERT_OK(
+      loom_serve_execution_transfer(execution_, 1, &upload, &completion));
+  iree_vm_variant_t arguments[] = {
+      iree_vm_variant_from_i32(1),
+      iree_hal_buffer_variant_from_ptr_borrowed(&types_, buffer_)};
+  iree_vm_variant_t results[1] = {};
+  auto status = iree_vm_invoke(invocation_, selected_step,
+                               iree_vm_variant_span_from_array(arguments),
+                               iree_vm_variant_span_from_array(results));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(arguments));
+  iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
+  IREE_ASSERT_OK(status);
+  download.download = {buffer_, 0, output_.data(), sizeof(output_)};
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution_, 1, &download, &completion));
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  for (int32_t value : output_) {
+    EXPECT_EQ(value, 107);
+  }
+  uint64_t observed = 0;
+  IREE_ASSERT_OK(
+      iree_hal_semaphore_query(held_frontier.semaphores[1], &observed));
+  EXPECT_LT(observed, held_frontier.values[1]);
+  const auto live =
+      loom_serve_device_memory_statistics(device_owner_).workspace;
+  EXPECT_EQ(live.reservation_count, 1u);
+  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
+  EXPECT_GT(loom_serve_device_memory_statistics(device_owner_)
+                .workspace.bytes_committed,
+            0u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(held_.gate, 1, nullptr));
+  iree_hal_semaphore_release(held_.gate);
+  held_.gate = nullptr;
+  IREE_ASSERT_OK(loom_serve_execution_drain(held_.execution));
+  for (size_t i = 0; i < held_.output.size(); ++i) {
+    EXPECT_EQ(held_.output[i], 105 + i);
+  }
+  IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
+  const auto retired =
+      loom_serve_device_memory_statistics(device_owner_).workspace;
+  EXPECT_EQ(retired.bytes_committed, 0u);
+  EXPECT_EQ(retired.reservation_count, 0u);
+  EXPECT_EQ(retired.reserve_count, 2u);
+  EXPECT_EQ(retired.release_count, 2u);
 }
 
 INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitTest, ::testing::Values(1, 4));

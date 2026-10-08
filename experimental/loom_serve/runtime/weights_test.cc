@@ -63,7 +63,8 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     transfer_ = loom_serve_device_transfer_queue(device_owner_);
-    execution_ = loom_serve_device_execution(device_owner_);
+    IREE_ASSERT_OK(
+        loom_serve_device_create_execution(device_owner_, &execution_));
     pool_ = loom_serve_device_memory_pool(device_owner_);
     directory_ =
         std::filesystem::path(FLAG_weight_sources).parent_path().string();
@@ -107,6 +108,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(state_));
     iree_hal_buffer_release(output_buffer_);
     loom_serve_jit_destroy(jit_);
+    loom_serve_execution_release(execution_);
     IREE_EXPECT_OK(loom_serve_device_destroy(device_owner_));
     if (path_.Exists()) {
       EXPECT_TRUE(path_.Remove());
@@ -156,8 +158,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   iree_status_t Register(iree_host_size_t index, iree_host_size_t first_plan,
                          iree_host_size_t plan_count) {
     return loom_serve_residency_create(
-        loom_serve_device_residency_cache(device_owner_), plan_count,
-        plans_.data() + first_plan, &residencies_[index], allocator_);
+        loom_serve_device_residency_cache(device_owner_), execution_,
+        plan_count, plans_.data() + first_plan, &residencies_[index],
+        allocator_);
   }
 
   void RunPinned(iree_host_size_t index, int32_t first) {
@@ -214,7 +217,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
   iree_hal_queue_t* dispatch_ = nullptr;
   // Exact transfer queue borrowed from device.
   iree_hal_queue_t* transfer_ = nullptr;
-  // Timelines borrowed from device_owner_ and used by consuming commands.
+  // Owned model timelines used by consuming commands.
   loom_serve_execution_t* execution_ = nullptr;
   // Explicitly elastic backing or NULL for the fixed comparison arm.
   loom_serve_memory_pool_t* pool_ = nullptr;

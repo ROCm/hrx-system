@@ -6,10 +6,8 @@
 
 #include "experimental/loom_serve/runtime/execution.h"
 
-#include "iree/base/internal/math.h"
 #include "iree/base/threading/mutex.h"
 #include "iree/base/threading/thread.h"
-#include "iree/hal/memory/tlsf_pool.h"
 
 typedef struct loom_serve_execution_timeline_t {
   // Retained timeline identifying accepted operations on this branch.
@@ -17,6 +15,13 @@ typedef struct loom_serve_execution_timeline_t {
   // Last accepted submission, advanced only after successful queue submission.
   uint64_t submitted_value;
 } loom_serve_execution_timeline_t;
+
+typedef struct execution_root_t {
+  // Owned allocation wrapper until every caller and queue capture releases it.
+  iree_hal_buffer_t* buffer;
+  // Retained source pool borrowed by the wrapper, including during destruction.
+  iree_hal_pool_t* pool;
+} execution_root_t;
 
 struct loom_serve_execution_t {
   // Intrusive ownership shared by the host and native VM module.
@@ -29,29 +34,25 @@ struct loom_serve_execution_t {
   iree_hal_queue_t* dispatch_queue;
   // Retained exact queue for host transfers.
   iree_hal_queue_t* transfer_queue;
-  // Ordered commands and input transfers owning shared model scratch.
+  // Shared physical command backing, independent of this model's timeline.
+  loom_serve_workspace_t* workspace;
+  // Ordered commands and input transfers for this model.
   loom_serve_execution_timeline_t work;
   // Ordered downloads consuming produced results without gating model work.
   loom_serve_execution_timeline_t feedback;
   // Protects timeline reservation through queue acceptance, never device waits.
   iree_slim_mutex_t mutex;
-  // Shared private command storage, independent of model residency.
+  // Private roots captured by this domain, independent of other model work.
   struct {
-    // Owned HAL pool, created on first use and retained across invocations.
-    iree_hal_pool_t* pool;
-    // Slab bytes, rounded to a searchable TLSF size class.
-    iree_device_size_t length;
-    // Largest registered base alignment, in bytes.
-    iree_device_size_t alignment;
     // Owned roots awaiting the final caller/queue release, in capture order.
-    iree_hal_buffer_t** roots;
+    execution_root_t* values;
     // Capacity of the reusable root ring.
     iree_host_size_t capacity;
     // First occupied ring slot.
     iree_host_size_t head;
     // Number of occupied ring slots.
     iree_host_size_t count;
-  } workspace;
+  } roots;
 };
 
 // The registry owns one reference; private roots are not published to models.
@@ -59,39 +60,39 @@ struct loom_serve_execution_t {
 // whose semaphore was failed before its captured resources were released.
 // Reaping never waits on the submission path and reuses the host ring storage.
 static void execution_reap_workspace(loom_serve_execution_t* execution) {
-  while (execution->workspace.count) {
-    iree_hal_buffer_t* root =
-        execution->workspace.roots[execution->workspace.head];
-    if (iree_atomic_ref_count_load(&((iree_hal_resource_t*)root)->ref_count) !=
-        1) {
+  while (execution->roots.count) {
+    execution_root_t* root = &execution->roots.values[execution->roots.head];
+    if (iree_atomic_ref_count_load(
+            &((iree_hal_resource_t*)root->buffer)->ref_count) != 1) {
       break;
     }
-    iree_hal_buffer_release(root);
-    execution->workspace.head =
-        (execution->workspace.head + 1) % execution->workspace.capacity;
-    --execution->workspace.count;
+    iree_hal_buffer_release(root->buffer);
+    iree_hal_pool_release(root->pool);
+    execution->roots.head =
+        (execution->roots.head + 1) % execution->roots.capacity;
+    --execution->roots.count;
   }
 }
 
 static iree_status_t execution_reserve_workspace_root(
     loom_serve_execution_t* execution) {
   execution_reap_workspace(execution);
-  if (execution->workspace.count < execution->workspace.capacity) {
+  if (execution->roots.count < execution->roots.capacity) {
     return iree_ok_status();
   }
-  const iree_host_size_t capacity =
-      iree_max(16, execution->workspace.capacity * 2);
-  iree_hal_buffer_t** roots = NULL;
+  const iree_host_size_t capacity = iree_max(16, execution->roots.capacity * 2);
+  execution_root_t* roots = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
       execution->host_allocator, capacity, sizeof(*roots), (void**)&roots));
-  for (iree_host_size_t i = 0; i < execution->workspace.count; ++i) {
-    roots[i] = execution->workspace.roots[(execution->workspace.head + i) %
-                                          execution->workspace.capacity];
+  for (iree_host_size_t i = 0; i < execution->roots.count; ++i) {
+    roots[i] =
+        execution->roots
+            .values[(execution->roots.head + i) % execution->roots.capacity];
   }
-  iree_allocator_free(execution->host_allocator, execution->workspace.roots);
-  execution->workspace.roots = roots;
-  execution->workspace.capacity = capacity;
-  execution->workspace.head = 0;
+  iree_allocator_free(execution->host_allocator, execution->roots.values);
+  execution->roots.values = roots;
+  execution->roots.capacity = capacity;
+  execution->roots.head = 0;
   return iree_ok_status();
 }
 
@@ -101,9 +102,9 @@ void loom_serve_execution_retain(loom_serve_execution_t* execution) {
 
 void loom_serve_execution_release(loom_serve_execution_t* execution) {
   if (execution && iree_atomic_ref_count_dec(&execution->ref_count) == 1) {
-    IREE_ASSERT_EQ(execution->workspace.count, 0);
-    iree_hal_pool_release(execution->workspace.pool);
-    iree_allocator_free(execution->host_allocator, execution->workspace.roots);
+    IREE_ASSERT_EQ(execution->roots.count, 0);
+    loom_serve_workspace_release(execution->workspace);
+    iree_allocator_free(execution->host_allocator, execution->roots.values);
     iree_slim_mutex_deinitialize(&execution->mutex);
     iree_hal_semaphore_release(execution->feedback.semaphore);
     iree_hal_semaphore_release(execution->work.semaphore);
@@ -117,55 +118,7 @@ void loom_serve_execution_release(loom_serve_execution_t* execution) {
 iree_status_t loom_serve_execution_reserve_workspace(
     loom_serve_execution_t* execution, iree_device_size_t length,
     iree_device_size_t alignment) {
-  if (!length || (length <= execution->workspace.length &&
-                  alignment <= execution->workspace.alignment)) {
-    return iree_ok_status();
-  }
-  length = iree_max(length, execution->workspace.length);
-  alignment = iree_max(iree_max(alignment, execution->workspace.alignment),
-                       IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT);
-  // A slab inside a TLSF size class can be skipped by a maximum-size search,
-  // which rounds up to the next class. Give backing a searchable geometry;
-  // individual command requests retain their exact compiler-reflected size.
-  const uint32_t first_level = 63 - iree_math_count_leading_zeros_u64(length);
-  const uint32_t shift = first_level > IREE_HAL_MEMORY_TLSF_SL_LOG2
-                             ? first_level - IREE_HAL_MEMORY_TLSF_SL_LOG2
-                             : 0;
-  const iree_device_size_t quantum =
-      iree_max((iree_device_size_t)1 << shift, alignment);
-  if (length > IREE_DEVICE_SIZE_MAX - (quantum - 1)) {
-    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
-                            "workspace slab size overflows device range");
-  }
-  length = iree_device_align(length, quantum);
-  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(execution));
-  iree_hal_pool_release(execution->workspace.pool);
-  execution->workspace.pool = NULL;
-  execution->workspace.length = length;
-  execution->workspace.alignment = alignment;
-  return iree_ok_status();
-}
-
-// TLSF creates its first physical slab eagerly. Defer that cold acquisition
-// until execution actually needs workspace rather than model registration.
-static iree_status_t execution_prepare_workspace_pool(
-    loom_serve_execution_t* execution) {
-  if (execution->workspace.pool) {
-    return iree_ok_status();
-  }
-  iree_hal_queue_pool_backend_t backend;
-  IREE_RETURN_IF_ERROR(iree_hal_device_query_queue_pool_backend(
-      execution->device, iree_hal_queue_family(execution->dispatch_queue),
-      &backend));
-  const iree_hal_tlsf_pool_options_t options = {
-      .tlsf_options = {.range_length = execution->workspace.length,
-                       .alignment = execution->workspace.alignment},
-      .asan = backend.asan,
-      .trace_name = IREE_SVL("loom_serve_workspace"),
-  };
-  return iree_hal_tlsf_pool_create(
-      options, backend.slab_provider, backend.notification, backend.epoch_query,
-      execution->host_allocator, &execution->workspace.pool);
+  return loom_serve_workspace_reserve(execution->workspace, length, alignment);
 }
 
 iree_status_t loom_serve_execution_alloca(
@@ -174,9 +127,10 @@ iree_status_t loom_serve_execution_alloca(
     iree_hal_buffer_t** out_buffer) {
   *out_buffer = NULL;
   iree_slim_mutex_lock(&execution->mutex);
+  iree_hal_pool_t* pool = NULL;
   iree_status_t status = execution_reserve_workspace_root(execution);
   if (iree_status_is_ok(status)) {
-    status = execution_prepare_workspace_pool(execution);
+    status = loom_serve_workspace_acquire_pool(execution->workspace, &pool);
   }
   if (iree_status_is_ok(status) &&
       execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE) {
@@ -190,16 +144,17 @@ iree_status_t loom_serve_execution_alloca(
                                              &next_value};
   if (iree_status_is_ok(status)) {
     status = iree_hal_queue_alloca(execution->dispatch_queue, waits, signals,
-                                   execution->workspace.pool, 1, request,
-                                   out_buffer);
+                                   pool, 1, request, out_buffer);
   }
   if (iree_status_is_ok(status)) {
     execution->work.submitted_value = next_value;
     const iree_host_size_t tail =
-        (execution->workspace.head + execution->workspace.count++) %
-        execution->workspace.capacity;
-    execution->workspace.roots[tail] = *out_buffer;
+        (execution->roots.head + execution->roots.count++) %
+        execution->roots.capacity;
+    execution->roots.values[tail] = (execution_root_t){*out_buffer, pool};
     iree_hal_buffer_retain(*out_buffer);
+  } else {
+    iree_hal_pool_release(pool);
   }
   iree_slim_mutex_unlock(&execution->mutex);
   return status;
@@ -229,25 +184,11 @@ iree_status_t loom_serve_execution_dealloca(loom_serve_execution_t* execution,
   return status;
 }
 
-iree_hal_pool_stats_t loom_serve_execution_workspace_statistics(
-    const loom_serve_execution_t* execution) {
-  iree_hal_pool_stats_t statistics = {0};
-  if (execution->workspace.pool) {
-    iree_hal_pool_query_stats(execution->workspace.pool, &statistics);
-  }
-  return statistics;
-}
-
-iree_status_t loom_serve_execution_trim_workspace(
-    loom_serve_execution_t* execution) {
-  return execution->workspace.pool
-             ? iree_hal_pool_trim(execution->workspace.pool)
-             : iree_ok_status();
-}
-
 iree_status_t loom_serve_execution_create(
     iree_hal_queue_t* dispatch_queue, iree_hal_queue_t* transfer_queue,
-    iree_allocator_t host_allocator, loom_serve_execution_t** out_execution) {
+    loom_serve_workspace_t* workspace, iree_allocator_t host_allocator,
+    loom_serve_execution_t** out_execution) {
+  *out_execution = NULL;
   iree_hal_device_t* device =
       iree_hal_queue_family_device(iree_hal_queue_family(dispatch_queue));
   if (device !=
@@ -261,6 +202,8 @@ iree_status_t loom_serve_execution_create(
   iree_atomic_ref_count_init(&execution->ref_count);
   iree_slim_mutex_initialize(&execution->mutex);
   execution->host_allocator = host_allocator;
+  execution->workspace = workspace;
+  loom_serve_workspace_retain(workspace);
   execution->device = device;
   iree_hal_device_retain(device);
   execution->dispatch_queue = dispatch_queue;
@@ -280,6 +223,58 @@ iree_status_t loom_serve_execution_create(
   } else {
     loom_serve_execution_release(execution);
   }
+  return status;
+}
+
+loom_serve_execution_frontier_t loom_serve_execution_frontier(
+    loom_serve_execution_t* execution) {
+  iree_slim_mutex_lock(&execution->mutex);
+  const loom_serve_execution_frontier_t frontier = {
+      .semaphores = {execution->work.semaphore, execution->feedback.semaphore},
+      .values = {execution->work.submitted_value,
+                 execution->feedback.submitted_value},
+  };
+  iree_slim_mutex_unlock(&execution->mutex);
+  return frontier;
+}
+
+iree_status_t loom_serve_execution_barrier(loom_serve_execution_t* execution,
+                                           iree_hal_semaphore_list_t waits) {
+  iree_hal_semaphore_t* inline_semaphores[8];
+  uint64_t inline_values[8];
+  iree_hal_semaphore_t** semaphores = inline_semaphores;
+  uint64_t* values = inline_values;
+  const iree_host_size_t count = waits.count + 1;
+  void* storage = NULL;
+  if (count > IREE_ARRAYSIZE(inline_semaphores)) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        execution->host_allocator, count, sizeof(*semaphores) + sizeof(*values),
+        &storage));
+    semaphores = storage;
+    values = (uint64_t*)(semaphores + count);
+  }
+  for (iree_host_size_t i = 0; i < waits.count; ++i) {
+    semaphores[i] = waits.semaphores[i];
+    values[i] = waits.payload_values[i];
+  }
+  iree_slim_mutex_lock(&execution->mutex);
+  semaphores[waits.count] = execution->work.semaphore;
+  values[waits.count] = execution->work.submitted_value;
+  uint64_t next_value = execution->work.submitted_value + 1;
+  const iree_hal_semaphore_list_t dependencies = {count, semaphores, values};
+  const iree_hal_semaphore_list_t signals = {1, &execution->work.semaphore,
+                                             &next_value};
+  iree_status_t status =
+      execution->work.submitted_value == IREE_HAL_SEMAPHORE_MAX_VALUE
+          ? iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                             "execution timeline is exhausted")
+          : iree_hal_queue_barrier(execution->dispatch_queue, dependencies,
+                                   signals, IREE_HAL_QUEUE_BARRIER_FLAG_NONE);
+  if (iree_status_is_ok(status)) {
+    execution->work.submitted_value = next_value;
+  }
+  iree_slim_mutex_unlock(&execution->mutex);
+  iree_allocator_free(execution->host_allocator, storage);
   return status;
 }
 
@@ -389,7 +384,7 @@ iree_status_t loom_serve_execution_drain(loom_serve_execution_t* execution) {
   for (;;) {
     iree_slim_mutex_lock(&execution->mutex);
     execution_reap_workspace(execution);
-    const bool retired = execution->workspace.count == 0;
+    const bool retired = execution->roots.count == 0;
     iree_slim_mutex_unlock(&execution->mutex);
     if (retired) {
       break;

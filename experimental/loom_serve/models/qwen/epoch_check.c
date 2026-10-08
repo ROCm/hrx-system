@@ -133,9 +133,8 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
         "shared residency witness requires elastic backing");
   }
   const loom_serve_text_flag_defaults_t defaults = {.row_count = 1};
-  loom_serve_execution_t* execution = loom_serve_device_execution(device);
   const iree_hal_pool_stats_t workspace_before =
-      loom_serve_execution_workspace_statistics(execution);
+      loom_serve_device_memory_statistics(device).workspace;
   loom_serve_text_model_t* second = NULL;
   iree_status_t status = loom_serve_text_model_create_from_flags(
       device, &defaults, &second, allocator);
@@ -200,7 +199,7 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
     status = qwen_check_residency_continuation(second, expected[1]);
   }
   const iree_hal_pool_stats_t workspace_after =
-      loom_serve_execution_workspace_statistics(execution);
+      loom_serve_device_memory_statistics(device).workspace;
   if (iree_status_is_ok(status) &&
       (workspace_after.bytes_committed != workspace_before.bytes_committed ||
        workspace_after.reservation_count ||

@@ -10,8 +10,6 @@ struct loom_serve_residency_cache_t {
   iree_allocator_t allocator;
   // Borrowed physical budget; NULL for explicitly fixed allocations.
   loom_serve_memory_pool_t* pool;
-  // Borrowed queues and accepted-work frontiers for cold error retirement.
-  loom_serve_execution_t* execution;
   // Least recently used registration, including inactive and pinned entries.
   loom_serve_residency_t* oldest;
   // Most recently used registration.
@@ -23,6 +21,8 @@ struct loom_serve_residency_t {
   iree_allocator_t allocator;
   // Borrowed cache outliving this registration.
   loom_serve_residency_cache_t* cache;
+  // Borrowed model frontiers for cold error retirement, never other models.
+  loom_serve_execution_t* execution;
   // Previous registration in least-to-most-recent order.
   loom_serve_residency_t* previous;
   // Next registration in least-to-most-recent order.
@@ -131,15 +131,14 @@ static iree_status_t residency_reclaim(void* user_data, uint64_t target_bytes) {
 }
 
 iree_status_t loom_serve_residency_cache_create(
-    loom_serve_memory_pool_t* pool, loom_serve_execution_t* execution,
-    loom_serve_residency_cache_t** out_cache, iree_allocator_t host_allocator) {
+    loom_serve_memory_pool_t* pool, loom_serve_residency_cache_t** out_cache,
+    iree_allocator_t host_allocator) {
   *out_cache = NULL;
   loom_serve_residency_cache_t* cache = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*cache), (void**)&cache));
   cache->allocator = host_allocator;
   cache->pool = pool;
-  cache->execution = execution;
   if (pool) {
     loom_serve_memory_pool_set_reclaimer(
         pool, (loom_serve_memory_reclaimer_t){cache, residency_reclaim});
@@ -161,8 +160,8 @@ void loom_serve_residency_cache_destroy(loom_serve_residency_cache_t* cache) {
 }
 
 iree_status_t loom_serve_residency_create(
-    loom_serve_residency_cache_t* cache, iree_host_size_t weight_count,
-    loom_serve_weights_t* const* weights,
+    loom_serve_residency_cache_t* cache, loom_serve_execution_t* execution,
+    iree_host_size_t weight_count, loom_serve_weights_t* const* weights,
     loom_serve_residency_t** out_residency, iree_allocator_t host_allocator) {
   *out_residency = NULL;
   loom_serve_residency_t* residency = NULL;
@@ -171,6 +170,7 @@ iree_status_t loom_serve_residency_create(
       (void**)&residency));
   residency->allocator = host_allocator;
   residency->cache = cache;
+  residency->execution = execution;
   residency->weight_count = weight_count;
   for (iree_host_size_t i = 0; i < weight_count; ++i) {
     residency->weights[i] = weights[i];
@@ -237,7 +237,7 @@ iree_status_t loom_serve_residency_finish(loom_serve_residency_t* residency,
                                           iree_status_t status) {
   iree_status_t retirement = iree_ok_status();
   if (!iree_status_is_ok(status)) {
-    retirement = loom_serve_execution_drain(residency->cache->execution);
+    retirement = loom_serve_execution_drain(residency->execution);
   }
   if (iree_status_is_ok(retirement)) {
     loom_serve_residency_release(residency);

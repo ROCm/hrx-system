@@ -60,8 +60,10 @@ class ControlTest
         SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
     ASSERT_NE(dispatch, nullptr);
     ASSERT_NE(transfer, nullptr);
-    IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, allocator_,
-                                               &execution_));
+    IREE_ASSERT_OK(
+        loom_serve_workspace_create(dispatch, &workspace_, allocator_));
+    IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, workspace_,
+                                               allocator_, &execution_));
     const auto* family = iree_hal_queue_family(dispatch);
     directory_ =
         std::filesystem::path(FLAG_control_sources).parent_path().string();
@@ -124,6 +126,7 @@ class ControlTest
     }
     loom_serve_jit_destroy(jit_);
     loom_serve_execution_release(execution_);
+    loom_serve_workspace_release(workspace_);
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
     iree_async_frontier_tracker_release(frontier_tracker_);
@@ -313,7 +316,9 @@ class ControlTest
   iree_hal_device_t* device_ = nullptr;
   // Owned domain for the device's semaphores.
   iree_hal_device_group_t* group_ = nullptr;
-  // Shared ordered execution capability.
+  // Shared command backing independent of model ordering.
+  loom_serve_workspace_t* workspace_ = nullptr;
+  // Owned model execution capability.
   loom_serve_execution_t* execution_ = nullptr;
   // Source directory shared by the catalog and VM program.
   std::string directory_;

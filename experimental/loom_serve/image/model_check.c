@@ -50,10 +50,8 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = loom_serve_image_model_create(device, &options, &model, allocator);
   }
-  loom_serve_execution_t* execution =
-      device ? loom_serve_device_execution(device) : NULL;
   if (iree_status_is_ok(status) &&
-      loom_serve_execution_workspace_statistics(execution).bytes_committed) {
+      loom_serve_device_memory_statistics(device).workspace.bytes_committed) {
     status = iree_make_status(IREE_STATUS_DATA_LOSS,
                               "model registration committed private scratch");
   }
@@ -104,7 +102,7 @@ int main(int argc, char** argv) {
     }
     if (iree_status_is_ok(status)) {
       const iree_hal_pool_stats_t workspace =
-          loom_serve_execution_workspace_statistics(execution);
+          loom_serve_device_memory_statistics(device).workspace;
       if (workspace.reservation_count || workspace.bytes_reserved ||
           workspace.reserve_count != i + 1 ||
           workspace.release_count != i + 1) {
@@ -115,10 +113,12 @@ int main(int argc, char** argv) {
     // Reclaim after each short/long/short group. The following group must
     // regrow backing without disturbing the model, weights or output buffers.
     if (iree_status_is_ok(status) && (i + 1) % IREE_ARRAYSIZE(cases) == 0) {
-      status = loom_serve_execution_trim_workspace(execution);
+      status = loom_serve_device_trim(
+          device,
+          loom_serve_device_memory_statistics(device).retained.committed_bytes);
       if (iree_status_is_ok(status)) {
         const iree_hal_pool_stats_t workspace =
-            loom_serve_execution_workspace_statistics(execution);
+            loom_serve_device_memory_statistics(device).workspace;
         printf("{\"event\":\"workspace_trimmed\",\"committed_bytes\":%" PRIu64
                ",\"reuse_count\":%" PRIu64 "}\n",
                (uint64_t)workspace.bytes_committed, workspace.reuse_count);

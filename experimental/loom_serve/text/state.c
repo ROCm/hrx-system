@@ -55,10 +55,11 @@ static iree_hal_buffer_t** text_allocation(loom_serve_text_state_t* state,
   return allocations[index];
 }
 
-iree_status_t loom_serve_text_state_allocate(loom_serve_text_state_t* state,
-                                             loom_serve_device_t* device) {
+iree_status_t loom_serve_text_state_allocate(
+    loom_serve_text_state_t* state, loom_serve_device_t* device,
+    loom_serve_execution_t* execution) {
   state->device = loom_serve_device_handle(device);
-  state->execution = loom_serve_device_execution(device);
+  state->execution = execution;
   state->memory.pool = loom_serve_device_memory_pool(device);
   if (state->cache.capacity) {
     IREE_RETURN_IF_ERROR(loom_serve_block_pool_initialize(

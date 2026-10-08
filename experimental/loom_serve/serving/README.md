@@ -1,9 +1,9 @@
 # Serving multiple source models
 
 `//experimental/loom_serve/serving:server` serves named text deployments through
-one loopback HTTP listener. All deployments borrow one device, execution
-timeline, parameter residency cache and private command workspace pool.
-Each keeps its own source-JIT programs, weights, logical KV pool, sessions and
+one loopback HTTP listener. All deployments borrow one device, parameter
+residency cache and private command workspace backing. Each owns its work and
+feedback timelines, source-JIT programs, weights, logical KV pool, sessions and
 checkpoints. Registering the same checkpoint twice currently creates two
 prepared parameter residencies; it does not deduplicate those weights.
 
@@ -106,6 +106,15 @@ owner accepts a bounded batch of requests, then advances each text service by
 at most one scheduling cohort, rotating service priority. A cohort may contain
 two device-fed epochs when configured. Model calls and residency transitions
 are never concurrent host operations.
+
+Models have independent semaphore timelines even when they use the same exact
+queues. Their command allocations share HAL TLSF backing; safe reuse follows
+dependency frontiers, not a device-wide execution chain. Registering larger
+workspace requirements creates backing lazily without draining other models.
+Older pool geometry remains accounted until its roots and queue captures retire.
+The synchronous owner loop still waits inside model calls; independent domains
+are the runtime foundation for task-owned services, not yet concurrent HTTP
+model execution.
 
 Admission pins a request's parameters and physically reserves its completion
 high-water. Other models retry queued admission as the owner advances. If the

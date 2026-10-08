@@ -29,7 +29,7 @@ class SnapshotTest : public ::testing::Test {
                                            iree_allocator_system());
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
-    execution = loom_serve_device_execution(device);
+    IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
     pool = loom_serve_device_memory_pool(device);
   }
 
@@ -39,6 +39,7 @@ class SnapshotTest : public ::testing::Test {
     for (auto* reservation : reservations) {
       IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(reservation));
     }
+    loom_serve_execution_release(execution);
     IREE_EXPECT_OK(loom_serve_device_destroy(device));
   }
 
@@ -50,7 +51,7 @@ class SnapshotTest : public ::testing::Test {
   static constexpr size_t kRangeCount = 70;
   // Shared device owner enclosing all reservation/transfer lifetimes.
   loom_serve_device_t* device = nullptr;
-  // Borrowed ordered submission owner.
+  // Owned model submission timeline.
   loom_serve_execution_t* execution = nullptr;
   // Physical budget enclosing both independent roots.
   loom_serve_memory_pool_t* pool = nullptr;

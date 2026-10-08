@@ -7,8 +7,7 @@
 #ifndef IREE_EXPERIMENTAL_LOOM_SERVE_RUNTIME_EXECUTION_H_
 #define IREE_EXPERIMENTAL_LOOM_SERVE_RUNTIME_EXECUTION_H_
 
-#include "iree/base/api.h"
-#include "iree/hal/api.h"
+#include "experimental/loom_serve/runtime/workspace.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -22,11 +21,13 @@ extern "C" {
 // Completion values belong to this object and the method's named timeline.
 typedef struct loom_serve_execution_t loom_serve_execution_t;
 
-// Retains the device and both exact queues. The device must belong to a live
+// Retains the device, both exact queues and the shared workspace. Queues must
+// use the workspace's device memory domain. The device must belong to a live
 // device group whose lifetime encloses the execution domain and all its work.
 iree_status_t loom_serve_execution_create(
     iree_hal_queue_t* dispatch_queue, iree_hal_queue_t* transfer_queue,
-    iree_allocator_t host_allocator, loom_serve_execution_t** out_execution);
+    loom_serve_workspace_t* workspace, iree_allocator_t host_allocator,
+    loom_serve_execution_t** out_execution);
 
 void loom_serve_execution_retain(loom_serve_execution_t* execution);
 
@@ -36,8 +37,8 @@ void loom_serve_execution_retain(loom_serve_execution_t* execution);
 void loom_serve_execution_release(loom_serve_execution_t* execution);
 
 // Cold registration of a command's private workspace requirement. Grows the
-// shared pool's slab geometry after draining prior work; does not commit device
-// memory. The host serializes registration with model calls.
+// shared pool's slab geometry without draining any domain or committing device
+// memory. Existing roots retain their original pool through queue retirement.
 iree_status_t loom_serve_execution_reserve_workspace(
     loom_serve_execution_t* execution, iree_device_size_t length,
     iree_device_size_t alignment);
@@ -45,7 +46,7 @@ iree_status_t loom_serve_execution_reserve_workspace(
 // Enqueues a private workspace allocation on the work timeline. The caller
 // owns the returned root, orders its consumers through this execution domain,
 // enqueues dealloca, and releases the root before draining the domain. The pool
-// and final queue ownership belong to execution, not the model or invocation.
+// belongs to the shared workspace; this domain tracks final root ownership.
 iree_status_t loom_serve_execution_alloca(
     loom_serve_execution_t* execution,
     const iree_hal_pool_reservation_request_t* request,
@@ -58,11 +59,26 @@ iree_status_t loom_serve_execution_dealloca(loom_serve_execution_t* execution,
                                             iree_hal_buffer_t* buffer,
                                             uint64_t* out_value);
 
-// Pool accounting and idle-backing reclamation shared by all registered models.
-iree_hal_pool_stats_t loom_serve_execution_workspace_statistics(
-    const loom_serve_execution_t* execution);
-iree_status_t loom_serve_execution_trim_workspace(
+// Coherent snapshot of accepted work/feedback frontiers. Semaphores are
+// borrowed through execution release. Owners may register asynchronous ANY/ALL
+// waits on these values; subsequent submissions do not change this snapshot.
+// Failure readiness is not proof that queue-captured buffers have retired.
+typedef struct loom_serve_execution_frontier_t {
+  // Model work followed by its independent host feedback branch.
+  iree_hal_semaphore_t* semaphores[2];
+  // Last accepted submission on each corresponding branch.
+  uint64_t values[2];
+} loom_serve_execution_frontier_t;
+
+loom_serve_execution_frontier_t loom_serve_execution_frontier(
     loom_serve_execution_t* execution);
+
+// Imports external dependencies into the model timeline without a host wait.
+// Used at cross-domain boundaries such as parameter activation and composed
+// model stages. Subsequent model work depends on both prior work and waits.
+// Semaphore storage is borrowed only during this call; HAL retains handles.
+iree_status_t loom_serve_execution_barrier(loom_serve_execution_t* execution,
+                                           iree_hal_semaphore_list_t waits);
 
 // Enqueues reusable commands. HAL captures the binding table and retains its
 // buffers before returning; the table itself may immediately be reused.
