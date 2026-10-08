@@ -1689,6 +1689,14 @@ iree_status_t loom_check_execute_emit(
     provider_request.module = module;
     provider_request.source_resolver = source_resolver;
     status = loom_check_emit_invoke_provider(provider, &provider_request);
+    if (iree_status_is_ok(status) &&
+        !loom_check_diagnostic_collector_has_error(&diagnostic_collector)) {
+      status = loom_check_emit_verify_provider_module(
+          module, &low_registry, source_resolver,
+          loom_target_environment_low_verify_provider_list(
+              environment->target_environment),
+          &diagnostic_collector);
+    }
     loom_input_module_deinitialize(&input);
     diagnostic_collector.module = NULL;
     status = loom_check_emit_finish_provider(status, &provider_request,

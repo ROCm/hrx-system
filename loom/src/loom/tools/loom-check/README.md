@@ -234,3 +234,7 @@ iree-bazel-run //loom/src/loom/tools/loom-check -- --agents_md
 Emit-mode JSON targets should stay small. When a case only needs structured
 diagnostics from the emitter, use `output=none` and check the `ERROR@` or
 `REMARK@` annotations instead of checking in a large JSON blob.
+
+Emit providers receiving a parsed module run with verification before emission
+and again after successful emission. Their scheduling and allocation rewrites
+must leave valid IR even when the selected output is native assembly or a report.

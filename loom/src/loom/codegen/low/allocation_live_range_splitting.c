@@ -89,8 +89,9 @@ static bool loom_low_allocation_split_use_is_eligible(
 }
 
 static bool loom_low_allocation_value_can_split_after_definition(
-    const loom_module_t* module, loom_value_id_t value_id,
-    loom_block_t** out_insertion_block, loom_op_t** out_insertion_anchor) {
+    const loom_module_t* module, const loom_low_allocation_table_t* table,
+    loom_value_id_t value_id, loom_block_t** out_insertion_block,
+    loom_op_t** out_insertion_anchor) {
   *out_insertion_block = NULL;
   *out_insertion_anchor = NULL;
   const loom_value_t* value = loom_module_value(module, value_id);
@@ -100,6 +101,10 @@ static bool loom_low_allocation_value_can_split_after_definition(
       return false;
     }
     *out_insertion_block = defining_block;
+    if (table->entry_preamble_end != NULL &&
+        defining_block == table->entry_preamble_end->parent_block) {
+      *out_insertion_anchor = (loom_op_t*)table->entry_preamble_end;
+    }
     return true;
   }
   loom_op_t* defining_op = loom_value_def_op(value);
@@ -109,7 +114,10 @@ static bool loom_low_allocation_value_can_split_after_definition(
     return false;
   }
   *out_insertion_block = defining_op->parent_block;
-  *out_insertion_anchor = defining_op;
+  *out_insertion_anchor =
+      loom_low_live_in_isa(defining_op) || loom_low_resource_isa(defining_op)
+          ? (loom_op_t*)table->entry_preamble_end
+          : defining_op;
   return true;
 }
 
@@ -443,7 +451,7 @@ iree_status_t loom_low_allocation_replicate_pair_sources(
     loom_block_t* insertion_block = NULL;
     loom_op_t* insertion_anchor = NULL;
     if (!loom_low_allocation_value_can_split_after_definition(
-            module, candidate->source_value_id, &insertion_block,
+            module, table, candidate->source_value_id, &insertion_block,
             &insertion_anchor)) {
       continue;
     }
@@ -574,17 +582,18 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
   loom_block_t* insertion_block = NULL;
   loom_op_t* insertion_anchor = NULL;
   if (!loom_low_allocation_value_can_split_after_definition(
-          module, value_id, &insertion_block, &insertion_anchor)) {
+          module, table, value_id, &insertion_block, &insertion_anchor)) {
     return iree_ok_status();
   }
 
-  const uint32_t original_use_count = value->use_count;
+  uint32_t rewritten_operand_count = 0;
   const loom_use_t* original_uses = loom_value_uses(value);
-  for (uint32_t i = 0; i < original_use_count; ++i) {
-    if (!loom_low_allocation_split_use_is_eligible(
-            value_id, insertion_block, insertion_anchor, original_uses[i])) {
-      return iree_ok_status();
-    }
+  for (uint32_t i = 0; i < value->use_count; ++i) {
+    rewritten_operand_count += loom_low_allocation_split_use_is_eligible(
+        value_id, insertion_block, insertion_anchor, original_uses[i]);
+  }
+  if (rewritten_operand_count == 0) {
+    return iree_ok_status();
   }
 
   loom_builder_ip_t saved_ip = loom_builder_save(&rewriter->builder);
@@ -609,15 +618,25 @@ static iree_status_t loom_low_allocation_try_split_fixed_value(
     const loom_value_id_t split_value_id = loom_op_results(transfer_op)[0];
     status = loom_rewriter_try_set_derived_value_name(
         rewriter, value_id, split_value_id, IREE_SV("split"));
-    if (iree_status_is_ok(status)) {
-      status = loom_rewriter_replace_all_uses_except(
-          rewriter, value_id, split_value_id, transfer_op);
+    // Preamble operands keep the original input. Walk backwards because
+    // replacing an operand swap-removes its entry from the source use list.
+    value = loom_module_value(module, value_id);
+    for (uint32_t i = value->use_count; i != 0 && iree_status_is_ok(status);) {
+      const loom_use_t use = loom_value_uses(value)[--i];
+      loom_op_t* user_op = loom_use_user_op(use);
+      if (user_op == transfer_op ||
+          !loom_low_allocation_split_use_is_eligible(value_id, insertion_block,
+                                                     insertion_anchor, use)) {
+        continue;
+      }
+      status = loom_rewriter_set_operand(
+          rewriter, user_op, loom_use_operand_index(use), split_value_id);
     }
     if (iree_status_is_ok(status)) {
       ++result->transfer_packet_count;
-      result->rewritten_operand_count += original_use_count;
+      result->rewritten_operand_count += rewritten_operand_count;
       status = loom_low_allocation_live_range_split_emit_decision(
-          table, fixed_value, split_value_id, original_use_count, emitter);
+          table, fixed_value, split_value_id, rewritten_operand_count, emitter);
     }
   }
   return status;

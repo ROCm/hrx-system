@@ -38,6 +38,8 @@ typedef struct loom_low_read_only_data_requirement_t {
 // function or its declarations change. Storage includes explicit reservations,
 // not spills that allocation may introduce.
 typedef struct loom_low_function_requirements_t {
+  // Last entry live-in/resource declaration, or NULL for an empty preamble.
+  const loom_op_t* entry_preamble_end;
   // Low resource declarations in function body order.
   const loom_op_t* const* resources;
   // Number of resource declarations.

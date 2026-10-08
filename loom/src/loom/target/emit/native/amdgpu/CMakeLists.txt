@@ -142,6 +142,7 @@ loom_check_test_suite(
     "test/delay_alu.loom-test"
     "test/delay_layout.loom-test"
     "test/dpp_wait_states.loom-test"
+    "test/entry_preamble.loom-test"
     "test/gfx1201_native.loom-test"
     "test/hal_kernel_library.loom-test"
     "test/immediates.loom-test"

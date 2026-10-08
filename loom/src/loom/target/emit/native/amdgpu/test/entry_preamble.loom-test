@@ -1,0 +1,356 @@
+// Fixed-input splits preserve the entry declarations and dominate body uses.
+// RUN: emit amdgpu-assembly @split_live_in strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_live_in() -> (reg<amdgpu.sgpr x2>) asm {
+  %current = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
+^exit(%next: reg<amdgpu.sgpr x2>):
+  return %next
+}
+
+// ----
+  s_mov_b32 s2, s0
+  s_mov_b32 s3, s1
+  s_mov_b32 s1, s2
+  s_mov_b32 s0, s3
+  v_cndmask_b32 v0, 0, v0, s[2:3]
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// Fixed-input splits preserve the entry declarations and dominate body uses.
+// RUN: emit amdgpu-assembly @split_entry_argument strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_entry_argument(%current: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
+^exit(%next: reg<amdgpu.sgpr x2>):
+  return %next
+}
+
+// ----
+  s_mov_b32 s2, s0
+  s_mov_b32 s3, s1
+  s_mov_b32 s1, s2
+  s_mov_b32 s0, s3
+  v_cndmask_b32 v0, 0, v0, s[2:3]
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// Fixed-input splits preserve the entry declarations and dominate body uses.
+// RUN: with-checks emit amdgpu-allocation-json @split_resource strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_resource() -> (reg<amdgpu.sgpr x2>) asm {
+  %current = resource<native_pointer> {index = 0, source_type = buffer} : reg<amdgpu.sgpr x2>
+  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
+^exit(%next: reg<amdgpu.sgpr x2>):
+  return %next
+}
+
+// ----
+CHECK: *"spill_count":0,*
+CHECK: *"name":"current_split",*
+
+// ====
+
+// Fixed-input splits preserve the entry declarations and dominate body uses.
+// RUN: emit amdgpu-assembly @split_ordinary_definition strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_ordinary_definition() -> (reg<amdgpu.sgpr x2>) asm {
+  %seed = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %current = copy %seed : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr x2>
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
+^exit(%next: reg<amdgpu.sgpr x2>):
+  return %next
+}
+
+// ----
+  s_mov_b32 s2, s0
+  s_mov_b32 s3, s1
+  s_mov_b32 s1, s2
+  s_mov_b32 s0, s3
+  v_cndmask_b32 v0, 0, v0, s[2:3]
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// Fixed-input splits preserve the entry declarations and dominate body uses.
+// RUN: emit amdgpu-assembly @split_successor_argument strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_successor_argument() -> (reg<amdgpu.sgpr x2>) asm {
+  %seed = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  low.br ^body(%seed: reg<amdgpu.sgpr x2>)
+^body(%current: reg<amdgpu.sgpr x2>):
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
+^exit(%next: reg<amdgpu.sgpr x2>):
+  return %next
+}
+
+// ----
+.Lbb1:
+  s_mov_b32 s2, s0
+  s_mov_b32 s3, s1
+  s_mov_b32 s1, s2
+  s_mov_b32 s0, s3
+  v_cndmask_b32 v0, 0, v0, s[2:3]
+.Lbb2:
+  s_endpgm
+
+// ====
+
+// Fixed-input splits preserve the entry declarations and dominate body uses.
+// RUN: with-checks emit amdgpu-allocation-json @split_preamble_operand strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_preamble_operand() -> (reg<amdgpu.sgpr x2>) asm {
+  %current = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %buffer = resource<native_pointer> extent(%current) {index = 0, source_type = buffer} : reg<amdgpu.sgpr x2>
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
+^exit(%next: reg<amdgpu.sgpr x2>):
+  return %next
+}
+
+// ----
+CHECK: *"spill_count":0,*
+CHECK: *"name":"current_split",*
+
+// ====
+
+// Fixed-input splits preserve the entry declarations and dominate body uses.
+// RUN: emit amdgpu-assembly @split_empty_preamble strategy=source amdgpu.sgpr=4 fixed=%current:physical_register:0:2 fixed=%next:physical_register:0:2
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.func.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) @split_empty_preamble(%current: reg<amdgpu.sgpr x2>, %value: reg<amdgpu.vgpr>) -> (reg<amdgpu.sgpr x2>) asm {
+  %first = slice %current[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %second = slice %current[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %swapped = concat(%second, %first) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %selected = v_cndmask_b32_src0_inline %value, %current {false_value = 0}
+  low.br ^exit(%swapped: reg<amdgpu.sgpr x2>)
+^exit(%next: reg<amdgpu.sgpr x2>):
+  return %next
+}
+
+// ----
+  s_mov_b32 s2, s0
+  s_mov_b32 s3, s1
+  s_mov_b32 s1, s2
+  s_mov_b32 s0, s3
+  v_cndmask_b32 v0, 0, v0, s[2:3]
+.Lbb1:
+  s_endpgm
+
+// ====
+
+// Profitable VOPD replication also places its copy after the complete preamble.
+// RUN: emit amdgpu-assembly @replicate_entry_argument strategy=resource-stall
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @replicate_entry_argument(%lhs: reg<amdgpu.vgpr x8>, %shared: reg<amdgpu.vgpr>) asm {
+  %pointer = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product0 = v_mul_f32 %lhs0, %shared
+  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product1 = v_mul_f32 %lhs1, %shared
+  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product2 = v_mul_f32 %lhs2, %shared
+  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product3 = v_mul_f32 %lhs3, %shared
+  %lhs4 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product4 = v_mul_f32 %lhs4, %shared
+  %lhs5 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product5 = v_mul_f32 %lhs5, %shared
+  %lhs6 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product6 = v_mul_f32 %lhs6, %shared
+  %lhs7 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product7 = v_mul_f32 %lhs7, %shared
+  return
+}
+
+// ----
+  v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
+  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
+  v_mov_b32 v2, v8
+  s_delay_alu instid0(VALU_DEP_1)
+  v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
+  v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  s_endpgm
+
+// ====
+
+// Profitable VOPD replication also places its copy after the complete preamble.
+// RUN: emit amdgpu-assembly @replicate_live_in strategy=resource-stall
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @replicate_live_in(%lhs: reg<amdgpu.vgpr x8>) asm {
+  %shared = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %pointer = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %lhs0 = slice %lhs[0] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product0 = v_mul_f32 %lhs0, %shared
+  %lhs1 = slice %lhs[1] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product1 = v_mul_f32 %lhs1, %shared
+  %lhs2 = slice %lhs[2] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product2 = v_mul_f32 %lhs2, %shared
+  %lhs3 = slice %lhs[3] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product3 = v_mul_f32 %lhs3, %shared
+  %lhs4 = slice %lhs[4] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product4 = v_mul_f32 %lhs4, %shared
+  %lhs5 = slice %lhs[5] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product5 = v_mul_f32 %lhs5, %shared
+  %lhs6 = slice %lhs[6] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product6 = v_mul_f32 %lhs6, %shared
+  %lhs7 = slice %lhs[7] : reg<amdgpu.vgpr x8> -> reg<amdgpu.vgpr>
+  %product7 = v_mul_f32 %lhs7, %shared
+  return
+}
+
+// ----
+  v_dual_mul_f32 v2, v8, v2 :: v_dual_mul_f32 v3, v3, v8
+  v_dual_mul_f32 v2, v8, v6 :: v_dual_mul_f32 v3, v7, v8
+  v_mov_b32 v2, v8
+  s_delay_alu instid0(VALU_DEP_1)
+  v_dual_mul_f32 v0, v0, v8 :: v_dual_mul_f32 v1, v1, v2
+  v_dual_mul_f32 v0, v4, v8 :: v_dual_mul_f32 v1, v5, v2
+  s_endpgm
+
+// ====
+
+// Public kernel emission retains a valid entry interface.
+// RUN: emit amdgpu-kernel-assembly
+
+amdgpu.target<gfx1151> @target {subgroup_size = 64}
+
+low.kernel.def schedule(locked) target<amdgpu.rdna3_5.core>(@target) workgroup_size(64, 1, 1) @retained_input() asm {
+  %mask = live_in<amdgpu.kernarg_segment_ptr> : reg<amdgpu.sgpr x2>
+  %value = live_in<amdgpu.workitem_id.x> : reg<amdgpu.vgpr>
+  %selected = v_cndmask_b32_src0_inline %value, %mask {false_value = 0}
+  return
+}
+
+// ----
+.text
+.amdgcn_target "amdgcn-amd-amdhsa--gfx1151"
+.amdhsa_code_object_version 6
+
+.protected retained_input
+.globl retained_input
+.p2align 8
+.type retained_input,@function
+retained_input:
+  v_cndmask_b32 v0, 0, v0, s[0:1]
+  s_endpgm
+.Lfunc_end0:
+.size retained_input, .Lfunc_end0-retained_input
+
+.rodata
+.p2align 6
+.amdhsa_kernel retained_input
+  .amdhsa_group_segment_fixed_size 0
+  .amdhsa_private_segment_fixed_size 0
+  .amdhsa_kernarg_size 0
+  .amdhsa_user_sgpr_count 2
+  .amdhsa_user_sgpr_dispatch_ptr 0
+  .amdhsa_user_sgpr_queue_ptr 0
+  .amdhsa_user_sgpr_kernarg_segment_ptr 1
+  .amdhsa_user_sgpr_dispatch_id 0
+  .amdhsa_user_sgpr_private_segment_size 0
+  .amdhsa_wavefront_size32 0
+  .amdhsa_uses_dynamic_stack 0
+  .amdhsa_enable_private_segment 0
+  .amdhsa_system_sgpr_workgroup_id_x 0
+  .amdhsa_system_sgpr_workgroup_id_y 0
+  .amdhsa_system_sgpr_workgroup_id_z 0
+  .amdhsa_system_sgpr_workgroup_info 0
+  .amdhsa_system_vgpr_workitem_id 0
+  .amdhsa_next_free_vgpr 1
+  .amdhsa_next_free_sgpr 2
+  .amdhsa_reserve_vcc 0
+  .amdhsa_float_round_mode_32 0
+  .amdhsa_float_round_mode_16_64 0
+  .amdhsa_float_denorm_mode_32 3
+  .amdhsa_float_denorm_mode_16_64 3
+  .amdhsa_dx10_clamp 1
+  .amdhsa_ieee_mode 1
+  .amdhsa_fp16_overflow 0
+  .amdhsa_workgroup_processor_mode 1
+  .amdhsa_memory_ordered 1
+  .amdhsa_forward_progress 1
+  .amdhsa_shared_vgpr_count 0
+  .amdhsa_inst_pref_size 0
+  .amdhsa_exception_fp_ieee_invalid_op 0
+  .amdhsa_exception_fp_denorm_src 0
+  .amdhsa_exception_fp_ieee_div_zero 0
+  .amdhsa_exception_fp_ieee_overflow 0
+  .amdhsa_exception_fp_ieee_underflow 0
+  .amdhsa_exception_fp_ieee_inexact 0
+  .amdhsa_exception_int_div_zero 0
+.end_amdhsa_kernel
+
+.amdgpu_metadata
+  amdhsa.version:
+    - 1
+    - 2
+  amdhsa.target: 'amdgcn-amd-amdhsa--gfx1151'
+  amdhsa.kernels:
+    - .name: 'retained_input'
+      .symbol: 'retained_input.kd'
+      .kernarg_segment_size: 0
+      .group_segment_fixed_size: 0
+      .private_segment_fixed_size: 0
+      .kernarg_segment_align: 8
+      .wavefront_size: 64
+      .sgpr_count: 2
+      .vgpr_count: 1
+      .max_flat_workgroup_size: 64
+      .reqd_workgroup_size:
+        - 64
+        - 1
+        - 1
+      .args: []
+.end_amdgpu_metadata

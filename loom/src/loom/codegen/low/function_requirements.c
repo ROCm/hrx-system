@@ -93,6 +93,7 @@ iree_status_t loom_low_function_requirements_build(
     const loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
       if (loom_low_resource_isa(op)) {
+        out_requirements->entry_preamble_end = op;
         const iree_host_size_t minimum_capacity =
             out_requirements->resource_count + 1;
         if (minimum_capacity > resource_capacity) {
@@ -102,6 +103,8 @@ iree_status_t loom_low_function_requirements_build(
               &resource_capacity, (void**)&resources));
         }
         resources[out_requirements->resource_count++] = op;
+      } else if (loom_low_live_in_isa(op)) {
+        out_requirements->entry_preamble_end = op;
       } else if (loom_low_storage_reserve_isa(op) ||
                  loom_low_storage_view_isa(op)) {
         IREE_RETURN_IF_ERROR(loom_low_storage_layout_builder_append(

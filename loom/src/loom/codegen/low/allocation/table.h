@@ -234,6 +234,9 @@ typedef struct loom_low_allocation_table_t {
   loom_module_t* module;
   // Target-low function operation allocated by this table.
   const loom_op_t* function_op;
+  // Last entry live-in/resource declaration retained for body rewrite anchors.
+  // NULL for an empty preamble; borrows the unchanged source declarations.
+  const loom_op_t* entry_preamble_end;
   // Resolved target context selected by |function_op|.
   loom_low_resolved_target_t target;
   // Final invocation-owned cells consumed by STORAGE assignments and moves.

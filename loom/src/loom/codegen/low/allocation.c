@@ -449,6 +449,7 @@ iree_status_t loom_low_allocate_function(
   *out_table = (loom_low_allocation_table_t){
       .module = model->module,
       .function_op = model->function_op,
+      .entry_preamble_end = model->requirements.entry_preamble_end,
       .target = model->target,
       .error_count = model->error_count,
       .cfg_graph = model->cfg_graph,
@@ -660,6 +661,7 @@ iree_status_t loom_low_allocate_function(
     table = (loom_low_allocation_table_t){
         .module = model->module,
         .function_op = model->function_op,
+        .entry_preamble_end = model->requirements.entry_preamble_end,
         .target = state.target,
         .storage_transport = options->storage_transport,
         .liveness = state.liveness,

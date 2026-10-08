@@ -9,11 +9,13 @@
 // Fixed values model ABI or target locations that must occupy a particular
 // physical slot while live. When such a value stays live long enough to force a
 // spill, this utility can insert one low.copy or ownership-preserving low.move
-// immediately after the fixed source is materialized and rewrite later users
-// to the transfer result. The fixed source's live range ends at the transfer;
-// the result has a preference for disjoint storage but no fixed-location
-// requirement. Rebuilding allocation determines whether the split avoids
-// spills.
+// after the fixed source is materialized and rewrite later users to the
+// transfer result. Entry sources are copied after the complete live-in/resource
+// preamble; other sources are copied immediately after their definition.
+// Preamble uses retain the original input. The fixed source's live range ends
+// at the transfer; the result has a preference for disjoint storage but no
+// fixed-location requirement. Rebuilding allocation determines whether the
+// split avoids spills.
 
 #ifndef LOOM_CODEGEN_LOW_ALLOCATION_LIVE_RANGE_SPLITTING_H_
 #define LOOM_CODEGEN_LOW_ALLOCATION_LIVE_RANGE_SPLITTING_H_
