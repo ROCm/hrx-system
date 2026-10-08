@@ -30,12 +30,18 @@ loom_corpus_build(
     "@atomic_f64_values"
     "TARGET/003"
     "loom::target::vm::all"
+    "numeric/conversion/float8_schema_conversion.loom"
+    "@float8_schema_conversion"
+    "TARGET/001"
+    "loom::target::vm::all"
     "numeric/float/activations.loom"
     "@activation_observations"
     "LOWERING/036"
   ALL_ROOTS_XFAIL
     "loom::target::vm::all"
     "memory/atomic/float64.loom"
+    "loom::target::vm::all"
+    "numeric/conversion/float8_schema_conversion.loom"
     "loom::target::vm::all"
     "numeric/float/activations.loom"
   EXCLUDES

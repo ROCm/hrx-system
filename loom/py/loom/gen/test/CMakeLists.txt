@@ -40,42 +40,4 @@ iree_py_library(
     loom::py::loom::gen::test::kernel_fixture
 )
 
-iree_py_library(
-  NAME
-    numeric_conversion_matrix
-  MAIN
-    "numeric_conversion_matrix.py"
-  SRCS
-    "__init__.py"
-    "numeric_conversion_matrix.py"
-  DEPS
-    loom::py::loom::core
-    loom::py::loom::dialect::encoding::encoding
-    loom::py::loom::gen::bootstrap
-    loom::py::loom::gen::support::support
-)
-
-iree_py_test(
-  NAME
-    numeric_conversion_matrix_test
-  MAIN
-    "../../tools/pytest_style_runner.py"
-  SRCS
-    "numeric_conversion_matrix_test.py"
-    "../../tools/pytest_style_runner.py"
-  ARGS
-    "loom.gen.test.numeric_conversion_matrix_test"
-  DATA
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/encoding/fp8_bidirectional_decode_e4m3.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/encoding/fp8_bidirectional_decode_e5m2.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/encoding/fp8_bidirectional_encode_e4m3.loom"
-    "${PROJECT_SOURCE_DIR}/loom/src/loom/test/corpus/encoding/fp8_bidirectional_encode_e5m2.loom"
-  DEPS
-    loom::py::loom::gen::test::numeric_conversion_matrix
-  PACKAGE_DIRS
-    "${PROJECT_SOURCE_DIR}/loom/py"
-    "${PROJECT_BINARY_DIR}/loom/py"
-    "${PROJECT_SOURCE_DIR}"
-)
-
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

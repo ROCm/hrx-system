@@ -136,8 +136,6 @@ loom_module(
     "finite_storage_decode.input_capacity=4608"
     "finite_storage_decode.output_capacity=16"
     "finite_storage_decode.row_capacity=65"
-    "fp8_bidirectional_decode.row_capacity=65536"
-    "fp8_bidirectional_encode.row_capacity=65536"
     "fp8_encode.row_capacity=65536"
   MODE
     "merge"

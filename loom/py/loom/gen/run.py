@@ -14,8 +14,6 @@ Usage:
     python3 loom/py/loom/gen/run.py c_errors --check
     python3 loom/py/loom/gen/run.py c_tables --check
     python3 loom/py/loom/gen/run.py c_tables --in-place
-    python3 loom/py/loom/gen/run.py numeric_conversion_matrix --check
-    python3 loom/py/loom/gen/run.py numeric_conversion_matrix --in-place
     python3 loom/py/loom/gen/run.py textmate --in-place
     python3 loom/py/loom/gen/run.py textmate --check
     python3 loom/py/loom/gen/run.py x86_packed_dot_contract --in-place
@@ -37,7 +35,6 @@ GENERATORS = {
     "c_tables": "loom.gen.ops.c_tables",
     "cxx_intrinsics": "loom.gen.cxx.intrinsics",
     "checked_in_artifacts": "loom.gen.checked_in_artifacts",
-    "numeric_conversion_matrix": "loom.gen.test.numeric_conversion_matrix",
     "package_inits": "loom.gen.python.package_inits",
     "textmate": "loom.gen.editor.textmate",
     "x86_packed_dot_contract": "loom.gen.target.arch.x86.x86_packed_dot_contract",

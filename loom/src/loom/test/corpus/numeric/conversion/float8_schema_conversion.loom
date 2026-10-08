@@ -1,0 +1,540 @@
+// The target path uses schema-directed vector conversions. The scalar oracle
+// reconstructs each format from its bit layout and selects the nearest finite
+// value independently of the target lowering.
+func.def inline @float8_decode_f32(%payload: i32, %mantissa_bits: i32, %exponent_bias: i32, %special_policy: i32) -> (f32) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c7 = scalar.constant 7 : i32
+  %c23 = scalar.constant 23 : i32
+  %c24 = scalar.constant 24 : i32
+  %c31 = scalar.constant 31 : i32
+  %c127 = scalar.constant 127 : i32
+  %c128 = scalar.constant 128 : i32
+  %sign = scalar.andi %payload, %c128 : i32
+  %sign_bits = scalar.shli %sign, %c24 : i32
+  %magnitude = scalar.andi %payload, %c127 : i32
+  %mantissa_limit = scalar.shli %c1, %mantissa_bits : i32
+  %mantissa_mask = scalar.subi %mantissa_limit, %c1 : i32
+  %exponent = scalar.shrui %magnitude, %mantissa_bits : i32
+  %mantissa = scalar.andi %magnitude, %mantissa_mask : i32
+  %exponent_bits = scalar.subi %c7, %mantissa_bits : i32
+  %exponent_limit = scalar.shli %c1, %exponent_bits : i32
+  %top_exponent = scalar.subi %exponent_limit, %c1 : i32
+  %is_ieee = scalar.cmpi eq, %special_policy, %c0 : i32
+  %is_finite_nan = scalar.cmpi eq, %special_policy, %c1 : i32
+  %is_fnuz = scalar.cmpi eq, %special_policy, %c2 : i32
+  %is_top_exponent = scalar.cmpi eq, %exponent, %top_exponent : i32
+  %mantissa_is_zero = scalar.cmpi eq, %mantissa, %c0 : i32
+  %mantissa_is_nonzero = scalar.cmpi ne, %mantissa, %c0 : i32
+  %magnitude_is_nan = scalar.cmpi eq, %magnitude, %c127 : i32
+  %payload_is_fnuz_nan = scalar.cmpi eq, %payload, %c128 : i32
+  %ieee_special = scalar.andi %is_ieee, %is_top_exponent : i1
+  %ieee_infinity = scalar.andi %ieee_special, %mantissa_is_zero : i1
+  %ieee_nan = scalar.andi %ieee_special, %mantissa_is_nonzero : i1
+  %finite_nan = scalar.andi %is_finite_nan, %magnitude_is_nan : i1
+  %fnuz_nan = scalar.andi %is_fnuz, %payload_is_fnuz_nan : i1
+  %nan_without_fnuz = scalar.ori %ieee_nan, %finite_nan : i1
+  %is_nan = scalar.ori %nan_without_fnuz, %fnuz_nan : i1
+
+  %normal_bias = scalar.subi %c127, %exponent_bias : i32
+  %normal_exponent = scalar.addi %exponent, %normal_bias : i32
+  %normal_exponent_bits = scalar.shli %normal_exponent, %c23 : i32
+  %normal_shift = scalar.subi %c23, %mantissa_bits : i32
+  %normal_mantissa_bits = scalar.shli %mantissa, %normal_shift : i32
+  %normal_sign_exponent = scalar.ori %sign_bits, %normal_exponent_bits : i32
+  %normal_bits = scalar.ori %normal_sign_exponent, %normal_mantissa_bits : i32
+
+  %safe_mantissa = scf.select %mantissa_is_zero, %c1, %mantissa : i32
+  %leading_zeros = scalar.ctlzi %safe_mantissa : i32
+  %leading_index = scalar.subi %c31, %leading_zeros : i32
+  %subnormal_bias_base = scalar.constant 128 : i32
+  %subnormal_bias = scalar.subi %subnormal_bias_base, %exponent_bias : i32
+  %subnormal_exponent_base = scalar.subi %subnormal_bias, %mantissa_bits : i32
+  %subnormal_exponent = scalar.addi %subnormal_exponent_base, %leading_index : i32
+  %subnormal_exponent_bits = scalar.shli %subnormal_exponent, %c23 : i32
+  %hidden_bit = scalar.shli %c1, %leading_index : i32
+  %subnormal_fraction = scalar.subi %safe_mantissa, %hidden_bit : i32
+  %subnormal_fraction_shift = scalar.subi %c23, %leading_index : i32
+  %subnormal_fraction_bits = scalar.shli %subnormal_fraction, %subnormal_fraction_shift : i32
+  %subnormal_sign_exponent = scalar.ori %sign_bits, %subnormal_exponent_bits : i32
+  %nonzero_subnormal_bits = scalar.ori %subnormal_sign_exponent, %subnormal_fraction_bits : i32
+  %subnormal_bits = scf.select %mantissa_is_zero, %sign_bits, %nonzero_subnormal_bits : i32
+
+  %exponent_is_zero = scalar.cmpi eq, %exponent, %c0 : i32
+  %finite_bits = scf.select %exponent_is_zero, %subnormal_bits, %normal_bits : i32
+  %nan_bits = scalar.constant 2143289344 : i32
+  %infinity_bits = scalar.constant 2139095040 : i32
+  %signed_infinity_bits = scalar.ori %infinity_bits, %sign_bits : i32
+  %nan_or_finite_bits = scf.select %is_nan, %nan_bits, %finite_bits : i32
+  %result_bits = scf.select %ieee_infinity, %signed_infinity_bits, %nan_or_finite_bits : i32
+  %result = scalar.bitcast %result_bits : i32 to f32
+  func.return %result : f32
+}
+
+func.def inline @float8_encode_f32(%value: f32, %source_sign: i32, %mantissa_bits: i32, %exponent_bias: i32, %special_policy: i32) -> (i8) {
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c7 = scalar.constant 7 : i32
+  %c126 = scalar.constant 126 : i32
+  %c127 = scalar.constant 127 : i32
+  %c128 = scalar.constant 128 : i32
+  %magnitude_mask = scalar.constant 2147483647 : i32
+  %infinity_bits = scalar.constant 2139095040 : i32
+  %bits = scalar.bitcast %value : f32 to i32
+  %magnitude_bits = scalar.andi %bits, %magnitude_mask : i32
+  %magnitude = scalar.bitcast %magnitude_bits : i32 to f32
+  %is_nan = scalar.cmpi ugt, %magnitude_bits, %infinity_bits : i32
+  %is_infinity = scalar.cmpi eq, %magnitude_bits, %infinity_bits : i32
+  %is_ieee = scalar.cmpi eq, %special_policy, %c0 : i32
+  %is_fnuz = scalar.cmpi eq, %special_policy, %c2 : i32
+
+  %mantissa_limit = scalar.shli %c1, %mantissa_bits : i32
+  %mantissa_mask = scalar.subi %mantissa_limit, %c1 : i32
+  %exponent_bits = scalar.subi %c7, %mantissa_bits : i32
+  %exponent_limit = scalar.shli %c1, %exponent_bits : i32
+  %top_exponent = scalar.subi %exponent_limit, %c1 : i32
+  %finite_exponent = scalar.subi %top_exponent, %c1 : i32
+  %finite_exponent_bits = scalar.shli %finite_exponent, %mantissa_bits : i32
+  %ieee_maximum_payload = scalar.ori %finite_exponent_bits, %mantissa_mask : i32
+  %non_ieee_maximum_payload = scf.select %is_fnuz, %c127, %c126 : i32
+  %maximum_payload = scf.select %is_ieee, %ieee_maximum_payload, %non_ieee_maximum_payload : i32
+  %infinity_magnitude = scalar.shli %top_exponent, %mantissa_bits : i32
+
+  %candidate_end_i32 = scalar.addi %maximum_payload, %c1 : i32
+  %candidate_begin = index.constant 1 : index
+  %candidate_end = index.cast %candidate_end_i32 : i32 to index
+  %candidate_step = index.constant 1 : index
+  %best_payload, %best_distance = scf.for %candidate_index = [%candidate_begin to %candidate_end step %candidate_step](%current_payload = %c0 : i32, %current_distance = %magnitude : f32) -> (i32, f32) {
+    %candidate = index.cast %candidate_index : index to i32
+    %candidate_value = func.call @float8_decode_f32(%candidate, %mantissa_bits, %exponent_bias, %special_policy) : (i32, i32, i32, i32) -> (f32)
+    %delta = scalar.subf %magnitude, %candidate_value : f32
+    %distance = scalar.absf %delta : f32
+    %closer = scalar.cmpf olt, %distance, %current_distance : f32
+    %equal = scalar.cmpf oeq, %distance, %current_distance : f32
+    %candidate_low_bit = scalar.andi %candidate, %c1 : i32
+    %current_low_bit = scalar.andi %current_payload, %c1 : i32
+    %candidate_even = scalar.cmpi eq, %candidate_low_bit, %c0 : i32
+    %current_odd = scalar.cmpi ne, %current_low_bit, %c0 : i32
+    %even_replaces_odd = scalar.andi %candidate_even, %current_odd : i1
+    %even_tie = scalar.andi %equal, %even_replaces_odd : i1
+    %replace = scalar.ori %closer, %even_tie : i1
+    %next_payload = scf.select %replace, %candidate, %current_payload : i32
+    %next_distance = scf.select %replace, %distance, %current_distance : f32
+    scf.yield %next_payload, %next_distance : i32, f32
+  }
+
+  %previous_payload = scalar.subi %maximum_payload, %c1 : i32
+  %maximum_value = func.call @float8_decode_f32(%maximum_payload, %mantissa_bits, %exponent_bias, %special_policy) : (i32, i32, i32, i32) -> (f32)
+  %previous_value = func.call @float8_decode_f32(%previous_payload, %mantissa_bits, %exponent_bias, %special_policy) : (i32, i32, i32, i32) -> (f32)
+  %maximum_spacing = scalar.subf %maximum_value, %previous_value : f32
+  %half = scalar.constant 0.5 : f32
+  %half_spacing = scalar.mulf %maximum_spacing, %half : f32
+  %overflow_threshold = scalar.addf %maximum_value, %half_spacing : f32
+  %ieee_overflow = scalar.cmpf oge, %magnitude, %overflow_threshold : f32
+  %finite_saturation = scalar.cmpf oge, %magnitude, %maximum_value : f32
+  %ieee_payload = scf.select %ieee_overflow, %infinity_magnitude, %best_payload : i32
+  %finite_payload = scf.select %finite_saturation, %maximum_payload, %best_payload : i32
+  %unsigned_payload = scf.select %is_ieee, %ieee_payload, %finite_payload : i32
+  %rounds_to_zero = scalar.cmpi eq, %unsigned_payload, %c0 : i32
+  %fnuz_zero = scalar.andi %is_fnuz, %rounds_to_zero : i1
+  %signed_payload = scalar.ori %unsigned_payload, %source_sign : i32
+  %finite_result = scf.select %fnuz_zero, %c0, %signed_payload : i32
+  %signed_ieee_infinity = scalar.ori %infinity_magnitude, %source_sign : i32
+  %signed_finite_infinity = scalar.ori %maximum_payload, %source_sign : i32
+  %infinity_result = scf.select %is_ieee, %signed_ieee_infinity, %signed_finite_infinity : i32
+  %finite_or_infinity = scf.select %is_infinity, %infinity_result, %finite_result : i32
+  %signed_nan = scalar.ori %c127, %source_sign : i32
+  %nan_result = scf.select %is_fnuz, %c128, %signed_nan : i32
+  %result_payload = scf.select %is_nan, %nan_result, %finite_or_infinity : i32
+  %result = scalar.trunci %result_payload : i32 to i8
+  func.return %result : i8
+}
+
+// NaN sign is outside the schema contract. Canonicalizing only that bit keeps
+// the complete result storage eligible for an exact bitwise comparison.
+func.def inline @canonicalize_f32_nan_sign(%value: f32) -> (f32) {
+  %is_nan = scalar.cmpf uno, %value, %value : f32
+  %absolute = scalar.absf %value : f32
+  %result = scf.select %is_nan, %absolute, %value : f32
+  func.return %result : f32
+}
+
+func.def inline @canonicalize_f16_nan_sign(%value: f16) -> (f16) {
+  %is_nan = scalar.cmpf uno, %value, %value : f16
+  %absolute = scalar.absf %value : f16
+  %result = scf.select %is_nan, %absolute, %value : f16
+  func.return %result : f16
+}
+
+func.def inline @canonicalize_bf16_nan_sign(%value: bf16) -> (bf16) {
+  %is_nan = scalar.cmpf uno, %value, %value : bf16
+  %absolute = scalar.absf %value : bf16
+  %result = scf.select %is_nan, %absolute, %value : bf16
+  func.return %result : bf16
+}
+
+// Each schema owns a 2816-byte output slab: three exhaustive decode tables
+// followed by three 256-element encode tables.
+func.def inline @float8_e4m3_vectors(%decode_input: buffer, %f32_input: buffer, %f16_input: buffer, %bf16_input: buffer, %output: buffer, %output_base: offset, %schema: encoding<schema>) {
+  %input_base = index.constant 0 : offset
+  %decode_f32_offset = index.constant 0 : offset
+  %decode_f16_offset = index.constant 1024 : offset
+  %decode_bf16_offset = index.constant 1536 : offset
+  %encode_f32_offset = index.constant 2048 : offset
+  %encode_f16_offset = index.constant 2304 : offset
+  %encode_bf16_offset = index.constant 2560 : offset
+  %decode_f32_base = index.add %output_base, %decode_f32_offset : offset
+  %decode_f16_base = index.add %output_base, %decode_f16_offset : offset
+  %decode_bf16_base = index.add %output_base, %decode_bf16_offset : offset
+  %encode_f32_base = index.add %output_base, %encode_f32_offset : offset
+  %encode_f16_base = index.add %output_base, %encode_f16_offset : offset
+  %encode_bf16_base = index.add %output_base, %encode_bf16_offset : offset
+  %decode_source = buffer.view %decode_input[%input_base] : buffer -> view<256xf8E4M3>
+  %f32_source = buffer.view %f32_input[%input_base] : buffer -> view<256xf32>
+  %f16_source = buffer.view %f16_input[%input_base] : buffer -> view<256xf16>
+  %bf16_source = buffer.view %bf16_input[%input_base] : buffer -> view<256xbf16>
+  %decode_f32_result = buffer.view %output[%decode_f32_base] : buffer -> view<256xf32>
+  %decode_f16_result = buffer.view %output[%decode_f16_base] : buffer -> view<256xf16>
+  %decode_bf16_result = buffer.view %output[%decode_bf16_base] : buffer -> view<256xbf16>
+  %encode_f32_result = buffer.view %output[%encode_f32_base] : buffer -> view<256xi8>
+  %encode_f16_result = buffer.view %output[%encode_f16_base] : buffer -> view<256xi8>
+  %encode_bf16_result = buffer.view %output[%encode_bf16_base] : buffer -> view<256xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 8 : index
+  scf.for %i = [%begin to %end step %step] {
+    %payload = vector.load %decode_source[%i] : view<256xf8E4M3> -> vector<8xf8E4M3>
+    %decoded_f32 = vector.decode %payload using %schema : vector<8xf8E4M3>, encoding<schema> -> vector<8xf32>
+    %decoded_f16 = vector.decode %payload using %schema : vector<8xf8E4M3>, encoding<schema> -> vector<8xf16>
+    %decoded_bf16 = vector.decode %payload using %schema : vector<8xf8E4M3>, encoding<schema> -> vector<8xbf16>
+    %f32_nan = vector.cmpf uno, %decoded_f32, %decoded_f32 : vector<8xf32> -> vector<8xi1>
+    %f16_nan = vector.cmpf uno, %decoded_f16, %decoded_f16 : vector<8xf16> -> vector<8xi1>
+    %bf16_nan = vector.cmpf uno, %decoded_bf16, %decoded_bf16 : vector<8xbf16> -> vector<8xi1>
+    %decoded_f32_absolute = vector.absf %decoded_f32 : vector<8xf32>
+    %decoded_f16_absolute = vector.absf %decoded_f16 : vector<8xf16>
+    %decoded_bf16_absolute = vector.absf %decoded_bf16 : vector<8xbf16>
+    %canonical_f32 = vector.select %f32_nan, %decoded_f32_absolute, %decoded_f32 : vector<8xf32>
+    %canonical_f16 = vector.select %f16_nan, %decoded_f16_absolute, %decoded_f16 : vector<8xf16>
+    %canonical_bf16 = vector.select %bf16_nan, %decoded_bf16_absolute, %decoded_bf16 : vector<8xbf16>
+    vector.store %canonical_f32, %decode_f32_result[%i] : vector<8xf32>, view<256xf32>
+    vector.store %canonical_f16, %decode_f16_result[%i] : vector<8xf16>, view<256xf16>
+    vector.store %canonical_bf16, %decode_bf16_result[%i] : vector<8xbf16>, view<256xbf16>
+    %f32_values = vector.load %f32_source[%i] : view<256xf32> -> vector<8xf32>
+    %f16_values = vector.load %f16_source[%i] : view<256xf16> -> vector<8xf16>
+    %bf16_values = vector.load %bf16_source[%i] : view<256xbf16> -> vector<8xbf16>
+    %encoded_f32 = vector.encode %f32_values using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E4M3>
+    %encoded_f16 = vector.encode %f16_values using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E4M3>
+    %encoded_bf16 = vector.encode %bf16_values using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E4M3>
+    %encoded_f32_bits = vector.bitcast %encoded_f32 : vector<8xf8E4M3> to vector<8xi8>
+    %encoded_f16_bits = vector.bitcast %encoded_f16 : vector<8xf8E4M3> to vector<8xi8>
+    %encoded_bf16_bits = vector.bitcast %encoded_bf16 : vector<8xf8E4M3> to vector<8xi8>
+    vector.store %encoded_f32_bits, %encode_f32_result[%i] : vector<8xi8>, view<256xi8>
+    vector.store %encoded_f16_bits, %encode_f16_result[%i] : vector<8xi8>, view<256xi8>
+    vector.store %encoded_bf16_bits, %encode_bf16_result[%i] : vector<8xi8>, view<256xi8>
+  }
+  func.return
+}
+
+func.def inline @float8_e5m2_vectors(%decode_input: buffer, %f32_input: buffer, %f16_input: buffer, %bf16_input: buffer, %output: buffer, %output_base: offset, %schema: encoding<schema>) {
+  %input_base = index.constant 0 : offset
+  %decode_f32_offset = index.constant 0 : offset
+  %decode_f16_offset = index.constant 1024 : offset
+  %decode_bf16_offset = index.constant 1536 : offset
+  %encode_f32_offset = index.constant 2048 : offset
+  %encode_f16_offset = index.constant 2304 : offset
+  %encode_bf16_offset = index.constant 2560 : offset
+  %decode_f32_base = index.add %output_base, %decode_f32_offset : offset
+  %decode_f16_base = index.add %output_base, %decode_f16_offset : offset
+  %decode_bf16_base = index.add %output_base, %decode_bf16_offset : offset
+  %encode_f32_base = index.add %output_base, %encode_f32_offset : offset
+  %encode_f16_base = index.add %output_base, %encode_f16_offset : offset
+  %encode_bf16_base = index.add %output_base, %encode_bf16_offset : offset
+  %decode_source = buffer.view %decode_input[%input_base] : buffer -> view<256xf8E5M2>
+  %f32_source = buffer.view %f32_input[%input_base] : buffer -> view<256xf32>
+  %f16_source = buffer.view %f16_input[%input_base] : buffer -> view<256xf16>
+  %bf16_source = buffer.view %bf16_input[%input_base] : buffer -> view<256xbf16>
+  %decode_f32_result = buffer.view %output[%decode_f32_base] : buffer -> view<256xf32>
+  %decode_f16_result = buffer.view %output[%decode_f16_base] : buffer -> view<256xf16>
+  %decode_bf16_result = buffer.view %output[%decode_bf16_base] : buffer -> view<256xbf16>
+  %encode_f32_result = buffer.view %output[%encode_f32_base] : buffer -> view<256xi8>
+  %encode_f16_result = buffer.view %output[%encode_f16_base] : buffer -> view<256xi8>
+  %encode_bf16_result = buffer.view %output[%encode_bf16_base] : buffer -> view<256xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 8 : index
+  scf.for %i = [%begin to %end step %step] {
+    %payload = vector.load %decode_source[%i] : view<256xf8E5M2> -> vector<8xf8E5M2>
+    %decoded_f32 = vector.decode %payload using %schema : vector<8xf8E5M2>, encoding<schema> -> vector<8xf32>
+    %decoded_f16 = vector.decode %payload using %schema : vector<8xf8E5M2>, encoding<schema> -> vector<8xf16>
+    %decoded_bf16 = vector.decode %payload using %schema : vector<8xf8E5M2>, encoding<schema> -> vector<8xbf16>
+    %f32_nan = vector.cmpf uno, %decoded_f32, %decoded_f32 : vector<8xf32> -> vector<8xi1>
+    %f16_nan = vector.cmpf uno, %decoded_f16, %decoded_f16 : vector<8xf16> -> vector<8xi1>
+    %bf16_nan = vector.cmpf uno, %decoded_bf16, %decoded_bf16 : vector<8xbf16> -> vector<8xi1>
+    %decoded_f32_absolute = vector.absf %decoded_f32 : vector<8xf32>
+    %decoded_f16_absolute = vector.absf %decoded_f16 : vector<8xf16>
+    %decoded_bf16_absolute = vector.absf %decoded_bf16 : vector<8xbf16>
+    %canonical_f32 = vector.select %f32_nan, %decoded_f32_absolute, %decoded_f32 : vector<8xf32>
+    %canonical_f16 = vector.select %f16_nan, %decoded_f16_absolute, %decoded_f16 : vector<8xf16>
+    %canonical_bf16 = vector.select %bf16_nan, %decoded_bf16_absolute, %decoded_bf16 : vector<8xbf16>
+    vector.store %canonical_f32, %decode_f32_result[%i] : vector<8xf32>, view<256xf32>
+    vector.store %canonical_f16, %decode_f16_result[%i] : vector<8xf16>, view<256xf16>
+    vector.store %canonical_bf16, %decode_bf16_result[%i] : vector<8xbf16>, view<256xbf16>
+    %f32_values = vector.load %f32_source[%i] : view<256xf32> -> vector<8xf32>
+    %f16_values = vector.load %f16_source[%i] : view<256xf16> -> vector<8xf16>
+    %bf16_values = vector.load %bf16_source[%i] : view<256xbf16> -> vector<8xbf16>
+    %encoded_f32 = vector.encode %f32_values using %schema : vector<8xf32>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_f16 = vector.encode %f16_values using %schema : vector<8xf16>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_bf16 = vector.encode %bf16_values using %schema : vector<8xbf16>, encoding<schema> -> vector<8xf8E5M2>
+    %encoded_f32_bits = vector.bitcast %encoded_f32 : vector<8xf8E5M2> to vector<8xi8>
+    %encoded_f16_bits = vector.bitcast %encoded_f16 : vector<8xf8E5M2> to vector<8xi8>
+    %encoded_bf16_bits = vector.bitcast %encoded_bf16 : vector<8xf8E5M2> to vector<8xi8>
+    vector.store %encoded_f32_bits, %encode_f32_result[%i] : vector<8xi8>, view<256xi8>
+    vector.store %encoded_f16_bits, %encode_f16_result[%i] : vector<8xi8>, view<256xi8>
+    vector.store %encoded_bf16_bits, %encode_bf16_result[%i] : vector<8xi8>, view<256xi8>
+  }
+  func.return
+}
+
+func.def inline @float8_schema_oracle(%decode_input: buffer, %f32_input: buffer, %f16_input: buffer, %bf16_input: buffer, %output: buffer, %output_base: offset, %mantissa_bits: i32, %exponent_bias: i32, %special_policy: i32) {
+  %input_base = index.constant 0 : offset
+  %decode_f32_offset = index.constant 0 : offset
+  %decode_f16_offset = index.constant 1024 : offset
+  %decode_bf16_offset = index.constant 1536 : offset
+  %encode_f32_offset = index.constant 2048 : offset
+  %encode_f16_offset = index.constant 2304 : offset
+  %encode_bf16_offset = index.constant 2560 : offset
+  %decode_f32_base = index.add %output_base, %decode_f32_offset : offset
+  %decode_f16_base = index.add %output_base, %decode_f16_offset : offset
+  %decode_bf16_base = index.add %output_base, %decode_bf16_offset : offset
+  %encode_f32_base = index.add %output_base, %encode_f32_offset : offset
+  %encode_f16_base = index.add %output_base, %encode_f16_offset : offset
+  %encode_bf16_base = index.add %output_base, %encode_bf16_offset : offset
+  %decode_source = buffer.view %decode_input[%input_base] : buffer -> view<256xi8>
+  %f32_source = buffer.view %f32_input[%input_base] : buffer -> view<256xf32>
+  %f16_source = buffer.view %f16_input[%input_base] : buffer -> view<256xf16>
+  %bf16_source = buffer.view %bf16_input[%input_base] : buffer -> view<256xbf16>
+  %decode_f32_result = buffer.view %output[%decode_f32_base] : buffer -> view<256xf32>
+  %decode_f16_result = buffer.view %output[%decode_f16_base] : buffer -> view<256xf16>
+  %decode_bf16_result = buffer.view %output[%decode_bf16_base] : buffer -> view<256xbf16>
+  %encode_f32_result = buffer.view %output[%encode_f32_base] : buffer -> view<256xi8>
+  %encode_f16_result = buffer.view %output[%encode_f16_base] : buffer -> view<256xi8>
+  %encode_bf16_result = buffer.view %output[%encode_bf16_base] : buffer -> view<256xi8>
+  %begin = index.constant 0 : index
+  %end = index.constant 256 : index
+  %step = index.constant 1 : index
+  %c8 = scalar.constant 8 : i32
+  %c24 = scalar.constant 24 : i32
+  %c128 = scalar.constant 128 : i32
+  scf.for %i = [%begin to %end step %step] {
+    %decode_byte = view.load %decode_source[%i] : view<256xi8> -> i8
+    %decode_payload = scalar.extui %decode_byte : i8 to i32
+    %decoded = func.call @float8_decode_f32(%decode_payload, %mantissa_bits, %exponent_bias, %special_policy) : (i32, i32, i32, i32) -> (f32)
+    %decoded_f16 = scalar.fptrunc %decoded : f32 to f16
+    %decoded_bf16 = scalar.fptrunc %decoded : f32 to bf16
+    %canonical_f32 = func.call @canonicalize_f32_nan_sign(%decoded) : (f32) -> (f32)
+    %canonical_f16 = func.call @canonicalize_f16_nan_sign(%decoded_f16) : (f16) -> (f16)
+    %canonical_bf16 = func.call @canonicalize_bf16_nan_sign(%decoded_bf16) : (bf16) -> (bf16)
+    view.store %canonical_f32, %decode_f32_result[%i] : f32, view<256xf32>
+    view.store %canonical_f16, %decode_f16_result[%i] : f16, view<256xf16>
+    view.store %canonical_bf16, %decode_bf16_result[%i] : bf16, view<256xbf16>
+    %f32_value = view.load %f32_source[%i] : view<256xf32> -> f32
+    %f16_value = view.load %f16_source[%i] : view<256xf16> -> f16
+    %bf16_value = view.load %bf16_source[%i] : view<256xbf16> -> bf16
+    %f32_bits = scalar.bitcast %f32_value : f32 to i32
+    %f16_bits = scalar.bitcast %f16_value : f16 to i16
+    %bf16_bits = scalar.bitcast %bf16_value : bf16 to i16
+    %wide_f16_bits = scalar.extui %f16_bits : i16 to i32
+    %wide_bf16_bits = scalar.extui %bf16_bits : i16 to i32
+    %f32_sign_byte = scalar.shrui %f32_bits, %c24 : i32
+    %f16_sign_byte = scalar.shrui %wide_f16_bits, %c8 : i32
+    %bf16_sign_byte = scalar.shrui %wide_bf16_bits, %c8 : i32
+    %f32_sign = scalar.andi %f32_sign_byte, %c128 : i32
+    %f16_sign = scalar.andi %f16_sign_byte, %c128 : i32
+    %bf16_sign = scalar.andi %bf16_sign_byte, %c128 : i32
+    %wide_f16_value = scalar.extf %f16_value : f16 to f32
+    %wide_bf16_value = scalar.extf %bf16_value : bf16 to f32
+    %encoded_f32 = func.call @float8_encode_f32(%f32_value, %f32_sign, %mantissa_bits, %exponent_bias, %special_policy) : (f32, i32, i32, i32, i32) -> (i8)
+    %encoded_f16 = func.call @float8_encode_f32(%wide_f16_value, %f16_sign, %mantissa_bits, %exponent_bias, %special_policy) : (f32, i32, i32, i32, i32) -> (i8)
+    %encoded_bf16 = func.call @float8_encode_f32(%wide_bf16_value, %bf16_sign, %mantissa_bits, %exponent_bias, %special_policy) : (f32, i32, i32, i32, i32) -> (i8)
+    view.store %encoded_f32, %encode_f32_result[%i] : i8, view<256xi8>
+    view.store %encoded_f16, %encode_f16_result[%i] : i8, view<256xi8>
+    view.store %encoded_bf16, %encode_bf16_result[%i] : i8, view<256xi8>
+  }
+  func.return
+}
+
+func.def @float8_schema_conversion(%decode_input: buffer, %f32_input: buffer, %f16_input: buffer, %bf16_input: buffer, %output: buffer) {
+  %e4m3_base = index.constant 0 : offset
+  %e5m2_base = index.constant 2816 : offset
+  %e4m3fn_base = index.constant 5632 : offset
+  %e4m3fnuz_base = index.constant 8448 : offset
+  %e5m2fnuz_base = index.constant 11264 : offset
+  %e4m3 = encoding.define #encoding.f8e4m3<payload_elements=8> : encoding<schema>
+  %e5m2 = encoding.define #encoding.f8e5m2<payload_elements=8> : encoding<schema>
+  %e4m3fn = encoding.define #encoding.f8e4m3fn<payload_elements=8> : encoding<schema>
+  %e4m3fnuz = encoding.define #encoding.f8e4m3fnuz<payload_elements=8> : encoding<schema>
+  %e5m2fnuz = encoding.define #encoding.f8e5m2fnuz<payload_elements=8> : encoding<schema>
+  func.call @float8_e4m3_vectors(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e4m3_base, %e4m3) : (buffer, buffer, buffer, buffer, buffer, offset, encoding<schema>)
+  func.call @float8_e5m2_vectors(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e5m2_base, %e5m2) : (buffer, buffer, buffer, buffer, buffer, offset, encoding<schema>)
+  func.call @float8_e4m3_vectors(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e4m3fn_base, %e4m3fn) : (buffer, buffer, buffer, buffer, buffer, offset, encoding<schema>)
+  func.call @float8_e4m3_vectors(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e4m3fnuz_base, %e4m3fnuz) : (buffer, buffer, buffer, buffer, buffer, offset, encoding<schema>)
+  func.call @float8_e5m2_vectors(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e5m2fnuz_base, %e5m2fnuz) : (buffer, buffer, buffer, buffer, buffer, offset, encoding<schema>)
+  func.return
+}
+
+func.def @float8_schema_conversion_oracle(%decode_input: buffer, %f32_input: buffer, %f16_input: buffer, %bf16_input: buffer, %output: buffer) {
+  %e4m3_base = index.constant 0 : offset
+  %e5m2_base = index.constant 2816 : offset
+  %e4m3fn_base = index.constant 5632 : offset
+  %e4m3fnuz_base = index.constant 8448 : offset
+  %e5m2fnuz_base = index.constant 11264 : offset
+  %e4m3_mantissa = scalar.constant 3 : i32
+  %e5m2_mantissa = scalar.constant 2 : i32
+  %e4m3_bias = scalar.constant 7 : i32
+  %e5m2_bias = scalar.constant 15 : i32
+  %e4m3fnuz_bias = scalar.constant 8 : i32
+  %e5m2fnuz_bias = scalar.constant 16 : i32
+  // Special policies are IEEE exponent reservation, finite-only terminal NaN,
+  // and finite-only unsigned zero with the 0x80 NaN payload.
+  %ieee = scalar.constant 0 : i32
+  %finite_nan = scalar.constant 1 : i32
+  %fnuz = scalar.constant 2 : i32
+  func.call @float8_schema_oracle(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e4m3_base, %e4m3_mantissa, %e4m3_bias, %ieee) : (buffer, buffer, buffer, buffer, buffer, offset, i32, i32, i32)
+  func.call @float8_schema_oracle(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e5m2_base, %e5m2_mantissa, %e5m2_bias, %ieee) : (buffer, buffer, buffer, buffer, buffer, offset, i32, i32, i32)
+  func.call @float8_schema_oracle(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e4m3fn_base, %e4m3_mantissa, %e4m3_bias, %finite_nan) : (buffer, buffer, buffer, buffer, buffer, offset, i32, i32, i32)
+  func.call @float8_schema_oracle(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e4m3fnuz_base, %e4m3_mantissa, %e4m3fnuz_bias, %fnuz) : (buffer, buffer, buffer, buffer, buffer, offset, i32, i32, i32)
+  func.call @float8_schema_oracle(%decode_input, %f32_input, %f16_input, %bf16_input, %output, %e5m2fnuz_base, %e5m2_mantissa, %e5m2fnuz_bias, %fnuz) : (buffer, buffer, buffer, buffer, buffer, offset, i32, i32, i32)
+  func.return
+}
+
+check.scenario @float8_schema_conversion_values {
+  // Raw source bits sample the complete floating-point domains, including
+  // values that an arithmetic generator would never produce.
+  check.trial[2](%trial: index, %entropy: check.entropy) {
+    %f32_entropy = check.entropy.fork %entropy name("f32") : check.entropy
+    %f16_entropy = check.entropy.fork %entropy name("f16") : check.entropy
+    %bf16_entropy = check.entropy.fork %entropy name("bf16") : check.entropy
+    %f32_seed = check.entropy.read %f32_entropy[%trial] : check.entropy -> i64
+    %f16_seed = check.entropy.read %f16_entropy[%trial] : check.entropy -> i64
+    %bf16_seed = check.entropy.read %bf16_entropy[%trial] : check.entropy -> i64
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.random.uniform seed(%f32_seed) range(-2147483648 to 2147483647) : tensor<256xi32>
+    %f16_input = check.generate.random.uniform seed(%f16_seed) range(-32768 to 32767) : tensor<256xi16>
+    %bf16_input = check.generate.random.uniform seed(%bf16_seed) range(-32768 to 32767) : tensor<256xi16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xi32>, tensor<256xi16>, tensor<256xi16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  // Dense E4M3 and E5M2 zero-boundary grids exercise subnormal ties-to-even.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(-0.0625) step(0.00048828125) : tensor<256xf32>
+    %f16_input = check.generate.iota offset(-0.0625) step(0.00048828125) : tensor<256xf16>
+    %bf16_input = check.generate.iota offset(-0.0625) step(0.00048828125) : tensor<256xbf16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xf32>, tensor<256xf16>, tensor<256xbf16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(-0.00048828125) step(3.814697265625e-06) : tensor<256xf32>
+    %f16_input = check.generate.iota offset(-0.00048828125) step(3.814697265625e-06) : tensor<256xf16>
+    %bf16_input = check.generate.iota offset(-0.00048828125) step(3.814697265625e-06) : tensor<256xbf16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xf32>, tensor<256xf16>, tensor<256xbf16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  // Unit-scale grids cover every E4M3 and E5M2 rounding boundary around one.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(0.5) step(0.00390625) : tensor<256xf32>
+    %f16_input = check.generate.iota offset(0.5) step(0.00390625) : tensor<256xf16>
+    %bf16_input = check.generate.iota offset(0.5) step(0.00390625) : tensor<256xbf16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xf32>, tensor<256xf16>, tensor<256xbf16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(-1.5) step(0.00390625) : tensor<256xf32>
+    %f16_input = check.generate.iota offset(-1.5) step(0.00390625) : tensor<256xf16>
+    %bf16_input = check.generate.iota offset(-1.5) step(0.00390625) : tensor<256xbf16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xf32>, tensor<256xf16>, tensor<256xbf16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  // High-range grids include every schema's maximum finite value and the IEEE
+  // overflow thresholds.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(193.0) step(1.0) : tensor<256xf32>
+    %f16_input = check.generate.iota offset(193.0) step(1.0) : tensor<256xf16>
+    %bf16_input = check.generate.iota offset(193.0) step(1.0) : tensor<256xbf16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xf32>, tensor<256xf16>, tensor<256xbf16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(45120.0) step(64.0) : tensor<256xf32>
+    %f16_input = check.generate.iota offset(45120.0) step(64.0) : tensor<256xf16>
+    %bf16_input = check.generate.iota offset(45120.0) step(64.0) : tensor<256xbf16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xf32>, tensor<256xf16>, tensor<256xbf16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  // Bit-pattern windows cover positive and negative infinities and NaNs, then
+  // negative zero and the adjacent subnormal payloads.
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(2139095040) step(1) period(128) : tensor<256xi32>
+    %f16_input = check.generate.iota offset(31744) step(1) period(128) : tensor<256xi16>
+    %bf16_input = check.generate.iota offset(32640) step(1) period(128) : tensor<256xi16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xi32>, tensor<256xi16>, tensor<256xi16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(-8388608) step(1) period(128) : tensor<256xi32>
+    %f16_input = check.generate.iota offset(-1024) step(1) period(128) : tensor<256xi16>
+    %bf16_input = check.generate.iota offset(-128) step(1) period(128) : tensor<256xi16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xi32>, tensor<256xi16>, tensor<256xi16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  check.trial[1](%trial: index, %entropy: check.entropy) {
+    %decode_input = check.generate.iota offset(-128) step(1) : tensor<256xi8>
+    %f32_input = check.generate.iota offset(-2147483648) step(1) period(128) : tensor<256xi32>
+    %f16_input = check.generate.iota offset(-32768) step(1) period(128) : tensor<256xi16>
+    %bf16_input = check.generate.iota offset(-32768) step(1) period(128) : tensor<256xi16>
+    %storage = check.generate.fill value(-559038737) : tensor<3528xi32>
+    %output = check.tensor.view %storage offset(16) : tensor<3528xi32> -> tensor<3520xi32>
+    check.compare<@float8_schema_conversion, @float8_schema_conversion_oracle>(%decode_input, %f32_input, %f16_input, %bf16_input, %output) : (tensor<256xi8>, tensor<256xi32>, tensor<256xi16>, tensor<256xi16>, tensor<3520xi32>) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<3528xi32>
+    }
+  }
+  check.return
+}
+
+check.benchmark<@float8_schema_conversion_values> @float8_schema_conversion_benchmark

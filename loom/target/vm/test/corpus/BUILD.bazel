@@ -119,6 +119,7 @@ loom_corpus_build(
     all_roots_xfail = {
         "//loom/target/vm:all": [
             "memory/atomic/float64.loom",
+            "numeric/conversion/float8_schema_conversion.loom",
             "numeric/float/activations.loom",
         ],
     },
@@ -129,6 +130,7 @@ loom_corpus_build(
         "//loom/target/vm:all": {
             "function/template/library.loom:@template_dead_library_observations": "LOWERING/045",
             "memory/atomic/float64.loom:@atomic_f64_values": "TARGET/003",
+            "numeric/conversion/float8_schema_conversion.loom:@float8_schema_conversion": "TARGET/001",
             "numeric/float/activations.loom:@activation_observations": "LOWERING/036",
         },
     },

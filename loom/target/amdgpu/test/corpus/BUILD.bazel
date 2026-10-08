@@ -63,6 +63,7 @@ _ADAPTER_ONLY_SCENARIOS = [
     "numeric/conversion/conversion.loom",
     "numeric/conversion/f32_narrowing.loom",
     "numeric/conversion/float_narrowing_matrix.loom",
+    "numeric/conversion/float8_schema_conversion.loom",
     "numeric/conversion/integer_float8.loom",
     "numeric/conversion/narrow_arithmetic.loom",
     "numeric/conversion/narrow_integer_float.loom",

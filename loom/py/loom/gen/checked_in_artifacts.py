@@ -27,7 +27,6 @@ from loom.gen.support.generated_file import (
     maintain_generated_file_families,
 )
 from loom.gen.target.arch.x86 import x86_packed_dot_contract
-from loom.gen.test import numeric_conversion_matrix
 
 _AMDGPU_TARGET_CONFIG_MODULE_NAME = "loom_build_tools_amdgpu_target_config"
 # Source checkouts and declared build trees preserve paths below top-level loom.
@@ -115,17 +114,6 @@ def checked_in_artifact_families(*, repository_root: Path | None = None) -> tupl
                 "loom/py/loom/gen/target/arch/x86/x86_packed_dot_contract.py",
                 "loom/py/loom/target/arch/x86",
                 "loom/py/loom/target/low_descriptors.py",
-            ),
-        ),
-        GeneratedFileFamily(
-            description=numeric_conversion_matrix.DESCRIPTION,
-            regenerate_command=numeric_conversion_matrix.REGENERATE_COMMAND,
-            file_set=numeric_conversion_matrix.checked_in_file_set(),
-            input_roots=(
-                "loom/py/loom/dialect/encoding/numeric_formats.py",
-                _PYTHON_GENERATOR_SUPPORT_ROOT,
-                "loom/py/loom/gen/test/numeric_conversion_matrix.py",
-                "loom/py/loom/ir.py",
             ),
         ),
     )

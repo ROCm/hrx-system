@@ -21,6 +21,7 @@ loom_corpus_sources(
     "conversion/float_narrowing_matrix.loom"
     "conversion/float8_dequantization.loom"
     "conversion/float8_facts.loom"
+    "conversion/float8_schema_conversion.loom"
     "conversion/integer_float8.loom"
     "conversion/integer_floating.loom"
     "conversion/integer_widths.loom"
