@@ -134,6 +134,7 @@ loom_cc_test(
     loom::target::test::alt_descriptors
     loom::target::test::descriptors
     loom::testing::diagnostic_matchers
+    loom::verify
 )
 
 loom_cc_benchmark(

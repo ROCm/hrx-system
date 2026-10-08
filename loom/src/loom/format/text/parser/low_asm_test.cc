@@ -21,6 +21,7 @@
 #include "loom/target/test/alt_descriptors.h"
 #include "loom/target/test/descriptors.h"
 #include "loom/testing/diagnostic_matchers.h"
+#include "loom/verify/verify.h"
 
 namespace loom {
 namespace {
@@ -1062,7 +1063,9 @@ TEST_F(LowAsmParserTest, BuildsControlFlowBlocks) {
   ASSERT_NE(entry, nullptr);
   ASSERT_EQ(entry->op_count, 2u);
   ASSERT_TRUE(loom_low_const_isa(loom_block_op(entry, 0)));
-  ASSERT_TRUE(loom_low_cond_br_isa(loom_block_op(entry, 1)));
+  loom_op_t* cond_br_op = loom_block_op(entry, 1);
+  ASSERT_TRUE(loom_low_cond_br_isa(cond_br_op));
+  EXPECT_EQ(cond_br_op->operand_count, 1u);
 
   loom_block_t* then_block = loom_region_block(region, 1);
   ASSERT_NE(then_block, nullptr);
@@ -1079,8 +1082,274 @@ TEST_F(LowAsmParserTest, BuildsControlFlowBlocks) {
   ASSERT_EQ(join_block->arg_count, 1u);
   ASSERT_EQ(join_block->op_count, 1u);
   ASSERT_TRUE(loom_low_return_isa(loom_block_op(join_block, 0)));
+  EXPECT_EQ(loom_low_cond_br_true_dest(cond_br_op), then_block);
+  EXPECT_EQ(loom_low_cond_br_false_dest(cond_br_op), else_block);
 
   loom_module_free(module);
+}
+
+TEST_F(LowAsmParserTest, MaterializesLegacyKernelLexicalFallthroughs) {
+  loom_module_t* module = ParseOk(
+      "low.kernel.def target<test.low.core> @legacy_fallthrough() asm {\n"
+      "  %first = test.const.i32 1\n"
+      "^middle:\n"
+      "  %second = test.const.i32 2\n"
+      "^done:\n"
+      "  return\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* kernel_op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_low_kernel_def_isa(kernel_op));
+  loom_region_t* region = loom_low_kernel_def_body(kernel_op);
+  ASSERT_NE(region, nullptr);
+  ASSERT_EQ(region->block_count, 3u);
+
+  loom_block_t* entry = loom_region_block(region, 0);
+  loom_block_t* middle = loom_region_block(region, 1);
+  loom_block_t* done = loom_region_block(region, 2);
+  ASSERT_EQ(entry->op_count, 2u);
+  ASSERT_EQ(middle->op_count, 2u);
+  ASSERT_EQ(done->op_count, 1u);
+  loom_op_t* entry_branch = loom_block_op(entry, entry->op_count - 1);
+  loom_op_t* middle_branch = loom_block_op(middle, middle->op_count - 1);
+  ASSERT_TRUE(loom_low_br_isa(entry_branch));
+  ASSERT_TRUE(loom_low_br_isa(middle_branch));
+  EXPECT_EQ(loom_low_br_dest(entry_branch), middle);
+  EXPECT_EQ(loom_low_br_dest(middle_branch), done);
+
+  loom_verify_options_t verify_options = {};
+  verify_options.sink = {loom_diagnostic_stderr_sink, nullptr};
+  loom_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(loom_verify_module(module, &verify_options, &verify_result));
+  EXPECT_EQ(verify_result.error_count, 0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmParserTest,
+       MaterializesLegacyFallthroughAfterCondBrPayloadBridge) {
+  loom_module_t* module = ParseOk(
+      "low.kernel.def target<test.low.core> "
+      "@legacy_bridge_fallthrough() asm {\n"
+      "  %condition = test.const.i32 1\n"
+      "  %initial = test.const.i32 0\n"
+      "  low.br ^loop(%initial: reg<test.i32>)\n"
+      "^loop(%value: reg<test.i32>):\n"
+      "  low.cond_br %condition, ^drain, "
+      "^loop(%value: reg<test.i32>) : reg<test.i32>\n"
+      "^drain:\n"
+      "  %next = test.const.i32 2\n"
+      "^done:\n"
+      "  return\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* kernel_op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_low_kernel_def_isa(kernel_op));
+  loom_region_t* region = loom_low_kernel_def_body(kernel_op);
+  ASSERT_NE(region, nullptr);
+  ASSERT_EQ(region->block_count, 5u);
+
+  loom_block_t* drain = nullptr;
+  loom_block_t* done = nullptr;
+  for (uint16_t i = 0; i < region->block_count; ++i) {
+    loom_block_t* block = loom_region_block(region, i);
+    if (StringFromId(module, block->label_id) == "drain") {
+      drain = block;
+    } else if (StringFromId(module, block->label_id) == "done") {
+      done = block;
+    }
+  }
+  ASSERT_NE(drain, nullptr);
+  ASSERT_NE(done, nullptr);
+  ASSERT_EQ(drain->op_count, 2u);
+  loom_op_t* branch = loom_block_op(drain, drain->op_count - 1);
+  ASSERT_TRUE(loom_low_br_isa(branch));
+  EXPECT_EQ(loom_low_br_dest(branch), done);
+
+  loom_verify_options_t verify_options = {};
+  verify_options.sink = {loom_diagnostic_stderr_sink, nullptr};
+  loom_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(loom_verify_module(module, &verify_options, &verify_result));
+  EXPECT_EQ(verify_result.error_count, 0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmParserTest, DesugarsLargeLegacyCondBrFalseBackedgePayload) {
+  constexpr int kArgCount = 17;
+  std::string source =
+      "low.func.def target<test.low.core> @legacy_false_backedge("
+      "%condition: reg<test.i32>";
+  for (int i = 0; i < kArgCount; ++i) {
+    source += ", %initial" + std::to_string(i) + ": reg<test.i32>";
+  }
+  source += ") asm {\n  low.br ^loop(";
+  for (int i = 0; i < kArgCount; ++i) {
+    if (i > 0) {
+      source += ", ";
+    }
+    source += "%initial" + std::to_string(i) + ": reg<test.i32>";
+  }
+  source += ")\n^loop(";
+  for (int i = 0; i < kArgCount; ++i) {
+    if (i > 0) {
+      source += ", ";
+    }
+    source += "%value" + std::to_string(i) + ": reg<test.i32>";
+  }
+  source += "):\n  low.cond_br %condition, ^done, ^loop(\n";
+  for (int i = 0; i < kArgCount; ++i) {
+    if (i > 0) {
+      source += ",\n";
+    }
+    source += "    %value" + std::to_string(i) + ": reg<test.i32>";
+  }
+  source +=
+      "\n  ) : reg<test.i32>\n"
+      "^done:\n"
+      "  return\n"
+      "}\n";
+  loom_module_t* module = ParseOk(source.c_str());
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* function_op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_region_t* region = loom_low_func_def_body(function_op);
+  ASSERT_NE(region, nullptr);
+  ASSERT_EQ(region->block_count, 4u);
+
+  loom_block_t* entry = loom_region_block(region, 0);
+  loom_block_t* bridge = loom_region_block(region, 1);
+  loom_block_t* loop = loom_region_block(region, 2);
+  loom_block_t* done = loom_region_block(region, 3);
+  EXPECT_EQ(bridge->label_id, LOOM_STRING_ID_INVALID);
+  EXPECT_EQ(StringFromId(module, loop->label_id), "loop");
+  EXPECT_EQ(StringFromId(module, done->label_id), "done");
+  EXPECT_EQ(loom_block_region_index(bridge) + 1, loom_block_region_index(loop));
+
+  ASSERT_EQ(entry->op_count, 1u);
+  loom_op_t* entry_br = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_low_br_isa(entry_br));
+  EXPECT_EQ(loom_low_br_dest(entry_br), loop);
+
+  ASSERT_EQ(loop->op_count, 1u);
+  loom_op_t* cond_br_op = loom_block_op(loop, 0);
+  ASSERT_TRUE(loom_low_cond_br_isa(cond_br_op));
+  EXPECT_EQ(cond_br_op->operand_count, 1u);
+  EXPECT_EQ(loom_low_cond_br_true_dest(cond_br_op), done);
+  EXPECT_EQ(loom_low_cond_br_false_dest(cond_br_op), bridge);
+
+  ASSERT_EQ(bridge->op_count, 1u);
+  loom_op_t* forwarding_br = loom_block_op(bridge, 0);
+  ASSERT_TRUE(loom_low_br_isa(forwarding_br));
+  EXPECT_EQ(loom_low_br_dest(forwarding_br), loop);
+  loom_value_slice_t args = loom_low_br_args(forwarding_br);
+  ASSERT_EQ(args.count, kArgCount);
+  ASSERT_EQ(loop->arg_count, kArgCount);
+  for (int i = 0; i < kArgCount; ++i) {
+    EXPECT_EQ(args.values[i], loop->arg_ids[i]);
+  }
+
+  loom_verify_options_t verify_options = {};
+  verify_options.sink = {loom_diagnostic_stderr_sink, nullptr};
+  loom_verify_result_t verify_result = {};
+  IREE_ASSERT_OK(loom_verify_module(module, &verify_options, &verify_result));
+  EXPECT_EQ(verify_result.error_count, 0u);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmParserTest, DesugarsLegacyCondBrPayloadsOnBothEdges) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @legacy_both_edges("
+      "%condition: reg<test.i32>, %lhs: reg<test.i32>, "
+      "%rhs: reg<test.i32>) asm {\n"
+      "  low.cond_br %condition, ^then(%lhs: reg<test.i32>), "
+      "^else(%rhs: reg<test.i32>) : reg<test.i32>\n"
+      "^then(%then_value: reg<test.i32>):\n"
+      "  return\n"
+      "^else(%else_value: reg<test.i32>):\n"
+      "  return\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  loom_op_t* function_op = loom_block_op(loom_module_block(module), 0);
+  ASSERT_TRUE(loom_low_func_def_isa(function_op));
+  loom_region_t* region = loom_low_func_def_body(function_op);
+  ASSERT_NE(region, nullptr);
+  ASSERT_EQ(region->block_count, 5u);
+
+  loom_block_t* entry = loom_region_block(region, 0);
+  loom_block_t* true_bridge = loom_region_block(region, 1);
+  loom_block_t* false_bridge = loom_region_block(region, 2);
+  loom_block_t* then_block = loom_region_block(region, 3);
+  loom_block_t* else_block = loom_region_block(region, 4);
+  EXPECT_EQ(StringFromId(module, then_block->label_id), "then");
+  EXPECT_EQ(StringFromId(module, else_block->label_id), "else");
+
+  ASSERT_EQ(entry->arg_count, 3u);
+  ASSERT_EQ(entry->op_count, 1u);
+  loom_op_t* cond_br_op = loom_block_op(entry, 0);
+  ASSERT_TRUE(loom_low_cond_br_isa(cond_br_op));
+  EXPECT_EQ(cond_br_op->operand_count, 1u);
+  EXPECT_EQ(loom_low_cond_br_true_dest(cond_br_op), true_bridge);
+  EXPECT_EQ(loom_low_cond_br_false_dest(cond_br_op), false_bridge);
+
+  ASSERT_EQ(true_bridge->op_count, 1u);
+  loom_op_t* true_br = loom_block_op(true_bridge, 0);
+  ASSERT_TRUE(loom_low_br_isa(true_br));
+  EXPECT_EQ(loom_low_br_dest(true_br), then_block);
+  loom_value_slice_t true_args = loom_low_br_args(true_br);
+  ASSERT_EQ(true_args.count, 1u);
+  EXPECT_EQ(true_args.values[0], entry->arg_ids[1]);
+
+  ASSERT_EQ(false_bridge->op_count, 1u);
+  loom_op_t* false_br = loom_block_op(false_bridge, 0);
+  ASSERT_TRUE(loom_low_br_isa(false_br));
+  EXPECT_EQ(loom_low_br_dest(false_br), else_block);
+  loom_value_slice_t false_args = loom_low_br_args(false_br);
+  ASSERT_EQ(false_args.count, 1u);
+  EXPECT_EQ(false_args.values[0], entry->arg_ids[2]);
+
+  loom_module_free(module);
+}
+
+TEST_F(LowAsmParserTest, RejectsLegacyCondBrPayloadTypeMismatch) {
+  const auto& diagnostics = ParseExpectErrors(
+      "low.func.def target<test.low.core> @legacy_type_mismatch("
+      "%condition: reg<test.i32>, %value: reg<test.i32>) asm {\n"
+      "  low.cond_br %condition, ^done, "
+      "^loop(%value: reg<test.i64>) : reg<test.i32>\n"
+      "^loop(%arg: reg<test.i32>):\n"
+      "  return\n"
+      "^done:\n"
+      "  return\n"
+      "}\n");
+  const CapturedDiagnostic* diagnostic = FindDiagnostic(
+      capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1));
+  ASSERT_NE(diagnostic, nullptr);
+  EXPECT_EQ(GetStringParam(*diagnostic, 0), "value");
+  EXPECT_EQ(GetStringParam(*diagnostic, 2), "type annotation");
+  (void)diagnostics;
+}
+
+TEST_F(LowAsmParserTest, RejectsMalformedLegacyCondBrPayload) {
+  const auto& diagnostics = ParseExpectErrors(
+      "low.func.def target<test.low.core> @legacy_malformed("
+      "%condition: reg<test.i32>, %value: reg<test.i32>) asm {\n"
+      "  low.cond_br %condition, ^done, "
+      "^loop(%value: reg<test.i32> : reg<test.i32>\n"
+      "^loop(%arg: reg<test.i32>):\n"
+      "  return\n"
+      "^done:\n"
+      "  return\n"
+      "}\n");
+  const CapturedDiagnostic* diagnostic = FindDiagnostic(
+      capture_, loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 3));
+  ASSERT_NE(diagnostic, nullptr);
+  (void)diagnostics;
 }
 
 TEST_F(LowAsmParserTest, RejectsTrailingTokenAfterLocation) {

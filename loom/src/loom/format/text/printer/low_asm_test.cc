@@ -529,5 +529,69 @@ TEST_F(LowAsmPrinterTest, RequiredLowAsmUsesFunctionRepresentationContract) {
             source);
   loom_module_free(module);
 }
+
+TEST_F(LowAsmPrinterTest, CanonicalizesLegacyCondBrEdgePayload) {
+  loom_module_t* module = ParseOk(
+      "low.func.def target<test.low.core> @legacy_false_backedge("
+      "%condition: reg<test.i32>, %initial: reg<test.i32>) asm {\n"
+      "  low.br ^loop(%initial: reg<test.i32>)\n"
+      "^loop(%value: reg<test.i32>):\n"
+      "  low.cond_br %condition, ^done, "
+      "^loop(%value: reg<test.i32>) : reg<test.i32>\n"
+      "^done:\n"
+      "  return\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  std::string printed = PrintModule(module);
+  loom_module_free(module);
+  size_t cond_br_start = printed.find("low.cond_br");
+  ASSERT_NE(cond_br_start, std::string::npos) << printed;
+  size_t cond_br_end = printed.find('\n', cond_br_start);
+  ASSERT_NE(cond_br_end, std::string::npos) << printed;
+  std::string cond_br_line =
+      printed.substr(cond_br_start, cond_br_end - cond_br_start);
+  EXPECT_EQ(cond_br_line.find('('), std::string::npos) << printed;
+  EXPECT_NE(printed.find("low.br ^loop(%value: reg<test.i32>)"),
+            std::string::npos)
+      << printed;
+
+  loom_module_t* reparsed = ParseOk(printed.c_str());
+  ASSERT_NE(reparsed, nullptr);
+  EXPECT_EQ(PrintModule(reparsed), printed);
+  loom_module_free(reparsed);
+}
+
+TEST_F(LowAsmPrinterTest, CanonicalizesLegacyKernelLexicalFallthroughs) {
+  loom_module_t* module = ParseOk(
+      "low.kernel.def target<test.low.core> @legacy_fallthrough() asm {\n"
+      "  %first = test.const.i32 1\n"
+      "^middle:\n"
+      "  %second = test.const.i32 2\n"
+      "^done:\n"
+      "  return\n"
+      "}\n");
+  ASSERT_NE(module, nullptr);
+
+  const char* expected =
+      "low.kernel.def target<test.low.core> @legacy_fallthrough() asm {\n"
+      "  %first = test.const.i32 1\n"
+      "  low.br ^middle\n"
+      "^middle:\n"
+      "  %second = test.const.i32 2\n"
+      "  low.br ^done\n"
+      "^done:\n"
+      "  return\n"
+      "}\n";
+  std::string printed = PrintModule(module);
+  EXPECT_EQ(printed, expected);
+  loom_module_free(module);
+
+  loom_module_t* reparsed = ParseOk(printed.c_str());
+  ASSERT_NE(reparsed, nullptr);
+  EXPECT_EQ(PrintModule(reparsed), expected);
+  loom_module_free(reparsed);
+}
+
 }  // namespace
 }  // namespace loom

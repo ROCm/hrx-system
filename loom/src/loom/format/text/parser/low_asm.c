@@ -887,6 +887,40 @@ static iree_status_t loom_parse_low_asm_block_body(
   return iree_ok_status();
 }
 
+// Legacy Low assembly allowed an unterminated block to fall through to the
+// next lexical block. Materialize that edge as canonical Low IR while the
+// lexical successor is known; later compatibility rewrites may reorder blocks.
+static iree_status_t loom_parse_low_asm_append_legacy_fallthrough(
+    loom_parser_t* parser, loom_block_t* block,
+    loom_block_t* lexical_successor) {
+  if (loom_parser_block_has_explicit_terminator(parser, block)) {
+    return iree_ok_status();
+  }
+
+  loom_op_kind_t br_kind = LOOM_OP_KIND_UNKNOWN;
+  const loom_op_vtable_t* br_vtable = loom_context_lookup_op_by_name(
+      parser->context, IREE_SV("low.br"), &br_kind);
+  if (!br_vtable) {
+    return iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "legacy Low fallthrough compatibility requires low.br");
+  }
+
+  loom_builder_ip_t saved_ip = loom_builder_save(&parser->builder);
+  loom_builder_set_block(&parser->builder, block);
+  loom_op_t* branch_op = NULL;
+  iree_status_t status = loom_builder_allocate_op_with_successors(
+      &parser->builder, br_kind, /*operand_count=*/0, /*result_count=*/0,
+      /*successor_count=*/1, /*region_count=*/0, /*tied_result_count=*/0,
+      br_vtable->attribute_count, LOOM_LOCATION_UNKNOWN, &branch_op);
+  if (iree_status_is_ok(status)) {
+    loom_op_successors(branch_op)[0] = lexical_successor;
+    status = loom_builder_finalize_op(&parser->builder, branch_op);
+  }
+  loom_builder_restore(&parser->builder, saved_ip);
+  return status;
+}
+
 static iree_status_t loom_parse_low_asm_region_body(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
     loom_region_t* region, const void* user_data) {
@@ -896,6 +930,8 @@ static iree_status_t loom_parse_low_asm_region_body(
   IREE_RETURN_IF_ERROR(loom_parser_seed_region_entry_block(parser, region));
 
   bool first_block = true;
+  loom_block_t* previous_block = NULL;
+  bool previous_block_parsed_ok = false;
   while (!loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_RBRACE) &&
          !loom_tokenizer_at(&parser->tokenizer, LOOM_TOKEN_EOF)) {
     if (loom_parser_at_error_limit(parser)) {
@@ -909,6 +945,10 @@ static iree_status_t loom_parse_low_asm_region_body(
     } else {
       IREE_RETURN_IF_ERROR(
           loom_region_append_block(parser->module, region, &block));
+      if (previous_block_parsed_ok) {
+        IREE_RETURN_IF_ERROR(loom_parse_low_asm_append_legacy_fallthrough(
+            parser, previous_block, block));
+      }
     }
 
     bool has_label = false;
@@ -918,10 +958,12 @@ static iree_status_t loom_parse_low_asm_region_body(
     const uint32_t block_errors_before = parser->error_count;
     IREE_RETURN_IF_ERROR(
         loom_parse_low_asm_block_body(parser, descriptor_set, block));
-    if (parser->error_count == block_errors_before) {
+    previous_block_parsed_ok = parser->error_count == block_errors_before;
+    if (previous_block_parsed_ok) {
       IREE_RETURN_IF_ERROR(loom_parser_append_implicit_terminator(
           parser, region_descriptor, block));
     }
+    previous_block = block;
   }
 
   if (first_block && !loom_parser_at_error_limit(parser)) {

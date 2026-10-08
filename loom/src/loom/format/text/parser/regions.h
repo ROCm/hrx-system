@@ -24,6 +24,8 @@ iree_status_t loom_parser_parse_optional_block_label(loom_parser_t* parser,
                                                      loom_region_t* region,
                                                      loom_block_t* block,
                                                      bool* out_present);
+bool loom_parser_block_has_explicit_terminator(loom_parser_t* parser,
+                                               const loom_block_t* block);
 iree_status_t loom_parser_append_implicit_terminator(
     loom_parser_t* parser, const loom_region_descriptor_t* region_descriptor,
     loom_block_t* block);

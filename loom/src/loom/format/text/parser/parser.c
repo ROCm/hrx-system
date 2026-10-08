@@ -543,6 +543,146 @@ static iree_status_t loom_finalize_op(
 // Op parsing
 //===----------------------------------------------------------------------===//
 
+static iree_status_t loom_parser_walk_format_fragment(
+    loom_parser_t* parser, const loom_op_vtable_t* vtable,
+    loom_token_t op_name_token, const loom_format_element_t* elements,
+    uint16_t element_count, loom_parsed_op_t* parsed,
+    uint16_t pending_func_arg_start) {
+  bool func_args_consumed_by_region = false;
+  return loom_parser_walk_format(
+      parser, vtable,
+      (loom_format_t){.elements = elements, .count = element_count},
+      op_name_token, parsed, pending_func_arg_start,
+      &func_args_consumed_by_region);
+}
+
+// Parses the retired low.cond_br edge-payload syntax. The canonical operation
+// has no payload operands; successful parses are normalized to low.br
+// forwarding blocks before the IR leaves the parser.
+static iree_status_t loom_parser_parse_legacy_low_cond_br(
+    loom_parser_t* parser, const loom_op_vtable_t* cond_br_vtable,
+    loom_token_t op_name_token, loom_parsed_op_t* parsed,
+    loom_parsed_op_t* true_args, loom_parsed_op_t* false_args,
+    uint16_t pending_func_arg_start) {
+  const uint32_t errors_before = parser->error_count;
+  static const loom_format_element_t prefix[] = {
+      {.kind = LOOM_FORMAT_KIND_OPERAND_REF, .field_index = 0},
+      {.kind = LOOM_FORMAT_KIND_KEYWORD, .data = LOOM_KW_COMMA},
+      {.kind = LOOM_FORMAT_KIND_SUCCESSOR_REF, .field_index = 0},
+  };
+  static const loom_format_element_t middle[] = {
+      {.kind = LOOM_FORMAT_KIND_KEYWORD, .data = LOOM_KW_COMMA},
+      {.kind = LOOM_FORMAT_KIND_SUCCESSOR_REF, .field_index = 1},
+  };
+  static const loom_format_element_t suffix[] = {
+      {.kind = LOOM_FORMAT_KIND_KEYWORD, .data = LOOM_KW_COLON},
+      {.kind = LOOM_FORMAT_KIND_OPERAND_TYPE, .field_index = 0},
+  };
+  static const loom_format_element_t typed_refs[] = {
+      {.kind = LOOM_FORMAT_KIND_OPERAND_TYPED_REFS, .field_index = 0},
+  };
+
+  loom_op_kind_t br_kind = LOOM_OP_KIND_UNKNOWN;
+  const loom_op_vtable_t* br_vtable = loom_context_lookup_op_by_name(
+      parser->context, IREE_SV("low.br"), &br_kind);
+  if (!br_vtable) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "low.cond_br compatibility requires low.br");
+  }
+
+  IREE_RETURN_IF_ERROR(loom_parser_walk_format_fragment(
+      parser, cond_br_vtable, op_name_token, prefix, IREE_ARRAYSIZE(prefix),
+      parsed, pending_func_arg_start));
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+  if (loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
+    IREE_RETURN_IF_ERROR(loom_parser_walk_format_fragment(
+        parser, br_vtable, op_name_token, typed_refs,
+        IREE_ARRAYSIZE(typed_refs), true_args, pending_func_arg_start));
+    if (parser->error_count > errors_before) {
+      return iree_ok_status();
+    }
+    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RPAREN, NULL);
+  }
+
+  IREE_RETURN_IF_ERROR(loom_parser_walk_format_fragment(
+      parser, cond_br_vtable, op_name_token, middle, IREE_ARRAYSIZE(middle),
+      parsed, pending_func_arg_start));
+  if (parser->error_count > errors_before) {
+    return iree_ok_status();
+  }
+  if (loom_tokenizer_try_consume(&parser->tokenizer, LOOM_TOKEN_LPAREN)) {
+    IREE_RETURN_IF_ERROR(loom_parser_walk_format_fragment(
+        parser, br_vtable, op_name_token, typed_refs,
+        IREE_ARRAYSIZE(typed_refs), false_args, pending_func_arg_start));
+    if (parser->error_count > errors_before) {
+      return iree_ok_status();
+    }
+    LOOM_PARSE_EXPECT(parser, LOOM_TOKEN_RPAREN, NULL);
+  }
+
+  return loom_parser_walk_format_fragment(parser, cond_br_vtable, op_name_token,
+                                          suffix, IREE_ARRAYSIZE(suffix),
+                                          parsed, pending_func_arg_start);
+}
+
+static iree_status_t loom_parser_finalize_legacy_low_cond_br(
+    loom_parser_t* parser, loom_op_kind_t cond_br_kind,
+    const loom_op_vtable_t* cond_br_vtable, loom_parsed_op_t* parsed,
+    loom_parsed_op_t* true_args, loom_parsed_op_t* false_args,
+    loom_location_id_t location, loom_op_t** out_op) {
+  loom_parsed_op_t* edge_args[] = {true_args, false_args};
+  loom_block_t* forwarding_blocks[] = {NULL, NULL};
+  loom_token_t destination_tokens[] = {
+      parsed->successor_label_tokens[0],
+      parsed->successor_label_tokens[1],
+  };
+
+  loom_builder_ip_t source_ip = loom_builder_save(&parser->builder);
+  loom_region_t* region = source_ip.block->parent_region;
+  for (uint8_t i = 0; i < IREE_ARRAYSIZE(edge_args); ++i) {
+    if (edge_args[i]->operand_count == 0) {
+      continue;
+    }
+    loom_block_t* destination = loom_parser_find_block_by_label(
+        parser, region, destination_tokens[i].text);
+    if (destination && destination->region_index != 0) {
+      IREE_RETURN_IF_ERROR(loom_region_insert_block(parser->module, region,
+                                                    destination->region_index,
+                                                    &forwarding_blocks[i]));
+    } else {
+      IREE_RETURN_IF_ERROR(loom_region_append_block(parser->module, region,
+                                                    &forwarding_blocks[i]));
+    }
+    parsed->successors[i] = forwarding_blocks[i];
+    parsed->successor_label_tokens[i] = loom_token_none();
+  }
+
+  loom_builder_restore(&parser->builder, source_ip);
+  IREE_RETURN_IF_ERROR(loom_finalize_op(parser, cond_br_kind, cond_br_vtable,
+                                        parsed, location, out_op));
+
+  loom_op_kind_t br_kind = LOOM_OP_KIND_UNKNOWN;
+  const loom_op_vtable_t* br_vtable = loom_context_lookup_op_by_name(
+      parser->context, IREE_SV("low.br"), &br_kind);
+  IREE_ASSERT(br_vtable != NULL);
+  for (uint8_t i = 0; i < IREE_ARRAYSIZE(edge_args); ++i) {
+    if (!forwarding_blocks[i]) {
+      continue;
+    }
+    IREE_RETURN_IF_ERROR(
+        loom_parsed_op_set_successor(edge_args[i], &parser->parser_arena, 0,
+                                     /*block=*/NULL, destination_tokens[i]));
+    loom_builder_set_block(&parser->builder, forwarding_blocks[i]);
+    loom_op_t* branch_op = NULL;
+    IREE_RETURN_IF_ERROR(loom_finalize_op(parser, br_kind, br_vtable,
+                                          edge_args[i], location, &branch_op));
+  }
+  loom_builder_restore(&parser->builder, source_ip);
+  return iree_ok_status();
+}
+
 static iree_status_t loom_parse_op_into(
     loom_parser_t* parser, loom_parsed_op_t* parsed,
     const loom_op_assembly_format_t* assembly) {
@@ -638,10 +778,23 @@ static iree_status_t loom_parse_op_into(
   }
 
   // Walk the format elements.
+  loom_parsed_op_t legacy_true_args;
+  loom_parsed_op_t legacy_false_args;
+  loom_parsed_op_initialize(&legacy_true_args);
+  loom_parsed_op_initialize(&legacy_false_args);
+  const bool parse_legacy_low_cond_br =
+      iree_string_view_equal(loom_op_vtable_name(vtable),
+                             IREE_SV("low.cond_br")) &&
+      (!assembly || !assembly->has_custom_format);
   bool func_args_consumed_by_region = false;
-  iree_status_t walk_status = loom_parser_walk_format(
-      parser, vtable, loom_op_format(vtable, assembly), op_name_token, parsed,
-      pending_func_arg_start, &func_args_consumed_by_region);
+  iree_status_t walk_status =
+      parse_legacy_low_cond_br
+          ? loom_parser_parse_legacy_low_cond_br(
+                parser, vtable, op_name_token, parsed, &legacy_true_args,
+                &legacy_false_args, pending_func_arg_start)
+          : loom_parser_walk_format(
+                parser, vtable, loom_op_format(vtable, assembly), op_name_token,
+                parsed, pending_func_arg_start, &func_args_consumed_by_region);
   parser->low_repr = previous_low_repr;
   IREE_RETURN_IF_ERROR(walk_status);
 
@@ -696,8 +849,15 @@ static iree_status_t loom_parse_op_into(
 
   // Finalize the op.
   loom_op_t* op = NULL;
-  IREE_RETURN_IF_ERROR(
-      loom_finalize_op(parser, kind, vtable, parsed, location, &op));
+  if (parse_legacy_low_cond_br &&
+      (legacy_true_args.operand_count || legacy_false_args.operand_count)) {
+    IREE_RETURN_IF_ERROR(loom_parser_finalize_legacy_low_cond_br(
+        parser, kind, vtable, parsed, &legacy_true_args, &legacy_false_args,
+        location, &op));
+  } else {
+    IREE_RETURN_IF_ERROR(
+        loom_finalize_op(parser, kind, vtable, parsed, location, &op));
+  }
   return loom_module_attach_op_comments(parser->module, op, comments,
                                         comment_count);
 }
@@ -738,8 +898,8 @@ static iree_status_t loom_parse_block_body(loom_parser_t* parser,
   return iree_ok_status();
 }
 
-static bool loom_parser_block_has_explicit_terminator(
-    loom_parser_t* parser, const loom_block_t* block) {
+bool loom_parser_block_has_explicit_terminator(loom_parser_t* parser,
+                                               const loom_block_t* block) {
   if (block->op_count == 0) {
     return false;
   }
