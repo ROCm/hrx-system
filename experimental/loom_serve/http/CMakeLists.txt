@@ -46,6 +46,7 @@ loom_cc_library(
     iree::base
     iree::base::internal::json
     iree::base::threading
+    iree::task
     loom::util::json
     loom::util::stream
   PUBLIC
@@ -82,6 +83,7 @@ loom_cc_test(
     ::server
     iree::async
     iree::base
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
 )

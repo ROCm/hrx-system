@@ -42,6 +42,7 @@ loom_cc_library(
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:json",
         "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
     ],
 )
 
@@ -74,6 +75,7 @@ loom_cc_test(
         ":server",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
     ],

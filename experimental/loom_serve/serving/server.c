@@ -149,8 +149,8 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_http_router_run(
-        server, configuration.model_count, services,
-        (iree_host_size_t)FLAG_connections, allocator);
+        loom_serve_host_executor(host), server, configuration.model_count,
+        services, (iree_host_size_t)FLAG_connections, allocator);
   }
   const iree_status_code_t terminal_code = iree_status_code(status);
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {

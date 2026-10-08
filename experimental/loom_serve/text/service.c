@@ -2036,8 +2036,9 @@ iree_status_t loom_serve_text_service_run(
       loom_serve_text_service_create(model, options, &service, host_allocator));
   const loom_serve_http_service_t interface =
       loom_serve_text_service_interface(service);
-  iree_status_t status = loom_serve_http_router_run(
-      server, 1, &interface, options->row_count, host_allocator);
+  iree_status_t status =
+      loom_serve_http_router_run(service->cpu.executor, server, 1, &interface,
+                                 options->row_count, host_allocator);
   loom_serve_text_service_destroy(service, iree_status_code(status));
   return status;
 }

@@ -11,7 +11,11 @@ The application owns one [host](../runtime/host.h) with shared IREE task workers
 and asynchronous I/O services. Each catalog's JIT queue uses those workers;
 adding a model does not create another compiler thread pool. Compilation has
 an asynchronous completion API; startup constructors join on the application
-thread. The HTTP/model owner loop below has not yet moved onto task processes.
+thread. HTTP admission and model scheduling run as a cooperative task process:
+bounded serialized turns preserve shared memory-policy ownership, while CPU
+preparation/output and device work proceed independently. Network, task release,
+model frontiers and heartbeat deadlines wake the owner directly. Only the outer
+application caller joins final scheduler release; no task waits for device work.
 
 The catalog selects source packages and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the

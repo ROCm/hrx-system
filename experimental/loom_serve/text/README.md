@@ -329,12 +329,13 @@ runs, but no control operation, reservation release or subsequent command can
 interleave its source invocation. Bad input becomes a client rejection after
 release; cancellation and shutdown likewise retain storage until release.
 Pure prompt epochs with no selected output need no response job. Device and
-pool bookkeeping stays on the application owner, which is still the outer
-router loop. Heartbeat deadlines use the host proactor and wake that owner to
-report copied statistics even while model work is pending. Shutdown requests
-timer cancellation on the poll owner and joins both terminal completion and
-the cancellation receipt. Reporting creates no per-model thread and never
-counts as activity that can relieve memory pressure.
+pool bookkeeping stays on the router's serialized task-owner turns. The router
+returns workers between bounded turns, allowing shared CPU work to progress
+even under continuous request arrivals. Heartbeat deadlines use the host
+proactor and wake that owner to report copied statistics even while model work
+is pending. Shutdown requests timer cancellation on the poll owner and joins
+both terminal completion and the cancellation receipt. Reporting creates no
+per-model thread and never counts as activity that can relieve memory pressure.
 
 The native real-model witness is
 `models/qwen:epoch_check --checkpoints --checkpoint_capacity=1

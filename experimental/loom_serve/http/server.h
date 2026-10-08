@@ -16,7 +16,7 @@ extern "C" {
 #endif
 
 // Local-only HTTP byte transport. One standard proactor thread services raw TCP
-// carriers while a single application owner may block on model stages. Each
+// carriers independently of the application's serialized scheduler turns. Each
 // connection carries one request and a close-delimited response. This layer
 // knows neither model rows nor chat/SSE semantics.
 typedef struct loom_serve_http_server_t loom_serve_http_server_t;
@@ -77,7 +77,7 @@ bool loom_serve_http_server_is_stopping(loom_serve_http_server_t* server);
 
 // Collects retired connections and claims one completed request, or returns
 // null. The request and connection are borrowed until finish or abort. The
-// application owns each claimed connection on its one model/scheduler thread.
+// application owns each claimed connection through serialized scheduler turns.
 loom_serve_http_connection_t* loom_serve_http_server_take_request(
     loom_serve_http_server_t* server,
     const loom_serve_http_request_t** out_request);

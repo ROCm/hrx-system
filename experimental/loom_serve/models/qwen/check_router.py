@@ -180,6 +180,7 @@ def main():
     for name in ("server", "model", "weights", "tokenizer", "output"):
         parser.add_argument(f"--{name}", type=Path, required=True)
     parser.add_argument("--memory-bytes", type=int, default=22 * 1024**3)
+    parser.add_argument("--workers", type=int, default=8)
     arguments = parser.parse_args()
     arguments.output.mkdir(parents=True, exist_ok=False)
     models = []
@@ -210,6 +211,7 @@ def main():
         f"--models={catalog.resolve()}",
         "--port=0",
         "--heartbeat_ms=250",
+        f"--workers={arguments.workers}",
         "--pool_backing=elastic",
         f"--memory_bytes={arguments.memory_bytes}",
     ]

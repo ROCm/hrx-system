@@ -9,7 +9,44 @@
 #include <stdio.h>
 
 #include "iree/base/internal/json.h"
+#include "iree/base/threading/mutex.h"
 #include "loom/util/json.h"
+
+typedef struct router_t {
+  // Shared application workers, borrowed through final process release.
+  iree_task_executor_t* executor;
+  // Transport owning network readiness and claimed request storage.
+  loom_serve_http_server_t* server;
+  // Immutable borrowed service interfaces, valid through run return.
+  const loom_serve_http_service_t* services;
+  // Number of registered services.
+  iree_host_size_t service_count;
+  // Maximum claims per turn, independent of model batch sizes.
+  iree_host_size_t request_capacity;
+  // Rotating service priority, changed only by the exclusive turn owner.
+  iree_host_size_t cursor;
+  // Cooperative process returning workers between bounded owner turns.
+  iree_task_process_t process;
+  // Nonblocking ownership guard: compute-slot wake budgets are not exclusion.
+  iree_slim_mutex_t mutex;
+  // Admission has stopped; accepted service work still drains.
+  bool stopping;
+  // All service readiness retired and every observer was detached.
+  bool completed;
+  // Owned terminal outcome retained while accepted callbacks drain.
+  iree_status_t status;
+  // Routing JSON scratch, used only by the exclusive turn owner.
+  iree_string_builder_t output;
+  // Final process retirement, independent of drain completion.
+  struct {
+    // Joins the release callback's last access before stack storage dies.
+    iree_slim_mutex_t mutex;
+    // Wakes only the outer application caller, never a task worker.
+    iree_notification_t notification;
+    // The executor has relinquished all process and drain storage.
+    bool released;
+  } retirement;
+} router_t;
 
 static iree_status_t router_quote(iree_string_builder_t* output,
                                   iree_string_view_t value) {
@@ -198,12 +235,95 @@ static iree_status_t router_accept(loom_serve_http_connection_t* connection,
 }
 
 static void router_wake(void* user_data) {
-  iree_notification_post((iree_notification_t*)user_data, IREE_ALL_WAITERS);
+  router_t* router = user_data;
+  iree_task_executor_schedule_process(router->executor, &router->process);
+}
+
+static void router_advance(router_t* router, bool* out_progress) {
+  router->stopping |= loom_serve_http_server_is_stopping(router->server);
+  *out_progress = false;
+  for (iree_host_size_t i = 0;
+       i < router->request_capacity && !router->stopping; ++i) {
+    const loom_serve_http_request_t* request = NULL;
+    loom_serve_http_connection_t* connection =
+        loom_serve_http_server_take_request(router->server, &request);
+    if (!connection) {
+      break;
+    }
+    router->status = router_accept(connection, request, router->service_count,
+                                   router->services, &router->output);
+    router->stopping = !iree_status_is_ok(router->status) ||
+                       loom_serve_http_server_is_stopping(router->server);
+    *out_progress = true;
+  }
+  for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+    const iree_host_size_t index = (router->cursor + i) % router->service_count;
+    const loom_serve_http_service_t* service = &router->services[index];
+    router->stopping |= loom_serve_http_server_is_stopping(router->server);
+    if (router->stopping && !service->is_pending(service->self)) {
+      continue;
+    }
+    bool progress = false;
+    const loom_serve_http_service_flags_t flags =
+        router_service_flags(index, router->service_count, router->services) |
+        (router->stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0);
+    router->status = iree_status_join(
+        router->status, service->advance(service->self, flags, &progress));
+    router->stopping |= !iree_status_is_ok(router->status);
+    *out_progress |= progress;
+  }
+  router->cursor = (router->cursor + 1) % router->service_count;
+  bool pending = false;
+  for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+    pending |= router->services[i].is_pending(router->services[i].self);
+  }
+  if (router->stopping && !pending) {
+    for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+      router->services[i].set_observer(router->services[i].self,
+                                       (loom_serve_http_observer_t){0});
+    }
+    loom_serve_http_server_set_observer(router->server,
+                                        (loom_serve_http_observer_t){0});
+    router->completed = true;
+  }
+}
+
+static iree_status_t router_drain(iree_task_process_t* process,
+                                  const iree_task_worker_context_t* context,
+                                  iree_task_process_drain_result_t* result) {
+  (void)context;
+  router_t* router = process->user_data;
+  if (!iree_slim_mutex_try_lock(&router->mutex)) {
+    return iree_ok_status();
+  }
+  if (!router->completed) {
+    router_advance(router, &result->did_work);
+  }
+  result->completed = router->completed;
+  iree_slim_mutex_unlock(&router->mutex);
+  // Service failures initiate draining, not premature process completion.
+  return iree_ok_status();
+}
+
+static void router_released(iree_task_process_t* process) {
+  router_t* router = process->user_data;
+  iree_slim_mutex_lock(&router->retirement.mutex);
+  router->retirement.released = true;
+  iree_notification_post(&router->retirement.notification, IREE_ALL_WAITERS);
+  iree_slim_mutex_unlock(&router->retirement.mutex);
+}
+
+static bool router_is_released(void* user_data) {
+  router_t* router = user_data;
+  iree_slim_mutex_lock(&router->retirement.mutex);
+  const bool released = router->retirement.released;
+  iree_slim_mutex_unlock(&router->retirement.mutex);
+  return released;
 }
 
 iree_status_t loom_serve_http_router_run(
-    loom_serve_http_server_t* server, iree_host_size_t service_count,
-    const loom_serve_http_service_t* services,
+    iree_task_executor_t* executor, loom_serve_http_server_t* server,
+    iree_host_size_t service_count, const loom_serve_http_service_t* services,
     iree_host_size_t request_capacity, iree_allocator_t host_allocator) {
   if (!service_count || !request_capacity) {
     return iree_make_status(
@@ -227,69 +347,31 @@ iree_status_t loom_serve_http_router_run(
       }
     }
   }
-  iree_string_builder_t output;
-  iree_string_builder_initialize(host_allocator, &output);
-  iree_notification_t* notification =
-      loom_serve_http_server_notification(server);
+  router_t router = {.executor = executor,
+                     .server = server,
+                     .services = services,
+                     .service_count = service_count,
+                     .request_capacity = request_capacity};
+  iree_slim_mutex_initialize(&router.mutex);
+  iree_slim_mutex_initialize(&router.retirement.mutex);
+  iree_notification_initialize(&router.retirement.notification);
+  iree_string_builder_initialize(host_allocator, &router.output);
+  iree_task_process_initialize(router_drain, 0, 1, &router.process);
+  iree_task_process_set_flags(&router.process,
+                              IREE_TASK_PROCESS_FLAG_COMPUTE_SLOT);
+  router.process.user_data = &router;
+  router.process.release_fn = router_released;
   for (iree_host_size_t i = 0; i < service_count; ++i) {
-    services[i].set_observer(services[i].self, (loom_serve_http_observer_t){
-                                                   router_wake, notification});
+    services[i].set_observer(
+        services[i].self, (loom_serve_http_observer_t){router_wake, &router});
   }
-  iree_host_size_t cursor = 0;
-  iree_status_t status = iree_ok_status();
-  bool stopping = false;
-  for (;;) {
-    const iree_wait_token_t token =
-        iree_notification_prepare_wait(notification);
-    stopping |= loom_serve_http_server_is_stopping(server);
-    bool progress = false;
-    for (iree_host_size_t i = 0; i < request_capacity && !stopping; ++i) {
-      const loom_serve_http_request_t* request = NULL;
-      loom_serve_http_connection_t* connection =
-          loom_serve_http_server_take_request(server, &request);
-      if (!connection) {
-        break;
-      }
-      status =
-          router_accept(connection, request, service_count, services, &output);
-      stopping = !iree_status_is_ok(status) ||
-                 loom_serve_http_server_is_stopping(server);
-      progress = true;
-    }
-    for (iree_host_size_t i = 0; i < service_count; ++i) {
-      const iree_host_size_t index = (cursor + i) % service_count;
-      const loom_serve_http_service_t* service = &services[index];
-      stopping |= loom_serve_http_server_is_stopping(server);
-      if (stopping && !service->is_pending(service->self)) {
-        continue;
-      }
-      bool service_progress = false;
-      const loom_serve_http_service_flags_t flags =
-          router_service_flags(index, service_count, services) |
-          (stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0);
-      status = iree_status_join(
-          status, service->advance(service->self, flags, &service_progress));
-      stopping |= !iree_status_is_ok(status);
-      progress |= service_progress;
-    }
-    cursor = (cursor + 1) % service_count;
-    bool pending = false;
-    for (iree_host_size_t i = 0; i < service_count; ++i) {
-      pending |= services[i].is_pending(services[i].self);
-    }
-    if (stopping && !pending) {
-      iree_notification_cancel_wait(notification);
-      break;
-    } else if (progress) {
-      iree_notification_cancel_wait(notification);
-    } else {
-      iree_notification_commit_wait(notification, token, IREE_DURATION_ZERO,
-                                    IREE_TIME_INFINITE_FUTURE);
-    }
-  }
-  for (iree_host_size_t i = 0; i < service_count; ++i) {
-    services[i].set_observer(services[i].self, (loom_serve_http_observer_t){0});
-  }
-  iree_string_builder_deinitialize(&output);
-  return status;
+  loom_serve_http_server_set_observer(
+      server, (loom_serve_http_observer_t){router_wake, &router});
+  iree_notification_await(&router.retirement.notification, router_is_released,
+                          &router, iree_infinite_timeout());
+  iree_string_builder_deinitialize(&router.output);
+  iree_notification_deinitialize(&router.retirement.notification);
+  iree_slim_mutex_deinitialize(&router.retirement.mutex);
+  iree_slim_mutex_deinitialize(&router.mutex);
+  return router.status;
 }

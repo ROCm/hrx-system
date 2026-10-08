@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_HTTP_ROUTER_H_
 
 #include "experimental/loom_serve/http/server.h"
+#include "iree/task/executor.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,7 +24,7 @@ typedef enum loom_serve_http_service_flag_bits_e {
 } loom_serve_http_service_flag_bits_t;
 typedef uint32_t loom_serve_http_service_flags_t;
 
-// One named service borrowing a model on the application owner thread. Network
+// One named service borrowing a model on serialized task-owner turns. Network
 // progress is independent; these callbacks never run concurrently. Names are
 // deployment identifiers, not source model identities or checkpoint paths.
 typedef struct loom_serve_http_service_t {
@@ -40,7 +41,7 @@ typedef struct loom_serve_http_service_t {
   bool (*is_pending)(void* self);
   // Whether live requests or pending maintenance may release shared capacity.
   // Queued requests alone are not activity: mutually blocked queues cannot
-  // make progress by waiting on one another. Called by the application owner.
+  // make progress by waiting on one another. Called by the serialized owner.
   bool (*is_active)(void* self);
   // Takes the connection claim on both success and failure. Invalid requests
   // produce an HTTP rejection and success; a terminal failure ends the owner
@@ -60,14 +61,17 @@ typedef struct loom_serve_http_service_t {
 // X-Loom-Model. A checkpoint request may omit its selector with exactly one
 // service. GET /v1/models lists deployment names; GET /healthz is model-free.
 // At most request_capacity claims are accepted before advancing each service
-// once, with rotating service priority. Shutdown/failure stops admission and
-// drains accepted asynchronous callbacks before detaching their wake targets.
+// once, with rotating service priority on the borrowed executor. Owner turns
+// return workers while waiting for network, CPU or device readiness. The outer
+// caller waits only for final process release; this function is not a task.
+// Shutdown/failure stops admission and drains accepted asynchronous callbacks
+// before detaching their wake targets.
 // Return leaves outstanding claims owned by services; the caller destroys them
 // before the borrowed transport. Failed readiness is not queue retirement:
 // model owners perform the outer device join, never a router callback.
 iree_status_t loom_serve_http_router_run(
-    loom_serve_http_server_t* server, iree_host_size_t service_count,
-    const loom_serve_http_service_t* services,
+    iree_task_executor_t* executor, loom_serve_http_server_t* server,
+    iree_host_size_t service_count, const loom_serve_http_service_t* services,
     iree_host_size_t request_capacity, iree_allocator_t host_allocator);
 
 #ifdef __cplusplus

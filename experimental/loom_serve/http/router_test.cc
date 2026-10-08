@@ -18,17 +18,19 @@
 #include <thread>
 
 #include "iree/async/proactor.h"
+#include "iree/task/topology.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
 namespace {
 
 // The dependency is a bounded model service. Routing, HTTP claims, copied
-// output, notification readiness and shutdown use the production carrier.
+// output, task scheduling, readiness and shutdown use production
+// infrastructure.
 struct ModelService {
   // Deployment identifier, borrowed for the router lifetime.
   const char* name;
-  // Accepted connection/request pairs owned only by the router thread.
+  // Accepted connection/request pairs owned only by serialized router turns.
   std::deque<std::pair<loom_serve_http_connection_t*,
                        const loom_serve_http_request_t*>>
       pending;
@@ -46,6 +48,10 @@ struct ModelService {
   bool waiting = false;
   // The test has released the accepted completion.
   bool ready = false;
+  // Simulated other ready model work continues while this request is held.
+  bool advance_ready_work = false;
+  // Bounded model units performed on owner turns before CPU readiness.
+  uint64_t ready_units = 0;
   // The router has requested wind-down while completion is still held.
   bool stopping = false;
   // Terminal completion result, transferred to the router exactly once.
@@ -109,6 +115,10 @@ struct ModelService {
           iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
       service->condition.notify_all();
       if (!service->ready) {
+        if (service->advance_ready_work && !service->stopping) {
+          ++service->ready_units;
+          *progress = true;
+        }
         return iree_ok_status();
       }
       service->waiting = false;
@@ -149,10 +159,18 @@ struct ModelService {
   }
 };
 
-class HttpRouterTest : public ::testing::Test {
+class HttpRouterTest : public ::testing::TestWithParam<int> {
  protected:
   void SetUp() override {
     IREE_ASSERT_OK(iree_async_signal_block_default());
+    iree_task_topology_t topology;
+    iree_task_topology_initialize_from_group_count(GetParam(), &topology);
+    iree_task_executor_options_t executor_options;
+    iree_task_executor_options_initialize(&executor_options);
+    iree_status_t status = iree_task_executor_create(
+        executor_options, &topology, iree_allocator_system(), &executor_);
+    iree_task_topology_deinitialize(&topology);
+    IREE_ASSERT_OK(status);
     auto options = loom_serve_http_server_options_default();
     options.port = 0;
     IREE_ASSERT_OK(loom_serve_http_server_create(&options, &server_,
@@ -171,9 +189,9 @@ class HttpRouterTest : public ::testing::Test {
           {IREE_SV("other"), &other_, ModelService::SetObserver,
            ModelService::IsPending, ModelService::IsActive,
            ModelService::Accept, ModelService::Advance}};
-      status_ =
-          loom_serve_http_router_run(server_, IREE_ARRAYSIZE(services),
-                                     services, 4, iree_allocator_system());
+      status_ = loom_serve_http_router_run(executor_, server_,
+                                           IREE_ARRAYSIZE(services), services,
+                                           4, iree_allocator_system());
       returned_.store(true);
     });
   }
@@ -190,6 +208,7 @@ class HttpRouterTest : public ::testing::Test {
       }
     }
     IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
+    iree_task_executor_release(executor_);
   }
   int Send(const std::string& method, const std::string& target,
            const std::string& body = "", const std::string& headers = "") {
@@ -230,15 +249,17 @@ class HttpRouterTest : public ::testing::Test {
   }
   // Real loopback transport and its separate proactor owner.
   loom_serve_http_server_t* server_ = nullptr;
-  // First model dependency used only by the joined application owner.
+  // Shared task workers, joined only after the router's final release.
+  iree_task_executor_t* executor_ = nullptr;
+  // First model dependency used only by serialized router turns.
   ModelService a_{"a"};
-  // Second model dependency used only by the joined application owner.
+  // Second model dependency used only by serialized router turns.
   ModelService b_{"b", {}, true};
   // Explicitly held device-readiness dependencies, independent of a and b.
   ModelService held_{"held", {}, false, true};
   // A second held dependency proves failure drains every accepted callback.
   ModelService other_{"other", {}, false, true};
-  // Application owner running the production router.
+  // Outer application caller joining the production router's final release.
   std::thread owner_;
   // Terminal result published by joining owner_.
   iree_status_t status_ = iree_ok_status();
@@ -248,7 +269,7 @@ class HttpRouterTest : public ::testing::Test {
   iree_status_code_t expected_code_ = IREE_STATUS_OK;
 };
 
-TEST_F(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
+TEST_P(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
   EXPECT_NE(Read(Send("GET", "/healthz")).find(R"({"status":"ready"})"),
             std::string::npos);
   const auto models = Read(Send("GET", "/v1/models"));
@@ -272,7 +293,7 @@ TEST_F(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
       std::string::npos);
 }
 
-TEST_F(HttpRouterTest, RejectsAmbiguousSelectorsWithoutInvokingModels) {
+TEST_P(HttpRouterTest, RejectsAmbiguousSelectorsWithoutInvokingModels) {
   for (const auto* body : {"{}", R"({"model":null})", R"({"model":4})",
                            R"({"model":""})", R"({"model":"a","model":"b"})",
                            R"({"model":"a"} trailing)", R"({"model":"\q"})"}) {
@@ -296,7 +317,7 @@ TEST_F(HttpRouterTest, RejectsAmbiguousSelectorsWithoutInvokingModels) {
             std::string::npos);
 }
 
-TEST_F(HttpRouterTest, HeldModelLeavesIndependentRequestsRunnable) {
+TEST_P(HttpRouterTest, HeldModelLeavesIndependentRequestsRunnable) {
   const std::string body = R"({"model":"held","messages":["retained"]})";
   const int held = Send("POST", "/v1/chat/completions", body);
   held_.WaitSubmitted();
@@ -310,7 +331,7 @@ TEST_F(HttpRouterTest, HeldModelLeavesIndependentRequestsRunnable) {
             std::string::npos);
 }
 
-TEST_F(HttpRouterTest, ShutdownDrainsAcceptedReadinessBeforeDetaching) {
+TEST_P(HttpRouterTest, ShutdownDrainsAcceptedReadinessBeforeDetaching) {
   const int held = Send("POST", "/v1/chat/completions", R"({"model":"held"})");
   held_.WaitSubmitted();
   EXPECT_EQ(kill(getpid(), SIGTERM), 0);
@@ -321,7 +342,7 @@ TEST_F(HttpRouterTest, ShutdownDrainsAcceptedReadinessBeforeDetaching) {
   EXPECT_EQ(close(held), 0);
 }
 
-TEST_F(HttpRouterTest, FailedReadinessStillDrainsOtherAcceptedCallbacks) {
+TEST_P(HttpRouterTest, FailedReadinessStillDrainsOtherAcceptedCallbacks) {
   const int held = Send("POST", "/v1/chat/completions", R"({"model":"held"})");
   const int other =
       Send("POST", "/v1/chat/completions", R"({"model":"other"})");
@@ -336,5 +357,67 @@ TEST_F(HttpRouterTest, FailedReadinessStillDrainsOtherAcceptedCallbacks) {
   EXPECT_EQ(close(held), 0);
   EXPECT_EQ(close(other), 0);
 }
+
+// Real finite CPU task on the router's executor. Release, not completion,
+// returns its stack storage to the test owner.
+struct CpuCompletion {
+  // Borrowed dependency receiving this task's readiness publication.
+  ModelService* service;
+  // Intrusive executor ownership, outliving its final release callback.
+  iree_task_process_t process = {};
+  // Protects final release and joins its last access.
+  std::mutex mutex;
+  // Wakes only the test thread, never a task worker.
+  std::condition_variable condition;
+  // Executor has returned all intrusive process storage.
+  bool released = false;
+
+  static iree_status_t Run(iree_task_process_t* process,
+                           const iree_task_worker_context_t*,
+                           iree_task_process_drain_result_t* result) {
+    auto* self = static_cast<CpuCompletion*>(process->user_data);
+    self->service->Release();
+    result->completed = true;
+    result->did_work = true;
+    return iree_ok_status();
+  }
+  static void Released(iree_task_process_t* process) {
+    auto* self = static_cast<CpuCompletion*>(process->user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->released = true;
+    self->condition.notify_all();
+  }
+  void Submit(iree_task_executor_t* executor) {
+    iree_task_process_initialize(Run, 0, 1, &process);
+    process.user_data = this;
+    process.release_fn = Released;
+    iree_task_executor_schedule_process(executor, &process);
+  }
+  void AwaitRelease() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this] { return released; });
+  }
+};
+
+TEST_P(HttpRouterTest, ContinuouslyReadyOwnerYieldsToSharedCpuWork) {
+  {
+    std::lock_guard<std::mutex> lock(held_.mutex);
+    held_.advance_ready_work = true;
+  }
+  const std::string body = R"({"model":"held"})";
+  const int held = Send("POST", "/v1/chat/completions", body);
+  held_.WaitSubmitted();
+  EXPECT_NE(Read(Send("GET", "/healthz")).find(R"({"status":"ready"})"),
+            std::string::npos);
+  CpuCompletion cpu{&held_};
+  cpu.Submit(executor_);
+  EXPECT_NE(Read(held).find("held:/v1/chat/completions:" + body),
+            std::string::npos);
+  cpu.AwaitRelease();
+  std::lock_guard<std::mutex> lock(held_.mutex);
+  EXPECT_GT(held_.ready_units, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(Workers, HttpRouterTest, ::testing::Values(1, 4));
 
 }  // namespace
