@@ -26,10 +26,23 @@ typedef enum text_request_phase_e {
   TEXT_REQUEST_FINISHING,
 } text_request_phase_t;
 
+// The exclusive model operation currently retained by asynchronous readiness.
+typedef enum text_work_e {
+  TEXT_WORK_NONE,
+  TEXT_WORK_EPOCH,
+  TEXT_WORK_CHECKPOINT,
+} text_work_t;
+
+typedef enum text_checkpoint_action_e {
+  TEXT_CHECKPOINT_PIN,
+  TEXT_CHECKPOINT_SUSPEND,
+  TEXT_CHECKPOINT_RELEASE,
+} text_checkpoint_action_t;
+
 // Explicit local name owns a native endpoint and its source-canonical history.
 // Active branches own independent state; only queued admissions borrow this.
 typedef struct text_checkpoint_t {
-  // Bounded service-local identifier; empty marks an available record.
+  // Bounded service-local identifier, published only after pin readiness.
   char name[65];
   // Owned native immutable state, released before the borrowed model dies.
   loom_serve_text_checkpoint_t* state;
@@ -153,6 +166,8 @@ struct loom_serve_text_service_t {
   loom_serve_text_heartbeat_t heartbeat;
   // Completion publication only; model mutation remains on the router owner.
   struct {
+    // Owner-only operation discriminator; NONE means no callback is accepted.
+    text_work_t work;
     // Joins the callback's final storage access before completion consumption.
     iree_slim_mutex_t mutex;
     // Borrowed shared host proactor outliving the service.
@@ -178,8 +193,6 @@ struct loom_serve_text_service_t {
     iree_host_size_t shape_index;
     // Current span in isolated/matched execution.
     iree_host_size_t cursor;
-    // A registered completion still borrows this service, even after failure.
-    bool waiting;
     // First issued epoch identity and host-observed start time.
     struct {
       // First issued epoch identity, including device-fed continuations.
@@ -204,12 +217,18 @@ struct loom_serve_text_service_t {
     // Request output credit, including any continuation.
     uint32_t output_limits[LOOM_SERVE_TEXT_ROW_CAPACITY];
   } epoch;
-  // One bounded control claim waiting for the current model epoch to retire.
+  // One bounded control claim, retained through any accepted model operation.
   struct {
     // Claimed HTTP ownership; NULL when no control request is queued.
     loom_serve_http_connection_t* connection;
     // Borrowed request storage, valid through response or abort.
     const loom_serve_http_request_t* request;
+    // Validated operation, meaningful after submission.
+    text_checkpoint_action_t action;
+    // Public identifier borrowing the retained HTTP request.
+    iree_string_view_t name;
+    // Owned registry record, unpublished while a new pin is pending.
+    text_checkpoint_t* checkpoint;
   } control;
   // Monotonic request identity, independent of TCP connection identity.
   uint64_t next_serial;
@@ -247,6 +266,40 @@ struct loom_serve_text_service_t {
   // Fixed retained rows sharing one model, command set and execution timeline.
   text_session_t sessions[LOOM_SERVE_TEXT_ROW_CAPACITY];
 };
+
+static void text_work_ready(void* user_data, iree_async_operation_t* operation,
+                            iree_status_t status,
+                            iree_async_completion_flags_t flags) {
+  (void)operation;
+  (void)flags;
+  loom_serve_text_service_t* service = user_data;
+  iree_slim_mutex_lock(&service->completion.mutex);
+  service->completion.status = status;
+  service->completion.ready = true;
+  service->completion.observer.wake(service->completion.observer.user_data);
+  iree_slim_mutex_unlock(&service->completion.mutex);
+}
+
+static iree_status_t text_await_work(loom_serve_text_service_t* service,
+                                     text_work_t work) {
+  iree_async_semaphore_wait_operation_t* wait = &service->completion.operation;
+  memset(wait, 0, sizeof(*wait));
+  iree_async_operation_initialize(
+      &wait->base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
+      IREE_ASYNC_OPERATION_FLAG_NONE, text_work_ready, service);
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    service->completion.semaphores[i] =
+        (iree_async_semaphore_t*)service->completion.frontier.semaphores[i];
+  }
+  wait->semaphores = service->completion.semaphores;
+  wait->values = service->completion.frontier.values;
+  wait->count = 2;
+  wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
+  IREE_RETURN_IF_ERROR(iree_async_proactor_submit_one(
+      service->completion.proactor, &wait->base));
+  service->completion.work = work;
+  return iree_ok_status();
+}
 
 static void text_observe(loom_serve_text_service_t* service,
                          const char* phase) {
@@ -446,6 +499,73 @@ static text_checkpoint_t* text_checkpoint_find(
   return NULL;
 }
 
+static iree_status_t text_checkpoint_reply(
+    loom_serve_text_service_t* service,
+    loom_serve_http_connection_t* connection, text_checkpoint_action_t action,
+    iree_string_view_t name, iree_host_size_t position,
+    iree_host_size_t host_bytes) {
+  const bool create = action == TEXT_CHECKPOINT_PIN;
+  const bool suspend = action == TEXT_CHECKPOINT_SUSPEND;
+  const bool release = action == TEXT_CHECKPOINT_RELEASE;
+  fprintf(stderr,
+          "{\"model\":%.*s,\"event\":\"checkpoint_%s\",\"checkpoint\":\"%.*s\","
+          "\"position\":%zu,"
+          "\"host_snapshot_bytes\":%zu}\n",
+          (int)iree_string_builder_size(&service->identity),
+          iree_string_builder_buffer(&service->identity),
+          create    ? "pin"
+          : suspend ? "suspend"
+                    : "release",
+          (int)name.size, name.data, position, host_bytes);
+  iree_string_builder_reset(&service->scratch);
+  iree_status_t status = iree_string_builder_append_format(
+      &service->scratch,
+      "HTTP/1.1 %s\r\nContent-Type: application/json\r\nConnection: "
+      "close\r\n\r\n"
+      "{\"checkpoint\":\"%.*s\",\"position\":%zu,\"pinned\":%s,"
+      "\"host_snapshot_bytes\":%zu}",
+      create ? "201 Created" : "200 OK", (int)name.size, name.data, position,
+      release ? "false" : "true", host_bytes);
+  if (iree_status_is_ok(status)) {
+    iree_status_t sent = loom_serve_http_connection_send(
+        connection, iree_string_builder_view(&service->scratch));
+    if (iree_status_is_ok(sent)) {
+      loom_serve_http_connection_finish(connection);
+    } else {
+      text_diagnose("Checkpoint response peer failed", sent);
+      loom_serve_http_connection_abort(connection);
+    }
+  } else {
+    loom_serve_http_connection_abort(connection);
+  }
+  return status;
+}
+
+static iree_status_t text_complete_checkpoint(
+    loom_serve_text_service_t* service, loom_serve_http_service_flags_t flags) {
+  text_checkpoint_t* checkpoint = service->control.checkpoint;
+  const text_checkpoint_action_t action = service->control.action;
+  const iree_string_view_t name = service->control.name;
+  if (action == TEXT_CHECKPOINT_PIN) {
+    memcpy(checkpoint->name, name.data, name.size);
+    checkpoint->name[name.size] = 0;
+  } else {
+    loom_serve_text_checkpoint_complete_suspend(checkpoint->state);
+    service->checkpoints.host_bytes +=
+        loom_serve_text_checkpoint_suspended_bytes(checkpoint->state);
+    service->pool.trim_pending = true;
+  }
+  loom_serve_http_connection_t* connection = service->control.connection;
+  memset(&service->control, 0, sizeof(service->control));
+  if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING)) {
+    loom_serve_http_connection_abort(connection);
+    return iree_ok_status();
+  }
+  return text_checkpoint_reply(
+      service, connection, action, name, checkpoint->position,
+      loom_serve_text_checkpoint_suspended_bytes(checkpoint->state));
+}
+
 static iree_status_t text_checkpoint_request(
     loom_serve_text_service_t* service,
     loom_serve_http_connection_t* connection,
@@ -524,8 +644,8 @@ static iree_status_t text_checkpoint_request(
                            "checkpoint capacity exhausted; release a pin or "
                            "configure checkpoint_capacity"));
     }
-    iree_status_t status =
-        loom_serve_text_row_try_pin(session->row, &checkpoint->state);
+    iree_status_t status = loom_serve_text_row_submit_pin(
+        session->row, &checkpoint->state, &service->completion.frontier);
     if (!iree_status_is_ok(status)) {
       loom_serve_http_connection_abort(connection);
       return status;
@@ -535,8 +655,6 @@ static iree_status_t text_checkpoint_request(
                          iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                           "native pin capacity exhausted"));
     }
-    memcpy(checkpoint->name, name.data, name.size);
-    checkpoint->name[name.size] = 0;
     checkpoint->completion = session->completion;
     iree_vm_buffer_retain(checkpoint->completion.storage);
     checkpoint->position = loom_serve_text_row_position(session->row);
@@ -544,6 +662,12 @@ static iree_status_t text_checkpoint_request(
     checkpoint->boundary = loom_serve_text_row_is_eos(session->row)
                                ? LOOM_SERVE_TEXT_CHAT_BOUNDARY_TERMINATED
                                : LOOM_SERVE_TEXT_CHAT_BOUNDARY_OPEN;
+    service->control.connection = connection;
+    service->control.request = request;
+    service->control.action = TEXT_CHECKPOINT_PIN;
+    service->control.name = name;
+    service->control.checkpoint = checkpoint;
+    return text_await_work(service, TEXT_WORK_CHECKPOINT);
   }
   const iree_host_size_t position = checkpoint->position;
   iree_host_size_t host_bytes =
@@ -556,58 +680,31 @@ static iree_status_t text_checkpoint_request(
           iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                            "checkpoint suspension requires elastic backing"));
     }
+    if (host_bytes) {
+      return text_checkpoint_reply(service, connection, TEXT_CHECKPOINT_SUSPEND,
+                                   name, position, host_bytes);
+    }
     text_observe(service, "checkpoint_suspend");
-    iree_status_t status =
-        loom_serve_text_checkpoint_suspend(checkpoint->state);
+    iree_status_t status = loom_serve_text_checkpoint_submit_suspend(
+        checkpoint->state, &service->completion.frontier);
     if (!iree_status_is_ok(status)) {
       loom_serve_http_connection_abort(connection);
       return status;
     }
-    const iree_host_size_t captured =
-        loom_serve_text_checkpoint_suspended_bytes(checkpoint->state);
-    service->checkpoints.host_bytes += captured - host_bytes;
-    host_bytes = captured;
+    service->control.connection = connection;
+    service->control.request = request;
+    service->control.action = TEXT_CHECKPOINT_SUSPEND;
+    service->control.name = name;
+    service->control.checkpoint = checkpoint;
+    return text_await_work(service, TEXT_WORK_CHECKPOINT);
   }
-  if (release) {
-    service->checkpoints.host_bytes -= host_bytes;
-    host_bytes = 0;
-    loom_serve_text_checkpoint_release(checkpoint->state);
-    loom_serve_text_chat_completion_deinitialize(&checkpoint->completion);
-    memset(checkpoint, 0, sizeof(*checkpoint));
-  }
-  service->pool.trim_pending |= suspend || release;
-  fprintf(stderr,
-          "{\"model\":%.*s,\"event\":\"checkpoint_%s\",\"checkpoint\":\"%.*s\","
-          "\"position\":%zu,"
-          "\"host_snapshot_bytes\":%zu}\n",
-          (int)iree_string_builder_size(&service->identity),
-          iree_string_builder_buffer(&service->identity),
-          create    ? "pin"
-          : suspend ? "suspend"
-                    : "release",
-          (int)name.size, name.data, position, host_bytes);
-  iree_string_builder_reset(&service->scratch);
-  iree_status_t status = iree_string_builder_append_format(
-      &service->scratch,
-      "HTTP/1.1 %s\r\nContent-Type: application/json\r\nConnection: "
-      "close\r\n\r\n"
-      "{\"checkpoint\":\"%.*s\",\"position\":%zu,\"pinned\":%s,"
-      "\"host_snapshot_bytes\":%zu}",
-      create ? "201 Created" : "200 OK", (int)name.size, name.data, position,
-      release ? "false" : "true", host_bytes);
-  if (iree_status_is_ok(status)) {
-    iree_status_t sent = loom_serve_http_connection_send(
-        connection, iree_string_builder_view(&service->scratch));
-    if (iree_status_is_ok(sent)) {
-      loom_serve_http_connection_finish(connection);
-    } else {
-      text_diagnose("Checkpoint response peer failed", sent);
-      loom_serve_http_connection_abort(connection);
-    }
-  } else {
-    loom_serve_http_connection_abort(connection);
-  }
-  return status;
+  service->checkpoints.host_bytes -= host_bytes;
+  loom_serve_text_checkpoint_release(checkpoint->state);
+  loom_serve_text_chat_completion_deinitialize(&checkpoint->completion);
+  memset(checkpoint, 0, sizeof(*checkpoint));
+  service->pool.trim_pending = true;
+  return text_checkpoint_reply(service, connection, TEXT_CHECKPOINT_RELEASE,
+                               name, position, 0);
 }
 
 // Prepares host input without changing retained device state. Rejection leaves
@@ -925,7 +1022,7 @@ static iree_status_t text_enqueue(loom_serve_text_service_t* service,
   iree_string_view_t checkpoint_name = request->target;
   if (iree_string_view_consume_prefix(&checkpoint_name,
                                       IREE_SV("/v1/checkpoints/"))) {
-    if (service->epoch.waiting) {
+    if (service->completion.work != TEXT_WORK_NONE) {
       if (service->control.connection) {
         return text_reject(service, connection, 503, "Service Unavailable",
                            iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -1346,39 +1443,6 @@ static void text_prepare_continuation(
   };
 }
 
-static void text_epoch_ready(void* user_data, iree_async_operation_t* operation,
-                             iree_status_t status,
-                             iree_async_completion_flags_t flags) {
-  (void)operation;
-  (void)flags;
-  loom_serve_text_service_t* service = user_data;
-  iree_slim_mutex_lock(&service->completion.mutex);
-  service->completion.status = status;
-  service->completion.ready = true;
-  service->completion.observer.wake(service->completion.observer.user_data);
-  iree_slim_mutex_unlock(&service->completion.mutex);
-}
-
-static iree_status_t text_await_epoch(loom_serve_text_service_t* service) {
-  iree_async_semaphore_wait_operation_t* wait = &service->completion.operation;
-  memset(wait, 0, sizeof(*wait));
-  iree_async_operation_initialize(
-      &wait->base, IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT,
-      IREE_ASYNC_OPERATION_FLAG_NONE, text_epoch_ready, service);
-  for (iree_host_size_t i = 0; i < 2; ++i) {
-    service->completion.semaphores[i] =
-        (iree_async_semaphore_t*)service->completion.frontier.semaphores[i];
-  }
-  wait->semaphores = service->completion.semaphores;
-  wait->values = service->completion.frontier.values;
-  wait->count = 2;
-  wait->mode = IREE_ASYNC_WAIT_MODE_ALL;
-  IREE_RETURN_IF_ERROR(iree_async_proactor_submit_one(
-      service->completion.proactor, &wait->base));
-  service->epoch.waiting = true;
-  return iree_ok_status();
-}
-
 static iree_status_t text_submit_isolated(loom_serve_text_service_t* service) {
   const loom_serve_text_span_t* span =
       &service->epoch.spans[service->epoch.cursor];
@@ -1474,7 +1538,7 @@ static iree_status_t text_submit_epoch(
     status = text_submit_isolated(service);
   }
   IREE_RETURN_IF_ERROR(status);
-  return text_await_epoch(service);
+  return text_await_work(service, TEXT_WORK_EPOCH);
 }
 
 static iree_status_t text_publish_epoch(loom_serve_text_service_t* service) {
@@ -1621,7 +1685,7 @@ static iree_status_t text_complete_epoch(
   if (service->schedule_mode != LOOM_SERVE_TEXT_SCHEDULE_PACKED &&
       service->epoch.cursor < service->epoch.count) {
     IREE_RETURN_IF_ERROR(text_submit_isolated(service));
-    return text_await_epoch(service);
+    return text_await_work(service, TEXT_WORK_EPOCH);
   }
   iree_status_t status = text_publish_epoch(service);
   service->epoch.count = 0;
@@ -1786,12 +1850,13 @@ static void text_set_observer(void* self, loom_serve_http_observer_t observer) {
 }
 
 static bool text_is_pending(void* self) {
-  return ((loom_serve_text_service_t*)self)->epoch.waiting;
+  return ((loom_serve_text_service_t*)self)->completion.work != TEXT_WORK_NONE;
 }
 
 static bool text_is_active(void* self) {
   const loom_serve_text_service_t* service = self;
-  if (service->pool.trim_pending) {
+  if (service->completion.work != TEXT_WORK_NONE ||
+      service->pool.trim_pending) {
     return true;
   }
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
@@ -1807,7 +1872,7 @@ static iree_status_t text_advance(void* self,
                                   bool* out_progress) {
   loom_serve_text_service_t* service = self;
   *out_progress = false;
-  if (service->epoch.waiting) {
+  if (service->completion.work != TEXT_WORK_NONE) {
     iree_slim_mutex_lock(&service->completion.mutex);
     if (!service->completion.ready) {
       iree_slim_mutex_unlock(&service->completion.mutex);
@@ -1817,11 +1882,14 @@ static iree_status_t text_advance(void* self,
     service->completion.status = iree_ok_status();
     service->completion.ready = false;
     iree_slim_mutex_unlock(&service->completion.mutex);
-    service->epoch.waiting = false;
+    const text_work_t work = service->completion.work;
+    service->completion.work = TEXT_WORK_NONE;
     *out_progress = true;
     IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(text_complete_epoch(service, flags));
-    if (service->epoch.waiting) {
+    IREE_RETURN_IF_ERROR(work == TEXT_WORK_EPOCH
+                             ? text_complete_epoch(service, flags)
+                             : text_complete_checkpoint(service, flags));
+    if (service->completion.work != TEXT_WORK_NONE) {
       return iree_ok_status();
     }
   }
@@ -1833,13 +1901,15 @@ static iree_status_t text_advance(void* self,
   if (service->control.connection) {
     loom_serve_http_connection_t* connection = service->control.connection;
     const loom_serve_http_request_t* request = service->control.request;
-    service->control.connection = NULL;
-    service->control.request = NULL;
+    memset(&service->control, 0, sizeof(service->control));
     *out_progress = true;
     if (loom_serve_http_connection_failed(connection)) {
       loom_serve_http_connection_abort(connection);
     } else {
       IREE_RETURN_IF_ERROR(text_enqueue(service, connection, request));
+    }
+    if (service->completion.work != TEXT_WORK_NONE) {
+      return iree_ok_status();
     }
   }
   text_pending_cancel_failed(service, out_progress);
@@ -1875,7 +1945,7 @@ static iree_status_t text_advance(void* self,
       status = text_submit_epoch(service, shape_index, count, spans);
     }
   }
-  if (!service->epoch.waiting) {
+  if (service->completion.work == TEXT_WORK_NONE) {
     text_observe(service, iree_status_is_ok(status) ? "idle" : "failed");
   }
   return status;
@@ -1887,8 +1957,9 @@ static iree_status_t text_accept(void* self,
                                  loom_serve_http_service_flags_t flags) {
   loom_serve_text_service_t* service = self;
   IREE_RETURN_IF_ERROR(text_enqueue(service, connection, request));
-  return service->epoch.waiting ? iree_ok_status()
-                                : text_admit_pending(service, flags);
+  return service->completion.work != TEXT_WORK_NONE
+             ? iree_ok_status()
+             : text_admit_pending(service, flags);
 }
 
 loom_serve_http_service_t loom_serve_text_service_interface(

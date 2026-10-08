@@ -305,6 +305,15 @@ An absent/evicted session returns `404`; a busy session or duplicate name
 returns `409`; exhausted pin capacity returns `503`. Pins never replace one
 another implicitly.
 
+Pin and suspend requests retain their HTTP claim through asynchronous model
+readiness. The name becomes visible only after pin completion; suspension keeps
+the source blocks until the host capture completes. A bounded control slot
+orders these operations after the current model work and ahead of stalled
+generation admission. Other models and transport processing remain runnable.
+Disconnecting after submission does not roll back a successfully completed
+named operation. Shutdown drains accepted work without submitting new work;
+failed readiness leaves native ownership to outer model destruction.
+
 A normal chat completion can set `X-Loom-Checkpoint: NAME` alongside its
 destination `X-Loom-Session`. It still sends full history. The source-rendered
 history must extend the checkpoint's canonical transcript; mismatches return
