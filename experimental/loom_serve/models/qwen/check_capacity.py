@@ -239,6 +239,24 @@ def main():
             raise RuntimeError(
                 "pooled concurrent output differs from sequential dense output"
             )
+        prepared = [e for e in events.values if e.get("event") == "prepared"]
+        identities = {e["request"] for e in prepared}
+        if len(identities) != len(prepared):
+            raise RuntimeError("capacity retries repeated source input preparation")
+        for admitted in (e for e in events.values if e.get("event") == "admit"):
+            plan = next(
+                (e for e in prepared if e["request"] == admitted["request"]), None
+            )
+            if plan is None or any(
+                plan[field] != admitted[field]
+                for field in (
+                    "row",
+                    "retained_tokens",
+                    "appended_tokens",
+                    "reservation_tokens",
+                )
+            ):
+                raise RuntimeError("admission changed its prepared input identity")
         heartbeats = [e for e in events.values if e.get("event") == "heartbeat"]
         if not heartbeats:
             raise RuntimeError("workload did not observe memory heartbeats")

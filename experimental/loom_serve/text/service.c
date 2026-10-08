@@ -113,8 +113,9 @@ typedef struct text_session_t {
   } request;
 } text_session_t;
 
-// A queued request owns no model row. Source rendering starts at a retired
-// model boundary; raw body/name/tool views borrow the immutable HTTP claim.
+// A queued request owns no device reservation. The FIFO head may retain an idle
+// slot's host input array; body/name/tool views borrow the immutable HTTP
+// claim.
 typedef struct text_pending_request_t {
   // Claimed transport identity, relinquished by admission, rejection or abort.
   loom_serve_http_connection_t* connection;
@@ -241,6 +242,17 @@ struct loom_serve_text_service_t {
     iree_host_size_t count;
     // Maximum queued request count, allocated once during initialization.
     iree_host_size_t capacity;
+    // Only the FIFO head prepares input; no device credit is acquired here.
+    struct {
+      // Stable idle slot owning encoded tokens, or NULL before preparation.
+      text_session_t* session;
+      // Known input tokens in the selected slot's existing host array.
+      iree_host_size_t input_count;
+      // Consumed prefix shared with the selected continuation or endpoint.
+      iree_host_size_t retained_count;
+      // Page-rounded completion high-water, including speculative credit.
+      iree_host_size_t reservation;
+    } prepared;
   } pending;
   // Request policy over the logical pool, not a second block allocator.
   struct {
@@ -775,6 +787,9 @@ static iree_status_t text_prepare_input(loom_serve_text_service_t* service,
 // and connection, or transfers both into an admitted request.
 static void text_pending_remove(loom_serve_text_service_t* service,
                                 iree_host_size_t index) {
+  if (!index) {
+    memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
+  }
   if (service->pending.values[index].checkpoint) {
     --service->pending.values[index].checkpoint->pending;
   }
@@ -899,50 +914,78 @@ static iree_status_t text_reclaim_idle(loom_serve_text_service_t* service,
   return status;
 }
 
+// The selected slot stays idle until this head admits or leaves the FIFO.
+// Compaction and checkpoint suspension preserve the logical input frontier.
+static iree_status_t text_prepare_admission(loom_serve_text_service_t* service,
+                                            text_session_t* session) {
+  text_pending_request_t* pending = &service->pending.values[0];
+  const iree_time_t start = iree_time_now();
+  IREE_RETURN_IF_ERROR(loom_serve_text_chat_initialize(
+      loom_serve_text_model_chat_policy(service->model), service->name,
+      pending->body, service->default_max_tokens, service->allocator,
+      &pending->chat));
+  iree_host_size_t input_count = 0, retained_count = 0;
+  IREE_RETURN_IF_ERROR(text_prepare_input(service, session, &pending->chat,
+                                          pending->name, pending->checkpoint,
+                                          &input_count, &retained_count));
+  const iree_host_size_t reservation = loom_serve_text_request_reservation(
+      service->context_capacity, retained_count + input_count,
+      pending->chat.max_tokens, service->mtp_depth,
+      service->pool.geometry.block_size);
+  if (service->pool.geometry.capacity &&
+      reservation > service->pool.geometry.capacity) {
+    return iree_make_status(
+        IREE_STATUS_OUT_OF_RANGE,
+        "request needs %zu page-rounded KV positions including completion "
+        "and speculative credit, but the shared pool holds %zu; compact "
+        "history, lower max_tokens, or increase pool_capacity",
+        reservation, service->pool.geometry.capacity);
+  }
+  service->pending.prepared.session = session;
+  service->pending.prepared.input_count = input_count;
+  service->pending.prepared.retained_count = retained_count;
+  service->pending.prepared.reservation = reservation;
+  fprintf(stderr,
+          "{\"model\":%.*s,\"event\":\"prepared\",\"request\":%" PRIu64
+          ",\"session\":\"%.*s\",\"row\":%zu,\"retained_tokens\":%zu,"
+          "\"appended_tokens\":%zu,\"reservation_tokens\":%zu,"
+          "\"duration_ms\":%.3f}\n",
+          (int)iree_string_builder_size(&service->identity),
+          iree_string_builder_buffer(&service->identity), pending->serial,
+          (int)pending->name.size, pending->name.data,
+          (iree_host_size_t)(session - service->sessions), retained_count,
+          input_count, reservation, (iree_time_now() - start) / 1e6);
+  return iree_ok_status();
+}
+
 static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
                                         loom_serve_http_service_flags_t flags) {
   iree_status_t status = iree_ok_status();
   while (service->pending.count && iree_status_is_ok(status)) {
     text_pending_request_t* pending = &service->pending.values[0];
-    text_session_t* session = text_session_select(service, pending->name);
-    if (!session) {
-      break;
-    }
-    iree_host_size_t input_count = 0, retained_count = 0;
-    if (!pending->chat.policy) {
-      status = loom_serve_text_chat_initialize(
-          loom_serve_text_model_chat_policy(service->model), service->name,
-          pending->body, service->default_max_tokens, service->allocator,
-          &pending->chat);
-    }
-    if (iree_status_is_ok(status)) {
-      status = text_prepare_input(service, session, &pending->chat,
-                                  pending->name, pending->checkpoint,
-                                  &input_count, &retained_count);
-    }
-    iree_host_size_t reservation = 0;
-    if (iree_status_is_ok(status)) {
-      reservation = loom_serve_text_request_reservation(
-          service->context_capacity, retained_count + input_count,
-          pending->chat.max_tokens, service->mtp_depth,
-          service->pool.geometry.block_size);
-      if (service->pool.geometry.capacity &&
-          reservation > service->pool.geometry.capacity) {
-        status = iree_make_status(
-            IREE_STATUS_OUT_OF_RANGE,
-            "request needs %zu page-rounded KV positions including completion "
-            "and speculative credit, but the shared pool holds %zu; compact "
-            "history, lower max_tokens, or increase pool_capacity",
-            reservation, service->pool.geometry.capacity);
+    if (!service->pending.prepared.session) {
+      text_session_t* session = text_session_select(service, pending->name);
+      if (!session) {
+        break;
       }
+      status = text_prepare_admission(service, session);
     }
     if (!iree_status_is_ok(status)) {
+      if (!iree_status_is_invalid_argument(status) &&
+          !iree_status_is_out_of_range(status)) {
+        break;
+      }
       loom_serve_http_connection_t* connection = pending->connection;
       loom_serve_text_chat_deinitialize(&pending->chat);
       text_pending_remove(service, 0);
       status = text_reject(service, connection, 400, "Bad Request", status);
       continue;
     }
+    text_session_t* session = service->pending.prepared.session;
+    const iree_host_size_t input_count = service->pending.prepared.input_count;
+    const iree_host_size_t retained_count =
+        service->pending.prepared.retained_count;
+    const iree_host_size_t reservation = service->pending.prepared.reservation;
     const iree_host_size_t restored_bytes =
         pending->checkpoint ? loom_serve_text_checkpoint_suspended_bytes(
                                   pending->checkpoint->state)

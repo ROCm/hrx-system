@@ -294,6 +294,15 @@ against that completed accounting. Cancellation resets an already-retired row
 without another device wait. Native allocation and mapping calls remain cold
 platform operations, outside the steady-state epoch path.
 
+The admission FIFO prepares its head once and retains the encoded input in an
+idle slot's existing host array while capacity is unavailable. This acquires no
+device reservation. Cancellation or rejection relinquishes that host choice;
+admission consumes the same token counts and completion extent. The `prepared`
+JSONL event reports source/tokenizer duration separately from admission queue
+time, along with retained, appended and reserved token counts. Only invalid
+request arguments or context overflow become client errors; allocation and
+other preparation failures remain terminal service errors.
+
 These handles are serialized model API objects. The HTTP service owns them
 through explicitly named endpoints; automatic prefix discovery is not enabled.
 The native real-model witness is
