@@ -83,5 +83,49 @@ TEST(QueueExecutionResourcesTest, MapsGfx11WgpResources) {
   EXPECT_EQ(full_mask[1], UINT32_C(0x000000FF));
 }
 
+TEST(QueueExecutionResourcesTest, MapsGfx1250XcdResources) {
+  iree_hal_amdgpu_queue_execution_resource_topology_t topology;
+  IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_topology_initialize(
+      {/*.major=*/12, /*.minor=*/5, /*.stepping=*/0},
+      /*execution_unit_count=*/256, /*partition_count=*/8, &topology));
+
+  ASSERT_EQ(iree_hal_amdgpu_queue_execution_resource_count(&topology), 256u);
+  iree_hal_queue_execution_resource_spec_t resources[256];
+  iree_hal_amdgpu_queue_execution_resource_populate_resources(&topology,
+                                                              resources);
+  for (uint32_t i = 0; i < IREE_ARRAYSIZE(resources); ++i) {
+    EXPECT_EQ(resources[i].group_ordinal, i % 8u);
+    EXPECT_EQ(resources[i].first_execution_unit_ordinal, i);
+    EXPECT_EQ(resources[i].execution_unit_count, 1u);
+  }
+
+  // KFD orders mask bits with XCD as the fastest-changing coordinate.
+  const iree_hal_queue_execution_resource_ordinal_t first_per_xcd[] = {
+      0, 1, 2, 3, 4, 5, 6, 7};
+  uint32_t first_mask[8] = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_write_mask(
+      &topology,
+      {/*.count=*/IREE_ARRAYSIZE(first_per_xcd),
+       /*.ordinals=*/first_per_xcd},
+      /*out_mask_bit_count=*/256, first_mask));
+  EXPECT_EQ(first_mask[0], UINT32_C(0x000000FF));
+  for (uint32_t i = 1; i < IREE_ARRAYSIZE(first_mask); ++i) {
+    EXPECT_EQ(first_mask[i], 0u);
+  }
+
+  const iree_hal_queue_execution_resource_ordinal_t next_per_xcd[] = {
+      8, 9, 10, 11, 12, 13, 14, 15};
+  uint32_t next_mask[8] = {0};
+  IREE_ASSERT_OK(iree_hal_amdgpu_queue_execution_resource_write_mask(
+      &topology,
+      {/*.count=*/IREE_ARRAYSIZE(next_per_xcd),
+       /*.ordinals=*/next_per_xcd},
+      /*out_mask_bit_count=*/256, next_mask));
+  EXPECT_EQ(next_mask[0], UINT32_C(0x0000FF00));
+  for (uint32_t i = 1; i < IREE_ARRAYSIZE(next_mask); ++i) {
+    EXPECT_EQ(next_mask[i], 0u);
+  }
+}
+
 }  // namespace
 }  // namespace iree::hal::amdgpu
