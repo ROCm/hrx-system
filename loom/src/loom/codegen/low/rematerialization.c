@@ -587,17 +587,21 @@ static bool loom_low_allocation_assignment_overlaps_failure_storage(
         descriptor_set, &candidate, assignment);
   }
 
-  for (uint32_t physical_register_id = 0;
-       physical_register_id < descriptor_set->physical_register_count;
-       ++physical_register_id) {
-    if (!loom_low_allocation_storage_explicit_physical_register_view(
+  const uint32_t candidate_count =
+      loom_low_allocation_storage_explicit_location_candidate_count(
+          descriptor_set, failure->descriptor_reg_class_id,
+          failure->required_unit_count);
+  for (uint32_t candidate_index = 0; candidate_index < candidate_count;
+       ++candidate_index) {
+    if (!loom_low_allocation_storage_explicit_location_candidate(
             descriptor_set, failure->descriptor_reg_class_id,
-            physical_register_id, failure->required_unit_count,
+            failure->required_unit_count, candidate_index,
+            &candidate.location_base,
             /*out_first_candidate_ordinal=*/NULL,
-            /*out_pressure_extent=*/NULL)) {
+            /*out_pressure_extent=*/NULL,
+            /*out_packing_rank=*/NULL)) {
       continue;
     }
-    candidate.location_base = physical_register_id;
     if (loom_low_allocation_storage_assignment_ranges_overlap(
             descriptor_set, &candidate, assignment)) {
       return true;

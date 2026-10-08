@@ -36,17 +36,38 @@ bool loom_low_allocation_storage_assignment_uses_explicit_physical_register(
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* assignment);
 
-// Returns true when |physical_register_id| is an ordered |unit_count|-unit
-// view of |descriptor_reg_class_id|. The first candidate ordinal identifies
-// the direct candidate covering logical unit zero. The pressure extent is one
-// past the highest direct candidate ordinal occupied by the view. Candidate
-// ordinals define preference and pressure order, not linear-location
-// alignment; the declared view itself defines legal unit grouping.
-bool loom_low_allocation_storage_explicit_physical_register_view(
+// Returns true when |assignment| uses a candidate-ordinal location in an
+// explicit physical-register class.
+bool loom_low_allocation_storage_assignment_uses_physical_candidate_ordinals(
     const loom_low_descriptor_set_t* descriptor_set,
-    uint16_t descriptor_reg_class_id, uint32_t physical_register_id,
+    const loom_low_allocation_assignment_t* assignment);
+
+// Returns true when |location_base| names a legal ordered |unit_count|-unit
+// location in |descriptor_reg_class_id|. Locations are either contiguous
+// class-candidate ordinal ranges or physical register/view IDs, as selected by
+// the register class. The returned pressure extent is one past the highest
+// direct candidate ordinal occupied by the location.
+bool loom_low_allocation_storage_explicit_physical_location(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id, uint32_t location_base,
     uint32_t unit_count, uint32_t* out_first_candidate_ordinal,
     uint32_t* out_pressure_extent);
+
+// Returns the scan bound for allocation candidates of the explicit physical
+// location described by |descriptor_reg_class_id| and |unit_count|.
+uint32_t loom_low_allocation_storage_explicit_location_candidate_count(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id, uint32_t unit_count);
+
+// Resolves one allocation-order candidate within the scan bound above. Returns
+// false when the indexed aggregate view belongs to another class or width, or
+// when a contiguous candidate range would extend beyond the class capacity.
+bool loom_low_allocation_storage_explicit_location_candidate(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint16_t descriptor_reg_class_id, uint32_t unit_count,
+    uint32_t candidate_index, uint32_t* out_location_base,
+    uint32_t* out_first_candidate_ordinal, uint32_t* out_pressure_extent,
+    uint32_t* out_packing_rank);
 
 // Resolves one logical unit of an explicit physical-register assignment to
 // the direct class-candidate register that names it.
@@ -57,8 +78,8 @@ bool loom_low_allocation_storage_assignment_unit_physical_register(
 
 // Finds a location for a |candidate_location_count|-unit assignment whose
 // |candidate_unit_start| subrange aliases the selected |reference| subrange.
-// Explicit physical-register classes search declared register views instead of
-// assuming that physical register IDs or candidate ordinals are linear.
+// Explicit physical-register classes search their candidate ranges or declared
+// register views instead of assuming physical register IDs are linear.
 bool loom_low_allocation_storage_find_subrange_alias_location(
     const loom_low_descriptor_set_t* descriptor_set,
     uint16_t candidate_reg_class_id,

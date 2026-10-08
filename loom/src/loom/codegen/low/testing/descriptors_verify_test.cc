@@ -2019,6 +2019,17 @@ TEST(LowDescriptorsTest, RejectsRegisterClassWithoutStorageKind) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
+TEST(LowDescriptorsTest,
+     RejectsContiguousPhysicalCandidatesWithoutExplicitStorage) {
+  TestTables tables;
+  InitializeTestTables(&tables);
+  tables.reg_classes[0].flags |=
+      LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES;
+
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_low_descriptor_set_verify(&tables.set));
+}
+
 TEST(LowDescriptorsTest, RejectsConflictingRegisterClassStorageKinds) {
   TestTables tables;
   InitializeTestTables(&tables);

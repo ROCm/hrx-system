@@ -926,6 +926,55 @@ def test_compiler_emits_ordered_multiunit_explicit_register_view() -> None:
     assert "kTestLowCorePhysicalRegisterViewUnitCandidateOrdinals" in generated.source
 
 
+def test_compiler_emits_contiguous_physical_candidate_range_class() -> None:
+    descriptor_set = _explicit_physical_descriptor_set()
+    register_classes = tuple(
+        replace(
+            register_class,
+            flags=(
+                *register_class.flags,
+                RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+            ),
+        )
+        if register_class.name == "test.phys"
+        else register_class
+        for register_class in descriptor_set.reg_classes
+    )
+    descriptor_set = replace(
+        descriptor_set,
+        reg_classes=register_classes,
+        physical_register_views=(),
+    )
+
+    compiled = compiler.compile_descriptor_set(descriptor_set)
+    generated = generate_descriptor_set(descriptor_set)
+
+    assert not compiled.physical_register_views
+    assert "LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES" in generated.source
+
+
+def test_compiler_rejects_view_for_contiguous_candidate_range_class() -> None:
+    descriptor_set = _explicit_physical_descriptor_set()
+    register_classes = tuple(
+        replace(
+            register_class,
+            flags=(
+                *register_class.flags,
+                RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+            ),
+        )
+        if register_class.name == "test.phys"
+        else register_class
+        for register_class in descriptor_set.reg_classes
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=re.escape("descriptor set 'test.low.core' physical register view 'test.pair' as 'test.phys' references a register class whose multi-unit locations are contiguous candidate ranges"),
+    ):
+        compiler.compile_descriptor_set(replace(descriptor_set, reg_classes=register_classes))
+
+
 @pytest.mark.parametrize("source_fence", [False, True])
 def test_compiler_preserves_barrier_source_fence_policy(source_fence: bool) -> None:
     flags = (DescriptorFlag.SIDE_EFFECTING,)

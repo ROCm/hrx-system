@@ -963,6 +963,9 @@ def validate_register_classes(
             f"{description} alias-set ID",
         )
         uses_explicit_physical_registers = RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS in register_class.flags
+        uses_contiguous_physical_register_candidates = RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES in register_class.flags
+        if uses_contiguous_physical_register_candidates and not uses_explicit_physical_registers:
+            raise ValueError(f"{description} uses contiguous physical register candidates without explicit physical registers")
         if uses_explicit_physical_registers:
             if RegClassFlag.PHYSICAL not in register_class.flags:
                 raise ValueError(f"{description} uses explicit physical registers without the physical flag")
@@ -1024,6 +1027,8 @@ def validate_register_classes(
             raise ValueError(f"{description} references unknown register class")
         if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS not in register_class.flags:
             raise ValueError(f"{description} references a register class without explicit physical registers")
+        if RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES in register_class.flags:
+            raise ValueError(f"{description} references a register class whose multi-unit locations are contiguous candidate ranges")
         if len(view.units) < 2:
             raise ValueError(f"{description} must contain at least two units")
         validate_u16(len(view.units), f"{description} unit count")
@@ -1139,6 +1144,8 @@ def derive_canonical_physical_register_views(
     view_keys = {(view.physical_register, view.reg_class) for view in explicit_views}
     for register_class in register_classes:
         if RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS not in register_class.flags:
+            continue
+        if RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES in register_class.flags:
             continue
         candidates = tuple(physical_registers_by_name[name] for name in register_class.physical_registers)
         candidate_atomic_unit_count = len(candidates[0].atomic_units)

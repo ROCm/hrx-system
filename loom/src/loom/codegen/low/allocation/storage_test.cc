@@ -54,7 +54,7 @@ bool FindExplicitPhysicalRegisterView(
        ++physical_register_id) {
     uint32_t actual_first_candidate_ordinal = 0;
     uint32_t pressure_extent = 0;
-    if (loom_low_allocation_storage_explicit_physical_register_view(
+    if (loom_low_allocation_storage_explicit_physical_location(
             descriptor_set, descriptor_reg_class_id, physical_register_id,
             unit_count, &actual_first_candidate_ordinal, &pressure_extent) &&
         actual_first_candidate_ordinal == first_candidate_ordinal &&
@@ -316,7 +316,7 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
       &pair_register_id));
   uint32_t first_candidate_ordinal = UINT32_MAX;
   uint32_t pressure_extent = 0;
-  EXPECT_TRUE(loom_low_allocation_storage_explicit_physical_register_view(
+  EXPECT_TRUE(loom_low_allocation_storage_explicit_physical_location(
       descriptor_set, reg_class_id, pair_register_id, /*unit_count=*/2,
       &first_candidate_ordinal, &pressure_extent));
   EXPECT_EQ(first_candidate_ordinal, 0u);
@@ -382,11 +382,187 @@ TEST(LowAllocationStorageTest, ResolvesExplicitAggregateRegisterViews) {
       descriptor_set, reg_class_id, /*unit_count=*/4,
       /*first_candidate_ordinal=*/0, /*maximum_pressure_extent=*/4,
       &quad_register_id));
-  EXPECT_TRUE(loom_low_allocation_storage_explicit_physical_register_view(
+  EXPECT_TRUE(loom_low_allocation_storage_explicit_physical_location(
       descriptor_set, reg_class_id, quad_register_id, /*unit_count=*/4,
       &first_candidate_ordinal, &pressure_extent));
   EXPECT_EQ(first_candidate_ordinal, 0u);
   EXPECT_EQ(pressure_extent, 4u);
+}
+
+TEST(LowAllocationStorageTest, ResolvesContiguousPhysicalCandidateRanges) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_test_low_core_descriptor_set();
+  uint16_t range_class = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.explicit_range32"), &range_class, nullptr));
+  uint16_t explicit_class = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptor_set, IREE_SV("test.explicit32"), &explicit_class, nullptr));
+
+  uint32_t first_candidate_ordinal = UINT32_MAX;
+  uint32_t pressure_extent = 0;
+  for (uint32_t unit_count = 1; unit_count <= 4; ++unit_count) {
+    for (uint32_t location_base = 0; location_base < 4; ++location_base) {
+      SCOPED_TRACE(::testing::Message() << "unit_count=" << unit_count
+                                        << " location_base=" << location_base);
+      const bool expected = location_base + unit_count <= 4;
+      EXPECT_EQ(loom_low_allocation_storage_explicit_physical_location(
+                    descriptor_set, range_class, location_base, unit_count,
+                    &first_candidate_ordinal, &pressure_extent),
+                expected);
+      if (expected) {
+        EXPECT_EQ(first_candidate_ordinal, location_base);
+        EXPECT_EQ(pressure_extent, location_base + unit_count);
+      }
+    }
+  }
+  EXPECT_EQ(loom_low_allocation_storage_explicit_location_candidate_count(
+                descriptor_set, range_class, /*unit_count=*/2),
+            4u);
+  for (uint32_t candidate_index = 0; candidate_index < 4; ++candidate_index) {
+    uint32_t location_base = UINT32_MAX;
+    uint32_t packing_rank = UINT32_MAX;
+    const bool expected = candidate_index < 3;
+    EXPECT_EQ(loom_low_allocation_storage_explicit_location_candidate(
+                  descriptor_set, range_class, /*unit_count=*/2,
+                  candidate_index, &location_base, &first_candidate_ordinal,
+                  &pressure_extent, &packing_rank),
+              expected);
+    if (expected) {
+      EXPECT_EQ(location_base, candidate_index);
+      EXPECT_EQ(first_candidate_ordinal, candidate_index);
+      EXPECT_EQ(pressure_extent, candidate_index + 2);
+      EXPECT_EQ(packing_rank, candidate_index);
+    }
+  }
+
+  const auto pair =
+      Assignment(range_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 /*location_base=*/0, /*location_count=*/2);
+  const auto shifted =
+      Assignment(range_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 /*location_base=*/1, /*location_count=*/2);
+  const uint32_t first_register =
+      loom_low_descriptor_set_physical_register_candidate(descriptor_set,
+                                                          range_class, 0);
+  const uint32_t second_register =
+      loom_low_descriptor_set_physical_register_candidate(descriptor_set,
+                                                          range_class, 1);
+  const auto second =
+      Assignment(range_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 /*location_base=*/1, /*location_count=*/1);
+  const auto aliased_second =
+      Assignment(explicit_class, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+                 second_register, /*location_count=*/1);
+  uint32_t physical_register = UINT32_MAX;
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
+      descriptor_set, &pair, 0, &physical_register));
+  EXPECT_EQ(physical_register, first_register);
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_unit_physical_register(
+      descriptor_set, &pair, 1, &physical_register));
+  EXPECT_EQ(physical_register, second_register);
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+      descriptor_set, &pair, 1, &second, 0, /*unit_count=*/1));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_subranges_equal(
+      descriptor_set, &pair, 1, &aliased_second, 0, /*unit_count=*/1));
+  EXPECT_TRUE(loom_low_allocation_storage_assignment_ranges_overlap(
+      descriptor_set, &pair, &shifted));
+
+  EXPECT_EQ(loom_low_allocation_storage_assignment_atomic_unit_count(
+                descriptor_set, &pair),
+            2u);
+  uint32_t storage_key = UINT32_MAX;
+  uint32_t atomic_unit = UINT32_MAX;
+  loom_low_allocation_storage_assignment_atomic_unit(
+      descriptor_set, &pair, 0, &storage_key, &atomic_unit);
+  EXPECT_EQ(storage_key, 0u);
+  EXPECT_EQ(atomic_unit, 0u);
+  loom_low_allocation_storage_assignment_atomic_unit(
+      descriptor_set, &pair, 1, &storage_key, &atomic_unit);
+  EXPECT_EQ(storage_key, 0u);
+  EXPECT_EQ(atomic_unit, 1u);
+}
+
+TEST(LowAllocationStorageTest, ResolvesCompletePhysicalCandidateRangeFamily) {
+  constexpr uint32_t kCandidateCount = 16;
+  loom_low_physical_register_t physical_registers[kCandidateCount] = {};
+  uint16_t candidate_ids[kCandidateCount] = {};
+  uint16_t allocation_ordinals[kCandidateCount] = {};
+  uint16_t atomic_units[kCandidateCount] = {};
+  for (uint32_t i = 0; i < kCandidateCount; ++i) {
+    physical_registers[i].atomic_unit_start = i;
+    physical_registers[i].atomic_unit_count = 1;
+    candidate_ids[i] = kCandidateCount - i - 1;
+    allocation_ordinals[i] = kCandidateCount - i - 1;
+    atomic_units[i] = i;
+  }
+  loom_low_reg_class_t reg_class = {};
+  reg_class.flags =
+      LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+      LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
+      LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES;
+  reg_class.allocatable_count = kCandidateCount;
+  reg_class.physical_atomic_unit_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {};
+  descriptor_set.reg_classes = &reg_class;
+  descriptor_set.reg_class_count = 1;
+  descriptor_set.physical_registers = physical_registers;
+  descriptor_set.physical_register_count = kCandidateCount;
+  descriptor_set.physical_register_candidate_ids = candidate_ids;
+  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
+  descriptor_set.physical_register_candidate_count = kCandidateCount;
+  descriptor_set.physical_register_atomic_units = atomic_units;
+  descriptor_set.physical_register_atomic_unit_count = kCandidateCount;
+  descriptor_set.physical_register_unit_count = kCandidateCount;
+
+  for (uint32_t unit_count = 1; unit_count <= kCandidateCount; ++unit_count) {
+    bool seen_bases[kCandidateCount] = {};
+    for (uint32_t candidate_index = 0; candidate_index < kCandidateCount;
+         ++candidate_index) {
+      const uint32_t expected_base = allocation_ordinals[candidate_index];
+      const bool expected = expected_base + unit_count <= kCandidateCount;
+      uint32_t location_base = UINT32_MAX;
+      EXPECT_EQ(loom_low_allocation_storage_explicit_location_candidate(
+                    &descriptor_set, /*descriptor_reg_class_id=*/0, unit_count,
+                    candidate_index, &location_base,
+                    /*out_first_candidate_ordinal=*/nullptr,
+                    /*out_pressure_extent=*/nullptr,
+                    /*out_packing_rank=*/nullptr),
+                expected);
+      if (expected) {
+        EXPECT_EQ(location_base, expected_base);
+        EXPECT_FALSE(seen_bases[location_base]);
+        seen_bases[location_base] = true;
+      }
+    }
+    for (uint32_t location_base = 0; location_base < kCandidateCount;
+         ++location_base) {
+      SCOPED_TRACE(::testing::Message() << "unit_count=" << unit_count
+                                        << " location_base=" << location_base);
+      const bool expected = location_base + unit_count <= kCandidateCount;
+      EXPECT_EQ(loom_low_allocation_storage_explicit_physical_location(
+                    &descriptor_set, /*descriptor_reg_class_id=*/0,
+                    location_base, unit_count,
+                    /*out_first_candidate_ordinal=*/nullptr,
+                    /*out_pressure_extent=*/nullptr),
+                expected);
+      if (!expected) {
+        EXPECT_FALSE(seen_bases[location_base]);
+        continue;
+      }
+      EXPECT_TRUE(seen_bases[location_base]);
+      const auto assignment = Assignment(
+          /*reg_class=*/0, LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          location_base, unit_count);
+      for (uint32_t unit = 0; unit < unit_count; ++unit) {
+        uint32_t physical_register_id = UINT32_MAX;
+        ASSERT_TRUE(
+            loom_low_allocation_storage_assignment_unit_physical_register(
+                &descriptor_set, &assignment, unit, &physical_register_id));
+        EXPECT_EQ(physical_register_id, candidate_ids[location_base + unit]);
+      }
+    }
+  }
 }
 
 TEST(LowAllocationStorageTest, FindsDirectPhysicalAliasesAcrossClasses) {

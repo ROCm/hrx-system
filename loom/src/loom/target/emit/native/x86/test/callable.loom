@@ -126,6 +126,29 @@ low.func.def public target<x86.scalar.core> abi(object_function) @high_mix(%unus
   return %result
 }
 
+low.func.def public target<x86.scalar.core> abi(object_function) @stored_pair(%first: reg<x86.gpr64>, %second: reg<x86.gpr64>) -> (reg<x86.gpr64>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 32} : low.storage<stack>
+  %tail = storage_view %slot {byte_length = 24, offset = 8} : low.storage<stack> -> low.storage<stack>
+  %pair = concat(%first, %second) : (reg<x86.gpr64>, reg<x86.gpr64>) -> reg<x86.gpr64 x2>
+  low.spill %pair, %tail {offset = 8} : reg<x86.gpr64 x2>, low.storage<stack>
+  %loaded = low.reload %tail {offset = 8} : low.storage<stack> -> reg<x86.gpr64 x2>
+  %left = slice %loaded[0] : reg<x86.gpr64 x2> -> reg<x86.gpr64>
+  %right = slice %loaded[1] : reg<x86.gpr64 x2> -> reg<x86.gpr64>
+  %result = sub.gpr64 %left, %right
+  return %result
+}
+
+low.func.def public target<x86.scalar.core> abi(object_function) @stored_eleven32(%v0: reg<x86.gpr32>, %v1: reg<x86.gpr32>, %v2: reg<x86.gpr32>, %v3: reg<x86.gpr32>, %v4: reg<x86.gpr32>, %v5: reg<x86.gpr32>, %v6: reg<x86.gpr32>, %v7: reg<x86.gpr32>, %v8: reg<x86.gpr32>, %v9: reg<x86.gpr32>, %v10: reg<x86.gpr32>) -> (reg<x86.gpr32>) asm {
+  %slot = storage {byte_alignment = 16, byte_length = 48} : low.storage<stack>
+  %values = concat(%v0, %v1, %v2, %v3, %v4, %v5, %v6, %v7, %v8, %v9, %v10) : (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr32>) -> reg<x86.gpr32 x11>
+  low.spill %values, %slot : reg<x86.gpr32 x11>, low.storage<stack>
+  %loaded = low.reload %slot : low.storage<stack> -> reg<x86.gpr32 x11>
+  %first = slice %loaded[0] : reg<x86.gpr32 x11> -> reg<x86.gpr32>
+  %last = slice %loaded[10] : reg<x86.gpr32 x11> -> reg<x86.gpr32>
+  %result = xor.gpr32 %first, %last
+  return %result
+}
+
 // Indexed byte and halfword stores truncate independently and leave neighboring
 // elements intact. The return packs both previous values after zero extension.
 // The C caller guarantees the index is in [0, 6).

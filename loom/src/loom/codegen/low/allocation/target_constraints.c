@@ -438,7 +438,7 @@ bool loom_low_allocation_target_constraints_location_range_fits_capacity(
       &descriptor_set->reg_classes[capacity->descriptor_reg_class_id];
   if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
     uint32_t pressure_extent = 0;
-    return loom_low_allocation_storage_explicit_physical_register_view(
+    return loom_low_allocation_storage_explicit_physical_location(
                descriptor_set, capacity->descriptor_reg_class_id, location_base,
                location_count, /*out_first_candidate_ordinal=*/NULL,
                &pressure_extent) &&
@@ -540,7 +540,7 @@ loom_low_allocation_target_constraints_validate_register_location_capacity(
           constraints->target->descriptor_set, reg_class_id);
   if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
     uint32_t pressure_extent = 0;
-    if (!loom_low_allocation_storage_explicit_physical_register_view(
+    if (!loom_low_allocation_storage_explicit_physical_location(
             constraints->target->descriptor_set, reg_class_id, location_base,
             location_count, /*out_first_candidate_ordinal=*/NULL,
             &pressure_extent) ||
@@ -1195,9 +1195,11 @@ iree_status_t loom_low_allocation_target_constraints_resolve_fixed_locations(
         loom_low_allocation_live_range_interval_alignment(
             constraints->target->descriptor_set, liveness,
             operand_constraints_by_interval, interval);
-    // Explicit physical IDs name declared register views, not linear storage
-    // offsets. The capacity check below validates the view's unit layout.
-    if (!loom_low_reg_class_uses_explicit_physical_registers(reg_class) &&
+    // Declared aggregate views encode their own unit layout. Candidate-range
+    // locations use ordinal bases and retain ordinary tuple alignment.
+    if ((!loom_low_reg_class_uses_explicit_physical_registers(reg_class) ||
+         loom_low_reg_class_uses_contiguous_physical_register_candidates(
+             reg_class)) &&
         fixed_value->location_base % alignment != 0) {
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_target_constraints_emit_fixed_value_misalignment(

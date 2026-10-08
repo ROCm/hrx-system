@@ -134,6 +134,21 @@ def test_physical_descriptor_set_accepts_same_register_ordinal_tuple() -> None:
     validation.validate_physical_descriptor_set(_descriptor_set(descriptor, register_classes=register_classes))
 
 
+def test_register_class_rejects_contiguous_candidates_without_explicit_storage() -> None:
+    register_class = RegClass(
+        "test.invalid_range",
+        32,
+        SpillSlotSpace.PRIVATE,
+        flags=(RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="uses contiguous physical register candidates without explicit physical registers",
+    ):
+        validation.validate_register_classes("test.invalid", (register_class,))
+
+
 def test_physical_descriptor_set_rejects_unproven_register_ordinal_tuple() -> None:
     register_classes = _coindexed_register_classes(partner_candidates=("test.r3", "test.r2"))
     descriptor = _descriptor(

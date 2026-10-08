@@ -159,14 +159,23 @@ static bool loom_low_allocation_interval_assignment_find_entry_location(
   const loom_low_reg_class_t* reg_class =
       &descriptors->reg_classes[capacity->descriptor_reg_class_id];
   if (loom_low_reg_class_uses_explicit_physical_registers(reg_class)) {
-    uint32_t first_candidate_ordinal = 0;
     uint32_t pressure_extent = 0;
-    if (!loom_low_allocation_storage_explicit_physical_register_view(
+    if (!loom_low_allocation_storage_explicit_physical_location(
             descriptors, capacity->descriptor_reg_class_id,
             entry->location_base, interval->unit_count,
-            &first_candidate_ordinal, &pressure_extent) ||
+            /*out_first_candidate_ordinal=*/NULL, &pressure_extent) ||
         (capacity->is_bounded && pressure_extent > capacity->max_units)) {
       return false;
+    }
+    if (loom_low_reg_class_uses_contiguous_physical_register_candidates(
+            reg_class)) {
+      const uint32_t alignment =
+          loom_low_allocation_live_range_interval_alignment(
+              descriptors, context->liveness,
+              context->placement->operand_constraints_by_interval, interval);
+      if (entry->location_base % alignment != 0) {
+        return false;
+      }
     }
   } else {
     const uint32_t alignment =
@@ -310,6 +319,10 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
            ->reg_classes[capacity->descriptor_reg_class_id];
   const bool uses_explicit_physical_registers =
       loom_low_reg_class_uses_explicit_physical_registers(reg_class);
+  const bool uses_candidate_ordinals =
+      uses_explicit_physical_registers &&
+      loom_low_reg_class_uses_contiguous_physical_register_candidates(
+          reg_class);
   uint32_t last_base = 0;
   if (!uses_explicit_physical_registers && capacity->is_bounded) {
     last_base = capacity->max_units - interval->unit_count;
@@ -337,7 +350,9 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
           : 0;
   const uint64_t candidate_count =
       uses_explicit_physical_registers
-          ? state->context->target->descriptor_set->physical_register_count
+          ? loom_low_allocation_storage_explicit_location_candidate_count(
+                state->context->target->descriptor_set,
+                capacity->descriptor_reg_class_id, interval->unit_count)
           : (uint64_t)last_base / alignment + 1u;
   for (uint64_t candidate_index = 0; candidate_index < candidate_count;
        ++candidate_index) {
@@ -345,12 +360,13 @@ static iree_status_t loom_low_allocation_interval_assignment_record_failure(
     uint32_t base = candidate_ordinal * alignment;
     if (uses_explicit_physical_registers) {
       uint32_t pressure_extent = 0;
-      base = (uint32_t)candidate_index;
-      if (!loom_low_allocation_storage_explicit_physical_register_view(
+      if (!loom_low_allocation_storage_explicit_location_candidate(
               state->context->target->descriptor_set,
-              capacity->descriptor_reg_class_id, base, interval->unit_count,
-              &candidate_ordinal, &pressure_extent) ||
-          pressure_extent > explicit_pressure_limit) {
+              capacity->descriptor_reg_class_id, interval->unit_count,
+              (uint32_t)candidate_index, &base, &candidate_ordinal,
+              &pressure_extent, /*out_packing_rank=*/NULL) ||
+          pressure_extent > explicit_pressure_limit ||
+          (uses_candidate_ordinals && base % alignment != 0)) {
         continue;
       }
     }

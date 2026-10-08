@@ -192,12 +192,19 @@ typedef uint32_t loom_low_register_part_mask_t;
 #define LOOM_LOW_REG_CLASS_FLAG_REFERENCE ((uint16_t)1u << 2)
 // Register class cannot be represented in spill storage.
 #define LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE ((uint16_t)1u << 3)
-// Class locations are descriptor-set physical-register IDs selected from an
-// explicit candidate slice. Each physical register owns an arbitrary set of
-// atomic storage units used for overlap checks.
+// Class storage is selected from an explicit physical-register candidate
+// slice. Ordinary classes use descriptor-set physical register IDs; classes
+// with CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES use candidate ordinal bases.
+// Each direct candidate owns an arbitrary set of atomic storage units used for
+// overlap checks.
 #define LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS ((uint16_t)1u << 4)
 // Values spanning multiple units require an even base register ordinal.
 #define LOOM_LOW_REG_CLASS_FLAG_EVEN_ALIGNED_TUPLES ((uint16_t)1u << 5)
+// Locations in an explicit physical class use contiguous candidate ordinal
+// ranges, including one-unit ranges. Classes without this flag use direct
+// physical IDs and declared aggregate-register views.
+#define LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES \
+  ((uint16_t)1u << 6)
 
 typedef enum loom_low_spill_slot_space_e {
   // Unknown or uninitialized spill storage space.
@@ -1699,6 +1706,18 @@ static inline bool loom_low_reg_class_uses_explicit_physical_registers(
   return reg_class &&
          iree_any_bit_set(reg_class->flags,
                           LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS);
+}
+
+// Returns true when locations use contiguous explicit candidate ordinals
+// instead of direct physical IDs and declared aggregate-register views.
+static inline bool
+loom_low_reg_class_uses_contiguous_physical_register_candidates(
+    const loom_low_reg_class_t* reg_class) {
+  return reg_class &&
+         iree_all_bits_set(
+             reg_class->flags,
+             LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
+                 LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES);
 }
 
 // Returns a physical-register row, or NULL when |physical_register_id| is out

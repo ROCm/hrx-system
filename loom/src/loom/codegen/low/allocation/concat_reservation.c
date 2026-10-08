@@ -305,6 +305,10 @@ loom_low_allocation_concat_reservation_find_location_for_source(
       &context->descriptor_set->reg_classes[capacity.descriptor_reg_class_id];
   const bool is_explicit =
       loom_low_reg_class_uses_explicit_physical_registers(reg_class);
+  const bool uses_candidate_ordinals =
+      is_explicit &&
+      loom_low_reg_class_uses_contiguous_physical_register_candidates(
+          reg_class);
   if (is_explicit) {
     // A shared or broadcast source cannot independently reserve one assembly.
     // Downstream affinities may inherit a fresh result placement; already
@@ -464,9 +468,12 @@ loom_low_allocation_concat_reservation_find_location_for_source(
                 context->placement, relation->result_ordinal)
           : (loom_low_placement_relation_range_t){0};
   const uint64_t candidate_count =
-      incoming.count + (is_explicit
-                            ? descriptor_set->physical_register_view_count
-                            : (uint64_t)last_base / result_alignment + 1);
+      incoming.count +
+      (is_explicit
+           ? loom_low_allocation_storage_explicit_location_candidate_count(
+                 descriptor_set, capacity.descriptor_reg_class_id,
+                 result_interval->unit_count)
+           : (uint64_t)last_base / result_alignment + 1);
   for (uint64_t candidate_index = 0; candidate_index < candidate_count;
        ++candidate_index) {
     uint32_t base = 0;
@@ -494,15 +501,16 @@ loom_low_allocation_concat_reservation_find_location_for_source(
         continue;
       }
     } else if (is_explicit) {
-      const loom_low_physical_register_view_t* view =
-          &descriptor_set
-               ->physical_register_views[candidate_index - incoming.count];
-      if (view->reg_class_id != capacity.descriptor_reg_class_id ||
-          view->unit_count != result_interval->unit_count) {
-        continue;
-      }
-      base = view->physical_register_id;
-      if (!loom_low_allocation_target_constraints_location_range_fits_capacity(
+      const uint64_t explicit_candidate_index =
+          candidate_index - incoming.count;
+      if (!loom_low_allocation_storage_explicit_location_candidate(
+              descriptor_set, capacity.descriptor_reg_class_id,
+              result_interval->unit_count, (uint32_t)explicit_candidate_index,
+              &base, /*out_first_candidate_ordinal=*/NULL,
+              /*out_pressure_extent=*/NULL,
+              /*out_packing_rank=*/NULL) ||
+          (uses_candidate_ordinals && base % result_alignment != 0) ||
+          !loom_low_allocation_target_constraints_location_range_fits_capacity(
               descriptor_set, &capacity, capacity.location_kind, base,
               result_interval->unit_count)) {
         continue;

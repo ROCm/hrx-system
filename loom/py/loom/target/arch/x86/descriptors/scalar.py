@@ -1000,14 +1000,22 @@ X86_SCALAR_DESCRIPTOR_SET = DescriptorSet(
             _REG_GPR32,
             32,
             SpillSlotSpace.STACK,
-            flags=(RegClassFlag.PHYSICAL, RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS),
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+                RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+            ),
             physical_registers=_GPR_NAMES,
         ),
         RegClass(
             _REG_GPR64,
             64,
             SpillSlotSpace.STACK,
-            flags=(RegClassFlag.PHYSICAL, RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS),
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+                RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+            ),
             physical_registers=_GPR_NAMES,
         ),
         *(

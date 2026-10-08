@@ -77,6 +77,7 @@ _REG_ALIAS64 = "test.alias64"
 _REG_PRESSURE_ALIAS32 = "test.pressure.alias32"
 _REG_PRESSURE_ALIAS64 = "test.pressure.alias64"
 _REG_EXPLICIT32 = "test.explicit32"
+_REG_EXPLICIT_RANGE32 = "test.explicit_range32"
 _REG_SPILLABLE_EXPLICIT32 = "test.spillable.explicit32"
 _REG_FIXED_R0 = "test.fixed.r0"
 _REG_FIXED_R2 = "test.fixed.r2"
@@ -2227,6 +2228,22 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
                 RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
             ),
             physical_registers=("test.r2",),
+        ),
+        RegClass(
+            _REG_EXPLICIT_RANGE32,
+            32,
+            SpillSlotSpace.STACK,
+            flags=(
+                RegClassFlag.PHYSICAL,
+                RegClassFlag.EXPLICIT_PHYSICAL_REGISTERS,
+                RegClassFlag.CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
+            ),
+            physical_registers=(
+                "test.r1",
+                "test.r0",
+                "test.r3",
+                "test.r2",
+            ),
         ),
     ),
     physical_registers=(

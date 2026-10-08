@@ -80,9 +80,21 @@ bool loom_low_allocation_unit_liveness_clobber_conflicts(
   const bool is_explicit =
       loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, candidate);
-  if (is_explicit) {
+  const bool uses_candidate_ordinals =
+      is_explicit &&
+      loom_low_allocation_storage_assignment_uses_physical_candidate_ordinals(
+          descriptor_set, candidate);
+  if (is_explicit &&
+      (!uses_candidate_ordinals || candidate->location_count == 1)) {
+    uint32_t physical_register_id = candidate->location_base;
+    if (uses_candidate_ordinals) {
+      const bool resolved =
+          loom_low_allocation_storage_assignment_unit_physical_register(
+              descriptor_set, candidate, 0, &physical_register_id);
+      IREE_ASSERT_TRUE(resolved);
+    }
     const loom_low_physical_register_t* physical_register =
-        &descriptor_set->physical_registers[candidate->location_base];
+        &descriptor_set->physical_registers[physical_register_id];
     const uint16_t* atomic_units =
         &descriptor_set->physical_register_atomic_units
              [physical_register->atomic_unit_start];

@@ -134,6 +134,11 @@ TEST(X86RegisterClassesTest, ViewsPreserveRegisterVocabularyAndCapacity) {
         ASSERT_TRUE(found);
         EXPECT_EQ(class_id, storage_id);
         EXPECT_EQ(reg_class->allocatable_count, test_case.capacities[kind]);
+        EXPECT_EQ(
+            loom_low_reg_class_uses_contiguous_physical_register_candidates(
+                reg_class),
+            register_class == LOOM_X86_REGISTER_CLASS_GPR32 ||
+                register_class == LOOM_X86_REGISTER_CLASS_GPR64);
         IREE_ASSERT_OK(
             loom_low_build_register_type(descriptor_set, storage_id, 1, &type));
         EXPECT_EQ(loom_x86_logical_register_class(class_id), register_class);

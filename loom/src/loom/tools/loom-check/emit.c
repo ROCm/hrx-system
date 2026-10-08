@@ -1180,7 +1180,7 @@ static iree_status_t loom_check_emit_resolve_entry_locations(
     if (location->location_kind !=
             loom_low_allocation_storage_reg_class_location_kind(reg_class) ||
         (loom_low_reg_class_uses_explicit_physical_registers(reg_class)
-             ? !loom_low_allocation_storage_explicit_physical_register_view(
+             ? !loom_low_allocation_storage_explicit_physical_location(
                    descriptors, class_id, location->location_base, units,
                    &first_ordinal, &extent)
              : (uint64_t)location->location_base + units > UINT32_MAX)) {

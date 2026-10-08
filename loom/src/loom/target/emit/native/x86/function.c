@@ -34,6 +34,12 @@ typedef struct loom_x86_incoming_fixup_t {
 typedef struct loom_x86_function_builder_t {
   // Prepared output under construction.
   loom_x86_function_t* function;
+  // Function-lifetime arena owning the resizable instruction array.
+  iree_arena_allocator_t* arena;
+  // Allocated instruction-array capacity.
+  iree_host_size_t instruction_capacity;
+  // Baseline capacity plus multi-unit storage expansion seen so far.
+  iree_host_size_t required_instruction_capacity;
   // Source operation being prepared, used only for admission diagnostics.
   const loom_op_t* source_op;
   // Optional destination for source diagnostics; sink failures propagate.
@@ -818,12 +824,10 @@ static iree_status_t loom_x86_function_storage(
         builder, LOOM_ERR_X86_004,
         IREE_SV("a register transfer that fits within its storage span"));
   }
-  // Every current x86 register class owns one physical allocation unit.
-  IREE_ASSERT_EQ(assignment->location_count, 1u);
-  const loom_low_move_location_t location =
-      loom_low_allocation_assignment_unit_location(frame->target.descriptor_set,
-                                                   assignment, 0);
   if (is_address) {
+    const loom_low_move_location_t location =
+        loom_low_allocation_assignment_unit_location(
+            frame->target.descriptor_set, assignment, 0);
     loom_x86_function_append(
         builder->function, LOOM_X86_ENCODING_FORM_ADDRESS_DISPLACEMENT,
         0x8d | LOOM_X86_ENCODING_REX_W,
@@ -831,13 +835,32 @@ static iree_status_t loom_x86_function_storage(
                                        .result = (uint8_t)location.location,
                                        .inputs = {4}},
         UINT32_MAX);
-  } else {
+    return iree_ok_status();
+  }
+  if (assignment->location_count > 1) {
+    if (!iree_host_size_checked_add(builder->required_instruction_capacity,
+                                    assignment->location_count - 1,
+                                    &builder->required_instruction_capacity)) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "x86 instruction capacity exceeds host size");
+    }
+    IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+        builder->arena, builder->function->instruction_count,
+        builder->required_instruction_capacity,
+        sizeof(*builder->function->instructions),
+        &builder->instruction_capacity,
+        (void**)&builder->function->instructions));
+  }
+  for (uint32_t unit = 0; unit < assignment->location_count; ++unit) {
+    const loom_low_move_location_t location =
+        loom_low_allocation_assignment_unit_location(
+            frame->target.descriptor_set, assignment, unit);
     loom_x86_transport_instruction_t instruction;
-    loom_x86_transport_select_storage(is_store ? LOOM_X86_STORAGE_TRANSFER_STORE
-                                               : LOOM_X86_STORAGE_TRANSFER_LOAD,
-                                      location.descriptor_reg_class_id,
-                                      location.location, 4,
-                                      (int32_t)byte_offset, &instruction);
+    loom_x86_transport_select_storage(
+        is_store ? LOOM_X86_STORAGE_TRANSFER_STORE
+                 : LOOM_X86_STORAGE_TRANSFER_LOAD,
+        location.descriptor_reg_class_id, location.location, 4,
+        (int32_t)(byte_offset + unit * unit_bytes), &instruction);
     loom_x86_function_append_transport(builder->function, &instruction);
   }
   return iree_ok_status();
@@ -989,7 +1012,8 @@ iree_status_t loom_x86_function_prepare(
   }
   // A descriptor is one encoding record; a return or conditional branch needs
   // at most two. Allocation retains the exact number of final physical moves,
-  // including multi-unit transport and cycle scratch.
+  // including multi-unit transport and cycle scratch. Rare multi-unit storage
+  // packets grow this baseline geometrically as they are emitted.
   const iree_host_size_t capacity =
       schedule->scheduled_node_count + schedule->block_count +
       frame->allocation.move_count + 2u * outgoing_count + 3u * incoming_count +
@@ -998,6 +1022,9 @@ iree_status_t loom_x86_function_prepare(
       2u * indirect_result_count * frame->allocation.exit_move_count;
   loom_x86_function_builder_t builder = {
       .function = &function,
+      .arena = arena,
+      .instruction_capacity = capacity,
+      .required_instruction_capacity = capacity,
       .source_op = frame->function_op,
       .emitter = emitter,
       .function_abi = function_abi,

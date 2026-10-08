@@ -2828,7 +2828,9 @@ static iree_status_t loom_low_verify_reg_class(
       LOOM_LOW_REG_CLASS_FLAG_VIRTUAL_ONLY | LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
           LOOM_LOW_REG_CLASS_FLAG_REFERENCE |
           LOOM_LOW_REG_CLASS_FLAG_UNSPILLABLE |
-          LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
+          LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
+          LOOM_LOW_REG_CLASS_FLAG_EVEN_ALIGNED_TUPLES |
+          LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES,
       "register class", reg_class_index));
   IREE_RETURN_IF_ERROR(loom_low_verify_required_string(
       descriptor_set, reg_class->name_string_ref, "reg_class.name"));
@@ -2857,6 +2859,9 @@ static iree_status_t loom_low_verify_reg_class(
       iree_all_bits_set(reg_class->flags, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
   const bool uses_explicit_physical_registers = iree_all_bits_set(
       reg_class->flags, LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS);
+  const bool uses_contiguous_physical_register_candidates = iree_all_bits_set(
+      reg_class->flags,
+      LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES);
   if (is_virtual_only == is_physical) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -2888,6 +2893,15 @@ static iree_status_t loom_low_verify_reg_class(
         IREE_STATUS_INVALID_ARGUMENT,
         "low register class %" PRIu32
         " uses explicit physical registers without the physical flag",
+        reg_class_index);
+  }
+  if (uses_contiguous_physical_register_candidates &&
+      !uses_explicit_physical_registers) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low register class %" PRIu32
+        " uses contiguous physical register candidates without explicit "
+        "physical registers",
         reg_class_index);
   }
   if (uses_explicit_physical_registers &&
@@ -3017,6 +3031,13 @@ static iree_status_t loom_low_verify_physical_register_view(
       "physical_register_view_unit_candidate_ordinals"));
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[view->reg_class_id];
+  if (loom_low_reg_class_uses_contiguous_physical_register_candidates(
+          reg_class)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "low physical register view %" PRIu32
+                            " references a contiguous-candidate register class",
+                            physical_register_view_index);
+  }
   for (uint16_t i = 0; i < view->unit_count; ++i) {
     const uint16_t candidate_ordinal =
         descriptor_set->physical_register_view_unit_candidate_ordinals

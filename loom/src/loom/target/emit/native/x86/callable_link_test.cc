@@ -26,6 +26,11 @@ extern "C" uint64_t load_word(uint64_t unused, const uint64_t* input,
 extern "C" uint64_t add_word(uint32_t word, uint64_t bias);
 extern "C" uint32_t divide_mix(uint64_t unused_first, uint64_t unused_second,
                                uint32_t word);
+extern "C" uint64_t stored_pair(uint64_t first, uint64_t second);
+extern "C" uint32_t stored_eleven32(uint32_t v0, uint32_t v1, uint32_t v2,
+                                    uint32_t v3, uint32_t v4, uint32_t v5,
+                                    uint32_t v6, uint32_t v7, uint32_t v8,
+                                    uint32_t v9, uint32_t v10);
 extern "C" uint32_t replace_narrow(uint8_t* bytes, uint16_t* words,
                                    uint64_t index, uint32_t replacement);
 extern "C" uint64_t high_mix(uint64_t unused, uint64_t factor, uint64_t word);
@@ -367,6 +372,11 @@ TEST(NativeCallableTest, StackStorageAndAllocationSpills) {
     ASSERT_EQ(pressure32(narrow.data()), narrow_sum);
     ASSERT_EQ(storage_spaces(wide[0], narrow[0]),
               wide[0] ^ (wide[0] + 258) ^ narrow[0]);
+    ASSERT_EQ(stored_pair(wide[0], wide[1]), wide[0] - wide[1]);
+    ASSERT_EQ(stored_eleven32(narrow[0], narrow[1], narrow[2], narrow[3],
+                              narrow[4], narrow[5], narrow[6], narrow[7],
+                              narrow[8], narrow[9], narrow[10]),
+              narrow[0] ^ narrow[10]);
     ASSERT_EQ(local_pair(wide[0], wide[1], 0), wide[0]);
     ASSERT_EQ(local_pair(wide[0], wide[1], 1), wide[1]);
   }
