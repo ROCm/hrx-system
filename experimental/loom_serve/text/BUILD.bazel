@@ -204,6 +204,28 @@ loom_cc_test(
 )
 
 loom_cc_binary(
+    name = "epoch_check",
+    testonly = True,
+    srcs = ["epoch_check.cc"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":chat",
+        ":flags",
+        ":model",
+        "//experimental/loom_serve/runtime:device_flags",
+        "//experimental/loom_serve/runtime:host",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_binary(
     name = "request_check",
     testonly = True,
     srcs = ["request_check.c"],

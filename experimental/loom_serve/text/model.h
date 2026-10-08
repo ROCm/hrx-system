@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_LOOM_SERVE_TEXT_MODEL_H_
 
 #include "experimental/loom_serve/runtime/device.h"
+#include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/storage/memory.h"
 #include "experimental/loom_serve/text/chat.h"
@@ -22,11 +23,14 @@ extern "C" {
 // One packed autoregressive model residency. A single host owner multiplexes
 // retained rows through the same VM process, commands and weights. Private
 // command workspace is borrowed from the shared device execution pool.
-// Calls wait for their result; no row-local VM or thread is required. This
-// runner-private interface exposes model work and shared source policy, not
-// network sessions. Input-capacity rejection submits no work. An
-// execution/submission failure ends the run: destroy drains accepted work
-// before any host payload is reused.
+// Packed epochs separate submission from successful completion; no row-local
+// VM or thread is required. The owner excludes other model mutation until
+// completion, but independent models may execute concurrently. Synchronous
+// convenience and maintenance calls join only on an outer application thread.
+// This runner-private interface exposes model work and shared source policy,
+// not network sessions. Input-capacity rejection submits no work. An execution
+// or submission failure ends the run: destroy drains accepted work before any
+// host payload is reused.
 typedef struct loom_serve_text_model_t loom_serve_text_model_t;
 typedef struct loom_serve_text_row_t loom_serve_text_row_t;
 typedef struct loom_serve_text_checkpoint_t loom_serve_text_checkpoint_t;
@@ -74,7 +78,7 @@ enum loom_serve_text_span_flag_bits_e {
   LOOM_SERVE_TEXT_SPAN_FLAG_SELECT = 1u << 0,
   // Generate three candidates on device before verification. The span reserves
   // four inputs but token_ids supplies only the pending anchor. Requires SELECT
-  // and a nonzero output limit in model_verify.
+  // and a nonzero output limit in the epoch plan.
   LOOM_SERVE_TEXT_SPAN_FLAG_PROPOSE = 1u << 1,
 };
 typedef uint32_t loom_serve_text_span_flags_t;
@@ -285,21 +289,14 @@ iree_host_size_t loom_serve_text_model_shape_count(
 const loom_serve_packing_shape_t* loom_serve_text_model_shapes(
     const loom_serve_text_model_t* model);
 
-// Advances distinct resident rows in one packed model traversal. The nonempty
-// span list and its total token count must fit the prepared capacities, and
-// each span must fit its row's remaining context. Validation rejects the whole
-// epoch before submission. Completion commits positions and selected tokens;
-// execution failure ends the run and destroy drains all accepted work.
-// Weights, commands and VM state are reused. Elastic backing grows only when
-// activating new row/page ranges; resident work allocates no physical memory.
-iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
-                                          iree_host_size_t shape_index,
-                                          iree_host_size_t span_count,
-                                          const loom_serve_text_span_t* spans);
-
-// Mixes ordinary known spans with four-input speculative spans on one cached
-// target shape. An optional continuation issues a second mixed plan without
-// an intermediate host wait. A zero output limit denotes known input.
+// Enqueues distinct resident rows in one packed traversal without a host wait.
+// The nonempty span list and total token count must fit the prepared shape,
+// and each span must fit its row's remaining context. Validation rejects the
+// whole plan before submission. NULL output_limits selects ordinary known
+// input and requires NULL continuation. Non-NULL output_limits requires MTP
+// and mixes known input with four-input speculative spans. An optional
+// continuation enqueues a second mixed plan without an intermediate host wait.
+// A zero output limit denotes known input.
 // Limits 1 through 4 (8 with continuation) denote speculative input, require
 // SELECT and a pending non-EOS prediction, and cap the number of new selected
 // outputs. PROPOSE spans supply only the pending token: three draft rounds
@@ -308,12 +305,43 @@ iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
 // at the first mismatch, EOS, or limit. Only accepted state is published;
 // catch-up pairs accepted inputs with target hidden state. Proposal,
 // verification, commit and catch-up have no intermediate host wait or readback.
-// Only completed output/progress records cross back to the caller. Each known
-// input chunk executes once. Continuation advances known chunks or promotes a
-// selected first result to speculation, stopping speculative work at EOS,
-// output credit or context bound. All inputs are copied before submission.
-// Results are in caller order and valid on success. Validation and submission
-// failure have the same contracts as model_epoch.
+// Each known input chunk executes once. Continuation advances known chunks or
+// promotes a selected first result to speculation, stopping speculative work
+// at EOS, output credit or context bound.
+//
+// Accepted inputs and publication metadata are copied before return. Caller
+// storage may be reused immediately, even on submission failure. Success
+// returns a borrowed work/feedback frontier, not completed row state. The model
+// owns one outstanding invocation and its parameter pin until complete_epoch.
+// The owner excludes other model mutation and retains the model through both
+// the asynchronous ALL wait and completion consumption. Failure preserves
+// accepted work and ownership for
+// outer model destruction; it never waits or releases pins from this call.
+// Weights, commands and VM state are reused. Elastic backing grows only when
+// activating new row/page ranges; resident work allocates no physical memory.
+iree_status_t loom_serve_text_model_submit_epoch(
+    loom_serve_text_model_t* model, iree_host_size_t shape_index,
+    iree_host_size_t span_count, const loom_serve_text_span_t* spans,
+    const uint32_t* output_limits,
+    const loom_serve_text_continuation_t* continuation,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes one successfully completed epoch after both submitted frontiers
+// signal success. Source VM publication commits row positions, returns rejected
+// state, and releases the invocation's parameter pin. Optional out_results has
+// the submitted span count and receives progress in caller order. No device
+// wait occurs. A failed wait must not call this entry; a VM publication error
+// also ends the run and preserves ownership for outer model destruction.
+iree_status_t loom_serve_text_model_complete_epoch(
+    loom_serve_text_model_t* model, loom_serve_text_result_t* out_results);
+
+// Synchronous outer-thread joins over submit_epoch and complete_epoch. Epoch
+// selects ordinary input; verify requires MTP and returns semantic progress.
+// These entry points are for CLI consumers, not task-worker execution.
+iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,
+                                          iree_host_size_t shape_index,
+                                          iree_host_size_t span_count,
+                                          const loom_serve_text_span_t* spans);
 iree_status_t loom_serve_text_model_verify(
     loom_serve_text_model_t* model, iree_host_size_t shape_index,
     iree_host_size_t span_count, const loom_serve_text_span_t* spans,

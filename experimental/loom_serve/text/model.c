@@ -48,6 +48,12 @@ enum {
   TEXT_HOST_BUFFER_COUNT = 10,
 };
 
+enum text_epoch_flag_bits_e {
+  TEXT_EPOCH_FLAG_VERIFY = 1u << 0,
+  TEXT_EPOCH_FLAG_CONTINUATION = 1u << 1,
+};
+typedef uint32_t text_epoch_flags_t;
+
 typedef struct text_stage_t {
   // Owned JIT command image and loaded executable entries.
   loom_serve_jit_stage_t* compiled;
@@ -139,6 +145,19 @@ struct loom_serve_text_model_t {
     // Stable writable mappings, valid for the corresponding buffer lifetime.
     iree_byte_span_t bytes[TEXT_HOST_BUFFER_COUNT];
   } host;
+  // Publication facts retained independently of the submitting caller's plan.
+  // One invocation owns the reusable host buffers and a residency pin until
+  // successful completion; terminal failure retains them for destruction.
+  struct {
+    // Number of first-plan spans, zero after successful completion.
+    iree_host_size_t span_count;
+    // Resident row identity in first-plan caller order.
+    iree_host_size_t row_indices[TEXT_ROW_CAPACITY];
+    // Source publication mode selected by the submitted plan.
+    text_epoch_flags_t flags;
+    // First-plan span bits with device-fed speculative continuation.
+    uint32_t continued_speculative_mask;
+  } invocation;
   // Tokenizer owning its parsed vocabulary and encoding data.
   iree_tokenizer_t* tokenizer;
   // Token identifying the end of a generated assistant turn.
@@ -1205,14 +1224,22 @@ static iree_host_size_t text_prepare_plan(loom_serve_text_model_t* model,
   return input_begin;
 }
 
-// One allocation-free cohort validates inputs, publishes immutable uploads,
-// invokes source-owned submissions, and joins the host publication frontier.
-static iree_status_t text_epoch(
+iree_status_t loom_serve_text_model_submit_epoch(
     loom_serve_text_model_t* model, iree_host_size_t shape_index,
     iree_host_size_t span_count, const loom_serve_text_span_t* spans,
     const uint32_t* output_limits,
     const loom_serve_text_continuation_t* continuation,
-    loom_serve_text_result_t* out_results) {
+    loom_serve_execution_frontier_t* out_frontier) {
+  *out_frontier = (loom_serve_execution_frontier_t){0};
+  if (continuation && !output_limits) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "continuation requires MTP output limits");
+  }
+  if (output_limits &&
+      !iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP)) {
+    return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
+                            "MTP artifacts were not loaded");
+  }
   if (shape_index >= model->shape_count) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "packed text shape index is not loaded");
@@ -1370,6 +1397,13 @@ static iree_status_t text_epoch(
                             required_blocks, model->state.cache.pool.available);
   }
   IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
+  model->invocation.span_count = span_count;
+  model->invocation.flags = (output_limits ? TEXT_EPOCH_FLAG_VERIFY : 0) |
+                            (continuation ? TEXT_EPOCH_FLAG_CONTINUATION : 0);
+  model->invocation.continued_speculative_mask = continued_speculative_mask;
+  for (iree_host_size_t i = 0; i < span_count; ++i) {
+    model->invocation.row_indices[i] = spans[i].row_index;
+  }
   iree_status_t status =
       loom_serve_text_state_grow(&model->state, span_count, spans, extents);
   if (iree_status_is_ok(status)) {
@@ -1455,18 +1489,24 @@ static iree_status_t text_epoch(
                          iree_vm_variant_span_from_array(results));
   }
   iree_vm_variant_span_reset(iree_vm_variant_span_from_array(results));
-  // The synchronous model boundary joins catch-up and feedback independently
-  // before publishing host positions or reusing either branch's payloads,
-  // including when a later native call rejects after earlier submissions.
-  status =
-      iree_status_join(status, loom_serve_execution_drain(model->execution));
+  if (iree_status_is_ok(status)) {
+    *out_frontier = loom_serve_execution_frontier(model->execution);
+  }
+  return status;
+}
+
+iree_status_t loom_serve_text_model_complete_epoch(
+    loom_serve_text_model_t* model, loom_serve_text_result_t* out_results) {
   iree_vm_variant_t publish_arguments[] = {
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->vm_types, model->host.buffers[TEXT_HOST_PLAN]),
-      iree_vm_variant_from_i32((int32_t)span_count),
-      iree_vm_variant_from_i32(output_limits != NULL),
-      iree_vm_variant_from_i32(continuation != NULL),
-      iree_vm_variant_from_i32((int32_t)continued_speculative_mask),
+      iree_vm_variant_from_i32((int32_t)model->invocation.span_count),
+      iree_vm_variant_from_i32(
+          iree_any_bit_set(model->invocation.flags, TEXT_EPOCH_FLAG_VERIFY)),
+      iree_vm_variant_from_i32(iree_any_bit_set(model->invocation.flags,
+                                                TEXT_EPOCH_FLAG_CONTINUATION)),
+      iree_vm_variant_from_i32(
+          (int32_t)model->invocation.continued_speculative_mask),
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->vm_types, model->host.buffers[TEXT_HOST_OUTPUTS]),
       iree_vm_buffer_variant_from_ptr_borrowed(
@@ -1476,13 +1516,11 @@ static iree_status_t text_epoch(
       iree_vm_buffer_variant_from_ptr_borrowed(
           &model->vm_types, model->host.buffers[TEXT_HOST_PROGRESS]),
   };
-  if (iree_status_is_ok(status)) {
-    status = text_invoke(model, model->publish_epoch,
-                         iree_vm_variant_span_from_array(publish_arguments),
-                         iree_vm_variant_span_empty());
-  }
-  for (iree_host_size_t i = 0; i < span_count && iree_status_is_ok(status);
-       ++i) {
+  IREE_RETURN_IF_ERROR(
+      text_invoke(model, model->publish_epoch,
+                  iree_vm_variant_span_from_array(publish_arguments),
+                  iree_vm_variant_span_empty()));
+  for (iree_host_size_t i = 0; i < model->invocation.span_count; ++i) {
     const uint8_t* record =
         model->host.bytes[TEXT_HOST_PROGRESS].data + i * 12 * sizeof(int32_t);
     loom_serve_text_result_t result = {
@@ -1498,7 +1536,7 @@ static iree_status_t text_epoch(
     if (out_results) {
       out_results[i] = result;
     }
-    loom_serve_text_row_t* row = &model->rows[spans[i].row_index];
+    loom_serve_text_row_t* row = &model->rows[model->invocation.row_indices[i]];
     row->state->position += result.consumed_count;
     loom_serve_text_state_row_trim(row->state);
     row->has_prediction = result.output_count != 0;
@@ -1508,7 +1546,23 @@ static iree_status_t text_epoch(
       row->transfer.progress[7] = row->transfer.tokens[0] == model->eos_token;
     }
   }
-  return loom_serve_residency_finish(model->residency, status);
+  model->invocation.span_count = 0;
+  loom_serve_residency_release(model->residency);
+  return iree_ok_status();
+}
+
+static iree_status_t text_epoch(
+    loom_serve_text_model_t* model, iree_host_size_t shape_index,
+    iree_host_size_t span_count, const loom_serve_text_span_t* spans,
+    const uint32_t* output_limits,
+    const loom_serve_text_continuation_t* continuation,
+    loom_serve_text_result_t* out_results) {
+  loom_serve_execution_frontier_t frontier;
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_submit_epoch(
+      model, shape_index, span_count, spans, output_limits, continuation,
+      &frontier));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(model->execution));
+  return loom_serve_text_model_complete_epoch(model, out_results);
 }
 
 iree_status_t loom_serve_text_model_epoch(loom_serve_text_model_t* model,

@@ -210,6 +210,27 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_binary(
+  NAME
+    epoch_check
+  SRCS
+    "epoch_check.cc"
+  DEPS
+    ::chat
+    ::flags
+    ::model
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::tooling::flags
+    iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host
+    iree::task
+  TESTONLY
+)
+endif()
+
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(
   NAME
