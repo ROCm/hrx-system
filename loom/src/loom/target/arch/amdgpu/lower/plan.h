@@ -2046,12 +2046,12 @@ typedef struct loom_amdgpu_prefetch_plan_t {
   loom_string_id_t count_attr_name_id;
   // Target-independent source memory access plan being wrapped.
   loom_low_source_memory_access_plan_t source;
-  // Target operand path selected for the source dynamic address term.
-  loom_amdgpu_memory_dynamic_index_kind_t dynamic_term_kind;
+  // Whether the source dynamic address term is added to the scalar base.
+  bool has_dynamic_base_offset;
   // Static offset value encoded in the descriptor offset immediate.
   int64_t immediate_offset;
-  // Static byte offset materialized through the scalar SOFFSET operand.
-  uint32_t scalar_byte_offset;
+  // Static byte offset materialized into the scalar base address.
+  uint32_t scalar_base_byte_offset;
   // Prefetch span count encoded in the descriptor count immediate.
   uint32_t count;
 } loom_amdgpu_prefetch_plan_t;

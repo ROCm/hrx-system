@@ -41,17 +41,9 @@ static iree_string_view_t loom_amdgpu_prefetch_locality_name(uint8_t locality) {
   return IREE_SV("invalid");
 }
 
-static iree_string_view_t loom_amdgpu_prefetch_dynamic_index_kind_name(
-    loom_amdgpu_memory_dynamic_index_kind_t kind) {
-  switch (kind) {
-    case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_NONE:
-      return IREE_SV("none");
-    case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_VADDR:
-      return IREE_SV("vaddr");
-    case LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET:
-      return IREE_SV("soffset");
-  }
-  return IREE_SV("invalid");
+static iree_string_view_t loom_amdgpu_prefetch_dynamic_index_name(
+    const loom_amdgpu_prefetch_plan_t* plan) {
+  return plan->has_dynamic_base_offset ? IREE_SV("sbase") : IREE_SV("none");
 }
 
 static bool loom_amdgpu_prefetch_static_offset_split(
@@ -62,14 +54,17 @@ static bool loom_amdgpu_prefetch_static_offset_split(
     return false;
   }
   const uint64_t static_byte_offset = (uint64_t)plan->source.static_byte_offset;
+  // The prefetch address ignores the two LSBs of each component (RDNA4 ISA
+  // 8.5). Keep a split immediate 4-byte aligned so the remainder carries them.
   const uint64_t immediate_offset =
-      iree_min(static_byte_offset, offset_info->unsigned_max);
-  const uint64_t scalar_byte_offset = static_byte_offset - immediate_offset;
-  if (scalar_byte_offset > UINT32_MAX) {
+      iree_min(static_byte_offset, offset_info->unsigned_max & ~(uint64_t)3);
+  const uint64_t scalar_base_byte_offset =
+      static_byte_offset - immediate_offset;
+  if (scalar_base_byte_offset > UINT32_MAX) {
     return false;
   }
   plan->immediate_offset = (int64_t)immediate_offset;
-  plan->scalar_byte_offset = (uint32_t)scalar_byte_offset;
+  plan->scalar_base_byte_offset = (uint32_t)scalar_base_byte_offset;
   return loom_amdgpu_source_memory_offset_fits_u32(
       &plan->source, plan->source.static_byte_offset);
 }
@@ -100,14 +95,14 @@ static bool loom_amdgpu_prefetch_select_dynamic_index(
 
   switch (term->source) {
     case LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKGROUP_ID:
-      plan->dynamic_term_kind = LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET;
+      plan->has_dynamic_base_offset = true;
       return true;
     case LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_VALUE:
       if (loom_amdgpu_analyzed_source_value_prefers_vgpr(
               module, fact_table, view_regions, analysis, term->index)) {
         return false;
       }
-      plan->dynamic_term_kind = LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET;
+      plan->has_dynamic_base_offset = true;
       return true;
     case LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_WORKITEM_ID:
     case LOOM_LOW_SOURCE_MEMORY_DYNAMIC_INDEX_SOURCE_NONE:
@@ -127,8 +122,9 @@ static bool loom_amdgpu_view_prefetch_count(const loom_op_t* source_op,
     case LOOM_VIEW_PREFETCH_LOCALITY_L3:
       // AMDGPU data-prefetch packets expose a span count, not a portable cache
       // locality selector. The source locality chooses whether to prefetch; the
-      // packet span stays at the minimal representable value.
-      *out_count = 1;
+      // packet span stays at the minimal representable value. The count is
+      // zero-based: 0 selects one 128-byte line.
+      *out_count = 0;
       return true;
     case LOOM_VIEW_PREFETCH_LOCALITY_COUNT_:
       break;
@@ -175,7 +171,7 @@ static bool loom_amdgpu_prefetch_select_source(
   }
 
   const uint32_t descriptor_ordinal = loom_amdgpu_descriptor_ref_ordinal(
-      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_BUFFER_PREFETCH_DATA);
+      descriptor_set, LOOM_AMDGPU_DESCRIPTOR_REF_S_PREFETCH_DATA);
   if (descriptor_ordinal == LOOM_LOW_DESCRIPTOR_ORDINAL_NONE) {
     *out_decision_key = IREE_SV("prefetch.descriptor_missing");
     return false;
@@ -185,8 +181,8 @@ static bool loom_amdgpu_prefetch_select_source(
   IREE_ASSERT(descriptor != NULL);
   loom_amdgpu_descriptor_offset_immediate_info_t offset_info = {0};
   if (!loom_amdgpu_descriptor_offset_immediate_info(
-          descriptor_set, descriptor_ordinal, 1,
-          LOOM_LOW_IMMEDIATE_KIND_UNSIGNED, &offset_info)) {
+          descriptor_set, descriptor_ordinal, 1, LOOM_LOW_IMMEDIATE_KIND_SIGNED,
+          &offset_info)) {
     *out_decision_key = IREE_SV("prefetch.offset_immediate");
     return false;
   }
@@ -221,7 +217,7 @@ static bool loom_amdgpu_prefetch_select_source(
 
   out_plan->descriptor_ordinal = descriptor_ordinal;
   *out_descriptor = descriptor;
-  *out_decision_key = IREE_SV("prefetch.s_buffer_prefetch_data");
+  *out_decision_key = IREE_SV("prefetch.s_prefetch_data");
   return true;
 }
 
@@ -290,9 +286,8 @@ iree_status_t loom_amdgpu_record_view_prefetch_diagnostic(
       loom_amdgpu_prefetch_locality_name(
           loom_view_prefetch_locality(source_op)),
       decision_key, selected ? IREE_SV("selected") : IREE_SV("dropped"),
-      packet_key, plan.immediate_offset, plan.scalar_byte_offset,
-      loom_amdgpu_prefetch_dynamic_index_kind_name(plan.dynamic_term_kind),
-      plan.count);
+      packet_key, plan.immediate_offset, plan.scalar_base_byte_offset,
+      loom_amdgpu_prefetch_dynamic_index_name(&plan), plan.count);
 }
 
 iree_status_t loom_amdgpu_select_view_prefetch_plan(
@@ -311,9 +306,8 @@ iree_status_t loom_amdgpu_lower_view_prefetch(
       &low_resource));
 
   const loom_value_id_t dynamic_index =
-      plan->dynamic_term_kind == LOOM_AMDGPU_MEMORY_DYNAMIC_INDEX_SOFFSET
-          ? plan->source.dynamic_terms[0].index
-          : LOOM_VALUE_ID_INVALID;
+      plan->has_dynamic_base_offset ? plan->source.dynamic_terms[0].index
+                                    : LOOM_VALUE_ID_INVALID;
   const int64_t dynamic_index_byte_stride =
       dynamic_index == LOOM_VALUE_ID_INVALID
           ? 1
@@ -322,10 +316,30 @@ iree_status_t loom_amdgpu_lower_view_prefetch(
       dynamic_index == LOOM_VALUE_ID_INVALID
           ? LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE
           : plan->source.dynamic_terms[0].byte_shift;
+  // SOFFSET contributes to the prefetch span, not its address. Keep it zero
+  // for the minimal span and add uniform address terms to the pointer base.
+  loom_value_id_t low_base = low_resource;
+  if (dynamic_index != LOOM_VALUE_ID_INVALID ||
+      plan->scalar_base_byte_offset != 0) {
+    loom_value_id_t low_address_offset = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_byte_offset(
+        context, source_op, dynamic_index, dynamic_index_byte_stride,
+        dynamic_index_byte_shift, plan->scalar_base_byte_offset,
+        &low_address_offset));
+    loom_value_id_t shifted_words[2];
+    IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr64_add_u32_offset(
+        context, source_op, low_resource, low_address_offset, shifted_words));
+    loom_type_t base_type = loom_type_none();
+    IREE_RETURN_IF_ERROR(
+        loom_amdgpu_make_sgpr_range_type(context, 2, &base_type));
+    IREE_RETURN_IF_ERROR(loom_amdgpu_build_low_register_range(
+        context, source_op, shifted_words, IREE_ARRAYSIZE(shifted_words),
+        base_type, &low_base));
+  }
   loom_value_id_t low_soffset = LOOM_VALUE_ID_INVALID;
   IREE_RETURN_IF_ERROR(loom_amdgpu_emit_sgpr_byte_offset(
-      context, source_op, dynamic_index, dynamic_index_byte_stride,
-      dynamic_index_byte_shift, plan->scalar_byte_offset, &low_soffset));
+      context, source_op, LOOM_VALUE_ID_INVALID, 1,
+      LOOM_LOW_SOURCE_MEMORY_ACCESS_BYTE_SHIFT_NONE, 0, &low_soffset));
 
   loom_named_attr_t attrs[] = {
       {
@@ -337,11 +351,8 @@ iree_status_t loom_amdgpu_lower_view_prefetch(
           .value = loom_attr_i64(plan->count),
       },
   };
-  loom_value_id_t low_descriptor = LOOM_VALUE_ID_INVALID;
-  IREE_RETURN_IF_ERROR(loom_amdgpu_emit_hal_buffer_descriptor(
-      context, source_op, low_resource, &plan->source, &low_descriptor));
   loom_value_id_t operands[] = {
-      low_descriptor,
+      low_base,
       low_soffset,
   };
   loom_op_t* low_op = NULL;

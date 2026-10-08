@@ -525,7 +525,7 @@ def _s_prefetch_overlay(
         operands=tuple(operands),
         immediate_fields=("IOFFSET", "SDATA"),
         immediates=(
-            _offset_immediate(24),
+            _signed_offset_immediate(24),
             _PREFETCH_COUNT_IMMEDIATE,
         ),
         effects=(effect,),
