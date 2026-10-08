@@ -8,7 +8,9 @@
 
 #include "loom/ir/local_value_domain.h"
 #include "loom/ir/value_refs.h"
+#include "loom/ops/buffer/ops.h"
 #include "loom/ops/cfg/ops.h"
+#include "loom/ops/index/ops.h"
 #include "loom/ops/scalar/ops.h"
 #include "loom/ops/special_values.h"
 #include "loom/pass/value_facts.h"
@@ -55,6 +57,18 @@ typedef struct loom_cfg_converge_replacement_t {
   iree_host_size_t capture;
 } loom_cfg_converge_replacement_t;
 
+typedef struct loom_cfg_converge_remat_t {
+  // A non-owning view reconstructed in each successor where it remains live.
+  loom_value_id_t value;
+  uint8_t arms;
+} loom_cfg_converge_remat_t;
+
+typedef struct loom_cfg_converge_remat_replacement_t {
+  loom_use_t use;
+  iree_host_size_t remat;
+  uint8_t arm;
+} loom_cfg_converge_remat_replacement_t;
+
 typedef struct loom_cfg_converge_plan_t {
   // Module containing the selected decision.
   loom_module_t* module;
@@ -88,6 +102,12 @@ typedef struct loom_cfg_converge_plan_t {
   iree_host_size_t replacement_count;
   // Reserved replacement operand capacity.
   iree_host_size_t replacement_capacity;
+  loom_cfg_converge_remat_t* remats;
+  iree_host_size_t remat_count;
+  uint32_t* remat_indices;
+  loom_cfg_converge_remat_replacement_t* remat_replacements;
+  iree_host_size_t remat_replacement_count;
+  iree_host_size_t remat_replacement_capacity;
   // Successor ordinal whose subtree is being inspected by the reference walk.
   uint8_t arm;
   // False when a capture cannot travel through an ordinary scalar argument.
@@ -162,6 +182,58 @@ static iree_status_t loom_cfg_converge_select(loom_cfg_converge_plan_t* plan,
   return iree_ok_status();
 }
 
+// A view may be rebuilt in its consuming successor instead of being carried
+// through a join with an invented inactive view. Restrict the recipe to pure
+// address operations whose leaves are available before the selected decision.
+static bool loom_cfg_converge_can_rematerialize(
+    const loom_cfg_converge_plan_t* plan, loom_value_id_t value_id,
+    uint8_t depth) {
+  if (depth == 16) {
+    return false;
+  }
+  const loom_value_t* value = loom_module_value(plan->module, value_id);
+  const loom_op_t* defining_op =
+      loom_value_is_block_arg(value) ? NULL : loom_value_def_op(value);
+  const loom_block_t* definition = loom_value_is_block_arg(value)
+                                       ? loom_value_def_block(value)
+                                   : defining_op ? defining_op->parent_block
+                                                 : NULL;
+  if (!definition || definition->parent_region != plan->facts->graph.region) {
+    return false;
+  }
+  if (loom_cfg_dominance_block_dominates(
+          &plan->facts->dominance, definition->region_index, plan->parent)) {
+    return true;
+  }
+  if (loom_value_is_block_arg(value) ||
+      loom_module_value_has_type_uses(plan->module, value_id) ||
+      loom_value_has_attribute_uses(value)) {
+    return false;
+  }
+  loom_type_use_iterator_t dependencies;
+  loom_module_value_type_dependencies(plan->module, value_id, &dependencies);
+  if (loom_type_users_next(&dependencies) != LOOM_VALUE_ID_INVALID) {
+    return false;
+  }
+  const loom_op_t* op = defining_op;
+  if (loom_index_constant_isa(op)) {
+    return true;
+  }
+  if (loom_index_add_isa(op)) {
+    return loom_cfg_converge_can_rematerialize(plan, loom_index_add_lhs(op),
+                                               depth + 1) &&
+           loom_cfg_converge_can_rematerialize(plan, loom_index_add_rhs(op),
+                                               depth + 1);
+  }
+  if (loom_buffer_view_isa(op)) {
+    return loom_cfg_converge_can_rematerialize(
+               plan, loom_buffer_view_buffer(op), depth + 1) &&
+           loom_cfg_converge_can_rematerialize(
+               plan, loom_buffer_view_byte_offset(op), depth + 1);
+  }
+  return false;
+}
+
 static iree_status_t loom_cfg_converge_capture(loom_value_id_t value_id,
                                                void* user_data) {
   loom_cfg_converge_plan_t* plan = user_data;
@@ -184,6 +256,19 @@ static iree_status_t loom_cfg_converge_capture(loom_value_id_t value_id,
   if (loom_cfg_dominance_block_dominates(
           dominance, plan->destinations[plan->arm], index) ||
       loom_cfg_dominance_block_dominates(dominance, index, plan->parent)) {
+    return iree_ok_status();
+  }
+  if (loom_type_is_view(value->type) &&
+      loom_cfg_converge_can_rematerialize(plan, value_id, 0)) {
+    loom_value_ordinal_t ordinal =
+        loom_local_value_domain_ordinal(&plan->domain, value_id);
+    uint32_t remat = plan->remat_indices[ordinal];
+    if (remat == UINT32_MAX) {
+      remat = (uint32_t)plan->remat_count++;
+      plan->remat_indices[ordinal] = remat;
+      plan->remats[remat].value = value_id;
+    }
+    plan->remats[remat].arms |= 1u << plan->arm;
     return iree_ok_status();
   }
   // Moving only the branch would break this reference's dominance. Scalar
@@ -211,9 +296,8 @@ static iree_status_t loom_cfg_converge_capture(loom_value_id_t value_id,
   return iree_ok_status();
 }
 
-static bool loom_cfg_converge_use_is_affected(
-    const loom_cfg_converge_plan_t* plan,
-    const loom_cfg_converge_capture_t* capture, loom_use_t use) {
+static uint8_t loom_cfg_converge_use_arm(const loom_cfg_converge_plan_t* plan,
+                                         uint8_t arms, loom_use_t use) {
   const loom_op_t* op = loom_use_user_op(use);
   // Nested-region operands inherit the containing CFG block's availability.
   while (op && op->parent_block &&
@@ -221,17 +305,17 @@ static bool loom_cfg_converge_use_is_affected(
     op = op->parent_op;
   }
   if (!op || !op->parent_block) {
-    return false;
+    return 2;
   }
   for (uint8_t arm = 0; arm < 2; ++arm) {
-    if ((capture->arms & (1u << arm)) &&
+    if ((arms & (1u << arm)) &&
         loom_cfg_dominance_block_dominates(&plan->facts->dominance,
                                            plan->destinations[arm],
                                            op->parent_block->region_index)) {
-      return true;
+      return arm;
     }
   }
-  return false;
+  return 2;
 }
 
 static iree_status_t loom_cfg_converge_preflight(
@@ -244,8 +328,17 @@ static iree_status_t loom_cfg_converge_preflight(
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
       plan->arena, plan->domain.value_count, sizeof(*plan->capture_indices),
       (void**)&plan->capture_indices));
+  IREE_RETURN_IF_ERROR(
+      iree_arena_allocate_array(plan->arena, plan->domain.value_count,
+                                sizeof(*plan->remats), (void**)&plan->remats));
+  IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
+      plan->arena, plan->domain.value_count, sizeof(*plan->remat_indices),
+      (void**)&plan->remat_indices));
+  memset(plan->remats, 0, plan->domain.value_count * sizeof(*plan->remats));
   memset(plan->capture_indices, 0xFF,
          plan->domain.value_count * sizeof(*plan->capture_indices));
+  memset(plan->remat_indices, 0xFF,
+         plan->domain.value_count * sizeof(*plan->remat_indices));
   plan->representable = true;
   const loom_cfg_dominance_t* dominance = &plan->facts->dominance;
   for (plan->arm = 0; plan->arm < 2 && plan->representable; ++plan->arm) {
@@ -277,7 +370,7 @@ static iree_status_t loom_cfg_converge_preflight(
     const loom_value_t* value = loom_module_value(plan->module, capture->value);
     const loom_use_t* uses = loom_value_uses(value);
     for (uint32_t j = 0; j < value->use_count; ++j) {
-      if (!loom_cfg_converge_use_is_affected(plan, capture, uses[j])) {
+      if (loom_cfg_converge_use_arm(plan, capture->arms, uses[j]) == 2) {
         continue;
       }
       IREE_RETURN_IF_ERROR(iree_arena_grow_array(
@@ -286,6 +379,25 @@ static iree_status_t loom_cfg_converge_preflight(
           (void**)&plan->replacements));
       plan->replacements[plan->replacement_count++] =
           (loom_cfg_converge_replacement_t){.use = uses[j], .capture = i};
+    }
+  }
+  for (iree_host_size_t i = 0; i < plan->remat_count; ++i) {
+    const loom_cfg_converge_remat_t* remat = &plan->remats[i];
+    const loom_value_t* value = loom_module_value(plan->module, remat->value);
+    const loom_use_t* uses = loom_value_uses(value);
+    for (uint32_t j = 0; j < value->use_count; ++j) {
+      uint8_t arm = loom_cfg_converge_use_arm(plan, remat->arms, uses[j]);
+      if (arm == 2) {
+        continue;
+      }
+      IREE_RETURN_IF_ERROR(iree_arena_grow_array(
+          plan->arena, plan->remat_replacement_count,
+          plan->remat_replacement_count + 1, sizeof(*plan->remat_replacements),
+          &plan->remat_replacement_capacity,
+          (void**)&plan->remat_replacements));
+      plan->remat_replacements[plan->remat_replacement_count++] =
+          (loom_cfg_converge_remat_replacement_t){
+              .use = uses[j], .remat = i, .arm = arm};
     }
   }
   return iree_ok_status();
@@ -321,6 +433,52 @@ static iree_status_t loom_cfg_converge_build_payload(
   return iree_ok_status();
 }
 
+static iree_status_t loom_cfg_converge_rematerialize(
+    loom_cfg_converge_plan_t* plan, loom_builder_t* builder,
+    loom_value_id_t original, loom_value_id_t* out_value) {
+  const loom_value_t* value = loom_module_value(plan->module, original);
+  const loom_block_t* definition = loom_value_is_block_arg(value)
+                                       ? loom_value_def_block(value)
+                                       : loom_value_def_op(value)->parent_block;
+  if (loom_cfg_dominance_block_dominates(
+          &plan->facts->dominance, definition->region_index, plan->parent)) {
+    *out_value = original;
+    return iree_ok_status();
+  }
+  const loom_op_t* source = loom_value_def_op(value);
+  loom_op_t* clone = NULL;
+  if (loom_index_constant_isa(source)) {
+    IREE_RETURN_IF_ERROR(
+        loom_index_constant_build(builder, loom_index_constant_value(source),
+                                  value->type, source->location, &clone));
+    *out_value = loom_index_constant_result(clone);
+  } else if (loom_index_add_isa(source)) {
+    loom_value_id_t lhs = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t rhs = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_cfg_converge_rematerialize(
+        plan, builder, loom_index_add_lhs(source), &lhs));
+    IREE_RETURN_IF_ERROR(loom_cfg_converge_rematerialize(
+        plan, builder, loom_index_add_rhs(source), &rhs));
+    IREE_RETURN_IF_ERROR(loom_index_add_build(builder, lhs, rhs, value->type,
+                                              source->location, &clone));
+    *out_value = loom_index_add_result(clone);
+  } else if (loom_buffer_view_isa(source)) {
+    loom_value_id_t buffer = LOOM_VALUE_ID_INVALID;
+    loom_value_id_t byte_offset = LOOM_VALUE_ID_INVALID;
+    IREE_RETURN_IF_ERROR(loom_cfg_converge_rematerialize(
+        plan, builder, loom_buffer_view_buffer(source), &buffer));
+    IREE_RETURN_IF_ERROR(loom_cfg_converge_rematerialize(
+        plan, builder, loom_buffer_view_byte_offset(source), &byte_offset));
+    IREE_RETURN_IF_ERROR(loom_buffer_view_build(
+        builder, buffer, byte_offset, value->type, source->location, &clone));
+    *out_value = loom_buffer_view_result(clone);
+  } else {
+    IREE_ASSERT_UNREACHABLE("preflight planned the rematerialization recipe");
+    IREE_BUILTIN_UNREACHABLE();
+  }
+  return iree_ok_status();
+}
+
 static iree_status_t loom_cfg_converge_apply(loom_cfg_converge_plan_t* plan,
                                              loom_rewriter_t* rewriter) {
   loom_builder_t* builder = &rewriter->builder;
@@ -329,6 +487,27 @@ static iree_status_t loom_cfg_converge_apply(loom_cfg_converge_plan_t* plan,
                                   loom_cfg_cond_br_false_dest(plan->branch)};
   loom_value_id_t selector = loom_cfg_cond_br_condition(plan->branch);
   loom_location_id_t location = plan->branch->location;
+  for (iree_host_size_t i = 0; i < plan->remat_count; ++i) {
+    for (uint8_t arm = 0; arm < 2; ++arm) {
+      if (!(plan->remats[i].arms & (1u << arm))) {
+        continue;
+      }
+      loom_builder_set_before(builder, destinations[arm]->first_op);
+      loom_value_id_t rematerialized = LOOM_VALUE_ID_INVALID;
+      IREE_RETURN_IF_ERROR(loom_cfg_converge_rematerialize(
+          plan, builder, plan->remats[i].value, &rematerialized));
+      for (iree_host_size_t j = 0; j < plan->remat_replacement_count; ++j) {
+        const loom_cfg_converge_remat_replacement_t* replacement =
+            &plan->remat_replacements[j];
+        if (replacement->remat != i || replacement->arm != arm) {
+          continue;
+        }
+        IREE_RETURN_IF_ERROR(loom_rewriter_set_operand(
+            rewriter, loom_use_user_op(replacement->use),
+            loom_use_operand_index(replacement->use), rematerialized));
+      }
+    }
+  }
   builder->ip.parent_op = plan->branch->parent_op;
   loom_block_t* join = NULL;
   IREE_RETURN_IF_ERROR(loom_region_insert_block(

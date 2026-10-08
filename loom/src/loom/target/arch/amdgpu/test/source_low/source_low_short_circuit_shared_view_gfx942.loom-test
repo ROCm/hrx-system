@@ -1,0 +1,54 @@
+// Copyright 2026 The IREE Authors
+//
+// Licensed under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+
+// RUN: with-checks emit source-low target=amdgpu:gfx942 output=low
+
+// A short-circuit OR shares one failure target. Its second operand loads
+// through the same buffer view that the success path loads and stores. Sinking
+// branch-local producers does not make this branch convergent; cfg-converge
+// must rebuild the view in the success path, or masked lowering rejects the
+// shared failure branch (masked_region_single_entry).
+
+amdgpu.target<gfx942> @target
+
+kernel.def target(@target) @short_circuit_shared_view() {
+  %one = index.constant 1 : index
+  %size = index.constant 64 : index
+  kernel.launch.config workgroups(%one, %one, %one) workgroup_size(%size, %one, %one) : index
+} launch(%cells: buffer, %limit: i32, %failure: buffer) {
+  %lane = kernel.workitem.id<x> : index
+  %lane_i32 = index.cast %lane : index to i32
+  %first_bad = scalar.cmpi sge, %lane_i32, %limit : i32
+  %bad = scf.if %first_bad -> (i1) {
+    scf.yield %first_bad : i1
+  } else {
+    %offset = index.constant 144 : offset
+    %view = buffer.view %cells[%offset] : buffer -> view<1xf64>
+    %value = view.load %view[0] : view<1xf64> -> f64
+    %zero = scalar.constant 0.0 : f64
+    %second_bad = scalar.cmpf ole, %value, %zero : f64
+    scf.yield %second_bad : i1
+  }
+  scf.if %bad {
+    %code_offset = index.constant 0 : offset
+    %code_view = buffer.view %failure[%code_offset] : buffer -> view<1xi32>
+    %code = scalar.constant -1 : i32
+    view.store %code, %code_view[0] : i32, view<1xi32>
+  } else {
+    %offset = index.constant 144 : offset
+    %view = buffer.view %cells[%offset] : buffer -> view<1xf64>
+    %value = view.load %view[0] : view<1xf64> -> f64
+    %twice = scalar.addf %value, %value : f64
+    view.store %twice, %view[0] : f64, view<1xf64>
+  }
+  kernel.return
+}
+
+// ----
+CHECK: low.kernel.def* @short_circuit_shared_view*
+CHECK: *global_load_dwordx2_saddr* {offset = 144}
+CHECK: *global_store_dword_saddr* %code_view
+CHECK: *global_store_dwordx2_saddr* %twice, *{offset = 144}

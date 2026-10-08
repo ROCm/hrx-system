@@ -219,12 +219,13 @@ func.def @nested_capture(%outer: i1, %inner: i1, %input: f32) {
 
 // RUN: pass cfg-converge,cfg-converge
 
-// Opaque live-ins retain their valid original CFG and ownership.
+// A non-owning view can be reconstructed in its consuming successor.
 func.def @opaque_capture(%outer: i1, %inner: i1, %input: buffer, %output: view<1xi32>) {
   cfg.cond_br %outer, ^evaluate, ^fallback
 ^evaluate:
-  %base = index.constant 0 : offset
-  %view = buffer.view %input[%base] : buffer -> view<1xi32>
+  %base = index.constant 4 : offset
+  %byte_offset = index.add %base, %base : offset
+  %view = buffer.view %input[%byte_offset] : buffer -> view<1xi32>
   cfg.cond_br %inner, ^selected, ^fallback
 ^selected:
   %value = view.load %view[0] : view<1xi32> -> i32
@@ -239,13 +240,23 @@ func.def @opaque_capture(%outer: i1, %inner: i1, %input: buffer, %output: view<1
 
 // ----
 func.def @opaque_capture(%outer: i1, %inner: i1, %input: buffer, %output: view<1xi32>) {
-  cfg.cond_br %outer, ^evaluate, ^fallback
+  cfg.cond_br %outer, ^evaluate, ^_bb2
 ^evaluate:
-  %base = index.constant 0 : offset
-  %view = buffer.view %input[%base] : buffer -> view<1xi32>
-  cfg.cond_br %inner, ^selected, ^fallback
+  %base = index.constant 4 : offset
+  %byte_offset = index.add %base, %base : offset
+  %view = buffer.view %input[%byte_offset] : buffer -> view<1xi32>
+  cfg.br ^_bb3(%inner: i1)
+^_bb2:
+  %13 = scalar.constant 0 : i1
+  cfg.br ^_bb3(%13: i1)
+^_bb3(%12: i1):
+  cfg.cond_br %12, ^selected, ^fallback
 ^selected:
-  %value = view.load %view[0] : view<1xi32> -> i32
+  %8 = index.constant 4 : offset
+  %9 = index.constant 4 : offset
+  %10 = index.add %8, %9 : offset
+  %11 = buffer.view %input[%10] : buffer -> view<1xi32>
+  %value = view.load %11[0] : view<1xi32> -> i32
   view.store %value, %output[0] : i32, view<1xi32>
   cfg.br ^exit
 ^fallback:
