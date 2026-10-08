@@ -28,6 +28,10 @@ model-specific C in the executable.
 
 ## Launch
 
+The [weight-free three-model catalog](../models/fixtures/README.md) is a complete
+first-output recipe for image, embedding and decision packages. The example
+below adds real text/image checkpoints; the same executable handles both.
+
 Create a JSON or JSONC catalog, for example:
 
 ~~~json

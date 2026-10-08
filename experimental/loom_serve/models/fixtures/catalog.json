@@ -1,0 +1,30 @@
+{
+  "models": [
+    {
+      "kind": "image",
+      "name": "pixels",
+      "source": "experimental/loom_serve/models/fixtures/image",
+      "checkpoint": "experimental/loom_serve/models/fixtures/image",
+      "width": 7,
+      "height": 5,
+      "text_tokens": 32,
+      "pending_requests": 4
+    },
+    {
+      "kind": "embedding",
+      "name": "vectors",
+      "source": "experimental/loom_serve/models/fixtures/embedding",
+      "assets": "experimental/loom_serve/models/fixtures/embedding",
+      "options": {"batch_units": 64},
+      "pending_requests": 16
+    },
+    {
+      "kind": "decision",
+      "name": "judge",
+      "source": "experimental/loom_serve/models/fixtures/decision",
+      "assets": "experimental/loom_serve/models/fixtures/decision",
+      "options": {"batch_units": 64},
+      "pending_requests": 16
+    }
+  ]
+}

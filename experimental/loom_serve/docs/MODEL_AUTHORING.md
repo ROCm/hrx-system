@@ -433,7 +433,18 @@ need their own real ownership contracts rather than disguised payload meanings.
 
 ### Other tensor-in/tensor-out adapters
 
-A first adapter outside that diffusion contract has this ownership flow:
+Embeddings and structured decisions already have a
+[source-defined finite-vector runner](../finite/README.md). Its source chooses
+additive work cost and compatibility classes, packs ragged inputs, selects
+commands and describes original-order result rows independently of physical
+feedback layout. The shared native service owns admission, cancellation and
+response lifetime. The [embedding](../models/fixtures/embedding/README.md) and
+[decision](../models/fixtures/decision/README.md) packages are runnable examples,
+with a [single-server catalog](../models/fixtures/README.md) requiring no model
+download. A compatible port supplies source and assets, not another C adapter.
+
+A model outside the existing text/image/finite-vector contracts first needs a
+concrete caller with a different ownership flow. The shared substrate is:
 
 1. It borrows the caller's [`loom_serve_device_t`](../runtime/device.h), which owns
    the device, asynchronous services, exact queues, execution timelines and

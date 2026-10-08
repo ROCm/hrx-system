@@ -6,13 +6,16 @@ produce question probabilities. The native runner owns source JIT, shared
 parameter residency, command submission and result lifetime. The source owns
 tokenization/task framing, model shapes, pooling, normalization and learned
 heads. It does not require a decode loop, KV reservation or VM process per
-request. The implemented HTTP consumer is [embeddings](../embedding/protocol.h).
+request. The HTTP consumers are [embeddings](../embedding/protocol.h) and
+[SystemOne decisions](../decision/README.md).
 
 The [source ABI](model.h) is implemented by the
 [deterministic embedding package](../models/fixtures/embedding/README.md).
 It uses the same task executor, parameter cache and queue workspace as text and
 image deployments. Source packages are loaded from directories at startup;
-replacing one does not require relinking the server.
+replacing one does not require relinking the server. The
+[weight-free multimodal catalog](../models/fixtures/README.md) exercises both
+alongside an image model on the same listener.
 
 ## Cold and warm source programs
 
