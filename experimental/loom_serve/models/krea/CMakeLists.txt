@@ -82,10 +82,16 @@ loom_cc_test(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::image::model
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::host
     iree::testing::gtest
     iree::testing::gtest_main
   ARGS
     "--model_source={{${PROJECT_SOURCE_DIR}/experimental/loom_serve/models/krea/prepare.loom}}"
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
 )
 endif()
 
