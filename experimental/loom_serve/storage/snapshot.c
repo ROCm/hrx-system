@@ -6,9 +6,11 @@
 
 #include "experimental/loom_serve/storage/snapshot.h"
 
-#include "experimental/loom_serve/runtime/retirement.h"
+#include "iree/base/internal/atomics.h"
 
 struct loom_serve_snapshot_t {
+  // Caller ownership and queue-captured views independently retain the payload.
+  iree_atomic_ref_count_t ref_count;
   // Allocator owning the header and packed payload.
   iree_allocator_t allocator;
   // Number of logical bytes in data.
@@ -17,25 +19,33 @@ struct loom_serve_snapshot_t {
   uint8_t data[];
 };
 
+static void snapshot_release_view(void* user_data, iree_hal_buffer_t* buffer) {
+  loom_serve_snapshot_release(user_data);
+}
+
 static iree_status_t snapshot_transfer(
-    loom_serve_execution_t* execution, iree_host_size_t buffer_count,
-    iree_hal_buffer_t* const* buffers, iree_host_size_t range_count,
-    const loom_serve_snapshot_range_t* ranges, uint8_t* data,
-    iree_hal_transfer_operation_type_t type, iree_allocator_t allocator) {
+    loom_serve_snapshot_t* snapshot, loom_serve_execution_t* execution,
+    iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers,
+    iree_host_size_t range_count, const loom_serve_snapshot_range_t* ranges,
+    iree_hal_transfer_operation_type_t type) {
   iree_hal_buffer_t** views = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      allocator, buffer_count, sizeof(*views), (void**)&views));
-  loom_serve_retirement_t retirement;
-  loom_serve_retirement_initialize(&retirement);
+      snapshot->allocator, buffer_count, sizeof(*views), (void**)&views));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < buffer_count && iree_status_is_ok(status);
        ++i) {
     if (buffers[i]) {
-      views[i] = buffers[i];
-      iree_hal_buffer_retain(views[i]);
-      status = loom_serve_retirement_track(&retirement, &views[i], allocator);
+      status = iree_hal_subspan_buffer_create_with_callback(
+          buffers[i], iree_hal_buffer_byte_offset(buffers[i]),
+          iree_hal_buffer_byte_length(buffers[i]),
+          (iree_hal_buffer_release_callback_t){snapshot_release_view, snapshot},
+          snapshot->allocator, &views[i]);
+      if (iree_status_is_ok(status)) {
+        iree_atomic_ref_count_inc(&snapshot->ref_count);
+      }
     }
   }
+  uint8_t* data = snapshot->data;
   iree_hal_transfer_operation_t operations[64];
   iree_host_size_t operation_count = 0;
   uint64_t completion = 0;
@@ -68,14 +78,10 @@ static iree_status_t snapshot_transfer(
     status = loom_serve_execution_transfer(execution, operation_count,
                                            operations, &completion);
   }
-  status = iree_status_join(status, loom_serve_execution_drain(execution));
   for (iree_host_size_t i = 0; i < buffer_count; ++i) {
     iree_hal_buffer_release(views[i]);
   }
-  // An errored semaphore can precede the final staging callback's write into
-  // host data. Joining the exact transfer views protects that borrowed payload.
-  loom_serve_retirement_deinitialize(&retirement);
-  iree_allocator_free(allocator, views);
+  iree_allocator_free(snapshot->allocator, views);
   return status;
 }
 
@@ -97,27 +103,27 @@ iree_status_t loom_serve_snapshot_capture(
   loom_serve_snapshot_t* snapshot = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc_uninitialized(
       host_allocator, sizeof(*snapshot) + length, (void**)&snapshot));
+  iree_atomic_ref_count_init(&snapshot->ref_count);
   snapshot->allocator = host_allocator;
   snapshot->length = length;
-  iree_status_t status = snapshot_transfer(
-      execution, buffer_count, buffers, range_count, ranges, snapshot->data,
-      IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD, host_allocator);
+  iree_status_t status =
+      snapshot_transfer(snapshot, execution, buffer_count, buffers, range_count,
+                        ranges, IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD);
   if (iree_status_is_ok(status)) {
     *out_snapshot = snapshot;
   } else {
-    loom_serve_snapshot_destroy(snapshot);
+    loom_serve_snapshot_release(snapshot);
   }
   return status;
 }
 
 iree_status_t loom_serve_snapshot_restore(
-    const loom_serve_snapshot_t* snapshot, loom_serve_execution_t* execution,
+    loom_serve_snapshot_t* snapshot, loom_serve_execution_t* execution,
     iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers,
     iree_host_size_t range_count, const loom_serve_snapshot_range_t* ranges) {
-  return snapshot_transfer(execution, buffer_count, buffers, range_count,
-                           ranges, (uint8_t*)snapshot->data,
-                           IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-                           snapshot->allocator);
+  return snapshot_transfer(snapshot, execution, buffer_count, buffers,
+                           range_count, ranges,
+                           IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD);
 }
 
 iree_host_size_t loom_serve_snapshot_size(
@@ -125,8 +131,8 @@ iree_host_size_t loom_serve_snapshot_size(
   return snapshot ? snapshot->length : 0;
 }
 
-void loom_serve_snapshot_destroy(loom_serve_snapshot_t* snapshot) {
-  if (snapshot) {
+void loom_serve_snapshot_release(loom_serve_snapshot_t* snapshot) {
+  if (snapshot && iree_atomic_ref_count_dec(&snapshot->ref_count) == 1) {
     iree_allocator_free(snapshot->allocator, snapshot);
   }
 }

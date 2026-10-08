@@ -58,8 +58,8 @@ loom_cc_library(
     "snapshot.c"
   DEPS
     iree::base
+    iree::base::internal
     iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::retirement
     iree::hal
   PUBLIC
 )
@@ -129,10 +129,14 @@ loom_cc_test(
   DEPS
     ::memory
     ::snapshot
+    iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::retirement
     iree::hal
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
   LABELS

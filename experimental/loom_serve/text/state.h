@@ -59,7 +59,8 @@ typedef struct loom_serve_text_state_row_t {
   uint32_t block_count;
   // Request high-water in token positions; zero outside a reservation.
   iree_host_size_t reserved_extent;
-  // Owned DRAM image while suspended; no physical KV IDs remain owned.
+  // Owned capture payload, or NULL. Successful suspension releases physical
+  // IDs; terminal transfer failure preserves both until teardown.
   loom_serve_snapshot_t* snapshot;
 } loom_serve_text_state_row_t;
 
@@ -76,7 +77,8 @@ typedef struct loom_serve_text_state_checkpoint_t {
   uint32_t block_count;
   // Logical-order IDs borrowing the owner's fixed checkpoint map bank.
   uint32_t* blocks;
-  // Owned logical DRAM image while suspended, independent of any active row.
+  // Owned capture payload independent of active rows. Successful suspension
+  // releases physical IDs; terminal failure retains them until teardown.
   loom_serve_snapshot_t* snapshot;
 } loom_serve_text_state_checkpoint_t;
 

@@ -28,23 +28,28 @@ typedef struct loom_serve_snapshot_range_t {
   iree_device_size_t length;
 } loom_serve_snapshot_range_t;
 
-// Captures the concatenated ranges after preceding execution work. The caller
-// excludes mutation until return. All accepted transfers retire before return,
-// including on failed readiness; the image is published only on success.
-// Metadata and roots are borrowed only for the call. This is a cold, blocking
-// maintenance boundary, not an inference hot path.
+// Enqueues capture of the concatenated ranges after preceding execution work.
+// Returns an owned snapshot on successful submission, without waiting. Its
+// payload is usable only after the resulting execution frontier succeeds.
+// The caller retains source backing and excludes mutation until that frontier
+// completes. Failed readiness does not authorize unmapping source backing.
+// Metadata and root handles are borrowed only during this call. Accepted queue
+// operations retain the payload even if submission fails or the caller releases
+// its snapshot reference before completion.
 iree_status_t loom_serve_snapshot_capture(
     loom_serve_execution_t* execution, iree_host_size_t buffer_count,
     iree_hal_buffer_t* const* buffers, iree_host_size_t range_count,
     const loom_serve_snapshot_range_t* ranges,
     loom_serve_snapshot_t** out_snapshot, iree_allocator_t host_allocator);
 
-// Restores into caller-admitted backed ranges with the same logical lengths
-// and order used for capture. Physical buffers and offsets may differ. The
-// caller excludes consumers until success and keeps the image on failure.
+// Enqueues restore of a completed snapshot into caller-admitted backed ranges
+// with the same logical lengths and order used for capture. Physical buffers
+// and offsets may differ. Returns without waiting; queued operations retain
+// the payload independently of caller ownership. The caller retains target
+// backing and orders consumers after the resulting execution frontier.
 // Platform/submission failure is terminal, not a partially resumed session.
 iree_status_t loom_serve_snapshot_restore(
-    const loom_serve_snapshot_t* snapshot, loom_serve_execution_t* execution,
+    loom_serve_snapshot_t* snapshot, loom_serve_execution_t* execution,
     iree_host_size_t buffer_count, iree_hal_buffer_t* const* buffers,
     iree_host_size_t range_count, const loom_serve_snapshot_range_t* ranges);
 
@@ -52,7 +57,11 @@ iree_status_t loom_serve_snapshot_restore(
 // accepted and reports zero; these bytes are not device pool commitment.
 iree_host_size_t loom_serve_snapshot_size(
     const loom_serve_snapshot_t* snapshot);
-void loom_serve_snapshot_destroy(loom_serve_snapshot_t* snapshot);
+
+// Releases caller ownership without waiting for queued captures or restores.
+// The host payload is freed after its final queue/caller reference. Accepts
+// NULL.
+void loom_serve_snapshot_release(loom_serve_snapshot_t* snapshot);
 
 #ifdef __cplusplus
 }  // extern "C"

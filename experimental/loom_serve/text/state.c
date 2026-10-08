@@ -255,7 +255,7 @@ iree_status_t loom_serve_text_state_deinitialize(
     loom_serve_text_state_t* state) {
   if (state->rows) {
     for (iree_host_size_t i = 0; i < state->row_count; ++i) {
-      loom_serve_snapshot_destroy(state->rows[i].snapshot);
+      loom_serve_snapshot_release(state->rows[i].snapshot);
       for (iree_host_size_t binding = TEXT_CONTROL; binding <= TEXT_PROGRESS;
            ++binding) {
         if (binding != TEXT_RECURRENT) {
@@ -273,7 +273,7 @@ iree_status_t loom_serve_text_state_deinitialize(
   loom_serve_block_pool_deinitialize(&state->recurrent.pool);
   if (state->checkpoints.values) {
     for (uint32_t i = 0; i < state->checkpoints.capacity; ++i) {
-      loom_serve_snapshot_destroy(state->checkpoints.values[i].snapshot);
+      loom_serve_snapshot_release(state->checkpoints.values[i].snapshot);
     }
   }
   loom_serve_block_pool_deinitialize(&state->checkpoints.pool);
@@ -673,7 +673,7 @@ iree_status_t loom_serve_text_state_row_activate(
 iree_status_t loom_serve_text_state_row_reset(
     loom_serve_text_state_row_t* row) {
   IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->owner->execution));
-  loom_serve_snapshot_destroy(row->snapshot);
+  loom_serve_snapshot_release(row->snapshot);
   row->snapshot = NULL;
   row->position = 0;
   row->reserved_extent = 0;
@@ -708,6 +708,8 @@ iree_status_t loom_serve_text_state_row_suspend(
   iree_status_t status = loom_serve_snapshot_capture(
       state->execution, IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
       &row->snapshot, state->allocator);
+  status =
+      iree_status_join(status, loom_serve_execution_drain(state->execution));
   if (iree_status_is_ok(status)) {
     loom_serve_block_pool_release(&state->cache.pool, row->block_count, blocks);
     row->block_count = 0;
@@ -796,7 +798,7 @@ iree_status_t loom_serve_text_state_row_try_resume(
         iree_status_join(status, loom_serve_execution_drain(state->execution));
   }
   if (iree_status_is_ok(status) && admitted) {
-    loom_serve_snapshot_destroy(row->snapshot);
+    loom_serve_snapshot_release(row->snapshot);
     row->snapshot = NULL;
     *out_resumed = true;
   } else if (iree_status_is_ok(status)) {
@@ -870,7 +872,7 @@ void loom_serve_text_state_checkpoint_release(
                                   &checkpoint->recurrent_slot);
     checkpoint->recurrent_slot = UINT32_MAX;
   }
-  loom_serve_snapshot_destroy(checkpoint->snapshot);
+  loom_serve_snapshot_release(checkpoint->snapshot);
   checkpoint->snapshot = NULL;
   const uint32_t index = (uint32_t)(checkpoint - state->checkpoints.values);
   loom_serve_block_pool_release(&state->checkpoints.pool, 1, &index);
@@ -915,6 +917,8 @@ iree_status_t loom_serve_text_state_checkpoint_suspend(
   iree_status_t status = loom_serve_snapshot_capture(
       state->execution, IREE_ARRAYSIZE(buffers), buffers, range_count, ranges,
       &checkpoint->snapshot, state->allocator);
+  status =
+      iree_status_join(status, loom_serve_execution_drain(state->execution));
   if (iree_status_is_ok(status)) {
     loom_serve_block_pool_release(&state->cache.pool, checkpoint->block_count,
                                   checkpoint->blocks);
@@ -993,12 +997,14 @@ static iree_status_t text_checkpoint_try_resume(
     status = loom_serve_snapshot_restore(checkpoint->snapshot, state->execution,
                                          IREE_ARRAYSIZE(buffers), buffers,
                                          range_count, ranges);
+    status =
+        iree_status_join(status, loom_serve_execution_drain(state->execution));
   }
   if (iree_status_is_ok(status) && admitted) {
-    loom_serve_snapshot_destroy(checkpoint->snapshot);
+    loom_serve_snapshot_release(checkpoint->snapshot);
     checkpoint->snapshot = NULL;
     *out_resumed = true;
-  } else {
+  } else if (!admitted) {
     loom_serve_block_pool_release(&state->cache.pool, needed,
                                   checkpoint->blocks);
     checkpoint->block_count = 0;
@@ -1372,7 +1378,7 @@ iree_status_t loom_serve_text_state_row_try_reserve(
           checkpoint->snapshot, state->execution, IREE_ARRAYSIZE(buffers),
           buffers, restore_count, restore_ranges);
       if (iree_status_is_ok(status)) {
-        loom_serve_snapshot_destroy(checkpoint->snapshot);
+        loom_serve_snapshot_release(checkpoint->snapshot);
         checkpoint->snapshot = NULL;
       }
     }

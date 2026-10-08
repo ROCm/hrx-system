@@ -1044,8 +1044,17 @@ static iree_status_t qwen_check_trim(loom_serve_text_model_t* model,
         actual.output_count != expected_verification.output_count ||
         memcmp(actual.tokens, expected_verification.tokens,
                actual.output_count * sizeof(*actual.tokens))) {
-      return iree_make_status(IREE_STATUS_DATA_LOSS,
-                              "compaction changed draft verification");
+      return iree_make_status(
+          IREE_STATUS_DATA_LOSS,
+          "compaction changed draft verification: "
+          "consumed %zu/%zu, outputs %zu/%zu, "
+          "tokens [%d,%d,%d,%d]/[%d,%d,%d,%d]",
+          actual.consumed_count, expected_verification.consumed_count,
+          actual.output_count, expected_verification.output_count,
+          actual.tokens[0], actual.tokens[1], actual.tokens[2],
+          actual.tokens[3], expected_verification.tokens[0],
+          expected_verification.tokens[1], expected_verification.tokens[2],
+          expected_verification.tokens[3]);
     }
   }
   if (loom_serve_text_row_position(survivor) != expected_position) {
@@ -1614,8 +1623,11 @@ static iree_status_t qwen_check_checkpoints(loom_serve_text_model_t* model,
     input[i] = padding[i % padding_count];
   }
   memcpy(input + 127 - prompt_count, prompt, prompt_count * sizeof(*input));
-  // Occupy low IDs first, so the shared prefix must relocate during trim.
+  // Compact the ballast while it is the sole owner. Prior suspension/reuse may
+  // leave the free-ID stack in any order; the following prefixes must start
+  // above this live compact prefix to guarantee real movement when it retires.
   IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 0, 512, input));
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(model, &trimmed));
   IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 7, 127, input));
   IREE_RETURN_IF_ERROR(qwen_check_prefill(model, 6, 127, input));
   loom_serve_text_row_t* source = loom_serve_text_model_row(model, 7);
