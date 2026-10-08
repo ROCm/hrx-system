@@ -38,6 +38,7 @@ loom_cc_binary(
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::text::model
     iree::experimental::loom_serve::text::schedule

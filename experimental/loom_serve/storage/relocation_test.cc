@@ -24,8 +24,12 @@ class RelocationTest : public ::testing::Test {
         .uri = IREE_SV("amdgpu"),
         .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
         .slab_size = 2 * 1024 * 1024};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(&options, &device, iree_allocator_system()));
+    loom_serve_host_t* host = nullptr;
+    IREE_ASSERT_OK(loom_serve_host_create(1, &host, iree_allocator_system()));
+    auto status = loom_serve_device_create(host, &options, &device,
+                                           iree_allocator_system());
+    loom_serve_host_release(host);
+    IREE_ASSERT_OK(status);
     pool = loom_serve_device_memory_pool(device);
     execution = loom_serve_device_execution(device);
   }

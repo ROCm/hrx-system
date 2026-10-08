@@ -7,15 +7,14 @@
 
 #include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
-#include "iree/base/threading/numa.h"
 #include "iree/hal/drivers/init.h"
 #include "iree/tooling/device_util.h"
 
 struct loom_serve_device_t {
   // Allocation policy for the owner and its runtime resources.
   iree_allocator_t allocator;
-  // Async I/O services outliving the HAL device.
-  iree_async_proactor_pool_t* proactor_pool;
+  // Retained application workers and I/O services outliving the HAL device.
+  loom_serve_host_t* host;
   // Completion registry outliving the device group.
   iree_async_frontier_tracker_t* frontier_tracker;
   // Owned device providing memory and queue resources.
@@ -56,15 +55,9 @@ static iree_status_t loom_serve_device_initialize(loom_serve_device_t* device,
       iree_hal_driver_registry_allocate(device->allocator, &registry));
   iree_status_t status = iree_hal_register_all_available_drivers(registry);
   if (iree_status_is_ok(status)) {
-    status = iree_async_proactor_pool_create(
-        iree_numa_node_count(), NULL,
-        iree_async_proactor_pool_options_default(), device->allocator,
-        &device->proactor_pool);
-  }
-  if (iree_status_is_ok(status)) {
     iree_hal_device_create_params_t params =
         iree_hal_device_create_params_default();
-    params.proactor_pool = device->proactor_pool;
+    params.proactor_pool = loom_serve_host_proactor_pool(device->host);
     params.event_sink = iree_hal_device_event_sink_stderr();
     status = iree_hal_create_device(registry, uri, &params, device->allocator,
                                     &device->handle);
@@ -90,7 +83,7 @@ static iree_status_t loom_serve_device_initialize(loom_serve_device_t* device,
 }
 
 iree_status_t loom_serve_device_create(
-    const loom_serve_device_options_t* options,
+    loom_serve_host_t* host, const loom_serve_device_options_t* options,
     loom_serve_device_t** out_device, iree_allocator_t host_allocator) {
   *out_device = NULL;
   if (options->backing != LOOM_SERVE_DEVICE_BACKING_FIXED &&
@@ -107,6 +100,8 @@ iree_status_t loom_serve_device_create(
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*device), (void**)&device));
   device->allocator = host_allocator;
+  device->host = host;
+  loom_serve_host_retain(host);
   iree_status_t status = loom_serve_device_initialize(device, options->uri);
   if (iree_status_is_ok(status) &&
       options->backing == LOOM_SERVE_DEVICE_BACKING_ELASTIC) {
@@ -148,7 +143,7 @@ iree_status_t loom_serve_device_destroy(loom_serve_device_t* device) {
   iree_hal_device_group_release(device->group);
   iree_hal_device_release(device->handle);
   iree_async_frontier_tracker_release(device->frontier_tracker);
-  iree_async_proactor_pool_release(device->proactor_pool);
+  loom_serve_host_release(device->host);
   iree_allocator_free(device->allocator, device);
   return status;
 }
@@ -186,6 +181,10 @@ iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
 
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device) {
   return device->handle;
+}
+
+loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device) {
+  return device->host;
 }
 
 iree_hal_device_group_t* loom_serve_device_group(

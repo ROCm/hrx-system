@@ -10,40 +10,51 @@
 
 namespace {
 
-TEST(DeviceTest, MissingDriverReleasesPartialOwnership) {
+class DeviceTest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    IREE_ASSERT_OK(loom_serve_host_create(1, &host, iree_allocator_system()));
+  }
+  void TearDown() override { loom_serve_host_release(host); }
+
+  // Application host shared by device creation and failure cleanup.
+  loom_serve_host_t* host = nullptr;
+};
+
+TEST_F(DeviceTest, MissingDriverReleasesPartialOwnership) {
   loom_serve_device_t* device = nullptr;
   const loom_serve_device_options_t options = {
       .uri = IREE_SV("unregistered-serving-device")};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_NOT_FOUND,
-      loom_serve_device_create(&options, &device, iree_allocator_system()));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        loom_serve_device_create(host, &options, &device,
+                                                 iree_allocator_system()));
   EXPECT_EQ(device, nullptr);
   IREE_EXPECT_OK(loom_serve_device_destroy(device));
 }
 
-TEST(DeviceTest, AllocationFailureReturnsNoOwner) {
+TEST_F(DeviceTest, AllocationFailureReturnsNoOwner) {
   loom_serve_device_t* device = nullptr;
   const loom_serve_device_options_t options = {.uri = IREE_SV("amdgpu")};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_device_create(&options, &device, iree_allocator_null()));
+      loom_serve_device_create(host, &options, &device, iree_allocator_null()));
   EXPECT_EQ(device, nullptr);
   IREE_EXPECT_OK(loom_serve_device_destroy(device));
 }
 
-TEST(DeviceTest, InvalidBackingRejectsBeforeDeviceCreation) {
+TEST_F(DeviceTest, InvalidBackingRejectsBeforeDeviceCreation) {
   loom_serve_device_t* device = nullptr;
   loom_serve_device_options_t options = {
       .uri = IREE_SV("unregistered-serving-device"), .memory_limit = 1};
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_device_create(&options, &device, iree_allocator_system()));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_device_create(host, &options, &device,
+                                                 iree_allocator_system()));
   EXPECT_EQ(device, nullptr);
   options.memory_limit = 0;
   options.backing = static_cast<loom_serve_device_backing_t>(2);
-  IREE_EXPECT_STATUS_IS(
-      IREE_STATUS_INVALID_ARGUMENT,
-      loom_serve_device_create(&options, &device, iree_allocator_system()));
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                        loom_serve_device_create(host, &options, &device,
+                                                 iree_allocator_system()));
   EXPECT_EQ(device, nullptr);
 }
 

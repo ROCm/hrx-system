@@ -7,6 +7,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_DEVICE_H_
 
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/host.h"
 #include "experimental/loom_serve/runtime/residency.h"
 #include "experimental/loom_serve/storage/memory.h"
 
@@ -41,12 +42,13 @@ typedef struct loom_serve_device_options_t {
 // Creates the device identified by a HAL URI and selects the first provisioned
 // queue supporting each of dispatch and transfer. Missing roles fail creation.
 // This establishes runtime ownership, not compiler support for the device.
+// Retains the application host for device and asynchronous service lifetime.
 // On failure no owner is returned and all partial resources are released.
 iree_status_t loom_serve_device_create(
-    const loom_serve_device_options_t* options,
+    loom_serve_host_t* host, const loom_serve_device_options_t* options,
     loom_serve_device_t** out_device, iree_allocator_t host_allocator);
 
-// Releases the device and then its async services, without an implicit wait.
+// Releases the device and its host reference, without an implicit device wait.
 // The caller first drains execution while all borrowed host I/O is alive and
 // releases all model/JIT/VM resources referencing this domain. Those resources
 // must not outlive the owner. NULL is permitted.
@@ -85,6 +87,8 @@ iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
 // Borrowed handles valid through owner destruction. The group establishes the
 // semaphore namespace; the exact queues are also used by the execution object.
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device);
+// Borrowed application host, which outlives this device and its models.
+loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device);
 iree_hal_device_group_t* loom_serve_device_group(
     const loom_serve_device_t* device);
 iree_hal_queue_t* loom_serve_device_dispatch_queue(

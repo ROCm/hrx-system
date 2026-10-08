@@ -23,8 +23,12 @@ class MemoryTest : public ::testing::Test {
         .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
         .slab_size = kSlabSize,
         .memory_limit = 3 * kSlabSize};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(&options, &device, iree_allocator_system()));
+    loom_serve_host_t* host = nullptr;
+    IREE_ASSERT_OK(loom_serve_host_create(1, &host, iree_allocator_system()));
+    auto status = loom_serve_device_create(host, &options, &device,
+                                           iree_allocator_system());
+    loom_serve_host_release(host);
+    IREE_ASSERT_OK(status);
     pool = loom_serve_device_memory_pool(device);
   }
 

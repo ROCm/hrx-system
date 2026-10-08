@@ -98,13 +98,18 @@ static iree_status_t projection_initialize(projection_check_t* check,
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(allocator, check->output_bytes,
                                              (void**)&check->baseline));
   const loom_serve_device_options_t device_options = {.uri = IREE_SV("amdgpu")};
-  IREE_RETURN_IF_ERROR(
-      loom_serve_device_create(&device_options, &check->owner, allocator));
+  loom_serve_host_t* host = NULL;
+  IREE_RETURN_IF_ERROR(loom_serve_host_create(8, &host, allocator));
+  status =
+      loom_serve_device_create(host, &device_options, &check->owner, allocator);
+  loom_serve_host_release(host);
+  IREE_RETURN_IF_ERROR(status);
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
   iree_hal_queue_t* dispatch = loom_serve_device_dispatch_queue(check->owner);
-  IREE_RETURN_IF_ERROR(loom_serve_jit_create(device, dispatch,
-                                             iree_make_cstring_view(FLAG_model),
-                                             NULL, allocator, &check->jit));
+  IREE_RETURN_IF_ERROR(loom_serve_jit_create(
+      device, dispatch,
+      loom_serve_host_task_pool(loom_serve_device_host(check->owner)),
+      iree_make_cstring_view(FLAG_model), NULL, allocator, &check->jit));
   char rows[32];
   snprintf(rows, sizeof(rows), "%d", FLAG_rows);
   const loomc_config_binding_t binding = {

@@ -9,6 +9,7 @@
 #include <string>
 
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/host.h"
 #include "experimental/loom_serve/runtime/jit.h"
 #include "experimental/loom_serve/runtime/module.h"
 #include "iree/async/frontier_tracker.h"
@@ -65,8 +66,9 @@ class ControlTest
     directory_ =
         std::filesystem::path(FLAG_control_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch, iree_make_cstring_view(directory_.c_str()), nullptr,
-        allocator_, &jit_));
+        device_, dispatch, loom_serve_host_task_pool(host_),
+        iree_make_cstring_view(directory_.c_str()), nullptr, allocator_,
+        &jit_));
     IREE_ASSERT_OK(Prepare(family, "prefill_to_decode", &commands_[0]));
     IREE_ASSERT_OK(Prepare(family, "decode_transition", &commands_[1]));
     IREE_ASSERT_OK(Prepare(family, "device_continuation", &commands_[2]));
@@ -125,7 +127,7 @@ class ControlTest
     iree_hal_device_group_release(group_);
     iree_hal_device_release(device_);
     iree_async_frontier_tracker_release(frontier_tracker_);
-    iree_async_proactor_pool_release(proactor_pool_);
+    loom_serve_host_release(host_);
   }
 
   iree_status_t CreateDevice() {
@@ -134,14 +136,11 @@ class ControlTest
         iree_hal_driver_registry_allocate(allocator_, &registry));
     iree_status_t status = iree_hal_register_all_available_drivers(registry);
     if (iree_status_is_ok(status)) {
-      status = iree_async_proactor_pool_create(
-          iree_numa_node_count(), nullptr,
-          iree_async_proactor_pool_options_default(), allocator_,
-          &proactor_pool_);
+      status = loom_serve_host_create(2, &host_, allocator_);
     }
     if (iree_status_is_ok(status)) {
       auto params = iree_hal_device_create_params_default();
-      params.proactor_pool = proactor_pool_;
+      params.proactor_pool = loom_serve_host_proactor_pool(host_);
       status = iree_hal_create_device(registry, IREE_SV("amdgpu"), &params,
                                       allocator_, &device_);
     }
@@ -306,8 +305,8 @@ class ControlTest
   static constexpr std::array<size_t, 3> kContinuationLengths = {96, 16, 16};
   // Host allocation policy used for all runtime objects.
   iree_allocator_t allocator_ = iree_allocator_system();
-  // Async services outliving the device and device group.
-  iree_async_proactor_pool_t* proactor_pool_ = nullptr;
+  // Shared compiler workers and I/O services outliving the device.
+  loom_serve_host_t* host_ = nullptr;
   // Cross-queue frontier registry retained through group destruction.
   iree_async_frontier_tracker_t* frontier_tracker_ = nullptr;
   // Owned target device.

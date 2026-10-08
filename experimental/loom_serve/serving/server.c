@@ -8,6 +8,7 @@
 #include <stdlib.h>
 
 #include "experimental/loom_serve/runtime/device_flags.h"
+#include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/serving/configuration.h"
 #include "experimental/loom_serve/text/schedule.h"
 #include "experimental/loom_serve/text/service.h"
@@ -108,6 +109,7 @@ int main(int argc, char** argv) {
     status = iree_async_signal_block_default();
   }
   loom_serve_device_t* device = NULL;
+  loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
   serving_model_t* models = NULL;
   loom_serve_http_service_t* services = NULL;
@@ -120,7 +122,10 @@ int main(int argc, char** argv) {
                                          sizeof(*services), (void**)&services);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_device_create_from_flags(&device, allocator);
+    status = loom_serve_host_create_from_flags(&host, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_device_create_from_flags(host, &device, allocator);
   }
   for (iree_host_size_t i = 0;
        i < configuration.model_count && iree_status_is_ok(status); ++i) {
@@ -157,6 +162,7 @@ int main(int argc, char** argv) {
                               loom_serve_text_model_destroy(models[i].model));
   }
   status = iree_status_join(status, loom_serve_device_destroy(device));
+  loom_serve_host_release(host);
   iree_allocator_free(allocator, services);
   iree_allocator_free(allocator, models);
   loom_serve_configuration_deinitialize(&configuration);

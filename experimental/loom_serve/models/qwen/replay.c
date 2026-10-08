@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/device_flags.h"
+#include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "experimental/loom_serve/text/chat.h"
 #include "experimental/loom_serve/text/flags.h"
@@ -446,10 +447,14 @@ int main(int argc, char** argv) {
   const loom_serve_text_flag_defaults_t defaults = {.row_count = row_count};
   loom_serve_text_model_t* model = NULL;
   loom_serve_device_t* device = NULL;
+  loom_serve_host_t* host = NULL;
   qwen_replay_row_t rows[QWEN_REPLAY_ROWS] = {0};
   qwen_replay_window_t* policies = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_device_create_from_flags(&device, allocator);
+    status = loom_serve_host_create_from_flags(&host, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_device_create_from_flags(host, &device, allocator);
   }
   if (iree_status_is_ok(status)) {
     status = loom_serve_text_model_create_from_flags(device, &defaults, &model,
@@ -472,6 +477,7 @@ int main(int argc, char** argv) {
   }
   status = iree_status_join(status, loom_serve_text_model_destroy(model));
   status = iree_status_join(status, loom_serve_device_destroy(device));
+  loom_serve_host_release(host);
   iree_allocator_free(allocator, policies);
   for (iree_host_size_t i = 0; i < QWEN_REPLAY_ROWS; ++i) {
     iree_allocator_free(allocator, rows[i].turns);

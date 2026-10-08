@@ -10,6 +10,7 @@
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
+#include "experimental/loom_serve/runtime/host_flags.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 
@@ -54,9 +55,13 @@ int main(int argc, char** argv) {
   iree_status_t status = iree_async_signal_block_default();
   loom_serve_image_model_t* model = NULL;
   loom_serve_device_t* device = NULL;
+  loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
   if (iree_status_is_ok(status)) {
-    status = loom_serve_device_create_from_flags(&device, allocator);
+    status = loom_serve_host_create_from_flags(&host, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    status = loom_serve_device_create_from_flags(host, &device, allocator);
   }
   if (iree_status_is_ok(status)) {
     const loom_serve_image_model_options_t options = {
@@ -94,6 +99,7 @@ int main(int argc, char** argv) {
   status = iree_status_join(status, loom_serve_http_server_destroy(server));
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
   status = iree_status_join(status, loom_serve_device_destroy(device));
+  loom_serve_host_release(host);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

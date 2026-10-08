@@ -36,6 +36,7 @@ loom_cc_binary(
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:device_flags",
+        "//experimental/loom_serve/runtime:host_flags",
         "//experimental/loom_serve/scheduling:packing",
         "//experimental/loom_serve/text:model",
         "//experimental/loom_serve/text:schedule",

@@ -15,7 +15,8 @@ extern "C" {
 // CLI leaf selecting the shared device, backing strategy and physical budget.
 // Model constructors borrow this owner; the entry point destroys it last.
 iree_status_t loom_serve_device_create_from_flags(
-    loom_serve_device_t** out_device, iree_allocator_t host_allocator);
+    loom_serve_host_t* host, loom_serve_device_t** out_device,
+    iree_allocator_t host_allocator);
 
 #ifdef __cplusplus
 }  // extern "C"

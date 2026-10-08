@@ -14,6 +14,44 @@ package(
 )
 
 loom_cc_library(
+    name = "host",
+    srcs = ["host.c"],
+    hdrs = ["host.h"],
+    deps = [
+        "//loom/binding/c:loomc",
+        "//loom/binding/c:task_pool",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/task",
+    ],
+)
+
+loom_cc_library(
+    name = "host_flags",
+    srcs = ["host_flags.c"],
+    hdrs = ["host_flags.h"],
+    deps = [
+        ":host",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/tooling:flags",
+    ],
+)
+
+loom_cc_test(
+    name = "host_test",
+    srcs = ["host_test.cc"],
+    deps = [
+        ":host",
+        "//loom/binding/c:task_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "command",
     srcs = ["command.c"],
     hdrs = ["command.h"],
@@ -42,6 +80,7 @@ loom_cc_test(
     ]),
     deps = [
         ":execution",
+        ":host",
         ":jit",
         ":module",
         "//loom/binding/c:loomc",
@@ -80,6 +119,7 @@ loom_cc_library(
     hdrs = ["device.h"],
     deps = [
         ":execution",
+        ":host",
         ":residency",
         "//experimental/loom_serve/storage:memory",
         "//runtime/src/iree/async",
@@ -144,6 +184,7 @@ loom_cc_library(
         "//loom/src/loom/target/arch/cmd:program",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:path",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/io:file_handle",
     ],
@@ -175,6 +216,7 @@ loom_cc_test(
         "//runtime/src/iree/base/tooling:flags",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/module/hal:types",
+        "//runtime/src/iree/task",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
         "//runtime/src/iree/vm",

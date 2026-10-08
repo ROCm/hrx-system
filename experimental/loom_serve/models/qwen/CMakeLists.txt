@@ -321,6 +321,7 @@ loom_cc_binary(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::runtime::residency
     iree::experimental::loom_serve::text::flags
     iree::experimental::loom_serve::text::model
@@ -339,6 +340,7 @@ loom_cc_binary(
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::text::flags
     iree::experimental::loom_serve::text::model
     iree::io::file_handle
@@ -358,6 +360,7 @@ loom_cc_binary(
     iree::base::internal::json
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host_flags
     iree::experimental::loom_serve::scheduling::packing
     iree::experimental::loom_serve::text::chat
     iree::experimental::loom_serve::text::flags

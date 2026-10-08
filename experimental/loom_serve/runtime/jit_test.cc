@@ -7,12 +7,15 @@
 #include "experimental/loom_serve/runtime/jit.h"
 
 #include <array>
+#include <condition_variable>
 #include <filesystem>
+#include <mutex>
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/runtime/module.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/task/executor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/vm/bytecode/module.h"
@@ -22,19 +25,94 @@ IREE_FLAG(string, jit_sources, "", "Portable test source catalog.");
 
 namespace {
 
-class JitTest : public ::testing::Test {
+// A scheduler process submits compilation from the same executor that must
+// compile its native requests. Only the outer test thread waits. One worker
+// makes a hidden synchronous join deterministic instead of timing-dependent.
+struct Compilation {
+  static iree_status_t Drain(iree_task_process_t* process,
+                             const iree_task_worker_context_t*,
+                             iree_task_process_drain_result_t* result) {
+    auto* self = static_cast<Compilation*>(process->user_data);
+    auto status = loom_serve_jit_compile_async(self->jit, self->root,
+                                               self->config, Complete, self);
+    if (!iree_status_is_ok(status)) {
+      Complete(self, status, nullptr);
+    }
+    result->completed = true;
+    result->did_work = true;
+    return iree_ok_status();
+  }
+
+  static void Complete(void* user_data, iree_status_t status,
+                       loom_serve_jit_stage_t* stage) {
+    auto* self = static_cast<Compilation*>(user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->status = status;
+    self->stage = stage;
+    self->compiled = true;
+    self->condition.notify_one();
+  }
+
+  static void Release(iree_task_process_t* process) {
+    auto* self = static_cast<Compilation*>(process->user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->released = true;
+    self->condition.notify_one();
+  }
+
+  iree_status_t Run(iree_task_executor_t* executor,
+                    loom_serve_jit_stage_t** out_stage) {
+    iree_task_process_initialize(Drain, 0, 1, &process);
+    process.user_data = this;
+    process.release_fn = Release;
+    iree_task_executor_schedule_process(executor, &process);
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&] { return compiled && released; });
+    *out_stage = stage;
+    return status;
+  }
+
+  // Borrowed catalog, with no other compilation outstanding.
+  loom_serve_jit_t* jit = nullptr;
+  // Borrowed source root retained through Run.
+  iree_string_view_t root = {};
+  // Borrowed specialization retained through Run.
+  const loomc_config_options_t* config = nullptr;
+  // Immediate process representing a scheduler's compilation submission.
+  iree_task_process_t process = {};
+  // Joins both callback publication and the scheduler process's final access.
+  std::mutex mutex;
+  // Outer test's readiness event, unrelated to device completion.
+  std::condition_variable condition;
+  // Compilation delivered its final outcome.
+  bool compiled = false;
+  // Executor relinquished the submitting process storage.
+  bool released = false;
+  // Owned outcome transferred to the outer caller.
+  iree_status_t status = iree_ok_status();
+  // Owned command stage transferred to the outer caller.
+  loom_serve_jit_stage_t* stage = nullptr;
+};
+
+class JitTest : public ::testing::TestWithParam<int> {
  protected:
   void SetUp() override {
     const loom_serve_device_options_t options = {.uri = IREE_SV("amdgpu")};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(&options, &device_owner_, allocator_));
+    loom_serve_host_t* host = nullptr;
+    IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host, allocator_));
+    auto status =
+        loom_serve_device_create(host, &options, &device_owner_, allocator_);
+    loom_serve_host_release(host);
+    IREE_ASSERT_OK(status);
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     execution_ = loom_serve_device_execution(device_owner_);
     directory_ = std::filesystem::path(FLAG_jit_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch_, iree_make_cstring_view(directory_.c_str()), nullptr,
-        allocator_, &jit_));
+        device_, dispatch_,
+        loom_serve_host_task_pool(loom_serve_device_host(device_owner_)),
+        iree_make_cstring_view(directory_.c_str()), nullptr, allocator_,
+        &jit_));
   }
 
   void TearDown() override {
@@ -74,7 +152,13 @@ class JitTest : public ::testing::Test {
     const loomc_config_options_t config = {
         bindings, count, {}, LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED};
     loom_serve_jit_stage_t* stage = nullptr;
-    auto status = loom_serve_jit_compile(jit_, root, &config, &stage);
+    Compilation compilation;
+    compilation.jit = jit_;
+    compilation.root = root;
+    compilation.config = &config;
+    auto status = compilation.Run(
+        loom_serve_host_executor(loom_serve_device_host(device_owner_)),
+        &stage);
     if (iree_status_is_ok(status)) {
       transients_[index] =
           loom_serve_jit_stage_program(stage)->requirements.transient;
@@ -174,7 +258,7 @@ class JitTest : public ::testing::Test {
   iree_vm_function_t step_ = {};
 };
 
-TEST_F(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
+TEST_P(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
   // A failed native task must join its accepted siblings before compiler reuse.
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         Compile("3", 0, IREE_SV("invalid_native")));
@@ -223,13 +307,13 @@ TEST_F(JitTest, SourceDefaultsAndOverridesShareVmAndGpuState) {
   }
 }
 
-TEST_F(JitTest, InvalidConfigurationLeavesCompilerReusable) {
+TEST_P(JitTest, InvalidConfigurationLeavesCompilerReusable) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Compile("99", 0));
   ASSERT_EQ(commands_[0], nullptr);
   IREE_ASSERT_OK(Compile("3", 0));
 }
 
-TEST_F(JitTest, InvalidRootLeavesCompilerReusable) {
+TEST_P(JitTest, InvalidRootLeavesCompilerReusable) {
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
                         Compile("3", 0, IREE_SV("absent")));
   IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND,
@@ -242,11 +326,11 @@ TEST_F(JitTest, InvalidRootLeavesCompilerReusable) {
   IREE_ASSERT_OK(Compile("3", 0));
 }
 
-TEST_F(JitTest, CommandWithoutNativeRequests) {
+TEST_P(JitTest, CommandWithoutNativeRequests) {
   IREE_ASSERT_OK(Compile("3", 0, IREE_SV("idle")));
 }
 
-TEST_F(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
+TEST_P(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
   IREE_ASSERT_OK(Compile("5", 0, IREE_SV("temporary_advance"), "64"));
   // A non-class-boundary maximum exercises the pool's backing geometry.
   IREE_ASSERT_OK(Compile("7", 1, IREE_SV("temporary_advance"), "4160"));
@@ -308,5 +392,7 @@ TEST_F(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
     EXPECT_EQ(value, expected);
   }
 }
+
+INSTANTIATE_TEST_SUITE_P(SharedWorkers, JitTest, ::testing::Values(1, 4));
 
 }  // namespace

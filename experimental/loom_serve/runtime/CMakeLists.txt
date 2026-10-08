@@ -11,6 +11,51 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    host
+  HDRS
+    "host.h"
+  SRCS
+    "host.c"
+  DEPS
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::task
+    loom::binding::c::loomc
+    loom::binding::c::task_pool
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    host_flags
+  HDRS
+    "host_flags.h"
+  SRCS
+    "host_flags.c"
+  DEPS
+    ::host
+    iree::base
+    iree::base::tooling::flags
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    host_test
+  SRCS
+    "host_test.cc"
+  DEPS
+    ::host
+    iree::base
+    iree::task
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::task_pool
+)
+
+loom_cc_library(
+  NAME
     command
   HDRS
     "command.h"
@@ -36,6 +81,7 @@ loom_cc_test(
     "${PROJECT_SOURCE_DIR}/experimental/loom_serve/runtime/testdata/control/sources.txt"
   DEPS
     ::execution
+    ::host
     ::jit
     ::module
     iree::async
@@ -86,6 +132,7 @@ loom_cc_library(
     "device.c"
   DEPS
     ::execution
+    ::host
     ::residency
     iree::async
     iree::async::util::proactor_pool
@@ -152,6 +199,7 @@ loom_cc_library(
     ::command
     iree::base
     iree::base::internal::path
+    iree::base::threading
     iree::hal
     iree::io::file_handle
     loom::binding::c::loomc
@@ -185,6 +233,7 @@ loom_cc_test(
     iree::base::tooling::flags
     iree::hal
     iree::module::hal::types
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
     iree::vm

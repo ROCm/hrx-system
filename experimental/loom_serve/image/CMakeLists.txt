@@ -129,6 +129,7 @@ loom_cc_binary(
     iree::base::internal::path
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host_flags
     iree::io::file_handle
   TESTONLY
 )
@@ -180,6 +181,7 @@ loom_cc_binary(
     iree::base::internal::json
     iree::base::tooling::flags
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host_flags
     iree::io::file_handle
 )
 endif()
@@ -199,6 +201,7 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device_flags
+    iree::experimental::loom_serve::runtime::host_flags
 )
 endif()
 

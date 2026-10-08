@@ -54,8 +54,12 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
                               : LOOM_SERVE_DEVICE_BACKING_FIXED,
         .slab_size = kSlabBytes,
         .memory_limit = GetParam() ? 2 * kSlabBytes : 0};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(&options, &device_owner_, allocator_));
+    loom_serve_host_t* host = nullptr;
+    IREE_ASSERT_OK(loom_serve_host_create(1, &host, allocator_));
+    auto status =
+        loom_serve_device_create(host, &options, &device_owner_, allocator_);
+    loom_serve_host_release(host);
+    IREE_ASSERT_OK(status);
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     transfer_ = loom_serve_device_transfer_queue(device_owner_);
@@ -64,8 +68,10 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     directory_ =
         std::filesystem::path(FLAG_weight_sources).parent_path().string();
     IREE_ASSERT_OK(loom_serve_jit_create(
-        device_, dispatch_, iree_make_cstring_view(directory_.c_str()), nullptr,
-        allocator_, &jit_));
+        device_, dispatch_,
+        loom_serve_host_task_pool(loom_serve_device_host(device_owner_)),
+        iree_make_cstring_view(directory_.c_str()), nullptr, allocator_,
+        &jit_));
     WriteCheckpoint(path_.path(), 0);
     iree_hal_buffer_params_t params = {};
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;

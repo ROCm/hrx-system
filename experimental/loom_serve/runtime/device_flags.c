@@ -20,7 +20,8 @@ IREE_FLAG(int64_t, memory_bytes, 0,
           "limit. Invocation workspace is accounted separately.");
 
 iree_status_t loom_serve_device_create_from_flags(
-    loom_serve_device_t** out_device, iree_allocator_t host_allocator) {
+    loom_serve_host_t* host, loom_serve_device_t** out_device,
+    iree_allocator_t host_allocator) {
   *out_device = NULL;
   if ((strcmp(FLAG_pool_backing, "elastic") &&
        strcmp(FLAG_pool_backing, "fixed")) ||
@@ -39,5 +40,5 @@ iree_status_t loom_serve_device_create_from_flags(
       .slab_size = (iree_device_size_t)FLAG_slab_bytes,
       .memory_limit = (uint64_t)FLAG_memory_bytes,
   };
-  return loom_serve_device_create(&options, out_device, host_allocator);
+  return loom_serve_device_create(host, &options, out_device, host_allocator);
 }

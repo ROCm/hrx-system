@@ -605,8 +605,10 @@ static iree_status_t text_initialize(loom_serve_text_model_t* model,
   model->transfer = loom_serve_device_transfer_queue(model->device_owner);
   model->execution = loom_serve_device_execution(model->device_owner);
   IREE_RETURN_IF_ERROR(loom_serve_jit_create(
-      model->device, model->dispatch, options->source_directory,
-      &options->kernel_sanitizer, model->allocator, &model->jit));
+      model->device, model->dispatch,
+      loom_serve_host_task_pool(loom_serve_device_host(model->device_owner)),
+      options->source_directory, &options->kernel_sanitizer, model->allocator,
+      &model->jit));
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0; i < stage_count && iree_status_is_ok(status);
        ++i) {

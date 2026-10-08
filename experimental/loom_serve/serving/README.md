@@ -7,6 +7,12 @@ Each keeps its own source-JIT programs, weights, logical KV pool, sessions and
 checkpoints. Registering the same checkpoint twice currently creates two
 prepared parameter residencies; it does not deduplicate those weights.
 
+The application owns one [host](../runtime/host.h) with shared IREE task workers
+and asynchronous I/O services. Each catalog's JIT queue uses those workers;
+adding a model does not create another compiler thread pool. Compilation has
+an asynchronous completion API; startup constructors join on the application
+thread. The HTTP/model owner loop below has not yet moved onto task processes.
+
 The catalog selects source packages and deployment options. Model math,
 checkpoint interpretation, storage geometry and chat policy remain in the
 Loom sources described by the [text model contract](../text/README.md).
@@ -63,7 +69,8 @@ build_tools/bin/iree-bazel-run --config=opt \
 ~~~
 
 The repository's build and hardware-execution policy applies. `--device`,
-`--slab_bytes` and `--memory_bytes` configure the shared device. Connections
+`--slab_bytes` and `--memory_bytes` configure the shared device. `--workers`
+sets the shared CPU worker maximum (eight by default). Connections
 and HTTP body storage have independent bounds through `--connections` and
 `--request_body_bytes`. Each model's `pending_requests` defaults to 32 and
 `max_tokens` to 512. Other defaults and accepted ranges are in

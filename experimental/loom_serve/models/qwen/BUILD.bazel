@@ -169,6 +169,7 @@ loom_cc_binary(
     ]),
     deps = [
         "//experimental/loom_serve/runtime:device_flags",
+        "//experimental/loom_serve/runtime:host_flags",
         "//experimental/loom_serve/runtime:residency",
         "//experimental/loom_serve/text:flags",
         "//experimental/loom_serve/text:model",
@@ -188,6 +189,7 @@ loom_cc_binary(
     ]),
     deps = [
         "//experimental/loom_serve/runtime:device_flags",
+        "//experimental/loom_serve/runtime:host_flags",
         "//experimental/loom_serve/text:flags",
         "//experimental/loom_serve/text:model",
         "//runtime/src/iree/base",
@@ -207,6 +209,7 @@ loom_cc_binary(
     ]),
     deps = [
         "//experimental/loom_serve/runtime:device_flags",
+        "//experimental/loom_serve/runtime:host_flags",
         "//experimental/loom_serve/scheduling:packing",
         "//experimental/loom_serve/text:chat",
         "//experimental/loom_serve/text:flags",
