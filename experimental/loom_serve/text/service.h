@@ -59,9 +59,9 @@ typedef struct loom_serve_text_service_options_t {
 
 typedef struct loom_serve_text_service_t loom_serve_text_service_t;
 
-// Creates host session/admission state around a borrowed model. No transport or
-// execution thread is created; only the optional copied-snapshot reporter runs
-// independently. Capacities must match the model. Calls use its one host owner.
+// Creates host session/admission state around a borrowed model. CPU work shares
+// the host executor; reporting shares its proactor. No per-model thread is
+// created. Capacities match the model. Calls use its one serialized host owner.
 iree_status_t loom_serve_text_service_create(
     loom_serve_text_model_t* model,
     const loom_serve_text_service_options_t* options,
@@ -72,12 +72,13 @@ iree_status_t loom_serve_text_service_create(
 loom_serve_http_service_t loom_serve_text_service_interface(
     loom_serve_text_service_t* service);
 
-// Relinquishes every accepted connection and joins the reporter. On terminal
-// failure, unresolved device reservations remain pinned for model destruction;
-// on ordinary completed-boundary shutdown, unused reservations are released.
-// terminal_code is the owner loop's result, including another model's failure.
-// The owner has consumed all accepted readiness callbacks before this call.
-// Null is accepted. The borrowed model and transport both outlive this call.
+// Relinquishes every accepted connection after readiness retirement. On
+// terminal failure, unresolved device reservations remain pinned for model
+// destruction; on ordinary completed-boundary shutdown, unused reservations are
+// released. terminal_code is the owner loop's result, including another model's
+// failure. The owner has consumed all CPU, device and heartbeat callbacks,
+// including timer cancellation receipts, before this call. Null is accepted.
+// The borrowed model and transport both outlive this call.
 void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
                                      iree_status_code_t terminal_code);
 

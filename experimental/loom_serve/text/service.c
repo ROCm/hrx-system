@@ -109,7 +109,7 @@ struct loom_serve_text_service_t {
   iree_host_size_t shape_count;
   // Rotating admission priority, independent of row or request identity.
   iree_host_size_t cursor;
-  // Independent periodic reporting of copied service state.
+  // Proactor-timed reporting of copied state, independent of model readiness.
   loom_serve_text_heartbeat_t heartbeat;
   // Completion publication only; model mutation remains on the router owner.
   struct {
@@ -1842,11 +1842,10 @@ iree_status_t loom_serve_text_service_create(
     status = text_service_initialize(service);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_text_heartbeat_start(
-        &service->heartbeat, iree_string_builder_view(&service->identity),
-        options->heartbeat_interval, host_allocator);
-  }
-  if (iree_status_is_ok(status)) {
+    loom_serve_text_heartbeat_configure(
+        &service->heartbeat, service->completion.proactor,
+        iree_string_builder_view(&service->identity),
+        options->heartbeat_interval);
     *out_service = service;
   } else {
     loom_serve_text_service_destroy(service, iree_status_code(status));
@@ -1859,10 +1858,15 @@ static void text_set_observer(void* self, loom_serve_http_observer_t observer) {
   iree_slim_mutex_lock(&service->completion.mutex);
   service->completion.observer = observer;
   iree_slim_mutex_unlock(&service->completion.mutex);
+  iree_slim_mutex_lock(&service->heartbeat.mutex);
+  service->heartbeat.observer = observer;
+  iree_slim_mutex_unlock(&service->heartbeat.mutex);
 }
 
 static bool text_is_pending(void* self) {
-  return ((loom_serve_text_service_t*)self)->completion.work != TEXT_WORK_NONE;
+  loom_serve_text_service_t* service = self;
+  return service->completion.work != TEXT_WORK_NONE ||
+         loom_serve_text_heartbeat_is_pending(&service->heartbeat);
 }
 
 static bool text_is_active(void* self) {
@@ -1879,9 +1883,9 @@ static bool text_is_active(void* self) {
   return false;
 }
 
-static iree_status_t text_advance(void* self,
-                                  loom_serve_http_service_flags_t flags,
-                                  bool* out_progress) {
+static iree_status_t text_advance_work(void* self,
+                                       loom_serve_http_service_flags_t flags,
+                                       bool* out_progress) {
   loom_serve_text_service_t* service = self;
   *out_progress = false;
   if (service->completion.work != TEXT_WORK_NONE) {
@@ -1985,6 +1989,24 @@ static iree_status_t text_advance(void* self,
     text_observe(service, iree_status_is_ok(status) ? "idle" : "failed");
   }
   return status;
+}
+
+static iree_status_t text_advance(void* self,
+                                  loom_serve_http_service_flags_t flags,
+                                  bool* out_progress) {
+  loom_serve_text_service_t* service = self;
+  iree_status_t status = loom_serve_text_heartbeat_advance(
+      &service->heartbeat,
+      iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING),
+      out_progress);
+  if (!iree_status_is_ok(status)) {
+    flags |= LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING;
+  }
+  bool work_progress = false;
+  iree_status_t work_status = text_advance_work(self, flags, &work_progress);
+  // A new model failure needs another owner turn to stop a pending timer.
+  *out_progress |= work_progress || !iree_status_is_ok(work_status);
+  return iree_status_join(status, work_status);
 }
 
 static iree_status_t text_accept(void* self,
