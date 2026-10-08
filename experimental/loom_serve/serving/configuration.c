@@ -18,8 +18,8 @@ typedef struct configuration_field_t {
   iree_json_value_type_t type;
   // Raw borrowed JSON value, with null data marking an absent field.
   iree_string_view_t value;
-  // Allowed model kind, or zero for fields common to all entries.
-  loom_serve_model_kind_t kind;
+  // Allowed model kinds as bit positions, or zero for common fields.
+  uint32_t kinds;
 } configuration_field_t;
 
 typedef struct configuration_fields_t {
@@ -182,39 +182,42 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
       {"name", IREE_JSON_VALUE_TYPE_STRING},
       {"source", IREE_JSON_VALUE_TYPE_STRING},
       {"weights", IREE_JSON_VALUE_TYPE_STRING,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"tokenizer", IREE_JSON_VALUE_TYPE_STRING,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
-      {"rows", IREE_JSON_VALUE_TYPE_NUMBER, .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
+      {"rows", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"context_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"pool_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"prefill_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"checkpoint_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"pending_requests", IREE_JSON_VALUE_TYPE_NUMBER},
       {"max_tokens", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"mtp_depth", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"continuation_epochs", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_TEXT)},
       {"checkpoint", IREE_JSON_VALUE_TYPE_STRING,
-       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE)},
       {"adapter", IREE_JSON_VALUE_TYPE_STRING,
-       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE)},
       {"width", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE)},
       {"height", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE)},
       {"text_tokens", IREE_JSON_VALUE_TYPE_NUMBER,
-       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_IMAGE)},
       {"assets", IREE_JSON_VALUE_TYPE_STRING,
-       .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING},
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
+                (1u << LOOM_SERVE_MODEL_KIND_DECISION)},
       {"options", IREE_JSON_VALUE_TYPE_OBJECT,
-       .kind = LOOM_SERVE_MODEL_KIND_EMBEDDING}};
+       .kinds = (1u << LOOM_SERVE_MODEL_KIND_EMBEDDING) |
+                (1u << LOOM_SERVE_MODEL_KIND_DECISION)}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, configuration_field_visit, &context));
@@ -224,14 +227,16 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
     model->kind = LOOM_SERVE_MODEL_KIND_IMAGE;
   } else if (iree_string_view_equal(fields[0].value, IREE_SV("embedding"))) {
     model->kind = LOOM_SERVE_MODEL_KIND_EMBEDDING;
+  } else if (iree_string_view_equal(fields[0].value, IREE_SV("decision"))) {
+    model->kind = LOOM_SERVE_MODEL_KIND_DECISION;
   } else {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
-        "catalog model kind must be text, image or embedding");
+        "catalog model kind must be text, image, embedding or decision");
   }
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
-    if (fields[i].value.data && fields[i].kind &&
-        fields[i].kind != model->kind) {
+    if (fields[i].value.data && fields[i].kinds &&
+        !(fields[i].kinds & (1u << model->kind))) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
           "catalog field '%s' does not apply to kind '%.*s'", fields[i].name,
@@ -291,7 +296,8 @@ void loom_serve_configuration_deinitialize(
                           (void*)model->image.checkpoint.data);
       iree_allocator_free(configuration->allocator,
                           (void*)model->image.adapter.data);
-    } else if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING) {
+    } else if (model->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING ||
+               model->kind == LOOM_SERVE_MODEL_KIND_DECISION) {
       iree_allocator_free(configuration->allocator,
                           (void*)model->finite.assets.data);
       iree_allocator_free(configuration->allocator,

@@ -1,0 +1,114 @@
+config.decl @fixture.units : %value: index where [range(%value, 1, 256)]
+amdgpu.target<gfx11-generic> @fixture_target {subgroup_size = 32}
+
+kernel.def target(@fixture_target) @weights() {
+  %units = config.get @fixture.units : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%units, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: buffer, %hidden: buffer) {
+  %origin = index.constant 0 : offset
+  %sixteen = index.constant 16 : offset
+  %row = kernel.workgroup.id<x> : index
+  %units = config.get @fixture.units : index
+  %header = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %rows32 = view.load %header[0] : view<4xi32> -> i32
+  %rows = index.cast %rows32 : i32 to index
+  %live = index.cmp ult, %row, %rows : index
+  scf.if %live {
+    %metadata = buffer.view %input[%sixteen] : buffer -> view<[%units]x4xi32>
+    %first32 = view.load %metadata[%row, 0] : view<[%units]x4xi32> -> i32
+    %width32 = view.load %metadata[%row, 1] : view<[%units]x4xi32> -> i32
+    %first_bounded = scalar.assume %first32 [range(%first32, 0, 255)] : i32
+    %width_bounded = scalar.assume %width32 [range(%width32, 1, 255)] : i32
+    %first = index.cast %first_bounded : i32 to index
+    %width = index.cast %width_bounded : i32 to index
+    %metadata_bytes = index.scale %units, %sixteen : index, offset -> offset
+    %seeds_base = index.add %sixteen, %metadata_bytes : offset
+    %seeds = buffer.view %input[%seeds_base] : buffer -> view<[%units]xi32>
+    %weights = buffer.view %hidden[%origin] : buffer -> view<[%units]xf32>
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %maximum = index.sub %units, %one : index
+    %three32 = scalar.constant 3 : i32
+    %one32 = scalar.constant 1 : i32
+    scf.for %j = [%zero to %width step %one] {
+      %index_value = index.add %first, %j : index
+      %index = index.assume %index_value [range(%index_value, 0, %maximum)] : index
+      %seed = view.load %seeds[%index] : view<[%units]xi32> -> i32
+      // Cohort size is an observable oracle input: serial per-request launches
+      // cannot masquerade as the expected packed dispatch in the HTTP test.
+      %cohort_seed = scalar.addi %seed, %rows32 : i32
+      %remainder = scalar.andi %cohort_seed, %three32 : i32
+      %value32 = scalar.addi %remainder, %one32 : i32
+      %value = scalar.uitofp %value32 : i32 to f32
+      view.store %value, %weights[%index] : f32, view<[%units]xf32>
+      scf.yield
+    }
+    scf.yield
+  }
+  kernel.return
+}
+
+// Positive integer weights normalize to predictable distributions. This is an
+// ABI oracle, not a learned head; all probability math is still device work.
+kernel.def target(@fixture_target) @normalize() {
+  %units = config.get @fixture.units : index
+  %one = index.constant 1 : index
+  kernel.launch.config workgroups(%units, %one, %one) workgroup_size(%one, %one, %one) : index
+} launch(%input: buffer, %hidden: buffer, %output: buffer) {
+  %origin = index.constant 0 : offset
+  %sixteen = index.constant 16 : offset
+  %row = kernel.workgroup.id<x> : index
+  %units = config.get @fixture.units : index
+  %header = buffer.view %input[%origin] : buffer -> view<4xi32>
+  %rows32 = view.load %header[0] : view<4xi32> -> i32
+  %rows = index.cast %rows32 : i32 to index
+  %live = index.cmp ult, %row, %rows : index
+  scf.if %live {
+    %metadata = buffer.view %input[%sixteen] : buffer -> view<[%units]x4xi32>
+    %first32 = view.load %metadata[%row, 0] : view<[%units]x4xi32> -> i32
+    %width32 = view.load %metadata[%row, 1] : view<[%units]x4xi32> -> i32
+    %target32 = view.load %metadata[%row, 2] : view<[%units]x4xi32> -> i32
+    %first_bounded = scalar.assume %first32 [range(%first32, 0, 255)] : i32
+    %width_bounded = scalar.assume %width32 [range(%width32, 1, 255)] : i32
+    %target_bounded = scalar.assume %target32 [range(%target32, 0, 255)] : i32
+    %first = index.cast %first_bounded : i32 to index
+    %width = index.cast %width_bounded : i32 to index
+    %target = index.cast %target_bounded : i32 to index
+    %weights = buffer.view %hidden[%origin] : buffer -> view<[%units]xf32>
+    %result = buffer.view %output[%origin] : buffer -> view<[%units]xf32>
+    %zero = index.constant 0 : index
+    %one = index.constant 1 : index
+    %maximum = index.sub %units, %one : index
+    %zero_f32 = scalar.constant 0.0 : f32
+    %sum = scf.for %j = [%zero to %width step %one](%previous = %zero_f32 : f32) -> (f32) {
+      %index_value = index.add %first, %j : index
+      %index = index.assume %index_value [range(%index_value, 0, %maximum)] : index
+      %value = view.load %weights[%index] : view<[%units]xf32> -> f32
+      %next = scalar.addf %previous, %value : f32
+      scf.yield %next : f32
+    }
+    scf.for %j = [%zero to %width step %one] {
+      %source_value = index.add %first, %j : index
+      %source = index.assume %source_value [range(%source_value, 0, %maximum)] : index
+      %target_value = index.add %target, %j : index
+      %position = index.assume %target_value [range(%target_value, 0, %maximum)] : index
+      %weight = view.load %weights[%source] : view<[%units]xf32> -> f32
+      %probability = scalar.divf %weight, %sum : f32
+      view.store %probability, %result[%position] : f32, view<[%units]xf32>
+      scf.yield
+    }
+    scf.yield
+  }
+  kernel.return
+}
+
+command.program.def public @decide() launch(%input: buffer, %output: buffer) {
+  %units = config.get @fixture.units : index
+  %four = index.constant 4 : offset
+  %bytes = index.scale %units, %four : index, offset -> offset
+  %hidden = buffer.alloca<global> align(16) %bytes : buffer
+  kernel.launch @weights(%input, %hidden) : (buffer, buffer)
+  kernel.launch @normalize(%input, %hidden, %output) : (buffer, buffer, buffer)
+  command.return
+}

@@ -21,11 +21,12 @@ TEST(EmbeddingProtocolTest, OwnsOrderedDecodedSequences) {
   IREE_ASSERT_OK(loom_serve_embedding_request_initialize(
       iree_make_cstring_view(json.c_str()), &request, iree_allocator_system()));
   json.assign(json.size(), 'x');
-  ASSERT_EQ(request.count, 2u);
+  ASSERT_EQ(request.base.count, 2u);
   EXPECT_EQ(request.dimensions, 2u);
   iree_const_byte_span_t bytes;
   IREE_ASSERT_OK(iree_vm_buffer_map_read(
-      request.input, 0, iree_vm_buffer_length(request.input), &bytes));
+      request.base.input, 0, iree_vm_buffer_length(request.base.input),
+      &bytes));
   EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data), 2u);
   EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data + 8), 2u);
   EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data + 16), 0u);
@@ -39,7 +40,7 @@ TEST(EmbeddingProtocolTest, OwnsOrderedDecodedSequences) {
             std::string("a\0b", 3));
   EXPECT_EQ(std::string(reinterpret_cast<const char*>(bytes.data + second), 2),
             "λ");
-  EXPECT_EQ(iree_vm_buffer_access(request.input),
+  EXPECT_EQ(iree_vm_buffer_access(request.base.input),
             IREE_VM_BUFFER_ACCESS_FLAG_READ);
   loom_serve_embedding_request_deinitialize(&request);
 }
@@ -50,10 +51,11 @@ TEST(EmbeddingProtocolTest, DistinguishesSingleTokenSequenceAndBatches) {
     loom_serve_embedding_request_t request;
     IREE_ASSERT_OK(loom_serve_embedding_request_initialize(
         iree_make_cstring_view(json), &request, iree_allocator_system()));
-    EXPECT_EQ(request.count, 1u);
+    EXPECT_EQ(request.base.count, 1u);
     iree_const_byte_span_t bytes;
     IREE_ASSERT_OK(iree_vm_buffer_map_read(
-        request.input, 0, iree_vm_buffer_length(request.input), &bytes));
+        request.base.input, 0, iree_vm_buffer_length(request.base.input),
+        &bytes));
     EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data + 16), 1u);
     EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data + 32), 12u);
     const uint64_t offset = iree_unaligned_load_le_u64(bytes.data + 24);
@@ -82,8 +84,8 @@ TEST(EmbeddingProtocolTest, RejectsAmbiguousRequestsAndReleasesPartialInput) {
         iree_make_cstring_view(json.c_str()), &request,
         iree_allocator_system()));
     EXPECT_FALSE(status.ok());
-    EXPECT_EQ(request.input, nullptr);
-    EXPECT_EQ(request.count, 0u);
+    EXPECT_EQ(request.base.input, nullptr);
+    EXPECT_EQ(request.base.count, 0u);
   }
 }
 
@@ -93,11 +95,12 @@ TEST(EmbeddingProtocolTest, DecodesEncodingEnumAndDefersEmptyItemsToSource) {
       IREE_SV(
           R"({"model":"m","input":[[],[0]],"encoding_format":"b\u0061se64"})"),
       &request, iree_allocator_system()));
-  EXPECT_EQ(request.count, 2u);
+  EXPECT_EQ(request.base.count, 2u);
   EXPECT_EQ(request.encoding, LOOM_SERVE_EMBEDDING_ENCODING_BASE64);
   iree_const_byte_span_t bytes;
   IREE_ASSERT_OK(iree_vm_buffer_map_read(
-      request.input, 0, iree_vm_buffer_length(request.input), &bytes));
+      request.base.input, 0, iree_vm_buffer_length(request.base.input),
+      &bytes));
   EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data + 32), 0u);
   EXPECT_EQ(iree_unaligned_load_le_u64(bytes.data + 56), 4u);
   loom_serve_embedding_request_deinitialize(&request);
@@ -109,7 +112,8 @@ TEST(EmbeddingProtocolTest, EncodesExactFloatAndLittleEndianBase64) {
   iree_unaligned_store_le_f32(bytes + 4, -2.5f);
   const iree_const_byte_span_t row =
       iree_make_const_byte_span(bytes, sizeof(bytes));
-  loom_serve_embedding_request_t request = {.count = 1, .dimensions = 2};
+  loom_serve_embedding_request_t request = {.base = {.count = 1},
+                                            .dimensions = 2};
   iree_string_builder_t output;
   iree_string_builder_initialize(iree_allocator_system(), &output);
   IREE_ASSERT_OK(

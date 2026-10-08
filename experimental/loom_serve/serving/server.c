@@ -7,8 +7,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "experimental/loom_serve/embedding/service.h"
+#include "experimental/loom_serve/decision/protocol.h"
+#include "experimental/loom_serve/embedding/protocol.h"
 #include "experimental/loom_serve/finite/model.h"
+#include "experimental/loom_serve/finite/service.h"
 #include "experimental/loom_serve/image/model.h"
 #include "experimental/loom_serve/image/service.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
@@ -51,8 +53,8 @@ typedef union serving_model_t {
     // Owned source-JIT model borrowing the shared device.
     loom_serve_finite_model_t* model;
     // Owned batched HTTP admission borrowing the model and route name.
-    loom_serve_embedding_service_t* service;
-  } embedding;
+    loom_serve_finite_service_t* service;
+  } finite;
 } serving_model_t;
 
 static iree_status_t serving_create_text(
@@ -127,7 +129,7 @@ static iree_status_t serving_create_image(
   return iree_ok_status();
 }
 
-static iree_status_t serving_create_embedding(
+static iree_status_t serving_create_finite(
     loom_serve_device_t* device,
     const loom_serve_model_configuration_t* configuration,
     serving_model_t* model, loom_serve_http_service_t* out_service,
@@ -137,14 +139,16 @@ static iree_status_t serving_create_embedding(
       .asset_directory = configuration->finite.assets,
       .options = configuration->finite.options};
   IREE_RETURN_IF_ERROR(loom_serve_finite_model_create(
-      device, &options, &model->embedding.model, allocator));
-  IREE_RETURN_IF_ERROR(loom_serve_embedding_service_create(
-      loom_serve_device_host(device), model->embedding.model,
+      device, &options, &model->finite.model, allocator));
+  IREE_RETURN_IF_ERROR(loom_serve_finite_service_create(
+      loom_serve_device_host(device), model->finite.model,
+      configuration->kind == LOOM_SERVE_MODEL_KIND_EMBEDDING
+          ? loom_serve_embedding_protocol()
+          : loom_serve_decision_protocol(),
       configuration->name, configuration->pending_requests,
-      (iree_duration_t)FLAG_heartbeat_ms * 1000000, &model->embedding.service,
+      (iree_duration_t)FLAG_heartbeat_ms * 1000000, &model->finite.service,
       allocator));
-  *out_service =
-      loom_serve_embedding_service_interface(model->embedding.service);
+  *out_service = loom_serve_finite_service_interface(model->finite.service);
   return iree_ok_status();
 }
 
@@ -217,8 +221,9 @@ int main(int argc, char** argv) {
                                       allocator);
         break;
       case LOOM_SERVE_MODEL_KIND_EMBEDDING:
-        status = serving_create_embedding(device, entry, &models[i],
-                                          &services[i], allocator);
+      case LOOM_SERVE_MODEL_KIND_DECISION:
+        status = serving_create_finite(device, entry, &models[i], &services[i],
+                                       allocator);
         break;
     }
   }
@@ -246,7 +251,7 @@ int main(int argc, char** argv) {
     } else if (configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
       loom_serve_image_service_destroy(models[i].image.service);
     } else {
-      loom_serve_embedding_service_destroy(models[i].embedding.service);
+      loom_serve_finite_service_destroy(models[i].finite.service);
     }
   }
   status = iree_status_join(status, loom_serve_http_server_destroy(server));
@@ -260,8 +265,8 @@ int main(int argc, char** argv) {
         model_status = loom_serve_image_model_destroy(models[i].image.model);
         break;
       case LOOM_SERVE_MODEL_KIND_EMBEDDING:
-        model_status =
-            loom_serve_finite_model_destroy(models[i].embedding.model);
+      case LOOM_SERVE_MODEL_KIND_DECISION:
+        model_status = loom_serve_finite_model_destroy(models[i].finite.model);
         break;
     }
     status = iree_status_join(status, model_status);

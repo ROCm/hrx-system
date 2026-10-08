@@ -4,7 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "experimental/loom_serve/embedding/service.h"
+#include "experimental/loom_serve/finite/service.h"
 
 #include <signal.h>
 #include <sys/socket.h>
@@ -19,6 +19,7 @@
 #include <utility>
 #include <vector>
 
+#include "experimental/loom_serve/embedding/protocol.h"
 #include "iree/async/proactor.h"
 #include "iree/base/tooling/flags.h"
 #include "iree/testing/gtest.h"
@@ -61,10 +62,10 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   void CreateService(iree_duration_t heartbeat_interval) {
-    IREE_ASSERT_OK(loom_serve_embedding_service_create(
-        host_, model_, IREE_SV("fixture"), 16, heartbeat_interval, &service_,
-        allocator_));
-    interface_ = loom_serve_embedding_service_interface(service_);
+    IREE_ASSERT_OK(loom_serve_finite_service_create(
+        host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
+        heartbeat_interval, &service_, allocator_));
+    interface_ = loom_serve_finite_service_interface(service_);
     interface_.set_observer(
         interface_.self,
         {[](void* self) {
@@ -83,7 +84,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
     if (service_) {
       interface_.set_observer(interface_.self, {});
-      loom_serve_embedding_service_destroy(service_);
+      loom_serve_finite_service_destroy(service_);
     }
     IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
     IREE_EXPECT_OK(loom_serve_finite_model_destroy(model_));
@@ -260,7 +261,7 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
   // Source package directory, independent of temporary replacements.
   std::string directory_;
   // Production batched protocol service.
-  loom_serve_embedding_service_t* service_ = nullptr;
+  loom_serve_finite_service_t* service_ = nullptr;
   // Serialized callbacks used by both direct turns and the shared router.
   loom_serve_http_service_t interface_ = {};
   // Production loopback carrier, independent of scheduler turns.
@@ -339,7 +340,7 @@ TEST_P(SourceEmbeddingServiceTest,
 TEST_P(SourceEmbeddingServiceTest,
        SharedRouterServesUtilitiesAndBothEncodings) {
   interface_.set_observer(interface_.self, {});
-  loom_serve_embedding_service_destroy(std::exchange(service_, nullptr));
+  loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
   // Exercise heartbeat cancellation during normal router shutdown. The test
   // waits for ownership, not the deadline, so even an hour-long timer retires.
   ASSERT_NO_FATAL_FAILURE(CreateService(INT64_C(3600000000000)));
@@ -378,7 +379,7 @@ TEST_P(SourceEmbeddingServiceTest,
       iree::testing::MakeTempFilePath("weighted_embedding");
   ASSERT_NO_FATAL_FAILURE(WriteWeightedPackage(package));
   interface_.set_observer(interface_.self, {});
-  loom_serve_embedding_service_destroy(std::exchange(service_, nullptr));
+  loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
   IREE_ASSERT_OK(
       loom_serve_finite_model_destroy(std::exchange(model_, nullptr)));
   IREE_ASSERT_OK(loom_serve_device_destroy(std::exchange(device_, nullptr)));

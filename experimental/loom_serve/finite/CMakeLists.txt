@@ -9,6 +9,46 @@
 
 iree_add_all_subdirs()
 
+loom_cc_library(
+  NAME
+    protocol
+  HDRS
+    "protocol.h"
+  DEPS
+    iree::base
+    iree::vm
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
+    service
+  HDRS
+    "service.h"
+  SRCS
+    "service.c"
+  DEPS
+    ::model
+    ::protocol
+    iree::async
+    iree::async::util::proactor_pool
+    iree::base
+    iree::base::threading
+    iree::experimental::loom_serve::http::request
+    iree::experimental::loom_serve::http::router
+    iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::http::timer
+    iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::host
+    iree::experimental::loom_serve::runtime::residency
+    iree::hal
+    iree::task
+    iree::vm
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME

@@ -13,6 +13,41 @@ package(
 )
 
 loom_cc_library(
+    name = "protocol",
+    hdrs = ["protocol.h"],
+    deps = [
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
+    name = "service",
+    srcs = ["service.c"],
+    hdrs = ["service.h"],
+    deps = [
+        ":model",
+        ":protocol",
+        "//experimental/loom_serve/http:request",
+        "//experimental/loom_serve/http:router",
+        "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/http:timer",
+        "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/runtime:host",
+        "//experimental/loom_serve/runtime:residency",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/async",
+        "//runtime/src/iree/async/util:proactor_pool",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/task",
+        "//runtime/src/iree/vm",
+    ],
+)
+
+loom_cc_library(
     name = "model",
     srcs = ["model.c"],
     hdrs = ["model.h"],

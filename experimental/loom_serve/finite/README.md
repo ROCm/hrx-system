@@ -41,7 +41,8 @@ run(stage_index, feedback_bytes, input_buffer, output_buffer)
 ```
 
 The native protocol provides ordered, indexed input records. Its layout is
-declared in [embedding/protocol.h](../embedding/protocol.h). Source preparation
+declared in [embedding/protocol.h](../embedding/protocol.h) or
+[decision/protocol.h](../decision/protocol.h). Source preparation
 validates model-specific limits through `input.require`; an invalid input is a
 request rejection, not a failed device. The state is immutable across request
 preparation. Returned buffers own their storage or retain any aliased input.
@@ -77,7 +78,8 @@ commands may need padded binding storage without downloading the padding.
 The current command ABI has two dynamic roots (input/output) and a
 compiler-reflected private workspace. `run` uses the runner's `execute_2` and
 `feedback` imports. Normalization, dimensional projection and other neural math
-execute in kernels. The CPU only formats the final vectors. Nonfinite values or
+execute in kernels. The CPU formats final vectors and computes the decision
+protocol's answer/confidence statistics from final probabilities. Nonfinite values or
 a result width inconsistent with the request are model failures, not an excuse
 for native truncation or normalization.
 
@@ -97,11 +99,19 @@ proof.
 
 ## Evidence and extension boundary
 
+[service.h](service.h) owns the common asynchronous cohort lifecycle.
+[protocol.h](protocol.h) supplies immutable native modality wiring for parsing
+and encoding. Each accepted job contains its concrete request storage in one
+allocation; model programs are not protocol callbacks. Embeddings and decisions
+share preparation, admission, device readiness, encoding lifetime and retirement.
+
 The fixture runs actual source JIT, two GPU kernels, private workspace, compact
 feedback and HTTP encoding with one/four workers. Its weighted source variant
 adds a checkpoint-backed head without changing native code and exercises
 admission behind another pinned residency. These are ABI and ownership tests,
-not model-quality or throughput measurements.
+not model-quality or throughput measurements. The decision source fixture adds
+variable question/option counts, exact typed answers and a mixed-model HTTP gate
+through the same service.
 
 A real embedding port must still supply its source package, checkpoint policy,
 input/task policy, numerical oracle and shape coverage. Target-family selection

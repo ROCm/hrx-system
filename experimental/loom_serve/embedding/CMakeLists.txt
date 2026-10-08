@@ -21,35 +21,7 @@ loom_cc_library(
     iree::base::internal::base64
     iree::base::internal::json
     iree::base::internal::unicode
-    iree::vm
-    loom::util::json
-    loom::util::stream
-  PUBLIC
-)
-
-loom_cc_library(
-  NAME
-    service
-  HDRS
-    "service.h"
-  SRCS
-    "service.c"
-  DEPS
-    ::protocol
-    iree::async
-    iree::async::util::proactor_pool
-    iree::base
-    iree::base::threading
-    iree::experimental::loom_serve::finite::model
-    iree::experimental::loom_serve::http::request
-    iree::experimental::loom_serve::http::router
-    iree::experimental::loom_serve::http::server
-    iree::experimental::loom_serve::http::timer
-    iree::experimental::loom_serve::runtime::execution
-    iree::experimental::loom_serve::runtime::host
-    iree::experimental::loom_serve::runtime::residency
-    iree::hal
-    iree::task
+    iree::experimental::loom_serve::finite::protocol
     iree::vm
     loom::util::json
     loom::util::stream

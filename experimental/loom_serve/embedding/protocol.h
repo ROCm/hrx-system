@@ -7,8 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_EMBEDDING_PROTOCOL_H_
 #define EXPERIMENTAL_LOOM_SERVE_EMBEDDING_PROTOCOL_H_
 
-#include "iree/base/api.h"
-#include "iree/vm/buffer.h"
+#include "experimental/loom_serve/finite/protocol.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -23,14 +22,15 @@ typedef struct loom_serve_embedding_request_t {
   // Owned read-only source input: i64 [dimensions, count], then count records
   // [kind, absolute byte offset, byte length]. Kind 0 is UTF-8 and kind 1 is
   // nonnegative LE i32 IDs. Payloads are aligned to eight bytes.
-  iree_vm_buffer_t* input;
-  // Number of ordered input sequences and expected result rows.
-  iree_host_size_t count;
+  loom_serve_finite_request_t base;
   // Requested output dimensions, or zero for the source-defined default.
   uint64_t dimensions;
   // Wire encoding; base64 contains little-endian IEEE754 F32 elements.
   loom_serve_embedding_encoding_t encoding;
 } loom_serve_embedding_request_t;
+
+// Static native modality wiring for the shared finite cohort service.
+const loom_serve_finite_protocol_t* loom_serve_embedding_protocol(void);
 
 // Parses a complete /v1/embeddings request. The router has selected model.
 // Supports string, string[], integer[] and integer[][] input, positive optional

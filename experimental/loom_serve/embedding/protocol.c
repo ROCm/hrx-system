@@ -232,8 +232,8 @@ static iree_status_t embedding_parse(iree_string_view_t body,
     }
     status = iree_vm_buffer_subspan(buffer, 0, bytes.data_length,
                                     IREE_VM_BUFFER_ACCESS_FLAG_READ, allocator,
-                                    &request->input);
-    request->count = inputs->count;
+                                    &request->base.input);
+    request->base.count = inputs->count;
   }
   iree_vm_buffer_release(buffer);
   return status;
@@ -241,7 +241,7 @@ static iree_status_t embedding_parse(iree_string_view_t body,
 
 void loom_serve_embedding_request_deinitialize(
     loom_serve_embedding_request_t* request) {
-  iree_vm_buffer_release(request->input);
+  iree_vm_buffer_release(request->base.input);
   memset(request, 0, sizeof(*request));
 }
 
@@ -314,8 +314,8 @@ iree_status_t loom_serve_embedding_response(
   IREE_RETURN_IF_ERROR(
       iree_string_builder_append_cstring(output, ",\"data\":["));
   iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0; i < request->count && iree_status_is_ok(status);
-       ++i) {
+  for (iree_host_size_t i = 0;
+       i < request->base.count && iree_status_is_ok(status); ++i) {
     if (request->dimensions && rows[i].data_length / 4 != request->dimensions) {
       status =
           iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -340,4 +340,37 @@ iree_status_t loom_serve_embedding_response(
         input_tokens, input_tokens);
   }
   return status;
+}
+
+static iree_status_t embedding_initialize(iree_string_view_t body,
+                                          loom_serve_finite_request_t* request,
+                                          iree_allocator_t allocator) {
+  return loom_serve_embedding_request_initialize(
+      body, (loom_serve_embedding_request_t*)request, allocator);
+}
+
+static void embedding_deinitialize(loom_serve_finite_request_t* request) {
+  loom_serve_embedding_request_deinitialize(
+      (loom_serve_embedding_request_t*)request);
+}
+
+static iree_status_t embedding_response(
+    const loom_serve_finite_request_t* request, iree_string_view_t model,
+    const iree_const_byte_span_t* rows, uint64_t input_tokens,
+    iree_string_builder_t* output) {
+  return loom_serve_embedding_response(
+      (const loom_serve_embedding_request_t*)request, model, rows, input_tokens,
+      output);
+}
+
+const loom_serve_finite_protocol_t* loom_serve_embedding_protocol(void) {
+  static const loom_serve_finite_protocol_t protocol = {
+      .name = "embedding",
+      .endpoint = "/v1/embeddings",
+      .invalid_status = "400 Bad Request",
+      .request_size = sizeof(loom_serve_embedding_request_t),
+      .initialize = embedding_initialize,
+      .deinitialize = embedding_deinitialize,
+      .response = embedding_response};
+  return &protocol;
 }

@@ -13,6 +13,8 @@ package(
     licenses = ["notice"],
 )
 
+exports_files(["prepare.loom"])
+
 filegroup(
     name = "sources",
     srcs = [
@@ -46,8 +48,9 @@ loom_cc_test(
         "//conditions:default": ["@platforms//:incompatible"],
     }),
     deps = [
-        "//experimental/loom_serve/embedding:service",
+        "//experimental/loom_serve/embedding:protocol",
         "//experimental/loom_serve/finite:model",
+        "//experimental/loom_serve/finite:service",
         "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/runtime:device",

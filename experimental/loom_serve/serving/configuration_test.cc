@@ -184,4 +184,32 @@ TEST(ConfigurationTest,
   }
 }
 
+TEST(ConfigurationTest, DecisionAndEmbeddingShareOnlyFiniteConfiguration) {
+  loom_serve_configuration_t configuration;
+  IREE_ASSERT_OK(loom_serve_configuration_initialize(IREE_SV(R"({"models":[
+        {"kind":"decision","name":"judge","source":"joint","assets":"weights","options":{"batch_units":64}},
+        {"kind":"embedding","name":"vectors","source":"encoder","assets":"weights"}
+      ]})"),
+                                                     &configuration,
+                                                     iree_allocator_system()));
+  ASSERT_EQ(configuration.model_count, 2u);
+  EXPECT_EQ(configuration.models[0].kind, LOOM_SERVE_MODEL_KIND_DECISION);
+  EXPECT_EQ(configuration.models[1].kind, LOOM_SERVE_MODEL_KIND_EMBEDDING);
+  const auto policy = configuration.models[0].finite.options;
+  EXPECT_EQ(std::string(policy.data, policy.size), R"({"batch_units":64})");
+  loom_serve_configuration_deinitialize(&configuration);
+  for (const char* field : {R"("rows":8)", R"("width":32)", R"("weights":"x")",
+                            R"("options":[])"}) {
+    const std::string json =
+        std::string(
+            R"({"models":[{"kind":"decision","name":"m","source":"s","assets":"a",)") +
+        field + "}]}";
+    IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
+                          loom_serve_configuration_initialize(
+                              iree_make_cstring_view(json.c_str()),
+                              &configuration, iree_allocator_system()));
+    EXPECT_EQ(configuration.models, nullptr);
+  }
+}
+
 }  // namespace

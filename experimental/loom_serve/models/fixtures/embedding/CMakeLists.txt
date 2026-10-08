@@ -49,8 +49,9 @@ loom_cc_test(
     iree::base
     iree::base::threading
     iree::base::tooling::flags
-    iree::experimental::loom_serve::embedding::service
+    iree::experimental::loom_serve::embedding::protocol
     iree::experimental::loom_serve::finite::model
+    iree::experimental::loom_serve::finite::service
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device

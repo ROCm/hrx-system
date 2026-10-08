@@ -17,6 +17,7 @@ typedef enum loom_serve_model_kind_e {
   LOOM_SERVE_MODEL_KIND_TEXT = 1,
   LOOM_SERVE_MODEL_KIND_IMAGE = 2,
   LOOM_SERVE_MODEL_KIND_EMBEDDING = 3,
+  LOOM_SERVE_MODEL_KIND_DECISION = 4,
 } loom_serve_model_kind_t;
 
 typedef struct loom_serve_text_configuration_t {
@@ -96,13 +97,14 @@ typedef struct loom_serve_configuration_t {
 } loom_serve_configuration_t;
 
 // Parses one complete JSON/JSONC {"models":[...]} catalog. Every model declares
-// kind="text", "image" or "embedding", name and source. Text entries require
-// weights and tokenizer; image entries require a checkpoint directory.
-// Embedding entries require assets and accept a source-owned options object.
-// Unknown/duplicate fields, fields from another modality, duplicate names and
-// invalid native options reject before model creation. Model-specific geometry
-// is validated by its source during creation. Strings are decoded and owned
-// independently of input. Failure releases partial state.
+// kind="text", "image", "embedding" or "decision", name and source. Text
+// entries require weights and tokenizer; image entries require a checkpoint
+// directory. Embedding/decision entries require assets and accept a
+// source-owned options object. Unknown/duplicate fields, fields from another
+// modality, duplicate names and invalid native options reject before model
+// creation. Model-specific geometry is validated by its source during creation.
+// Strings are decoded and owned independently of input. Failure releases
+// partial state.
 iree_status_t loom_serve_configuration_initialize(
     iree_string_view_t json, loom_serve_configuration_t* out_configuration,
     iree_allocator_t host_allocator);

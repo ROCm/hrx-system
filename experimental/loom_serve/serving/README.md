@@ -1,8 +1,9 @@
 # Serving multiple source models
 
-`//experimental/loom_serve/serving:server` serves named text, image and embedding
-deployments through one loopback HTTP listener. All deployments borrow one device, parameter
-residency cache and private command workspace backing. Each owns its work and
+`//experimental/loom_serve/serving:server` serves named text, image, embedding and
+decision deployments through one loopback HTTP listener. All deployments borrow
+one device, parameter residency cache and private command workspace backing.
+Each owns its work and
 feedback timelines, source-JIT programs and weights. Text deployments own their
 logical KV pool, sessions and checkpoints; image deployments own their finite
 request storage. Registering the same checkpoint twice creates two
@@ -87,7 +88,7 @@ Unknown, duplicate and wrong-modality fields reject instead of silently changing
 configuration. Image `checkpoint` is an asset directory, whereas text `weights`
 is a checkpoint file; an image's optional `adapter` is interpreted by its source.
 A model source can impose additional shape/storage constraints.
-Embedding `assets` names the package's asset directory; `options` is passed
+Embedding/decision `assets` names the package's asset directory; `options` is passed
 unchanged as JSON to its cold source program. There are no native model-specific
 embedding configuration fields. The example uses a deterministic ABI fixture,
 not a learned embedding model.
@@ -105,7 +106,7 @@ sets the shared CPU worker maximum (eight by default). Connections
 and HTTP body storage have independent bounds through `--connections` and
 `--request_body_bytes`. Each model's `pending_requests` defaults to 32 and
 text `max_tokens` to 512. Image defaults are 384-square pixels and 512 text tokens.
-For embedding deployments, `pending_requests` bounds all accepted requests,
+For embedding/decision deployments, `pending_requests` bounds all accepted requests,
 including the active cohort. For text/image it bounds the waiting queue.
 The budget must fit each model's weights plus live retained state; this example's
 36 GiB fits either model separately, not all deployments together.
@@ -206,6 +207,15 @@ response identity. A cancelled peer loses only its own response. The native
 encoder receives compact final vectors, not hidden activations. See the
 [fixture](../models/fixtures/embedding/README.md) for exact predictable outputs
 and the source replacement/parameter-pressure test.
+
+Decisions use `POST /v1/systemone` with `model`, `state` and keyed typed
+`questions`. Choice, score and noul answers come from source-produced compact
+probability vectors. A `kind:"decision"` deployment uses the same `source`,
+`assets`, `options` and `pending_requests` catalog fields as embeddings, and the
+same finite cohort scheduler. See the [decision protocol](../decision/README.md)
+and [source fixture](../models/fixtures/decision/README.md) for full request,
+response, capacity and model-authoring semantics. An endpoint implementation
+does not imply support for a learned decision checkpoint.
 
 ## Scheduling and memory ownership
 
