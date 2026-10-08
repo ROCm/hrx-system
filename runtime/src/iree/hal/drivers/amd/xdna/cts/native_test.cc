@@ -4,15 +4,18 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <vector>
 
+#include "iree/async/frontier_tracker.h"
 #include "iree/async/util/proactor_pool.h"
 #include "iree/hal/drivers/amd/xdna/driver.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/add_i32_npu4.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32_npu4.h"
+#include "iree/hal/slab_pool.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -58,8 +61,10 @@ class XdnaNativeTest : public ::testing::Test {
     for (auto* buffer : buffers_) {
       iree_hal_buffer_release(buffer);
     }
+    iree_hal_pool_release(memory_pool_);
     iree_hal_executable_release(alternate_executable_);
     iree_hal_executable_release(executable_);
+    iree_hal_device_group_release(device_group_);
     iree_hal_device_release(device_);
     iree_async_proactor_pool_release(pool_);
     iree_hal_driver_release(driver_);
@@ -126,6 +131,32 @@ class XdnaNativeTest : public ::testing::Test {
     semaphores_.push_back(*out_semaphore);
   }
 
+  void CreateMemoryPool(iree_hal_buffer_usage_t usage) {
+    iree_async_frontier_tracker_t* tracker = nullptr;
+    IREE_ASSERT_OK(iree_async_frontier_tracker_create(
+        iree_async_frontier_tracker_options_default(), iree_allocator_system(),
+        &tracker));
+    iree_status_t status = iree_hal_device_group_create_from_device(
+        device_, tracker, iree_allocator_system(), &device_group_);
+    iree_async_frontier_tracker_release(tracker);
+    IREE_ASSERT_OK(status);
+
+    const iree_hal_pool_family_access_t family_access = {
+        /*.family=*/iree_hal_queue_family(queue_),
+        /*.usage=*/usage,
+        /*.interfaces=*/UINT64_C(1) << IREE_HAL_BUFFER_INTERFACE_XDNA_SHIM_DMA,
+    };
+    const iree_hal_pool_scope_t scope = {
+        /*.family_count=*/1,
+        /*.families=*/&family_access,
+    };
+    iree_hal_slab_pool_options_t options;
+    iree_hal_slab_pool_options_initialize(&options);
+    IREE_ASSERT_OK(iree_hal_slab_pool_create(device_group_, scope, &options,
+                                             iree_allocator_system(),
+                                             &memory_pool_));
+  }
+
   void CheckOutput(iree_hal_buffer_t* output,
                    const std::array<uint32_t, 16>& lhs,
                    const std::array<uint32_t, 16>& rhs,
@@ -163,6 +194,10 @@ class XdnaNativeTest : public ::testing::Test {
   iree_hal_device_t* device_ = nullptr;
   // Borrowed provisioned queue.
   iree_hal_queue_t* queue_ = nullptr;
+  // Owned sealed topology for family-scoped memory construction.
+  iree_hal_device_group_t* device_group_ = nullptr;
+  // Owned native slab pool selected from the sealed topology.
+  iree_hal_pool_t* memory_pool_ = nullptr;
   // Loaded real compiler image.
   iree_hal_executable_t* executable_ = nullptr;
   // Reflected function token.
@@ -225,6 +260,111 @@ TEST_F(XdnaNativeTest, ConsumerBeforeProducerCapturesArguments) {
   IREE_ASSERT_OK(iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   CheckOutput(output, expected_lhs, expected_rhs);
+}
+
+TEST_F(XdnaNativeTest, SlabPoolAllocationExecutesThroughPreparedBindings) {
+  ASSERT_NO_FATAL_FAILURE(CreateMemoryPool(IREE_HAL_BUFFER_USAGE_TRANSFER |
+                                           IREE_HAL_BUFFER_USAGE_STORAGE));
+  ASSERT_NO_FATAL_FAILURE(LoadMultiply());
+  iree_hal_semaphore_t* progress = nullptr;
+  ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&progress));
+
+  std::array<iree_hal_pool_reservation_request_t, 3> requests = {};
+  for (size_t i = 0; i < requests.size(); ++i) {
+    requests[i].params.min_alignment = 64;
+    requests[i].params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER_TARGET |
+                               IREE_HAL_BUFFER_USAGE_STORAGE_READ;
+    requests[i].allocation_size = 3 * kBytes;
+  }
+  requests[2].params.usage =
+      IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_STORAGE_WRITE;
+  std::array<iree_hal_buffer_t*, 3> roots = {};
+  uint64_t progress_value = 1;
+  IREE_ASSERT_OK(iree_hal_queue_alloca(
+      queue_, {}, {1, &progress, &progress_value}, memory_pool_,
+      requests.size(), requests.data(), roots.data()));
+  for (iree_hal_buffer_t* root : roots) {
+    ASSERT_NE(root, nullptr);
+    buffers_.push_back(root);
+  }
+
+  std::array<iree_hal_buffer_t*, 3> bindings = {};
+  for (size_t i = 0; i < bindings.size(); ++i) {
+    IREE_ASSERT_OK(iree_hal_buffer_subspan(
+        roots[i], kBytes, kBytes, iree_allocator_system(), &bindings[i]));
+    buffers_.push_back(bindings[i]);
+  }
+
+  const uint8_t guard = 0xA5;
+  std::array<iree_hal_transfer_operation_t, 3> fills = {};
+  for (size_t i = 0; i < fills.size(); ++i) {
+    fills[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL;
+    fills[i].fill.target_buffer = roots[i];
+    fills[i].fill.length = requests[i].allocation_size;
+    fills[i].fill.pattern = &guard;
+    fills[i].fill.pattern_length = sizeof(guard);
+  }
+  uint64_t wait_value = progress_value;
+  ++progress_value;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &progress, &wait_value},
+                                         {1, &progress, &progress_value},
+                                         fills.size(), fills.data()));
+
+  std::array<uint32_t, 16> lhs, rhs;
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    lhs[i] = static_cast<uint32_t>(i * 97 + 13);
+    rhs[i] = static_cast<uint32_t>(0xFFFFFF00u + i * 11);
+  }
+  std::array<iree_hal_transfer_operation_t, 2> updates = {};
+  for (size_t i = 0; i < updates.size(); ++i) {
+    updates[i].type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPDATE;
+    updates[i].update.source_buffer = i == 0 ? lhs.data() : rhs.data();
+    updates[i].update.target_buffer = bindings[i];
+    updates[i].update.length = kBytes;
+  }
+  wait_value = progress_value;
+  ++progress_value;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &progress, &wait_value},
+                                         {1, &progress, &progress_value},
+                                         updates.size(), updates.data()));
+
+  std::array<iree_hal_buffer_ref_t, 3> binding_refs;
+  for (size_t i = 0; i < binding_refs.size(); ++i) {
+    binding_refs[i] = iree_hal_make_buffer_ref(bindings[i], 0, kBytes);
+  }
+  wait_value = progress_value;
+  ++progress_value;
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      queue_, {1, &progress, &wait_value}, {1, &progress, &progress_value},
+      executable_, function_, iree_hal_make_static_dispatch_config(1, 1, 1), {},
+      {binding_refs.size(), binding_refs.data()}, IREE_HAL_DISPATCH_FLAG_NONE));
+
+  std::array<uint32_t, 48> output;
+  iree_hal_transfer_operation_t download = {};
+  download.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  download.download.source_buffer = roots[2];
+  download.download.target = output.data();
+  download.download.length = sizeof(output);
+  wait_value = progress_value;
+  ++progress_value;
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &progress, &wait_value},
+                                         {1, &progress, &progress_value}, 1,
+                                         &download));
+
+  wait_value = progress_value;
+  ++progress_value;
+  IREE_ASSERT_OK(iree_hal_queue_dealloca(queue_, {1, &progress, &wait_value},
+                                         {1, &progress, &progress_value},
+                                         roots.size(), roots.data()));
+  IREE_ASSERT_OK(iree_hal_semaphore_wait(progress, progress_value,
+                                         iree_infinite_timeout(),
+                                         IREE_ASYNC_WAIT_FLAG_NONE));
+
+  for (size_t i = 0; i < lhs.size(); ++i) {
+    EXPECT_EQ(output[i], 0xA5A5A5A5u) << i;
+    EXPECT_EQ(output[lhs.size() + i], lhs[i] * rhs[i]) << i;
+    EXPECT_EQ(output[2 * lhs.size() + i], 0xA5A5A5A5u) << i;
+  }
 }
 
 TEST_F(XdnaNativeTest, RebindsExecutableAfterCheckedRetirement) {
