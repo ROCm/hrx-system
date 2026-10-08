@@ -149,3 +149,33 @@ held, then releases it and checks final output. It is not a timeout-based speed
 assertion. Real model quality and controlled performance runs follow the
 [authoring](../../docs/MODEL_AUTHORING.md) and
 [measurement](../../docs/PERFORMANCE.md) guides.
+
+## Mixed lifecycle churn
+
+The [catalog workload](catalog_test.py) launches the actual shared executable
+with all four source-model families and a temporary 76-byte text checkpoint.
+Twenty concurrent client operations share two resident text rows and a
+128-position logical pool. Variable-length conversations run alongside image,
+embedding, decision and tokenizer requests; partial-prefix forks and rewind
+are checked against independent dense arithmetic. Invalid requests and reset
+peers must leave the other work usable.
+
+After releasing the explicit checkpoint, each round admits a fresh request
+reserving all 128 positions with an incompatible prefix. Idle retention is
+evictable, but leaked pins or reservations would prevent that request fitting.
+Session/checkpoint names are reused across rounds, final status and metrics
+must agree on idle, and shutdown joins normally. The default runs four rounds
+each with one and four shared workers, emitting one compact JSON result per
+round. No model download or production test hook is involved.
+
+```sh
+build_tools/bin/iree-bazel-test --config=asan \
+  //experimental/loom_serve/models/fixtures:catalog_test
+```
+
+This is a bounded logical-ownership workload, not a latency assertion or a
+particular interleaving/batch-size requirement. Fixed backing isolates it from
+physical remapping; real-model and native checks retain responsibility for VMM
+trim/growth, offload, MTP, numerical quality and measured throughput. The
+fixture-specific held-work checks cover exact cancellation and dependency
+boundaries that an external client cannot force merely by resetting a socket.
