@@ -1575,7 +1575,7 @@ static void loom_low_schedule_preserve_live_out_state(
         .consumer_node = block->node_start + block->node_count - 1,
         .dependency_kind = LOOM_LOW_SCHEDULE_DEPENDENCY_STATE,
         .operand_index = UINT32_MAX,
-        .state_value_id = value->value_id,
+        .state_value_id = liveness->live_out_values[i],
     };
     ++state->error_count;
     return;

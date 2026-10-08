@@ -179,9 +179,9 @@ typedef struct loom_low_schedule_unspillable_completion_path_t {
   uint32_t sink;
 } loom_low_schedule_unspillable_completion_path_t;
 
+// Mutable scheduling facts indexed by function-local value ordinal. The
+// acquired value domain owns the corresponding module value IDs.
 typedef struct loom_low_schedule_value_record_t {
-  // Module value represented by this local record.
-  loom_value_id_t value_id;
   // First same-class architectural-state writer after the producer.
   loom_low_schedule_state_access_t state_next_write;
   // Register units contributed to the pressure model.

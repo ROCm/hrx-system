@@ -304,8 +304,9 @@ static uint64_t loom_low_schedule_unspillable_handoff_replacement_units(
     }
     const loom_low_schedule_value_record_t* destination =
         &state->values[relation->destination_ordinal];
-    const loom_value_t* destination_value =
-        loom_module_value(state->module, destination->value_id);
+    const loom_value_t* destination_value = loom_module_value(
+        state->module,
+        state->value_domain->value_ids[relation->destination_ordinal]);
     if (!loom_value_is_block_arg(destination_value) ||
         loom_value_def_block(destination_value) != consumer_block ||
         loom_low_schedule_unspillable_completion_domain_id(

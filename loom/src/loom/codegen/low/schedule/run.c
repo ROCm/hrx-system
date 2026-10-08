@@ -58,7 +58,6 @@ static iree_status_t loom_low_schedule_initialize_value_records(
     const loom_value_id_t value_id = value_domain->value_ids[ordinal];
     loom_low_schedule_value_record_t* value = &state->values[ordinal];
     *value = (loom_low_schedule_value_record_t){
-        .value_id = value_id,
         .state_next_write =
             {
                 .node_index = LOOM_LOW_SCHEDULE_NODE_NONE,
@@ -946,8 +945,8 @@ static loom_value_id_t loom_low_schedule_state_value_for_dependency(
       loom_low_schedule_node_const_operand_ordinals(reader);
   if (dependency->value_operand_index != LOOM_LOW_ID_NONE) {
     IREE_ASSERT_LT(dependency->value_operand_index, reader->operand_count);
-    return state->values[operand_ordinals[dependency->value_operand_index]]
-        .value_id;
+    return state->value_domain
+        ->value_ids[operand_ordinals[dependency->value_operand_index]];
   }
   loom_value_id_t state_value_id = LOOM_VALUE_ID_INVALID;
   for (uint16_t i = 0; i < reader->operand_count; ++i) {
@@ -958,11 +957,12 @@ static loom_value_id_t loom_low_schedule_state_value_for_dependency(
         value->state_next_write.node_index != dependency->consumer_node) {
       continue;
     }
-    if (state_value_id != LOOM_VALUE_ID_INVALID &&
-        state_value_id != value->value_id) {
+    const loom_value_id_t value_id =
+        state->value_domain->value_ids[operand_ordinals[i]];
+    if (state_value_id != LOOM_VALUE_ID_INVALID && state_value_id != value_id) {
       return LOOM_VALUE_ID_INVALID;
     }
-    state_value_id = value->value_id;
+    state_value_id = value_id;
   }
   return state_value_id;
 }

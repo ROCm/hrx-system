@@ -1741,9 +1741,11 @@ void loom_low_schedule_pressure_score_candidate(
       // Repair retained this result's private consumer placement. Keep that
       // placement for input-free clones too; the ready policy can still
       // advance them to complete live storage groups.
+      const loom_value_id_t value_id =
+          state->value_domain->value_ids[result_ordinals[result_index]];
       has_per_user_placement |=
-          value->value_id < per_user_placement_values.bit_count &&
-          iree_bitmap_test(per_user_placement_values, value->value_id);
+          value_id < per_user_placement_values.bit_count &&
+          iree_bitmap_test(per_user_placement_values, value_id);
       ++produced_live_value_count;
       rematerializable_leaf =
           rematerializable_leaf &&

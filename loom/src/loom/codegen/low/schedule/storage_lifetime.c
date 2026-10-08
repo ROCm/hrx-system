@@ -84,8 +84,8 @@ static void loom_low_schedule_storage_lifetimes_populate(
         const loom_low_schedule_value_record_t* source = &state->values[root];
         const loom_low_schedule_value_record_t* destination =
             &state->values[relation->destination_ordinal];
-        const loom_value_t* value =
-            loom_module_value(state->module, source->value_id);
+        const loom_value_t* value = loom_module_value(
+            state->module, state->value_domain->value_ids[root]);
         if (loom_value_is_block_arg(value) &&
             loom_value_def_block(value) ==
                 state->body->blocks[node->block_index] &&

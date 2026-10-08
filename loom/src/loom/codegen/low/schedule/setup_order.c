@@ -55,8 +55,8 @@ static bool loom_low_schedule_setup_order_is_member(
     return false;
   }
   const loom_value_id_t value_id =
-      state->values[loom_low_schedule_node_const_result_ordinals(node)[0]]
-          .value_id;
+      state->value_domain
+          ->value_ids[loom_low_schedule_node_const_result_ordinals(node)[0]];
   return value_id < state->options->per_user_placement_values.bit_count &&
          iree_bitmap_test(state->options->per_user_placement_values, value_id);
 }
