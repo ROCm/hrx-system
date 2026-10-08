@@ -24,4 +24,23 @@ loom_cc_test(
 )
 endif()
 
+if(LOOM_BUILD AND LOOM_TARGET_ARCH_XDNA AND LOOM_EMIT_XDNA)
+loom_cc_test(
+  NAME
+    iree_hal_test
+  SRCS
+    "iree_hal_test.cc"
+  DEPS
+    iree::hal
+    iree::hal::utils::device_spec_builder
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::binding::c::loomc
+    loom::binding::c::target::amd::xdna
+    loom::binding::c::target::amd::xdna::iree_hal
+    loom::binding::c::target::iree_hal
+    loom::binding::c::test::test_util
+)
+endif()
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###
