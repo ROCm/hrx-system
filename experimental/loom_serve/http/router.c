@@ -49,6 +49,8 @@ typedef struct router_t {
   const loom_serve_http_service_t* services;
   // Number of registered services.
   iree_host_size_t service_count;
+  // Reusable copies sampled once per metrics response, indexed by service.
+  loom_serve_http_service_snapshot_t* snapshots;
   // Maximum claims per turn, independent of model batch sizes.
   iree_host_size_t request_capacity;
   // Rotating service priority, changed only by the exclusive turn owner.
@@ -63,7 +65,7 @@ typedef struct router_t {
   bool completed;
   // Owned terminal outcome retained while accepted callbacks drain.
   iree_status_t status;
-  // Routing JSON scratch, used only by the exclusive turn owner.
+  // Routing response scratch, used only by the exclusive turn owner.
   iree_string_builder_t output;
   // Accepted utility jobs, each holding one transport claim until CPU release.
   router_tokenization_t* tokenizations;
@@ -332,6 +334,111 @@ static iree_status_t router_describe_service(
   return iree_string_builder_append_cstring(output, "}}");
 }
 
+// Prometheus labels preserve UTF-8 and escape only backslash, quote and LF.
+// JSON escaping is different for control characters and Unicode separators.
+static iree_status_t router_metric_label(iree_string_builder_t* output,
+                                         iree_string_view_t value) {
+  iree_status_t status = iree_string_builder_append_cstring(output, "\"");
+  iree_host_size_t start = 0;
+  for (iree_host_size_t i = 0; i < value.size && iree_status_is_ok(status);
+       ++i) {
+    const char* escape = NULL;
+    switch (value.data[i]) {
+      case '\\':
+        escape = "\\\\";
+        break;
+      case '"':
+        escape = "\\\"";
+        break;
+      case '\n':
+        escape = "\\n";
+        break;
+    }
+    if (escape) {
+      status = iree_string_builder_append_string(
+          output, iree_make_string_view(value.data + start, i - start));
+      if (iree_status_is_ok(status)) {
+        status = iree_string_builder_append_cstring(output, escape);
+      }
+      start = i + 1;
+    }
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_string(
+        output, iree_string_view_substr(value, start, IREE_STRING_VIEW_NPOS));
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(output, "\"");
+  }
+  return status;
+}
+
+static iree_status_t router_metric_sample(
+    iree_string_builder_t* output, const char* metric,
+    const loom_serve_http_service_t* service, const char* phase,
+    iree_host_size_t value) {
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output, "loom_serve_model_%s{model=", metric));
+  IREE_RETURN_IF_ERROR(router_metric_label(output, service->name));
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, ",kind="));
+  IREE_RETURN_IF_ERROR(
+      router_metric_label(output, iree_make_cstring_view(service->kind)));
+  if (phase) {
+    IREE_RETURN_IF_ERROR(iree_string_builder_append_cstring(output, ",phase="));
+    IREE_RETURN_IF_ERROR(
+        router_metric_label(output, iree_make_cstring_view(phase)));
+  }
+  return iree_string_builder_append_format(output, "} %zu\n", value);
+}
+
+static iree_status_t router_metrics(router_t* router) {
+  for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+    router->snapshots[i] =
+        router->services[i].snapshot(router->services[i].self);
+  }
+  iree_string_builder_t* output = &router->output;
+  iree_string_builder_reset(output);
+  iree_status_t status = iree_string_builder_append_cstring(
+      output,
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n"
+      "Connection: close\r\n\r\n"
+      "# HELP loom_serve_model_queued_requests Requests outside the active "
+      "invocation or cohort.\n"
+      "# TYPE loom_serve_model_queued_requests gauge\n");
+  for (iree_host_size_t i = 0;
+       i < router->service_count && iree_status_is_ok(status); ++i) {
+    status =
+        router_metric_sample(output, "queued_requests", &router->services[i],
+                             NULL, router->snapshots[i].queued_requests);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(
+        output,
+        "# HELP loom_serve_model_active_requests Requests owned by the active "
+        "invocation or cohort, not hardware utilization.\n"
+        "# TYPE loom_serve_model_active_requests gauge\n");
+  }
+  for (iree_host_size_t i = 0;
+       i < router->service_count && iree_status_is_ok(status); ++i) {
+    status =
+        router_metric_sample(output, "active_requests", &router->services[i],
+                             NULL, router->snapshots[i].active_requests);
+  }
+  if (iree_status_is_ok(status)) {
+    status = iree_string_builder_append_cstring(
+        output,
+        "# HELP loom_serve_model_phase Current scheduler ownership phase.\n"
+        "# TYPE loom_serve_model_phase gauge\n");
+  }
+  for (iree_host_size_t i = 0;
+       i < router->service_count && iree_status_is_ok(status); ++i) {
+    status = router_metric_sample(output, "phase", &router->services[i],
+                                  router->snapshots[i].phase, 1);
+  }
+  return status;
+}
+
 static iree_status_t router_accept(router_t* router,
                                    loom_serve_http_connection_t* connection,
                                    const loom_serve_http_request_t* request) {
@@ -339,6 +446,15 @@ static iree_status_t router_accept(router_t* router,
   const loom_serve_http_service_t* services = router->services;
   iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
+  if (get && iree_string_view_equal(request->target, IREE_SV("/metrics"))) {
+    iree_status_t status = router_metrics(router);
+    if (iree_status_is_ok(status)) {
+      router_send(connection, iree_string_builder_view(output));
+    } else {
+      loom_serve_http_connection_abort(connection);
+    }
+    return status;
+  }
   if (get && (iree_string_view_equal(request->target, IREE_SV("/healthz")) ||
               iree_string_view_equal(request->target, IREE_SV("/readyz")))) {
     router_send(connection,
@@ -542,6 +658,9 @@ iree_status_t loom_serve_http_router_run(
                      .services = services,
                      .service_count = service_count,
                      .request_capacity = request_capacity};
+  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+      host_allocator, service_count, sizeof(*router.snapshots),
+      (void**)&router.snapshots));
   iree_slim_mutex_initialize(&router.mutex);
   iree_slim_mutex_initialize(&router.retirement.mutex);
   iree_notification_initialize(&router.retirement.notification);
@@ -560,6 +679,7 @@ iree_status_t loom_serve_http_router_run(
   iree_notification_await(&router.retirement.notification, router_is_released,
                           &router, iree_infinite_timeout());
   iree_string_builder_deinitialize(&router.output);
+  iree_allocator_free(host_allocator, router.snapshots);
   iree_notification_deinitialize(&router.retirement.notification);
   iree_slim_mutex_deinitialize(&router.retirement.mutex);
   iree_slim_mutex_deinitialize(&router.mutex);

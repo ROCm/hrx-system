@@ -58,6 +58,8 @@ struct ModelService {
   bool stopping = false;
   // Terminal completion result, transferred to the router exactly once.
   iree_status_t result = iree_ok_status();
+  // Accepted claims published to the outer test without exposing the FIFO.
+  uint64_t accepted = 0;
 
   static void SetObserver(void* self, loom_serve_http_observer_t observer) {
     auto* service = static_cast<ModelService*>(self);
@@ -74,6 +76,10 @@ struct ModelService {
   void WaitSubmitted() {
     std::unique_lock<std::mutex> lock(mutex);
     condition.wait(lock, [this] { return waiting; });
+  }
+  void WaitAccepted(uint64_t count) {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this, count] { return accepted >= count; });
   }
   void WaitStopping() {
     std::unique_lock<std::mutex> lock(mutex);
@@ -105,7 +111,11 @@ struct ModelService {
                               const loom_serve_http_request_t* request,
                               loom_serve_http_service_flags_t flags) {
     (void)flags;
-    static_cast<ModelService*>(self)->pending.emplace_back(connection, request);
+    auto* service = static_cast<ModelService*>(self);
+    std::lock_guard<std::mutex> lock(service->mutex);
+    service->pending.emplace_back(connection, request);
+    ++service->accepted;
+    service->condition.notify_all();
     return iree_ok_status();
   }
   static iree_status_t Advance(void* self,
@@ -210,7 +220,8 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
     owner_ = std::thread([this] {
       const loom_serve_http_service_t services[] = {
           a_.Interface(tokenizer_a_), b_.Interface(tokenizer_b_),
-          held_.Interface(tokenizer_a_), other_.Interface(nullptr)};
+          held_.Interface(tokenizer_a_), other_.Interface(nullptr),
+          escaped_.Interface(nullptr)};
       status_ = loom_serve_http_router_run(executor_, server_,
                                            IREE_ARRAYSIZE(services), services,
                                            4, iree_allocator_system());
@@ -223,7 +234,7 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
       owner_.join();
     }
     IREE_EXPECT_STATUS_IS(expected_code_, status_);
-    for (auto* service : {&a_, &b_, &held_, &other_}) {
+    for (auto* service : {&a_, &b_, &held_, &other_, &escaped_}) {
       for (auto& [connection, request] : service->pending) {
         (void)request;
         loom_serve_http_connection_abort(connection);
@@ -288,6 +299,8 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   ModelService held_{"held", {}, false, true};
   // A second held dependency proves failure drains every accepted callback.
   ModelService other_{"other", {}, false, true};
+  // Valid deployment identifier requiring distinct metric label escaping.
+  ModelService escaped_{R"(quoted"\name)"};
   // Outer application caller joining the production router's final release.
   std::thread owner_;
   // Terminal result published by joining owner_.
@@ -297,6 +310,60 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   // Expected terminal result; service errors are not hidden by shutdown.
   iree_status_code_t expected_code_ = IREE_STATUS_OK;
 };
+
+TEST_P(HttpRouterTest, MetricsCopyHeldAndQueuedOwnershipWithEscapedLabels) {
+  const int held = Send("POST", "/v1/test", R"({"model":"held"})");
+  held_.WaitSubmitted();
+  const int queued = Send("POST", "/v1/test", R"({"model":"b"})");
+  b_.WaitAccepted(1);
+  const auto metrics = Read(Send("GET", "/metrics"));
+  EXPECT_EQ(
+      metrics,
+      "HTTP/1.1 200 OK\r\n"
+      "Content-Type: text/plain; version=0.0.4; charset=utf-8\r\n"
+      "Connection: close\r\n\r\n"
+      R"(# HELP loom_serve_model_queued_requests Requests outside the active invocation or cohort.
+# TYPE loom_serve_model_queued_requests gauge
+loom_serve_model_queued_requests{model="a",kind="fixture"} 0
+loom_serve_model_queued_requests{model="b",kind="fixture"} 1
+loom_serve_model_queued_requests{model="held",kind="fixture"} 0
+loom_serve_model_queued_requests{model="other",kind="fixture"} 0
+loom_serve_model_queued_requests{model="quoted\"\\name",kind="fixture"} 0
+# HELP loom_serve_model_active_requests Requests owned by the active invocation or cohort, not hardware utilization.
+# TYPE loom_serve_model_active_requests gauge
+loom_serve_model_active_requests{model="a",kind="fixture"} 0
+loom_serve_model_active_requests{model="b",kind="fixture"} 0
+loom_serve_model_active_requests{model="held",kind="fixture"} 1
+loom_serve_model_active_requests{model="other",kind="fixture"} 0
+loom_serve_model_active_requests{model="quoted\"\\name",kind="fixture"} 0
+# HELP loom_serve_model_phase Current scheduler ownership phase.
+# TYPE loom_serve_model_phase gauge
+loom_serve_model_phase{model="a",kind="fixture",phase="idle"} 1
+loom_serve_model_phase{model="b",kind="fixture",phase="idle"} 1
+loom_serve_model_phase{model="held",kind="fixture",phase="held"} 1
+loom_serve_model_phase{model="other",kind="fixture",phase="idle"} 1
+loom_serve_model_phase{model="quoted\"\\name",kind="fixture",phase="idle"} 1
+)");
+  // Scraping changes no model ownership and does not wait on the held work.
+  EXPECT_NE(
+      Read(Send("GET", "/v1/status"))
+          .find(R"("phase":"held","queued_requests":0,"active_requests":1)"),
+      std::string::npos);
+  held_.Release();
+  EXPECT_NE(Read(held).find("held:/v1/test:"), std::string::npos);
+  EXPECT_NE(Read(queued).find("b:/v1/test:"), std::string::npos);
+  const auto idle = Read(Send("GET", "/metrics"));
+  EXPECT_NE(idle.find("loom_serve_model_active_requests{model=\"held\","
+                      "kind=\"fixture\"} 0\n"),
+            std::string::npos);
+  EXPECT_NE(idle.find("loom_serve_model_queued_requests{model=\"b\","
+                      "kind=\"fixture\"} 0\n"),
+            std::string::npos);
+  EXPECT_NE(idle.find("loom_serve_model_phase{model=\"held\","
+                      "kind=\"fixture\",phase=\"idle\"} 1\n"),
+            std::string::npos);
+  EXPECT_EQ(idle.find("phase=\"held\""), std::string::npos);
+}
 
 TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {
   const int held = Send("POST", "/v1/test", R"({"model":"held"})");

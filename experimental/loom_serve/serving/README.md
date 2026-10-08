@@ -259,6 +259,24 @@ Snapshots neither activate a model nor wait for CPU/device completion, and
 transport copies the response so a slow status peer retains no model buffers.
 Unmeasured device times and whole-device memory totals are not reported as zero.
 
+`GET /metrics` exposes those same ownership snapshots in
+[Prometheus text 0.0.4 format](https://prometheus.io/docs/instrumenting/exposition_formats/).
+It samples each deployment once per response, groups samples by metric family,
+and returns `Content-Type: text/plain; version=0.0.4; charset=utf-8`. For example:
+
+~~~text
+loom_serve_model_queued_requests{model="illustrator",kind="image"} 2
+loom_serve_model_active_requests{model="illustrator",kind="image"} 1
+loom_serve_model_phase{model="illustrator",kind="image",phase="generating"} 1
+~~~
+
+These are gauges, not cumulative request counters. The phase family contains
+only the current phase with value one; an old phase disappears on the next
+scrape. Labels contain deployment/modality/phase identifiers, never prompts,
+session IDs or checkpoint paths. Metric names and phase vocabulary are
+experimental. A scrape neither activates cold weights nor waits for a model;
+it has the same admission and shutdown availability as the other probes.
+
 `GET /readyz` and `/healthz` return `{"status":"ready"}` after model
 construction and router registration. Readiness means the server can route
 requests; cold weights, capacity waiters and a full model queue do not make the

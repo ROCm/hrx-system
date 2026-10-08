@@ -228,7 +228,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_NE(active.find("\"active_request\":2"), std::string::npos);
   EXPECT_NE(active.find("\"completed\":0"), std::string::npos);
 
-  for (const std::string target : {"/healthz", "/readyz", "/v1/status"}) {
+  for (const std::string target :
+       {"/healthz", "/readyz", "/v1/status", "/metrics"}) {
     const int probe = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(probe, 0);
     EXPECT_EQ(
@@ -246,6 +247,13 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
           response.find(
               R"({"object":"model","id":"image-witness","loom":{"kind":"image","endpoint":"/v1/images/generations","tokenize":false,"status":{"phase":"generating","queued_requests":0,"active_requests":1}}})"),
           std::string::npos);
+    } else if (target == "/metrics") {
+      EXPECT_NE(response.find("loom_serve_model_active_requests{"
+                              "model=\"image-witness\",kind=\"image\"} 1\n"),
+                std::string::npos);
+      EXPECT_NE(response.find("loom_serve_model_phase{model=\"image-witness\","
+                              "kind=\"image\",phase=\"generating\"} 1\n"),
+                std::string::npos);
     } else {
       EXPECT_NE(response.find("\"status\":\"ready\""), std::string::npos);
     }
