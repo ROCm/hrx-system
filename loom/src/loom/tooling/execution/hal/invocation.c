@@ -1735,7 +1735,7 @@ static iree_status_t loom_run_hal_dispatch_sequence_execute_direct(
             .count = step->binding_count,
             .values = &sequence->direct.binding_refs[step->binding_offset],
         },
-        IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES);
+        /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES);
     if (iree_status_is_ok(status)) {
       accepted_epoch_step_count = step->signal_semaphore_ordinal + 1;
       accepted_epoch_signal_value = step_signal_value;
