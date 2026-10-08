@@ -54,6 +54,11 @@ enum text_epoch_flag_bits_e {
 };
 typedef uint32_t text_epoch_flags_t;
 
+typedef enum text_step_kind_e {
+  TEXT_STEP_PREFILL,
+  TEXT_STEP_DECODE,
+} text_step_kind_t;
+
 typedef struct text_stage_t {
   // Owned JIT command image and loaded executable entries.
   loom_serve_jit_stage_t* compiled;
@@ -173,6 +178,15 @@ struct loom_serve_text_row_t {
   bool has_prediction;
   // Completed stage counts and end-to-end host durations.
   loom_serve_text_metrics_t metrics;
+  // Single-row publication facts, owned until successful complete_step.
+  struct {
+    // Source command and completed metric category.
+    text_step_kind_t kind;
+    // Number of consumed inputs published only after readiness.
+    iree_host_size_t token_count;
+    // Submission start, including activation and feedback retirement.
+    iree_time_t start_time;
+  } step;
   // Host payloads remain alive until the model drains accepted transfers.
   struct {
     // Active prefill count, absolute base, and EOS ID.
@@ -1187,7 +1201,9 @@ static iree_status_t text_invoke(loom_serve_text_model_t* model,
   return status;
 }
 
-static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
+static iree_status_t text_submit_step(
+    loom_serve_text_row_t* row, int32_t initialize,
+    loom_serve_execution_frontier_t* out_frontier) {
   loom_serve_text_model_t* model = row->model;
   IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(model->residency));
   iree_vm_variant_t arguments[TEXT_BINDING_COUNT + 2] = {
@@ -1220,9 +1236,9 @@ static iree_status_t text_step(loom_serve_text_row_t* row, int32_t initialize) {
         model->execution, IREE_ARRAYSIZE(downloads), downloads, &completion);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_feedback_wait(model->execution, completion);
+    *out_frontier = loom_serve_execution_frontier(model->execution);
   }
-  return loom_serve_residency_finish(model->residency, status);
+  return status;
 }
 
 // Only ownership changes visit this path. The source encoder owns device
@@ -1683,9 +1699,10 @@ iree_status_t loom_serve_text_model_verify(
                     continuation, out_results);
 }
 
-iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
-                                          iree_host_size_t count,
-                                          const int32_t* token_ids) {
+iree_status_t loom_serve_text_row_submit_prefill(
+    loom_serve_text_row_t* row, iree_host_size_t count,
+    const int32_t* token_ids, loom_serve_execution_frontier_t* out_frontier) {
+  *out_frontier = (loom_serve_execution_frontier_t){0};
   loom_serve_text_model_t* model = row->model;
   if (!count || count > model->prefill_capacity ||
       count > model->context_capacity - row->state->position ||
@@ -1694,7 +1711,9 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "prefill exceeds stage, context or reservation");
   }
-  const iree_time_t start = iree_time_now();
+  row->step.kind = TEXT_STEP_PREFILL;
+  row->step.token_count = count;
+  row->step.start_time = iree_time_now();
   if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
       model->state.cache.capacity) {
     iree_host_size_t shape_index = 0;
@@ -1708,12 +1727,8 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
         token_ids,
         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
     };
-    IREE_RETURN_IF_ERROR(
-        loom_serve_text_model_epoch(model, shape_index, 1, &span));
-    row->metrics.prefill_tokens += count;
-    ++row->metrics.prefill_steps;
-    row->metrics.prefill_duration += iree_time_now() - start;
-    return iree_ok_status();
+    return loom_serve_text_model_submit_epoch(model, shape_index, 1, &span,
+                                              NULL, NULL, out_frontier);
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_activate(row->state));
   memset(row->transfer.tokens, 0, sizeof(row->transfer.tokens));
@@ -1735,19 +1750,14 @@ iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
   iree_status_t status = loom_serve_execution_transfer(
       model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion);
   if (iree_status_is_ok(status)) {
-    status = text_step(row, 1);
-  }
-  if (iree_status_is_ok(status)) {
-    row->state->position += count;
-    row->has_prediction = true;
-    row->metrics.prefill_tokens += count;
-    ++row->metrics.prefill_steps;
-    row->metrics.prefill_duration += iree_time_now() - start;
+    status = text_submit_step(row, 1, out_frontier);
   }
   return status;
 }
 
-iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
+iree_status_t loom_serve_text_row_submit_decode(
+    loom_serve_text_row_t* row, loom_serve_execution_frontier_t* out_frontier) {
+  *out_frontier = (loom_serve_execution_frontier_t){0};
   if (!row->has_prediction) {
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "decode requires a selected prediction");
@@ -1761,7 +1771,9 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "decode exceeds request completion reservation");
   }
-  const iree_time_t start = iree_time_now();
+  row->step.kind = TEXT_STEP_DECODE;
+  row->step.token_count = 1;
+  row->step.start_time = iree_time_now();
   if (iree_any_bit_set(row->model->state.flags,
                        LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
       row->model->state.cache.capacity) {
@@ -1772,10 +1784,8 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
         &token,
         LOOM_SERVE_TEXT_SPAN_FLAG_SELECT,
     };
-    IREE_RETURN_IF_ERROR(loom_serve_text_model_epoch(row->model, 0, 1, &span));
-    ++row->metrics.decode_steps;
-    row->metrics.decode_duration += iree_time_now() - start;
-    return iree_ok_status();
+    return loom_serve_text_model_submit_epoch(row->model, 0, 1, &span, NULL,
+                                              NULL, out_frontier);
   }
   // The host row owns the input position and prediction regardless of which
   // schedule produced it. The isolated decode command consumes that snapshot.
@@ -1796,14 +1806,48 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
   iree_status_t status = loom_serve_execution_transfer(
       row->model->execution, IREE_ARRAYSIZE(uploads), uploads, &completion);
   if (iree_status_is_ok(status)) {
-    status = text_step(row, 0);
-  }
-  if (iree_status_is_ok(status)) {
-    ++row->state->position;
-    ++row->metrics.decode_steps;
-    row->metrics.decode_duration += iree_time_now() - start;
+    status = text_submit_step(row, 0, out_frontier);
   }
   return status;
+}
+
+iree_status_t loom_serve_text_row_complete_step(loom_serve_text_row_t* row) {
+  loom_serve_text_model_t* model = row->model;
+  if (iree_any_bit_set(model->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
+      model->state.cache.capacity) {
+    IREE_RETURN_IF_ERROR(loom_serve_text_model_complete_epoch(model, NULL));
+  } else {
+    row->state->position += row->step.token_count;
+    row->has_prediction = true;
+    loom_serve_residency_release(model->residency);
+  }
+  const iree_duration_t duration = iree_time_now() - row->step.start_time;
+  if (row->step.kind == TEXT_STEP_PREFILL) {
+    row->metrics.prefill_tokens += row->step.token_count;
+    ++row->metrics.prefill_steps;
+    row->metrics.prefill_duration += duration;
+  } else {
+    ++row->metrics.decode_steps;
+    row->metrics.decode_duration += duration;
+  }
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
+                                          iree_host_size_t count,
+                                          const int32_t* token_ids) {
+  loom_serve_execution_frontier_t frontier;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_row_submit_prefill(row, count, token_ids, &frontier));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  return loom_serve_text_row_complete_step(row);
+}
+
+iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
+  loom_serve_execution_frontier_t frontier;
+  IREE_RETURN_IF_ERROR(loom_serve_text_row_submit_decode(row, &frontier));
+  IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
+  return loom_serve_text_row_complete_step(row);
 }
 
 int32_t loom_serve_text_row_token(const loom_serve_text_row_t* row) {

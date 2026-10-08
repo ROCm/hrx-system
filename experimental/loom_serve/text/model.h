@@ -480,18 +480,39 @@ iree_status_t loom_serve_text_row_try_resume(loom_serve_text_row_t* row,
 iree_host_size_t loom_serve_text_row_suspended_bytes(
     const loom_serve_text_row_t* row);
 
-// Appends one active chunk at the retained absolute position and selects the
-// next token. Input count is in [1, prefill_capacity] and must fit the context.
-// The selected token has NOT been consumed into KV/recurrent state. Another
-// prefill may discard that prediction; decode consumes it. Input is copied
-// before any submission, so its memory is not borrowed after return, even on
-// failure.
+// Submits one active chunk at the retained absolute position and selects the
+// next token. Input count is in [1, prefill_capacity] and fits the context.
+// Input is copied into model-owned storage and not borrowed after return, even
+// on failure. Pooled/MTP storage uses one packed span; dense storage uses the
+// source's isolated prefill command. The model owns one outstanding invocation
+// and its parameter pin through successful ALL readiness and complete_step.
+// The owner excludes model mutation and prediction queries until completion.
+// Position and metrics remain at their last completed boundary. Failure
+// retains accepted ownership for outer model destruction, never worker waits.
+// The selected token is not consumed into KV/recurrent state. A later prefill
+// may discard that prediction; decode consumes it.
+iree_status_t loom_serve_text_row_submit_prefill(
+    loom_serve_text_row_t* row, iree_host_size_t count,
+    const int32_t* token_ids, loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes the previously selected token and selects its successor using the
+// same ownership contract as submit_prefill. The caller has consumed successful
+// completion and chosen to continue; EOS policy belongs to it. Dense storage
+// uses the source's isolated decode command, not a one-token prefill.
+iree_status_t loom_serve_text_row_submit_decode(
+    loom_serve_text_row_t* row, loom_serve_execution_frontier_t* out_frontier);
+
+// Publishes a submitted single-row step after successful ALL readiness and
+// releases its parameter pin. No device wait occurs. Failure is terminal and
+// preserves accepted ownership for outer destruction.
+iree_status_t loom_serve_text_row_complete_step(loom_serve_text_row_t* row);
+
+// Synchronous outer-thread joins over submission and complete_step. Task
+// workers use the phases above, not these CLI convenience entry points.
 iree_status_t loom_serve_text_row_prefill(loom_serve_text_row_t* row,
                                           iree_host_size_t count,
                                           const int32_t* token_ids);
 
-// Consumes the previously selected token and selects its successor. The caller
-// has completed prefill and chosen to continue; EOS policy belongs to it.
 iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row);
 
 // Token/EOS queries require a successfully selected prediction, not a reset or

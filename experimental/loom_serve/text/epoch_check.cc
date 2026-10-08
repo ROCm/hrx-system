@@ -33,7 +33,16 @@ using Spans = std::array<loom_serve_text_span_t, kSpanCount>;
 using Results = std::array<loom_serve_text_result_t, kSpanCount>;
 
 struct ModelWork {
-  enum class Operation { kEpoch, kTrim, kReserve, kPin, kSuspend, kReset };
+  enum class Operation {
+    kEpoch,
+    kTrim,
+    kReserve,
+    kPin,
+    kSuspend,
+    kReset,
+    kPrefill,
+    kDecode,
+  };
   enum class Cancellation { kNone, kBeforeSubmission, kAfterSubmission };
   // Model operation submitted and completed by the same task protocol.
   Operation operation = Operation::kEpoch;
@@ -80,8 +89,6 @@ struct ModelWork {
     loom_serve_text_checkpoint_t* value = nullptr;
     // Caller abandonment before admission or while work owns storage.
     Cancellation cancellation = Cancellation::kNone;
-    // Fails feedback readiness while the capture work branch remains valid.
-    bool fail_readiness = false;
     // Successful readiness was consumed by the owner.
     bool completed = false;
     // Free token slots before capture, checked through failed readiness.
@@ -89,6 +96,17 @@ struct ModelWork {
   } checkpoint;
   // Borrowed row whose ownership is cleared at a retired boundary.
   loom_serve_text_row_t* reset_row = nullptr;
+  // Single-row comparison command inputs, copied by submission.
+  struct {
+    // Borrowed row using either dense commands or one packed span.
+    loom_serve_text_row_t* row = nullptr;
+    // Known prefill inputs; decode consumes the row's prediction instead.
+    const int32_t* tokens = nullptr;
+    // Number of known prefill inputs.
+    size_t count = 0;
+    // Completed position before submitting this command.
+    size_t position = 0;
+  } step;
   // Row frontiers before submission, checked again before publication.
   std::array<size_t, kSpanCount> positions = {};
   // Task submitting the source-owned device sequence.
@@ -99,6 +117,8 @@ struct ModelWork {
   iree_async_semaphore_wait_operation_t wait = {};
   // Borrowed accepted work and feedback timelines returned by the model.
   loom_serve_execution_frontier_t frontier = {};
+  // Fails feedback readiness while the accepted work branch remains valid.
+  bool fail_readiness = false;
   // Toll-free async identities for the HAL timelines.
   std::array<iree_async_semaphore_t*, 2> semaphores = {};
   // Serializes terminal status and joins callbacks with outer storage reuse.
@@ -220,10 +240,23 @@ struct ModelWork {
         loom_serve_text_row_reset_retired(self->reset_row);
         pending = false;
         break;
+      case Operation::kPrefill: {
+        std::array<int32_t, kTokenCapacity> tokens = {};
+        memcpy(tokens.data(), self->step.tokens,
+               self->step.count * sizeof(int32_t));
+        status = loom_serve_text_row_submit_prefill(
+            self->step.row, self->step.count, tokens.data(), &self->frontier);
+        memset(tokens.data(), 0xFF, sizeof(tokens));
+        break;
+      }
+      case Operation::kDecode:
+        status =
+            loom_serve_text_row_submit_decode(self->step.row, &self->frontier);
+        break;
     }
     if (iree_status_is_ok(status) && pending) {
-      if (self->checkpoint.fail_readiness) {
-        // Fail the observed feedback branch, not the queued capture. Outer
+      if (self->fail_readiness) {
+        // Fail the observed feedback branch, not the accepted work. Outer
         // destruction must still join that work before releasing its source.
         iree_hal_semaphore_fail(self->frontier.semaphores[1],
                                 iree_status_from_code(IREE_STATUS_CANCELLED));
@@ -262,6 +295,11 @@ struct ModelWork {
                                 iree_task_process_drain_result_t* result) {
     auto* self = static_cast<ModelWork*>(process->user_data);
     std::lock_guard<std::mutex> lock(self->mutex);
+    if (self->step.row && iree_status_is_ok(self->status) &&
+        loom_serve_text_row_position(self->step.row) != self->step.position) {
+      self->status = iree_make_status(
+          IREE_STATUS_DATA_LOSS, "single-row step published before completion");
+    }
     for (size_t i = 0; (self->operation == Operation::kEpoch ||
                         self->operation == Operation::kTrim) &&
                        i < kSpanCount && iree_status_is_ok(self->status);
@@ -307,6 +345,10 @@ struct ModelWork {
           break;
         case Operation::kReset:
           break;
+        case Operation::kPrefill:
+        case Operation::kDecode:
+          self->status = loom_serve_text_row_complete_step(self->step.row);
+          break;
       }
     }
     result->did_work = true;
@@ -329,6 +371,9 @@ struct ModelWork {
     for (size_t i = 0; i < kSpanCount; ++i) {
       positions[i] = loom_serve_text_row_position(
           loom_serve_text_model_row(model, spans[i].row_index));
+    }
+    if (step.row) {
+      step.position = loom_serve_text_row_position(step.row);
     }
     iree_task_process_initialize(Submit, 0, 1, &submit);
     iree_task_process_initialize(Complete, 0, 1, &complete);
@@ -475,6 +520,65 @@ static iree_status_t Run(loom_serve_text_model_t* model,
   fprintf(stdout,
           "{\"event\":\"admission_check\","
           "\"case\":\"cancel-after-activation\"}\n");
+  fflush(stdout);
+  // Exercise the server's isolated and matched comparison controls through
+  // the same one-worker readiness protocol as packed epochs. Dense storage
+  // uses distinct source prefill/decode commands; pooled/MTP storage uses
+  // one-span epochs. The independent row owns the synchronous control.
+  for (size_t input = 0; input < kSpanCount; ++input) {
+    auto* row = loom_serve_text_model_row(model, 4);
+    auto* reference = loom_serve_text_model_row(model, 3);
+    const size_t prefix_count = counts[input] / 2;
+    for (size_t pass = 0; pass < 5; ++pass) {
+      ModelWork step;
+      step.model = model;
+      step.step.row = row;
+      const bool prefill = pass < 2 || pass == 3;
+      step.operation = prefill ? ModelWork::Operation::kPrefill
+                               : ModelWork::Operation::kDecode;
+      const int32_t token = pass == 3 ? loom_serve_text_row_token(row) : 0;
+      if (prefill) {
+        step.step.count = pass == 0   ? prefix_count
+                          : pass == 1 ? counts[input] - prefix_count
+                                      : 1;
+        step.step.tokens =
+            pass == 3 ? &token
+                      : inputs[input].data() + (pass ? prefix_count : 0);
+      }
+      IREE_RETURN_IF_ERROR(step.Run());
+      IREE_RETURN_IF_ERROR(
+          prefill ? loom_serve_text_row_prefill(reference, step.step.count,
+                                                step.step.tokens)
+                  : loom_serve_text_row_decode(reference));
+      const auto actual = loom_serve_text_row_metrics(row);
+      const auto expected = loom_serve_text_row_metrics(reference);
+      if (loom_serve_text_row_position(row) !=
+              loom_serve_text_row_position(reference) ||
+          loom_serve_text_row_token(row) !=
+              loom_serve_text_row_token(reference) ||
+          loom_serve_text_row_is_eos(row) !=
+              loom_serve_text_row_is_eos(reference) ||
+          actual.prefill_steps != expected.prefill_steps ||
+          actual.prefill_tokens != expected.prefill_tokens ||
+          actual.decode_steps != expected.decode_steps) {
+        return iree_make_status(IREE_STATUS_DATA_LOSS,
+                                "single-row step %zu changed output or metrics",
+                                pass);
+      }
+    }
+    for (auto* value : {row, reference}) {
+      ModelWork release;
+      release.model = model;
+      release.operation = ModelWork::Operation::kReset;
+      release.reset_row = value;
+      IREE_RETURN_IF_ERROR(release.Run());
+    }
+  }
+  fprintf(stdout,
+          "{\"event\":\"step_check\",\"case\":\"prefill-decode-matched\","
+          "\"steps\":10,\"pooled\":%s,\"mtp\":%s}\n",
+          loom_serve_text_model_pool_usage(model).capacity ? "true" : "false",
+          loom_serve_text_mtp_from_flags() ? "true" : "false");
   fflush(stdout);
   // Low physical IDs belong to independent ballast rows. Releasing them after
   // the target/reference work guarantees a fragmented live pool for trim.
@@ -728,7 +832,7 @@ static iree_status_t Run(loom_serve_text_model_t* model,
     failed_capture.operation = ModelWork::Operation::kSuspend;
     failed_capture.model = model;
     failed_capture.checkpoint.value = terminal_pin.checkpoint.value;
-    failed_capture.checkpoint.fail_readiness = true;
+    failed_capture.fail_readiness = true;
     auto failure = failed_capture.Run();
     if (!iree_status_is_cancelled(failure)) {
       return iree_status_join(
@@ -747,6 +851,43 @@ static iree_status_t Run(loom_serve_text_model_t* model,
     fprintf(stdout,
             "{\"event\":\"checkpoint_check\","
             "\"case\":\"failed-readiness-retains-source\"}\n");
+    fflush(stdout);
+  } else {
+    // The dense comparison route retains its invocation pin and unpublished
+    // position on failed readiness, just like a packed model invocation.
+    auto* row = loom_serve_text_model_row(model, kRows[0]);
+    const size_t position = loom_serve_text_row_position(row);
+    ModelWork failed_step;
+    failed_step.model = model;
+    failed_step.operation = ModelWork::Operation::kDecode;
+    failed_step.step.row = row;
+    failed_step.fail_readiness = true;
+    auto failure = failed_step.Run();
+    if (!iree_status_is_cancelled(failure)) {
+      return iree_status_join(
+          failure,
+          iree_make_status(IREE_STATUS_DATA_LOSS,
+                           "single-row step did not observe failed readiness"));
+    }
+    iree_status_free(failure);
+    if (loom_serve_text_row_position(row) != position) {
+      return iree_make_status(IREE_STATUS_DATA_LOSS,
+                              "failed single-row step published position");
+    }
+    if (loom_serve_device_memory_pool(loom_serve_text_model_device(model))) {
+      auto deactivation = loom_serve_text_model_deactivate(model);
+      if (!iree_status_is_failed_precondition(deactivation)) {
+        return iree_status_join(
+            deactivation,
+            iree_make_status(IREE_STATUS_DATA_LOSS,
+                             "failed single-row step lost its parameter pin"));
+      }
+      iree_status_free(deactivation);
+    }
+    *out_terminal_code = IREE_STATUS_CANCELLED;
+    fprintf(stdout,
+            "{\"event\":\"step_check\","
+            "\"case\":\"failed-readiness-retains-step\"}\n");
     fflush(stdout);
   }
   return iree_ok_status();
@@ -791,8 +932,8 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   fprintf(stdout,
-          "PASS: one-worker text admission, epochs, compaction and checkpoints "
-          "preserve "
+          "PASS: one-worker text steps, admission, epochs, compaction and "
+          "checkpoints preserve "
           "ownership, output and row publication.\n");
   return EXIT_SUCCESS;
 }
