@@ -60,8 +60,8 @@ class ControlTest
         SelectQueue(device_, IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER);
     ASSERT_NE(dispatch, nullptr);
     ASSERT_NE(transfer, nullptr);
-    IREE_ASSERT_OK(
-        loom_serve_workspace_create(dispatch, &workspace_, allocator_));
+    IREE_ASSERT_OK(loom_serve_workspace_create(group_, dispatch, transfer,
+                                               &workspace_, allocator_));
     IREE_ASSERT_OK(loom_serve_execution_create(dispatch, transfer, workspace_,
                                                allocator_, &execution_));
     const auto* family = iree_hal_queue_family(dispatch);

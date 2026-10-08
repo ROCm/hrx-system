@@ -354,7 +354,13 @@ TEST_P(JitTest, CommandWithoutNativeRequests) {
   IREE_ASSERT_OK(Compile("3", 0, IREE_SV("idle")));
 }
 
-TEST_P(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
+TEST_P(JitTest, UnequalPrivateWorkspacesPreservePoolPolicyAndOutput) {
+  const auto* sanitizer =
+      iree_hal_device_spec_sanitizer(iree_hal_device_spec(device_));
+  const bool guarded =
+      iree_any_bit_set(sanitizer->flags, IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN);
+  const uint64_t quarantine_limit =
+      guarded ? sanitizer->asan.pool_options.quarantine_size : 0;
   IREE_ASSERT_OK(Compile("5", 0, IREE_SV("temporary_advance"), "64"));
   // A non-class-boundary maximum exercises the pool's backing geometry.
   IREE_ASSERT_OK(Compile("7", 1, IREE_SV("temporary_advance"), "4160"));
@@ -406,7 +412,20 @@ TEST_P(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
   EXPECT_EQ(statistics.reservation_count, 0u);
   EXPECT_EQ(statistics.reserve_count, 4u);
   EXPECT_EQ(statistics.release_count, 4u);
-  EXPECT_GT(statistics.reuse_count, 0u);
+  if (guarded) {
+    // Sanitized deallocation retires before returning an empty frontier. These
+    // reservations are fresh in HAL's dependency accounting, even on reused
+    // backing; they are not frontier-dominated reuse.
+    EXPECT_EQ(statistics.reuse_count, 0u);
+    EXPECT_EQ(statistics.fresh_count, statistics.reserve_count);
+  } else {
+    EXPECT_GT(statistics.reuse_count, 0u);
+  }
+  EXPECT_LE(statistics.bytes_quarantined, quarantine_limit);
+  if (quarantine_limit) {
+    EXPECT_TRUE(statistics.bytes_quarantined > 0 ||
+                statistics.quarantine_eviction_count > 0);
+  }
   EXPECT_GT(statistics.bytes_committed, 0u);
   // A different model has no dependency edge to the retired producer. HAL's
   // completed-frontier query must recover reuse without a device-wide chain.
@@ -420,6 +439,17 @@ TEST_P(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
       .allocation_size = 4160};
   IREE_ASSERT_OK(
       loom_serve_execution_alloca(held_.execution, &request, &held_.buffer));
+  ASSERT_NE(held_.buffer->memory.contract, nullptr);
+  EXPECT_EQ(held_.buffer->memory.contract->domain,
+            iree_hal_device_group_memory_domain(
+                loom_serve_device_group(device_owner_)));
+  IREE_ASSERT_OK(iree_hal_buffer_validate_family_usage(
+      held_.buffer, iree_hal_queue_family(dispatch_),
+      IREE_HAL_BUFFER_USAGE_STORAGE));
+  IREE_ASSERT_OK(iree_hal_buffer_validate_family_usage(
+      held_.buffer,
+      iree_hal_queue_family(loom_serve_device_transfer_queue(device_owner_)),
+      IREE_HAL_BUFFER_USAGE_TRANSFER));
   iree_hal_transfer_operation_t transfers[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
        .upload = {input_.data(), held_.buffer, 0, sizeof(input_)}},
@@ -439,12 +469,27 @@ TEST_P(JitTest, UnequalPrivateWorkspacesReusePoolAndTrimWithoutLosingOutput) {
   EXPECT_EQ(held_.output, input_);
   const auto shared =
       loom_serve_device_memory_statistics(device_owner_).workspace;
-  EXPECT_EQ(shared.bytes_committed, statistics.bytes_committed);
-  EXPECT_GT(shared.reuse_count, statistics.reuse_count);
+  if (quarantine_limit) {
+    // Quarantined ranges cannot satisfy this independent model's request.
+    EXPECT_GE(shared.bytes_committed, statistics.bytes_committed);
+    EXPECT_LE(shared.bytes_quarantined, quarantine_limit);
+  } else {
+    EXPECT_EQ(shared.bytes_committed, statistics.bytes_committed);
+  }
+  if (guarded) {
+    EXPECT_EQ(shared.reuse_count, 0u);
+    EXPECT_EQ(shared.fresh_count, statistics.fresh_count + 1);
+  } else {
+    EXPECT_GT(shared.reuse_count, statistics.reuse_count);
+  }
   IREE_ASSERT_OK(loom_serve_device_trim(device_owner_, 0));
-  EXPECT_EQ(loom_serve_device_memory_statistics(device_owner_)
-                .workspace.bytes_committed,
-            0u);
+  const auto trimmed =
+      loom_serve_device_memory_statistics(device_owner_).workspace;
+  EXPECT_EQ(trimmed.bytes_committed, 0u);
+  EXPECT_EQ(trimmed.bytes_quarantined, 0u);
+  if (quarantine_limit) {
+    EXPECT_GT(trimmed.quarantine_eviction_count, 0u);
+  }
   // Feedback owns the final output independently of private workspace reuse.
   for (int32_t value : output_) {
     EXPECT_EQ(value, expected);

@@ -20,11 +20,13 @@ extern "C" {
 // still use them.
 typedef struct loom_serve_workspace_t loom_serve_workspace_t;
 
-// Retains the device. No physical backing is acquired until execution
-// allocates. The device group must outlive this owner and all execution domains
-// using it.
+// Retains the sealed group and qualifies storage/transfer on the dispatch
+// family plus transfer on the transfer family. Both queues belong to the
+// group. No public host mapping or physical backing is acquired at creation.
+// Dispatch-device sanitizer policy also applies to suballocated workspaces.
 iree_status_t loom_serve_workspace_create(
-    iree_hal_queue_t* dispatch_queue, loom_serve_workspace_t** out_workspace,
+    iree_hal_device_group_t* group, iree_hal_queue_t* dispatch_queue,
+    iree_hal_queue_t* transfer_queue, loom_serve_workspace_t** out_workspace,
     iree_allocator_t host_allocator);
 void loom_serve_workspace_retain(loom_serve_workspace_t* workspace);
 void loom_serve_workspace_release(loom_serve_workspace_t* workspace);

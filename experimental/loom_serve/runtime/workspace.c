@@ -8,7 +8,6 @@
 
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/mutex.h"
-#include "iree/hal/memory/passthrough_pool.h"
 #include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 
@@ -30,10 +29,10 @@ struct loom_serve_workspace_t {
   iree_atomic_ref_count_t ref_count;
   // Allocation policy for this owner and cold generation metadata.
   iree_allocator_t allocator;
-  // Retained device enclosing backend pool ingredients.
-  iree_hal_device_t* device;
-  // Device-owned slab provider, completion query and notification services.
-  iree_hal_queue_pool_backend_t backend;
+  // Retained group enclosing native owners and captured memory scopes.
+  iree_hal_device_group_t* group;
+  // Immutable allocation-shaping policy of the dispatch device.
+  iree_hal_asan_pool_options_t asan;
   // Owned native backing source shared by all geometry generations.
   iree_hal_pool_t* backing_pool;
   // Protects geometry, generations and archived statistics, never device waits.
@@ -58,6 +57,7 @@ static void workspace_add_counters(iree_hal_pool_stats_t* total,
   total->exhausted_count += source->exhausted_count;
   total->over_budget_count += source->over_budget_count;
   total->wait_count += source->wait_count;
+  total->quarantine_eviction_count += source->quarantine_eviction_count;
 }
 
 static void workspace_generation_destroy(workspace_generation_t* generation,
@@ -109,12 +109,13 @@ void loom_serve_workspace_release(loom_serve_workspace_t* workspace) {
   }
   iree_slim_mutex_deinitialize(&workspace->mutex);
   iree_hal_pool_release(workspace->backing_pool);
-  iree_hal_device_release(workspace->device);
+  iree_hal_device_group_release(workspace->group);
   iree_allocator_free(workspace->allocator, workspace);
 }
 
 iree_status_t loom_serve_workspace_create(
-    iree_hal_queue_t* dispatch_queue, loom_serve_workspace_t** out_workspace,
+    iree_hal_device_group_t* group, iree_hal_queue_t* dispatch_queue,
+    iree_hal_queue_t* transfer_queue, loom_serve_workspace_t** out_workspace,
     iree_allocator_t host_allocator) {
   *out_workspace = NULL;
   loom_serve_workspace_t* workspace = NULL;
@@ -123,23 +124,32 @@ iree_status_t loom_serve_workspace_create(
   iree_atomic_ref_count_init(&workspace->ref_count);
   iree_slim_mutex_initialize(&workspace->mutex);
   workspace->allocator = host_allocator;
-  workspace->device =
-      iree_hal_queue_family_device(iree_hal_queue_family(dispatch_queue));
-  iree_hal_device_retain(workspace->device);
-  iree_status_t status = iree_hal_device_query_queue_pool_backend(
-      workspace->device, iree_hal_queue_family(dispatch_queue),
-      &workspace->backend);
-  if (iree_status_is_ok(status)) {
-    const iree_hal_passthrough_pool_options_t options = {
-        .epoch_query = workspace->backend.epoch_query,
-        .trace_name = IREE_SVL("loom_serve_workspace_backing"),
-    };
-    status = iree_hal_passthrough_pool_create(
-        options, workspace->backend.slab_provider,
-        workspace->backend.notification, workspace->backend.frontier_tracker,
-        workspace->backend.maintenance, host_allocator,
-        &workspace->backing_pool);
+  workspace->group = group;
+  iree_hal_device_group_retain(workspace->group);
+  const iree_hal_queue_family_t* dispatch_family =
+      iree_hal_queue_family(dispatch_queue);
+  const iree_hal_queue_family_t* transfer_family =
+      iree_hal_queue_family(transfer_queue);
+  iree_hal_device_t* device = iree_hal_queue_family_device(dispatch_family);
+  const iree_hal_device_sanitizer_spec_t* sanitizer =
+      iree_hal_device_spec_sanitizer(iree_hal_device_spec(device));
+  if (iree_any_bit_set(sanitizer->flags, IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
+    workspace->asan = sanitizer->asan.pool_options;
   }
+  const iree_hal_pool_family_access_t families[] = {
+      {.family = dispatch_family,
+       .usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER},
+      {.family = transfer_family, .usage = IREE_HAL_BUFFER_USAGE_TRANSFER},
+  };
+  const iree_hal_pool_scope_t scope = {
+      .family_count = dispatch_family == transfer_family ? 1 : 2,
+      .families = families,
+  };
+  const iree_hal_slab_pool_options_t options = {
+      .trace_name = IREE_SVL("loom_serve_workspace_backing"),
+  };
+  iree_status_t status = iree_hal_slab_pool_create(
+      group, scope, &options, host_allocator, &workspace->backing_pool);
   if (iree_status_is_ok(status)) {
     *out_workspace = workspace;
   } else {
@@ -197,7 +207,7 @@ iree_status_t loom_serve_workspace_acquire_pool(
       const iree_hal_tlsf_pool_options_t options = {
           .tlsf_options = {.range_length = generation->length,
                            .alignment = generation->alignment},
-          .asan = workspace->backend.asan,
+          .asan = workspace->asan,
           .trace_name = IREE_SVL("loom_serve_workspace"),
       };
       iree_hal_slab_cache_options_t cache_options = {

@@ -78,7 +78,8 @@ static iree_status_t loom_serve_device_initialize(loom_serve_device_t* device,
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
                             "device needs dispatch and transfer queues");
   }
-  return loom_serve_workspace_create(device->dispatch, &device->workspace,
+  return loom_serve_workspace_create(device->group, device->dispatch,
+                                     device->transfer, &device->workspace,
                                      device->allocator);
 }
 

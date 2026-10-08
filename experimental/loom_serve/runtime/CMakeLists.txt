@@ -119,7 +119,6 @@ loom_cc_library(
     iree::base::internal
     iree::base::threading
     iree::hal
-    iree::hal::memory::passthrough_pool
     iree::hal::memory::slab_cache
     iree::hal::memory::tlsf_pool
   PUBLIC
