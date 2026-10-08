@@ -313,6 +313,14 @@ or model progress, with prepared input retained unchanged.
 
 These handles are serialized model API objects. The HTTP service owns them
 through explicitly named endpoints; automatic prefix discovery is not enabled.
+
+`session.h` owns reusable host token/decoder storage, canonical continuation
+text and bounded output packets. It performs source-directed token decoding and
+SSE formatting without sending transport data or releasing native reservations.
+The service owns those claim/admission policies and serializes session CPU work
+against the model's shared VM invocation. Scratch builders are shared by the
+exclusive model owner, not multiplied per retained session.
+
 The native real-model witness is
 `models/qwen:epoch_check --checkpoints --checkpoint_capacity=1
 --pool_capacity=65536 --context_capacity=1024 --prefill_capacity=128

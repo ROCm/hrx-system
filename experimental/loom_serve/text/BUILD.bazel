@@ -139,6 +139,25 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "session",
+    srcs = ["session.c"],
+    hdrs = ["session.h"],
+    target_compatible_with = loom_config_compatible_with([
+        "//loom/config/target/arch:vm",
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":chat",
+        ":model",
+        "//experimental/loom_serve/http:server",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
@@ -151,6 +170,7 @@ loom_cc_library(
         ":heartbeat",
         ":model",
         ":schedule",
+        ":session",
         "//experimental/loom_serve/http:request",
         "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",

@@ -151,6 +151,26 @@ loom_cc_library(
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME
+    session
+  HDRS
+    "session.h"
+  SRCS
+    "session.c"
+  DEPS
+    ::chat
+    ::model
+    iree::base
+    iree::experimental::loom_serve::http::server
+    iree::tokenizer
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+endif()
+
+if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
+loom_cc_library(
+  NAME
     service
   HDRS
     "service.h"
@@ -161,6 +181,7 @@ loom_cc_library(
     ::heartbeat
     ::model
     ::schedule
+    ::session
     iree::async
     iree::async::util::proactor_pool
     iree::base
