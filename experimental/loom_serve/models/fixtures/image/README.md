@@ -31,6 +31,7 @@ iree-bazel-run //experimental/loom_serve/image:server -- \
   --width=7 --height=5 --text_tokens=32
 ```
 
-`POST /v1/images/generations` with `{"prompt":"aba","seed":1}` returns a
-base64 PNG through the normal endpoint. Parameter paging, learned image quality
+`POST /v1/images/generations` with
+`{"model":"fixture-image","prompt":"aba","seed":1}` returns a base64 PNG
+through the normal endpoint. Parameter paging, learned image quality
 and real model performance have separate model tests.

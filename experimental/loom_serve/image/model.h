@@ -7,6 +7,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
 #define EXPERIMENTAL_LOOM_SERVE_IMAGE_MODEL_H_
 
+#include "experimental/loom_serve/image/generator.h"
 #include "experimental/loom_serve/runtime/device.h"
 
 #ifdef __cplusplus
@@ -84,6 +85,11 @@ loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
 // Borrows the source-declared public identifier for this residency.
 iree_string_view_t loom_serve_image_model_name(
     const loom_serve_image_model_t* model);
+
+// Borrows this model's finite invocation callbacks for a serialized service.
+// The model and its shared device owner outlive the returned interface.
+loom_serve_image_generator_t loom_serve_image_model_generator(
+    loom_serve_image_model_t* model);
 
 // CPU-only source preparation, serialized with other model calls. Suitable for
 // a CPU task: no device submission, wait or shared residency mutation occurs.

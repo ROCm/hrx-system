@@ -169,22 +169,20 @@ def main():
         models = receive(send(path="/v1/models"))
         assert len(models["data"]) == 1
         assert models["data"][0]["id"] == "krea2-turbo"
-        assert models["data"][0]["reference_images"] is False
-        assert models["data"][0]["adapter_strength"] is True
         for body in (
             b"{}",
-            b'{"prompt":"x","prompt":"y"}',
-            b'{"prompt":"x","strength":1e100}',
-            b'{"prompt":"x","seed":18446744073709551616}',
-            b'{"prompt":"x","n":2}',
-            b'{"prompt":"x","size":"512x512"}',
-            b'{"prompt":"x","reference_images":[]}',
-            b'{"prompt":"\xff"}',
+            b'{"model":"krea2-turbo","prompt":"x","prompt":"y"}',
+            b'{"model":"krea2-turbo","prompt":"x","strength":1e100}',
+            b'{"model":"krea2-turbo","prompt":"x","seed":18446744073709551616}',
+            b'{"model":"krea2-turbo","prompt":"x","n":2}',
+            b'{"model":"krea2-turbo","prompt":"x","size":"512x512"}',
+            b'{"model":"krea2-turbo","prompt":"x","reference_images":[]}',
+            b'{"model":"krea2-turbo","prompt":"\xff"}',
         ):
             assert "error" in receive(send(body), 400)
         receive(send(path="/unknown"), 404)
         health = receive(send(path="/healthz"))
-        assert (health["active"], health["queued"], health["completed"]) == (0, 0, 0)
+        assert health == {"status": "ready"}
 
         short = dict(
             prompt="a red fox in the snow",
@@ -201,11 +199,13 @@ def main():
         heartbeat = journal.wait("image_heartbeat", active_request=1)
         assert heartbeat["active_ms"] >= 0 and heartbeat["completed"] == 0
         health = receive(send(path="/healthz"))
-        assert health["active"] == 1 and health["completed"] == 0
+        assert health == {"status": "ready"}
+        journal.wait("image_heartbeat", active_request=1, completed=0)
         queued = send(long)
         journal.wait("image_accepted", request=2)
+        journal.wait("image_heartbeat", active_request=1, queued=1)
         health = receive(send(path="/healthz"))
-        assert health["active"] == 1 and health["queued"] == 1
+        assert health == {"status": "ready"}
         receive(send(short), 503)
         reset(queued)
         journal.wait("image_cancelled", request=2, phase="queued")
@@ -226,19 +226,20 @@ def main():
         pixels(repeated, "base-after-style", 0)
 
         abandoned = send(long)
-        journal.wait("image_started", request=6)
+        journal.wait("image_heartbeat", active_request=6, phase="generating")
         reset(abandoned)
         journal.wait("image_cancelled", request=6, phase="active")
         after_reset = send(short)
         journal.wait("image_accepted", request=7)
+        journal.wait("image_heartbeat", active_request=6, queued=1)
         health = receive(send(path="/healthz"))
-        assert health["active"] == 1 and health["queued"] == 1
+        assert health == {"status": "ready"}
         journal.wait("image_generated", request=6)
         journal.wait("image_generated", request=7)
         pixels(after_reset, "base-after-reset", 0)
 
         send(dict(short, strength=1))
-        journal.wait("image_started", request=8)
+        journal.wait("image_heartbeat", active_request=8, phase="generating")
         process.send_signal(signal.SIGTERM)
         journal.wait("image_shutdown", active=8)
         journal.wait("image_heartbeat", active_request=8, stopping=True)

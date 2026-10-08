@@ -69,39 +69,12 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     loom_serve_host_release(host_);
   }
 
-  static iree_status_t Acquire(void* self, bool* admitted) {
-    return loom_serve_residency_try_acquire(
-        loom_serve_image_model_residency(
-            static_cast<loom_serve_image_model_t*>(self)),
-        admitted);
-  }
-  static iree_status_t Prepare(void* self,
-                               const loom_serve_image_request_t* request) {
-    return loom_serve_image_model_prepare_request(
-        static_cast<loom_serve_image_model_t*>(self),
-        iree_string_builder_view(&request->prompt), request->seed,
-        request->strength);
-  }
-  static iree_status_t Submit(void* self,
-                              loom_serve_execution_frontier_t* frontier) {
-    return loom_serve_image_model_submit(
-        static_cast<loom_serve_image_model_t*>(self), frontier);
-  }
-  static void DiscardPreparedRequest(void* self) {
-    loom_serve_image_model_discard_prepared_request(
-        static_cast<loom_serve_image_model_t*>(self));
-  }
-  static iree_const_byte_span_t Complete(void* self) {
-    return loom_serve_image_model_complete(
-        static_cast<loom_serve_image_model_t*>(self));
-  }
-
   void Start() {
     service_ = std::thread([this] {
-      const loom_serve_image_generator_t generator = {
-          model_, Prepare, DiscardPreparedRequest, Acquire, Submit, Complete};
+      const loom_serve_image_generator_t generator =
+          loom_serve_image_model_generator(model_);
       const loom_serve_image_service_options_t options = {
-          .model = loom_serve_image_model_name(model_),
+          .name = loom_serve_image_model_name(model_),
           .width = kWidth,
           .height = kHeight,
           .pending_capacity = 8,
@@ -196,14 +169,15 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
   EXPECT_NE(Read(Send("GET", "/v1/models")).find("fixture-image"),
             std::string::npos);
   // A rejected request must leave the same listener/model usable.
-  EXPECT_EQ(
-      Read(Send("POST", "/v1/images/generations", R"({"prompt":"ab","n":2})"))
-          .find("HTTP/1.1 400"),
-      0u);
+  EXPECT_EQ(Read(Send("POST", "/v1/images/generations",
+                      R"({"model":"fixture-image","prompt":"ab","n":2})"))
+                .find("HTTP/1.1 400"),
+            0u);
   // This rejection comes from the source VM after ordinary HTTP parsing.
   const std::string too_long =
       Read(Send("POST", "/v1/images/generations",
-                "{\"prompt\":\"" + std::string(33, 'a') + "\"}"));
+                "{\"model\":\"fixture-image\",\"prompt\":\"" +
+                    std::string(33, 'a') + "\"}"));
   ASSERT_EQ(too_long.find("HTTP/1.1 400"), 0u);
   EXPECT_NE(too_long.find("prompt exceeds fixture text capacity"),
             std::string::npos);
@@ -236,7 +210,7 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
     EXPECT_NE(response.find("\"b64_json\":\"" + encoded + "\""),
               std::string::npos);
   }
-  EXPECT_NE(Read(Send("GET", "/healthz")).find("\"completed\":4"),
+  EXPECT_NE(Read(Send("GET", "/healthz")).find("\"status\":\"ready\""),
             std::string::npos);
 }
 

@@ -810,3 +810,39 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
   }
   return status;
 }
+
+static iree_status_t image_generator_acquire(void* self, bool* out_admitted) {
+  return loom_serve_residency_try_acquire(
+      loom_serve_image_model_residency(self), out_admitted);
+}
+
+static iree_status_t image_generator_prepare(
+    void* self, const loom_serve_image_request_t* request) {
+  return loom_serve_image_model_prepare_request(
+      self, iree_string_builder_view(&request->prompt), request->seed,
+      request->strength);
+}
+
+static iree_status_t image_generator_submit(
+    void* self, loom_serve_execution_frontier_t* out_frontier) {
+  return loom_serve_image_model_submit(self, out_frontier);
+}
+
+static void image_generator_discard(void* self) {
+  loom_serve_image_model_discard_prepared_request(self);
+}
+
+static iree_const_byte_span_t image_generator_complete(void* self) {
+  return loom_serve_image_model_complete(self);
+}
+
+loom_serve_image_generator_t loom_serve_image_model_generator(
+    loom_serve_image_model_t* model) {
+  return (loom_serve_image_generator_t){
+      .self = model,
+      .prepare = image_generator_prepare,
+      .discard_prepared_request = image_generator_discard,
+      .try_acquire = image_generator_acquire,
+      .submit = image_generator_submit,
+      .complete = image_generator_complete};
+}

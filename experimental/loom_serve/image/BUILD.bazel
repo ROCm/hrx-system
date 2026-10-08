@@ -54,13 +54,25 @@ loom_cc_test(
 )
 
 loom_cc_library(
+    name = "generator",
+    hdrs = ["generator.h"],
+    deps = [
+        ":request",
+        "//experimental/loom_serve/runtime:execution",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "service",
     srcs = ["service.c"],
     hdrs = ["service.h"],
     deps = [
+        ":generator",
         ":output",
         ":request",
         "//experimental/loom_serve/http:request",
+        "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/http:timer",
         "//experimental/loom_serve/runtime:execution",
@@ -86,12 +98,14 @@ loom_cc_test(
     ]),
     deps = [
         ":service",
+        "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:host",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
+        "//runtime/src/iree/base/threading",
         "//runtime/src/iree/hal",
         "//runtime/src/iree/testing:gtest",
         "//runtime/src/iree/testing:gtest_main",
@@ -148,6 +162,7 @@ loom_cc_library(
         "//runtime/config/hal:driver_amdgpu",
     ]),
     deps = [
+        ":generator",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:execution",
         "//experimental/loom_serve/runtime:input",

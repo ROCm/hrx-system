@@ -6,10 +6,12 @@
 
 #include "experimental/loom_serve/image/service.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
 #include <cstdio>
 #include <string>
 #include <thread>
@@ -17,6 +19,7 @@
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "iree/async/proactor.h"
+#include "iree/base/threading/notification.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 
@@ -25,6 +28,34 @@ namespace {
 // Only model math is replaced. Actual HAL queue dependencies, task ownership,
 // proactor multi-waits, encoding, TCP and shutdown use the production stack.
 struct ImageGate {
+  enum { kSubmitted = 1, kDenied = 2, kDiscarded = 4 };
+
+  ImageGate() { iree_notification_initialize(&notification); }
+  ~ImageGate() { iree_notification_deinitialize(&notification); }
+
+  void Publish(uint32_t event) {
+    events.fetch_or(event, std::memory_order_release);
+    iree_notification_post(&notification, IREE_ALL_WAITERS);
+  }
+
+  void Await(uint32_t event) {
+    for (;;) {
+      const auto token = iree_notification_prepare_wait(&notification);
+      if (events.load(std::memory_order_acquire) & event) {
+        iree_notification_cancel_wait(&notification);
+        return;
+      }
+      iree_notification_commit_wait(&notification, token, IREE_DURATION_ZERO,
+                                    IREE_TIME_INFINITE_FUTURE);
+    }
+  }
+
+  // Dependency outcomes observed by the outer test thread without sleeps.
+  std::atomic<uint32_t> events{0};
+  // Outer test readiness; no scheduler worker waits here.
+  iree_notification_t notification;
+  // Optional shared admission slot, mutated only by serialized owner turns.
+  bool* occupied = nullptr;
   // Borrowed model execution domain held by an explicit queue dependency.
   loom_serve_execution_t* execution = nullptr;
   // Borrowed valid CHW F32 result, outliving the joined service.
@@ -37,7 +68,16 @@ struct ImageGate {
   uint32_t discarded = 0;
 
   static iree_status_t Acquire(void* self, bool* out_admitted) {
-    *out_admitted = static_cast<ImageGate*>(self)->admission_available;
+    auto* gate = static_cast<ImageGate*>(self);
+    *out_admitted =
+        gate->admission_available && (!gate->occupied || !*gate->occupied);
+    if (*out_admitted) {
+      if (gate->occupied) {
+        *gate->occupied = true;
+      }
+    } else {
+      gate->Publish(kDenied);
+    }
     return iree_ok_status();
   }
   static iree_status_t Prepare(void* self,
@@ -46,17 +86,23 @@ struct ImageGate {
     return iree_ok_status();
   }
   static void DiscardPreparedRequest(void* self) {
-    ++static_cast<ImageGate*>(self)->discarded;
+    auto* gate = static_cast<ImageGate*>(self);
+    ++gate->discarded;
+    gate->Publish(kDiscarded);
   }
   static iree_status_t Submit(void* self,
                               loom_serve_execution_frontier_t* out_frontier) {
-    *out_frontier =
-        loom_serve_execution_frontier(static_cast<ImageGate*>(self)->execution);
+    auto* gate = static_cast<ImageGate*>(self);
+    *out_frontier = loom_serve_execution_frontier(gate->execution);
+    gate->Publish(kSubmitted);
     return iree_ok_status();
   }
   static iree_const_byte_span_t Complete(void* self) {
     auto* gate = static_cast<ImageGate*>(self);
     ++gate->completed;
+    if (gate->occupied) {
+      *gate->occupied = false;
+    }
     return iree_make_const_byte_span(gate->pixel, sizeof(gate->pixel));
   }
 };
@@ -108,7 +154,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
       ImageGate::Submit,
       ImageGate::Complete};
   const loom_serve_image_service_options_t options = {
-      .model = IREE_SV("image-witness"),
+      .name = IREE_SV("image-witness"),
       .width = 1,
       .height = 1,
       .adapter_enabled = false,
@@ -150,7 +196,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_EQ(connect(denied, reinterpret_cast<const sockaddr*>(address->storage),
                     address->length),
             0);
-  const std::string denied_body = R"({"prompt":"denied","seed":1})";
+  const std::string denied_body =
+      R"({"model":"image-witness","prompt":"denied","seed":1})";
   const std::string denied_request =
       "POST /v1/images/generations HTTP/1.1\r\nHost: local\r\n"
       "Content-Type: application/json\r\nContent-Length: " +
@@ -165,7 +212,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_EQ(connect(client, reinterpret_cast<const sockaddr*>(address->storage),
                     address->length),
             0);
-  const std::string body = "{\"prompt\":\"heartbeat witness\"}";
+  const std::string body =
+      "{\"model\":\"image-witness\",\"prompt\":\"heartbeat witness\"}";
   const std::string request =
       "POST /v1/images/generations HTTP/1.1\r\nHost: local\r\n"
       "Content-Type: application/json\r\nContent-Length: " +
@@ -187,7 +235,8 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_EQ(
       send(health, health_request.data(), health_request.size(), MSG_NOSIGNAL),
       static_cast<ssize_t>(health_request.size()));
-  EXPECT_NE(read_response(health).find("\"active\":1"), std::string::npos);
+  EXPECT_NE(read_response(health).find("\"status\":\"ready\""),
+            std::string::npos);
   EXPECT_EQ(close(health), 0);
 
   if (completion_mode == CompletionMode::kShutdown) {
@@ -245,6 +294,146 @@ INSTANTIATE_TEST_SUITE_P(
     ::testing::Combine(::testing::Values(CompletionMode::kResponse,
                                          CompletionMode::kShutdown,
                                          CompletionMode::kDeviceFailure),
+                       ::testing::Values(1u, 4u)));
+
+enum class AdmissionMode { kResponse, kCancel, kShutdown };
+
+class ImageAdmissionTest
+    : public ::testing::TestWithParam<std::tuple<AdmissionMode, uint32_t>> {};
+
+TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
+  const auto [mode, workers] = GetParam();
+  IREE_ASSERT_OK(iree_async_signal_block_default());
+  const auto allocator = iree_allocator_system();
+  loom_serve_host_t* host = nullptr;
+  IREE_ASSERT_OK(loom_serve_host_create(workers, &host, allocator));
+  loom_serve_device_t* device = nullptr;
+  const loom_serve_device_options_t device_options = {.uri = IREE_SV("amdgpu")};
+  IREE_ASSERT_OK(
+      loom_serve_device_create(host, &device_options, &device, allocator));
+  loom_serve_execution_t* execution = nullptr;
+  IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
+  iree_hal_semaphore_t* predecessor = nullptr;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_serve_device_handle(device), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &predecessor));
+  uint64_t held = 1;
+  IREE_ASSERT_OK(
+      loom_serve_execution_barrier(execution, {1, &predecessor, &held}));
+  bool occupied = false;
+  ImageGate gates[2];
+  loom_serve_image_service_t* images[2] = {};
+  loom_serve_http_service_t services[2];
+  for (size_t i = 0; i < 2; ++i) {
+    gates[i].execution = execution;
+    gates[i].occupied = &occupied;
+    const loom_serve_image_generator_t generator = {
+        &gates[i],
+        ImageGate::Prepare,
+        ImageGate::DiscardPreparedRequest,
+        ImageGate::Acquire,
+        ImageGate::Submit,
+        ImageGate::Complete};
+    const loom_serve_image_service_options_t options = {
+        .name = i == 0 ? IREE_SV("first") : IREE_SV("second"),
+        .width = 1,
+        .height = 1,
+        .pending_capacity = 1,
+        .heartbeat_interval = 0};
+    IREE_ASSERT_OK(loom_serve_image_service_create(host, generator, &options,
+                                                   &images[i], allocator));
+    services[i] = loom_serve_image_service_interface(images[i]);
+  }
+  auto transport_options = loom_serve_http_server_options_default();
+  transport_options.port = 0;
+  loom_serve_http_server_t* server = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_http_server_create(&transport_options, &server, allocator));
+  iree_status_t status = iree_ok_status();
+  std::thread router([&] {
+    status = loom_serve_http_router_run(loom_serve_host_executor(host), server,
+                                        2, services, 8, allocator);
+    for (auto* image : images) {
+      loom_serve_image_service_destroy(image);
+    }
+  });
+  auto send_request = [&](const std::string& model) {
+    const int peer = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+    EXPECT_GE(peer, 0);
+    const auto* address = loom_serve_http_server_address(server);
+    EXPECT_EQ(connect(peer, reinterpret_cast<const sockaddr*>(address->storage),
+                      address->length),
+              0);
+    const std::string body =
+        "{\"model\":\"" + model + "\",\"prompt\":\"shared admission\"}";
+    const std::string request =
+        model.empty()
+            ? "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"
+            : "POST /v1/images/generations HTTP/1.1\r\nHost: local\r\n"
+              "Content-Type: application/json\r\nContent-Length: " +
+                  std::to_string(body.size()) + "\r\n\r\n" + body;
+    EXPECT_EQ(send(peer, request.data(), request.size(), MSG_NOSIGNAL),
+              static_cast<ssize_t>(request.size()));
+    return peer;
+  };
+  auto receive = [](int peer) {
+    std::string response;
+    char buffer[1024];
+    ssize_t count;
+    while ((count = recv(peer, buffer, sizeof(buffer), 0)) > 0) {
+      response.append(buffer, count);
+    }
+    EXPECT_TRUE(count == 0 || errno == ECONNRESET);
+    EXPECT_EQ(close(peer), 0);
+    return response;
+  };
+  const int first = send_request("first");
+  gates[0].Await(ImageGate::kSubmitted);
+  int second = send_request("second");
+  gates[1].Await(ImageGate::kDenied);
+  EXPECT_NE(receive(send_request("")).find("\"status\":\"ready\""),
+            std::string::npos);
+  EXPECT_EQ(gates[1].events.load() & ImageGate::kSubmitted, 0u);
+  if (mode == AdmissionMode::kCancel) {
+    const linger reset = {1, 0};
+    EXPECT_EQ(setsockopt(second, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+              0);
+    EXPECT_EQ(close(second), 0);
+    gates[1].Await(ImageGate::kDiscarded);
+  } else if (mode == AdmissionMode::kShutdown) {
+    EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+    EXPECT_TRUE(receive(first).empty());
+  }
+  IREE_EXPECT_OK(iree_hal_semaphore_signal(predecessor, 1, nullptr));
+  if (mode != AdmissionMode::kShutdown) {
+    EXPECT_NE(receive(first).find("\"b64_json\":\"iVBOR"), std::string::npos);
+    if (mode == AdmissionMode::kCancel) {
+      second = send_request("second");
+    }
+    EXPECT_NE(receive(second).find("\"b64_json\":\"iVBOR"), std::string::npos);
+    EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  } else {
+    EXPECT_TRUE(receive(second).empty());
+  }
+  router.join();
+  IREE_EXPECT_OK(status);
+  EXPECT_FALSE(occupied);
+  EXPECT_EQ(gates[0].completed, 1u);
+  EXPECT_EQ(gates[1].completed, mode == AdmissionMode::kShutdown ? 0u : 1u);
+  EXPECT_EQ(gates[1].discarded, mode == AdmissionMode::kResponse ? 0u : 1u);
+  IREE_EXPECT_OK(loom_serve_http_server_destroy(server));
+  IREE_EXPECT_OK(loom_serve_execution_drain(execution));
+  loom_serve_execution_release(execution);
+  iree_hal_semaphore_release(predecessor);
+  IREE_EXPECT_OK(loom_serve_device_destroy(device));
+  loom_serve_host_release(host);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Capacity, ImageAdmissionTest,
+    ::testing::Combine(::testing::Values(AdmissionMode::kResponse,
+                                         AdmissionMode::kCancel,
+                                         AdmissionMode::kShutdown),
                        ::testing::Values(1u, 4u)));
 
 }  // namespace

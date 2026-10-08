@@ -61,12 +61,25 @@ loom_cc_test(
 
 loom_cc_library(
   NAME
+    generator
+  HDRS
+    "generator.h"
+  DEPS
+    ::request
+    iree::base
+    iree::experimental::loom_serve::runtime::execution
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     service
   HDRS
     "service.h"
   SRCS
     "service.c"
   DEPS
+    ::generator
     ::output
     ::request
     iree::async
@@ -75,6 +88,7 @@ loom_cc_library(
     iree::base::internal::base64
     iree::base::threading
     iree::experimental::loom_serve::http::request
+    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::http::timer
     iree::experimental::loom_serve::runtime::execution
@@ -95,6 +109,8 @@ loom_cc_test(
     ::service
     iree::async
     iree::base
+    iree::base::threading
+    iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::execution
@@ -158,6 +174,7 @@ loom_cc_library(
   SRCS
     "model.c"
   DEPS
+    ::generator
     iree::base
     iree::base::internal::path
     iree::experimental::loom_serve::runtime::device

@@ -33,31 +33,6 @@ IREE_FLAG(int32_t, request_body_bytes, 65536,
 IREE_FLAG(int32_t, heartbeat_ms, 1000,
           "Periodic image-state report interval; zero disables heartbeats.");
 
-static iree_status_t image_acquire(void* self, bool* out_admitted) {
-  return loom_serve_residency_try_acquire(
-      loom_serve_image_model_residency(self), out_admitted);
-}
-
-static iree_status_t image_prepare(void* self,
-                                   const loom_serve_image_request_t* request) {
-  return loom_serve_image_model_prepare_request(
-      self, iree_string_builder_view(&request->prompt), request->seed,
-      request->strength);
-}
-
-static iree_status_t image_submit(
-    void* self, loom_serve_execution_frontier_t* out_frontier) {
-  return loom_serve_image_model_submit(self, out_frontier);
-}
-
-static void image_discard_prepared_request(void* self) {
-  loom_serve_image_model_discard_prepared_request(self);
-}
-
-static iree_const_byte_span_t image_complete(void* self) {
-  return loom_serve_image_model_complete(self);
-}
-
 int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   if (!FLAG_model[0] || !FLAG_checkpoint[0] || FLAG_port < 0 ||
@@ -101,11 +76,10 @@ int main(int argc, char** argv) {
     status = loom_serve_http_server_create(&options, &server, allocator);
   }
   if (iree_status_is_ok(status)) {
-    const loom_serve_image_generator_t generator = {
-        model,         image_prepare, image_discard_prepared_request,
-        image_acquire, image_submit,  image_complete};
+    const loom_serve_image_generator_t generator =
+        loom_serve_image_model_generator(model);
     const loom_serve_image_service_options_t options = {
-        .model = loom_serve_image_model_name(model),
+        .name = loom_serve_image_model_name(model),
         .width = (uint32_t)FLAG_width,
         .height = (uint32_t)FLAG_height,
         .adapter_enabled = FLAG_adapter[0] != 0,
