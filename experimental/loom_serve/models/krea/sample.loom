@@ -1,8 +1,8 @@
-config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
-config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
 amdgpu.target<gfx11-generic> @sample_mask_wave32 {subgroup_size = 32}
 command.program.decl @text_encoder() launch(%parameters: buffer, %token_ids: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %taps: buffer)
 command.program.decl @denoise() launch(%parameters: buffer, %sample: buffer, %text: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %output: buffer)

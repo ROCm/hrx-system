@@ -199,7 +199,7 @@ func.def public inline @ggml_q6k_q8_1_x4_block_lane(%weight: buffer, %weight_row
 // Computes one lane's partial for a complete Q6_K row. Callers choose how
 // rows and activations are tiled, then reduce the returned value by subgroup.
 func.def inline @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -218,7 +218,7 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, 
 // the resulting target program retains four independent accumulators while
 // issuing one weight-packet load sequence.
 func.def inline @ggml_q6k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row0_byte_base: offset, %q8_row1_byte_base: offset, %q8_row2_byte_base: offset, %q8_row3_byte_base: offset, %lane: index) -> (f32, f32, f32, f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c256 = index.constant 256 : index
@@ -244,7 +244,7 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane_m4(%input_size: index, %weight: buffe
 // reduction therefore combines four complete blocks per loop iteration while
 // preserving the canonical wave32 unpacking and dot-product primitive.
 func.def inline @ggml_q6k_q8_1_x4_row_lane_wave64_block4(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_lane = index.assume %lane [range(%lane, 0, 63)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -280,7 +280,7 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane_wave64_block4(%input_size: index, %we
 // Wave64 four-row contraction. Four 16-lane cohorts advance across four Q6_K
 // blocks while each cohort retains the four target-row accumulators.
 func.def inline @ggml_q6k_q8_1_x4_row_lane_m4_wave64_block4(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row0_byte_base: offset, %q8_row1_byte_base: offset, %q8_row2_byte_base: offset, %q8_row3_byte_base: offset, %lane: index) -> (f32, f32, f32, f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_lane = index.assume %lane [range(%lane, 0, 63)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -330,7 +330,7 @@ func.def inline @ggml_q6k_q8_1_x4_row_lane_m4_wave64_block4(%input_size: index, 
 // dense logits tensor or an endpoint reduction.
 template.def<@ggml.linear_q6k_q8_1_x4.body> device @ggml_linear_q6k_q8_1_x4_body(%publish_output: i1, %token_count: index, %token0: index, %input_size: index, %output_size: index, %q8_input: buffer, %weight: buffer) -> (f32, index, index, i1, index, index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144)] : index
   %channel_tile = kernel.workgroup.id<x> : index
   %subgroup0 = kernel.subgroup.id : index
@@ -424,7 +424,7 @@ kernel.def export("ggml_linear_q6k_q8_1_x4_m4") @ggml_linear_q6k_q8_1_x4_m4(%tok
   %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4), le(%token_count, %token_capacity)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %channel_tile = kernel.workgroup.id<x> : index
   %subgroup0 = kernel.subgroup.id : index
@@ -500,7 +500,7 @@ kernel.def target(@ggml_q6k_q8_gfx11_wave64) export("ggml_linear_q6k_q8_1_x4") @
   %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %token0 = kernel.workgroup.id<y> : index
   %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index
@@ -551,7 +551,7 @@ kernel.def target(@ggml_q6k_q8_gfx11_wave64) export("ggml_linear_q6k_q8_1_x4_m4"
   %token_capacity = config.get @ggml.linear_q6k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q6k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4), le(%token_count, %token_capacity)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %channel = kernel.workgroup.id<x> : index
   %lane = kernel.subgroup.lane.id : index

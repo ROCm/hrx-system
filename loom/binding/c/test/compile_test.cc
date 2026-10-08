@@ -531,7 +531,7 @@ config.def @model36.unused = 1 : index
   std::string text = SerializeModuleToText(module.get());
   EXPECT_NE(
       text.find("config.def @model36.model.hidden_size = 4096 : %value: index "
-                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+                "where [range(%value, 0, 8192), multiple_of(%value, 16)]"),
       std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
@@ -574,7 +574,7 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
   std::string text = ToString(text_artifact->contents);
   EXPECT_NE(
       text.find("config.def @model36.model.hidden_size = 4096 : %value: index "
-                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+                "where [range(%value, 0, 8192), multiple_of(%value, 16)]"),
       std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
@@ -698,7 +698,7 @@ config.def @model36.model.hidden_size = 4096 : index
   const std::string text = ToString(artifact->contents);
   EXPECT_NE(
       text.find("config.def @model36.model.hidden_size = 4096 : %value: index "
-                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+                "where [range(%value, 0, 8192), multiple_of(%value, 16)]"),
       std::string::npos);
   EXPECT_EQ(text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);

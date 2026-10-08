@@ -1301,7 +1301,7 @@ func.def public @entry() -> (index) {
   std::string first_text = SerializeModuleToText(first_module.get());
   EXPECT_NE(first_text.find(
                 "config.def @model36.model.hidden_size = 4096 : %value: index "
-                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+                "where [range(%value, 0, 8192), multiple_of(%value, 16)]"),
             std::string::npos);
   EXPECT_EQ(first_text.find("config.decl @model36.model.hidden_size"),
             std::string::npos);
@@ -1327,7 +1327,7 @@ func.def public @entry() -> (index) {
   std::string second_text = SerializeModuleToText(second_module.get());
   EXPECT_NE(second_text.find(
                 "config.def @model36.model.hidden_size = 1024 : %value: index "
-                "where [range(%value, 0, 8192), mul(%value, 16)]"),
+                "where [range(%value, 0, 8192), multiple_of(%value, 16)]"),
             std::string::npos);
   EXPECT_EQ(second_text.find("4096"), std::string::npos);
 }

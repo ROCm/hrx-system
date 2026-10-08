@@ -1,5 +1,5 @@
-config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 config.decl @krea2.time_count : %value: index where [range(%value, 1, 256)]
 config.decl @krea2.step_index : %value: index where [range(%value, 0, 255)]
 command.program.decl @krea2.denoise_update(%step: index) launch(%sample: buffer, %velocity: buffer, %deltas: buffer, %output: buffer)

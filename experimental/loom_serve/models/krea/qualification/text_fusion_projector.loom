@@ -1,4 +1,4 @@
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @fusion_projector_qualification_wave32 {subgroup_size = 32}
 template.decl @projection.gather_12_bf16(%rows: index, %width: index, %row: index, %channel: index, %input: buffer) -> (vector<12xf32>)
 template.decl @projection.dot_12_f32_as_bf16(%outputs: index, %row: index, %values: vector<12xf32>, %weight: buffer) -> (bf16)

@@ -1,4 +1,4 @@
-config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @shared_four_head_wave32 {subgroup_size = 32}
 template.decl @attention.shared_four_head_bf16(%tokens: index, %key_value_heads: index, %gated: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)
 template.decl @attention.shared_four_head_k32_bf16(%tokens: index, %key_value_heads: index, %gated: i1, %query: buffer, %key: buffer, %value: buffer, %mask: buffer, %gate: buffer, %output: buffer)

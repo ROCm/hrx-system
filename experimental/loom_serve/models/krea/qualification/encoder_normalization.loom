@@ -1,4 +1,4 @@
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 config.decl @qualify.encoder_layer : %value: index where [range(%value, 0, 34)]
 amdgpu.target<gfx11-generic> @encoder_observation_wave32 {subgroup_size = 32}
 template.decl @normalization.scaled_rows_bf16(%rows: index, %width: index, %threads: index, %epsilon: f32, %input: buffer, %weight: buffer, %output: buffer)

@@ -1,4 +1,4 @@
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 kernel.decl @fusion_layerwise_norm() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @fusion_layerwise_head_norm() launch(%input: buffer, %weight: buffer, %output: buffer)
 kernel.decl @fusion_layerwise_linear_2560_2560() launch(%input: buffer, %weight: buffer, %output: buffer)

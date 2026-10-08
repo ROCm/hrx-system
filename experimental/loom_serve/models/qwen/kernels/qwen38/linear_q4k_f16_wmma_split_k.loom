@@ -197,7 +197,7 @@ kernel.def target(@qwen38_q4k_gfx11_wave64_split_k) export("qwen38_linear_q4k_f1
         %activation_row0 = index.add %activation_row_base, %activation_row_offset : index
         %activation_row = index.assume %activation_row0 [range(%activation_row0, 0, 31)] : index
         %input_k0 = index.add %k_origin, %activation_k : index
-        %input_k = index.assume %input_k0 [range(%input_k0, 0, 5118), mul(%input_k0, 2), lt(%input_k0, %last_input_pair_start)] : index
+        %input_k = index.assume %input_k0 [range(%input_k0, 0, 5118), multiple_of(%input_k0, 2), lt(%input_k0, %last_input_pair_start)] : index
         %input_token0 = index.add %token_tile_base, %activation_row : index
         %valid_input_token = index.cmp ult, %input_token0, %token_count : index
         %activation_values = scf.if %valid_input_token -> (vector<2xf16>) {
@@ -308,13 +308,13 @@ kernel.def target(@qwen38_q4k_gfx11_wave64_split_k) export("qwen38_linear_q4k_f1
 }
 
 kernel.def target(@qwen38_q4k_gfx11_wave64_split_k) @qwen38_q4k_f32_reference_5120(%token_count: index) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 32, 512), mul(%token_count, 32)] : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 32, 512), multiple_of(%token_count, 32)] : index
   %c1 = index.constant 1 : index
   %c32 = index.constant 32 : index
   %c48 = index.constant 48 : index
   kernel.launch.config workgroups(%c48, %bounded_token_count, %c1) workgroup_size(%c32, %c1, %c1) : index
 } launch(%token_count: index, %input: buffer, %weight: buffer, %output: buffer) {
-  %bounded_token_count = index.assume %token_count [range(%token_count, 32, 512), mul(%token_count, 32)] : index
+  %bounded_token_count = index.assume %token_count [range(%token_count, 32, 512), multiple_of(%token_count, 32)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
   %c2 = index.constant 2 : index

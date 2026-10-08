@@ -4,9 +4,9 @@
 // distinct sentinels, comparing complete outputs to the full-K64 recurrence.
 // The second case crosses a group boundary and a partial 64-row tile.
 
-config.decl @wide_test.rows : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @wide_test.inputs : %value: index where [range(%value, 256, 65536), mul(%value, 256)]
-config.decl @wide_test.outputs : %value: index where [range(%value, 128, 65536), mul(%value, 128)]
+config.decl @wide_test.rows : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @wide_test.inputs : %value: index where [range(%value, 256, 65536), multiple_of(%value, 256)]
+config.decl @wide_test.outputs : %value: index where [range(%value, 128, 65536), multiple_of(%value, 128)]
 amdgpu.target<gfx11-generic> @wide_wave32 {subgroup_size = 32}
 template.decl @projection.linear_tiled_full_k_bf16(%rows: index, %inputs: index, %outputs: index, %row_tile_group_size: index, %output_layout: encoding<layout>, %input: buffer, %weight: buffer, %output: buffer)
 template.decl @projection.linear_tiled_wide_bf16(%rows: index, %inputs: index, %outputs: index, %group_size: index, %input: buffer, %weight: buffer, %output: buffer)

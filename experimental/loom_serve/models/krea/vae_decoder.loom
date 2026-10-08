@@ -1,5 +1,5 @@
-config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
-config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
 command.program.decl @vae_input_attention() launch(%parameters: buffer, %input: buffer, %affine: buffer, %output: buffer)
 command.program.decl @krea2.vae_mid_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)
 command.program.decl @krea2.vae_up0_residual(%block: index) launch(%parameters: buffer, %input: buffer, %output: buffer)

@@ -62,7 +62,7 @@ func.def public inline @ggml_q4k_chunk(%weight: buffer, %row_byte_base: offset, 
 // subgroup size controls whether each loop iteration covers two or four
 // consecutive 256-value blocks.
 func.def inline @ggml_q4k_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane: index) -> (f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), multiple_of(%input_size, 256)] : index
   %subgroup_size = target.subgroup.size : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -149,7 +149,7 @@ kernel.def target(@ggml_q4k_gfx11_wave32) export("ggml_linear_q4k_q8_1_x4") @ggm
   %token_capacity = config.get @ggml.linear_q4k_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q4k_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 32768), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %subgroup_size = target.subgroup.size : index
   %workgroup_size = index.constant 256 : index

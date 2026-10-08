@@ -1,5 +1,5 @@
 // Standalone B, SiLU, and ungated attention expose production fusion boundaries.
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @fusion_qualification_wave32 {subgroup_size = 32}
 amdgpu.target<gfx11-generic> @fusion_qualification_wave64 {subgroup_size = 64}
 template.decl @projection.linear_f32_as_bf16(%rows: index, %inputs: index, %outputs: index, %row_origin: index, %output_origin: index, %input: buffer, %weight: buffer) -> (vector<8xf32>)

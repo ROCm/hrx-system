@@ -8,8 +8,8 @@
 // output/state comparisons also check preservation of the unused suffix.
 config.decl @matrix_test.height : %value: index where [range(%value, 1, 3)]
 config.decl @matrix_test.width : %value: index where [range(%value, 1, 11)]
-config.decl @matrix_test.inputs : %value: index where [range(%value, 32, 384), mul(%value, 32)]
-config.decl @matrix_test.outputs : %value: index where [range(%value, 32, 384), mul(%value, 32)]
+config.decl @matrix_test.inputs : %value: index where [range(%value, 32, 384), multiple_of(%value, 32)]
+config.decl @matrix_test.outputs : %value: index where [range(%value, 32, 384), multiple_of(%value, 32)]
 config.decl @matrix_test.planes : %value: index where [range(%value, 1, 3)]
 config.decl @matrix_test.upsample : %value: index where [range(%value, 1, 2)]
 amdgpu.target<gfx11-generic> @matrix_test_wave32 {subgroup_size = 32}

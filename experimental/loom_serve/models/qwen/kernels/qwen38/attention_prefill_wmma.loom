@@ -71,7 +71,7 @@ template.def<@qwen38.attention.wmma> device @qwen38_attention_wmma(%logical_capa
   %context_count = index.assume %context_count0 [range(%context_count0, 1, 262144), le(%context_count0, %logical_capacity)] : index
   %full_block_count = index.div %context_count, %c64 : index
   %full_context_count0 = index.mul %full_block_count, %c64 : index
-  %full_context_count = index.assume %full_context_count0 [range(%full_context_count0, 0, 262144), mul(%full_context_count0, 64)] : index
+  %full_context_count = index.assume %full_context_count0 [range(%full_context_count0, 0, 262144), multiple_of(%full_context_count0, 64)] : index
 
   %query_head_base = index.mul %query_head, %c256 : index
   %key_value_head = index.div %query_head, %c6 : index

@@ -7,7 +7,7 @@
 
 config.decl @convolution_test.height : %value: index where [range(%value, 1, 1024)]
 config.decl @convolution_test.width : %value: index where [range(%value, 1, 1024)]
-config.decl @convolution_test.channels : %value: index where [range(%value, 32, 384), mul(%value, 32)]
+config.decl @convolution_test.channels : %value: index where [range(%value, 32, 384), multiple_of(%value, 32)]
 config.decl @convolution_test.add_residual : %value: index where [range(%value, 0, 1)]
 
 amdgpu.target<gfx11-generic> @convolution_test_wave32 {subgroup_size = 32}

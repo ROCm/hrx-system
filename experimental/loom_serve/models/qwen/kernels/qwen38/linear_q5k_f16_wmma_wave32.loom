@@ -18,7 +18,7 @@ amdgpu.target<gfx11-generic> @qwen38_dense_gfx11_wave32_x128 {subgroup_size = 32
 
 template.def<@qwen38.dense_q5k_f16_wmma.wave32_x128.compute> device @qwen38_dense_q5k_f16_wmma_wave32_x128_compute(%input_is_f16: i1, %token_count: index, %input_size0: index, %output_size0: index, %channel_tile: index, %token_tile: index, %channel_tile_width: index, %token_tile_width: index, %channel_group_count: index, %workgroup_size: index, %workitem: index, %subgroup: index, %input: buffer, %weight: buffer) -> (vector<8xf32>, vector<8xf32>, vector<8xf32>, vector<8xf32>) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 512)] : index
-  %bounded_input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %bounded_input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
   %bounded_output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -284,7 +284,7 @@ template.def<@qwen38.dense_q5k_f16_wmma.wave32_x128.publish> device @qwen38_dens
 
 kernel.def target(@qwen38_dense_gfx11_wave32_x128) export("qwen38_linear_q5k_f16_wmma_c128_t128_wave32") @qwen38_linear_q5k_f16_wmma_c128_t128_wave32(%token_count0: index, %input_size0: index, %output_size0: index) {
   %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
-  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
   %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
   %c1 = index.constant 1 : index
   %c127 = index.constant 127 : index
@@ -307,7 +307,7 @@ kernel.def target(@qwen38_dense_gfx11_wave32_x128) export("qwen38_linear_q5k_f16
   %token_count_i32 = view.load %token_count_view[%c0] : view<1xi32> -> i32
   %token_count0 = index.cast %token_count_i32 : i32 to index
   %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
-  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
   %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
   %channel_tile = kernel.workgroup.id<x> : index
   %token_tile = kernel.workgroup.id<y> : index
@@ -324,7 +324,7 @@ kernel.def target(@qwen38_dense_gfx11_wave32_x128) export("qwen38_linear_q5k_f16
 
 kernel.def target(@qwen38_dense_gfx11_wave32_x128) export("qwen38_linear_q5k_f16_wmma_c128_t128_wave32_input_f16") @qwen38_linear_q5k_f16_wmma_c128_t128_wave32_input_f16(%token_count0: index, %input_size0: index, %output_size0: index) {
   %token_count = index.assume %token_count0 [range(%token_count0, 0, 512)] : index
-  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
   %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
   %c1 = index.constant 1 : index
   %c127 = index.constant 127 : index
@@ -347,7 +347,7 @@ kernel.def target(@qwen38_dense_gfx11_wave32_x128) export("qwen38_linear_q5k_f16
   %token_count_i32 = view.load %token_count_view[%c0] : view<1xi32> -> i32
   %token_count0 = index.cast %token_count_i32 : i32 to index
   %token_count = index.assume %token_count0 [range(%token_count0, 1, 512)] : index
-  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), mul(%input_size0, 256)] : index
+  %input_size = index.assume %input_size0 [range(%input_size0, 256, 32768), multiple_of(%input_size0, 256)] : index
   %output_size = index.assume %output_size0 [range(%output_size0, 1, 32768)] : index
   %channel_tile = kernel.workgroup.id<x> : index
   %token_tile = kernel.workgroup.id<y> : index

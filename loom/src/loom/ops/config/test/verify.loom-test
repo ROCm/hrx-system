@@ -126,8 +126,8 @@ config.def @bad_default = 99 : %value: index where [range(%value, 1, 8)]
 
 // ====
 
-// ERROR@+1: STRUCTURE/014 "value" "7" "violates constraint 'mul'"
-config.def @bad_multiple = 7 : %value: i32 where [mul(%value, 4)]
+// ERROR@+1: STRUCTURE/014 "value" "7" "violates constraint 'multiple_of'"
+config.def @bad_multiple = 7 : %value: i32 where [multiple_of(%value, 4)]
 
 // ====
 

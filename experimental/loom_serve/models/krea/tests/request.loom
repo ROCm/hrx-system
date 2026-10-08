@@ -1,5 +1,5 @@
-config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 kernel.decl @request_rotary() launch(%cosine: buffer, %sine: buffer)
 kernel.decl @request_encoder_rotary() launch(%request: buffer, %cosine: buffer, %sine: buffer)
 kernel.decl @request_constants() launch(%request: buffer, %times: buffer, %deltas: buffer, %strength: buffer, %affine: buffer)

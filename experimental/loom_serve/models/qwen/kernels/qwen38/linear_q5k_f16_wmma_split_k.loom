@@ -13,7 +13,7 @@ kernel.decl @qwen38_linear_q5k_f16_wmma(%token_count: index, %input_size: index,
 amdgpu.target<gfx11-generic> @qwen38_dense_gfx11_wave64_split_k {subgroup_size = 64}
 
 kernel.def target(@qwen38_dense_gfx11_wave64_split_k) export("qwen38_linear_q5k_f16_wmma_alpha_split_k") @qwen38_linear_q5k_f16_wmma_alpha_split_k(%token_count0: index, %input_size0: index, %output_size0: index) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 0, 32), mul(%token_count0, 32)] : index
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 32), multiple_of(%token_count0, 32)] : index
   %input_size = index.assume %input_size0 [range(%input_size0, 5120, 5120)] : index
   %output_size = index.assume %output_size0 [range(%output_size0, 48, 48)] : index
   %c1 = index.constant 1 : index
@@ -150,7 +150,7 @@ kernel.def target(@qwen38_dense_gfx11_wave64_split_k) export("qwen38_linear_q5k_
         %activation_row0 = index.add %activation_row_base, %activation_row_offset : index
         %activation_row = index.assume %activation_row0 [range(%activation_row0, 0, 31)] : index
         %input_k0 = index.add %k_origin, %activation_k : index
-        %input_k = index.assume %input_k0 [range(%input_k0, 0, 5118), mul(%input_k0, 2), lt(%input_k0, %last_input_pair_start)] : index
+        %input_k = index.assume %input_k0 [range(%input_k0, 0, 5118), multiple_of(%input_k0, 2), lt(%input_k0, %last_input_pair_start)] : index
         %loaded = vector.load %input_view[%activation_row, %input_k] : view<32x5120xf32> -> vector<2xf32>
         %activation_values = vector.fptrunc %loaded : vector<2xf32> to vector<2xf16>
         vector.store %activation_values, %activation_stage_physical_view[%activation_row, %activation_k] : vector<2xf16>, view<32x40xf16>
@@ -197,7 +197,7 @@ kernel.def target(@qwen38_dense_gfx11_wave64_split_k) export("qwen38_linear_q5k_
 }
 
 kernel.def target(@qwen38_dense_gfx11_wave64_split_k) export("qwen38_linear_q5k_f16_wmma_alpha_split_k_reduce") @qwen38_linear_q5k_f16_wmma_alpha_split_k_reduce(%token_count0: index) {
-  %token_count = index.assume %token_count0 [range(%token_count0, 0, 32), mul(%token_count0, 32)] : index
+  %token_count = index.assume %token_count0 [range(%token_count0, 0, 32), multiple_of(%token_count0, 32)] : index
   %c1 = index.constant 1 : index
   %c12 = index.constant 12 : index
   %c255 = index.constant 255 : index

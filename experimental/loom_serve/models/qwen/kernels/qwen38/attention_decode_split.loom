@@ -323,7 +323,7 @@ kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_at
     %linear = index.madd %load_iteration, %c2048, %workitem_vector : index
     %local_query_row = index.div %linear, %c256 : index
     %query_channel0 = index.rem %linear, %c256 : index
-    %query_channel = index.assume %query_channel0 [range(%query_channel0, 0, 248), mul(%query_channel0, 8)] : index
+    %query_channel = index.assume %query_channel0 [range(%query_channel0, 0, 248), multiple_of(%query_channel0, 8)] : index
     %query_valid = index.cmp ult, %local_query_row, %c6 : index
     %query_value = scf.if %query_valid -> (vector<8xf16>) {
       %query_head_base0 = index.mul %key_head, %c6 : index
@@ -347,7 +347,7 @@ kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_at
       %linear = index.madd %load_iteration, %c2048, %workitem_vector : index
       %tile_row = index.div %linear, %c256 : index
       %channel0 = index.rem %linear, %c256 : index
-      %channel = index.assume %channel0 [range(%channel0, 0, 248), mul(%channel0, 8)] : index
+      %channel = index.assume %channel0 [range(%channel0, 0, 248), multiple_of(%channel0, 8)] : index
       %row_valid = index.cmp ult, %tile_row, %tile_token_count : index
       %key_value = scf.if %row_valid -> (vector<8xf16>) {
         %token0 = index.add %key_origin, %tile_row : index
@@ -412,7 +412,7 @@ kernel.def target(@qwen38_attention_decode_split_gfx11_wave64) export("qwen38_at
       %linear = index.madd %load_iteration, %c2048, %workitem_vector : index
       %tile_row = index.div %linear, %c256 : index
       %channel0 = index.rem %linear, %c256 : index
-      %channel = index.assume %channel0 [range(%channel0, 0, 248), mul(%channel0, 8)] : index
+      %channel = index.assume %channel0 [range(%channel0, 0, 248), multiple_of(%channel0, 8)] : index
       %row_valid = index.cmp ult, %tile_row, %tile_token_count : index
       %value = scf.if %row_valid -> (vector<8xf16>) {
         %token0 = index.add %key_origin, %tile_row : index

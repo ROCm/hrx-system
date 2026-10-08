@@ -1,1 +1,1 @@
-config.def @count = 8 : %value: index where [pow2(%value)]
+config.def @count = 8 : %value: index where [power_of_two(%value)]

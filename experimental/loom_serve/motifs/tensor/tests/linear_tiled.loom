@@ -9,9 +9,9 @@
 // valid stores. Column-major cases compare the entire physical byte stream;
 // both kernels publish the same logical matrix through that selected layout.
 
-config.decl @projection_test.rows : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @projection_test.inputs : %value: index where [range(%value, 256, 65536), mul(%value, 256)]
-config.decl @projection_test.outputs : %value: index where [range(%value, 64, 65536), mul(%value, 64)]
+config.decl @projection_test.rows : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @projection_test.inputs : %value: index where [range(%value, 256, 65536), multiple_of(%value, 256)]
+config.decl @projection_test.outputs : %value: index where [range(%value, 64, 65536), multiple_of(%value, 64)]
 config.decl @projection_test.row_tile_group_size : %value: index where [range(%value, 1, 1024)]
 config.decl @projection_test.column_major : %value: index where [range(%value, 0, 1)]
 

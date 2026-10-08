@@ -9,8 +9,8 @@
 template.decl @ggml.q5k.scale_min(%weight: buffer, %block_byte_base: offset, %group: index) -> (f32, f32)
 func.decl @qwen38_q5k_f16_vector4_prescaled(%weight: buffer, %row_byte_base: offset, %q5_block: index, %q5_group: index, %packet: index, %d_scale: f32, %dmin_scale: f32) -> (vector<4xf16>)
 amdgpu.target<gfx11-generic> @qwen38_ffn_block_prefetch_gfx11_wave32 {subgroup_size = 32}
-config.decl @qwen38.ffn.input_size : %value: index where [range(%value, 256, 32768), mul(%value, 256)]
-config.decl @qwen38.ffn.output_size : %value: index where [range(%value, 64, 32768), mul(%value, 64)]
+config.decl @qwen38.ffn.input_size : %value: index where [range(%value, 256, 32768), multiple_of(%value, 256)]
+config.decl @qwen38.ffn.output_size : %value: index where [range(%value, 64, 32768), multiple_of(%value, 64)]
 
 template.decl @qwen38.ffn_gate_up_q5k.block_prefetch.body(%input_size: index, %output_size: index, %weight_channels: index, %token_count_data: buffer, %input: buffer, %gate_weight: buffer, %up_weight: buffer, %output: buffer)
 

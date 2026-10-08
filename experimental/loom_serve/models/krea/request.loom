@@ -1,6 +1,6 @@
-config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
 amdgpu.target<gfx11-generic> @request_wave32 {subgroup_size = 32}
 template.decl @random.philox4x32(%counter0: i32, %counter1: i32, %counter2: i32, %counter3: i32, %seed0: i32, %seed1: i32) -> (i32, i32, i32, i32)
 template.decl @random.normal_pair(%radius_word: i32, %angle_word: i32) -> (f32, f32)

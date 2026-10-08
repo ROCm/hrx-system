@@ -1,6 +1,6 @@
 // Component entry points are qualification-only. The deployment graph calls
 // the parameterized model commands directly.
-config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 config.decl @krea2.block_index : %value: index where [range(%value, 0, 27)]
 
 command.program.decl @krea2.block_norm1(%layer: index) launch(%parameters: buffer, %input: buffer, %output: buffer)

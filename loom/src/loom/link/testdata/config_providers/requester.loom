@@ -1,5 +1,5 @@
 // Configuration declarations carry the constraints used by this consumer.
-config.decl @count : %value: index where [range(%value, 1, 16), mul(%value, 4)]
+config.decl @count : %value: index where [range(%value, 1, 16), multiple_of(%value, 4)]
 
 config.decl @enabled : i1
 

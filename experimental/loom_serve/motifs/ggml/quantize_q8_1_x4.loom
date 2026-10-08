@@ -227,7 +227,7 @@ template.def<@ggml.quantize_q8_1_x4.group_body> device @ggml_quantize_q8_1_x4_gr
 // specialization and addressing bound.
 kernel.def export("ggml_quantize_q8_1_x4_f32") @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) {
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), multiple_of(%input_size, 128)] : index
   %unit = index.constant 1 : index
   %workgroup_size = index.constant 32 : index
   %elements_per_group = index.constant 128 : index
@@ -237,7 +237,7 @@ kernel.def export("ggml_quantize_q8_1_x4_f32") @ggml_quantize_q8_1_x4_f32(%token
 } launch(%token_count: index, %input_size: index, %input: buffer, %output: buffer) {
   %group_capacity = config.get @ggml.quantize_q8_1_x4.group_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), multiple_of(%input_size, 128)] : index
   %elements_per_group = index.constant 128 : index
   %element_count = index.mul %bounded_token_count, %bounded_input_size : index
   %group_count0 = index.div %element_count, %elements_per_group : index

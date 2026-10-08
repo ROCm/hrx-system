@@ -1,8 +1,8 @@
-config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
-config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
-config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.image_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
 template.decl @krea2.sample_image(%tokens: index, %images: index, %patches: index, %texts: index, %prefix: index, %adapted: i1, %parameters: buffer, %adapter: buffer, %vae_parameters: buffer, %sample: buffer, %taps: buffer, %times: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %deltas: buffer, %strength: buffer, %affine: buffer, %output: buffer)
 
 // The output is a distinct NCHW F32 RGB buffer, clamped to [-1, 1], at eight

@@ -21,7 +21,7 @@ kernel.decl @ggml_quantize_q8_1_x4_f32(%token_count: index, %input_size: index) 
 // Computes one lane's partial for a complete Q8_0 row. The active subgroup
 // profile specializes the loop step before native emission.
 func.def inline @ggml_q8_0_q8_1_x4_row_lane(%input_size: index, %weight: buffer, %weight_row_byte_base: offset, %q8_input: buffer, %q8_row_byte_base: offset, %lane0: index) -> (f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), multiple_of(%input_size, 128)] : index
   %lane = index.assume %lane0 [range(%lane0, 0, 63)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -88,7 +88,7 @@ kernel.def target(@ggml_q8_gfx11_wave32) export("ggml_linear_q8_0_q8_1_x4") @ggm
   %token_capacity = config.get @ggml.linear_q8_0_q8_1_x4.token_capacity : index
   %output_capacity = config.get @ggml.linear_q8_0_q8_1_x4.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 2048), le(%token_count, %token_capacity)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), mul(%input_size, 128)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 128, 32768), multiple_of(%input_size, 128)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %token0 = kernel.workgroup.id<y> : index
   %token = index.assume %token0 [lt(%token0, %bounded_token_count)] : index

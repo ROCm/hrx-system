@@ -156,7 +156,7 @@ func.def inline @ggml_q6k_f32_block_lane_row2(%input: buffer, %input_row_byte_ba
 }
 
 func.def inline @ggml_q6k_f32_row_lane2(%input_size: index, %input: buffer, %input_row_byte_base: offset, %weight: buffer, %weight_row0_byte_base: offset, %weight_row1_byte_base: offset, %lane: index) -> (f32, f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %subgroup_size = target.subgroup.size : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -193,7 +193,7 @@ func.def inline @ggml_q6k_f32_row_lane2(%input_size: index, %input: buffer, %inp
 // single block loop preserves the token-one contribution and reduction order;
 // inlining exposes the repeated immutable Q6_K loads to canonical CSE.
 func.def inline @ggml_q6k_f32_row_lane2_m4(%input_size: index, %input: buffer, %input_row0_byte_base: offset, %input_row1_byte_base: offset, %input_row2_byte_base: offset, %input_row3_byte_base: offset, %weight: buffer, %weight_row0_byte_base: offset, %weight_row1_byte_base: offset, %lane: index) -> (f32, f32, f32, f32, f32, f32, f32, f32) {
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %subgroup_size = target.subgroup.size : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -248,7 +248,7 @@ kernel.def export("ggml_linear_q6k_f32_decode") @ggml_linear_q6k_f32_decode(%tok
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
   %output_capacity = config.get @ggml.linear_q6k_f32_decode.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 1, 4)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index
@@ -312,7 +312,7 @@ kernel.def export("ggml_linear_q6k_f32_decode_m4") @ggml_linear_q6k_f32_decode_m
   %input_noalias, %weight_noalias, %output_noalias = buffer.assume.noalias %input, %weight, %output : buffer, buffer, buffer
   %output_capacity = config.get @ggml.linear_q6k_f32_decode.output_capacity : index
   %bounded_token_count = index.assume %token_count [range(%token_count, 4, 4)] : index
-  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), mul(%input_size, 256)] : index
+  %bounded_input_size = index.assume %input_size [range(%input_size, 256, 17408), multiple_of(%input_size, 256)] : index
   %bounded_output_size = index.assume %output_size [range(%output_size, 1, 262144), le(%output_size, %output_capacity)] : index
   %c0 = index.constant 0 : index
   %c1 = index.constant 1 : index

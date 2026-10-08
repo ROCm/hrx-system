@@ -120,7 +120,7 @@ template.def<@attention.shared_four_head_k32_bf16> device @shared_four_head_k32_
     %unclamped_next = index.add %key_origin, %key_tile : index
     %before_last = index.cmp ult, %unclamped_next, %last_origin : index
     %selected_next = scf.select %before_last, %unclamped_next, %last_origin : index
-    %next_origin = index.assume %selected_next [le(%selected_next, %last_origin), mul(%selected_next, 32)] : index
+    %next_origin = index.assume %selected_next [le(%selected_next, %last_origin), multiple_of(%selected_next, 32)] : index
     %next_key_row0 = index.add %next_origin, %stage_key : index
     %next_key_row1 = index.add %next_origin, %upper_stage_key : index
     %next_value_origin1 = index.add %next_origin, %tile : index

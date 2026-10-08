@@ -1,4 +1,4 @@
-config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @block_pointwise_wave32 {subgroup_size = 32}
 template.decl @modulation.combine_bf16(%value: bf16, %table: f32) -> (bf16)
 template.decl @activation.silu_bf16(%value: bf16) -> (bf16)

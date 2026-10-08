@@ -313,7 +313,7 @@ kernel.def export("qwen38_gdn_snapshot_history") @qwen38_gdn_snapshot_history() 
   %group_base = index.mul %group, %threads : index
   %vector_index = index.add %group_base, %thread : index
   %element0 = index.mul %vector_index, %width : index
-  %element = index.assume %element0 [range(%element0, 0, 30716), mul(%element0, 4)] : index
+  %element = index.assume %element0 [range(%element0, 0, 30716), multiple_of(%element0, 4)] : index
   %source = buffer.view %history[%origin] : buffer -> view<30720xf32>
   %target = buffer.view %snapshot[%origin] : buffer -> view<30720xf32>
   %values = vector.load %source[%element] : view<30720xf32> -> vector<4xf32>
@@ -503,7 +503,7 @@ kernel.def export("qwen38_gdn_capture_transition_depth4") @qwen38_gdn_capture_tr
     %packet_base = index.mul %workgroup, %c256 : index
     %packet = index.add %packet_base, %workitem : index
     %element0 = index.mul %packet, %c4 : index
-    %element = index.assume %element0 [range(%element0, 0, 40956), mul(%element0, 4)] : index
+    %element = index.assume %element0 [range(%element0, 0, 40956), multiple_of(%element0, 4)] : index
     %values = vector.load %qkv_view[%element] : view<40960xf32> -> vector<4xf32>
     vector.store %values, %transition_view[%element] : vector<4xf32>, view<41344xf32>
   } else {
@@ -526,7 +526,7 @@ kernel.def export("qwen38_gdn_capture_transition_depth4") @qwen38_gdn_capture_tr
       }
       %gate_base = scf.select %is_alpha, %alpha_element_base, %beta_element_base : index
       %target_element0 = index.add %gate_base, %gate_element : index
-      %target_element = index.assume %target_element0 [range(%target_element0, 40960, 41340), mul(%target_element0, 4)] : index
+      %target_element = index.assume %target_element0 [range(%target_element0, 40960, 41340), multiple_of(%target_element0, 4)] : index
       vector.store %values, %transition_view[%target_element] : vector<4xf32>, view<41344xf32>
     }
   }

@@ -1,4 +1,4 @@
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 amdgpu.target<gfx11-generic> @encoder_gather_wave32 {subgroup_size = 32}
 template.decl @embedding.lookup_bf16(%vocabulary: index, %width: index, %token_id: i32, %channel: index, %weight: buffer) -> (bf16)
 command.program.decl @krea2.encoder_block(%layer: index) launch(%parameters: buffer, %input: buffer, %cosine: buffer, %sine: buffer, %mask: buffer, %output: buffer)

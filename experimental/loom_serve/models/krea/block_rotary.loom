@@ -1,4 +1,4 @@
-config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.block_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 
 amdgpu.target<gfx11-generic> @block_rotary_wave32 {subgroup_size = 32}
 template.decl @attention.normalize_rotary_bf16(%tokens: index, %heads: index, %width: index, %input: buffer, %weight: buffer, %cosine: buffer, %sine: buffer, %output: buffer)

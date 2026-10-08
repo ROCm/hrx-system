@@ -1,5 +1,5 @@
-config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
-config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), mul(%value, 2)]
+config.decl @krea2.latent_height : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
+config.decl @krea2.latent_width : %value: index where [range(%value, 2, 1024), multiple_of(%value, 2)]
 amdgpu.target<gfx11-generic> @vae_residual_wave32 {subgroup_size = 32}
 template.decl @image.convolution_3x3_matrix_f32(%height: index, %width: index, %inputs: index, %outputs: index, %planes: index, %upsample: index, %add_residual: i1, %input: buffer, %weight: buffer, %bias: buffer, %residual: buffer, %output: buffer)
 template.decl @image.channel_norm_f32(%pixels: index, %channels: index, %silu: i1, %input: buffer, %weight: buffer, %output: buffer)

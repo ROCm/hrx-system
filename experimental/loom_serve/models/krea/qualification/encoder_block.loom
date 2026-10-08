@@ -1,4 +1,4 @@
-config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), mul(%value, 16)]
+config.decl @krea2.text_tokens : %value: index where [range(%value, 16, 65536), multiple_of(%value, 16)]
 config.decl @qualify.encoder_layer : %value: index where [range(%value, 0, 34)]
 amdgpu.target<gfx11-generic> @encoder_silu_wave32 {subgroup_size = 32}
 template.decl @activation.silu_bf16(%value: bf16) -> (bf16)

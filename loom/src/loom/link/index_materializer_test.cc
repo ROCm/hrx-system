@@ -1594,6 +1594,9 @@ TEST_F(LinkIndexMaterializerTest, ConfigProvidersPreserveValuesAndConstraints) {
   auto* requester = Parse(requester_source, IREE_SV("requester.loom"));
   auto* defaults = Parse(defaults_source, IREE_SV("defaults.loom"));
   auto* equal = Parse(equal_source, IREE_SV("equal.loom"));
+  ASSERT_NE(requester, nullptr);
+  ASSERT_NE(defaults, nullptr);
+  ASSERT_NE(equal, nullptr);
   const auto requester_bytecode = WriteModule(requester);
   const auto defaults_bytecode = WriteModule(defaults);
   const auto equal_bytecode = WriteModule(equal);
@@ -1667,12 +1670,15 @@ TEST_F(LinkIndexMaterializerTest, ConfigProvidersRejectIncompatibleContracts) {
   const auto defaults_source = ConfigFixture(IREE_SV("defaults.loom"));
   auto* requester = Parse(requester_source, IREE_SV("requester.loom"));
   auto* defaults = Parse(defaults_source, IREE_SV("defaults.loom"));
+  ASSERT_NE(requester, nullptr);
+  ASSERT_NE(defaults, nullptr);
   const auto requester_bytecode = WriteModule(requester);
   const auto defaults_bytecode = WriteModule(defaults);
   for (auto name : {IREE_SV("conflict.loom"), IREE_SV("invalid.loom"),
                     IREE_SV("wrong_type.loom")}) {
     const auto source = ConfigFixture(name);
     auto* provider = Parse(source, name);
+    ASSERT_NE(provider, nullptr);
     const auto bytecode = WriteModule(provider);
     for (auto form : {ProviderForm::kMaterialized, ProviderForm::kText,
                       ProviderForm::kBytecode}) {
