@@ -1,0 +1,26 @@
+func.decl import("input") @encode(%text: buffer, %flags: i32, %capacity: i64) -> (buffer, i64)
+func.decl import("runner") @execute_2(%stage: i32, %request: hal.buffer, %rgb: hal.buffer) -> (i64)
+func.decl import("runner") @feedback(%slot: i32, %source: hal.buffer, %offset: i64, %length: i64) -> (i64)
+
+// The payload carries request-derived facts, not host-rendered pixels.
+func.def public @prepare_request(%state: buffer, %tags: buffer, %stage_count: i32, %prompt: buffer, %seed: i64, %strength: f32) -> (i32, buffer) {
+  %origin = index.constant 0 : offset
+  %state_view = buffer.view %state[%origin] : buffer -> view<1xi64>
+  %capacity = view.load %state_view[0] : view<1xi64> -> i64
+  %zero = scalar.constant 0 : i32
+  %ids, %count = func.call @encode(%prompt, %zero, %capacity) : (buffer, i32, i64) -> (buffer, i64)
+  %length = index.constant 16 : offset
+  %payload = buffer.alloca<private> align(8) %length : buffer
+  %header = buffer.view %payload[%origin] : buffer -> view<2xi64>
+  view.store %seed, %header[0] : i64, view<2xi64>
+  view.store %count, %header[1] : i64, view<2xi64>
+  func.return %zero, %payload : i32, buffer
+}
+
+func.def public @generate(%stage: i32, %output_bytes: i64, %request: hal.buffer, %rgb: hal.buffer) {
+  %work = func.call @execute_2(%stage, %request, %rgb) : (i32, hal.buffer, hal.buffer) -> (i64)
+  %zero = scalar.constant 0 : i32
+  %offset = scalar.constant 0 : i64
+  %done = func.call @feedback(%zero, %rgb, %offset, %output_bytes) : (i32, hal.buffer, i64, i64) -> (i64)
+  func.return
+}

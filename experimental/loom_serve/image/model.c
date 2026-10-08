@@ -487,13 +487,15 @@ static iree_status_t image_model_initialize(
   const loom_cmd_program_t* program =
       loom_serve_jit_stage_program(model->stages.values[0].compiled);
   const uint32_t roots = program->requirements.fixed_buffer_count;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      allocator, roots, sizeof(*model->weights.values),
-      (void**)&model->weights.values));
-  model->weights.count = roots;
-  IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
-      allocator, roots, sizeof(*model->weights.plans),
-      (void**)&model->weights.plans));
+  if (roots) {
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        allocator, roots, sizeof(*model->weights.values),
+        (void**)&model->weights.values));
+    model->weights.count = roots;
+    IREE_RETURN_IF_ERROR(iree_allocator_malloc_array(
+        allocator, roots, sizeof(*model->weights.plans),
+        (void**)&model->weights.plans));
+  }
   uint64_t parameter_bytes = 0;
   for (uint32_t i = 0; i < roots; ++i) {
     parameter_bytes +=
