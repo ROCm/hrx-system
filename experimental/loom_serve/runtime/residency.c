@@ -51,6 +51,11 @@ struct loom_serve_residency_t {
   loom_serve_weights_t* weights[];
 };
 
+loom_serve_residency_cache_t* loom_serve_residency_cache(
+    const loom_serve_residency_t* residency) {
+  return residency->cache;
+}
+
 loom_serve_memory_statistics_t loom_serve_residency_statistics(
     const loom_serve_residency_t* residency) {
   loom_serve_memory_statistics_t total = {0};

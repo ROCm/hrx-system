@@ -333,7 +333,7 @@ INSTANTIATE_TEST_SUITE_P(
                                          CompletionMode::kDeviceFailure),
                        ::testing::Values(1u, 4u)));
 
-enum class AdmissionMode { kResponse, kCancel, kShutdown };
+enum class AdmissionMode { kResponse, kCancel, kShutdown, kIndependent };
 
 class ImageAdmissionTest
     : public ::testing::TestWithParam<std::tuple<AdmissionMode, uint32_t>> {};
@@ -357,16 +357,34 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   uint64_t held = 1;
   IREE_ASSERT_OK(
       loom_serve_execution_barrier(execution, {1, &predecessor, &held}));
+  // A second owner has its own queues, timelines and capacity domain, even
+  // though this correctness witness uses the same physical GPU. It does not
+  // claim heterogeneous hardware execution.
+  loom_serve_device_t* independent_device = nullptr;
+  loom_serve_execution_t* independent_execution = nullptr;
+  if (mode == AdmissionMode::kIndependent) {
+    IREE_ASSERT_OK(loom_serve_device_create(host, &device_options,
+                                            &independent_device, allocator));
+    IREE_ASSERT_OK(loom_serve_device_create_execution(independent_device,
+                                                      &independent_execution));
+  }
   bool occupied = false;
   ImageGate gates[2];
   loom_serve_image_service_t* images[2] = {};
   loom_serve_http_service_t services[2];
   for (size_t i = 0; i < 2; ++i) {
-    gates[i].execution = execution;
-    gates[i].occupied = &occupied;
+    const bool independent = i == 1 && independent_device;
+    gates[i].execution = independent ? independent_execution : execution;
+    gates[i].occupied = independent ? nullptr : &occupied;
     const loom_serve_image_generator_t generator = {
-        &gates[i],        ImageGate::Prepare, ImageGate::DiscardPreparedRequest,
-        ImageGate::Admit, ImageGate::Submit,  ImageGate::Complete};
+        .self = &gates[i],
+        .prepare = ImageGate::Prepare,
+        .discard_prepared_request = ImageGate::DiscardPreparedRequest,
+        .try_admit = ImageGate::Admit,
+        .submit = ImageGate::Submit,
+        .complete = ImageGate::Complete,
+        .capacity_domain = loom_serve_device_residency_cache(
+            independent ? independent_device : device)};
     const loom_serve_image_service_options_t options = {
         .name = i == 0 ? IREE_SV("first") : IREE_SV("second"),
         .width = 1,
@@ -390,7 +408,7 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
       loom_serve_image_service_destroy(image);
     }
   });
-  auto send_request = [&](const std::string& model) {
+  auto send_request = [&](const std::string& model, uint64_t seed = 0) {
     const int peer = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(peer, 0);
     const auto* address = loom_serve_http_server_address(server);
@@ -398,7 +416,9 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
                       address->length),
               0);
     const std::string body =
-        "{\"model\":\"" + model + "\",\"prompt\":\"shared admission\"}";
+        "{\"model\":\"" + model +
+        "\",\"prompt\":\"shared admission\",\"seed\":" + std::to_string(seed) +
+        "}";
     const std::string request =
         model.empty()
             ? "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"
@@ -422,12 +442,19 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   };
   const int first = send_request("first");
   gates[0].Await(ImageGate::kSubmitted);
-  int second = send_request("second");
+  int second =
+      send_request("second", mode == AdmissionMode::kIndependent ? 1 : 0);
   gates[1].Await(ImageGate::kDenied);
   EXPECT_NE(receive(send_request("")).find("\"status\":\"ready\""),
             std::string::npos);
   EXPECT_EQ(gates[1].events.load() & ImageGate::kSubmitted, 0u);
-  if (mode == AdmissionMode::kCancel) {
+  if (mode == AdmissionMode::kIndependent) {
+    // The failed admission cannot be repaired by the unrelated held domain.
+    // Its 503 and a subsequent successful PNG both precede that completion.
+    EXPECT_EQ(receive(second).find("HTTP/1.1 503"), 0u);
+    EXPECT_NE(receive(send_request("second")).find("\"b64_json\":\"iVBOR"),
+              std::string::npos);
+  } else if (mode == AdmissionMode::kCancel) {
     const linger reset = {1, 0};
     EXPECT_EQ(setsockopt(second, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
               0);
@@ -443,7 +470,10 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
     if (mode == AdmissionMode::kCancel) {
       second = send_request("second");
     }
-    EXPECT_NE(receive(second).find("\"b64_json\":\"iVBOR"), std::string::npos);
+    if (mode != AdmissionMode::kIndependent) {
+      EXPECT_NE(receive(second).find("\"b64_json\":\"iVBOR"),
+                std::string::npos);
+    }
     EXPECT_EQ(kill(getpid(), SIGTERM), 0);
   } else {
     EXPECT_TRUE(receive(second).empty());
@@ -457,6 +487,11 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   IREE_EXPECT_OK(loom_serve_http_server_destroy(server));
   IREE_EXPECT_OK(loom_serve_execution_drain(execution));
   loom_serve_execution_release(execution);
+  if (independent_execution) {
+    IREE_EXPECT_OK(loom_serve_execution_drain(independent_execution));
+    loom_serve_execution_release(independent_execution);
+  }
+  IREE_EXPECT_OK(loom_serve_device_destroy(independent_device));
   iree_hal_semaphore_release(predecessor);
   IREE_EXPECT_OK(loom_serve_device_destroy(device));
   loom_serve_host_release(host);
@@ -466,7 +501,8 @@ INSTANTIATE_TEST_SUITE_P(
     Capacity, ImageAdmissionTest,
     ::testing::Combine(::testing::Values(AdmissionMode::kResponse,
                                          AdmissionMode::kCancel,
-                                         AdmissionMode::kShutdown),
+                                         AdmissionMode::kShutdown,
+                                         AdmissionMode::kIndependent),
                        ::testing::Values(1u, 4u)));
 
 }  // namespace

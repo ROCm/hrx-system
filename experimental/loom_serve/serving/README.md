@@ -341,6 +341,10 @@ This policy queues weighted admissions conservatively within one cache after
 pressure, not all requests globally. Parameter-free work bypasses it; separate
 caches are independent. When all weights fit, no pressure FIFO is established.
 It does not preempt accepted generation or choose mutable state to offload.
+The router's pressure-release hint uses that same cache identity. Activity in
+an independent cache cannot defer an otherwise impossible admission; only
+services sharing capacity can supply the hint. A service with no shared
+capacity identity is isolated even from other such services.
 
 `--memory_bytes` bounds retained parameter/state VMM commitment, not total
 device memory. Heartbeats separately report retained commitment, workspace

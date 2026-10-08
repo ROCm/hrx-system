@@ -296,8 +296,13 @@ static iree_status_t router_model(const loom_serve_http_request_t* request,
 static loom_serve_http_service_flags_t router_service_flags(
     iree_host_size_t selected, iree_host_size_t service_count,
     const loom_serve_http_service_t* services) {
+  const void* capacity_domain = services[selected].capacity_domain;
+  if (!capacity_domain) {
+    return 0;
+  }
   for (iree_host_size_t i = 0; i < service_count; ++i) {
-    if (i != selected && services[i].is_active(services[i].self)) {
+    if (i != selected && services[i].capacity_domain == capacity_domain &&
+        services[i].is_active(services[i].self)) {
       return LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
     }
   }

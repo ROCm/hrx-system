@@ -16,8 +16,9 @@ extern "C" {
 #endif
 
 typedef enum loom_serve_http_service_flag_bits_e {
-  // Another service has accepted work or maintenance that may release shared
-  // capacity. Admission can queue instead of rejecting an idle-capacity stall.
+  // Another service in the same capacity domain has accepted work or
+  // maintenance that may release capacity. Admission can queue instead of
+  // rejecting an idle-capacity stall.
   LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY = 1u << 0,
   // Admission has stopped. Consume only already accepted asynchronous work;
   // new model submissions and queued request admission are forbidden.
@@ -85,6 +86,11 @@ typedef struct loom_serve_http_service_t {
   // Copies published ownership on the serialized owner without invoking model
   // work or reading state still borrowed by a CPU/device task.
   loom_serve_http_service_snapshot_t (*snapshot)(void* self);
+  // Borrowed shared-capacity owner identity, never dereferenced by the router.
+  // Only equal non-NULL identities can provide SHARED_ACTIVITY to each other;
+  // NULL means this service has no shared-capacity relationship. The owner
+  // outlives the service and every accepted asynchronous obligation.
+  const void* capacity_domain;
 } loom_serve_http_service_t;
 
 // Routes JSON request bodies by their model field and checkpoint operations by

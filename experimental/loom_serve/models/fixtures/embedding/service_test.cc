@@ -66,6 +66,8 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
         host_, model_, loom_serve_embedding_protocol(), IREE_SV("fixture"), 16,
         heartbeat_interval, &service_, allocator_));
     interface_ = loom_serve_finite_service_interface(service_);
+    EXPECT_EQ(interface_.capacity_domain,
+              loom_serve_device_residency_cache(device_));
     interface_.set_observer(
         interface_.self,
         {[](void* self) {

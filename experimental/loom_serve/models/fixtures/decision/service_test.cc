@@ -51,6 +51,8 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
         host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
         16, 0, &services_[0], allocator_));
     interfaces_[0] = loom_serve_finite_service_interface(services_[0]);
+    EXPECT_EQ(interfaces_[0].capacity_domain,
+              loom_serve_device_residency_cache(device_));
     interfaces_[0].set_observer(
         interfaces_[0].self,
         {[](void* self) {

@@ -2078,7 +2078,9 @@ loom_serve_http_service_t loom_serve_text_service_interface(
       .tokenizer = loom_serve_text_model_tokenizer(service->model),
       .kind = "text",
       .endpoint = "/v1/chat/completions",
-      .snapshot = text_snapshot};
+      .snapshot = text_snapshot,
+      .capacity_domain = loom_serve_residency_cache(
+          loom_serve_text_model_residency(service->model))};
 }
 
 iree_status_t loom_serve_text_service_run(

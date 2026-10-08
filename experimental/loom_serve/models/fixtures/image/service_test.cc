@@ -73,6 +73,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     service_ = std::thread([this] {
       const loom_serve_image_generator_t generator =
           loom_serve_image_model_generator(model_);
+      EXPECT_EQ(generator.capacity_domain,
+                loom_serve_device_residency_cache(device_));
       const loom_serve_image_service_options_t options = {
           .name = loom_serve_image_model_name(model_),
           .width = kWidth,

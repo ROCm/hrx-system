@@ -522,6 +522,8 @@ TEST_P(SourceTextServiceTest,
   std::unique_ptr<loom_serve_text_service_t, decltype(destroy)> service(
       value, destroy);
   auto interface = loom_serve_text_service_interface(value);
+  EXPECT_EQ(interface.capacity_domain,
+            loom_serve_device_residency_cache(device_));
   interface.set_observer(interface.self,
                          {[](void* self) {
                             auto* readiness = static_cast<Readiness*>(self);

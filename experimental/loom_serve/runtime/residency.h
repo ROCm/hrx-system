@@ -52,6 +52,11 @@ iree_status_t loom_serve_residency_create(
 // Does not destroy borrowed plans or their backing. NULL is accepted.
 void loom_serve_residency_destroy(loom_serve_residency_t* residency);
 
+// Borrowed admission/LRU owner, outliving this registration. Equal cache
+// identities share pressure; activity in another cache cannot release it.
+loom_serve_residency_cache_t* loom_serve_residency_cache(
+    const loom_serve_residency_t* residency);
+
 // Pins the entire group before admission/loading. Already active groups need
 // no I/O. Enqueues loading before consumption on the model timeline, without
 // waiting on device or I/O completion. On success admitted=true owns one pin,

@@ -661,17 +661,19 @@ static iree_status_t image_advance(void* self,
 
 loom_serve_http_service_t loom_serve_image_service_interface(
     loom_serve_image_service_t* service) {
-  return (loom_serve_http_service_t){.name = service->options.name,
-                                     .self = service,
-                                     .set_observer = image_set_observer,
-                                     .is_pending = image_is_pending,
-                                     .is_active = image_is_active,
-                                     .accept = image_accept,
-                                     .advance = image_advance,
-                                     .tokenizer = service->generator.tokenizer,
-                                     .kind = "image",
-                                     .endpoint = "/v1/images/generations",
-                                     .snapshot = image_snapshot};
+  return (loom_serve_http_service_t){
+      .name = service->options.name,
+      .self = service,
+      .set_observer = image_set_observer,
+      .is_pending = image_is_pending,
+      .is_active = image_is_active,
+      .accept = image_accept,
+      .advance = image_advance,
+      .tokenizer = service->generator.tokenizer,
+      .kind = "image",
+      .endpoint = "/v1/images/generations",
+      .snapshot = image_snapshot,
+      .capacity_domain = service->generator.capacity_domain};
 }
 
 void loom_serve_image_service_destroy(loom_serve_image_service_t* service) {

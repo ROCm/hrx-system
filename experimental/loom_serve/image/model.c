@@ -847,5 +847,6 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .try_admit = image_generator_admit,
       .submit = image_generator_submit,
       .complete = image_generator_complete,
-      .tokenizer = model->tokenizer};
+      .tokenizer = model->tokenizer,
+      .capacity_domain = loom_serve_residency_cache(model->residency)};
 }

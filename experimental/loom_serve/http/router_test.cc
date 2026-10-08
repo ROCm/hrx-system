@@ -181,7 +181,8 @@ struct ModelService {
     return status;
   }
 
-  loom_serve_http_service_t Interface(const iree_tokenizer_t* tokenizer) {
+  loom_serve_http_service_t Interface(const iree_tokenizer_t* tokenizer,
+                                      const void* capacity_domain) {
     return {.name = iree_make_cstring_view(name),
             .self = this,
             .set_observer = SetObserver,
@@ -192,7 +193,8 @@ struct ModelService {
             .tokenizer = tokenizer,
             .kind = "fixture",
             .endpoint = "/v1/test",
-            .snapshot = Snapshot};
+            .snapshot = Snapshot,
+            .capacity_domain = capacity_domain};
   }
 };
 
@@ -222,9 +224,10 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
         iree_allocator_system(), &tokenizer_b_));
     owner_ = std::thread([this] {
       const loom_serve_http_service_t services[] = {
-          a_.Interface(tokenizer_a_), b_.Interface(tokenizer_b_),
-          held_.Interface(tokenizer_a_), other_.Interface(nullptr),
-          escaped_.Interface(nullptr)};
+          a_.Interface(tokenizer_a_, &a_), b_.Interface(tokenizer_b_, &a_),
+          held_.Interface(tokenizer_a_, &a_),
+          other_.Interface(nullptr, nullptr),
+          escaped_.Interface(nullptr, nullptr)};
       status_ = loom_serve_http_router_run(executor_, server_,
                                            IREE_ARRAYSIZE(services), services,
                                            4, iree_allocator_system());
@@ -303,7 +306,7 @@ class HttpRouterTest : public ::testing::TestWithParam<int> {
   // A second held dependency proves failure drains every accepted callback.
   ModelService other_{"other", {}, false, true};
   // Valid deployment identifier requiring distinct metric label escaping.
-  ModelService escaped_{R"(quoted"\name)"};
+  ModelService escaped_{R"(quoted"\name)", {}, true};
   // Outer application caller joining the production router's final release.
   std::thread owner_;
   // Terminal result published by joining owner_.
@@ -387,6 +390,25 @@ loom_serve_model_oldest_active_age_seconds{model="quoted\"\\name",kind="fixture"
   EXPECT_NE(idle.find("loom_serve_model_oldest_queued_age_seconds{model=\"b\","
                       "kind=\"fixture\"} 0\n"),
             std::string::npos);
+}
+
+TEST_P(HttpRouterTest, UnrelatedCapacityNeverWaitsForHeldCompletion) {
+  const int held = Send("POST", "/v1/test", R"({"model":"other"})");
+  other_.WaitSubmitted();
+  // Both dependencies honor SHARED_ACTIVITY. The held service has no shared
+  // domain: neither a named owner nor another NULL identity can wait on it.
+  EXPECT_NE(
+      Read(Send("POST", "/v1/test", R"({"model":"b"})")).find("b:/v1/test:"),
+      std::string::npos);
+  EXPECT_NE(Read(Send("POST", "/v1/test", R"({"model":"quoted\"\\name"})"))
+                .find(std::string(escaped_.name) + ":/v1/test:"),
+            std::string::npos);
+  const auto state = Read(Send("GET", "/v1/status"));
+  EXPECT_NE(
+      state.find(R"("phase":"held","queued_requests":0,"active_requests":1)"),
+      std::string::npos);
+  other_.Release();
+  EXPECT_NE(Read(held).find("other:/v1/test:"), std::string::npos);
 }
 
 TEST_P(HttpRouterTest, RawUtilitiesProgressWhileTheSelectedModelIsHeld) {

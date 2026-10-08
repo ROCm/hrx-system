@@ -647,7 +647,9 @@ loom_serve_http_service_t loom_serve_finite_service_interface(
       .tokenizer = loom_serve_finite_model_tokenizer(service->model),
       .kind = service->protocol->name,
       .endpoint = service->protocol->endpoint,
-      .snapshot = finite_snapshot};
+      .snapshot = finite_snapshot,
+      .capacity_domain = loom_serve_residency_cache(
+          loom_serve_finite_model_residency(service->model))};
 }
 
 void loom_serve_finite_service_destroy(loom_serve_finite_service_t* service) {
