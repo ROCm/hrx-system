@@ -1,5 +1,44 @@
 # Contributing
 
+## How Pull Requests Are Integrated
+
+Contributions are welcome at every stage, from a focused bug report, feature
+proposal, or tested design idea through a complete implementation. This
+repository is developed by a continuously active team, and changes often cross
+shared representations, generators, backends, tests, and performance
+constraints. Loom in particular usually has dozens of concurrent workstreams.
+A pull request therefore supplies evidence and a concrete implementation to
+evaluate. Its submitted diff and commit structure may change before the work
+lands.
+
+When maintainer edits are enabled, project maintainers may push corrections,
+rework commits, extend tests, or rebase the pull request branch. We may instead
+split or combine the work, or carry its findings into a broader implementation
+on another branch. The goal is one coherent change for the system as a whole.
+Code carried forward retains its authorship. A replacement or superseding
+change links the original issue or pull request and credits the discovery,
+design, or code it carries forward.
+
+A nontrivial pull request must stand on its own for someone outside the
+authoring session. Describe the problem and its impact, include a concrete
+reproducer or other evidence, explain the design intent and scope, and report
+how the change was verified. Include performance and size results when the
+change can affect them. Agent-assisted contributions are welcome and meet the
+same standard. A raw generated diff or "an agent made this" does not provide
+enough information to triage; the agent should produce the explanation and
+evidence as part of the contribution.
+
+[PR #1380](https://github.com/ROCm/hrx-system/pull/1380) is an example of this
+model. It isolated a silent wrong-code bug, supplied a compact reproducer,
+explained the violated invariant, and proposed a repair. Concurrent
+[PR #1377](https://github.com/ROCm/hrx-system/pull/1377) corrected the same
+invariant across a broader set of compiler paths. The project verified that
+broader fix against #1380's reproducer and closed #1380 as superseded, while
+retaining the original report as part of the design history. The contribution
+improved Loom even though its submitted patch did not merge unchanged.
+
+## Development Tooling
+
 This repository uses Bazel as the source of truth for build graph structure and
 uses CMake for package/install-test workflows. `dev.py` is the blessed command
 router for local development. It selects a structural build lane, prepares the
