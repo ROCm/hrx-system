@@ -14,3 +14,28 @@ low.func.def public target<x86.packed_dot.core> abi(object_function) abi_layout(
   %result = low.func.call @identity_packed_i32x8(%value) : (reg<x86.ymm>) -> (reg<x86.ymm>)
   return %result
 }
+
+// Preserve the accumulator before its destructive use, matching source
+// lowering, then carry each consumed accumulator through its result while
+// every AVX-VNNI-INT8 operation reaches the final object writer.
+low.func.def public target<x86.packed_dot.core> abi(object_function) abi_layout({signature = (vector<4xi32>, vector<16xi8>, vector<16xi8>) -> (vector<4xi32>)}) @avx_vnni_int8_xmm(%acc: reg<x86.xmm>, %lhs: reg<x86.xmm>, %rhs: reg<x86.xmm>) -> (reg<x86.xmm>) asm {
+  %dot_acc = copy %acc : reg<x86.xmm> -> reg<x86.xmm>
+  %r0 = avx_vnni_int8.vpdpbssd.xmm %dot_acc, %lhs, %rhs
+  %r1 = avx_vnni_int8.vpdpbssds.xmm %r0, %acc, %rhs
+  %r2 = avx_vnni_int8.vpdpbsud.xmm %r1, %lhs, %acc
+  %r3 = avx_vnni_int8.vpdpbsuds.xmm %r2, %acc, %rhs
+  %r4 = avx_vnni_int8.vpdpbuud.xmm %r3, %lhs, %acc
+  %r5 = avx_vnni_int8.vpdpbuuds.xmm %r4, %acc, %rhs
+  return %r5
+}
+
+low.func.def public target<x86.packed_dot.core> abi(object_function) abi_layout({signature = (vector<8xi32>, vector<32xi8>, vector<32xi8>) -> (vector<8xi32>)}) @avx_vnni_int8_ymm(%acc: reg<x86.ymm>, %lhs: reg<x86.ymm>, %rhs: reg<x86.ymm>) -> (reg<x86.ymm>) asm {
+  %dot_acc = copy %acc : reg<x86.ymm> -> reg<x86.ymm>
+  %r0 = avx_vnni_int8.vpdpbssd.ymm %dot_acc, %lhs, %rhs
+  %r1 = avx_vnni_int8.vpdpbssds.ymm %r0, %acc, %rhs
+  %r2 = avx_vnni_int8.vpdpbsud.ymm %r1, %lhs, %acc
+  %r3 = avx_vnni_int8.vpdpbsuds.ymm %r2, %acc, %rhs
+  %r4 = avx_vnni_int8.vpdpbuud.ymm %r3, %lhs, %acc
+  %r5 = avx_vnni_int8.vpdpbuuds.ymm %r4, %acc, %rhs
+  return %r5
+}

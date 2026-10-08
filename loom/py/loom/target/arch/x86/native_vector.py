@@ -868,6 +868,48 @@ VPCMPW = _instruction(
     _IMMEDIATES_4,
     _encoding(_EVEX, _MAP_3, 1, 1, 0x3F, (128, 256, 512)),
 )
+VPDPBSSD = _instruction(
+    "vpdpbssd",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 3, 0, 0x50, (128, 256)),
+)
+VPDPBSSDS = _instruction(
+    "vpdpbssds",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 3, 0, 0x51, (128, 256)),
+)
+VPDPBSUD = _instruction(
+    "vpdpbsud",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 2, 0, 0x50, (128, 256)),
+)
+VPDPBSUDS = _instruction(
+    "vpdpbsuds",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 2, 0, 0x51, (128, 256)),
+)
+VPDPBUUD = _instruction(
+    "vpdpbuud",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 0, 0, 0x50, (128, 256)),
+)
+VPDPBUUDS = _instruction(
+    "vpdpbuuds",
+    _DESTRUCTIVE_NDS,
+    _OPERANDS_17,
+    _IMMEDIATES_0,
+    _encoding(_VEX, _MAP_2, 0, 0, 0x51, (128, 256)),
+)
 VPERMD = _instruction(
     "vpermd",
     _NDS_SWAPPED_INPUTS,
@@ -1581,6 +1623,14 @@ AVX512_PREDICATE_CONVERSION = (
     (VPMOVB2M, VPMOVM2B),
     (VPMOVB2M, VPMOVM2B),
     (VPMOVB2M, VPMOVM2B),
+)
+AVX_VNNI_INT8 = (
+    VPDPBSSD,
+    VPDPBSSDS,
+    VPDPBSUD,
+    VPDPBSUDS,
+    VPDPBUUD,
+    VPDPBUUDS,
 )
 VECTOR_MEMORY = (
     VMOVDQU32_LOAD,

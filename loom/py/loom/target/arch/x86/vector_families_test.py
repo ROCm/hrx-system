@@ -7,6 +7,7 @@
 from loom.target.arch.x86.descriptors import (
     X86_AVX2_DESCRIPTOR_SET,
     X86_AVX512_CORE_DESCRIPTOR_SET,
+    X86_AVX_VNNI_INT8_DESCRIPTOR_SET,
 )
 from loom.target.arch.x86.vector_families import (
     AVX2_FLOAT_BINARY_FAMILIES,
@@ -97,6 +98,30 @@ def test_avx2_family_rows_materialize_both_register_widths() -> None:
         for mnemonic in family_mnemonics
         for vector_bit_width in AVX2_VECTOR_BIT_WIDTHS
     } <= descriptor_keys
+
+
+def test_avx_vnni_int8_rows_have_complete_direct_encodings() -> None:
+    descriptors = {
+        descriptor.key: (descriptor.encoding_format_id, descriptor.encoding_id)
+        for descriptor in X86_AVX_VNNI_INT8_DESCRIPTOR_SET.descriptors
+    }
+    expected_encoding_ids = {
+        "x86.avx_vnni_int8.vpdpbssd.xmm": 0x0E50,
+        "x86.avx_vnni_int8.vpdpbssd.ymm": 0x4E50,
+        "x86.avx_vnni_int8.vpdpbssds.xmm": 0x0E51,
+        "x86.avx_vnni_int8.vpdpbssds.ymm": 0x4E51,
+        "x86.avx_vnni_int8.vpdpbsud.xmm": 0x0A50,
+        "x86.avx_vnni_int8.vpdpbsud.ymm": 0x4A50,
+        "x86.avx_vnni_int8.vpdpbsuds.xmm": 0x0A51,
+        "x86.avx_vnni_int8.vpdpbsuds.ymm": 0x4A51,
+        "x86.avx_vnni_int8.vpdpbuud.xmm": 0x0250,
+        "x86.avx_vnni_int8.vpdpbuud.ymm": 0x4250,
+        "x86.avx_vnni_int8.vpdpbuuds.xmm": 0x0251,
+        "x86.avx_vnni_int8.vpdpbuuds.ymm": 0x4251,
+    }
+    assert descriptors == {
+        key: (0x8320, encoding_id) for key, encoding_id in expected_encoding_ids.items()
+    }
 
 
 def test_avx512_direct_integer_matrix_matches_core_isa_families() -> None:

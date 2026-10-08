@@ -12,6 +12,7 @@ from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
+from loom.target.arch.x86 import native_vector as native
 from loom.target.arch.x86.packed_dot_data import (
     FAMILY_AVX10_2,
     FAMILY_AVX512_BF16,
@@ -22,6 +23,7 @@ from loom.target.arch.x86.packed_dot_data import (
     X86_PACKED_DOT_DESCRIPTORS,
     PackedDotDescriptor,
 )
+from loom.target.arch.x86.vector_encoding import VectorEncodingPrefix
 from loom.target.low_descriptors import (
     Descriptor,
     DescriptorSet,
@@ -69,6 +71,9 @@ _X86_VEX_PACKED_DOT_FAMILIES = frozenset(
         FAMILY_AVX_VNNI_INT16,
     )
 )
+_AVX_VNNI_INT8_INSTRUCTIONS = {
+    instruction.descriptor_mnemonic: instruction for instruction in native.AVX_VNNI_INT8
+}
 
 
 def _packed_dot_file_name(stem: str, suffix: str) -> Path:
@@ -158,15 +163,23 @@ def _packed_dot_target_descriptor(
         descriptor_data,
         qualify_asm_mnemonic=qualify_asm_mnemonic,
     )
-    if descriptor_data.family not in _X86_VEX_PACKED_DOT_FAMILIES:
-        return descriptor
-    return replace(
-        descriptor,
-        operands=tuple(
-            _low_subset_operand(operand, _X86_VEX_ADDRESSABLE_REGISTER_COUNT)
-            for operand in descriptor.operands
-        ),
-    )
+    if descriptor_data.family in _X86_VEX_PACKED_DOT_FAMILIES:
+        descriptor = replace(
+            descriptor,
+            operands=tuple(
+                _low_subset_operand(operand, _X86_VEX_ADDRESSABLE_REGISTER_COUNT)
+                for operand in descriptor.operands
+            ),
+        )
+    if descriptor_data.family == FAMILY_AVX_VNNI_INT8:
+        try:
+            instruction = _AVX_VNNI_INT8_INSTRUCTIONS[descriptor_data.mnemonic]
+        except KeyError as error:
+            raise ValueError(
+                f"{descriptor_data.key}: missing AVX-VNNI-INT8 machine facts"
+            ) from error
+        descriptor = instruction.bind(descriptor, VectorEncodingPrefix.VEX)
+    return descriptor
 
 
 def _descriptor_set(
