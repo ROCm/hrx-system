@@ -137,7 +137,7 @@ amdf_cts_gpu_kernel_set(
     ],
     entry_point = "device_sdma",
     namespace = "kernels::device_sdma",
-    targets = _KERNEL_TARGETS,
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
 amdf_cc_library(
@@ -151,7 +151,7 @@ amdf_cts_gpu_kernel_set(
     srcs = ["device_sdma_batched.loom"],
     entry_point = "device_sdma_batched",
     namespace = "kernels::device_sdma_batched",
-    targets = _KERNEL_TARGETS,
+    targets = AMDF_CTS_GPU_KERNEL_TARGETS,
 )
 
 amdf_cc_library(
@@ -356,7 +356,7 @@ amdf_cts_gpu_kernel_set(
     entry_point = "resident_npu_sdma",
     namespace = "kernels::resident_npu_sdma",
     target_compatible_with = _COMPLETED_TICK_COMPATIBILITY,
-    targets = _RDNA_KERNEL_TARGETS,
+    targets = AMDF_CTS_GPU_PM4_TARGETS,
 )
 
 amdf_cts_gpu_kernel_set(
