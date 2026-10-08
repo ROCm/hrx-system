@@ -13,14 +13,12 @@
 extern "C" {
 #endif
 
-// One source-defined text deployment. Entries have independent logical state
-// and admission capacity; the executable supplies their shared device. Paths
-// are interpreted relative to the process working directory.
-typedef struct loom_serve_model_configuration_t {
-  // Owned visible ASCII identifier used in JSON and HTTP header selectors.
-  iree_string_view_t name;
-  // Owned source package directory path.
-  iree_string_view_t source;
+typedef enum loom_serve_model_kind_e {
+  LOOM_SERVE_MODEL_KIND_TEXT = 1,
+  LOOM_SERVE_MODEL_KIND_IMAGE = 2,
+} loom_serve_model_kind_t;
+
+typedef struct loom_serve_text_configuration_t {
   // Owned checkpoint file path.
   iree_string_view_t weights;
   // Owned tokenizer JSON file path.
@@ -35,14 +33,46 @@ typedef struct loom_serve_model_configuration_t {
   iree_host_size_t prefill_capacity;
   // Explicit pinned endpoint slots, independent of active rows.
   iree_host_size_t checkpoint_capacity;
-  // Maximum host requests waiting for admission without a row.
-  iree_host_size_t pending_requests;
   // Default output limit when a request omits max_tokens.
   iree_host_size_t max_tokens;
   // Speculative proposal depth, zero or three.
   iree_host_size_t mtp_depth;
   // Device-fed epochs per scheduling turn, one or two.
   iree_host_size_t continuation_epochs;
+} loom_serve_text_configuration_t;
+
+typedef struct loom_serve_image_configuration_t {
+  // Owned checkpoint asset directory, interpreted by the source bootstrap.
+  iree_string_view_t checkpoint;
+  // Optional owned adapter asset path; empty means no adapter.
+  iree_string_view_t adapter;
+  // Fixed output pixel width, validated for the architecture by its source.
+  uint32_t width;
+  // Fixed output pixel height, validated for the architecture by its source.
+  uint32_t height;
+  // Text capacity requested from the source; its meaning is model-defined.
+  uint32_t text_tokens;
+} loom_serve_image_configuration_t;
+
+// One source-defined deployment. Entries have independent logical state and
+// admission capacity; the executable supplies their shared device. Paths are
+// interpreted relative to the process working directory.
+typedef struct loom_serve_model_configuration_t {
+  // Selects the native modality contract and the configuration union member.
+  loom_serve_model_kind_t kind;
+  // Owned visible ASCII identifier used in JSON and HTTP header selectors.
+  iree_string_view_t name;
+  // Owned source package directory path.
+  iree_string_view_t source;
+  // Maximum host requests waiting for admission without device ownership.
+  iree_host_size_t pending_requests;
+  // Only the member selected by kind is initialized and owned.
+  union {
+    // Autoregressive text deployment capacity and checkpoint inputs.
+    loom_serve_text_configuration_t text;
+    // Finite image deployment geometry and checkpoint inputs.
+    loom_serve_image_configuration_t image;
+  };
 } loom_serve_model_configuration_t;
 
 typedef struct loom_serve_configuration_t {
@@ -55,8 +85,10 @@ typedef struct loom_serve_configuration_t {
 } loom_serve_configuration_t;
 
 // Parses one complete JSON/JSONC {"models":[...]} catalog. Every model declares
-// kind="text", name, source, weights and tokenizer. Unknown/duplicate fields,
-// duplicate names and invalid native options reject before model creation.
+// kind="text" or "image", name and source. Text entries require weights and
+// tokenizer; image entries require a checkpoint directory. Unknown/duplicate
+// fields, fields from another modality, duplicate names and invalid native
+// options reject before model creation.
 // Model-specific geometry is validated by its source during creation. Strings
 // are decoded and owned independently of input. Failure releases partial state.
 iree_status_t loom_serve_configuration_initialize(

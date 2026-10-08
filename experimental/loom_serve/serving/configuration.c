@@ -18,6 +18,8 @@ typedef struct configuration_field_t {
   iree_json_value_type_t type;
   // Raw borrowed JSON value, with null data marking an absent field.
   iree_string_view_t value;
+  // Allowed model kind, or zero for fields common to all entries.
+  loom_serve_model_kind_t kind;
 } configuration_field_t;
 
 typedef struct configuration_fields_t {
@@ -110,53 +112,129 @@ static iree_status_t configuration_count(void* self, iree_host_size_t index,
   return iree_ok_status();
 }
 
+static iree_status_t configuration_text(const configuration_field_t* fields,
+                                        loom_serve_text_configuration_t* text,
+                                        iree_allocator_t allocator) {
+  *text = (loom_serve_text_configuration_t){.rows = 4,
+                                            .context_capacity = 16384,
+                                            .pool_capacity = 65536,
+                                            .prefill_capacity = 512,
+                                            .max_tokens = 512,
+                                            .continuation_epochs = 1};
+  IREE_RETURN_IF_ERROR(
+      configuration_string(&fields[3], &text->weights, allocator));
+  IREE_RETURN_IF_ERROR(
+      configuration_string(&fields[4], &text->tokenizer, allocator));
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[5], 1, 16, &text->rows));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[6], 1, 262144, &text->context_capacity));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[7], 1, 4194304, &text->pool_capacity));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[8], 1, 512, &text->prefill_capacity));
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[9], 0, IREE_HOST_SIZE_MAX,
+                                          &text->checkpoint_capacity));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[11], 1, 16384, &text->max_tokens));
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[12], 0, 3, &text->mtp_depth));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[13], 1, 2, &text->continuation_epochs));
+  if ((text->mtp_depth != 0 && text->mtp_depth != 3) ||
+      (text->mtp_depth && text->prefill_capacity < 4) ||
+      (text->continuation_epochs == 2 && text->mtp_depth != 3)) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "MTP requires depth 3 and at least four tokens; "
+                            "two-epoch continuation requires MTP");
+  }
+  return iree_ok_status();
+}
+
+static iree_status_t configuration_image(
+    const configuration_field_t* fields,
+    loom_serve_image_configuration_t* image, iree_allocator_t allocator) {
+  IREE_RETURN_IF_ERROR(
+      configuration_string(&fields[14], &image->checkpoint, allocator));
+  if (fields[15].value.data) {
+    IREE_RETURN_IF_ERROR(
+        configuration_string(&fields[15], &image->adapter, allocator));
+  }
+  iree_host_size_t width = 384, height = 384, text_tokens = 512;
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[16], 1, UINT32_MAX, &width));
+  IREE_RETURN_IF_ERROR(configuration_size(&fields[17], 1, UINT32_MAX, &height));
+  IREE_RETURN_IF_ERROR(
+      configuration_size(&fields[18], 1, UINT32_MAX, &text_tokens));
+  image->width = (uint32_t)width;
+  image->height = (uint32_t)height;
+  image->text_tokens = (uint32_t)text_tokens;
+  return iree_ok_status();
+}
+
 static iree_status_t configuration_model(void* self, iree_host_size_t index,
                                          iree_json_value_type_t type,
                                          iree_string_view_t value) {
   (void)type;
   loom_serve_configuration_t* configuration = self;
   loom_serve_model_configuration_t* model = &configuration->models[index];
-  *model = (loom_serve_model_configuration_t){.rows = 4,
-                                              .context_capacity = 16384,
-                                              .pool_capacity = 65536,
-                                              .prefill_capacity = 512,
-                                              .pending_requests = 32,
-                                              .max_tokens = 512,
-                                              .continuation_epochs = 1};
+  *model = (loom_serve_model_configuration_t){.pending_requests = 32};
   configuration->model_count = index + 1;
   configuration_field_t fields[] = {
       {"kind", IREE_JSON_VALUE_TYPE_STRING},
       {"name", IREE_JSON_VALUE_TYPE_STRING},
       {"source", IREE_JSON_VALUE_TYPE_STRING},
-      {"weights", IREE_JSON_VALUE_TYPE_STRING},
-      {"tokenizer", IREE_JSON_VALUE_TYPE_STRING},
-      {"rows", IREE_JSON_VALUE_TYPE_NUMBER},
-      {"context_capacity", IREE_JSON_VALUE_TYPE_NUMBER},
-      {"pool_capacity", IREE_JSON_VALUE_TYPE_NUMBER},
-      {"prefill_capacity", IREE_JSON_VALUE_TYPE_NUMBER},
-      {"checkpoint_capacity", IREE_JSON_VALUE_TYPE_NUMBER},
+      {"weights", IREE_JSON_VALUE_TYPE_STRING,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"tokenizer", IREE_JSON_VALUE_TYPE_STRING,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"rows", IREE_JSON_VALUE_TYPE_NUMBER, .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"context_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"pool_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"prefill_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"checkpoint_capacity", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
       {"pending_requests", IREE_JSON_VALUE_TYPE_NUMBER},
-      {"max_tokens", IREE_JSON_VALUE_TYPE_NUMBER},
-      {"mtp_depth", IREE_JSON_VALUE_TYPE_NUMBER},
-      {"continuation_epochs", IREE_JSON_VALUE_TYPE_NUMBER}};
+      {"max_tokens", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"mtp_depth", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"continuation_epochs", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_TEXT},
+      {"checkpoint", IREE_JSON_VALUE_TYPE_STRING,
+       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+      {"adapter", IREE_JSON_VALUE_TYPE_STRING,
+       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+      {"width", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+      {"height", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_IMAGE},
+      {"text_tokens", IREE_JSON_VALUE_TYPE_NUMBER,
+       .kind = LOOM_SERVE_MODEL_KIND_IMAGE}};
   configuration_fields_t context = {IREE_ARRAYSIZE(fields), fields};
   IREE_RETURN_IF_ERROR(iree_json_enumerate_object_typed(
       value, configuration_field_visit, &context));
-  if (!iree_string_view_equal(fields[0].value, IREE_SV("text"))) {
+  if (iree_string_view_equal(fields[0].value, IREE_SV("text"))) {
+    model->kind = LOOM_SERVE_MODEL_KIND_TEXT;
+  } else if (iree_string_view_equal(fields[0].value, IREE_SV("image"))) {
+    model->kind = LOOM_SERVE_MODEL_KIND_IMAGE;
+  } else {
     return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "catalog model kind must be 'text'");
+                            "catalog model kind must be 'text' or 'image'");
   }
-  iree_string_view_t* strings[] = {&model->name, &model->source,
-                                   &model->weights, &model->tokenizer};
-  iree_status_t status = iree_ok_status();
-  for (iree_host_size_t i = 0;
-       i < IREE_ARRAYSIZE(strings) && iree_status_is_ok(status); ++i) {
-    status = configuration_string(&fields[i + 1], strings[i],
-                                  configuration->allocator);
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(fields); ++i) {
+    if (fields[i].value.data && fields[i].kind &&
+        fields[i].kind != model->kind) {
+      return iree_make_status(
+          IREE_STATUS_INVALID_ARGUMENT,
+          "catalog field '%s' does not apply to kind '%.*s'", fields[i].name,
+          (int)fields[0].value.size, fields[0].value.data);
+    }
   }
-  if (!iree_status_is_ok(status)) {
-    return status;
-  }
+  IREE_RETURN_IF_ERROR(
+      configuration_string(&fields[1], &model->name, configuration->allocator));
+  IREE_RETURN_IF_ERROR(configuration_string(&fields[2], &model->source,
+                                            configuration->allocator));
   for (iree_host_size_t i = 0; i < model->name.size; ++i) {
     const uint8_t c = (uint8_t)model->name.data[i];
     if (c < 0x21 || c > 0x7e) {
@@ -165,37 +243,19 @@ static iree_status_t configuration_model(void* self, iree_host_size_t index,
           "model names must fit a visible ASCII HTTP header selector");
     }
   }
-  IREE_RETURN_IF_ERROR(configuration_size(&fields[5], 1, 16, &model->rows));
-  IREE_RETURN_IF_ERROR(
-      configuration_size(&fields[6], 1, 262144, &model->context_capacity));
-  IREE_RETURN_IF_ERROR(
-      configuration_size(&fields[7], 1, 4194304, &model->pool_capacity));
-  IREE_RETURN_IF_ERROR(
-      configuration_size(&fields[8], 1, 512, &model->prefill_capacity));
-  IREE_RETURN_IF_ERROR(configuration_size(&fields[9], 0, IREE_HOST_SIZE_MAX,
-                                          &model->checkpoint_capacity));
   IREE_RETURN_IF_ERROR(configuration_size(&fields[10], 1, IREE_HOST_SIZE_MAX,
                                           &model->pending_requests));
-  IREE_RETURN_IF_ERROR(
-      configuration_size(&fields[11], 1, 16384, &model->max_tokens));
-  IREE_RETURN_IF_ERROR(
-      configuration_size(&fields[12], 0, 3, &model->mtp_depth));
-  IREE_RETURN_IF_ERROR(
-      configuration_size(&fields[13], 1, 2, &model->continuation_epochs));
-  if ((model->mtp_depth != 0 && model->mtp_depth != 3) ||
-      (model->mtp_depth && model->prefill_capacity < 4) ||
-      (model->continuation_epochs == 2 && model->mtp_depth != 3)) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "MTP requires depth 3 and at least four tokens; "
-                            "two-epoch continuation requires MTP");
-  }
   for (iree_host_size_t i = 0; i < index; ++i) {
     if (iree_string_view_equal(configuration->models[i].name, model->name)) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "duplicate model name");
     }
   }
-  return iree_ok_status();
+  return model->kind == LOOM_SERVE_MODEL_KIND_TEXT
+             ? configuration_text(fields, &model->text,
+                                  configuration->allocator)
+             : configuration_image(fields, &model->image,
+                                   configuration->allocator);
 }
 
 void loom_serve_configuration_deinitialize(
@@ -204,8 +264,17 @@ void loom_serve_configuration_deinitialize(
     loom_serve_model_configuration_t* model = &configuration->models[i];
     iree_allocator_free(configuration->allocator, (void*)model->name.data);
     iree_allocator_free(configuration->allocator, (void*)model->source.data);
-    iree_allocator_free(configuration->allocator, (void*)model->weights.data);
-    iree_allocator_free(configuration->allocator, (void*)model->tokenizer.data);
+    if (model->kind == LOOM_SERVE_MODEL_KIND_TEXT) {
+      iree_allocator_free(configuration->allocator,
+                          (void*)model->text.weights.data);
+      iree_allocator_free(configuration->allocator,
+                          (void*)model->text.tokenizer.data);
+    } else if (model->kind == LOOM_SERVE_MODEL_KIND_IMAGE) {
+      iree_allocator_free(configuration->allocator,
+                          (void*)model->image.checkpoint.data);
+      iree_allocator_free(configuration->allocator,
+                          (void*)model->image.adapter.data);
+    }
   }
   iree_allocator_free(configuration->allocator, configuration->models);
   memset(configuration, 0, sizeof(*configuration));

@@ -36,6 +36,8 @@ loom_cc_binary(
     iree::base::tooling::flags
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::image::model
+    iree::experimental::loom_serve::image::service
     iree::experimental::loom_serve::runtime::device
     iree::experimental::loom_serve::runtime::device_flags
     iree::experimental::loom_serve::runtime::host_flags

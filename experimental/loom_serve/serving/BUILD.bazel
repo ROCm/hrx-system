@@ -34,6 +34,8 @@ loom_cc_binary(
         ":configuration",
         "//experimental/loom_serve/http:router",
         "//experimental/loom_serve/http:server",
+        "//experimental/loom_serve/image:model",
+        "//experimental/loom_serve/image:service",
         "//experimental/loom_serve/runtime:device",
         "//experimental/loom_serve/runtime:device_flags",
         "//experimental/loom_serve/runtime:host_flags",

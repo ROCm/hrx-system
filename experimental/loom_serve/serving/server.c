@@ -7,6 +7,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "experimental/loom_serve/image/model.h"
+#include "experimental/loom_serve/image/service.h"
 #include "experimental/loom_serve/runtime/device_flags.h"
 #include "experimental/loom_serve/runtime/host_flags.h"
 #include "experimental/loom_serve/serving/configuration.h"
@@ -26,49 +28,94 @@ IREE_FLAG(int32_t, request_body_bytes, 8 * 1024 * 1024,
 IREE_FLAG(int32_t, heartbeat_ms, 1000,
           "Per-model JSONL heartbeat interval; zero disables reporting.");
 
-typedef struct serving_model_t {
-  // Owned source-JIT model borrowing the shared device.
-  loom_serve_text_model_t* model;
-  // Owned HTTP session state borrowing the model and deployment name.
-  loom_serve_text_service_t* service;
+// The corresponding catalog entry selects the initialized ownership pair.
+typedef union serving_model_t {
+  // Autoregressive deployment with model-local sessions and checkpoints.
+  struct {
+    // Owned source-JIT model borrowing the shared device.
+    loom_serve_text_model_t* model;
+    // Owned HTTP session state borrowing the model and deployment name.
+    loom_serve_text_service_t* service;
+  } text;
+  // Finite image deployment with model-local request storage.
+  struct {
+    // Owned source-JIT model borrowing the shared device.
+    loom_serve_image_model_t* model;
+    // Owned HTTP admission borrowing the model and deployment name.
+    loom_serve_image_service_t* service;
+  } image;
 } serving_model_t;
 
-static iree_status_t serving_create(
+static iree_status_t serving_create_text(
     loom_serve_device_t* device,
     const loom_serve_model_configuration_t* configuration,
-    serving_model_t* model, iree_allocator_t allocator) {
+    serving_model_t* model, loom_serve_http_service_t* out_service,
+    iree_allocator_t allocator) {
+  const loom_serve_text_configuration_t* text = &configuration->text;
   loom_serve_packing_shape_t shapes[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY];
   const iree_host_size_t shape_count = loom_serve_text_default_shapes(
-      configuration->rows, configuration->prefill_capacity, shapes);
+      text->rows, text->prefill_capacity, shapes);
   const loom_serve_text_options_t options = {
       .source_directory = configuration->source,
-      .prefill_capacity = configuration->prefill_capacity,
-      .context_capacity = configuration->context_capacity,
-      .pool_capacity = configuration->pool_capacity,
+      .prefill_capacity = text->prefill_capacity,
+      .context_capacity = text->context_capacity,
+      .pool_capacity = text->pool_capacity,
       .epoch_count = shape_count,
       .epoch_shapes = shapes,
-      .enable_mtp = configuration->mtp_depth != 0,
+      .enable_mtp = text->mtp_depth != 0,
       .kernel_sanitizer = {.type = LOOMC_STRUCTURE_TYPE_SANITIZER_OPTIONS,
                            .structure_size = sizeof(loomc_sanitizer_options_t)},
-      .weights_path = configuration->weights,
-      .tokenizer_path = configuration->tokenizer,
-      .row_count = configuration->rows,
-      .checkpoint_capacity = configuration->checkpoint_capacity};
-  IREE_RETURN_IF_ERROR(
-      loom_serve_text_model_create(device, &options, &model->model, allocator));
+      .weights_path = text->weights,
+      .tokenizer_path = text->tokenizer,
+      .row_count = text->rows,
+      .checkpoint_capacity = text->checkpoint_capacity};
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_create(
+      device, &options, &model->text.model, allocator));
   const loom_serve_text_service_options_t service_options = {
       .name = configuration->name,
-      .row_count = configuration->rows,
-      .chunk_size = configuration->prefill_capacity,
-      .default_max_tokens = configuration->max_tokens,
+      .row_count = text->rows,
+      .chunk_size = text->prefill_capacity,
+      .default_max_tokens = text->max_tokens,
       .pending_capacity = configuration->pending_requests,
       .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000,
       .schedule_mode = LOOM_SERVE_TEXT_SCHEDULE_PACKED,
       .packing_mode = LOOM_SERVE_TEXT_PACKING_MIXED,
-      .mtp_depth = configuration->mtp_depth,
-      .continuation_epochs = configuration->continuation_epochs};
-  return loom_serve_text_service_create(model->model, &service_options,
-                                        &model->service, allocator);
+      .mtp_depth = text->mtp_depth,
+      .continuation_epochs = text->continuation_epochs};
+  IREE_RETURN_IF_ERROR(loom_serve_text_service_create(
+      model->text.model, &service_options, &model->text.service, allocator));
+  *out_service = loom_serve_text_service_interface(model->text.service);
+  return iree_ok_status();
+}
+
+static iree_status_t serving_create_image(
+    loom_serve_device_t* device,
+    const loom_serve_model_configuration_t* configuration,
+    serving_model_t* model, loom_serve_http_service_t* out_service,
+    iree_allocator_t allocator) {
+  const loom_serve_image_configuration_t* image = &configuration->image;
+  const loom_serve_image_model_options_t options = {
+      .source_directory = configuration->source,
+      .checkpoint_directory = image->checkpoint,
+      .adapter_path = image->adapter,
+      .height = image->height,
+      .width = image->width,
+      .text_tokens = image->text_tokens};
+  IREE_RETURN_IF_ERROR(loom_serve_image_model_create(
+      device, &options, &model->image.model, allocator));
+  const loom_serve_image_service_options_t service_options = {
+      .name = configuration->name,
+      .width = image->width,
+      .height = image->height,
+      .adapter_enabled = image->adapter.size != 0,
+      .pending_capacity = configuration->pending_requests,
+      .heartbeat_interval = (iree_duration_t)FLAG_heartbeat_ms * 1000000};
+  IREE_RETURN_IF_ERROR(loom_serve_image_service_create(
+      loom_serve_device_host(device),
+      loom_serve_image_model_generator(model->image.model), &service_options,
+      &model->image.service, allocator));
+  *out_service = loom_serve_image_service_interface(model->image.service);
+  return iree_ok_status();
 }
 
 static iree_status_t serving_ready(loom_serve_http_server_t* server,
@@ -129,11 +176,12 @@ int main(int argc, char** argv) {
   }
   for (iree_host_size_t i = 0;
        i < configuration.model_count && iree_status_is_ok(status); ++i) {
-    status =
-        serving_create(device, &configuration.models[i], &models[i], allocator);
-    if (iree_status_is_ok(status)) {
-      services[i] = loom_serve_text_service_interface(models[i].service);
-    }
+    const loom_serve_model_configuration_t* entry = &configuration.models[i];
+    status = entry->kind == LOOM_SERVE_MODEL_KIND_TEXT
+                 ? serving_create_text(device, entry, &models[i], &services[i],
+                                       allocator)
+                 : serving_create_image(device, entry, &models[i], &services[i],
+                                        allocator);
   }
   if (iree_status_is_ok(status)) {
     loom_serve_http_server_options_t options =
@@ -154,12 +202,18 @@ int main(int argc, char** argv) {
   }
   const iree_status_code_t terminal_code = iree_status_code(status);
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
-    loom_serve_text_service_destroy(models[i].service, terminal_code);
+    if (configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_TEXT) {
+      loom_serve_text_service_destroy(models[i].text.service, terminal_code);
+    } else {
+      loom_serve_image_service_destroy(models[i].image.service);
+    }
   }
   status = iree_status_join(status, loom_serve_http_server_destroy(server));
   for (iree_host_size_t i = 0; models && i < configuration.model_count; ++i) {
-    status = iree_status_join(status,
-                              loom_serve_text_model_destroy(models[i].model));
+    status = iree_status_join(
+        status, configuration.models[i].kind == LOOM_SERVE_MODEL_KIND_TEXT
+                    ? loom_serve_text_model_destroy(models[i].text.model)
+                    : loom_serve_image_model_destroy(models[i].image.model));
   }
   status = iree_status_join(status, loom_serve_device_destroy(device));
   loom_serve_host_release(host);

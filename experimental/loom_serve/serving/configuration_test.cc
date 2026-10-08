@@ -19,6 +19,12 @@ std::string Model(const std::string& name, const std::string& options = "") {
          options + "}";
 }
 
+std::string Image(const std::string& name, const std::string& options = "") {
+  return R"({"kind":"image","name":")" + name +
+         R"(","source":"models/image","checkpoint":"assets/image")" + options +
+         "}";
+}
+
 TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
   std::string json =
       "{\"models\":[" + Model("scout") + "," +
@@ -36,45 +42,102 @@ TEST(ConfigurationTest, IndependentModelsOwnDecodedStringsAndOptions) {
   const auto& b = configuration.models[1];
   EXPECT_EQ(std::string(a.name.data, a.name.size), "scout");
   EXPECT_EQ(std::string(b.name.data, b.name.size), "researcher");
-  EXPECT_EQ(a.rows, 4u);
-  EXPECT_EQ(a.context_capacity, 16384u);
-  EXPECT_EQ(a.mtp_depth, 0u);
-  EXPECT_EQ(b.rows, 8u);
-  EXPECT_EQ(b.context_capacity, 262144u);
-  EXPECT_EQ(b.pool_capacity, 4096u);
-  EXPECT_EQ(b.checkpoint_capacity, 2u);
-  EXPECT_EQ(b.prefill_capacity, 128u);
-  EXPECT_EQ(b.mtp_depth, 3u);
-  EXPECT_EQ(b.continuation_epochs, 2u);
+  EXPECT_EQ(a.kind, LOOM_SERVE_MODEL_KIND_TEXT);
+  EXPECT_EQ(b.kind, LOOM_SERVE_MODEL_KIND_TEXT);
+  EXPECT_EQ(a.text.rows, 4u);
+  EXPECT_EQ(a.text.context_capacity, 16384u);
+  EXPECT_EQ(a.text.mtp_depth, 0u);
+  EXPECT_EQ(b.text.rows, 8u);
+  EXPECT_EQ(b.text.context_capacity, 262144u);
+  EXPECT_EQ(b.text.pool_capacity, 4096u);
+  EXPECT_EQ(b.text.checkpoint_capacity, 2u);
+  EXPECT_EQ(b.text.prefill_capacity, 128u);
+  EXPECT_EQ(b.text.mtp_depth, 3u);
+  EXPECT_EQ(b.text.continuation_epochs, 2u);
   EXPECT_EQ(b.pending_requests, 17u);
-  EXPECT_EQ(b.max_tokens, 128u);
+  EXPECT_EQ(b.text.max_tokens, 128u);
+  loom_serve_configuration_deinitialize(&configuration);
+}
+
+TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
+  std::string json =
+      "{\"models\":[" + Image("default-image") + "," + Model("text") + "," +
+      Image(
+          "styled",
+          R"(,"adapter":"style\u002esafetensors","width":768,"height":512,"text_tokens":1024,"pending_requests":3)") +
+      "]}";
+  loom_serve_configuration_t configuration;
+  IREE_ASSERT_OK(loom_serve_configuration_initialize(
+      iree_make_cstring_view(json.c_str()), &configuration,
+      iree_allocator_system()));
+  json.assign(json.size(), 'x');
+  ASSERT_EQ(configuration.model_count, 3u);
+  const auto& a = configuration.models[0];
+  const auto& b = configuration.models[2];
+  EXPECT_EQ(a.kind, LOOM_SERVE_MODEL_KIND_IMAGE);
+  EXPECT_EQ(b.kind, LOOM_SERVE_MODEL_KIND_IMAGE);
+  EXPECT_EQ(configuration.models[1].kind, LOOM_SERVE_MODEL_KIND_TEXT);
+  EXPECT_EQ(std::string(a.name.data, a.name.size), "default-image");
+  EXPECT_EQ(std::string(a.source.data, a.source.size), "models/image");
+  EXPECT_EQ(std::string(a.image.checkpoint.data, a.image.checkpoint.size),
+            "assets/image");
+  EXPECT_EQ(a.image.adapter.size, 0u);
+  EXPECT_EQ(a.image.width, 384u);
+  EXPECT_EQ(a.image.height, 384u);
+  EXPECT_EQ(a.image.text_tokens, 512u);
+  EXPECT_EQ(a.pending_requests, 32u);
+  EXPECT_EQ(std::string(b.image.adapter.data, b.image.adapter.size),
+            "style.safetensors");
+  EXPECT_EQ(b.image.width, 768u);
+  EXPECT_EQ(b.image.height, 512u);
+  EXPECT_EQ(b.image.text_tokens, 1024u);
+  EXPECT_EQ(b.pending_requests, 3u);
   loom_serve_configuration_deinitialize(&configuration);
 }
 
 TEST(ConfigurationTest,
      RejectsAmbiguousOrUnsupportedCatalogsAndCleansPartialState) {
-  for (const auto& json :
-       {std::string("{}"),
-        std::string(R"({"models":[]})"),
-        std::string(R"({"models":[null]})"),
-        std::string(R"({"models":[{"kind":"image"}]})"),
-        std::string(R"({"models":[{"kind":"text","name":"x"}]})"),
-        "{\"models\":[" + Model("same") + "," + Model("same") + "]}",
-        "{\"models\":[" + Model(R"(bad\u0000name)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"rows":0)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"rows":17)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"rows":2,"rows":4)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"mtp_depth":2)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"continuation_epochs":2)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"prefill_capacity":2,"mtp_depth":3)") +
-            "]}",
-        "{\"models\":[" + Model("x", R"(,"prefill_capacity":1024)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"pool_capacity":0)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"pending_requests":-1)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"max_tokens":1.5)") + "]}",
-        "{\"models\":[" + Model("x", R"(,"typo":true)") + "]}",
-        "{\"models\":[" + Model("x") + "],\"unknown\":0}",
-        "{\"models\":[" + Model("x") + "]} trailing"}) {
+  for (
+      const auto& json :
+      {std::string("{}"),
+       std::string(R"({"models":[]})"),
+       std::string(R"({"models":[null]})"),
+       std::string(R"({"models":[{"kind":"image"}]})"),
+       std::string(R"({"models":[{"kind":"audio","name":"x"}]})"),
+       std::string(R"({"models":[{"kind":"text","name":"x"}]})"),
+       "{\"models\":[" + Model("same") + "," + Model("same") + "]}",
+       "{\"models\":[" + Model(R"(bad\u0000name)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"rows":0)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"rows":17)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"rows":2,"rows":4)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"mtp_depth":2)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"continuation_epochs":2)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"prefill_capacity":2,"mtp_depth":3)") +
+           "]}",
+       "{\"models\":[" + Model("x", R"(,"prefill_capacity":1024)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"pool_capacity":0)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"pending_requests":-1)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"max_tokens":1.5)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"typo":true)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"width":384)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"weights":"file.gguf")") + "]}",
+       "{\"models\":[" + Image("x", R"(,"rows":1)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"width":0)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"width":384,"width":384)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"height":-1)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"height":4294967296)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"text_tokens":0)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"text_tokens":1.5)") + "]}",
+       "{\"models\":[" + Image("x", R"(,"adapter":"")") + "]}",
+       "{\"models\":[" + Image("x", R"(,"adapter":"style\u0000file")") + "]}",
+       "{\"models\":[" + Image("same") + "," + Model("same") + "]}",
+       "{\"models\":[" + Image("valid-image") + "," +
+           R"({"kind":"text","name":"bad","source":"models/text","weights":"weights.gguf"})" +
+           "]}",
+       "{\"models\":[" + Model("valid") + "," + Image("valid-image") + "," +
+           Image("bad", R"(,"adapter":"bad\u0000path")") + "]}",
+       "{\"models\":[" + Model("x") + "],\"unknown\":0}",
+       "{\"models\":[" + Model("x") + "]} trailing"}) {
     SCOPED_TRACE(json);
     loom_serve_configuration_t configuration;
     iree::Status status(loom_serve_configuration_initialize(
