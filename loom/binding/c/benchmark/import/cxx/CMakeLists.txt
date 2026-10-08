@@ -83,6 +83,8 @@ loom_cc_benchmark(
     loom::binding::c::import::cxx
     loom::binding::c::loomc
     loom::binding::c::target::amdgpu
+  ARGS
+    "--benchmark_min_time=1x"
   TESTONLY
 )
 endif()

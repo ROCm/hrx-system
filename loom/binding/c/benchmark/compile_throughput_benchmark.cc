@@ -274,6 +274,35 @@ iree_status_t PreparePassProgram(loomc_context_t* context,
   return iree_ok_status();
 }
 
+static iree_status_t PrepareTargetPassProgram(
+    loomc_context_t* context, loomc_target_pipeline_kind_t kind,
+    loomc_string_view_t identifier,
+    loomc_target_control_flow_lowering_t control_flow_lowering,
+    PassProgramPtr* out_pass_program) {
+  out_pass_program->reset();
+  const loomc_target_pipeline_options_t options = {
+      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
+      /*.structure_size=*/sizeof(options),
+      /*.next=*/nullptr,
+      /*.identifier=*/identifier,
+      /*.kind=*/kind,
+      /*.control_flow_lowering=*/control_flow_lowering,
+      /*.source_to_low_max_errors=*/20,
+  };
+  loomc_pass_program_t* raw_pass_program = nullptr;
+  loomc_result_t* raw_result = nullptr;
+  iree_status_t status =
+      to_iree_status(loomc_pass_program_create_from_target_pipeline(
+          context, &options, loom_allocator(), &raw_pass_program, &raw_result));
+  PassProgramPtr pass_program(raw_pass_program);
+  ResultPtr result(raw_result);
+  IREE_RETURN_IF_ERROR(status);
+  IREE_RETURN_IF_ERROR(
+      RequireSucceededResult(result.get(), "target pipeline preparation"));
+  out_pass_program->reset(pass_program.release());
+  return iree_ok_status();
+}
+
 CompileScenario::CompileScenario(iree_host_size_t workspace_block_size)
     : workspace_block_size_(workspace_block_size) {}
 
@@ -401,7 +430,8 @@ TargetCompileScenario::TargetCompileScenario(
 
 iree_status_t TargetCompileScenario::SetUpTarget(
     iree_host_size_t worker_count, TargetEnvironmentPtr target_environment,
-    TargetProfilePtr target_profile, loomc_string_view_t pipeline_identifier,
+    TargetProfilePtr target_profile, loomc_target_pipeline_kind_t pipeline_kind,
+    loomc_string_view_t pipeline_identifier,
     loomc_target_control_flow_lowering_t control_flow_lowering) {
   target_environment_ = std::move(target_environment);
   target_profile_ = std::move(target_profile);
@@ -427,32 +457,14 @@ iree_status_t TargetCompileScenario::SetUpTarget(
       context_.get(), /*options=*/nullptr, loom_allocator(), &raw_compiler)));
   compiler_.reset(raw_compiler);
 
-  loomc_target_pipeline_options_t pipeline_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(pipeline_options),
-      /*.next=*/nullptr,
-      /*.identifier=*/pipeline_identifier,
-      /*.kind=*/LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
-      /*.control_flow_lowering=*/control_flow_lowering,
-      /*.source_to_low_max_errors=*/20,
-  };
-  loomc_pass_program_t* raw_pass_program = nullptr;
-  loomc_result_t* raw_result = nullptr;
-  iree_status_t status =
-      to_iree_status(loomc_pass_program_create_from_target_pipeline(
-          context_.get(), &pipeline_options, loom_allocator(),
-          &raw_pass_program, &raw_result));
-  PassProgramPtr pass_program(raw_pass_program);
-  ResultPtr result(raw_result);
-  IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(
-      RequireSucceededResult(result.get(), "target pipeline preparation"));
-  pass_program_.reset(pass_program.release());
+  IREE_RETURN_IF_ERROR(PrepareTargetPassProgram(
+      context_.get(), pipeline_kind, pipeline_identifier, control_flow_lowering,
+      &pass_program_));
 
   return SetUpWorkerSlots(worker_count);
 }
 
-iree_status_t TargetCompileScenario::CompileModuleToPreparedLow(
+iree_status_t TargetCompileScenario::CompileModuleToTargetBoundary(
     WorkspacePtr& workspace, ModulePtr& module,
     loomc_string_view_t function_symbol, loomc_string_view_t module_name,
     const loomc_module_t* config_module,

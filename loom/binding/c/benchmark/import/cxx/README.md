@@ -115,6 +115,52 @@ compiler, prepared pipeline, target profile, config module, source handle, and
 workspace are reused. Process startup and setup are outside timing. One warmup
 compilation precedes measurement; parsed C++ ASTs are not cached.
 
+The `CxxJitPhase` rows attribute this endpoint with two maintained sources:
+llama.cpp RMSNorm provides a small ordinary kernel, while the MXFP8 group dot
+exercises storage encodings, narrow-float conversion, vectors, reductions, and
+target-specific lowering. Each row invokes a complete public compiler boundary:
+
+| Phase | Timed operation |
+| --- | --- |
+| `Import` | Preprocess, parse, type-check, and import source to verified High IR. |
+| `CloneHigh` | Clone a setup-imported High module into the invocation workspace. |
+| `SourceLow` | Clone High IR and run the source-low target pipeline. |
+| `PreparedLow` | Clone High IR and run the complete prepared-low target pipeline. |
+| `ClonePreparedLow` | Clone setup-prepared Low IR with its retained specialization facts. |
+| `EmitPreparedLow` | Clone prepared Low IR, emit HSACO, and validate the ELF artifact. |
+
+The lowering and emission rows include their required fresh-module clone. The
+clone-only rows expose that floor. `SourceLow` and `PreparedLow` are independent
+cumulative compilations, while `EmitPreparedLow` starts from retained prepared
+IR, so phase times are not additive reconstructions of `SourceToHsaco`.
+Validation, result construction, teardown, and arena reuse remain owned by the
+public operation that performs them.
+
+An optimized 2026-10-08 run on an AMD Ryzen AI Max+ 395 measured these warmed
+medians. Phase rows used seven 100-iteration repetitions and complete rows used
+fifteen 50-iteration repetitions under the benchmark lease with no process
+allocator override.
+
+| Public boundary | llama.cpp RMSNorm | MXFP8 group dot |
+| --- | ---: | ---: |
+| Import to verified High IR | 3.221 ms | 4.101 ms |
+| Clone High IR | 22.7 us | 8.42 us |
+| Through source-low | 1.439 ms | 0.233 ms |
+| Through prepared-low | 1.614 ms | 0.291 ms |
+| Clone prepared Low IR | 33.6 us | 33.4 us |
+| Emit prepared Low IR to HSACO | 0.807 ms | 0.689 ms |
+| Complete source to HSACO | 6.443 ms | 5.509 ms |
+
+`SourceToHsacoColdWorkspace` skips scenario warmup and forces one compilation
+per repetition. Context, compiler, target, pass-program, source, and config
+setup remain outside timing, while the invocation workspace starts unused. Its
+allocation counters therefore report the first compilation's arena growth
+instead of mixing first-growth and reuse in one sample.
+All fifteen one-iteration repetitions reported twelve 128 KiB blocks for
+RMSNorm and eight blocks for MXFP8. Cold-workspace latency varied by 8.0% and
+6.3%, respectively, so it is compared as a repeated distribution rather than a
+single-sample threshold.
+
 Build an optimized executable before collecting numbers:
 
 ```sh

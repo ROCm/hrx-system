@@ -75,6 +75,7 @@ loom_cc_benchmark(
 loom_cc_benchmark(
     name = "source_to_hsaco_benchmark",
     srcs = ["source_to_hsaco_benchmark.cc"],
+    args = ["--benchmark_min_time=1x"],
     target_compatible_with = _AMDGPU_COMPATIBLE_WITH,
     deps = [
         ":kernels",

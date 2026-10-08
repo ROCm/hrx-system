@@ -173,6 +173,7 @@ class AmdgpuTargetCompileScenario : public TargetCompileScenario {
 
     return SetUpTarget(worker_count, std::move(target_environment),
                        std::move(target_profile),
+                       LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
                        loomc_make_cstring_view("benchmark-amdgpu-prepared-low"),
                        LOOMC_TARGET_CONTROL_FLOW_LOWERING_CFG);
   }
@@ -451,7 +452,7 @@ class AmdgpuI32ChainScenario final : public AmdgpuTargetCompileScenario {
     ModulePtr module;
     IREE_RETURN_IF_ERROR(
         CloneModule(template_module_.get(), workspace.get(), &module));
-    IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
+    IREE_RETURN_IF_ERROR(CompileModuleToTargetBoundary(
         workspace, module, loomc_make_cstring_view("i32_memory_chain"),
         loomc_make_cstring_view("amdgpu_i32_chain"),
         operation_count.config_module.get(),
@@ -594,7 +595,7 @@ class AmdgpuClusterAsyncDisjointScenario final
     ModulePtr module;
     IREE_RETURN_IF_ERROR(
         CloneModule(template_module_.get(), workspace.get(), &module));
-    IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
+    IREE_RETURN_IF_ERROR(CompileModuleToTargetBoundary(
         workspace, module, loomc_make_cstring_view("cluster_async_disjoint"),
         loomc_make_cstring_view("amdgpu_cluster_async_disjoint"),
         /*config_module=*/nullptr, /*config_flags=*/0));

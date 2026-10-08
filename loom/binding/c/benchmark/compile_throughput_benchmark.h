@@ -123,10 +123,13 @@ class TargetCompileScenario : public CompileScenario {
  protected:
   iree_status_t SetUpTarget(
       iree_host_size_t worker_count, TargetEnvironmentPtr target_environment,
-      TargetProfilePtr target_profile, loomc_string_view_t pipeline_identifier,
+      TargetProfilePtr target_profile,
+      loomc_target_pipeline_kind_t pipeline_kind,
+      loomc_string_view_t pipeline_identifier,
       loomc_target_control_flow_lowering_t control_flow_lowering);
 
-  iree_status_t CompileModuleToPreparedLow(
+  // Runs the scenario's selected target pipeline with one exact root/profile.
+  iree_status_t CompileModuleToTargetBoundary(
       WorkspacePtr& workspace, ModulePtr& module,
       loomc_string_view_t function_symbol, loomc_string_view_t module_name,
       const loomc_module_t* config_module,

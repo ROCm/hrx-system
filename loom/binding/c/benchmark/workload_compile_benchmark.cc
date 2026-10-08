@@ -151,34 +151,6 @@ static iree_status_t CaptureModuleShape(const loomc_module_t* module,
   return iree_ok_status();
 }
 
-static iree_status_t PrepareTargetPassProgram(
-    loomc_context_t* context, loomc_target_pipeline_kind_t kind,
-    loomc_string_view_t identifier,
-    loomc_target_control_flow_lowering_t control_flow_lowering,
-    PassProgramPtr* out_pass_program) {
-  const loomc_target_pipeline_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_PIPELINE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/identifier,
-      /*.kind=*/kind,
-      /*.control_flow_lowering=*/control_flow_lowering,
-      /*.source_to_low_max_errors=*/20,
-  };
-  loomc_pass_program_t* raw_pass_program = nullptr;
-  loomc_result_t* raw_result = nullptr;
-  iree_status_t status =
-      to_iree_status(loomc_pass_program_create_from_target_pipeline(
-          context, &options, loom_allocator(), &raw_pass_program, &raw_result));
-  PassProgramPtr pass_program(raw_pass_program);
-  ResultPtr result(raw_result);
-  IREE_RETURN_IF_ERROR(status);
-  IREE_RETURN_IF_ERROR(
-      RequireSucceededResult(result.get(), "target pipeline preparation"));
-  out_pass_program->reset(pass_program.release());
-  return iree_ok_status();
-}
-
 static iree_status_t PrepareStructuredPassProgram(
     loomc_context_t* context, loomc_workspace_t* workspace,
     const std::string& source_text, loomc_string_view_t pipeline_symbol,
@@ -218,9 +190,16 @@ class AttentionCompileScenario final : public TargetCompileScenario {
     TargetProfilePtr selected_target_profile;
     IREE_RETURN_IF_ERROR(
         target_.CreateTarget(&target_environment, &selected_target_profile));
+    const loomc_target_pipeline_kind_t pipeline_kind =
+        phase_ == AttentionCompilePhase::kSourceLow
+            ? LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW
+            : LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
     IREE_RETURN_IF_ERROR(SetUpTarget(
         worker_count, std::move(target_environment),
-        std::move(selected_target_profile), target_.pipeline_identifier(),
+        std::move(selected_target_profile), pipeline_kind,
+        phase_ == AttentionCompilePhase::kSourceLow
+            ? loomc_make_cstring_view("benchmark-attention-source-low")
+            : target_.pipeline_identifier(),
         target_.control_flow_lowering()));
 
     SourcePtr fixture_source;
@@ -304,13 +283,9 @@ class AttentionCompileScenario final : public TargetCompileScenario {
         }
         return iree_ok_status();
       }
-      case AttentionCompilePhase::kSourceLow:
-        return PrepareTargetPassProgram(
-            context_.get(), LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-            loomc_make_cstring_view("benchmark-attention-source-low"),
-            target_.control_flow_lowering(), &pass_program_);
       case AttentionCompilePhase::kParse:
       case AttentionCompilePhase::kCloneSource:
+      case AttentionCompilePhase::kSourceLow:
       case AttentionCompilePhase::kPreparedLow:
       case AttentionCompilePhase::kCompileAndEmit:
         return iree_ok_status();
@@ -535,9 +510,16 @@ class InputScalingCompileScenario final : public TargetCompileScenario {
     TargetProfilePtr selected_target_profile;
     IREE_RETURN_IF_ERROR(
         target_.CreateTarget(&target_environment, &selected_target_profile));
+    const loomc_target_pipeline_kind_t pipeline_kind =
+        phase_ == InputScalingCompilePhase::kSourceLow
+            ? LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW
+            : LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW;
     IREE_RETURN_IF_ERROR(SetUpTarget(
         worker_count, std::move(target_environment),
-        std::move(selected_target_profile), target_.pipeline_identifier(),
+        std::move(selected_target_profile), pipeline_kind,
+        phase_ == InputScalingCompilePhase::kSourceLow
+            ? loomc_make_cstring_view("benchmark-input-scaling-source-low")
+            : target_.pipeline_identifier(),
         target_.control_flow_lowering()));
     IREE_RETURN_IF_ERROR(CreateBenchmarkSource(workload_.source, &source_));
     const loomc_byte_span_t source_contents =
@@ -559,12 +541,6 @@ class InputScalingCompileScenario final : public TargetCompileScenario {
         context_.get(), template_workspace_.get(), "input_size_config.loom",
         config_text.str(), &config_module_));
 
-    if (phase_ == InputScalingCompilePhase::kSourceLow) {
-      return PrepareTargetPassProgram(
-          context_.get(), LOOMC_TARGET_PIPELINE_KIND_SOURCE_LOW,
-          loomc_make_cstring_view("benchmark-input-scaling-source-low"),
-          target_.control_flow_lowering(), &pass_program_);
-    }
     return iree_ok_status();
   }
 
@@ -714,6 +690,7 @@ class PipelineCompileScenario final : public TargetCompileScenario {
     IREE_RETURN_IF_ERROR(spec_.target->CreateTarget(&environment, &profile));
     IREE_RETURN_IF_ERROR(SetUpTarget(worker_count, std::move(environment),
                                      std::move(profile),
+                                     LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
                                      spec_.target->pipeline_identifier(),
                                      spec_.target->control_flow_lowering()));
     IREE_RETURN_IF_ERROR(CreateWorkspace(0, &template_workspace_));

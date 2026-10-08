@@ -198,6 +198,7 @@ class SpirvScenarioBase : public TargetCompileScenario {
 
     return SetUpTarget(worker_count, std::move(target_environment),
                        std::move(target_profile),
+                       LOOMC_TARGET_PIPELINE_KIND_PREPARED_LOW,
                        loomc_make_cstring_view("benchmark-spirv-prepared-low"),
                        LOOMC_TARGET_CONTROL_FLOW_LOWERING_STRUCTURED_LOW);
   }
@@ -336,7 +337,7 @@ class SpirvTunerFlowScenario final : public SpirvScenarioBase {
                                              source_.get(), &module));
     }
 
-    IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
+    IREE_RETURN_IF_ERROR(CompileModuleToTargetBoundary(
         workspace, module, loomc_make_cstring_view("i32_memory_chain"),
         loomc_make_cstring_view("spirv_tuner_kernel"),
         config_modules_[job_ordinal % config_modules_.size()].get(),
@@ -404,7 +405,7 @@ class SpirvI32ChainScenario final : public SpirvScenarioBase {
     }
 
     (void)job_ordinal;
-    IREE_RETURN_IF_ERROR(CompileModuleToPreparedLow(
+    IREE_RETURN_IF_ERROR(CompileModuleToTargetBoundary(
         workspace, module, loomc_make_cstring_view("i32_memory_chain"),
         loomc_make_cstring_view("spirv_i32_chain"), config_module_.get(),
         LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED));
