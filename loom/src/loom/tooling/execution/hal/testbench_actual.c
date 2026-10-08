@@ -595,9 +595,16 @@ iree_status_t loom_run_hal_testbench_actual_provider_compile(
   IREE_RETURN_IF_ERROR(loom_run_hal_testbench_module_symbol_name_from_ref(
       provider->native_module, provider->invocation->callee_ref,
       &entry_symbol));
-  IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_export_name(
-      provider->module, entry_symbol,
-      &provider->invocation_options.function_name));
+  if (is_pipeline) {
+    // Pipeline symbols lower directly to the exported array-program name and
+    // are not module functions before compilation. Kernel definitions may
+    // instead declare an explicit export symbol that the HAL executable uses.
+    provider->invocation_options.function_name = entry_symbol;
+  } else {
+    IREE_RETURN_IF_ERROR(loom_run_hal_testbench_resolve_export_name(
+        provider->module, entry_symbol,
+        &provider->invocation_options.function_name));
+  }
 
   loomc_iree_hal_target_selection_t selection = {0};
   loomc_result_t* result = NULL;
@@ -1497,6 +1504,7 @@ static iree_status_t loom_run_hal_testbench_actual_sequence_prepare_sample(
         span->invocations[invocation_offset].provider;
     loom_run_hal_dispatch_sequence_step_t* step =
         &span->steps[invocation_offset];
+    step->representation = provider->sequence_representation;
     step->options = provider->invocation_options;
     const loom_testbench_invocation_plan_t* invocation = provider->invocation;
     for (iree_host_size_t workload_index = 0;
