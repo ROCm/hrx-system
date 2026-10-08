@@ -25,10 +25,11 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
         .memory_limit = kSlabBytes};
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_host_create(1, &host, iree_allocator_system()));
-    auto status = loom_serve_device_create(host, &options, &device,
-                                           iree_allocator_system());
+    auto status = loom_serve_device_group_create(host, 1, &options, &group,
+                                                 iree_allocator_system());
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
+    device = loom_serve_device_group_at(group, 0);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_create(
         loom_serve_device_memory_pool(device), kSlabBytes, 256, &statistics,
         &reservation));
@@ -56,12 +57,14 @@ class RetirementTest : public ::testing::TestWithParam<bool> {
     iree_hal_semaphore_release(uploaded);
     iree_hal_semaphore_release(gate);
     IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(reservation));
-    IREE_EXPECT_OK(loom_serve_device_destroy(device));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group));
   }
 
   // One mapped slab remains owned until all transfer views retire.
   static constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
-  // Shared physical owner enclosing the test's queue operations.
+  // Application group enclosing all device resources.
+  loom_serve_device_group_t* group = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device = nullptr;
   // Parameter/state-like virtual reservation, independent of view references.
   loom_serve_virtual_buffer_t* reservation = nullptr;

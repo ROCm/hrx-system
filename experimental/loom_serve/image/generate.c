@@ -85,12 +85,14 @@ static iree_status_t image_run(iree_allocator_t allocator) {
       .text_tokens = (uint32_t)FLAG_text_tokens,
   };
   loom_serve_image_model_t* model = NULL;
+  loom_serve_device_group_t* group = NULL;
   loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_host_create_from_flags(&host, allocator));
   iree_status_t status =
-      loom_serve_device_create_from_flags(host, &device, allocator);
+      loom_serve_device_group_create_from_flags(host, &group, allocator);
   if (iree_status_is_ok(status)) {
+    device = loom_serve_device_group_at(group, 0);
     status = loom_serve_image_model_create(device, &options, &model, allocator);
   }
   iree_const_byte_span_t rgb = iree_const_byte_span_empty();
@@ -102,7 +104,7 @@ static iree_status_t image_run(iree_allocator_t allocator) {
     status = image_write_image(rgb, allocator);
   }
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
-  status = iree_status_join(status, loom_serve_device_destroy(device));
+  status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
   return status;
 }

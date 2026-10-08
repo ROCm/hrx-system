@@ -904,12 +904,16 @@ int main(int argc, char** argv) {
   iree_flags_parse_checked(IREE_FLAGS_PARSE_MODE_DEFAULT, &argc, &argv);
   const auto allocator = iree_allocator_system();
   loom_serve_host_t* host = nullptr;
+  loom_serve_device_group_t* group = nullptr;
   loom_serve_device_t* device = nullptr;
   loom_serve_text_model_t* model = nullptr;
   iree_status_code_t terminal_code = IREE_STATUS_OK;
   auto status = loom_serve_host_create(1, &host, allocator);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_device_create_from_flags(host, &device, allocator);
+    status = loom_serve_device_group_create_from_flags(host, &group, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    device = loom_serve_device_group_at(group, 0);
   }
   const loom_serve_text_flag_defaults_t defaults = {.row_count = 8};
   if (iree_status_is_ok(status)) {
@@ -929,7 +933,7 @@ int main(int argc, char** argv) {
                     iree_make_status(IREE_STATUS_DATA_LOSS,
                                      "model teardown lost terminal status")));
   }
-  status = iree_status_join(status, loom_serve_device_destroy(device));
+  status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);

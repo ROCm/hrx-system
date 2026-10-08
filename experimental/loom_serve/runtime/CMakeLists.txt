@@ -189,6 +189,28 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+if(IREE_HAL_DRIVER_AMDGPU)
+loom_cc_test(
+  NAME
+    device_group_test
+  SRCS
+    "device_group_test.cc"
+  DEPS
+    ::device
+    ::execution
+    ::host
+    iree::base
+    iree::experimental::loom_serve::storage::memory
+    iree::hal
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
+)
+endif()
+
 loom_cc_library(
   NAME
     module

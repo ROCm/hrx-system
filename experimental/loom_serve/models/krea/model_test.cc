@@ -24,18 +24,21 @@ class Krea2ModelTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_serve_host_create(1, &host_, iree_allocator_system()));
     loom_serve_device_options_t options = {};
     options.uri = IREE_SV("amdgpu");
-    IREE_ASSERT_OK(loom_serve_device_create(host_, &options, &device_,
-                                            iree_allocator_system()));
+    IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &options, &group_,
+                                                  iree_allocator_system()));
+    device_ = loom_serve_device_group_at(group_, 0);
   }
 
   void TearDown() override {
-    IREE_EXPECT_OK(loom_serve_device_destroy(device_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
     loom_serve_host_release(host_);
   }
 
   // Shared task and I/O services outlive the device owner.
   loom_serve_host_t* host_ = nullptr;
-  // Device owner remains reusable after failed model creation.
+  // Application group remains reusable after failed model creation.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device_ = nullptr;
 };
 

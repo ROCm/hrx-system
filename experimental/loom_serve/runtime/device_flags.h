@@ -12,10 +12,11 @@
 extern "C" {
 #endif
 
-// CLI leaf selecting the shared device, backing strategy and physical budget.
-// Model constructors borrow this owner; the entry point destroys it last.
-iree_status_t loom_serve_device_create_from_flags(
-    loom_serve_host_t* host, loom_serve_device_t** out_device,
+// CLI leaf constructing a single-device application group from the device,
+// backing strategy and physical budget flags. Models borrow its first record;
+// the entry point destroys the group after every model retires.
+iree_status_t loom_serve_device_group_create_from_flags(
+    loom_serve_host_t* host, loom_serve_device_group_t** out_group,
     iree_allocator_t host_allocator);
 
 #ifdef __cplusplus

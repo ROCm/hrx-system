@@ -189,6 +189,7 @@ int main(int argc, char** argv) {
   if (iree_status_is_ok(status)) {
     status = iree_async_signal_block_default();
   }
+  loom_serve_device_group_t* group = NULL;
   loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   loom_serve_http_server_t* server = NULL;
@@ -206,7 +207,10 @@ int main(int argc, char** argv) {
     status = loom_serve_host_create_from_flags(&host, allocator);
   }
   if (iree_status_is_ok(status)) {
-    status = loom_serve_device_create_from_flags(host, &device, allocator);
+    status = loom_serve_device_group_create_from_flags(host, &group, allocator);
+  }
+  if (iree_status_is_ok(status)) {
+    device = loom_serve_device_group_at(group, 0);
   }
   for (iree_host_size_t i = 0;
        i < configuration.model_count && iree_status_is_ok(status); ++i) {
@@ -271,7 +275,7 @@ int main(int argc, char** argv) {
     }
     status = iree_status_join(status, model_status);
   }
-  status = iree_status_join(status, loom_serve_device_destroy(device));
+  status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
   iree_allocator_free(allocator, services);
   iree_allocator_free(allocator, models);

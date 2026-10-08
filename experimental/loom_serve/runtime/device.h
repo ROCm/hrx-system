@@ -15,10 +15,16 @@
 extern "C" {
 #endif
 
-// One serving device, its async I/O services, semaphore domain and shared
-// workspace backing. One host owner serializes model calls and physical
-// residency transitions. Model programs and logical state remain independent;
-// their virtual reservations share this owner's physical allocation budget.
+// Application owner of all cooperating devices, one immutable HAL topology and
+// frontier namespace, profiling session and retained host services. Models
+// drain before this owner is destroyed. Group membership creates no execution
+// edges and implies no cross-device buffer visibility.
+typedef struct loom_serve_device_group_t loom_serve_device_group_t;
+
+// Borrowed device record within the application group. Its queues, workspace,
+// retained-memory budget and residency cache are independent of other records.
+// One task owner serializes model calls and physical residency transitions;
+// models sharing this record share its allocation budget, not their timelines.
 typedef struct loom_serve_device_t loom_serve_device_t;
 
 typedef enum loom_serve_device_backing_e {
@@ -39,23 +45,33 @@ typedef struct loom_serve_device_options_t {
   uint64_t memory_limit;
 } loom_serve_device_options_t;
 
-// Creates the device identified by a HAL URI and selects the first provisioned
-// queue supporting each of dispatch and transfer. Missing roles fail creation.
-// This establishes runtime ownership, not compiler support for the device.
-// Retains the application host for device and asynchronous service lifetime.
-// On failure no owner is returned and all partial resources are released.
-iree_status_t loom_serve_device_create(
-    loom_serve_host_t* host, const loom_serve_device_options_t* options,
-    loom_serve_device_t** out_device, iree_allocator_t host_allocator);
+// Creates every requested HAL device, seals one group, then constructs each
+// record's pools and selects its first provisioned dispatch/transfer queues.
+// Missing roles fail creation. device_count must be nonzero and within the HAL
+// topology limit; options are borrowed only during creation. This establishes
+// runtime ownership, not compiler support or cross-device tensor access.
+// Retains host through all device and asynchronous service lifetimes. Failure
+// returns no group and releases partial state, including earlier devices.
+iree_status_t loom_serve_device_group_create(
+    loom_serve_host_t* host, iree_host_size_t device_count,
+    const loom_serve_device_options_t* options,
+    loom_serve_device_group_t** out_group, iree_allocator_t host_allocator);
 
-// Releases the device and its host reference, without an implicit device wait.
-// The caller first drains every model domain while borrowed host I/O is alive
-// and releases all model/JIT/VM resources referencing this domain. Those
-// resources must not outlive the owner. NULL is permitted. Profiling belongs to
-// the device, not individual models. Outstanding virtual reservations preserve
-// the owner and return failure rather than dangling a physical domain after a
-// model cleanup failure.
-iree_status_t loom_serve_device_destroy(loom_serve_device_t* device);
+// Releases all device resources and the host reference without an implicit
+// device wait. The caller first drains every model domain and releases all
+// model/JIT/VM resources while host I/O remains alive. NULL is permitted.
+// Any outstanding virtual reservation preserves the entire group and returns
+// failure before partial teardown can invalidate another device's resources.
+iree_status_t loom_serve_device_group_destroy(loom_serve_device_group_t* group);
+
+// Number of immutable device records owned by the group.
+iree_host_size_t loom_serve_device_group_count(
+    const loom_serve_device_group_t* group);
+
+// Borrows a record through group destruction. device_index is a caller-resolved
+// ordinal less than the group's count.
+loom_serve_device_t* loom_serve_device_group_at(
+    loom_serve_device_group_t* group, iree_host_size_t device_index);
 
 // Serving-managed backing across every model sharing this device. Virtual
 // statistics are zero for fixed backing. Workspace statistics are atomic HAL
@@ -84,8 +100,8 @@ loom_serve_device_memory_statistics_t loom_serve_device_memory_statistics(
 iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
                                      uint64_t target_bytes);
 
-// Borrowed handles valid through owner destruction. The group establishes the
-// semaphore namespace; execution domains retain the exact queues.
+// Borrowed handles valid through group destruction. Every device record returns
+// the same HAL group; execution domains retain their own exact queues.
 iree_hal_device_t* loom_serve_device_handle(const loom_serve_device_t* device);
 // Borrowed application host, which outlives this device and its models.
 loom_serve_host_t* loom_serve_device_host(const loom_serve_device_t* device);

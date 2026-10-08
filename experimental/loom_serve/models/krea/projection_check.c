@@ -29,7 +29,9 @@ IREE_FLAG(string, expected_adapter, "",
 IREE_FLAG(int32_t, rows, 576, "Image token count, a positive multiple of 16.");
 
 typedef struct projection_check_t {
-  // Shared device and queues, destroyed after all model and host I/O storage.
+  // Application group, destroyed after all model and host I/O storage.
+  loom_serve_device_group_t* group;
+  // Borrowed device and queues within the application group.
   loom_serve_device_t* owner;
   // Owned model timeline, drained before releasing borrowed input/output.
   loom_serve_execution_t* execution;
@@ -102,10 +104,11 @@ static iree_status_t projection_initialize(projection_check_t* check,
   const loom_serve_device_options_t device_options = {.uri = IREE_SV("amdgpu")};
   loom_serve_host_t* host = NULL;
   IREE_RETURN_IF_ERROR(loom_serve_host_create(8, &host, allocator));
-  status =
-      loom_serve_device_create(host, &device_options, &check->owner, allocator);
+  status = loom_serve_device_group_create(host, 1, &device_options,
+                                          &check->group, allocator);
   loom_serve_host_release(host);
   IREE_RETURN_IF_ERROR(status);
+  check->owner = loom_serve_device_group_at(check->group, 0);
   IREE_RETURN_IF_ERROR(
       loom_serve_device_create_execution(check->owner, &check->execution));
   iree_hal_device_t* device = loom_serve_device_handle(check->owner);
@@ -305,7 +308,8 @@ int main(int argc, char** argv) {
   iree_allocator_free(allocator, check.baseline);
   loom_serve_jit_destroy(check.jit);
   loom_serve_execution_release(check.execution);
-  status = iree_status_join(status, loom_serve_device_destroy(check.owner));
+  status =
+      iree_status_join(status, loom_serve_device_group_destroy(check.group));
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);
     iree_status_free(status);

@@ -101,9 +101,10 @@ class JitTest : public ::testing::TestWithParam<int> {
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host, allocator_));
     auto status =
-        loom_serve_device_create(host, &options, &device_owner_, allocator_);
+        loom_serve_device_group_create(host, 1, &options, &group_, allocator_);
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
+    device_owner_ = loom_serve_device_group_at(group_, 0);
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     IREE_ASSERT_OK(
@@ -145,7 +146,7 @@ class JitTest : public ::testing::TestWithParam<int> {
     loom_serve_execution_release(held_.execution);
     iree_hal_semaphore_release(held_.gate);
     loom_serve_execution_release(execution_);
-    IREE_EXPECT_OK(loom_serve_device_destroy(device_owner_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
   }
 
   // Null uses the source provider; text overlays its value for this request.
@@ -229,7 +230,9 @@ class JitTest : public ::testing::TestWithParam<int> {
 
   // Host allocation policy for all fixture resources.
   iree_allocator_t allocator_ = iree_allocator_system();
-  // Production device owner outliving all compiler, VM and I/O resources.
+  // Application group outliving all compiler, VM and I/O resources.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device_owner_ = nullptr;
   // Borrowed live device used for profile extraction.
   iree_hal_device_t* device_ = nullptr;

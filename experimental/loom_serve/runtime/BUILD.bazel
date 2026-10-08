@@ -169,6 +169,26 @@ loom_cc_test(
     ],
 )
 
+loom_cc_test(
+    name = "device_group_test",
+    srcs = ["device_group_test.cc"],
+    resource_group = GPU_DEVICE_RESOURCE_GROUP,
+    tags = ["iree-run-requirement=runtime.resource.amd_gpu"],
+    target_compatible_with = loom_config_compatible_with([
+        "//runtime/config/hal:driver_amdgpu",
+    ]),
+    deps = [
+        ":device",
+        ":execution",
+        ":host",
+        "//experimental/loom_serve/storage:memory",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
 loom_cc_library(
     name = "module",
     srcs = ["module.c"],

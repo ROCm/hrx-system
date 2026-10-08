@@ -38,8 +38,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t device_options = {.uri =
                                                             IREE_SV("amdgpu")};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(host_, &device_options, &device_, allocator_));
+    IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
+                                                  &group_, allocator_));
+    device_ = loom_serve_device_group_at(group_, 0);
     const std::string source = FLAG_model_source;
     const std::string directory = source.substr(0, source.find_last_of('/'));
     const loom_serve_image_model_options_t model_options = {
@@ -65,7 +66,7 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
     IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
     IREE_EXPECT_OK(loom_serve_image_model_destroy(model_));
-    IREE_EXPECT_OK(loom_serve_device_destroy(device_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
     loom_serve_host_release(host_);
   }
 
@@ -140,7 +141,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
   const iree_allocator_t allocator_ = iree_allocator_system();
   // Shared CPU/JIT resources outlive every model and service task.
   loom_serve_host_t* host_ = nullptr;
-  // Actual qualified device owner, not a mock model implementation.
+  // Application group enclosing all model and device resources.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device_ = nullptr;
   // Real source-JIT model with two kernels and reflected private workspace.
   loom_serve_image_model_t* model_ = nullptr;

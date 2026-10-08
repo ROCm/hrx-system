@@ -26,10 +26,11 @@ class MemoryTest : public ::testing::Test {
         .memory_limit = 3 * kSlabSize};
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_host_create(1, &host, iree_allocator_system()));
-    auto status = loom_serve_device_create(host, &options, &device,
-                                           iree_allocator_system());
+    auto status = loom_serve_device_group_create(host, 1, &options, &group,
+                                                 iree_allocator_system());
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
+    device = loom_serve_device_group_at(group, 0);
     pool = loom_serve_device_memory_pool(device);
     IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
   }
@@ -43,7 +44,7 @@ class MemoryTest : public ::testing::Test {
     EXPECT_EQ(statistics.committed_bytes, 0u);
     EXPECT_EQ(statistics.reserved_bytes, 0u);
     loom_serve_execution_release(execution);
-    IREE_EXPECT_OK(loom_serve_device_destroy(device));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group));
   }
 
   void RoundTrip(iree_hal_buffer_t* buffer, uint64_t offset, uint32_t value) {
@@ -94,7 +95,9 @@ class MemoryTest : public ::testing::Test {
   static constexpr uint64_t kSlabSize = 2 * 1024 * 1024;
   // Offset deliberately crossing the 32-bit byte-address boundary.
   static constexpr uint64_t kHighOffset = (uint64_t{1} << 32) + 512;
-  // Device owner enclosing all physical and virtual storage.
+  // Application group enclosing all device resources.
+  loom_serve_device_group_t* group = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device = nullptr;
   // Owned model timeline for transfers and workspace allocations.
   loom_serve_execution_t* execution = nullptr;
@@ -117,7 +120,7 @@ TEST_F(MemoryTest, SparseGrowthTrimRegrowthAndSharedAdmission) {
                                                   &statistics[1], &second));
   auto* const identity = loom_serve_virtual_buffer_handle(first);
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
-                        loom_serve_device_destroy(device));
+                        loom_serve_device_group_destroy(group));
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool).committed_bytes, 0u);
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, kHighOffset, 256));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_commit(first, 0, 512));

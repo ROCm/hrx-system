@@ -38,10 +38,11 @@ class SnapshotTest : public ::testing::Test {
         .memory_limit = 256 * kSlabSize};
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_host_create(1, &host, iree_allocator_system()));
-    auto status = loom_serve_device_create(host, &options, &device,
-                                           iree_allocator_system());
+    auto status = loom_serve_device_group_create(host, 1, &options, &group,
+                                                 iree_allocator_system());
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
+    device = loom_serve_device_group_at(group, 0);
     IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
     pool = loom_serve_device_memory_pool(device);
   }
@@ -60,14 +61,16 @@ class SnapshotTest : public ::testing::Test {
       IREE_EXPECT_OK(loom_serve_virtual_buffer_destroy(reservation));
     }
     loom_serve_execution_release(execution);
-    IREE_EXPECT_OK(loom_serve_device_destroy(device));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group));
   }
 
   // Capacity granularity, independent of the packed transfer lengths.
   static constexpr uint64_t kSlabSize = 2 * 1024 * 1024;
   // Source contents deliberately use wide addresses.
   static constexpr uint64_t kHighOffset = (uint64_t{1} << 32) + 512;
-  // Shared device owner enclosing all reservation/transfer lifetimes.
+  // Application group enclosing all device resources.
+  loom_serve_device_group_t* group = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device = nullptr;
   // Owned model submission timeline.
   loom_serve_execution_t* execution = nullptr;

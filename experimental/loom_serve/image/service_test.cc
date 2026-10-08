@@ -122,10 +122,11 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   loom_serve_host_t* host = nullptr;
   IREE_ASSERT_OK(
       loom_serve_host_create(worker_count, &host, iree_allocator_system()));
-  loom_serve_device_t* device = nullptr;
+  loom_serve_device_group_t* group = nullptr;
   const loom_serve_device_options_t device_options = {.uri = IREE_SV("amdgpu")};
-  IREE_ASSERT_OK(loom_serve_device_create(host, &device_options, &device,
-                                          iree_allocator_system()));
+  IREE_ASSERT_OK(loom_serve_device_group_create(
+      host, 1, &device_options, &group, iree_allocator_system()));
+  auto* device = loom_serve_device_group_at(group, 0);
   ImageGate gate;
   IREE_ASSERT_OK(loom_serve_device_create_execution(device, &gate.execution));
   iree_hal_semaphore_t* predecessor = nullptr;
@@ -322,7 +323,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   }
   loom_serve_execution_release(gate.execution);
   iree_hal_semaphore_release(predecessor);
-  IREE_EXPECT_OK(loom_serve_device_destroy(device));
+  IREE_EXPECT_OK(loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
 }
 
@@ -344,10 +345,14 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   const auto allocator = iree_allocator_system();
   loom_serve_host_t* host = nullptr;
   IREE_ASSERT_OK(loom_serve_host_create(workers, &host, allocator));
-  loom_serve_device_t* device = nullptr;
-  const loom_serve_device_options_t device_options = {.uri = IREE_SV("amdgpu")};
-  IREE_ASSERT_OK(
-      loom_serve_device_create(host, &device_options, &device, allocator));
+  loom_serve_device_group_t* group = nullptr;
+  const loom_serve_device_options_t device_options[] = {
+      {.uri = IREE_SV("amdgpu")}, {.uri = IREE_SV("amdgpu")}};
+  const iree_host_size_t device_count =
+      mode == AdmissionMode::kIndependent ? 2 : 1;
+  IREE_ASSERT_OK(loom_serve_device_group_create(
+      host, device_count, device_options, &group, allocator));
+  auto* device = loom_serve_device_group_at(group, 0);
   loom_serve_execution_t* execution = nullptr;
   IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
   iree_hal_semaphore_t* predecessor = nullptr;
@@ -357,14 +362,18 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
   uint64_t held = 1;
   IREE_ASSERT_OK(
       loom_serve_execution_barrier(execution, {1, &predecessor, &held}));
-  // A second owner has its own queues, timelines and capacity domain, even
-  // though this correctness witness uses the same physical GPU. It does not
-  // claim heterogeneous hardware execution.
+  // A second record shares the HAL group, not its queues, timelines or capacity
+  // domain. Two handles on one GPU prove ownership, not heterogeneous
+  // execution.
   loom_serve_device_t* independent_device = nullptr;
   loom_serve_execution_t* independent_execution = nullptr;
   if (mode == AdmissionMode::kIndependent) {
-    IREE_ASSERT_OK(loom_serve_device_create(host, &device_options,
-                                            &independent_device, allocator));
+    independent_device = loom_serve_device_group_at(group, 1);
+    EXPECT_EQ(loom_serve_device_group_count(group), 2u);
+    EXPECT_EQ(loom_serve_device_group(device),
+              loom_serve_device_group(independent_device));
+    EXPECT_NE(loom_serve_device_residency_cache(device),
+              loom_serve_device_residency_cache(independent_device));
     IREE_ASSERT_OK(loom_serve_device_create_execution(independent_device,
                                                       &independent_execution));
   }
@@ -491,9 +500,8 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
     IREE_EXPECT_OK(loom_serve_execution_drain(independent_execution));
     loom_serve_execution_release(independent_execution);
   }
-  IREE_EXPECT_OK(loom_serve_device_destroy(independent_device));
   iree_hal_semaphore_release(predecessor);
-  IREE_EXPECT_OK(loom_serve_device_destroy(device));
+  IREE_EXPECT_OK(loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
 }
 

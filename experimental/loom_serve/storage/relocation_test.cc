@@ -26,10 +26,11 @@ class RelocationTest : public ::testing::Test {
         .slab_size = 2 * 1024 * 1024};
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_host_create(1, &host, iree_allocator_system()));
-    auto status = loom_serve_device_create(host, &options, &device,
-                                           iree_allocator_system());
+    auto status = loom_serve_device_group_create(host, 1, &options, &group,
+                                                 iree_allocator_system());
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
+    device = loom_serve_device_group_at(group, 0);
     pool = loom_serve_device_memory_pool(device);
     IREE_ASSERT_OK(loom_serve_device_create_execution(device, &execution));
   }
@@ -40,10 +41,12 @@ class RelocationTest : public ::testing::Test {
     loom_serve_retirement_deinitialize(&retirement);
     IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(buffer));
     loom_serve_execution_release(execution);
-    IREE_EXPECT_OK(loom_serve_device_destroy(device));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group));
   }
 
-  // Device owner enclosing all queue work and memory.
+  // Application group enclosing all device resources.
+  loom_serve_device_group_t* group = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device = nullptr;
   // Owned model work/feedback retirement domain.
   loom_serve_execution_t* execution = nullptr;

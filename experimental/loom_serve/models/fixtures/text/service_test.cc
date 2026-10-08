@@ -95,8 +95,9 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t device_options = {.uri =
                                                             IREE_SV("amdgpu")};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(host_, &device_options, &device_, allocator_));
+    IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
+                                                  &group_, allocator_));
+    device_ = loom_serve_device_group_at(group_, 0);
     const std::string source = FLAG_model_source;
     directory_ = source.substr(0, source.find_last_of('/'));
     tokenizer_ = directory_ + "/tokenizer.json";
@@ -152,7 +153,7 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     }
     IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
     IREE_EXPECT_OK(loom_serve_text_model_destroy(model_));
-    IREE_EXPECT_OK(loom_serve_device_destroy(device_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
     loom_serve_host_release(host_);
   }
 
@@ -259,7 +260,9 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
   std::string weights_;
   // Shared task/JIT owner outliving device and model.
   loom_serve_host_t* host_ = nullptr;
-  // Real device with fixed backing and logical pooled page ownership.
+  // Application group enclosing all model and device resources.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device_ = nullptr;
   // Actual source-defined text model, with no native mock implementation.
   loom_serve_text_model_t* model_ = nullptr;

@@ -10,6 +10,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <fstream>
@@ -33,14 +34,17 @@ namespace {
 
 class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
+  virtual iree_host_size_t DeviceCount() const { return 1; }
+
   void SetUp() override {
     iree_notification_initialize(&notification_);
     IREE_ASSERT_OK(iree_async_signal_block_default());
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
-    const loom_serve_device_options_t device_options = {.uri =
-                                                            IREE_SV("amdgpu")};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(host_, &device_options, &device_, allocator_));
+    const loom_serve_device_options_t device_options[] = {
+        {.uri = IREE_SV("amdgpu")}, {.uri = IREE_SV("amdgpu")}};
+    IREE_ASSERT_OK(loom_serve_device_group_create(
+        host_, DeviceCount(), device_options, &group_, allocator_));
+    device_ = loom_serve_device_group_at(group_, DeviceCount() - 1);
     const std::string source = FLAG_model_source;
     directory_ = source.substr(0, source.find_last_of('/'));
     ASSERT_NO_FATAL_FAILURE(CreateModel(directory_));
@@ -91,7 +95,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     IREE_EXPECT_OK(loom_serve_http_server_destroy(server_));
     IREE_EXPECT_OK(loom_serve_finite_model_destroy(model_));
     IREE_EXPECT_OK(loom_serve_finite_model_destroy(retained_));
-    IREE_EXPECT_OK(loom_serve_device_destroy(device_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
     loom_serve_host_release(host_);
     iree_notification_deinitialize(&notification_);
   }
@@ -253,7 +257,9 @@ global.rodata.def @policy = bytes("706f6c6963792e6c6f6f6d")
   const iree_allocator_t allocator_ = iree_allocator_system();
   // Shared CPU/JIT/task runtime.
   loom_serve_host_t* host_ = nullptr;
-  // Real hardware owner backing parameters and command workspaces.
+  // Application group enclosing every device and model resource.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed placement of the source-defined embedding model.
   loom_serve_device_t* device_ = nullptr;
   // Shared source-JIT finite model.
   loom_serve_finite_model_t* model_ = nullptr;
@@ -384,15 +390,18 @@ TEST_P(SourceEmbeddingServiceTest,
   loom_serve_finite_service_destroy(std::exchange(service_, nullptr));
   IREE_ASSERT_OK(
       loom_serve_finite_model_destroy(std::exchange(model_, nullptr)));
-  IREE_ASSERT_OK(loom_serve_device_destroy(std::exchange(device_, nullptr)));
+  device_ = nullptr;
+  IREE_ASSERT_OK(
+      loom_serve_device_group_destroy(std::exchange(group_, nullptr)));
   constexpr uint64_t kSlabBytes = 2 * 1024 * 1024;
   const loom_serve_device_options_t device_options = {
       .uri = IREE_SV("amdgpu"),
       .backing = LOOM_SERVE_DEVICE_BACKING_ELASTIC,
       .slab_size = kSlabBytes,
       .memory_limit = kSlabBytes};
-  IREE_ASSERT_OK(
-      loom_serve_device_create(host_, &device_options, &device_, allocator_));
+  IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &device_options,
+                                                &group_, allocator_));
+  device_ = loom_serve_device_group_at(group_, 0);
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
   retained_ = std::exchange(model_, nullptr);
   ASSERT_NO_FATAL_FAILURE(CreateModel(package));
@@ -482,6 +491,107 @@ TEST_P(SourceEmbeddingServiceTest,
   EXPECT_EQ(loom_serve_residency_statistics(residency).committed_bytes,
             kSlabBytes);
 }
+
+class GroupEmbeddingServiceTest : public SourceEmbeddingServiceTest {
+ protected:
+  iree_host_size_t DeviceCount() const override { return 2; }
+
+  void TearDown() override {
+    // Release a held dependency even when an assertion interrupts the witness.
+    if (gate_) {
+      IREE_EXPECT_OK(iree_hal_semaphore_signal(gate_, 2, nullptr));
+    }
+    iree_hal_buffer_release(workspace_);
+    if (execution_) {
+      IREE_EXPECT_OK(loom_serve_execution_drain(execution_));
+    }
+    loom_serve_execution_release(execution_);
+    iree_hal_semaphore_release(gate_);
+    SourceEmbeddingServiceTest::TearDown();
+  }
+
+  // Work on the group's other device, independent of the embedding timeline.
+  loom_serve_execution_t* execution_ = nullptr;
+  // External predecessor held until the other device returns its HTTP result.
+  iree_hal_semaphore_t* gate_ = nullptr;
+  // Queue-allocated root retained through submission of its final reader.
+  iree_hal_buffer_t* workspace_ = nullptr;
+  // Feedback storage outliving accepted work, including assertion cleanup.
+  std::array<uint32_t, 16> output_ = {};
+};
+
+TEST_P(GroupEmbeddingServiceTest, EmbeddingsCompleteBeforeOtherDeviceRetires) {
+  auto* first = loom_serve_device_group_at(group_, 0);
+  EXPECT_EQ(loom_serve_device_group_count(group_), 2u);
+  EXPECT_EQ(loom_serve_device_group(first), loom_serve_device_group(device_));
+  EXPECT_EQ(iree_hal_device_group_device_count(loom_serve_device_group(first)),
+            2u);
+  EXPECT_NE(loom_serve_device_residency_cache(first),
+            loom_serve_device_residency_cache(device_));
+  IREE_ASSERT_OK(loom_serve_device_create_execution(first, &execution_));
+  IREE_ASSERT_OK(loom_serve_execution_reserve_workspace(execution_, 64, 16));
+  const iree_hal_pool_reservation_request_t request = {
+      .params = {.usage = IREE_HAL_BUFFER_USAGE_STORAGE |
+                          IREE_HAL_BUFFER_USAGE_TRANSFER,
+                 .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+                 .min_alignment = 16},
+      .allocation_size = 64};
+  IREE_ASSERT_OK(
+      loom_serve_execution_alloca(execution_, &request, &workspace_));
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      loom_serve_device_handle(first), IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &gate_));
+  uint64_t value = 1;
+  IREE_ASSERT_OK(loom_serve_execution_barrier(execution_, {1, &gate_, &value}));
+  const uint32_t pattern = 0x13579BDF;
+  const iree_hal_transfer_operation_t fill = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_FILL,
+      .fill = {.target_buffer = workspace_,
+               .length = sizeof(output_),
+               .pattern = &pattern,
+               .pattern_length = sizeof(pattern)}};
+  IREE_ASSERT_OK(loom_serve_execution_transfer(execution_, 1, &fill, &value));
+  const iree_hal_transfer_operation_t download = {
+      .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+      .download = {.source_buffer = workspace_,
+                   .target = output_.data(),
+                   .length = sizeof(output_)}};
+  IREE_ASSERT_OK(
+      loom_serve_execution_feedback(execution_, 1, &download, &value));
+  auto frontier = loom_serve_execution_frontier(execution_);
+  // The feedback branch is a final reader, not an implicit FIFO dependency.
+  IREE_ASSERT_OK(loom_serve_execution_barrier(
+      execution_, {1, &frontier.semaphores[1], &frontier.values[1]}));
+  IREE_ASSERT_OK(loom_serve_execution_dealloca(execution_, workspace_, &value));
+  iree_hal_buffer_release(std::exchange(workspace_, nullptr));
+
+  StartRouter();
+  const auto response =
+      Read(Send(R"({"model":"fixture","input":["a","bbb"]})"));
+  EXPECT_EQ(response.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(response.find(R"("index":0,"embedding":[1,1,1,2])"),
+            std::string::npos);
+  EXPECT_NE(response.find(R"("index":1,"embedding":[6,3,2,2])"),
+            std::string::npos);
+  uint64_t observed = 0;
+  IREE_ASSERT_OK(iree_hal_semaphore_query(frontier.semaphores[1], &observed));
+  EXPECT_LT(observed, frontier.values[1]);
+  IREE_ASSERT_OK(loom_serve_device_trim(first, 0));
+  EXPECT_EQ(
+      loom_serve_device_memory_statistics(first).workspace.reservation_count,
+      1u);
+  IREE_ASSERT_OK(iree_hal_semaphore_signal(gate_, 1, nullptr));
+  IREE_ASSERT_OK(loom_serve_execution_drain(execution_));
+  for (uint32_t word : output_) {
+    EXPECT_EQ(word, pattern);
+  }
+  IREE_ASSERT_OK(loom_serve_device_trim(first, 0));
+  EXPECT_EQ(
+      loom_serve_device_memory_statistics(first).workspace.bytes_committed, 0u);
+}
+
+INSTANTIATE_TEST_SUITE_P(Workers, GroupEmbeddingServiceTest,
+                         ::testing::Values(1u, 4u));
 
 INSTANTIATE_TEST_SUITE_P(Workers, SourceEmbeddingServiceTest,
                          ::testing::Values(1u, 4u));

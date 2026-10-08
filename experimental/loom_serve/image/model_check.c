@@ -41,13 +41,15 @@ int main(int argc, char** argv) {
       .text_tokens = 512,
   };
   loom_serve_image_model_t* model = NULL;
+  loom_serve_device_group_t* group = NULL;
   loom_serve_device_t* device = NULL;
   loom_serve_host_t* host = NULL;
   iree_status_t status = loom_serve_host_create_from_flags(&host, allocator);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_device_create_from_flags(host, &device, allocator);
+    status = loom_serve_device_group_create_from_flags(host, &group, allocator);
   }
   if (iree_status_is_ok(status)) {
+    device = loom_serve_device_group_at(group, 0);
     status = loom_serve_image_model_create(device, &options, &model, allocator);
   }
   if (iree_status_is_ok(status) &&
@@ -139,7 +141,7 @@ int main(int argc, char** argv) {
     iree_allocator_free(allocator, path);
   }
   status = iree_status_join(status, loom_serve_image_model_destroy(model));
-  status = iree_status_join(status, loom_serve_device_destroy(device));
+  status = iree_status_join(status, loom_serve_device_group_destroy(group));
   loom_serve_host_release(host);
   if (!iree_status_is_ok(status)) {
     iree_status_fprint(stderr, status);

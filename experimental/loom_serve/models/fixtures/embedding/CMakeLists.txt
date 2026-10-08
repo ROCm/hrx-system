@@ -58,6 +58,7 @@ loom_cc_test(
     iree::experimental::loom_serve::runtime::execution
     iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::runtime::residency
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

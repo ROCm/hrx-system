@@ -49,6 +49,16 @@ deployments with `--models=/path/to/catalog.json`. Full serving coverage runs wi
 
 ## Shared execution
 
+`runtime/device.c` owns one immutable HAL device group for the application.
+Every raw device is created and assigned its group topology before any workspace
+or model is constructed. The group shares host services, the frontier registry
+and one profiling session. Models borrow per-device records with separate queue
+selection, workspace, retained-memory budgets and residency caches. Group
+membership establishes neither execution ordering nor cross-device coherence.
+All model work and borrowed I/O retire before the application destroys the group;
+an outstanding virtual reservation rejects destruction before any device is torn
+down. Single-device tools use the same owner with one record.
+
 `runtime/command.c` combines a parsed portable command program with loaded executable
 reflection. Recording retains fixed buffers and code. Rebindable slots include
 model state and explicit scratch; the materializer allocates no device backing.

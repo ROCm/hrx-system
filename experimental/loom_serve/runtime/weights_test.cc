@@ -201,9 +201,10 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     loom_serve_host_t* host = nullptr;
     IREE_ASSERT_OK(loom_serve_host_create(1, &host, allocator_));
     auto status =
-        loom_serve_device_create(host, &options, &device_owner_, allocator_);
+        loom_serve_device_group_create(host, 1, &options, &group_, allocator_);
     loom_serve_host_release(host);
     IREE_ASSERT_OK(status);
+    device_owner_ = loom_serve_device_group_at(group_, 0);
     device_ = loom_serve_device_handle(device_owner_);
     dispatch_ = loom_serve_device_dispatch_queue(device_owner_);
     transfer_ = loom_serve_device_transfer_queue(device_owner_);
@@ -253,7 +254,7 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
     iree_hal_buffer_release(output_buffer_);
     loom_serve_jit_destroy(jit_);
     loom_serve_execution_release(execution_);
-    IREE_EXPECT_OK(loom_serve_device_destroy(device_owner_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
     if (path_.Exists()) {
       EXPECT_TRUE(path_.Remove());
     }
@@ -355,7 +356,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
 
   // Allocation policy for the real runtime and compiler.
   iree_allocator_t allocator_ = iree_allocator_system();
-  // Production runtime owner outliving every weight and accepted operation.
+  // Application group outliving all compiler, VM and I/O resources.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device_owner_ = nullptr;
   // Borrowed live GPU used by compilation and execution.
   iree_hal_device_t* device_ = nullptr;

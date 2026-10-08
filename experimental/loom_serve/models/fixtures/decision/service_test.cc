@@ -44,8 +44,9 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     IREE_ASSERT_OK(iree_async_signal_block_default());
     IREE_ASSERT_OK(loom_serve_host_create(GetParam(), &host_, allocator_));
     const loom_serve_device_options_t options = {.uri = IREE_SV("amdgpu")};
-    IREE_ASSERT_OK(
-        loom_serve_device_create(host_, &options, &device_, allocator_));
+    IREE_ASSERT_OK(loom_serve_device_group_create(host_, 1, &options, &group_,
+                                                  allocator_));
+    device_ = loom_serve_device_group_at(group_, 0);
     ASSERT_NO_FATAL_FAILURE(CreateModel(FLAG_model_source, &models_[0]));
     IREE_ASSERT_OK(loom_serve_finite_service_create(
         host_, models_[0], loom_serve_decision_protocol(), IREE_SV("decisions"),
@@ -82,7 +83,7 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
     for (auto* model : models_) {
       IREE_EXPECT_OK(loom_serve_finite_model_destroy(model));
     }
-    IREE_EXPECT_OK(loom_serve_device_destroy(device_));
+    IREE_EXPECT_OK(loom_serve_device_group_destroy(group_));
     loom_serve_host_release(host_);
     iree_notification_deinitialize(&notification_);
   }
@@ -180,7 +181,9 @@ class SourceDecisionServiceTest : public ::testing::TestWithParam<uint32_t> {
   const iree_allocator_t allocator_ = iree_allocator_system();
   // Real shared CPU/JIT executor and asynchronous I/O owner.
   loom_serve_host_t* host_ = nullptr;
-  // Shared GPU and parameter/workspace backing.
+  // Application group enclosing all model and device resources.
+  loom_serve_device_group_t* group_ = nullptr;
+  // Borrowed device record within the application group.
   loom_serve_device_t* device_ = nullptr;
   // Independently compiled source models, not mock callbacks.
   loom_serve_finite_model_t* models_[2] = {};
