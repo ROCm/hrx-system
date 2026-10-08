@@ -607,7 +607,6 @@ loom_cc_library(
     loom::ops::low
     loom::ops::op_defs
     loom::target::reporting::report
-    loom::tools::loom-check::compile
     loom::tools::loom-check::execute
     loom::tools::loom-check::provider
   PUBLIC

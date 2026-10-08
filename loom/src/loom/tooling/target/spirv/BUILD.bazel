@@ -58,7 +58,6 @@ loom_cc_library(
     hdrs = ["check/loom_check.h"],
     deps = [
         "//loom/src/loom/target/tool:spirv",
-        "//loom/src/loom/tools/loom-check:compile",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
     ],

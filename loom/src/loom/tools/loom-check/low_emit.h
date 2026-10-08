@@ -135,6 +135,7 @@ iree_status_t loom_check_low_emit_resolve_fixed_value_specs(
 // All other frame options, including reserved ranges, pass through unchanged.
 iree_status_t loom_check_low_emit_packetize_function(
     const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module,
     iree_string_view_t function_symbol_name,
     const loom_low_emission_frame_options_t* frame_options,
     const loom_check_low_emit_fixed_value_spec_t* allocation_fixed_specs,

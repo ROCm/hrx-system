@@ -48,6 +48,7 @@ typedef struct loom_target_environment_t loom_target_environment_t;
 typedef struct loom_check_diagnostic_collector_t
     loom_check_diagnostic_collector_t;
 typedef struct loom_check_compile_session_t loom_check_compile_session_t;
+typedef struct loomc_module_t loomc_module_t;
 
 //===----------------------------------------------------------------------===//
 // Types
@@ -142,11 +143,9 @@ typedef struct loom_check_requirement_provider_t
     loom_check_requirement_provider_t;
 
 enum loom_check_emit_provider_flag_bits_e {
-  // The provider consumes source before common module admission.
-  LOOM_CHECK_EMIT_PROVIDER_FLAG_CONSUMES_SOURCE = 1u << 0,
   // Provider output is complete and comparable alongside expected compiler
   // errors.
-  LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT = 1u << 1,
+  LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT = 1u << 0,
 };
 typedef uint32_t loom_check_emit_provider_flags_t;
 
@@ -162,17 +161,12 @@ typedef struct loom_check_emit_provider_request_t {
   iree_string_view_t filename;
   // Parsed test case being executed.
   const loom_test_case_t* test_case;
-  // Original source admission request. Source-consuming providers admit this
-  // input through the public compiler and receive no internal |module|.
-  const loom_input_request_t* input_request;
   // Finalized runner context for checker-owned inspection IR.
   loom_context_t* context;
   // Runner environment that selected this provider.
   const loom_check_environment_t* environment;
-  // Module admitted by the selected input provider.
-  loom_module_t* module;
-  // Source resolver for source-backed operation locations in |module|.
-  loom_source_resolver_t source_resolver;
+  // Public module admitted once through LoomC for this emit case.
+  loomc_module_t* public_module;
   // Linked target-low registry visible to this runner.
   const loom_target_low_descriptor_registry_t* low_registry;
   // Diagnostic collector for provider diagnostics.
@@ -188,6 +182,17 @@ typedef struct loom_check_emit_provider_request_t {
   loom_check_result_t* result;
 } loom_check_emit_provider_request_t;
 
+// Mutable exact-version projection supplied only to native emit providers.
+// The public module has been verified against its context target before this
+// view is created. Native mutation invalidates that cached verification; common
+// dispatch verifies the module again after the callback succeeds.
+typedef struct loom_check_emit_native_module_t {
+  // Mutable module owned by the emit request's public module.
+  loom_module_t* module;
+  // Resolver for source-backed operation locations in |module|.
+  loom_source_resolver_t source_resolver;
+} loom_check_emit_native_module_t;
+
 // Returns true when |provider| owns emit targets named |target_name|.
 typedef bool (*loom_check_emit_provider_match_fn_t)(
     const loom_check_emit_provider_t* provider, iree_string_view_t target_name);
@@ -202,6 +207,12 @@ typedef iree_status_t (*loom_check_emit_provider_check_requirements_fn_t)(
 typedef iree_status_t (*loom_check_emit_provider_execute_fn_t)(
     const loom_check_emit_provider_t* provider,
     const loom_check_emit_provider_request_t* request);
+
+// Emits provider-owned output from a verified mutable native module.
+typedef iree_status_t (*loom_check_emit_provider_execute_native_fn_t)(
+    const loom_check_emit_provider_t* provider,
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module);
 
 // Appends provider-owned emit target names to a diagnostic list.
 typedef iree_status_t (*loom_check_emit_provider_append_names_fn_t)(
@@ -220,6 +231,8 @@ struct loom_check_emit_provider_t {
   loom_check_emit_provider_check_requirements_fn_t check_requirements;
   // Emits provider-owned comparable output.
   loom_check_emit_provider_execute_fn_t execute;
+  // Emits from a verified native module when |execute| is NULL.
+  loom_check_emit_provider_execute_native_fn_t execute_native;
   // Appends supported emit target names to diagnostic help text.
   loom_check_emit_provider_append_names_fn_t append_names;
 };
@@ -278,7 +291,7 @@ struct loom_check_environment_t {
   loom_check_register_context_callback_t register_context;
   // Composed target environment used by target-aware check modes.
   const loom_target_environment_t* target_environment;
-  // Lazy public compiler session used only by source-consuming providers.
+  // Lazy public compiler session used to admit every module-dependent case.
   loom_check_compile_session_t* compile_session;
   // Cleanup rewrite providers linked into this runner.
   const loom_cleanup_pattern_provider_set_t* cleanup_pattern_provider_set;

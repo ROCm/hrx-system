@@ -20,7 +20,6 @@ loom_cc_library(
   DEPS
     iree::base
     loom::target::tool::spirv
-    loom::tools::loom-check::compile
     loom::tools::loom-check::execute
   PUBLIC
 )

@@ -146,7 +146,8 @@ static iree_status_t loom_amdgpu_occupancy_check_parse_emit_options(
 
 static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   loom_amdgpu_occupancy_check_emit_options_t options;
   IREE_RETURN_IF_ERROR(
@@ -167,7 +168,7 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
       .storage_lease_provider = &storage_lease_provider,
   };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, &frame_options,
+      request, native_module, options.function_symbol_name, &frame_options,
       options.allocation_fixed_values.specs,
       options.allocation_fixed_values.count,
       /*spill_free_options=*/NULL, &frame, &frame_accepted));
@@ -182,8 +183,8 @@ static iree_status_t loom_amdgpu_occupancy_check_emit_provider_execute(
 
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
-      .module = request->module,
-      .source_resolver = request->source_resolver,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const loom_amdgpu_occupancy_options_t occupancy_options = {
@@ -213,6 +214,6 @@ const loom_check_emit_provider_t
     loom_amdgpu_occupancy_loom_check_emit_provider = {
         .name = IREE_SVL("amdgpu-occupancy"),
         .match = loom_amdgpu_occupancy_check_emit_provider_matches,
-        .execute = loom_amdgpu_occupancy_check_emit_provider_execute,
+        .execute_native = loom_amdgpu_occupancy_check_emit_provider_execute,
         .append_names = loom_amdgpu_occupancy_check_emit_provider_append_names,
 };

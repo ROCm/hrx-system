@@ -279,7 +279,8 @@ static void loom_check_test_low_synthetic_hazard_progress_query(
 
 static iree_status_t loom_check_test_low_synthetic_hazard_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_synthetic_hazard_options_t options;
   IREE_RETURN_IF_ERROR(loom_check_test_low_synthetic_hazard_parse_emit_options(
@@ -293,7 +294,7 @@ static iree_status_t loom_check_test_low_synthetic_hazard_execute(
       .allocation_budget_count = options.allocation_budget_count,
   };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, &frame_options,
+      request, native_module, options.function_symbol_name, &frame_options,
       options.allocation_fixed_values.specs,
       options.allocation_fixed_values.count,
       /*spill_free_options=*/NULL, &frame, &frame_accepted));
@@ -369,6 +370,6 @@ const loom_check_emit_provider_t loom_check_test_low_synthetic_hazard_provider =
     {
         .name = IREE_SVL("synthetic-hazard-plan"),
         .match = loom_check_test_low_synthetic_hazard_matches,
-        .execute = loom_check_test_low_synthetic_hazard_execute,
+        .execute_native = loom_check_test_low_synthetic_hazard_execute,
         .append_names = loom_check_test_low_synthetic_hazard_append_names,
 };

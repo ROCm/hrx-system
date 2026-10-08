@@ -170,32 +170,31 @@ static iree_status_t loom_x86_loom_check_emit_frame(
 }
 
 static iree_status_t loom_x86_loom_check_prepare_abis(
-    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_provider_request_t* request, loom_module_t* module,
     loom_x86_module_abi_t* out_module_abi) {
   iree_host_size_t function_count = 0;
-  for (iree_host_size_t i = 0; i < request->module->symbols.count; ++i) {
-    const loom_op_t* op = request->module->symbols.entries[i].defining_op;
+  for (iree_host_size_t i = 0; i < module->symbols.count; ++i) {
+    const loom_op_t* op = module->symbols.entries[i].defining_op;
     function_count +=
         op != NULL && (loom_low_func_def_isa(op) || loom_low_func_decl_isa(op));
   }
-  IREE_RETURN_IF_ERROR(loom_x86_module_abi_initialize(
-      request->module->symbols.count, function_count, request->case_arena,
-      out_module_abi));
+  IREE_RETURN_IF_ERROR(
+      loom_x86_module_abi_initialize(module->symbols.count, function_count,
+                                     request->case_arena, out_module_abi));
   loom_symbol_fact_table_t symbol_facts = {0};
   loom_symbol_fact_table_initialize(&symbol_facts, request->case_arena);
   iree_host_size_t function_index = 0;
-  for (loom_symbol_id_t symbol_id = 0;
-       symbol_id < request->module->symbols.count; ++symbol_id) {
-    loom_op_t* op = request->module->symbols.entries[symbol_id].defining_op;
+  for (loom_symbol_id_t symbol_id = 0; symbol_id < module->symbols.count;
+       ++symbol_id) {
+    loom_op_t* op = module->symbols.entries[symbol_id].defining_op;
     if (op == NULL ||
         (!loom_low_func_def_isa(op) && !loom_low_func_decl_isa(op))) {
       continue;
     }
     loom_low_resolved_target_t target = {0};
     IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-        request->module, &symbol_facts, op, NULL,
-        &request->low_registry->registry, (iree_diagnostic_emitter_t){0},
-        &target));
+        module, &symbol_facts, op, NULL, &request->low_registry->registry,
+        (iree_diagnostic_emitter_t){0}, &target));
     if (target.descriptor_set == NULL) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                               "x86 frame function has no resolved target");
@@ -203,9 +202,8 @@ static iree_status_t loom_x86_loom_check_prepare_abis(
     bool supported = false;
     iree_string_view_t constraint = iree_string_view_empty();
     IREE_RETURN_IF_ERROR(loom_x86_function_abi_prepare(
-        request->module, loom_func_like_cast(request->module, op), &target,
-        request->case_arena, &supported, &constraint,
-        &out_module_abi->functions[function_index]));
+        module, loom_func_like_cast(module, op), &target, request->case_arena,
+        &supported, &constraint, &out_module_abi->functions[function_index]));
     if (!supported) {
       return iree_make_status(IREE_STATUS_UNIMPLEMENTED, "%.*s",
                               (int)constraint.size, constraint.data);
@@ -217,20 +215,22 @@ static iree_status_t loom_x86_loom_check_prepare_abis(
 
 static iree_status_t loom_x86_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   loom_x86_loom_check_emit_options_t options;
   IREE_RETURN_IF_ERROR(
       loom_x86_loom_check_parse_emit_options(request, &options));
 
   loom_x86_module_abi_t module_abi = {0};
-  IREE_RETURN_IF_ERROR(loom_x86_loom_check_prepare_abis(request, &module_abi));
-  const loom_string_id_t function_name_id =
-      loom_module_lookup_string(request->module, options.function_symbol_name);
+  IREE_RETURN_IF_ERROR(loom_x86_loom_check_prepare_abis(
+      request, native_module->module, &module_abi));
+  const loom_string_id_t function_name_id = loom_module_lookup_string(
+      native_module->module, options.function_symbol_name);
   const loom_symbol_id_t function_symbol_id =
       function_name_id == LOOM_STRING_ID_INVALID
           ? LOOM_SYMBOL_ID_INVALID
-          : loom_module_find_symbol(request->module, function_name_id);
+          : loom_module_find_symbol(native_module->module, function_name_id);
   const loom_x86_function_abi_t* function_abi =
       function_symbol_id == LOOM_SYMBOL_ID_INVALID
           ? NULL
@@ -277,7 +277,7 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
       .allocation_reserved_range_count = reserved_range_count,
   };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, &frame_options,
+      request, native_module, options.function_symbol_name, &frame_options,
       options.allocation_fixed_values.specs,
       options.allocation_fixed_values.count, &spill_free_options, &frame,
       &frame_accepted));
@@ -291,8 +291,8 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
   }
   loom_check_diagnostic_emitter_capture_t capture = {
       .diagnostic_collector = request->diagnostic_collector,
-      .module = request->module,
-      .source_resolver = request->source_resolver,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
   };
   IREE_ASSERT_NE(function_abi, NULL);
   return loom_x86_loom_check_emit_frame(
@@ -314,6 +314,6 @@ static iree_status_t loom_x86_loom_check_emit_provider_append_names(
 const loom_check_emit_provider_t loom_x86_native_loom_check_emit_provider = {
     .name = IREE_SVL("x86-native"),
     .match = loom_x86_loom_check_emit_provider_matches,
-    .execute = loom_x86_loom_check_emit_provider_execute,
+    .execute_native = loom_x86_loom_check_emit_provider_execute,
     .append_names = loom_x86_loom_check_emit_provider_append_names,
 };

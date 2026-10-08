@@ -287,7 +287,6 @@ static iree_status_t loom_spirv_loom_check_requirement_provider_append_names(
 
 const loom_check_emit_provider_t loom_spirv_loom_check_emit_provider = {
     .name = IREE_SVL("spirv"),
-    .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_CONSUMES_SOURCE,
     .match = loom_spirv_loom_check_emit_provider_matches,
     .check_requirements =
         loom_spirv_loom_check_emit_provider_check_requirements,

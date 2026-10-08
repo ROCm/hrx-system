@@ -21,11 +21,8 @@
 #include "loom/codegen/low/schedule/types.h"
 #include "loom/codegen/low/target_binding.h"
 #include "loom/codegen/low/text_asm.h"
-#include "loom/codegen/low/verify.h"
 #include "loom/error/error_catalog.h"
 #include "loom/error/source.h"
-#include "loom/format/text/parser.h"
-#include "loom/format/text/printer.h"
 #include "loom/ir/context.h"
 #include "loom/ir/module.h"
 #include "loom/ops/func/ops.h"
@@ -33,20 +30,18 @@
 #include "loom/ops/op_defs.h"
 #include "loom/ops/pipeline/ops.h"
 #include "loom/pass/pipeline.h"
-#include "loom/target/entry_selection.h"
 #include "loom/target/low_packet_diagnostics.h"
 #include "loom/target/provider.h"
 #include "loom/tools/loom-check/analysis.h"
 #include "loom/tools/loom-check/comparison.h"
+#include "loom/tools/loom-check/compile.h"
 #include "loom/tools/loom-check/diagnostics.h"
 #include "loom/tools/loom-check/execute.h"
-#include "loom/tools/loom-check/input.h"
 #include "loom/tools/loom-check/low_emit.h"
 #include "loom/tools/loom-check/low_report.h"
 #include "loom/tools/loom-check/target_low_registry_manifest.h"
 #include "loom/util/fact_table.h"
 #include "loom/util/stream.h"
-#include "loom/verify/verify.h"
 
 typedef enum loom_check_emit_format_e {
   LOOM_CHECK_EMIT_LIVENESS_JSON = 0,
@@ -1454,35 +1449,19 @@ static iree_status_t loom_check_emit_write_low_packet_json(
                                      &result->actual_output);
 }
 
-static iree_status_t loom_check_emit_verify_provider_module(
-    loom_module_t* module,
-    const loom_target_low_descriptor_registry_t* low_registry,
-    loom_source_resolver_t source_resolver,
-    loom_low_verify_provider_list_t low_verify_provider_list,
-    loom_check_diagnostic_collector_t* diagnostic_collector) {
-  const loom_target_entry_options_t entry_options = {
-      .diagnostic_sink = {.fn = loom_check_diagnostic_collector_sink,
-                          .user_data = diagnostic_collector},
-      .source_resolver = source_resolver,
-      .max_errors = 20,
-  };
-  loom_verify_result_t verify_result = {0};
-  IREE_RETURN_IF_ERROR(loom_target_entry_verify_module(module, &entry_options,
-                                                       20, &verify_result));
-  if (verify_result.error_count != 0) {
-    return iree_ok_status();
-  }
+typedef struct loom_check_emit_native_provider_consumer_t {
+  // Provider receiving the projected native module.
+  const loom_check_emit_provider_t* provider;
+  // Common request owning the admitted public module.
+  const loom_check_emit_provider_request_t* request;
+} loom_check_emit_native_provider_consumer_t;
 
-  loom_target_entry_diagnostic_emitter_t verifier_emitter = {0};
-  loom_target_entry_diagnostic_emitter_initialize(
-      module, &entry_options, LOOM_EMITTER_VERIFIER, &verifier_emitter);
-  loom_low_verify_result_t low_verify_result = {0};
-  loom_low_verify_scratch_t low_verify_scratch =
-      loom_low_verify_scratch_for_module(module);
-  IREE_RETURN_IF_ERROR(loom_target_entry_verify_low_module(
-      module, low_registry, &entry_options, &verifier_emitter, 20,
-      low_verify_provider_list, &low_verify_scratch, &low_verify_result));
-  return iree_ok_status();
+static iree_status_t loom_check_emit_invoke_native_provider(
+    void* user_data, const loom_check_emit_native_module_t* native_module) {
+  const loom_check_emit_native_provider_consumer_t* consumer =
+      (const loom_check_emit_native_provider_consumer_t*)user_data;
+  return consumer->provider->execute_native(consumer->provider,
+                                            consumer->request, native_module);
 }
 
 static iree_status_t loom_check_emit_invoke_provider(
@@ -1494,7 +1473,18 @@ static iree_status_t loom_check_emit_invoke_provider(
   // Providers own comparable output by default and may explicitly suppress it
   // for diagnostics-only modes.
   request->result->has_actual_output = true;
-  iree_status_t status = provider->execute(provider, request);
+  iree_status_t status = iree_ok_status();
+  if (provider->execute != NULL) {
+    status = provider->execute(provider, request);
+  } else {
+    const loom_check_emit_native_provider_consumer_t native_consumer = {
+        .provider = provider,
+        .request = request,
+    };
+    status = loom_check_compile_with_native_module(
+        request, loom_check_emit_invoke_native_provider,
+        (void*)&native_consumer);
+  }
   iree_arena_deinitialize(&case_arena);
   // Successful emission owns a comparable output even when it is empty.
   // Providers must opt in when they produce complete output after a compiler
@@ -1521,6 +1511,132 @@ static iree_status_t loom_check_emit_finish_provider(
   return loom_check_emit_finish_diagnostics_and_compare_output(
       request->diagnostic_collector, request->test_case, case_index, report,
       request->host_allocator, request->result);
+}
+
+typedef struct loom_check_emit_core_consumer_t {
+  // Common request owning the admitted public module and output state.
+  const loom_check_emit_provider_request_t* provider_request;
+  // Parsed core emit operation.
+  const loom_check_emit_request_t* emit_request;
+  // Pass diagnostics emitted while producing the core output.
+  iree_host_size_t diagnostic_emission_count;
+} loom_check_emit_core_consumer_t;
+
+static iree_status_t loom_check_emit_core_native_module(
+    void* user_data, const loom_check_emit_native_module_t* native_module) {
+  loom_check_emit_core_consumer_t* consumer =
+      (loom_check_emit_core_consumer_t*)user_data;
+  const loom_check_emit_provider_request_t* provider_request =
+      consumer->provider_request;
+  const loom_check_emit_request_t* request = consumer->emit_request;
+  loom_check_diagnostic_collector_t* diagnostic_collector =
+      provider_request->diagnostic_collector;
+  loom_module_t* module = native_module->module;
+  loom_check_result_t* result = provider_request->result;
+  loom_check_diagnostic_emitter_capture_t pass_diagnostic_capture = {
+      .diagnostic_collector = diagnostic_collector,
+      .module = module,
+      .source_resolver = native_module->source_resolver,
+      .emitter = LOOM_EMITTER_PASS,
+  };
+  const iree_diagnostic_emitter_t emitter = {
+      .fn = loom_check_diagnostic_emitter_capture_emit,
+      .user_data = &pass_diagnostic_capture,
+  };
+  const iree_host_size_t actual_output_size = result->actual_output.size;
+  iree_status_t status = iree_ok_status();
+  if (request->format == LOOM_CHECK_EMIT_LIVENESS_JSON ||
+      request->format == LOOM_CHECK_EMIT_STORAGE_INTERFERENCE) {
+    status = loom_check_emit_write_function_analysis(
+        module, request->analysis_symbol_name, request->format,
+        provider_request->test_case, provider_request->filename,
+        diagnostic_collector, emitter, diagnostic_collector->arena, result);
+  } else if (request->format == LOOM_CHECK_EMIT_PIPELINE_PLAN) {
+    status = loom_check_emit_pipeline_plan(
+        module, request->analysis_symbol_name, request->pipeline_limits,
+        provider_request->test_case, provider_request->filename,
+        diagnostic_collector, emitter, diagnostic_collector->arena);
+  } else if (request->format == LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON) {
+    status = loom_check_emit_write_low_schedule_json(
+        native_module->module, request->analysis_symbol_name,
+        &provider_request->low_registry->registry, provider_request->test_case,
+        provider_request->filename, diagnostic_collector,
+        request->low_schedule_pressure_cliff_specs,
+        request->low_schedule_pressure_cliff_spec_count,
+        request->low_allocation_budgets, request->low_allocation_budget_count,
+        request->low_schedule_diagnostic_flags, request->low_schedule_strategy,
+        emitter, diagnostic_collector->arena, result);
+  } else if (request->format == LOOM_CHECK_EMIT_LOW_ALLOCATION_JSON) {
+    status = loom_check_emit_write_low_allocation_json(
+        native_module->module, request->analysis_symbol_name,
+        &provider_request->low_registry->registry, provider_request->test_case,
+        provider_request->filename, diagnostic_collector,
+        request->low_allocation_budgets, request->low_allocation_budget_count,
+        request->low_allocation_fixed_values.specs,
+        request->low_allocation_fixed_values.count,
+        &request->low_allocation_entry,
+        request->low_allocation_diagnostic_flags, emitter,
+        diagnostic_collector->arena, result);
+  } else if (request->format == LOOM_CHECK_EMIT_LOW_ALLOCATION_SUMMARY) {
+    status = loom_check_emit_write_low_allocation_summary(
+        native_module->module, request->analysis_symbol_name,
+        &provider_request->low_registry->registry, provider_request->test_case,
+        provider_request->filename, diagnostic_collector,
+        request->low_allocation_budgets, request->low_allocation_budget_count,
+        request->low_allocation_fixed_values.specs,
+        request->low_allocation_fixed_values.count,
+        &request->low_allocation_entry,
+        request->low_allocation_diagnostic_flags, emitter,
+        diagnostic_collector->arena, result);
+  } else if (request->format == LOOM_CHECK_EMIT_LOW_COMPILE_REPORT) {
+    status = loom_check_emit_low_report(
+        native_module->module, request->analysis_symbol_name,
+        &provider_request->low_registry->registry, provider_request->test_case,
+        provider_request->filename, diagnostic_collector, emitter,
+        diagnostic_collector->arena, result);
+  } else if (request->format == LOOM_CHECK_EMIT_LOW_PACKET_JSON) {
+    status = loom_check_emit_write_low_packet_json(
+        native_module->module, request->analysis_symbol_name,
+        &provider_request->low_registry->registry, provider_request->test_case,
+        provider_request->filename, diagnostic_collector,
+        request->low_schedule_strategy, request->low_allocation_budgets,
+        request->low_allocation_budget_count,
+        request->low_allocation_fixed_values.specs,
+        request->low_allocation_fixed_values.count,
+        loom_target_environment_low_packet_diagnostic_provider_list(
+            provider_request->environment->target_environment),
+        request->low_packet_diagnostic_flags, emitter,
+        diagnostic_collector->arena, result);
+  } else {
+    status = iree_make_status(
+        IREE_STATUS_INTERNAL,
+        "core emit target '%.*s' was parsed but not handled",
+        (int)request->emit_target_name.size, request->emit_target_name.data);
+  }
+
+  consumer->diagnostic_emission_count = pass_diagnostic_capture.emission_count;
+  if (iree_status_is_ok(status)) {
+    if (request->suppress_actual_output) {
+      result->actual_output.size = actual_output_size;
+      if (result->actual_output.buffer != NULL &&
+          result->actual_output.capacity > actual_output_size) {
+        result->actual_output.buffer[actual_output_size] = 0;
+      }
+    } else if (result->actual_output.size != actual_output_size) {
+      result->has_actual_output = true;
+    }
+  }
+  return status;
+}
+
+static void loom_check_emit_release_public_module(
+    loom_check_emit_provider_request_t* request) {
+  loomc_module_release(request->public_module);
+  request->public_module = NULL;
+  loom_check_compile_session_t* session = request->environment->compile_session;
+  if (session->workspace != NULL) {
+    loomc_workspace_trim(session->workspace);
+  }
 }
 
 iree_status_t loom_check_execute_emit(
@@ -1601,10 +1717,12 @@ iree_status_t loom_check_execute_emit(
           environment->target_environment);
   loom_low_descriptor_text_print_context_initialize(
       &low_registry.registry, &diagnostic_collector.type_print_context);
-  if (provider != NULL && provider->execute == NULL) {
-    status = iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
-                              "emit provider '%.*s' has no execute callback",
-                              (int)provider->name.size, provider->name.data);
+  if (provider != NULL &&
+      ((provider->execute == NULL) == (provider->execute_native == NULL))) {
+    status = iree_make_status(
+        IREE_STATUS_FAILED_PRECONDITION,
+        "emit provider '%.*s' must define exactly one execute callback",
+        (int)provider->name.size, provider->name.data);
     status = loom_check_emit_finish_status_failure(
         status, request.emit_target_name, result);
     iree_arena_deinitialize(&diagnostic_arena);
@@ -1616,7 +1734,6 @@ iree_status_t loom_check_execute_emit(
       .target_options = provider_target_options,
       .filename = filename,
       .test_case = test_case,
-      .input_request = input_request,
       .context = context,
       .environment = environment,
       .low_registry = &low_registry,
@@ -1625,309 +1742,64 @@ iree_status_t loom_check_execute_emit(
       .host_allocator = allocator,
       .result = result,
   };
-  if (provider != NULL &&
-      iree_any_bit_set(provider->flags,
-                       LOOM_CHECK_EMIT_PROVIDER_FLAG_CONSUMES_SOURCE)) {
-    status = loom_check_emit_invoke_provider(provider, &provider_request);
-    status = loom_check_emit_finish_provider(status, &provider_request,
-                                             case_index, report);
-    iree_arena_deinitialize(&diagnostic_arena);
-    return status;
-  }
-
-  loom_input_module_t input = {0};
-  loom_module_t* module = NULL;
-  loom_text_parse_options_t parse_options = {
-      .diagnostic_sink = {.fn = loom_check_diagnostic_collector_sink,
-                          .user_data = &diagnostic_collector},
-      .max_errors = 20,
-  };
-  loom_low_descriptor_text_asm_environment_storage_t low_asm_storage = {0};
-  loom_low_descriptor_text_asm_environment_initialize_with_diagnostics(
-      &low_registry.registry,
-      loom_target_environment_low_asm_diagnostic_provider_list(
-          environment->target_environment),
-      &low_asm_storage, &parse_options.low_asm_environment);
-  if (iree_status_is_ok(status)) {
-    status =
-        loom_check_load_input(test_case, input_request, environment, context,
-                              block_pool, &parse_options, allocator, &input);
-    module = input.module;
-  }
-  loom_source_resolver_t source_resolver =
-      loom_input_module_source_resolver(&input);
-  diagnostic_collector.module = module;
+  status = loom_check_compile_admit_module(
+      test_case, filename, input_request, environment->compile_session,
+      environment, &diagnostic_collector, block_pool, allocator,
+      &provider_request.public_module);
   if (!iree_status_is_ok(status)) {
-    loom_input_module_deinitialize(&input);
+    loom_check_emit_release_public_module(&provider_request);
+    status = loom_check_emit_finish_status_failure(
+        status, request.emit_target_name, result);
     iree_arena_deinitialize(&diagnostic_arena);
     return status;
   }
-  if (!module ||
+  if (provider_request.public_module == NULL ||
       loom_check_diagnostic_collector_has_error(&diagnostic_collector)) {
+    loom_check_emit_release_public_module(&provider_request);
     status = loom_check_diagnostic_collector_finish(&diagnostic_collector,
                                                     test_case, case_index,
                                                     report, allocator, result);
-    loom_input_module_deinitialize(&input);
     iree_arena_deinitialize(&diagnostic_arena);
     return status;
   }
 
   if (provider != NULL) {
-    if (iree_status_is_ok(status)) {
-      status = loom_check_emit_verify_provider_module(
-          module, &low_registry, source_resolver,
-          loom_target_environment_low_verify_provider_list(
-              environment->target_environment),
-          &diagnostic_collector);
-    }
-    if (!iree_status_is_ok(status)) {
-      loom_input_module_deinitialize(&input);
-      status = loom_check_emit_finish_status_failure(
-          status, request.emit_target_name, result);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
-    }
-    if (loom_check_diagnostic_collector_has_error(&diagnostic_collector)) {
-      status = loom_check_diagnostic_collector_finish(
-          &diagnostic_collector, test_case, case_index, report, allocator,
-          result);
-      loom_input_module_deinitialize(&input);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
-    }
-    provider_request.module = module;
-    provider_request.source_resolver = source_resolver;
     status = loom_check_emit_invoke_provider(provider, &provider_request);
-    if (iree_status_is_ok(status) &&
-        !loom_check_diagnostic_collector_has_error(&diagnostic_collector)) {
-      status = loom_check_emit_verify_provider_module(
-          module, &low_registry, source_resolver,
-          loom_target_environment_low_verify_provider_list(
-              environment->target_environment),
-          &diagnostic_collector);
-    }
-    loom_input_module_deinitialize(&input);
-    diagnostic_collector.module = NULL;
+    loom_check_emit_release_public_module(&provider_request);
     status = loom_check_emit_finish_provider(status, &provider_request,
                                              case_index, report);
     iree_arena_deinitialize(&diagnostic_arena);
     return status;
   }
 
-  if (request.format == LOOM_CHECK_EMIT_LIVENESS_JSON ||
-      request.format == LOOM_CHECK_EMIT_STORAGE_INTERFERENCE ||
-      request.format == LOOM_CHECK_EMIT_PIPELINE_PLAN ||
-      request.format == LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON ||
-      request.format == LOOM_CHECK_EMIT_LOW_ALLOCATION_JSON ||
-      request.format == LOOM_CHECK_EMIT_LOW_ALLOCATION_SUMMARY ||
-      request.format == LOOM_CHECK_EMIT_LOW_PACKET_JSON ||
-      request.format == LOOM_CHECK_EMIT_LOW_COMPILE_REPORT) {
-    loom_verify_options_t verify_options = {
-        .sink = {.fn = loom_check_diagnostic_collector_sink,
-                 .user_data = &diagnostic_collector},
-        .max_errors = 20,
-        .source_resolver = source_resolver,
-    };
-    loom_verify_result_t verify_result = {0};
-    if (iree_status_is_ok(status)) {
-      status = loom_verify_module(module, &verify_options, &verify_result);
-    }
-    if (!iree_status_is_ok(status)) {
-      loom_input_module_deinitialize(&input);
-      status = loom_check_emit_finish_status_failure(
-          status, request.emit_target_name, result);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
-    }
-    if (verify_result.error_count > 0 ||
-        loom_check_diagnostic_collector_has_error(&diagnostic_collector)) {
-      status = loom_check_diagnostic_collector_finish(
-          &diagnostic_collector, test_case, case_index, report, allocator,
-          result);
-      loom_input_module_deinitialize(&input);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
-    }
-    if (request.format == LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON ||
-        request.format == LOOM_CHECK_EMIT_LOW_ALLOCATION_JSON ||
-        request.format == LOOM_CHECK_EMIT_LOW_ALLOCATION_SUMMARY ||
-        request.format == LOOM_CHECK_EMIT_LOW_PACKET_JSON ||
-        request.format == LOOM_CHECK_EMIT_LOW_COMPILE_REPORT) {
-      loom_check_diagnostic_emitter_capture_t low_diagnostic_capture = {
-          .diagnostic_collector = &diagnostic_collector,
-          .module = module,
-          .source_resolver = source_resolver,
-          .emitter = LOOM_EMITTER_VERIFIER,
-      };
-      loom_low_verify_options_t low_verify_options = {
-          .descriptor_registry = &low_registry.registry,
-          .emitter =
-              {
-                  .fn = loom_check_diagnostic_emitter_capture_emit,
-                  .user_data = &low_diagnostic_capture,
-              },
-          .provider_list = loom_target_environment_low_verify_provider_list(
-              environment->target_environment),
-          .max_errors = 20,
-      };
-      loom_low_verify_result_t low_verify_result = {0};
-      loom_low_verify_scratch_t low_verify_scratch =
-          loom_low_verify_scratch_for_module(module);
-      status = loom_low_verify_module(module, &low_verify_options,
-                                      &low_verify_scratch, &low_verify_result);
-      if (iree_status_is_ok(status) &&
-          (low_verify_result.error_count > 0 ||
-           loom_check_diagnostic_collector_has_error(&diagnostic_collector))) {
-        status = loom_check_diagnostic_collector_finish(
-            &diagnostic_collector, test_case, case_index, report, allocator,
-            result);
-        loom_input_module_deinitialize(&input);
-        iree_arena_deinitialize(&diagnostic_arena);
-        return status;
-      }
-    }
-    loom_check_diagnostic_emitter_capture_t pass_diagnostic_capture = {
-        .diagnostic_collector = &diagnostic_collector,
-        .module = module,
-        .source_resolver = source_resolver,
-        .emitter = LOOM_EMITTER_PASS,
-    };
-    iree_host_size_t actual_output_size = result->actual_output.size;
-    if (iree_status_is_ok(status)) {
-      if (request.format == LOOM_CHECK_EMIT_LIVENESS_JSON ||
-          request.format == LOOM_CHECK_EMIT_STORAGE_INTERFERENCE) {
-        status = loom_check_emit_write_function_analysis(
-            module, request.analysis_symbol_name, request.format, test_case,
-            filename, &diagnostic_collector,
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &pass_diagnostic_capture,
-            },
-            &diagnostic_arena, result);
-      } else if (request.format == LOOM_CHECK_EMIT_PIPELINE_PLAN) {
-        status = loom_check_emit_pipeline_plan(
-            module, request.analysis_symbol_name, request.pipeline_limits,
-            test_case, filename, &diagnostic_collector,
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &pass_diagnostic_capture,
-            },
-            &diagnostic_arena);
-      } else if (request.format == LOOM_CHECK_EMIT_LOW_SCHEDULE_JSON) {
-        status = loom_check_emit_write_low_schedule_json(
-            module, request.analysis_symbol_name, &low_registry.registry,
-            test_case, filename, &diagnostic_collector,
-            request.low_schedule_pressure_cliff_specs,
-            request.low_schedule_pressure_cliff_spec_count,
-            request.low_allocation_budgets, request.low_allocation_budget_count,
-            request.low_schedule_diagnostic_flags,
-            request.low_schedule_strategy,
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &pass_diagnostic_capture,
-            },
-            &diagnostic_arena, result);
-      } else if (request.format == LOOM_CHECK_EMIT_LOW_ALLOCATION_JSON) {
-        status = loom_check_emit_write_low_allocation_json(
-            module, request.analysis_symbol_name, &low_registry.registry,
-            test_case, filename, &diagnostic_collector,
-            request.low_allocation_budgets, request.low_allocation_budget_count,
-            request.low_allocation_fixed_values.specs,
-            request.low_allocation_fixed_values.count,
-            &request.low_allocation_entry,
-            request.low_allocation_diagnostic_flags,
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &pass_diagnostic_capture,
-            },
-            &diagnostic_arena, result);
-      } else if (request.format == LOOM_CHECK_EMIT_LOW_ALLOCATION_SUMMARY) {
-        status = loom_check_emit_write_low_allocation_summary(
-            module, request.analysis_symbol_name, &low_registry.registry,
-            test_case, filename, &diagnostic_collector,
-            request.low_allocation_budgets, request.low_allocation_budget_count,
-            request.low_allocation_fixed_values.specs,
-            request.low_allocation_fixed_values.count,
-            &request.low_allocation_entry,
-            request.low_allocation_diagnostic_flags,
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &pass_diagnostic_capture,
-            },
-            &diagnostic_arena, result);
-      } else if (request.format == LOOM_CHECK_EMIT_LOW_COMPILE_REPORT) {
-        status = loom_check_emit_low_report(
-            module, request.analysis_symbol_name, &low_registry.registry,
-            test_case, filename, &diagnostic_collector,
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &pass_diagnostic_capture,
-            },
-            &diagnostic_arena, result);
-      } else {
-        status = loom_check_emit_write_low_packet_json(
-            module, request.analysis_symbol_name, &low_registry.registry,
-            test_case, filename, &diagnostic_collector,
-            request.low_schedule_strategy, request.low_allocation_budgets,
-            request.low_allocation_budget_count,
-            request.low_allocation_fixed_values.specs,
-            request.low_allocation_fixed_values.count,
-            loom_target_environment_low_packet_diagnostic_provider_list(
-                environment->target_environment),
-            request.low_packet_diagnostic_flags,
-            (iree_diagnostic_emitter_t){
-                .fn = loom_check_diagnostic_emitter_capture_emit,
-                .user_data = &pass_diagnostic_capture,
-            },
-            &diagnostic_arena, result);
-      }
-    }
-    if (iree_status_is_ok(status)) {
-      if (request.suppress_actual_output) {
-        result->actual_output.size = actual_output_size;
-        if (result->actual_output.buffer &&
-            result->actual_output.capacity > actual_output_size) {
-          result->actual_output.buffer[actual_output_size] = 0;
-        }
-      } else if (result->actual_output.size != actual_output_size) {
-        result->has_actual_output = true;
-      }
-    }
-    loom_input_module_deinitialize(&input);
-    diagnostic_collector.module = NULL;
-    if (!iree_status_is_ok(status)) {
-      status = loom_check_emit_finish_status_failure(
-          status, request.emit_target_name, result);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
-    }
-    if (test_case->annotation_count > 0 ||
-        pass_diagnostic_capture.emission_count > 0 ||
-        diagnostic_collector.count > 0) {
-      status = loom_check_emit_finish_diagnostics_and_compare_output(
-          &diagnostic_collector, test_case, case_index, report, allocator,
-          result);
-      iree_arena_deinitialize(&diagnostic_arena);
-      return status;
-    }
-    if (request.suppress_actual_output) {
-      result->raw_outcome = LOOM_CHECK_PASS;
-      status = iree_ok_status();
-    } else {
-      status = loom_check_compare_output(test_case, allocator, result);
-    }
+  loom_check_emit_core_consumer_t core_consumer = {
+      .provider_request = &provider_request,
+      .emit_request = &request,
+  };
+  status = loom_check_compile_with_native_module(
+      &provider_request, loom_check_emit_core_native_module, &core_consumer);
+  loom_check_emit_release_public_module(&provider_request);
+  if (!iree_status_is_ok(status)) {
+    status = loom_check_emit_finish_status_failure(
+        status, request.emit_target_name, result);
     iree_arena_deinitialize(&diagnostic_arena);
     return status;
   }
-
-  loom_input_module_deinitialize(&input);
-  diagnostic_collector.module = NULL;
-  status = loom_check_emit_finish_status_failure(
-      iree_make_status(IREE_STATUS_INTERNAL,
-                       "core emit target '%.*s' was parsed but not handled",
-                       (int)request.emit_target_name.size,
-                       request.emit_target_name.data),
-      request.emit_target_name, result);
+  if (test_case->annotation_count > 0 ||
+      core_consumer.diagnostic_emission_count > 0 ||
+      diagnostic_collector.count > 0) {
+    status = loom_check_emit_finish_diagnostics_and_compare_output(
+        &diagnostic_collector, test_case, case_index, report, allocator,
+        result);
+    iree_arena_deinitialize(&diagnostic_arena);
+    return status;
+  }
+  if (request.suppress_actual_output) {
+    result->raw_outcome = LOOM_CHECK_PASS;
+    status = iree_ok_status();
+  } else {
+    status = loom_check_compare_output(test_case, allocator, result);
+  }
   iree_arena_deinitialize(&diagnostic_arena);
   return status;
 }

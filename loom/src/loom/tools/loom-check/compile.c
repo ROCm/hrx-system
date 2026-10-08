@@ -92,7 +92,7 @@ static iree_status_t loom_check_compile_append_result(
   return loom_check_compile_append_result_diagnostics(collector, result);
 }
 
-static iree_status_t loom_check_compile_admit_module(
+iree_status_t loom_check_compile_admit_module(
     const loom_test_case_t* test_case, iree_string_view_t filename,
     const loom_input_request_t* input_request,
     loom_check_compile_session_t* session,
@@ -101,6 +101,7 @@ static iree_status_t loom_check_compile_admit_module(
     iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
     loomc_module_t** out_module) {
   *out_module = NULL;
+  IREE_RETURN_IF_ERROR(loom_check_compile_session_prepare(session));
 
   iree_string_view_t format = input_request->format;
   iree_string_view_t input_options = iree_string_view_empty();
@@ -196,22 +197,6 @@ static iree_status_t loom_check_compile_admit_module(
   loomc_source_release(source);
   iree_allocator_free(host_allocator, source_identifier_storage);
   iree_string_builder_deinitialize(&stripped_source);
-  return status;
-}
-
-iree_status_t loom_check_compile_admit_source_module(
-    const loom_check_emit_provider_request_t* request,
-    loomc_module_t** out_module) {
-  *out_module = NULL;
-  loom_check_compile_session_t* session = request->environment->compile_session;
-  IREE_RETURN_IF_ERROR(loom_check_compile_session_prepare(session));
-  iree_status_t status = loom_check_compile_admit_module(
-      request->test_case, request->filename, request->input_request, session,
-      request->environment, request->diagnostic_collector, request->block_pool,
-      request->host_allocator, out_module);
-  if (*out_module == NULL) {
-    loomc_workspace_trim(session->workspace);
-  }
   return status;
 }
 
@@ -389,7 +374,7 @@ static iree_status_t loom_check_compile_select_source_function(
   return iree_ok_status();
 }
 
-static iree_status_t loom_check_compile_project_source_low_module(
+static iree_status_t loom_check_compile_project_module(
     loomc_module_t* module, loom_check_diagnostic_collector_t* collector,
     iree_allocator_t allocator, loomc_module_interop_view_t* out_view,
     bool* out_succeeded) {
@@ -403,18 +388,50 @@ static iree_status_t loom_check_compile_project_source_low_module(
   return status;
 }
 
+iree_status_t loom_check_compile_with_native_module(
+    const loom_check_emit_provider_request_t* request,
+    loom_check_compile_native_module_consumer_fn_t consumer, void* user_data) {
+  loomc_module_interop_view_t verified_view = {0};
+  bool projected = false;
+  iree_status_t status = loom_check_compile_project_module(
+      request->public_module, request->diagnostic_collector,
+      request->host_allocator, &verified_view, &projected);
+  if (!iree_status_is_ok(status) || !projected) {
+    return status;
+  }
+
+  const loomc_module_mutable_interop_view_t mutable_view =
+      loomc_module_get_mutable_interop_view(request->public_module);
+  const loom_check_emit_native_module_t native_module = {
+      .module = mutable_view.module,
+      .source_resolver =
+          {
+              .fn = loom_source_table_resolve,
+              .user_data = (void*)mutable_view.source_table,
+          },
+  };
+  request->diagnostic_collector->module = native_module.module;
+  status = consumer(user_data, &native_module);
+  request->diagnostic_collector->module = NULL;
+
+  if (iree_status_is_ok(status) && !loom_check_diagnostic_collector_has_error(
+                                       request->diagnostic_collector)) {
+    verified_view = (loomc_module_interop_view_t){0};
+    projected = false;
+    status = loom_check_compile_project_module(
+        request->public_module, request->diagnostic_collector,
+        request->host_allocator, &verified_view, &projected);
+  }
+  return status;
+}
+
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
     const loom_check_compile_source_low_options_t* options,
     loom_check_compile_source_low_consumer_fn_t consumer, void* user_data) {
   loom_check_compile_session_t* session = request->environment->compile_session;
-  IREE_RETURN_IF_ERROR(loom_check_compile_session_prepare(session));
-
-  loomc_module_t* module = NULL;
-  iree_status_t status = loom_check_compile_admit_module(
-      request->test_case, request->filename, request->input_request, session,
-      request->environment, request->diagnostic_collector, request->block_pool,
-      request->host_allocator, &module);
+  loomc_module_t* module = request->public_module;
+  iree_status_t status = iree_ok_status();
 
   loomc_pass_program_t* pass_program = NULL;
   if (iree_status_is_ok(status) && module != NULL) {
@@ -429,7 +446,7 @@ iree_status_t loom_check_compile_source_low(
     loomc_module_interop_view_t native_view = {0};
     bool projected = false;
     if (iree_string_view_is_empty(function_name)) {
-      status = loom_check_compile_project_source_low_module(
+      status = loom_check_compile_project_module(
           module, request->diagnostic_collector, request->host_allocator,
           &native_view, &projected);
     }
@@ -487,7 +504,7 @@ iree_status_t loom_check_compile_source_low(
   loomc_module_interop_view_t native_view = {0};
   bool projected = false;
   if (iree_status_is_ok(status) && compiled) {
-    status = loom_check_compile_project_source_low_module(
+    status = loom_check_compile_project_module(
         module, request->diagnostic_collector, request->host_allocator,
         &native_view, &projected);
   }
@@ -509,8 +526,6 @@ iree_status_t loom_check_compile_source_low(
   loomc_result_release(result);
   loomc_target_profile_release(target_profile);
   loomc_pass_program_release(pass_program);
-  loomc_module_release(module);
-  loomc_workspace_trim(session->workspace);
   return status;
 }
 
@@ -589,13 +604,8 @@ iree_status_t loom_check_compile_artifact(
     loomc_source_t** out_artifact_source) {
   *out_artifact_source = NULL;
   loom_check_compile_session_t* session = request->environment->compile_session;
-  IREE_RETURN_IF_ERROR(loom_check_compile_session_prepare(session));
-
-  loomc_module_t* module = NULL;
-  iree_status_t status = loom_check_compile_admit_module(
-      request->test_case, request->filename, request->input_request, session,
-      request->environment, request->diagnostic_collector, request->block_pool,
-      request->host_allocator, &module);
+  loomc_module_t* module = request->public_module;
+  iree_status_t status = iree_ok_status();
 
   const loomc_pass_program_t* pass_program = NULL;
   if (iree_status_is_ok(status) && module != NULL) {
@@ -640,8 +650,6 @@ iree_status_t loom_check_compile_artifact(
 
   loomc_result_release(result);
   loomc_target_profile_release(target_profile);
-  loomc_module_release(module);
-  loomc_workspace_trim(session->workspace);
   return status;
 }
 
@@ -653,7 +661,6 @@ iree_status_t loom_check_execute_compile(
     const loom_check_environment_t* environment,
     iree_arena_block_pool_t* block_pool, iree_allocator_t allocator,
     loom_check_result_t* result) {
-  IREE_RETURN_IF_ERROR(loom_check_compile_session_prepare(options->session));
   iree_arena_allocator_t arena;
   iree_arena_initialize(block_pool, &arena);
   loom_check_diagnostic_collector_t collector = {

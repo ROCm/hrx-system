@@ -140,7 +140,6 @@ static iree_status_t loom_amdgpu_bank_service_check_emit_provider_append_names(
 const loom_check_emit_provider_t
     loom_amdgpu_bank_service_loom_check_emit_provider = {
         .name = IREE_SVL("amdgpu-bank-service"),
-        .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_CONSUMES_SOURCE,
         .match = loom_amdgpu_bank_service_check_emit_provider_matches,
         .execute = loom_amdgpu_bank_service_check_emit_provider_execute,
         .append_names =

@@ -931,6 +931,7 @@ static iree_status_t loom_check_test_low_schedule_append_transport(
 
 static iree_status_t loom_check_test_low_schedule_build(
     const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module,
     const loom_check_test_low_schedule_options_t* options,
     loom_low_schedule_table_t* out_schedule,
     loom_liveness_analysis_t* out_scheduled_liveness, bool* out_accepted) {
@@ -938,8 +939,8 @@ static iree_status_t loom_check_test_low_schedule_build(
   *out_accepted = false;
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
-      .module = request->module,
-      .source_resolver = request->source_resolver,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   iree_diagnostic_emitter_t emitter = {0};
@@ -951,7 +952,7 @@ static iree_status_t loom_check_test_low_schedule_build(
   }
   loom_op_t* low_function = NULL;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_find_low_function_def(
-      request->module, options->function_symbol_name, request->test_case,
+      native_module->module, options->function_symbol_name, request->test_case,
       request->filename, request->diagnostic_collector, emitter,
       &low_function));
   if (low_function == NULL) {
@@ -969,7 +970,7 @@ static iree_status_t loom_check_test_low_schedule_build(
   };
   loom_low_function_model_t model = {0};
   iree_status_t status = loom_low_function_model_initialize(
-      request->module, low_function,
+      native_module->module, low_function,
       /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
       /*flags=*/0, request->case_arena, &model);
   if (iree_status_is_ok(status)) {
@@ -1003,7 +1004,8 @@ static iree_status_t loom_check_test_low_schedule_build(
 
 static iree_status_t loom_check_test_low_schedule_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_schedule_options_t options;
   IREE_RETURN_IF_ERROR(
@@ -1013,7 +1015,8 @@ static iree_status_t loom_check_test_low_schedule_execute(
   loom_liveness_analysis_t scheduled_liveness = {0};
   bool schedule_accepted = false;
   IREE_RETURN_IF_ERROR(loom_check_test_low_schedule_build(
-      request, &options, &schedule, &scheduled_liveness, &schedule_accepted));
+      request, native_module, &options, &schedule, &scheduled_liveness,
+      &schedule_accepted));
   if (request->diagnostic_collector != NULL &&
       loom_check_diagnostic_collector_has_error(
           request->diagnostic_collector)) {
@@ -1061,6 +1064,6 @@ static iree_status_t loom_check_test_low_schedule_append_names(
 const loom_check_emit_provider_t loom_check_test_low_schedule_provider = {
     .name = IREE_SVL("schedule-query"),
     .match = loom_check_test_low_schedule_matches,
-    .execute = loom_check_test_low_schedule_execute,
+    .execute_native = loom_check_test_low_schedule_execute,
     .append_names = loom_check_test_low_schedule_append_names,
 };

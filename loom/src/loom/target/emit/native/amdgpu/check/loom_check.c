@@ -369,6 +369,7 @@ static iree_status_t loom_amdgpu_loom_check_lower_spill_traffic(
 
 static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
     const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module,
     loom_symbol_fact_table_t* symbol_facts,
     iree_string_view_t function_symbol_name,
     loom_low_schedule_pair_affinity_list_t* out_affinities,
@@ -377,8 +378,8 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   *out_state_reads = loom_low_schedule_structural_state_read_list_empty();
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
-      .module = request->module,
-      .source_resolver = request->source_resolver,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   iree_diagnostic_emitter_t emitter = {0};
@@ -390,7 +391,7 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   }
   loom_op_t* low_function = NULL;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_find_low_function_def(
-      request->module, function_symbol_name, request->test_case,
+      native_module->module, function_symbol_name, request->test_case,
       request->filename, request->diagnostic_collector, emitter,
       &low_function));
   if (!low_function) {
@@ -398,14 +399,14 @@ static iree_status_t loom_amdgpu_loom_check_build_schedule_models(
   }
   loom_low_resolved_target_t target = {0};
   IREE_RETURN_IF_ERROR(loom_low_resolve_function_target(
-      request->module, symbol_facts, low_function,
+      native_module->module, symbol_facts, low_function,
       /*function_target_facts=*/NULL, &request->low_registry->registry, emitter,
       &target));
   if (target.descriptor_set == NULL) {
     return iree_ok_status();
   }
   if (target.target_facts == NULL) {
-    return loom_low_diagnostic_emit_missing_target(request->module,
+    return loom_low_diagnostic_emit_missing_target(native_module->module,
                                                    low_function, emitter);
   }
   IREE_RETURN_IF_ERROR(loom_amdgpu_vopd_build_schedule_pair_affinities(
@@ -429,21 +430,23 @@ static iree_status_t loom_amdgpu_loom_check_append_artifact_segment(
 }
 
 static iree_status_t loom_amdgpu_loom_check_emit_hal_kernel_assembly(
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   const loom_amdgpu_hal_kernel_library_options_t options = {
       .diagnostic_sink =
           {
               .fn = loom_check_diagnostic_collector_sink,
               .user_data = request->diagnostic_collector,
           },
-      .source_resolver = request->source_resolver,
+      .source_resolver = native_module->source_resolver,
       .max_errors = 20,
       .capture_target_listing = true,
   };
   bool emitted = false;
   loom_amdgpu_hal_kernel_library_t library = {0};
   iree_status_t status = loom_amdgpu_compile_hal_kernel_library(
-      request->module, &options, request->host_allocator, &emitted, &library);
+      native_module->module, &options, request->host_allocator, &emitted,
+      &library);
   if (iree_status_is_ok(status) && emitted) {
     if (!iree_string_view_equal(library.target_listing_format,
                                 IREE_SV("amdgpu-assembly")) ||
@@ -473,10 +476,12 @@ static iree_status_t loom_amdgpu_loom_check_emit_hal_kernel_assembly(
 
 static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   if (loom_amdgpu_loom_check_is_kernel_assembly_target(request->target_name)) {
-    return loom_amdgpu_loom_check_emit_hal_kernel_assembly(request);
+    return loom_amdgpu_loom_check_emit_hal_kernel_assembly(request,
+                                                           native_module);
   }
   loom_amdgpu_loom_check_emit_options_t options;
   IREE_RETURN_IF_ERROR(
@@ -511,7 +516,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
   loom_low_schedule_structural_state_read_list_t schedule_state_reads =
       loom_low_schedule_structural_state_read_list_empty();
   IREE_RETURN_IF_ERROR(loom_amdgpu_loom_check_build_schedule_models(
-      request, &symbol_facts, options.function_symbol_name,
+      request, native_module, &symbol_facts, options.function_symbol_name,
       &schedule_pair_affinities, &schedule_state_reads));
   if (request->diagnostic_collector != NULL &&
       loom_check_diagnostic_collector_has_error(
@@ -536,7 +541,7 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_execute(
       .storage_lease_provider = selected_storage_lease_provider,
   };
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, &frame_options,
+      request, native_module, options.function_symbol_name, &frame_options,
       options.allocation_fixed_values.specs,
       options.allocation_fixed_values.count, &spill_free_options, &frame,
       &frame_accepted));
@@ -611,6 +616,6 @@ static iree_status_t loom_amdgpu_loom_check_emit_provider_append_names(
 const loom_check_emit_provider_t loom_amdgpu_native_loom_check_emit_provider = {
     .name = IREE_SVL("amdgpu-native"),
     .match = loom_amdgpu_loom_check_emit_provider_matches,
-    .execute = loom_amdgpu_loom_check_emit_provider_execute,
+    .execute_native = loom_amdgpu_loom_check_emit_provider_execute,
     .append_names = loom_amdgpu_loom_check_emit_provider_append_names,
 };

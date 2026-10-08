@@ -25,7 +25,6 @@ loom_cc_library(
     }),
     deps = [
         "//loom/src/loom/target/reporting:report",
-        "//loom/src/loom/tools/loom-check:compile",
         "//loom/src/loom/tools/loom-check:execute",
         "//runtime/src/iree/base",
     ],

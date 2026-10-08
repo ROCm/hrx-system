@@ -128,7 +128,8 @@ static iree_status_t loom_aie2p_leaf_check_append_value_uses(
 
 static iree_status_t loom_aie2p_leaf_check_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   iree_string_view_t remaining = iree_string_view_trim(request->target_options);
   iree_string_view_t symbol;
@@ -190,8 +191,8 @@ static iree_status_t loom_aie2p_leaf_check_execute(
   }
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
-      .module = request->module,
-      .source_resolver = request->source_resolver,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   const iree_diagnostic_emitter_t emitter = {
@@ -200,7 +201,8 @@ static iree_status_t loom_aie2p_leaf_check_execute(
   };
   loom_op_t* function = NULL;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_find_low_function_def(
-      request->module, iree_string_view_substr(symbol, 1, IREE_HOST_SIZE_MAX),
+      native_module->module,
+      iree_string_view_substr(symbol, 1, IREE_HOST_SIZE_MAX),
       request->test_case, request->filename, request->diagnostic_collector,
       emitter, &function));
   if (!function) {
@@ -222,9 +224,9 @@ static iree_status_t loom_aie2p_leaf_check_execute(
   };
   bool resolved = false;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_resolve_fixed_value_specs(
-      request->module, function, fixed_specs.specs, fixed_specs.count, emitter,
-      &options.allocation_fixed_values, &options.allocation_fixed_value_count,
-      &resolved, request->case_arena));
+      native_module->module, function, fixed_specs.specs, fixed_specs.count,
+      emitter, &options.allocation_fixed_values,
+      &options.allocation_fixed_value_count, &resolved, request->case_arena));
   if (!resolved) {
     return iree_ok_status();
   }
@@ -235,7 +237,7 @@ static iree_status_t loom_aie2p_leaf_check_execute(
   loom_aie2p_leaf_contribution_t contribution = {0};
   bool compiled = false;
   iree_status_t status =
-      loom_aie2p_leaf_compile(request->module, function, &options,
+      loom_aie2p_leaf_compile(native_module->module, function, &options,
                               request->case_arena, &compiled, &contribution);
   if (iree_status_is_ok(status) && compiled &&
       report_kind == LOOM_AIE2P_LEAF_CHECK_REPORT_EMISSION) {
@@ -269,7 +271,7 @@ static iree_status_t loom_aie2p_leaf_check_execute(
         &request->result->actual_output, "\n"));
   }
   IREE_RETURN_IF_ERROR(loom_aie2p_leaf_check_append_value_uses(
-      request->module, function, selected_value_names,
+      native_module->module, function, selected_value_names,
       &request->result->actual_output));
   while (!iree_string_view_is_empty(registers)) {
     iree_string_view_t name;
@@ -302,6 +304,6 @@ static iree_status_t loom_aie2p_leaf_check_append_names(
 const loom_check_emit_provider_t loom_aie2p_leaf_check_emit_provider = {
     .name = IREE_SVL("aie2p-leaf"),
     .match = loom_aie2p_leaf_check_matches,
-    .execute = loom_aie2p_leaf_check_execute,
+    .execute_native = loom_aie2p_leaf_check_execute,
     .append_names = loom_aie2p_leaf_check_append_names,
 };

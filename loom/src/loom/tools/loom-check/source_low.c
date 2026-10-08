@@ -249,16 +249,8 @@ static iree_status_t loom_check_emit_write_source_low_pipeline_text(
         "source-low pipeline outputs cannot be combined with diagnostics");
   }
 
-  loomc_module_t* source_module = NULL;
-  iree_status_t status =
-      loom_check_compile_admit_source_module(provider_request, &source_module);
-  if (!iree_status_is_ok(status) || source_module == NULL) {
-    return status;
-  }
-  loom_check_compile_session_t* session =
-      provider_request->environment->compile_session;
   loom_module_t* pipeline_module = NULL;
-  status = loom_module_allocate(
+  iree_status_t status = loom_module_allocate(
       provider_request->context, IREE_SV("__loom_check_source_low_pipeline"),
       provider_request->block_pool, NULL, provider_request->host_allocator,
       &pipeline_module);
@@ -294,8 +286,6 @@ static iree_status_t loom_check_emit_write_source_low_pipeline_text(
   if (iree_status_is_ok(status)) {
     provider_request->result->has_actual_output = true;
   }
-  loomc_module_release(source_module);
-  loomc_workspace_trim(session->workspace);
   return status;
 }
 
@@ -439,7 +429,6 @@ static iree_status_t loom_check_source_low_emit_provider_append_names(
 
 const loom_check_emit_provider_t loom_check_source_low_emit_provider = {
     .name = IREE_SVL("source-low"),
-    .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_CONSUMES_SOURCE,
     .match = loom_check_source_low_emit_provider_matches,
     .execute = loom_check_source_low_emit_provider_execute,
     .append_names = loom_check_source_low_emit_provider_append_names,

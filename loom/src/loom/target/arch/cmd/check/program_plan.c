@@ -249,7 +249,8 @@ static iree_status_t loom_cmd_program_plan_check_roundtrip_artifacts(
 
 static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   loom_cmd_program_plan_check_options_t options = {0};
   IREE_RETURN_IF_ERROR(
@@ -257,18 +258,18 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_execute(
 
   loom_symbol_ref_t* source_root_refs = NULL;
   iree_status_t status = loom_cmd_program_plan_check_resolve_roots(
-      request->module, &options, request->case_arena, &source_root_refs);
+      native_module->module, &options, request->case_arena, &source_root_refs);
   loom_cmd_program_plan_t plan = {0};
   bool plan_valid = false;
   if (iree_status_is_ok(status)) {
     loom_check_diagnostic_emitter_capture_t capture = {
         .diagnostic_collector = request->diagnostic_collector,
-        .module = request->module,
-        .source_resolver = request->source_resolver,
+        .module = native_module->module,
+        .source_resolver = native_module->source_resolver,
         .emitter = LOOM_EMITTER_PASS,
     };
     status = loom_cmd_program_plan_check_build_from_roots(
-        request->module, source_root_refs, options.root_count,
+        native_module->module, source_root_refs, options.root_count,
         request->case_arena, request->block_pool, request->host_allocator,
         request->environment->cleanup_pattern_provider_set,
         (iree_diagnostic_emitter_t){
@@ -304,6 +305,6 @@ static iree_status_t loom_cmd_program_plan_check_emit_provider_append_names(
 const loom_check_emit_provider_t loom_cmd_program_plan_check_emit_provider = {
     .name = IREE_SVL("command program plan"),
     .match = loom_cmd_program_plan_check_emit_provider_matches,
-    .execute = loom_cmd_program_plan_check_emit_provider_execute,
+    .execute_native = loom_cmd_program_plan_check_emit_provider_execute,
     .append_names = loom_cmd_program_plan_check_emit_provider_append_names,
 };

@@ -72,7 +72,7 @@ typedef struct loom_check_compile_options_t {
   const loomc_sanitizer_options_t* sanitizer;
 } loom_check_compile_options_t;
 
-// Public compile request used by source-consuming emit providers.
+// Public artifact compile request used by emit providers.
 typedef struct loom_check_compile_artifact_options_t {
   // Public artifact format selecting the target emitter.
   iree_string_view_t artifact_format;
@@ -126,6 +126,11 @@ typedef struct loom_check_compile_source_low_view_t {
   loom_source_resolver_t source_resolver;
 } loom_check_compile_source_low_view_t;
 
+// Consumes one verified mutable native projection of an admitted public
+// module. The projection remains valid only for the callback invocation.
+typedef iree_status_t (*loom_check_compile_native_module_consumer_fn_t)(
+    void* user_data, const loom_check_emit_native_module_t* native_module);
+
 // Consumes one successfully compiled source-Low module before it is released.
 typedef iree_status_t (*loom_check_compile_source_low_consumer_fn_t)(
     void* user_data, const loom_check_compile_source_low_view_t* view);
@@ -139,7 +144,26 @@ iree_status_t loom_check_compile_session_select_target_profile(
     loom_check_compile_session_t* session, iree_string_view_t specification,
     loomc_target_profile_t** out_target_profile);
 
-// Admits one check case and compiles it to one target artifact. Public
+// Admits one checker case through the shared public compiler session. Public
+// diagnostics are appended to |diagnostic_collector|. A successful module is
+// owned by the caller and must be released with loomc_module_release.
+iree_status_t loom_check_compile_admit_module(
+    const loom_test_case_t* test_case, iree_string_view_t filename,
+    const loom_input_request_t* input_request,
+    loom_check_compile_session_t* session,
+    const loom_check_environment_t* environment,
+    loom_check_diagnostic_collector_t* diagnostic_collector,
+    iree_arena_block_pool_t* block_pool, iree_allocator_t host_allocator,
+    loomc_module_t** out_module);
+
+// Projects, invokes, and re-verifies the admitted public module in |request|.
+// Public verification diagnostics suppress the callback and return OK for
+// normal loom-check annotation matching.
+iree_status_t loom_check_compile_with_native_module(
+    const loom_check_emit_provider_request_t* request,
+    loom_check_compile_native_module_consumer_fn_t consumer, void* user_data);
+
+// Compiles the request's admitted public module to one target artifact. Public
 // diagnostics are appended to |request->diagnostic_collector|. A successful
 // primary artifact is returned as an immutable source owned by the caller.
 iree_status_t loom_check_compile_artifact(
@@ -147,17 +171,9 @@ iree_status_t loom_check_compile_artifact(
     const loom_check_compile_artifact_options_t* options,
     loomc_source_t** out_artifact_source);
 
-// Admits one provider request through the shared public compiler session.
-// Diagnostics are appended to |request->diagnostic_collector|. A successful
-// module is owned by the caller and must be released with
-// loomc_module_release.
-iree_status_t loom_check_compile_admit_source_module(
-    const loom_check_emit_provider_request_t* request,
-    loomc_module_t** out_module);
-
-// Admits and lowers one source case through LoomC, then invokes |consumer| on
-// the successfully compiled module. User diagnostics suppress the callback and
-// return OK for normal loom-check annotation matching.
+// Lowers the request's admitted public module through LoomC, then invokes
+// |consumer| on the successfully compiled module. User diagnostics suppress
+// the callback and return OK for normal loom-check annotation matching.
 iree_status_t loom_check_compile_source_low(
     const loom_check_emit_provider_request_t* request,
     const loom_check_compile_source_low_options_t* options,

@@ -163,6 +163,8 @@ loom_cc_library(
     srcs = [
         "analysis.c",
         "comparison.c",
+        "compile.c",
+        "compile_diagnostics.c",
         "diagnostics.c",
         "emit.c",
         "execute.c",
@@ -176,6 +178,8 @@ loom_cc_library(
     hdrs = [
         "analysis.h",
         "comparison.h",
+        "compile.h",
+        "compile_diagnostics.h",
         "diagnostics.h",
         "execute.h",
         "input.h",
@@ -187,6 +191,8 @@ loom_cc_library(
         ":report",
         ":target_low_registry_manifest",
         ":update",
+        "//loom/binding/c:interop",
+        "//loom/binding/c:loomc",
         "//loom/src/loom/analysis:liveness",
         "//loom/src/loom/analysis:liveness_json",
         "//loom/src/loom/analysis:pipeline_plan",
@@ -228,6 +234,7 @@ loom_cc_library(
         "//loom/src/loom/pass:registry",
         "//loom/src/loom/pass:report",
         "//loom/src/loom/pass:tooling",
+        "//loom/src/loom/sanitizer:options",
         "//loom/src/loom/target:entry_selection",
         "//loom/src/loom/target:legalization",
         "//loom/src/loom/target:low_asm_diagnostics",
@@ -235,6 +242,8 @@ loom_cc_library(
         "//loom/src/loom/target:low_legality",
         "//loom/src/loom/target:low_packet_diagnostics",
         "//loom/src/loom/target:math_policy",
+        "//loom/src/loom/target:pipeline",
+        "//loom/src/loom/target:pipeline_options",
         "//loom/src/loom/target:predicate",
         "//loom/src/loom/target:provider",
         "//loom/src/loom/target:selection",
@@ -242,9 +251,12 @@ loom_cc_library(
         "//loom/src/loom/target:types",
         "//loom/src/loom/target/reporting:format",
         "//loom/src/loom/target/reporting:low",
+        "//loom/src/loom/target/reporting:report",
         "//loom/src/loom/testing:test_diagnostic",
         "//loom/src/loom/testing:test_file",
+        "//loom/src/loom/tooling/cli:loomc_diagnostic_json",
         "//loom/src/loom/tooling/input",
+        "//loom/src/loom/tooling/io:source_path",
         "//loom/src/loom/tools/loom-format:convert",
         "//loom/src/loom/transforms/cleanup:patterns",
         "//loom/src/loom/util:diff",
@@ -289,7 +301,6 @@ loom_cc_test(
     name = "execute_test",
     srcs = ["execute_test.cc"],
     deps = [
-        ":compile",
         ":execute",
         ":report",
         ":source_low",
@@ -395,42 +406,10 @@ loom_cc_library(
 )
 
 loom_cc_library(
-    name = "compile",
-    srcs = [
-        "compile.c",
-        "compile_diagnostics.c",
-    ],
-    hdrs = [
-        "compile.h",
-        "compile_diagnostics.h",
-    ],
-    deps = [
-        ":execute",
-        "//loom/binding/c:interop",
-        "//loom/binding/c:loomc",
-        "//loom/src/loom/error:error_defs",
-        "//loom/src/loom/error:source",
-        "//loom/src/loom/ops:op_defs",
-        "//loom/src/loom/sanitizer:options",
-        "//loom/src/loom/target:pipeline",
-        "//loom/src/loom/target:pipeline_options",
-        "//loom/src/loom/target/reporting:report",
-        "//loom/src/loom/testing:test_file",
-        "//loom/src/loom/tooling/cli:loomc_diagnostic_json",
-        "//loom/src/loom/tooling/input",
-        "//loom/src/loom/tooling/io:source_path",
-        "//loom/src/loom/util:json",
-        "//loom/src/loom/util:stream",
-        "//runtime/src/iree/base",
-    ],
-)
-
-loom_cc_library(
     name = "source_low",
     srcs = ["source_low.c"],
     hdrs = ["source_low.h"],
     deps = [
-        ":compile",
         ":execute",
         "//loom/binding/c:interop",
         "//loom/binding/c:loomc",
@@ -455,7 +434,6 @@ loom_cc_library(
     srcs = ["file.c"],
     hdrs = ["file.h"],
     deps = [
-        ":compile",
         ":execute",
         ":json_output",
         ":output",
@@ -505,7 +483,6 @@ loom_cc_library(
     srcs = ["main.c"],
     hdrs = ["main.h"],
     deps = [
-        ":compile",
         ":execute",
         ":file",
         ":json_output",
@@ -582,7 +559,7 @@ loom_cc_binary(
     srcs = ["loom-check.c"],
     copts = _LOOM_CHECK_PROVIDER_COPTS,
     deps = [
-        ":compile",
+        ":execute",
         ":provider",
         "//loom/src/loom/target/arch/cmd/check:check_provider",
         "//loom/src/loom/target/configured:compiler_provider_set",
@@ -598,7 +575,7 @@ loom_cc_binary(
     srcs = ["loom-check.c"],
     copts = ["-DLOOM_CHECK_HAVE_TEST_PROVIDER=1"] + _LOOM_CHECK_PROVIDER_COPTS,
     deps = [
-        ":compile",
+        ":execute",
         ":provider",
         ":test_provider",
         "//loom/src/loom/target/arch/cmd/check:check_provider",

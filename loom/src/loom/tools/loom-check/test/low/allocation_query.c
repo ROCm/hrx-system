@@ -560,7 +560,8 @@ static iree_status_t loom_check_test_low_allocation_append_edge_moves(
 
 static iree_status_t loom_check_test_low_allocation_execute(
     const loom_check_emit_provider_t* provider,
-    const loom_check_emit_provider_request_t* request) {
+    const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module) {
   (void)provider;
   loom_check_test_low_allocation_options_t options;
   IREE_RETURN_IF_ERROR(
@@ -575,7 +576,7 @@ static iree_status_t loom_check_test_low_allocation_execute(
   loom_low_emission_frame_t frame = {0};
   bool accepted = false;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_packetize_function(
-      request, options.function_symbol_name, &frame_options,
+      request, native_module, options.function_symbol_name, &frame_options,
       options.allocation_fixed_values.specs,
       options.allocation_fixed_values.count, NULL, &frame, &accepted));
   const bool failure_requested = iree_any_bit_set(
@@ -656,6 +657,6 @@ const loom_check_emit_provider_t loom_check_test_low_allocation_provider = {
     .name = IREE_SVL("allocation-query"),
     .flags = LOOM_CHECK_EMIT_PROVIDER_FLAG_COMPARE_ERROR_OUTPUT,
     .match = loom_check_test_low_allocation_matches,
-    .execute = loom_check_test_low_allocation_execute,
+    .execute_native = loom_check_test_low_allocation_execute,
     .append_names = loom_check_test_low_allocation_append_names,
 };

@@ -509,6 +509,7 @@ iree_status_t loom_check_low_emit_resolve_fixed_value_specs(
 
 iree_status_t loom_check_low_emit_packetize_function(
     const loom_check_emit_provider_request_t* request,
+    const loom_check_emit_native_module_t* native_module,
     iree_string_view_t function_symbol_name,
     const loom_low_emission_frame_options_t* options,
     const loom_check_low_emit_fixed_value_spec_t* allocation_fixed_specs,
@@ -518,8 +519,8 @@ iree_status_t loom_check_low_emit_packetize_function(
   *out_accepted = false;
   loom_check_diagnostic_emitter_capture_t diagnostic_capture = {
       .diagnostic_collector = request->diagnostic_collector,
-      .module = request->module,
-      .source_resolver = request->source_resolver,
+      .module = native_module->module,
+      .source_resolver = native_module->source_resolver,
       .emitter = LOOM_EMITTER_PASS,
   };
   iree_diagnostic_emitter_t emitter = {0};
@@ -531,7 +532,7 @@ iree_status_t loom_check_low_emit_packetize_function(
   }
   loom_op_t* low_function = NULL;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_find_low_function_def(
-      request->module, function_symbol_name, request->test_case,
+      native_module->module, function_symbol_name, request->test_case,
       request->filename, request->diagnostic_collector, emitter,
       &low_function));
   if (!low_function) {
@@ -541,7 +542,7 @@ iree_status_t loom_check_low_emit_packetize_function(
   iree_host_size_t fixed_value_count = 0;
   bool fixed_values_resolved = false;
   IREE_RETURN_IF_ERROR(loom_check_low_emit_resolve_fixed_value_specs(
-      request->module, low_function, allocation_fixed_specs,
+      native_module->module, low_function, allocation_fixed_specs,
       allocation_fixed_spec_count, emitter, &fixed_values, &fixed_value_count,
       &fixed_values_resolved, request->case_arena));
   if (!fixed_values_resolved) {
@@ -556,10 +557,10 @@ iree_status_t loom_check_low_emit_packetize_function(
   *out_frame = (loom_low_emission_frame_t){0};
   if (spill_free_options != NULL) {
     return loom_low_emission_frame_build_spill_free(
-        request->module, low_function, &frame_options, spill_free_options,
+        native_module->module, low_function, &frame_options, spill_free_options,
         request->case_arena, out_frame, out_accepted);
   }
-  return loom_low_emission_frame_build(request->module, low_function,
+  return loom_low_emission_frame_build(native_module->module, low_function,
                                        &frame_options, request->case_arena,
                                        out_frame, out_accepted);
 }
