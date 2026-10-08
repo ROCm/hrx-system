@@ -244,19 +244,6 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
   const iree_hal_physical_device_affinity_t affinity =
       iree_hal_queue_family_spec(iree_hal_queue_family(dispatch))
           ->physical_device_affinity;
-  const iree_hal_executable_target_selection_t selection = {
-      .family = IREE_SV("amdgpu"),
-      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
-      .physical_device_affinity = affinity,
-  };
-  const iree_hal_executable_target_selection_result_t selected =
-      iree_hal_device_spec_select_executable_target(
-          iree_hal_device_spec(device), &selection);
-  if (selected.outcome !=
-      IREE_HAL_EXECUTABLE_TARGET_SELECTION_OUTCOME_SELECTED) {
-    return iree_make_status(IREE_STATUS_UNAVAILABLE,
-                            "JIT requires one exact AMDGPU queue target");
-  }
   loom_serve_jit_t* jit = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, sizeof(*jit), (void**)&jit));
@@ -265,7 +252,6 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
   iree_hal_device_retain(device);
   jit->dispatch = dispatch;
   iree_hal_queue_retain(dispatch);
-  jit->target = selected.target;
   const loomc_allocator_t ca = loomc_allocator_from_iree(host_allocator);
   iree_status_t status = iree_status_from_loomc(
       loomc_target_environment_create_amdgpu(ca, &jit->kernel.environment));
@@ -273,13 +259,14 @@ iree_status_t loom_serve_jit_create(iree_hal_device_t* device,
     status = jit_compiler_initialize(sanitizer, host_allocator, &jit->kernel);
   }
   if (iree_status_is_ok(status)) {
-    const loomc_amdgpu_iree_hal_profile_options_t options = {
+    const loomc_amdgpu_iree_hal_target_options_t options = {
         .device = device, .physical_device_affinity = affinity};
+    loomc_iree_hal_target_selection_t selection = {0};
     loomc_result_t* result = NULL;
-    const loomc_status_t operation =
-        loomc_target_profile_create_amdgpu_iree_hal(
-            jit->kernel.environment, &options, ca, &jit->kernel.profile,
-            &result);
+    const loomc_status_t operation = loomc_target_select_amdgpu_iree_hal(
+        jit->kernel.environment, &options, ca, &selection, &result);
+    jit->kernel.profile = selection.target_profile;
+    jit->target = selection.executable_target;
     status = jit_result(operation, result);
   }
   if (iree_status_is_ok(status)) {

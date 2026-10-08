@@ -166,7 +166,7 @@ iree_status_t loom_serve_device_trim(loom_serve_device_t* device,
           target_bytes - memory.workspace.bytes_committed) {
     return iree_ok_status();
   }
-  IREE_RETURN_IF_ERROR(loom_serve_workspace_trim(device->workspace));
+  loom_serve_workspace_trim(device->workspace);
   memory = loom_serve_device_memory_statistics(device);
   const uint64_t retained_target =
       memory.workspace.bytes_committed < target_bytes

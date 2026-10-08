@@ -20,8 +20,9 @@ extern "C" {
 // still use them.
 typedef struct loom_serve_workspace_t loom_serve_workspace_t;
 
-// Retains the device. No physical backing is acquired until acquire_pool.
-// The device group must outlive this owner and all execution domains using it.
+// Retains the device. No physical backing is acquired until execution
+// allocates. The device group must outlive this owner and all execution domains
+// using it.
 iree_status_t loom_serve_workspace_create(
     iree_hal_queue_t* dispatch_queue, loom_serve_workspace_t** out_workspace,
     iree_allocator_t host_allocator);
@@ -43,14 +44,17 @@ iree_status_t loom_serve_workspace_reserve(loom_serve_workspace_t* workspace,
 iree_status_t loom_serve_workspace_acquire_pool(
     loom_serve_workspace_t* workspace, iree_hal_pool_t** out_pool);
 
-// Combined live backing and cumulative allocation counters across generations.
-// Device-side counters are observations, not an atomic whole-device snapshot.
+// Combined retained backing and logical reservation counters across
+// generations. Backing includes idle cached slabs, but excludes detached native
+// returns. Device-side counters are observations, not an atomic whole-device
+// snapshot.
 iree_hal_pool_stats_t loom_serve_workspace_statistics(
     loom_serve_workspace_t* workspace);
 
-// Releases idle backing and retired pool generations without waiting on work.
-// Live roots and their source pools remain protected.
-iree_status_t loom_serve_workspace_trim(loom_serve_workspace_t* workspace);
+// Returns idle backing and retired pool generations without waiting on device
+// work. Native freeing runs asynchronously on HAL's maintenance owner. Live
+// roots and their source pools remain protected.
+void loom_serve_workspace_trim(loom_serve_workspace_t* workspace);
 
 #ifdef __cplusplus
 }  // extern "C"

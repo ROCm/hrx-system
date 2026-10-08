@@ -8,11 +8,15 @@
 
 #include "iree/base/internal/math.h"
 #include "iree/base/threading/mutex.h"
+#include "iree/hal/memory/passthrough_pool.h"
+#include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 
 typedef struct workspace_generation_t {
   // Owned pool, also retained by each outstanding execution root record.
   iree_hal_pool_t* pool;
+  // Owned backing-class cache retaining slabs returned by the logical pool.
+  iree_hal_pool_t* cache;
   // Maximum reservation and slab bytes for this immutable pool geometry.
   iree_device_size_t length;
   // Minimum base alignment of this pool's slabs, in bytes.
@@ -30,6 +34,8 @@ struct loom_serve_workspace_t {
   iree_hal_device_t* device;
   // Device-owned slab provider, completion query and notification services.
   iree_hal_queue_pool_backend_t backend;
+  // Owned native backing source shared by all geometry generations.
+  iree_hal_pool_t* backing_pool;
   // Protects geometry, generations and archived statistics, never device waits.
   iree_slim_mutex_t mutex;
   // Largest registered searchable slab size, in bytes.
@@ -54,6 +60,16 @@ static void workspace_add_counters(iree_hal_pool_stats_t* total,
   total->wait_count += source->wait_count;
 }
 
+static void workspace_generation_destroy(workspace_generation_t* generation,
+                                         iree_allocator_t allocator) {
+  if (!generation) {
+    return;
+  }
+  iree_hal_pool_release(generation->pool);
+  iree_hal_pool_release(generation->cache);
+  iree_allocator_free(allocator, generation);
+}
+
 // Execution records retain the pool until the last root/queue user retires.
 // The owner's sole reference therefore proves an old generation can be freed,
 // independently of semaphore success or failure. Stable geometry has no walk.
@@ -73,8 +89,7 @@ static void workspace_collect(loom_serve_workspace_t* workspace) {
     iree_hal_pool_query_stats(generation->pool, &statistics);
     workspace_add_counters(&workspace->retired, &statistics);
     *link = generation->next;
-    iree_hal_pool_release(generation->pool);
-    iree_allocator_free(workspace->allocator, generation);
+    workspace_generation_destroy(generation, workspace->allocator);
   }
 }
 
@@ -89,11 +104,11 @@ void loom_serve_workspace_release(loom_serve_workspace_t* workspace) {
   workspace_generation_t* generation = workspace->current;
   while (generation) {
     workspace_generation_t* next = generation->next;
-    iree_hal_pool_release(generation->pool);
-    iree_allocator_free(workspace->allocator, generation);
+    workspace_generation_destroy(generation, workspace->allocator);
     generation = next;
   }
   iree_slim_mutex_deinitialize(&workspace->mutex);
+  iree_hal_pool_release(workspace->backing_pool);
   iree_hal_device_release(workspace->device);
   iree_allocator_free(workspace->allocator, workspace);
 }
@@ -114,6 +129,17 @@ iree_status_t loom_serve_workspace_create(
   iree_status_t status = iree_hal_device_query_queue_pool_backend(
       workspace->device, iree_hal_queue_family(dispatch_queue),
       &workspace->backend);
+  if (iree_status_is_ok(status)) {
+    const iree_hal_passthrough_pool_options_t options = {
+        .epoch_query = workspace->backend.epoch_query,
+        .trace_name = IREE_SVL("loom_serve_workspace_backing"),
+    };
+    status = iree_hal_passthrough_pool_create(
+        options, workspace->backend.slab_provider,
+        workspace->backend.notification, workspace->backend.frontier_tracker,
+        workspace->backend.maintenance, host_allocator,
+        &workspace->backing_pool);
+  }
   if (iree_status_is_ok(status)) {
     *out_workspace = workspace;
   } else {
@@ -174,17 +200,29 @@ iree_status_t loom_serve_workspace_acquire_pool(
           .asan = workspace->backend.asan,
           .trace_name = IREE_SVL("loom_serve_workspace"),
       };
-      status = iree_hal_tlsf_pool_create(
-          options, workspace->backend.slab_provider,
-          workspace->backend.notification, workspace->backend.epoch_query,
-          workspace->allocator, &generation->pool);
+      iree_hal_slab_cache_options_t cache_options = {
+          .max_count = UINT32_MAX,
+          .trace_name = IREE_SVL("loom_serve_workspace_cache"),
+      };
+      status = iree_hal_tlsf_pool_query_backing_request(
+          workspace->backing_pool, &options, &cache_options.slab);
+      if (iree_status_is_ok(status)) {
+        status = iree_hal_slab_cache_create(
+            workspace->backing_pool, &cache_options, workspace->allocator,
+            &generation->cache);
+      }
+      if (iree_status_is_ok(status)) {
+        status =
+            iree_hal_tlsf_pool_create(generation->cache, &options,
+                                      workspace->allocator, &generation->pool);
+      }
     }
     if (iree_status_is_ok(status)) {
       generation->next = current;
       workspace->current = generation;
       workspace_collect(workspace);
     } else {
-      iree_allocator_free(workspace->allocator, generation);
+      workspace_generation_destroy(generation, workspace->allocator);
     }
   }
   if (iree_status_is_ok(status)) {
@@ -203,25 +241,27 @@ iree_hal_pool_stats_t loom_serve_workspace_statistics(
        generation = generation->next) {
     iree_hal_pool_stats_t statistics;
     iree_hal_pool_query_stats(generation->pool, &statistics);
+    iree_hal_pool_stats_t backing;
+    iree_hal_pool_query_stats(generation->cache, &backing);
     total.bytes_reserved += statistics.bytes_reserved;
-    total.bytes_free += statistics.bytes_free;
-    total.bytes_committed += statistics.bytes_committed;
+    total.bytes_free += statistics.bytes_free + backing.bytes_free;
+    total.bytes_committed += backing.bytes_committed;
+    total.bytes_quarantined += statistics.bytes_quarantined;
     total.reservation_count += statistics.reservation_count;
-    total.slab_count += statistics.slab_count;
+    total.slab_count += backing.slab_count;
     workspace_add_counters(&total, &statistics);
   }
   iree_slim_mutex_unlock(&workspace->mutex);
   return total;
 }
 
-iree_status_t loom_serve_workspace_trim(loom_serve_workspace_t* workspace) {
+void loom_serve_workspace_trim(loom_serve_workspace_t* workspace) {
   iree_slim_mutex_lock(&workspace->mutex);
   workspace_collect(workspace);
-  iree_status_t status = iree_ok_status();
-  for (workspace_generation_t* generation = workspace->current;
-       generation && iree_status_is_ok(status); generation = generation->next) {
-    status = iree_hal_pool_trim(generation->pool);
+  for (workspace_generation_t* generation = workspace->current; generation;
+       generation = generation->next) {
+    iree_hal_pool_trim(generation->pool, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
+    iree_hal_pool_trim(generation->cache, IREE_HAL_POOL_TRIM_FLAG_ALL, 0);
   }
   iree_slim_mutex_unlock(&workspace->mutex);
-  return status;
 }
