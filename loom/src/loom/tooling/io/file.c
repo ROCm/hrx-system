@@ -18,6 +18,26 @@
 
 #include "iree/base/internal/path.h"
 #include "iree/io/stdio_stream.h"
+#include "iree/io/stdio_util.h"
+
+static iree_status_t loom_tooling_file_set_binary_mode(
+    FILE* file, iree_string_view_t stream_name) {
+#if defined(IREE_PLATFORM_WINDOWS)
+  // The Windows CRT defaults standard streams to text mode and rewrites byte
+  // values that happen to encode newlines. Tool outputs are byte sequences
+  // even when their selected format is textual, so make stdout/stderr match
+  // ordinary files opened with "wb".
+  if (fflush(file) != 0 || IREE_IO_SET_BINARY_MODE(file) == -1) {
+    return iree_make_status(iree_status_code_from_errno(errno),
+                            "failed to set %.*s to binary mode (%d)",
+                            (int)stream_name.size, stream_name.data, errno);
+  }
+#else
+  (void)file;
+  (void)stream_name;
+#endif  // defined(IREE_PLATFORM_WINDOWS)
+  return iree_ok_status();
+}
 
 static iree_status_t loom_tooling_file_path_dup(iree_string_view_t path,
                                                 iree_allocator_t allocator,
@@ -192,6 +212,8 @@ iree_status_t loom_tooling_write_output_file(iree_string_view_t path,
     return iree_io_file_contents_write(path, bytes, allocator);
   }
 
+  IREE_RETURN_IF_ERROR(
+      loom_tooling_file_set_binary_mode(stdout, IREE_SV("stdout")));
   if (bytes.data_length > 0 &&
       fwrite(bytes.data, bytes.data_length, 1, stdout) != 1) {
     return iree_make_status(IREE_STATUS_DATA_LOSS,
@@ -242,11 +264,15 @@ iree_status_t loom_tooling_output_stream_open(
       .path = path,
   };
   if (iree_string_view_equal(path, IREE_SV("stderr"))) {
+    IREE_RETURN_IF_ERROR(
+        loom_tooling_file_set_binary_mode(stderr, IREE_SV("stderr")));
     out_output->file = stderr;
     loom_output_stream_for_file(stderr, &out_output->stream);
     return iree_ok_status();
   }
   if (loom_tooling_output_path_is_stdout(path)) {
+    IREE_RETURN_IF_ERROR(
+        loom_tooling_file_set_binary_mode(stdout, IREE_SV("stdout")));
     out_output->file = stdout;
     loom_output_stream_for_file(stdout, &out_output->stream);
     return iree_ok_status();

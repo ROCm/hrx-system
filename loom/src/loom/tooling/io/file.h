@@ -68,7 +68,8 @@ iree_status_t loom_tooling_read_input_file(
 iree_string_view_t loom_tooling_file_contents_string_view(
     const iree_io_file_contents_t* contents);
 
-// Writes |contents| to |path|, treating empty and "-" paths as stdout.
+// Writes |contents| to |path|, treating empty and "-" paths as stdout. Standard
+// output is switched to binary mode so every byte is preserved on Windows.
 iree_status_t loom_tooling_write_output_file(iree_string_view_t path,
                                              iree_string_view_t contents,
                                              iree_allocator_t allocator);
@@ -94,7 +95,8 @@ typedef struct loom_tooling_output_stream_t {
   iree_string_view_t path;
 } loom_tooling_output_stream_t;
 
-// Opens an output stream to stderr, stdout/"-"/empty, or a file path.
+// Opens an output stream to stderr, stdout/"-"/empty, or a file path. Standard
+// streams are switched to binary mode so every byte is preserved on Windows.
 iree_status_t loom_tooling_output_stream_open(
     iree_string_view_t path, iree_allocator_t allocator,
     loom_tooling_output_stream_t* out_output);
