@@ -462,6 +462,11 @@ void loom_low_schedule_pressure_compute_node_priorities(
     if (node_index == block_record->node_start + block_record->node_count - 1) {
       loom_low_schedule_storage_lifetimes_set_forwarded_values(
           state, node->block_index, true);
+      if (pressure_state->first_actionable_pressure_cliff_indices != NULL ||
+          state->pressure_resources != NULL) {
+        loom_low_schedule_initialize_source_pressure_block(
+            state, pressure_state, node->block_index);
+      }
     }
     const bool is_storage_setup = iree_any_bit_set(
         node->flags, LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP);
@@ -751,10 +756,6 @@ void loom_low_schedule_pressure_compute_node_priorities(
         state->pressure_resources != NULL) {
       loom_low_schedule_reverse_source_pressure_node(state, pressure_state,
                                                      node);
-      if (node_index == block_record->node_start) {
-        loom_low_schedule_remove_source_pressure_block_arguments(
-            state, pressure_state, block_record->block);
-      }
     }
     if (node_index == block_record->node_start) {
       loom_low_schedule_storage_lifetimes_set_forwarded_values(

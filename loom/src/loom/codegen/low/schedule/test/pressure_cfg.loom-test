@@ -1,0 +1,113 @@
+// The last local use does not release either loop-invariant input. Only one
+// temporary fits beside them, even while waiting for its consumer to be ready.
+// RUN: emit low-schedule-query @loop_live_out strategy=resource-stall test.i32=3 order=1,2,3,4,5 scheduled-pressure=test.i32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_live_out(%held: reg<test.i32>, %seed: reg<test.i32>) asm {
+  low.br ^loop
+^loop:
+  test.event.memory.write.i32 %held
+  %first = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %first
+  %second = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %second
+  low.br ^loop
+}
+
+// ----
+block 1 order: 1, 2, 3, 4, 5
+scheduled pressure test.i32: peak-live-units=3 peak-live-values=3
+
+// ====
+
+// The held value has no local use, and the seed survives its final local use.
+// Both occupy registers throughout the intermediate block.
+// RUN: emit low-schedule-query @live_through strategy=resource-stall test.i32=3 order=1,2,3,4 scheduled-pressure=test.i32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @live_through(%held: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  low.br ^work
+^work:
+  %first = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %first
+  %second = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %second
+  low.br ^exit
+^exit:
+  return %held, %seed
+}
+
+// ----
+block 1 order: 1, 2, 3, 4
+scheduled pressure test.i32: peak-live-units=3 peak-live-values=3
+
+// ====
+
+// An alias's final local read cannot release the loop-invariant source. The
+// alias still shares its source's pressure instead of allocating another unit.
+// RUN: emit low-schedule-query @aliased_loop_live_out strategy=resource-stall test.i32=3 order=1,2,3,4,5,6
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @aliased_loop_live_out(%held: reg<test.i32>, %seed: reg<test.i32>) asm {
+  low.br ^loop
+^loop:
+  %alias = copy %held : reg<test.i32> -> reg<test.i32>
+  test.event.memory.write.i32 %alias
+  %first = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %first
+  %second = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %second
+  low.br ^loop
+}
+
+// ----
+block 1 order: 1, 2, 3, 4, 5, 6
+
+// ====
+
+// A result used only by a successor still produces live storage. Delay that
+// result until the temporaries are consumed instead of treating it as dead.
+// RUN: emit low-schedule-query @successor_only_result strategy=resource-stall test.i32=3 order=0,1,2,3,4 scheduled-pressure=test.i32
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @successor_only_result(%seed: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>) asm {
+  %held = test.add.i32 %seed, %seed
+  %first = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %first
+  %second = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %second
+  low.br ^exit
+^exit:
+  return %held, %seed
+}
+
+// ----
+block 0 order: 1, 2, 3, 4, 0
+scheduled pressure test.i32: peak-live-units=2 peak-live-values=2
+
+// ====
+
+// The source schedule already needs three units: two loop-invariant inputs and
+// one temporary. That residency cliff is unavoidable; the next cliff at four
+// units still penalizes issuing the second temporary before retiring the first.
+// RUN: emit low-schedule-json @loop_residency strategy=resource-stall cliff=test.i32:3:16:15 cliff=test.i32:4:15:14 diagnostics=candidates output=none
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @loop_residency(%held: reg<test.i32>, %seed: reg<test.i32>) asm {
+  low.br ^loop
+^loop:
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.event.memory.write.i32", rejected_packet="test.event.fast.i32", chosen_killed_live_units="0", rejected_pressure_cliff_penalty="0"}
+  test.event.memory.write.i32 %held
+  // REMARK@+1: BACKEND/015 {chosen_projected_live_units="3", chosen_pressure_cliff_penalty="0", chosen_units_until_pressure_cliff="1"}
+  %first = test.event.fast.i32 %seed, %seed
+  // REMARK@+1: BACKEND/015 {chosen_packet="test.event.memory.write.i32", rejected_packet="test.event.fast.i32", chosen_pressure_cliff_penalty="0", rejected_pressure_cliff_units="4", rejected_pressure_cliff_penalty="1"}
+  test.event.memory.write.i32 %first
+  %second = test.event.fast.i32 %seed, %seed
+  test.event.memory.write.i32 %second
+  low.br ^loop
+}

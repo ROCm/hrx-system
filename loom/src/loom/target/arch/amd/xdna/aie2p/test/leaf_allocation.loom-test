@@ -211,13 +211,11 @@ CHECK: copies: coalesced=0 materialized=1
 // ====
 
 // Static byte-offset literals share scalar registers with the loop's arithmetic.
-// Their pure materializers can be recreated near use when 22 loop-invariant
-// offsets leave too few registers for the loop arithmetic and memory pipeline.
-// Input-free literals remain available to fill issue slots while their consumers
-// wait for other prerequisites, instead of inheriting the entire setup chain.
+// The 22 loop-invariant offsets remain live across the backedge. Accounting for
+// that storage leaves enough registers for the arithmetic and memory pipeline
+// without rematerializing the literals inside the loop.
 // RUN: emit aie2p-leaf @static_offset_loop diagnostics=predicted-spills
 
-// REMARK@+1: BACKEND/045 {function_name="static_offset_loop", trigger_kind="allocation-failure", repaired_value_count="24", cloned_packet_count="24", rewritten_operand_count="24", retained_placement_count="0"}
 low.func.def target<amd.xdna.aie2p.core> @static_offset_loop(%input: reg<aie2p.ep>, %output: reg<aie2p.ep>, %count: reg<aie2p.er>) asm {
   %zero = mov.short 0
   %one = mov.short 1

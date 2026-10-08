@@ -1685,6 +1685,7 @@ static iree_status_t loom_low_schedule_build(
       .value_domain = &model->context.value_domain,
       .storage_origins = model->context.storage_origins,
       .cfg_graph = &model->cfg_graph,
+      .liveness_dataflow = &model->liveness_dataflow,
   };
   loom_low_schedule_dependency_graph_initialize(&state.dependencies);
   IREE_ASSERT(state.body != NULL);

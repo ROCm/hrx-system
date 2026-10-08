@@ -2682,14 +2682,14 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_predicated_tile_swe
 
 // ----
   v_mov_b32 v1, 0
-  s_mov_b32 s6, 16
-  s_mov_b32 s7, 128
-  s_mov_b32 s8, 0
+  s_mov_b32 s6, 0
+  s_mov_b32 s7, 16
+  s_mov_b32 s8, 128
   global_load_d16_b16 v2, v1, s[0:1] offset:0
   v_cvt_f32_f16 v2, v2
   v_mov_b32 v3, v2
 .Lbb1:
-  s_cmp_lt_i32 s8, s7
+  s_cmp_lt_i32 s6, s8
   s_cbranch_scc0 .Lbb6
 .Lbb2:
   s_mov_b64_exec_read s[0:1]
@@ -2700,21 +2700,21 @@ low.func.def target<amdgpu.rdna3.core>(@gfx11_target) @gfx11_predicated_tile_swe
   s_and_saveexec_b64 s[10:11], s[10:11]
   s_cbranch_scc0 .Lbb5
 .Lbb4:
-  v_mov_b32_copy v4, s8
-  v_mov_b32 v5, 15
-  v_mov_b32 v6, 64
-  v_lshrrev_b32 v7, 4, v2
-  v_and_b32 v5, v2, v5
-  v_add_u32 v4, v4, v5
-  v_mad_u32_u24 v4, v7, 3072, v4
-  v_add_u32 v2, v2, v6
+  v_mov_b32 v4, 15
+  v_mov_b32 v5, 64
+  v_lshrrev_b32 v6, 4, v2
+  v_mov_b32_copy v7, s6
+  v_and_b32 v4, v2, v4
+  v_add_u32 v4, v7, v4
+  v_mad_u32_u24 v4, v6, 3072, v4
+  v_add_u32 v2, v2, v5
   v_lshlrev_b32 v4, 2, v4
   global_load_b32 v4, v4, s[2:3] offset:0
   v_add_f32 v3, v3, v4
   s_branch .Lbb3
 .Lbb5:
   s_mov_b64 exec, s[0:1]
-  s_add_u32 s8, s8, s6
+  s_add_u32 s6, s6, s7
   s_branch .Lbb1
 .Lbb6:
   global_store_b32 v1, v3, s[4:5] offset:0
@@ -3302,15 +3302,15 @@ low.func.def target<amdgpu.rdna3.core>(@gfx_target) @gfx11_smem_wait_drains_cros
 }
 
 // ----
-  s_load_dword s5, s[0:1], s2 offset:4
-  s_load_dword s6, s[0:1], s2 offset:0
+  s_load_dword s5, s[0:1], s2 offset:0
+  s_load_dword s6, s[0:1], s2 offset:4
   s_waitcnt vmcnt(63) lgkmcnt(0)
-  s_add_u32 s0, s6, s3
+  s_add_u32 s0, s5, s3
   s_cmp_lt_i32 s3, s4
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb2
 .Lbb1:
-  s_add_u32 s1, s5, s4
+  s_add_u32 s1, s6, s4
   s_add_u32 s0, s0, s1
   s_endpgm
 .Lbb2:

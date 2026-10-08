@@ -32,12 +32,12 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) workgroup_size(32, 1, 1) @sw
 .type swap_words,@function
 swap_words:
   v_dual_mov_b32 v0, 7 :: v_dual_mov_b32 v1, 11
-  s_mov_b32 s0, 1
-  s_mov_b32 s1, 0
-  s_mov_b32 s2, 3
+  s_mov_b32 s0, 3
+  s_mov_b32 s1, 1
+  s_mov_b32 s2, 0
 .Lbb1:
-  s_sub_u32 s2, s2, s0
-  s_cmp_gt_u32 s2, s1
+  s_sub_u32 s0, s0, s1
+  s_cmp_gt_u32 s0, s2
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
@@ -151,20 +151,20 @@ low.kernel.def target<amdgpu.rdna3_5.core>(@target) workgroup_size(32, 1, 1) @sw
 .p2align 8
 .type swap_scalar_words,@function
 swap_scalar_words:
-  s_mov_b32 s0, 1
-  s_mov_b32 s1, 0
-  s_mov_b32 s2, 7
-  s_mov_b32 s3, 11
-  s_mov_b32 s4, 3
+  s_mov_b32 s0, 7
+  s_mov_b32 s1, 11
+  s_mov_b32 s2, 3
+  s_mov_b32 s3, 1
+  s_mov_b32 s4, 0
 .Lbb1:
-  s_sub_u32 s4, s4, s0
-  s_cmp_gt_u32 s4, s1
+  s_sub_u32 s2, s2, s3
+  s_cmp_gt_u32 s2, s4
   s_delay_alu instid0(SALU_CYCLE_1)
   s_cbranch_scc0 .Lbb3
 .Lbb2:
-  s_mov_b32 s5, s3
-  s_mov_b32 s3, s2
-  s_mov_b32 s2, s5
+  s_mov_b32 s5, s1
+  s_mov_b32 s1, s0
+  s_mov_b32 s0, s5
   s_branch .Lbb1
 .Lbb3:
   s_endpgm

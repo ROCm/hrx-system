@@ -413,11 +413,11 @@ void loom_low_schedule_reverse_source_pressure_node(
     loom_low_schedule_pressure_state_t* pressure_state,
     const loom_low_schedule_node_t* node);
 
-// Removes the block arguments closing a reverse source-order block sweep.
-void loom_low_schedule_remove_source_pressure_block_arguments(
+// Starts a reverse source-order block sweep at its canonical live-outs.
+// Block-local live state is reset; function-wide high-water marks are retained.
+void loom_low_schedule_initialize_source_pressure_block(
     loom_low_schedule_build_state_t* state,
-    loom_low_schedule_pressure_state_t* pressure_state,
-    const loom_block_t* block);
+    loom_low_schedule_pressure_state_t* pressure_state, uint32_t block_index);
 
 // Resets mutable state used to reconstruct source-order pressure ceilings.
 void loom_low_schedule_reset_source_pressure_sweep(

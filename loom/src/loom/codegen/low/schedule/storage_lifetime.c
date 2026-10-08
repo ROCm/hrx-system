@@ -197,13 +197,22 @@ void loom_low_schedule_storage_lifetimes_set_forwarded_values(
        state->target.descriptor_set->register_packing_resource_count == 0)) {
     return;
   }
+  const loom_low_schedule_value_flags_t forwarding_flags =
+      is_forwarded ? LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED : 0;
+  const loom_liveness_block_relation_t* liveness =
+      &state->liveness_dataflow->blocks[block_index];
+  for (iree_host_size_t i = 0; i < liveness->live_out_count; ++i) {
+    const loom_value_ordinal_t ordinal = loom_local_value_domain_ordinal(
+        state->value_domain, liveness->live_out_values[i]);
+    loom_low_schedule_value_record_t* value = &state->values[ordinal];
+    value->flags = (value->flags & ~LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED) |
+                   forwarding_flags;
+  }
   const uint32_t endpoint = block->node_start + block->node_count - 1;
   const uint32_t begin = loom_low_schedule_storage_relation_index_begin(
       &state->storage_relations, endpoint);
   const uint32_t end = loom_low_schedule_storage_relation_index_end(
       &state->storage_relations, endpoint);
-  const loom_low_schedule_value_flags_t forwarding_flags =
-      is_forwarded ? LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED : 0;
   for (uint32_t i = begin; i < end; ++i) {
     const loom_low_schedule_storage_relation_t* relation =
         loom_low_schedule_storage_relation_index_at(&state->storage_relations,

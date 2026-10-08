@@ -734,19 +734,7 @@ void loom_low_schedule_reverse_source_pressure_node(
   }
 }
 
-void loom_low_schedule_remove_source_pressure_block_arguments(
-    loom_low_schedule_build_state_t* state,
-    loom_low_schedule_pressure_state_t* pressure_state,
-    const loom_block_t* block) {
-  for (uint16_t arg_index = 0; arg_index < block->arg_count; ++arg_index) {
-    const loom_value_ordinal_t value_ordinal = loom_local_value_domain_ordinal(
-        state->value_domain, loom_block_arg_id(block, arg_index));
-    loom_low_schedule_remove_live_pressure_value(state, pressure_state,
-                                                 value_ordinal);
-  }
-}
-
-void loom_low_schedule_reset_source_pressure_sweep(
+static void loom_low_schedule_reset_source_pressure_block(
     loom_low_schedule_build_state_t* state,
     loom_low_schedule_pressure_state_t* pressure_state) {
   for (iree_host_size_t i = 0; i < pressure_state->block_value_count; ++i) {
@@ -767,9 +755,29 @@ void loom_low_schedule_reset_source_pressure_sweep(
   }
   pressure_state->block_reg_class_count = 0;
   loom_low_schedule_reset_block_alias_pressure(pressure_state);
-  loom_low_schedule_reset_source_resource_pressure(state, pressure_state);
   loom_low_schedule_pressure_alias_reset(&pressure_state->storage_aliases);
   pressure_state->current_live_units = 0;
+}
+
+void loom_low_schedule_initialize_source_pressure_block(
+    loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state, uint32_t block_index) {
+  loom_low_schedule_reset_source_pressure_block(state, pressure_state);
+  const loom_liveness_block_relation_t* liveness =
+      &state->liveness_dataflow->blocks[block_index];
+  for (iree_host_size_t i = 0; i < liveness->live_out_count; ++i) {
+    loom_low_schedule_add_source_pressure_value(
+        state, pressure_state, block_index,
+        loom_local_value_domain_ordinal(state->value_domain,
+                                        liveness->live_out_values[i]));
+  }
+}
+
+void loom_low_schedule_reset_source_pressure_sweep(
+    loom_low_schedule_build_state_t* state,
+    loom_low_schedule_pressure_state_t* pressure_state) {
+  loom_low_schedule_reset_source_pressure_block(state, pressure_state);
+  loom_low_schedule_reset_source_resource_pressure(state, pressure_state);
 }
 
 static void loom_low_schedule_note_block_pressure_use(
@@ -869,6 +877,19 @@ void loom_low_schedule_pressure_initialize_block(
           pressure_state->candidate_operand_use_counts[value_ordinal]);
     }
     loom_low_schedule_reset_candidate_operand_uses(state, pressure_state);
+  }
+
+  // A live-out survives every local consumer, including the final use before a
+  // loop backedge. One retained boundary use feeds all existing pressure and
+  // alias-lifetime queries without inventing a local consumer node.
+  const loom_liveness_block_relation_t* liveness =
+      &state->liveness_dataflow->blocks[block_record->block->region_index];
+  for (iree_host_size_t i = 0; i < liveness->live_out_count; ++i) {
+    loom_low_schedule_note_block_pressure_use(
+        state, pressure_state,
+        loom_local_value_domain_ordinal(state->value_domain,
+                                        liveness->live_out_values[i]),
+        1);
   }
 
   for (iree_host_size_t i = 0; i < pressure_state->block_value_count; ++i) {

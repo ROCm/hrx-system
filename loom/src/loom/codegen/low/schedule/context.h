@@ -162,7 +162,7 @@ enum loom_low_schedule_value_flag_bits_e {
   LOOM_LOW_SCHEDULE_VALUE_FLAG_ACTIVE_PRESSURE_ALIAS = 1u << 4,
   // Value ordinal is present in the pressure state's touched-value list.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_PRESSURE_TOUCHED = 1u << 5,
-  // The current block's endpoint forwards this value's storage ownership.
+  // Storage survives the block through a live-out value or branch payload.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_FORWARDED = 1u << 6,
   // At least one occurrence in the current candidate reads after result writes.
   LOOM_LOW_SCHEDULE_VALUE_FLAG_CANDIDATE_LATE_READ = 1u << 7,
@@ -188,7 +188,7 @@ typedef struct loom_low_schedule_value_record_t {
   uint32_t live_unit_count;
   // Units inherited before result writes while scoring the current candidate.
   uint32_t candidate_transferred_units;
-  // Remaining operand uses in the current simulated block schedule.
+  // Remaining local operands plus one retained use for a block live-out.
   uint32_t remaining_use_count;
   // Least expensive local exit for a compiler-produced unspillable value.
   loom_low_schedule_unspillable_completion_path_t unspillable_completion;
@@ -246,6 +246,8 @@ typedef struct loom_low_schedule_build_state_t {
   const loom_value_ordinal_t* storage_origins;
   // Shared read-only control-flow graph for the function body.
   const loom_cfg_graph_t* cfg_graph;
+  // Canonical block-boundary liveness borrowed from the function model.
+  const loom_liveness_dataflow_t* liveness_dataflow;
   // Dense per-local-value scheduler records indexed by value ordinal.
   loom_low_schedule_value_record_t* values;
   // Defining schedule node indexed by local value ordinal.

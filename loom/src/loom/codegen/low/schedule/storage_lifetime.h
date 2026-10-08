@@ -47,10 +47,11 @@ struct loom_low_schedule_build_state_t;
 iree_status_t loom_low_schedule_storage_lifetimes_initialize(
     struct loom_low_schedule_build_state_t* state, iree_host_size_t node_count);
 
-// Projects the block endpoint's indexed branch payloads into current value
-// flags. Reverse analysis clears them after the block; dynamic scheduling
-// clears its touched values before marking the next block. Empty blocks and
-// strategies without a pressure-completion consumer require no projection.
+// Marks storage retained beyond the block, through canonical live-outs or the
+// endpoint's indexed branch payloads. Reverse analysis clears these flags after
+// the block; dynamic scheduling clears its touched values before the next
+// block. Strategies without a pressure-completion consumer require no
+// projection.
 void loom_low_schedule_storage_lifetimes_set_forwarded_values(
     struct loom_low_schedule_build_state_t* state, uint32_t block_index,
     bool is_forwarded);
