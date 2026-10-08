@@ -92,7 +92,7 @@ CHECK: worker index=0 * resources=2 storage-domains=1
 CHECK: worker-storage worker=0 space=2 * bytes=24
 CHECK: binding-patch ordinal=0 channel=0 * span=40 transfer=40 repeat=1
 CHECK: binding-patch ordinal=1 channel=1 * span=72 transfer=72 repeat=1 completion-route=0
-CHECK: resident worker=0 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=834 resources=0 fixups=2
+CHECK: resident worker=0 entry=@private_atomic_array$worker$0 tile=(0,2) code-bytes=826 resources=0 fixups=2
 CHECK: * = storage {byte_alignment = 8, byte_length = 24} : low.storage<private>
 CHECK: %cell_f32 = storage_address * : low.storage<private> -> reg<aie2p.ep>
 CHECK: %initial_f32 = lda.i32.index %input_f32, *

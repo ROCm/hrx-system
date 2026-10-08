@@ -1750,3 +1750,23 @@ node 0 issue-cycle: 0
 node 1 issue-cycle: 0
 node 2 issue-cycle: 1
 node 3 issue-cycle: 2
+
+// ====
+
+// RUN: emit low-schedule-query @resource_stall_defers_storage_address kind=order strategy=resource-stall order=0,1,2,3,4,5 consumer=*
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_defers_storage_address(%lhs: reg<test.i32 x4>, %rhs: reg<test.i32 x4>) -> (reg<test.i32 x4>) asm {
+  %storage = storage {byte_alignment = 16, byte_length = 16} : low.storage<workgroup>
+  // Materialize the address after both payload producers, when its store
+  // can consume it, rather than retaining a pointer across their latency.
+  %address = storage_address %storage : low.storage<workgroup> -> reg<test.ptr>
+  %payload0 = test.add.v4i32 %lhs, %rhs
+  %payload1 = test.add.v4i32 %payload0, %rhs
+  test.store.v4i32 %address, %payload1
+  return %payload1
+}
+// ----
+block 0 order: 2, 0, 3, 1, 4, 5
+none

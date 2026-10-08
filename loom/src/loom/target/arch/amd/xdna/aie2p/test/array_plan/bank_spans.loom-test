@@ -254,7 +254,7 @@ control-relocation index=0 record=0 word=1 binding=0 addend=0 alignment=4
 control-relocation index=1 record=3 word=1 binding=1 addend=0 alignment=4
 
 resident-program workers=1
-resident worker=0 entry=@occupied_bank_prefixes$worker$0 tile=(0,2) code-bytes=130 resources=0 fixups=2
+resident worker=0 entry=@occupied_bank_prefixes$worker$0 tile=(0,2) code-bytes=132 resources=0 fixups=2
 
 low.func.def retain target<amd.xdna.aie2p.core> @occupied_bank_prefixes$worker$0() asm {
   %allocation = storage {byte_alignment = 32768, byte_length = 20000} : low.storage<workgroup>

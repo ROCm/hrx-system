@@ -894,3 +894,39 @@ low.func.def target<amdgpu.gfx11.generic.core>(@target) @wide_address_pressure(%
   global_load_b32 v0, v0, s[0:1] offset:0
   s_waitcnt vmcnt(0) lgkmcnt(63)
   s_endpgm
+
+// ====
+
+// The held tuple remains live through ^body but has no local use there.
+// Large spill offsets create VGPR address helpers; they must be scheduled
+// close to their stores so the seven-register budget remains sufficient.
+// RUN: emit amdgpu-assembly @spill_address_pressure strategy=resource-stall amdgpu.vgpr=7
+
+amdgpu.target<gfx942> @target
+
+low.func.def target<amdgpu.cdna3.core>(@target) @spill_address_pressure(%seed: reg<amdgpu.vgpr>, %held: reg<amdgpu.vgpr x4>) -> (reg<amdgpu.vgpr>, reg<amdgpu.vgpr x4>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4108} : low.storage<private>
+  low.spill %held, %storage : reg<amdgpu.vgpr x4>, low.storage<private>
+  low.br ^body
+^body:
+  low.spill %seed, %storage {offset = 4096} : reg<amdgpu.vgpr>, low.storage<private>
+  low.spill %seed, %storage {offset = 4100} : reg<amdgpu.vgpr>, low.storage<private>
+  %doubled = v_add_u32 %seed, %seed
+  low.spill %doubled, %storage {offset = 4104} : reg<amdgpu.vgpr>, low.storage<private>
+  low.br ^exit
+^exit:
+  return %doubled, %held
+}
+// ----
+  scratch_store_b128 off, v[2:5], off offset:0 nt:0 sc0:0 sc1:0
+.Lbb1:
+  v_mov_b32 v1, 4096
+  scratch_store_b32 v1, v0, off offset:0 nt:0 sc0:0 sc1:0
+  v_mov_b32 v1, 4100
+  scratch_store_b32 v1, v0, off offset:0 nt:0 sc0:0 sc1:0
+  v_add_u32 v0, v0, v0
+  v_mov_b32 v1, 4104
+  scratch_store_b32 v1, v0, off offset:0 nt:0 sc0:0 sc1:0
+.Lbb2:
+  s_waitcnt vmcnt(0) lgkmcnt(15)
+  s_endpgm

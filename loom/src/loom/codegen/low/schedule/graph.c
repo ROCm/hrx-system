@@ -1475,7 +1475,11 @@ iree_status_t loom_low_schedule_fill_nodes(
       } else if (loom_low_func_call_isa(op)) {
         ++state->call_node_count;
       } else if (op->region_count == 0 &&
-                 iree_any_bit_set(node->traits, LOOM_TRAIT_STORAGE_RELATION)) {
+                 (iree_any_bit_set(node->traits, LOOM_TRAIT_STORAGE_RELATION) ||
+                  loom_low_storage_address_isa(op))) {
+        // Address materialization opens a register lifetime just like a
+        // storage relation. Keep it near an actionable consumer rather than
+        // hoisting spill addresses into mandatory register pressure.
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP;
         if (op->kind == LOOM_OP_LOW_SLICE || op->kind == LOOM_OP_LOW_CONCAT) {
           node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT;
