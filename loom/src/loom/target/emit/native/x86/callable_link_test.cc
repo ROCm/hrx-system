@@ -47,6 +47,9 @@ extern "C" void add_i32x4(const int32_t* lhs, const int32_t* rhs,
 extern "C" void add_constant_i32x4(const int32_t* input, int32_t* output);
 extern "C" void reverse_i8x32_lanes(const uint8_t* input, uint8_t* output);
 extern "C" void spill_i8x32(const uint8_t* input, uint8_t* output);
+extern "C" void write_mixed_results(const int32_t* input,
+                                    int32_t* vector_output,
+                                    uint64_t* scalar_output);
 extern "C" void avx512_select_i32x16(const int32_t* scalar, const int32_t* lhs,
                                      const int32_t* rhs,
                                      const int32_t* fallback, int32_t* output);
@@ -121,6 +124,7 @@ extern "C" void native_f16_stack(uint16_t* output, F16 v0, F16 v1, F16 v2,
 }
 
 extern "C" uint64_t call_pair(uint64_t, uint64_t);
+extern "C" void write_narrow_triplet(uint32_t*, uint32_t);
 extern "C" uint64_t incoming_eight(uint64_t, uint64_t, uint64_t, uint64_t,
                                    uint64_t, uint64_t, uint64_t, uint64_t);
 extern "C" uint64_t recursive_sum(uint64_t);
@@ -264,6 +268,22 @@ TEST(NativeCallableTest, Avx2VectorFunctionUsesOrdinaryCLinkage) {
   EXPECT_EQ(spilled, bytes);
 }
 
+TEST(NativeCallableTest, MixedPrivateResultsOverflowIndependentBanks) {
+  std::array<int32_t, 24> input;
+  for (size_t i = 0; i < input.size(); ++i) {
+    input[i] = static_cast<int32_t>(1000 + i);
+  }
+  std::array<int32_t, 24> vectors = {};
+  std::array<uint64_t, 3> scalars = {};
+  write_mixed_results(input.data(), vectors.data(), scalars.data());
+  for (size_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(vectors[i], input[16 + i]);
+    EXPECT_EQ(vectors[8 + i], input[i]);
+    EXPECT_EQ(vectors[16 + i], input[8 + i]);
+  }
+  EXPECT_EQ(scalars, (std::array<uint64_t, 3>{43, 17, 29}));
+}
+
 TEST(NativeCallableTest, Avx512CoreUsesOrdinaryCLinkage) {
   if (!__builtin_cpu_supports("avx512f") ||
       !__builtin_cpu_supports("avx512bw") ||
@@ -369,6 +389,16 @@ TEST(NativeCallableTest, CompleteCallOwnsItsOverflowAndAlignedLocal) {
       const uint64_t second = y + 23 * y + 33 * x + 19 * 9;
       EXPECT_EQ(call_pair(x, y), first + second + (x ^ y));
     }
+  }
+}
+
+TEST(NativeCallableTest, NestedPrivateCallsReturnRegisterAndOverflowValues) {
+  for (uint32_t value : {0u, 1u, 0x12345678u, 0xffffffffu}) {
+    std::array<uint32_t, 3> output = {};
+    write_narrow_triplet(output.data(), value);
+    EXPECT_EQ(output[0], value != 0 ? 1u : 0u);
+    EXPECT_EQ(output[1], value != 0 ? value & UINT8_MAX : 0x5au);
+    EXPECT_EQ(output[2], value != 0 ? value & UINT16_MAX : 0xa55au);
   }
 }
 

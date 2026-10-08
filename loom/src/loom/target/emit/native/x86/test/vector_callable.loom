@@ -46,6 +46,29 @@ low.func.def public target<x86.avx2.core> abi(object_function) @spill_i8x32(%inp
   return
 }
 
+// Integer and vector results advance through independent two-register banks.
+// The third value in each bank crosses the same caller-owned overflow block.
+low.func.def target<x86.avx2.core> abi(object_function) @private_mixed_results(%v0: reg<x86.ymm>, %g0: reg<x86.gpr64>, %v1: reg<x86.ymm>, %g1: reg<x86.gpr64>, %v2: reg<x86.ymm>, %g2: reg<x86.gpr64>) -> (reg<x86.ymm>, reg<x86.gpr64>, reg<x86.ymm>, reg<x86.gpr64>, reg<x86.ymm>, reg<x86.gpr64>) asm {
+  return %v2, %g2, %v0, %g0, %v1, %g1
+}
+
+low.func.def public target<x86.avx2.core> abi(object_function) @write_mixed_results(%input: reg<x86.gpr64>, %vector_output: reg<x86.gpr64>, %scalar_output: reg<x86.gpr64>) asm {
+  %v0 = vmovdqu32.load.ymm %input {disp32 = 0}
+  %v1 = vmovdqu32.load.ymm %input {disp32 = 32}
+  %v2 = vmovdqu32.load.ymm %input {disp32 = 64}
+  %g0 = mov.imm64 17
+  %g1 = mov.imm64 29
+  %g2 = mov.imm64 43
+  %rv0, %rg0, %rv1, %rg1, %rv2, %rg2 = low.func.call @private_mixed_results(%v0, %g0, %v1, %g1, %v2, %g2) : (reg<x86.ymm>, reg<x86.gpr64>, reg<x86.ymm>, reg<x86.gpr64>, reg<x86.ymm>, reg<x86.gpr64>) -> (reg<x86.ymm>, reg<x86.gpr64>, reg<x86.ymm>, reg<x86.gpr64>, reg<x86.ymm>, reg<x86.gpr64>)
+  vmovdqu32.store.ymm %rv0, %vector_output {disp32 = 0}
+  vmovdqu32.store.ymm %rv1, %vector_output {disp32 = 32}
+  vmovdqu32.store.ymm %rv2, %vector_output {disp32 = 64}
+  mov.store.gpr64 %rg0, %scalar_output {disp32 = 0}
+  mov.store.gpr64 %rg1, %scalar_output {disp32 = 8}
+  mov.store.gpr64 %rg2, %scalar_output {disp32 = 16}
+  return
+}
+
 // INTEGER and SSE argument banks advance independently. The seventh integer
 // and ninth vector values cross onto the stack at different aligned offsets.
 low.func.decl import(native, "native_vector_mix") target<x86.avx2.core> abi(object_function) abi_layout({signature = (buffer, vector<8xi32>, i64, vector<8xi32>, i64, vector<8xi32>, i64, vector<8xi32>, i64, vector<8xi32>, i64, vector<8xi32>, i64, vector<8xi32>, i64, vector<8xi32>, vector<8xi32>) -> ()}) @native_vector_mix(%output: reg<x86.gpr64>, %v0: reg<x86.ymm>, %g0: reg<x86.gpr64>, %v1: reg<x86.ymm>, %g1: reg<x86.gpr64>, %v2: reg<x86.ymm>, %g2: reg<x86.gpr64>, %v3: reg<x86.ymm>, %g3: reg<x86.gpr64>, %v4: reg<x86.ymm>, %g4: reg<x86.gpr64>, %v5: reg<x86.ymm>, %g5: reg<x86.gpr64>, %v6: reg<x86.ymm>, %g6: reg<x86.gpr64>, %v7: reg<x86.ymm>, %v8: reg<x86.ymm>)

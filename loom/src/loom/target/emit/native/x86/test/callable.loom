@@ -366,6 +366,42 @@ func.def public @call_pair(%x: i64, %y: i64) -> (i64) {
   func.return %result : i64
 }
 
+// Private helpers use independent result registers followed by caller-owned
+// overflow storage. The forwarding call proves that each frame retains its own
+// result block while a nested callee uses the same internal convention.
+func.def noinline @narrow_triplet(%value: i32) -> (i1, i8, i16) {
+  %threshold = scalar.constant 0 : i32
+  %predicate = scalar.cmpi ne, %value, %threshold : i32
+  %byte = scalar.trunci %value : i32 to i8
+  %word = scalar.trunci %value : i32 to i16
+  cfg.cond_br %predicate, ^nonzero, ^zero
+^zero:
+  %fallback_predicate = scalar.constant false : i1
+  %fallback_byte = scalar.constant 90 : i8
+  %fallback_word = scalar.constant -23206 : i16
+  func.return %fallback_predicate, %fallback_byte, %fallback_word : i1, i8, i16
+^nonzero:
+  func.return %predicate, %byte, %word : i1, i8, i16
+}
+
+func.def noinline @forward_narrow_triplet(%value: i32) -> (i1, i8, i16) {
+  %predicate, %byte, %word = func.call @narrow_triplet(%value) : (i32) -> (i1, i8, i16)
+  func.return %predicate, %byte, %word : i1, i8, i16
+}
+
+func.def public @write_narrow_triplet(%output: buffer, %value: i32) {
+  %predicate, %byte, %word = func.call @forward_narrow_triplet(%value) : (i32) -> (i1, i8, i16)
+  %wide_predicate = scalar.extui %predicate : i1 to i32
+  %wide_byte = scalar.extui %byte : i8 to i32
+  %wide_word = scalar.extui %word : i16 to i32
+  %origin = index.constant 0 : offset
+  %results = buffer.view %output[%origin] : buffer -> view<3xi32>
+  view.store %wide_predicate, %results[0] : i32, view<3xi32>
+  view.store %wide_byte, %results[1] : i32, view<3xi32>
+  view.store %wide_word, %results[2] : i32, view<3xi32>
+  func.return
+}
+
 func.def public @incoming_eight(%a: i64, %b: i64, %c: i64, %d: i64, %e: i64, %f: i64, %g: i64, %h: i64) -> (i64) {
   %ab = scalar.addi %a, %b : i64
   %cd = scalar.xori %c, %d : i64

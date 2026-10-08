@@ -243,7 +243,7 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
   const loom_low_emission_frame_spill_free_options_t spill_free_options = {0};
   // The fixture supplies incoming value locations. Reserve RSP just as the
   // object provider does before allocation; the native envelope uses it.
-  loom_low_allocation_reserved_range_t reserved_ranges[2] = {
+  loom_low_allocation_reserved_range_t reserved_ranges[3] = {
       {{0}},
   };
   const iree_host_size_t reserved_range_count =
@@ -269,6 +269,10 @@ static iree_status_t loom_x86_loom_check_emit_provider_execute(
           function_abi != NULL ? function_abi->call_contract.arguments : NULL,
       .allocation_entry_location_count =
           function_abi != NULL ? function_abi->call_contract.argument_count : 0,
+      .allocation_exit_locations =
+          function_abi != NULL ? function_abi->call_contract.results : NULL,
+      .allocation_exit_location_count =
+          function_abi != NULL ? function_abi->call_contract.result_count : 0,
       .allocation_reserved_ranges = reserved_ranges,
       .allocation_reserved_range_count = reserved_range_count,
   };

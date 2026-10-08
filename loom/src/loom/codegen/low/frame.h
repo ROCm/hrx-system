@@ -94,6 +94,11 @@ typedef struct loom_low_emission_frame_options_t {
   const loom_low_allocation_abi_location_t* allocation_entry_locations;
   // Number of entries in |allocation_entry_locations|.
   iree_host_size_t allocation_entry_location_count;
+  // Borrowed outgoing locations indexed by function result, passed unchanged
+  // through allocation repair. These constrain exits, not SSA lifetimes.
+  const loom_low_allocation_abi_location_t* allocation_exit_locations;
+  // Number of entries in |allocation_exit_locations|.
+  iree_host_size_t allocation_exit_location_count;
   // Callee convention facts consumed before allocation in every repair round.
   loom_low_call_contract_provider_t call_contracts;
   // Storage spaces supported by synchronous final transport in this emitter.

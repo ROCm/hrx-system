@@ -29,6 +29,15 @@ functions, recursion, and direct calls to external C symbols remain outlined.
 Unsupported calling conventions or payload classes are diagnosed before an
 object is returned.
 
+Module-internal definitions may return several flattened values because every
+caller and callee is emitted together. Integer-class results use RAX and RDX;
+SSE-class results independently use vector registers 0 and 1. Additional
+results use a compact caller-owned block after the complete stack-argument
+area. A callee retains that block across nested calls, while allocation plans
+all register results as one parallel exit. Public and imported functions remain
+limited to one result until their source aggregate layout supplies a real
+platform ABI instead of an ambiguous flat value list.
+
 The shared allocator preserves values across call clobbers, inserts spill
 storage, and resolves register permutations. When a signature exceeds the
 register bank, proven entry stores and pre-call reloads become direct transfers

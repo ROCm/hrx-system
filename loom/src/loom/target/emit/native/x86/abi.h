@@ -46,10 +46,16 @@ typedef struct loom_x86_function_abi_t {
   loom_x86_abi_value_t* results;
   // Bytes occupied by all stack arguments, including inter-argument padding.
   uint32_t stack_argument_bytes;
+  // Bytes occupied by arguments and caller-owned result storage.
+  uint32_t call_storage_bytes;
   // Required caller-RSP alignment, or zero when no argument uses the stack.
   uint8_t stack_argument_alignment;
+  // Required caller-RSP alignment for arguments and indirect results.
+  uint8_t call_storage_alignment;
   // True when an incoming SIMD stack value needs a stable scalar address base.
   bool has_simd_stack_argument;
+  // True when module-internal results overflow their register banks.
+  bool has_indirect_results;
   // True when an argument retains live YMM/ZMM0-15 state through CALL.
   bool has_upper_vector_register_argument;
   // True when the result returns live YMM/ZMM0-15 state to the caller.

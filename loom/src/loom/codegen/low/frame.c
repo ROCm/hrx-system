@@ -293,6 +293,8 @@ static iree_status_t loom_low_emission_frame_build_impl(
       .fixed_value_count = options->allocation_fixed_value_count,
       .entry_locations = options->allocation_entry_locations,
       .entry_location_count = options->allocation_entry_location_count,
+      .exit_locations = options->allocation_exit_locations,
+      .exit_location_count = options->allocation_exit_location_count,
       .call_contracts = options->call_contracts,
       .storage_transport = storage_transport,
       .move_storage_spaces = options->synchronous_storage_spaces,

@@ -245,6 +245,67 @@ low.func.def target<test.low.core> @caller(%value: reg<test.pressure.alias32>) -
             TEST_LOW_CORE_REG_CLASS_ID_TEST_PRESSURE_ALIAS32);
 }
 
+TEST_F(LowEmissionFrameTest, ExitTransportRetainsParallelBoundaryMoves) {
+  ModulePtr module = ParseModule(R"(
+low.func.def target<test.low.core> @pair(%first: reg<test.pressure.alias32>, %second: reg<test.pressure.alias32>) -> (reg<test.pressure.alias32>, reg<test.pressure.alias32>) asm {
+  return %first, %second
+}
+)");
+  const loom_low_descriptor_set_t* descriptors =
+      loom_test_low_core_descriptor_set();
+  uint16_t boundary_class = LOOM_LOW_REG_CLASS_NONE;
+  ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(
+      descriptors, IREE_SV("test.pressure.alias64"), &boundary_class, nullptr));
+  const loom_low_allocation_abi_location_t results[] = {
+      {LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, boundary_class, 7},
+      {LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, boundary_class, 6},
+  };
+  loom_op_t* function = loom_block_op(loom_module_block(module.get()), 0);
+  loom_block_t* body =
+      loom_region_entry_block(loom_low_func_def_body(function));
+  const loom_low_allocation_fixed_value_t fixed_values[] = {
+      {body->arg_ids[0], LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 6, 1},
+      {body->arg_ids[1], LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER, 7, 1},
+  };
+  loom_low_emission_frame_options_t options = {};
+  options.descriptor_registry = &registry_.registry;
+  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  options.allocation_fixed_values = fixed_values;
+  options.allocation_fixed_value_count = IREE_ARRAYSIZE(fixed_values);
+  options.allocation_exit_locations = results;
+  options.allocation_exit_location_count = IREE_ARRAYSIZE(results);
+  options.synchronous_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_STACK;
+  loom_low_emission_frame_t frame = {};
+  bool accepted = false;
+  IREE_ASSERT_OK(loom_low_emission_frame_build(module.get(), function, &options,
+                                               &arena_, &frame, &accepted));
+  ASSERT_TRUE(accepted);
+  ASSERT_EQ(frame.allocation.error_count, 0u);
+  ASSERT_EQ(frame.allocation.exit_move_count, 1u);
+  const loom_low_allocation_exit_moves_t& exit = frame.allocation.exit_moves[0];
+  EXPECT_EQ(exit.result_count, 2u);
+  uint32_t registers[16] = {};
+  registers[6] = 0x11111111u;
+  registers[7] = 0x22222222u;
+  uint32_t move_storage[1] = {};
+  for (iree_host_size_t i = 0; i < exit.results.count; ++i) {
+    const loom_low_move_t& move =
+        frame.allocation.moves[exit.results.start + i];
+    const uint32_t value =
+        move.source.location_kind == LOOM_LOW_ALLOCATION_LOCATION_MOVE_STORAGE
+            ? move_storage[move.source.location]
+            : registers[move.source.location];
+    if (move.destination.location_kind ==
+        LOOM_LOW_ALLOCATION_LOCATION_MOVE_STORAGE) {
+      move_storage[move.destination.location] = value;
+    } else {
+      registers[move.destination.location] = value;
+    }
+  }
+  EXPECT_EQ(registers[7], 0x11111111u);
+  EXPECT_EQ(registers[6], 0x22222222u);
+}
+
 TEST_F(LowEmissionFrameTest, CommonCallClobbersProtectCallerValues) {
   ModulePtr module = ParseModule(R"(
 low.func.decl target<test.low.core> @callee()

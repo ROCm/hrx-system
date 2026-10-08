@@ -86,7 +86,7 @@ typedef struct loom_x86_function_t {
 // from the fragment's value classes.
 iree_host_size_t loom_x86_function_reserved_ranges(
     const loom_x86_function_abi_t* function_abi,
-    loom_low_allocation_reserved_range_t out_ranges[2]);
+    loom_low_allocation_reserved_range_t out_ranges[3]);
 
 // Materializes native instructions from an accepted allocated Low frame. The
 // retained SysV plan supplies entry, call, and result transport. Stack,

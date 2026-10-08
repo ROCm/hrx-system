@@ -607,12 +607,116 @@ TEST_F(X86FunctionAbiTest, StackRowsRetainExactScalarAndVectorWidths) {
   }
 }
 
+TEST_F(X86FunctionAbiTest, PrivateResultsUseIndependentBanksAndOverflow) {
+  ModulePtr module = Parse(R"(
+low.func.def target<x86.avx2.core> abi(object_function) abi_layout({signature = (i1, f16, i64, vector<8xi32>, i16, f32, vector<8xi32>) -> (i1, f16, i64, vector<8xi32>, i16, f32, vector<8xi32>)}) @mixed_results(%b0: reg<x86.gpr32>, %h0: reg<x86.gpr32>, %g1: reg<x86.gpr64>, %v1: reg<x86.ymm>, %g2: reg<x86.gpr32>, %f2: reg<x86.xmm>, %v2: reg<x86.ymm>) -> (reg<x86.gpr32>, reg<x86.gpr32>, reg<x86.gpr64>, reg<x86.ymm>, reg<x86.gpr32>, reg<x86.xmm>, reg<x86.ymm>) asm {
+  return %b0, %h0, %g1, %v1, %g2, %f2, %v2
+}
+)");
+  const PreparedAbi prepared =
+      Prepare(module.get(), "mixed_results", loom_x86_avx2_core_descriptor_set);
+  ASSERT_TRUE(prepared.supported);
+  ASSERT_EQ(prepared.abi.call_contract.result_count, 7u);
+
+  static const struct {
+    uint16_t index;
+    uint16_t register_class;
+    uint32_t location;
+  } register_results[] = {
+      {0, LOOM_X86_REGISTER_CLASS_GPR32, 0},
+      {1, LOOM_X86_REGISTER_CLASS_XMM, 0},
+      {2, LOOM_X86_REGISTER_CLASS_GPR64, 2},
+      {3, LOOM_X86_REGISTER_CLASS_YMM, 1},
+  };
+  for (const auto& result : register_results) {
+    const loom_low_allocation_abi_location_t& location =
+        prepared.abi.call_contract.results[result.index];
+    EXPECT_EQ(location.location_kind,
+              LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER);
+    EXPECT_EQ(location.descriptor_reg_class_id, result.register_class);
+    EXPECT_EQ(location.location_base, result.location);
+    EXPECT_EQ(prepared.abi.results[result.index].stack_offset, UINT32_MAX);
+  }
+
+  for (uint16_t i : {4, 5, 6}) {
+    EXPECT_EQ(prepared.abi.call_contract.results[i].location_kind,
+              LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED);
+  }
+  EXPECT_EQ(prepared.abi.results[4].stack_offset, 0u);
+  EXPECT_EQ(prepared.abi.results[4].byte_length, 2u);
+  EXPECT_EQ(prepared.abi.results[4].action,
+            LOOM_X86_CALL_ABI_VALUE_ACTION_NORMALIZE_I16);
+  EXPECT_EQ(prepared.abi.results[5].stack_offset, 8u);
+  EXPECT_EQ(prepared.abi.results[5].byte_length, 4u);
+  EXPECT_EQ(prepared.abi.results[6].stack_offset, 32u);
+  EXPECT_EQ(prepared.abi.results[6].byte_length, 32u);
+  EXPECT_EQ(prepared.abi.stack_argument_bytes, 0u);
+  EXPECT_EQ(prepared.abi.call_storage_bytes, 64u);
+  EXPECT_EQ(prepared.abi.call_storage_alignment, 32u);
+  EXPECT_TRUE(prepared.abi.has_indirect_results);
+  EXPECT_TRUE(prepared.abi.has_upper_vector_result);
+}
+
+TEST_F(X86FunctionAbiTest, EveryProfileSupportsPrivateResultOverflow) {
+  std::string source;
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kProfiles); ++i) {
+    source += "low.func.def target<";
+    source += kProfiles[i].descriptor_key;
+    source += "> @profile" + std::to_string(i);
+    source += "(%a: reg<x86.";
+    source += kProfiles[i].carrier;
+    source += ">, %b: reg<x86.";
+    source += kProfiles[i].carrier;
+    source += ">, %c: reg<x86.";
+    source += kProfiles[i].carrier;
+    source += ">) -> (reg<x86.";
+    source += kProfiles[i].carrier;
+    source += ">, reg<x86.";
+    source += kProfiles[i].carrier;
+    source += ">, reg<x86.";
+    source += kProfiles[i].carrier;
+    source += ">) asm {\n  return %a, %b, %c\n}\n";
+  }
+  ModulePtr module = Parse(source);
+
+  for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(kProfiles); ++i) {
+    SCOPED_TRACE(kProfiles[i].name);
+    const std::string name = "profile" + std::to_string(i);
+    const PreparedAbi prepared =
+        Prepare(module.get(), name.c_str(), kProfiles[i].provider);
+    ASSERT_TRUE(prepared.supported);
+    ASSERT_EQ(prepared.abi.call_contract.result_count, 3u);
+    const uint16_t register_class =
+        kProfiles[i].vector_register_class == LOOM_LOW_REG_CLASS_NONE
+            ? LOOM_X86_REGISTER_CLASS_GPR64
+            : kProfiles[i].vector_register_class;
+    const uint32_t byte_length =
+        register_class == LOOM_X86_REGISTER_CLASS_GPR64 ? 8
+        : register_class == LOOM_X86_REGISTER_CLASS_XMM ? 16
+        : register_class == LOOM_X86_REGISTER_CLASS_YMM ? 32
+                                                        : 64;
+    EXPECT_EQ(prepared.abi.call_contract.results[0].location_base, 0u);
+    EXPECT_EQ(prepared.abi.call_contract.results[1].location_base,
+              register_class == LOOM_X86_REGISTER_CLASS_GPR64 ? 2u : 1u);
+    EXPECT_EQ(prepared.abi.call_contract.results[2].location_kind,
+              LOOM_LOW_ALLOCATION_LOCATION_UNASSIGNED);
+    EXPECT_EQ(prepared.abi.results[2].stack_offset, 0u);
+    EXPECT_EQ(prepared.abi.call_storage_bytes, byte_length);
+    EXPECT_EQ(prepared.abi.call_storage_alignment,
+              static_cast<uint8_t>(byte_length < 16 ? 16 : byte_length));
+    EXPECT_TRUE(prepared.abi.has_indirect_results);
+  }
+}
+
 TEST_F(X86FunctionAbiTest, RejectsUnavailableAndMismatchedBoundaries) {
   ModulePtr module = Parse(R"(
 low.func.decl target<x86.avx512.core> @unavailable(%value: reg<x86.xmm>)
 low.func.decl target<x86.scalar.core> abi_layout({signature = (i64) -> ()}) @mismatch(%value: reg<x86.gpr32>)
 low.func.decl target<x86.avx512.core> abi_layout({signature = (vector<3xi1>) -> ()}) @unsupported_predicate(%value: reg<x86.xmm>)
 low.func.decl target<x86.scalar.core> @multiple_results() -> (reg<x86.gpr64>, reg<x86.gpr64>)
+low.func.def public target<x86.scalar.core> @public_results(%a: reg<x86.gpr64>, %b: reg<x86.gpr64>) -> (reg<x86.gpr64>, reg<x86.gpr64>) asm {
+  return %a, %b
+}
 )");
   const PreparedAbi unavailable =
       Prepare(module.get(), "unavailable", loom_x86_scalar_core_descriptor_set);
@@ -638,7 +742,15 @@ low.func.decl target<x86.scalar.core> @multiple_results() -> (reg<x86.gpr64>, re
   EXPECT_FALSE(multiple_results.supported);
   EXPECT_TRUE(iree_string_view_equal(
       multiple_results.constraint,
-      IREE_SV("native x86 supports at most one primitive result")));
+      IREE_SV("native x86 public and imported functions require one platform "
+              "result")));
+  const PreparedAbi public_results = Prepare(
+      module.get(), "public_results", loom_x86_scalar_core_descriptor_set);
+  EXPECT_FALSE(public_results.supported);
+  EXPECT_TRUE(iree_string_view_equal(
+      public_results.constraint,
+      IREE_SV("native x86 public and imported functions require one platform "
+              "result")));
 }
 
 }  // namespace

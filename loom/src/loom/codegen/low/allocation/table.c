@@ -186,6 +186,25 @@ loom_low_allocation_find_call_moves_by_source_ordinal(
   return NULL;
 }
 
+const loom_low_allocation_exit_moves_t*
+loom_low_allocation_find_exit_moves_by_source_ordinal(
+    const loom_low_allocation_table_t* table, uint32_t source_ordinal) {
+  iree_host_size_t lower = 0;
+  iree_host_size_t upper = table->exit_move_count;
+  while (lower < upper) {
+    const iree_host_size_t middle = lower + (upper - lower) / 2;
+    const loom_low_allocation_exit_moves_t* moves = &table->exit_moves[middle];
+    if (source_ordinal < moves->source_ordinal) {
+      upper = middle;
+    } else if (source_ordinal > moves->source_ordinal) {
+      lower = middle + 1;
+    } else {
+      return moves;
+    }
+  }
+  return NULL;
+}
+
 iree_status_t loom_low_allocation_assignment_register_class_name(
     const loom_low_allocation_table_t* table,
     const loom_low_allocation_assignment_t* assignment,

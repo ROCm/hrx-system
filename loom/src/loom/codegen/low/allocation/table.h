@@ -259,6 +259,17 @@ typedef struct loom_low_allocation_call_moves_t {
   loom_low_move_range_t results;
 } loom_low_allocation_call_moves_t;
 
+// Return transport belongs to the exit that produces the function results.
+// The range indexes the allocation's common move table after cycle resolution.
+typedef struct loom_low_allocation_exit_moves_t {
+  // Source-order ordinal of the owning low.return.
+  uint32_t source_ordinal;
+  // Complete semantic result count, including storage ABI results.
+  uint16_t result_count;
+  // Register transport immediately before leaving the function body.
+  loom_low_move_range_t results;
+} loom_low_allocation_exit_moves_t;
+
 // Assignment-backed storage lease over target-visible physical units.
 //
 // Each record corresponds to one entry in |storage_leases.records|. The lease
@@ -386,6 +397,10 @@ typedef struct loom_low_allocation_table_t {
   const loom_low_allocation_call_moves_t* call_moves;
   // Number of records in |call_moves|.
   iree_host_size_t call_move_count;
+  // Return transport in source order; absent without register ABI results.
+  const loom_low_allocation_exit_moves_t* exit_moves;
+  // Number of records in |exit_moves|.
+  iree_host_size_t exit_move_count;
   // Final sequential physical move rows shared by all move groups.
   const loom_low_move_t* moves;
   // Number of final move rows across edge and packet-local move groups.
@@ -494,6 +509,11 @@ loom_low_allocation_find_packet_move_group_by_source_ordinal(
 // was performed without a target call contract.
 const loom_low_allocation_call_moves_t*
 loom_low_allocation_find_call_moves_by_source_ordinal(
+    const loom_low_allocation_table_t* table, uint32_t source_ordinal);
+
+// Returns retained function-exit transport for |source_ordinal|, or NULL.
+const loom_low_allocation_exit_moves_t*
+loom_low_allocation_find_exit_moves_by_source_ordinal(
     const loom_low_allocation_table_t* table, uint32_t source_ordinal);
 
 // Resolves the descriptor-set register class spelling for |assignment|.

@@ -105,7 +105,7 @@ static iree_status_t loom_x86_module_encode_function(
   const loom_x86_function_abi_t* abi =
       loom_x86_module_abi_lookup(module_abi, entry->func_ref);
   IREE_ASSERT_NE(abi, NULL);
-  loom_low_allocation_reserved_range_t reserved_ranges[2] = {{{0}}};
+  loom_low_allocation_reserved_range_t reserved_ranges[3] = {{{0}}};
   const iree_host_size_t reserved_range_count =
       loom_x86_function_reserved_ranges(abi, reserved_ranges);
   const loom_low_emission_frame_options_t frame_options = {
@@ -117,6 +117,8 @@ static iree_status_t loom_x86_module_encode_function(
       .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
       .allocation_entry_locations = abi->call_contract.arguments,
       .allocation_entry_location_count = abi->call_contract.argument_count,
+      .allocation_exit_locations = abi->call_contract.results,
+      .allocation_exit_location_count = abi->call_contract.result_count,
       .call_contracts =
           {
               .validate = loom_x86_function_call_contract_validate,

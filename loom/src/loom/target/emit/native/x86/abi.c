@@ -14,6 +14,10 @@
 // SysV AMD64 integer-class arguments use RDI, RSI, RDX, RCX, R8, and R9.
 static const uint8_t kSysvIntegerArgumentRegisters[] = {7, 6, 2, 1, 8, 9};
 
+// Module-internal multiple results use the platform's ordinary primitive
+// result prefixes before overflowing to caller-owned storage.
+static const uint8_t kInternalIntegerResultRegisters[] = {0, 2};
+
 static const loom_low_call_clobber_t kSysvGprClobbers[] = {
     {LOOM_X86_REGISTER_CLASS_GPR64, 0, 3},
     {LOOM_X86_REGISTER_CLASS_GPR64, 6, 6},
@@ -259,9 +263,11 @@ iree_status_t loom_x86_function_abi_prepare(
     *out_constraint = IREE_SV("native x86 requires one valid ABI signature");
     return iree_ok_status();
   }
-  if (function.op->result_count > 1) {
-    *out_constraint =
-        IREE_SV("native x86 supports at most one primitive result");
+  if (function.op->result_count > 1 &&
+      (!loom_func_like_is_module_internal(function) ||
+       function.op->region_count == 0)) {
+    *out_constraint = IREE_SV(
+        "native x86 public and imported functions require one platform result");
     return iree_ok_status();
   }
 
@@ -340,37 +346,68 @@ iree_status_t loom_x86_function_abi_prepare(
                             "x86 ABI argument area exceeds 32 bits");
   }
   out_abi->stack_argument_bytes = (uint32_t)stack_bytes;
+  out_abi->call_storage_bytes = (uint32_t)stack_bytes;
+  out_abi->call_storage_alignment = out_abi->stack_argument_alignment;
 
-  if (function.op->result_count != 0) {
+  uint16_t result_register_counts[2] = {0, 0};
+  for (uint16_t i = 0; i < function.op->result_count; ++i) {
     const loom_type_t logical_type =
-        signature ? signature->types[argument_count] : loom_type_none();
-    const loom_type_t carrier = loom_module_value_type(module, result_ids[0]);
+        signature ? signature->types[argument_count + i] : loom_type_none();
+    const loom_type_t carrier = loom_module_value_type(module, result_ids[i]);
     loom_x86_call_abi_classification_t classification;
     if (!loom_x86_abi_classify_value(logical_type, carrier, &classification)) {
       *out_constraint =
           IREE_SV("native x86 result logical type and Low carrier disagree");
       return iree_ok_status();
     }
-    if (!loom_x86_abi_register_available(
-            descriptor_set, classification.boundary_register_class, 0)) {
-      *out_constraint = IREE_SV(
-          "native x86 result register class is unavailable in this profile");
-      return iree_ok_status();
-    }
-    result_locations[0] = (loom_low_allocation_abi_location_t){
-        .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
-        .descriptor_reg_class_id = classification.boundary_register_class,
-        .location_base = 0,
-    };
-    out_abi->has_upper_vector_result = loom_x86_abi_has_upper_vector_state(
-        classification.boundary_register_class, 0);
-    out_abi->results[0] = (loom_x86_abi_value_t){
+    loom_x86_abi_value_t* value = &out_abi->results[i];
+    *value = (loom_x86_abi_value_t){
         .stack_offset = UINT32_MAX,
         .byte_length = classification.byte_length,
         .byte_alignment = classification.byte_alignment,
         .action = classification.action,
     };
+    const uint16_t register_index =
+        result_register_counts[classification.abi_class]++;
+    const uint16_t register_limit = 2;
+    if (register_index < register_limit) {
+      const uint32_t location =
+          classification.abi_class == LOOM_X86_CALL_ABI_CLASS_INTEGER
+              ? kInternalIntegerResultRegisters[register_index]
+              : register_index;
+      if (!loom_x86_abi_register_available(
+              descriptor_set, classification.boundary_register_class,
+              location)) {
+        *out_constraint = IREE_SV(
+            "native x86 result register class is unavailable in this profile");
+        return iree_ok_status();
+      }
+      result_locations[i] = (loom_low_allocation_abi_location_t){
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .descriptor_reg_class_id = classification.boundary_register_class,
+          .location_base = location,
+      };
+      out_abi->has_upper_vector_result |= loom_x86_abi_has_upper_vector_state(
+          classification.boundary_register_class, location);
+      continue;
+    }
+    const uint32_t alignment = iree_max(8u, value->byte_alignment);
+    stack_bytes = iree_host_align(stack_bytes, alignment);
+    if (stack_bytes > UINT32_MAX) {
+      return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                              "x86 ABI call storage exceeds 32 bits");
+    }
+    value->stack_offset = (uint32_t)stack_bytes;
+    stack_bytes += iree_host_align(value->byte_length, 8u);
+    out_abi->call_storage_alignment = (uint8_t)iree_max(
+        out_abi->call_storage_alignment, iree_max(16u, alignment));
+    out_abi->has_indirect_results = true;
   }
+  if (stack_bytes > UINT32_MAX) {
+    return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
+                            "x86 ABI call storage exceeds 32 bits");
+  }
+  out_abi->call_storage_bytes = (uint32_t)stack_bytes;
 
   out_abi->call_contract = (loom_low_call_contract_t){
       .arguments = argument_locations,

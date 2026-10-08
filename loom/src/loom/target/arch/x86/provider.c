@@ -154,7 +154,9 @@ static loom_target_call_policy_t loom_x86_select_call_policy(
   if (kind != LOOM_CALL_LIKE_KIND_SEMANTIC || !loom_func_like_isa(callee)) {
     return LOOM_TARGET_CALL_POLICY_DIRECT;
   }
-  if (callee.op->result_count > 1) {
+  if (callee.op->result_count > 1 &&
+      (!loom_func_like_is_module_internal(callee) ||
+       callee.op->region_count == 0)) {
     return LOOM_TARGET_CALL_POLICY_REQUIRE_INLINE;
   }
   uint16_t argument_count = 0;

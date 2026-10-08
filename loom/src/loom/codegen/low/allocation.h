@@ -62,6 +62,11 @@ typedef struct loom_low_allocation_options_t {
   const loom_low_allocation_abi_location_t* entry_locations;
   // Number of entries in |entry_locations|, at most the formal argument count.
   iree_host_size_t entry_location_count;
+  // Borrowed outgoing locations indexed by function result. These constrain
+  // each return boundary, not SSA lifetimes.
+  const loom_low_allocation_abi_location_t* exit_locations;
+  // Number of entries in |exit_locations|, at most the function result count.
+  iree_host_size_t exit_location_count;
   // Physical call effects resolved from retained target convention bindings.
   loom_low_call_contract_provider_t call_contracts;
   // Proven synchronous boundary storage for this immutable function snapshot.
