@@ -4,8 +4,10 @@
 
 namespace loomt = loom::type;
 using layout2 = loomt::encoding<loom::encoding::role::layout, 2>;
-using rows32 = loomt::view<const float, loomt::dynamic, 32>;
-using rows16 = loomt::view<const float, loomt::dynamic, 16>;
+using rows32 =
+    loomt::view<loomt::shape<loomt::dynamic, 32>, const float>;
+using rows16 =
+    loomt::view<loomt::shape<loomt::dynamic, 16>, const float>;
 static_assert(__is_trivially_copyable(layout2));
 static_assert(__is_trivially_copyable(rows32));
 static_assert(__is_trivially_copyable(rows16));
@@ -59,80 +61,145 @@ kernel.def @repack() {
   %input_byte_offset = index.constant 0 : offset
   %output_byte_offset = index.constant 0 : offset
   %12 = scalar.constant 1 : i32
-  %13 = index.cast %input_stride : i32 to index
-  %14 = index.cast %12 : i32 to index
-  %input_layout = encoding.layout.strided [%13, %14] : encoding<layout>
+  %13 = scalar.extui %input_stride : i32 to i64
+  %14 = index.cast %13 : i64 to index
+  %15 = index.cast %12 : i32 to index
+  %input_layout = encoding.layout.strided [%14, %15] : encoding<layout>
   %output_layout = encoding.layout.dense : encoding<layout>
-  %17 = scalar.extui %rows : i32 to i64
-  %source_rows = index.cast %17 : i64 to index
-  %source = buffer.view %input[%input_byte_offset] : buffer -> view<[%source_rows]x32xf32, %input_layout>
-  %20 = scalar.extui %rows : i32 to i64
-  %destination_rows = index.cast %20 : i64 to index
-  %destination = buffer.view %output[%output_byte_offset] : buffer -> view<[%destination_rows]x32xf32, %output_layout>
-  %23 = scalar.constant 1 : i32
+  %18 = scalar.extui %rows : i32 to i64
+  %source_dim0 = index.cast %18 : i64 to index
+  %source = buffer.view %input[%input_byte_offset] : buffer -> view<[%source_dim0]x32xf32, %input_layout>
+  %21 = scalar.extui %rows : i32 to i64
+  %destination_dim0 = index.cast %21 : i64 to index
+  %destination = buffer.view %output[%output_byte_offset] : buffer -> view<[%destination_dim0]x32xf32, %output_layout>
   %24 = scalar.constant 1 : i32
-  %25 = scalar.subi %rows, %24 : i32
-  %tail_rows, %tail_layout, %tail = func.call @suffix(%source_rows, %input_layout, %source, %23, %25) : (index, encoding<layout>, view<[%source_rows]x32xf32, %input_layout>, i32, i32) -> (index, encoding<layout>, view<[%tail_rows]x32xf32, %tail_layout>)
-  %29 = scalar.constant 1 : i32
-  %30 = scalar.constant 8 : i32
-  %31 = scalar.constant 1 : i32
-  %32 = scalar.subi %rows, %31 : i32
-  %narrow_tail_rows, %narrow_tail_layout, %narrow_tail = func.call @narrow(%source_rows, %input_layout, %source, %29, %30, %32) : (index, encoding<layout>, view<[%source_rows]x32xf32, %input_layout>, i32, i32, i32) -> (index, encoding<layout>, view<[%narrow_tail_rows]x16xf32, %narrow_tail_layout>)
-  %36 = scalar.constant 2 : i32
-  %37 = scalar.cmpi ugt, %rows, %36 : i32
-  %selected_rows$38, %selected_layout$39, %selected$40 = func.call @choose(%37, %source_rows, %input_layout, %source, %tail_rows, %tail_layout, %tail) : (i1, index, encoding<layout>, view<[%source_rows]x32xf32, %input_layout>, index, encoding<layout>, view<[%tail_rows]x32xf32, %tail_layout>) -> (index, encoding<layout>, view<[%selected_rows$38]x32xf32, %selected_layout$39>)
-  %41 = scalar.constant 3 : i32
-  %42 = scalar.cmpi ugt, %rows, %41 : i32
-  %selected_rows$43, %selected_layout$44, %selected$45 = scf.if %42 -> (index, encoding<layout>, view<[%selected_rows$43]x32xf32, %selected_layout$44>) {
-    scf.yield %tail_rows, %tail_layout, %tail : index, encoding<layout>, view<[%tail_rows]x32xf32, %tail_layout>
+  %25 = scalar.constant 1 : i32
+  %26 = scalar.subi %rows, %25 : i32
+  %tail_dim0, %tail_layout, %tail = func.call @suffix(%source_dim0, %input_layout, %source, %24, %26) : (index, encoding<layout>, view<[%source_dim0]x32xf32, %input_layout>, i32, i32) -> (index, encoding<layout>, view<[%tail_dim0]x32xf32, %tail_layout>)
+  %30 = scalar.constant 1 : i32
+  %31 = scalar.constant 8 : i32
+  %32 = scalar.constant 1 : i32
+  %33 = scalar.subi %rows, %32 : i32
+  %narrow_tail_dim0, %narrow_tail_layout, %narrow_tail = func.call @narrow(%source_dim0, %input_layout, %source, %30, %31, %33) : (index, encoding<layout>, view<[%source_dim0]x32xf32, %input_layout>, i32, i32, i32) -> (index, encoding<layout>, view<[%narrow_tail_dim0]x16xf32, %narrow_tail_layout>)
+  %37 = scalar.constant 2 : i32
+  %38 = scalar.cmpi ugt, %rows, %37 : i32
+  %selected_dim0$39, %selected_layout$40, %selected$41 = func.call @choose(%38, %source_dim0, %input_layout, %source, %tail_dim0, %tail_layout, %tail) : (i1, index, encoding<layout>, view<[%source_dim0]x32xf32, %input_layout>, index, encoding<layout>, view<[%tail_dim0]x32xf32, %tail_layout>) -> (index, encoding<layout>, view<[%selected_dim0$39]x32xf32, %selected_layout$40>)
+  %42 = scalar.constant 3 : i32
+  %43 = scalar.cmpi ugt, %rows, %42 : i32
+  %selected_dim0$44, %selected_layout$45, %selected$46 = scf.if %43 -> (index, encoding<layout>, view<[%selected_dim0$44]x32xf32, %selected_layout$45>) {
+    scf.yield %tail_dim0, %tail_layout, %tail : index, encoding<layout>, view<[%tail_dim0]x32xf32, %tail_layout>
   } else {
-    scf.yield %selected_rows$38, %selected_layout$39, %selected$40 : index, encoding<layout>, view<[%selected_rows$38]x32xf32, %selected_layout$39>
+    scf.yield %selected_dim0$39, %selected_layout$40, %selected$41 : index, encoding<layout>, view<[%selected_dim0$39]x32xf32, %selected_layout$40>
   }
   %workitem_id_x = kernel.workitem.id<x> : index
   %column = index.cast %workitem_id_x : index to i32
-  %48 = scalar.constant 0 : i32
-  %49 = scalar.extsi %48 : i32 to i64
-  %50 = scalar.extui %column : i32 to i64
-  %51 = index.cast %49 : i64 to index
-  %52 = index.cast %50 : i64 to index
-  %value = view.load %selected$45[%51, %52] : view<[%selected_rows$43]x32xf32, %selected_layout$44> -> f32
+  %49 = scalar.constant 0 : i32
+  %50 = index.cast %49 : i32 to index
+  %51 = scalar.extui %column : i32 to i64
+  %52 = index.cast %51 : i64 to index
+  %value = view.load %selected$46[%50, %52] : view<[%selected_dim0$44]x32xf32, %selected_layout$45> -> f32
   %54 = scalar.constant 0 : i32
-  %55 = scalar.extsi %54 : i32 to i64
+  %55 = index.cast %54 : i32 to index
   %56 = scalar.extui %column : i32 to i64
-  %57 = index.cast %55 : i64 to index
-  %58 = index.cast %56 : i64 to index
-  view.store %value, %destination[%57, %58] : f32, view<[%destination_rows]x32xf32, %output_layout>
+  %57 = index.cast %56 : i64 to index
+  view.store %value, %destination[%55, %57] : f32, view<[%destination_dim0]x32xf32, %output_layout>
   kernel.return
 }
 
-func.def @suffix(%source_rows: index, %source_layout: encoding<layout>, %source: view<[%source_rows]x32xf32, %source_layout>, %first: i32, %remaining: i32) -> (%64: index, %65: encoding<layout>, view<[%64]x32xf32, %65>) {
-  %67 = scalar.extui %first : i32 to i64
-  %68 = scalar.constant 0 : i32
-  %69 = scalar.extsi %68 : i32 to i64
-  %70 = scalar.extui %remaining : i32 to i64
-  %71 = index.cast %70 : i64 to index
-  %72 = index.cast %67 : i64 to index
-  %73 = index.cast %69 : i64 to index
-  %74 = view.subview %source[%72, %73] : view<[%source_rows]x32xf32, %source_layout> -> view<[%71]x32xf32, %source_layout>
-  func.return %71, %source_layout, %74 : index, encoding<layout>, view<[%71]x32xf32, %source_layout>
+func.def @suffix(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x32xf32, %source_layout>, %first: i32, %remaining: i32) -> (%63: index, %64: encoding<layout>, view<[%63]x32xf32, %64>) {
+  %66 = scalar.extui %first : i32 to i64
+  %67 = scalar.constant 0 : i32
+  %68 = scalar.extsi %67 : i32 to i64
+  %69 = scalar.extui %remaining : i32 to i64
+  %70 = index.cast %69 : i64 to index
+  %71 = index.cast %66 : i64 to index
+  %72 = index.cast %68 : i64 to index
+  %73 = view.subview %source[%71, %72] : view<[%source_dim0]x32xf32, %source_layout> -> view<[%70]x32xf32, %source_layout>
+  func.return %70, %source_layout, %73 : index, encoding<layout>, view<[%70]x32xf32, %source_layout>
 }
 
-func.def @narrow(%source_rows: index, %source_layout: encoding<layout>, %source: view<[%source_rows]x32xf32, %source_layout>, %first: i32, %column: i32, %remaining: i32) -> (%81: index, %82: encoding<layout>, view<[%81]x16xf32, %82>) {
-  %84 = scalar.extui %first : i32 to i64
-  %85 = scalar.extui %column : i32 to i64
-  %86 = scalar.extui %remaining : i32 to i64
-  %87 = index.cast %86 : i64 to index
+func.def @narrow(%source_dim0: index, %source_layout: encoding<layout>, %source: view<[%source_dim0]x32xf32, %source_layout>, %first: i32, %column: i32, %remaining: i32) -> (%80: index, %81: encoding<layout>, view<[%80]x16xf32, %81>) {
+  %83 = scalar.extui %first : i32 to i64
+  %84 = scalar.extui %column : i32 to i64
+  %85 = scalar.extui %remaining : i32 to i64
+  %86 = index.cast %85 : i64 to index
+  %87 = index.cast %83 : i64 to index
   %88 = index.cast %84 : i64 to index
-  %89 = index.cast %85 : i64 to index
-  %90 = view.subview %source[%88, %89] : view<[%source_rows]x32xf32, %source_layout> -> view<[%87]x16xf32, %source_layout>
-  func.return %87, %source_layout, %90 : index, encoding<layout>, view<[%87]x16xf32, %source_layout>
+  %89 = view.subview %source[%87, %88] : view<[%source_dim0]x32xf32, %source_layout> -> view<[%86]x16xf32, %source_layout>
+  func.return %86, %source_layout, %89 : index, encoding<layout>, view<[%86]x16xf32, %source_layout>
 }
 
-func.def @choose(%use_right: i1, %left_rows: index, %left_layout: encoding<layout>, %left: view<[%left_rows]x32xf32, %left_layout>, %right_rows: index, %right_layout: encoding<layout>, %right: view<[%right_rows]x32xf32, %right_layout>) -> (%98: index, %99: encoding<layout>, view<[%98]x32xf32, %99>) {
-  %101, %102, %103 = scf.if %use_right -> (index, encoding<layout>, view<[%101]x32xf32, %102>) {
-    scf.yield %right_rows, %right_layout, %right : index, encoding<layout>, view<[%right_rows]x32xf32, %right_layout>
+func.def @choose(%use_right: i1, %left_dim0: index, %left_layout: encoding<layout>, %left: view<[%left_dim0]x32xf32, %left_layout>, %right_dim0: index, %right_layout: encoding<layout>, %right: view<[%right_dim0]x32xf32, %right_layout>) -> (%97: index, %98: encoding<layout>, view<[%97]x32xf32, %98>) {
+  %100, %101, %102 = scf.if %use_right -> (index, encoding<layout>, view<[%100]x32xf32, %101>) {
+    scf.yield %right_dim0, %right_layout, %right : index, encoding<layout>, view<[%right_dim0]x32xf32, %right_layout>
   } else {
-    scf.yield %left_rows, %left_layout, %left : index, encoding<layout>, view<[%left_rows]x32xf32, %left_layout>
+    scf.yield %left_dim0, %left_layout, %left : index, encoding<layout>, view<[%left_dim0]x32xf32, %left_layout>
   }
-  func.return %101, %102, %103 : index, encoding<layout>, view<[%101]x32xf32, %102>
+  func.return %100, %101, %102 : index, encoding<layout>, view<[%100]x32xf32, %101>
+}
+
+// ====
+// Rank-three physical storage remains an ordinary view across a helper and
+// subview boundary.
+#include <loomcxx/encoding.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/view.h>
+namespace loomt = loom::type;
+using Weight = loomt::float8_e4m3fn_t;
+using Weights =
+    loomt::view<loomt::shape<loomt::dynamic, loomt::dynamic, 16>,
+                const Weight, loom::encoding::role::storage>;
+
+static Weights preserve_weights(Weights weights) { return weights; }
+
+Weight read_weight(const Weight* data, unsigned rows, unsigned tiles,
+                   unsigned row, unsigned tile, unsigned lane) {
+  auto layout = loom::encoding::layout::dense<3>();
+  auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{
+      .payload_elements = 16, .scale_group_elements = 16}>();
+  auto storage = loom::encoding::define(layout, schema);
+  auto raw_weights = loom::buffer::view<loomt::dynamic, loomt::dynamic, 16>(
+      data, {rows, tiles}, storage);
+  auto weights = preserve_weights(raw_weights);
+  auto tail = loom::view::subview(weights, {row, 0, 0}, {rows - row, tiles});
+  return loom::view::load(tail, 0, tile, lane);
+}
+
+// ----
+func.def public @read_weight(%data: buffer, %data_byte_offset: offset, %rows: i32, %tiles: i32, %row: i32, %tile: i32, %lane: i32) -> (f8E4M3) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  %11 = scalar.extui %rows : i32 to i64
+  %12 = scalar.extui %tiles : i32 to i64
+  %raw_weights_dim0 = index.cast %11 : i64 to index
+  %raw_weights_dim1 = index.cast %12 : i64 to index
+  %raw_weights = buffer.view %data[%data_byte_offset] : buffer -> view<[%raw_weights_dim0]x[%raw_weights_dim1]x16xf8E4M3, %storage>
+  %weights_dim0, %weights_dim1, %weights_storage, %weights = func.call @preserve_weights(%raw_weights_dim0, %raw_weights_dim1, %storage, %raw_weights) : (index, index, encoding<storage>, view<[%raw_weights_dim0]x[%raw_weights_dim1]x16xf8E4M3, %storage>) -> (index, index, encoding<storage>, view<[%weights_dim0]x[%weights_dim1]x16xf8E4M3, %weights_storage>)
+  %20 = scalar.extui %row : i32 to i64
+  %21 = scalar.constant 0 : i32
+  %22 = scalar.extsi %21 : i32 to i64
+  %23 = scalar.constant 0 : i32
+  %24 = scalar.extsi %23 : i32 to i64
+  %25 = scalar.subi %rows, %row : i32
+  %26 = scalar.extui %25 : i32 to i64
+  %27 = scalar.extui %tiles : i32 to i64
+  %tail_dim0 = index.cast %26 : i64 to index
+  %tail_dim1 = index.cast %27 : i64 to index
+  %30 = index.cast %20 : i64 to index
+  %31 = index.cast %22 : i64 to index
+  %32 = index.cast %24 : i64 to index
+  %tail = view.subview %weights[%30, %31, %32] : view<[%weights_dim0]x[%weights_dim1]x16xf8E4M3, %weights_storage> -> view<[%tail_dim0]x[%tail_dim1]x16xf8E4M3, %weights_storage>
+  %34 = scalar.constant 0 : i32
+  %35 = index.cast %34 : i32 to index
+  %36 = scalar.extui %tile : i32 to i64
+  %37 = index.cast %36 : i64 to index
+  %38 = scalar.extui %lane : i32 to i64
+  %39 = index.cast %38 : i64 to index
+  %40 = view.load %tail[%35, %37, %39] : view<[%tail_dim0]x[%tail_dim1]x16xf8E4M3, %weights_storage> -> f8E4M3
+  func.return %40 : f8E4M3
+}
+
+func.def @preserve_weights(%weights_dim0: index, %weights_dim1: index, %weights_storage: encoding<storage>, %weights: view<[%weights_dim0]x[%weights_dim1]x16xf8E4M3, %weights_storage>) -> (%45: index, %46: index, %47: encoding<storage>, view<[%45]x[%46]x16xf8E4M3, %47>) {
+  func.return %weights_dim0, %weights_dim1, %weights_storage, %weights : index, index, encoding<storage>, view<[%weights_dim0]x[%weights_dim1]x16xf8E4M3, %weights_storage>
 }

@@ -12,6 +12,8 @@
 #include <cxx/types.h>
 #include <cxx/views/symbol_chain.h>
 
+#include <string>
+
 #include "iree/testing/gtest.h"
 #include "loom/import/cxx/source/error.h"
 
@@ -233,27 +235,33 @@ TEST(TypesTest, FixedArrayStorageRetainsNestedSourceLayout) {
 TEST(TypesTest, ViewPartitionsBindEachDestinationShapeAndLayoutIdentity) {
   loom_cxx_import_options_t options;
   loom_cxx_import_options_initialize(&options);
-  Source source(IREE_SV("namespace loom { namespace encoding { "
-                        "enum class role { layout }; } namespace type { "
-                        "using size_type = __SIZE_TYPE__; "
-                        "inline constexpr size_type dynamic = ~size_type{0}; "
-                        "template <loom::encoding::role Role, size_type Rank> "
-                        "struct [[loom::type(\"encoding\")]] encoding { "
-                        "size_type strides[Rank]; }; "
-                        "template <class T, size_type Rows = dynamic, "
-                        "size_type Columns = dynamic> "
-                        "struct [[loom::type(\"view\")]] view { T* data; "
-                        "size_type shape[2]; "
-                        "encoding<loom::encoding::role::layout, 2> layout; }; "
-                        "} } "
-                        "using Layout = loom::type::encoding<"
-                        "loom::encoding::role::layout, 2>; "
-                        "using Plane = loom::type::view<const float, "
-                        "loom::type::dynamic, 32>; "
-                        "using Observed = loom::type::view<const volatile "
-                        "float, loom::type::dynamic, 32>; "
-                        "struct Packet { Plane plane; unsigned tag; };"),
-                IREE_SV("views.cpp"), options);
+  Source source(
+      IREE_SV("namespace loom { namespace encoding { "
+              "enum class role { layout, schema, storage, transform }; "
+              "} namespace type { "
+              "using size_type = __SIZE_TYPE__; "
+              "inline constexpr size_type dynamic = ~size_type{0}; "
+              "template <loom::encoding::role Role, size_type Rank> "
+              "struct [[loom::type(\"encoding\")]] encoding { "
+              "size_type strides[Rank]; }; "
+              "template <size_type... Extents> "
+              "struct [[loom::type(\"shape\")]] shape {}; "
+              "template <class Shape, class T, "
+              "loom::encoding::role Role = "
+              "loom::encoding::role::layout> "
+              "struct [[loom::type(\"view\")]] view { T* data; }; "
+              "} } "
+              "using Layout = loom::type::encoding<"
+              "loom::encoding::role::layout, 2>; "
+              "using Plane = loom::type::view<loom::type::shape<"
+              "loom::type::dynamic, 32>, const float>; "
+              "using Observed = loom::type::view<loom::type::shape<"
+              "loom::type::dynamic, 32>, const volatile float>; "
+              "using Volume = loom::type::view<loom::type::shape<"
+              "loom::type::dynamic, 4, loom::type::dynamic>, "
+              "const float, loom::encoding::role::storage>; "
+              "struct Packet { Plane plane; unsigned tag; };"),
+      IREE_SV("views.cpp"), options);
   Types types(source.unit(), source.diagnostics());
   auto* owner = source.unit().ast();
   auto source_type = [&](const char* name) {
@@ -280,8 +288,10 @@ TEST(TypesTest, ViewPartitionsBindEachDestinationShapeAndLayoutIdentity) {
   EXPECT_EQ(static_cast<const ViewPartition&>(observed).access_flags,
             LOOM_MEMORY_ACCESS_FLAG_VOLATILE);
   const loom_value_id_t plane_ids[] = {11, 12, 13};
+  BoundTypeStorage plane_storage;
   std::vector<loom_type_t> plane_types;
-  types.append_bound(source_type("Plane"), owner, plane_ids, plane_types);
+  types.append_bound(source_type("Plane"), owner, plane_ids, plane_storage,
+                     plane_types);
   ASSERT_EQ(plane_types.size(), 3u);
   EXPECT_EQ(loom_type_element_type(plane_types[0]), LOOM_SCALAR_TYPE_INDEX);
   EXPECT_EQ(loom_type_encoding_role(plane_types[1]),
@@ -293,6 +303,23 @@ TEST(TypesTest, ViewPartitionsBindEachDestinationShapeAndLayoutIdentity) {
   EXPECT_EQ(loom_type_dim_static_size_at(plane_types[2], 1), 32);
   EXPECT_TRUE(loom_type_has_ssa_encoding(plane_types[2]));
   EXPECT_EQ(loom_type_encoding_value_id(plane_types[2]), 12u);
+
+  const auto& volume = types.partition(source_type("Volume"), owner);
+  EXPECT_EQ(volume.kind, ValueKind::View);
+  EXPECT_EQ(volume.component_count, 4u);
+  const loom_value_id_t volume_ids[] = {31, 32, 33, 34};
+  BoundTypeStorage volume_storage;
+  std::vector<loom_type_t> volume_types;
+  types.append_bound(source_type("Volume"), owner, volume_ids, volume_storage,
+                     volume_types);
+  ASSERT_EQ(volume_types.size(), 4u);
+  EXPECT_EQ(loom_type_encoding_role(volume_types[2]),
+            LOOM_ENCODING_ROLE_PHYSICAL_STORAGE);
+  EXPECT_EQ(loom_type_rank(volume_types[3]), 3u);
+  EXPECT_EQ(loom_type_dim_value_id_at(volume_types[3], 0), 31u);
+  EXPECT_EQ(loom_type_dim_static_size_at(volume_types[3], 1), 4);
+  EXPECT_EQ(loom_type_dim_value_id_at(volume_types[3], 2), 32u);
+  EXPECT_EQ(loom_type_encoding_value_id(volume_types[3]), 33u);
   std::vector<loom_type_t> unbound;
   EXPECT_THROW(types.append(source_type("Plane"), owner, unbound),
                SourceRejected);
@@ -302,15 +329,152 @@ TEST(TypesTest, ViewPartitionsBindEachDestinationShapeAndLayoutIdentity) {
   EXPECT_EQ(packet->component_count, 4u);
   EXPECT_EQ(
       packet->component_names,
-      (std::vector<std::string>{"plane_rows", "plane_layout", "plane", "tag"}));
+      (std::vector<std::string>{"plane_dim0", "plane_layout", "plane", "tag"}));
   EXPECT_TRUE(types.requires_binding(source_type("Packet"), owner));
   const loom_value_id_t packet_ids[] = {21, 22, 23, 24};
+  BoundTypeStorage packet_storage;
   std::vector<loom_type_t> packet_types;
-  types.append_bound(source_type("Packet"), owner, packet_ids, packet_types);
+  types.append_bound(source_type("Packet"), owner, packet_ids, packet_storage,
+                     packet_types);
   ASSERT_EQ(packet_types.size(), 4u);
   EXPECT_EQ(loom_type_dim_value_id_at(packet_types[2], 0), 21u);
   EXPECT_EQ(loom_type_encoding_value_id(packet_types[2]), 22u);
   EXPECT_EQ(loom_type_element_type(packet_types[3]), LOOM_SCALAR_TYPE_I32);
+}
+
+TEST(TypesTest, ProjectsEverySupportedViewRankAndEncodingRole) {
+  std::string source_text = R"(
+    namespace loom { namespace encoding {
+    enum class role { layout, schema, storage, transform };
+    } namespace type {
+    using size_type = __SIZE_TYPE__;
+    inline constexpr size_type dynamic = ~size_type{0};
+    template <loom::encoding::role Role, size_type Rank>
+    struct [[loom::type("encoding")]] encoding { size_type values[Rank + 1]; };
+    template <size_type... Extents>
+    struct [[loom::type("shape")]] shape {};
+    template <class Shape, class T,
+              loom::encoding::role Role = loom::encoding::role::layout>
+    struct [[loom::type("view")]] view { T* data; };
+    } }
+    using Layout = loom::type::encoding<loom::encoding::role::layout, 15>;
+    using Schema = loom::type::encoding<loom::encoding::role::schema, 0>;
+    using Storage = loom::type::encoding<loom::encoding::role::storage, 15>;
+    using Transform = loom::type::encoding<loom::encoding::role::transform, 0>;
+  )";
+  for (size_t rank = 1; rank <= LOOM_TYPE_MAX_RANK; ++rank) {
+    source_text += "using Rank" + std::to_string(rank) +
+                   " = loom::type::view<loom::type::shape<"
+                   "loom::type::dynamic";
+    for (size_t axis = 1; axis < rank; ++axis) {
+      source_text += ", " + std::to_string(axis + 1);
+    }
+    source_text += ">, const float, loom::encoding::role::";
+    source_text += rank % 2 ? "layout" : "storage";
+    source_text += ">;\n";
+  }
+
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(iree_make_string_view(source_text.data(), source_text.size()),
+                IREE_SV("view_family.cpp"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto source_type = [&](const std::string& name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+
+  struct EncodingCase {
+    // Source alias naming the encoding specialization.
+    const char* name;
+    // Expected High encoding role.
+    loom_encoding_role_t role;
+    // Expected logical rank.
+    size_t rank;
+  };
+  for (const auto& test : {
+           EncodingCase{"Layout", LOOM_ENCODING_ROLE_ADDRESS_LAYOUT, 15},
+           EncodingCase{"Schema", LOOM_ENCODING_ROLE_STORAGE_SCHEMA, 0},
+           EncodingCase{"Storage", LOOM_ENCODING_ROLE_PHYSICAL_STORAGE, 15},
+           EncodingCase{"Transform", LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM, 0},
+       }) {
+    const auto& encoding = static_cast<const EncodingPartition&>(
+        types.partition(source_type(test.name), owner));
+    EXPECT_EQ(encoding.role, test.role);
+    EXPECT_EQ(encoding.rank, test.rank);
+  }
+
+  for (size_t rank = 1; rank <= LOOM_TYPE_MAX_RANK; ++rank) {
+    auto* input = source_type("Rank" + std::to_string(rank));
+    const auto& view =
+        static_cast<const ViewPartition&>(types.partition(input, owner));
+    ASSERT_EQ(view.extents.size(), rank);
+    EXPECT_EQ(view.encoding_role, rank % 2
+                                      ? LOOM_ENCODING_ROLE_ADDRESS_LAYOUT
+                                      : LOOM_ENCODING_ROLE_PHYSICAL_STORAGE);
+    EXPECT_EQ(view.extents[0], -1);
+    for (size_t axis = 1; axis < rank; ++axis) {
+      EXPECT_EQ(view.extents[axis], static_cast<int64_t>(axis + 1));
+    }
+
+    const loom_value_id_t first_id = 100 + rank * 4;
+    const loom_value_id_t identities[] = {first_id, first_id + 1, first_id + 2};
+    BoundTypeStorage storage;
+    std::vector<loom_type_t> projected;
+    types.append_bound(input, owner, identities, storage, projected);
+    ASSERT_EQ(projected.size(), 3u);
+    EXPECT_EQ(loom_type_encoding_role(projected[1]), view.encoding_role);
+    EXPECT_EQ(loom_type_rank(projected[2]), rank);
+    EXPECT_EQ(loom_type_dim_value_id_at(projected[2], 0), first_id);
+    for (size_t axis = 1; axis < rank; ++axis) {
+      EXPECT_EQ(loom_type_dim_static_size_at(projected[2], axis),
+                static_cast<int64_t>(axis + 1));
+    }
+    EXPECT_EQ(loom_type_encoding_value_id(projected[2]), first_id + 1);
+  }
+}
+
+TEST(TypesTest, RejectsInvalidViewRanksAndEncodingRoles) {
+  loom_cxx_import_options_t options;
+  loom_cxx_import_options_initialize(&options);
+  Source source(IREE_SV(R"(
+    namespace loom { namespace encoding {
+    enum class role { layout, schema, storage, transform };
+    } namespace type {
+    using size_type = __SIZE_TYPE__;
+    template <loom::encoding::role Role, size_type Rank>
+    struct [[loom::type("encoding")]] encoding { size_type value; };
+    template <size_type... Extents>
+    struct [[loom::type("shape")]] shape {};
+    template <class Shape, class T,
+              loom::encoding::role Role = loom::encoding::role::layout>
+    struct [[loom::type("view")]] view { T* data; };
+    } }
+    using RankZero = loom::type::view<loom::type::shape<>, float>;
+    using RankSixteen = loom::type::view<loom::type::shape<
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16>, float>;
+    using SchemaView = loom::type::view<loom::type::shape<4>, float,
+        loom::encoding::role::schema>;
+    using TransformView = loom::type::view<loom::type::shape<4>, float,
+        loom::encoding::role::transform>;
+    using LayoutZero = loom::type::encoding<loom::encoding::role::layout, 0>;
+    using StorageZero = loom::type::encoding<loom::encoding::role::storage, 0>;
+    using SchemaRanked = loom::type::encoding<loom::encoding::role::schema, 1>;
+    using TransformRanked = loom::type::encoding<
+        loom::encoding::role::transform, 1>;
+  )"),
+                IREE_SV("invalid_views.cpp"), options);
+  Types types(source.unit(), source.diagnostics());
+  auto* owner = source.unit().ast();
+  auto source_type = [&](const char* name) {
+    return (*source.unit().globalScope()->find(name).begin())->type();
+  };
+
+  for (const char* name :
+       {"RankZero", "RankSixteen", "SchemaView", "TransformView", "LayoutZero",
+        "StorageZero", "SchemaRanked", "TransformRanked"}) {
+    EXPECT_THROW(types.partition(source_type(name), owner), SourceRejected);
+  }
 }
 
 TEST(TypesTest, RejectsRepresentationsThatLoseSourceSemantics) {

@@ -178,6 +178,38 @@ constexpr SourceToModuleInput kEncodingType = {
     nullptr};
 constexpr SourceToModuleInput kEncoding = {
     SourceLanguage::kCxx, "#include <loomcxx/encoding.h>\n", nullptr, nullptr};
+constexpr SourceToModuleInput kView = {
+    SourceLanguage::kCxx, "#include <loomcxx/view.h>\n", nullptr, nullptr};
+constexpr SourceToModuleInput kRankTwoView = {SourceLanguage::kCxx,
+                                              R"cxx(#include <loomcxx/view.h>
+float load_rank_two(const float* data, unsigned rows, unsigned row,
+                    unsigned column) {
+  auto layout = loom::encoding::layout::dense<2>();
+  auto source = loom::buffer::view<loom::type::dynamic, 32>(
+      data, {rows}, layout);
+  return loom::view::load(source, row, column);
+}
+)cxx",
+                                              nullptr, nullptr};
+constexpr SourceToModuleInput kRankThreeStorageView = {
+    SourceLanguage::kCxx,
+    R"cxx(#include <loomcxx/encoding.h>
+#include <loomcxx/numeric.h>
+#include <loomcxx/view.h>
+using Weight = loom::type::float8_e4m3fn_t;
+Weight load_rank_three(const Weight* data, unsigned rows, unsigned tiles,
+                       unsigned row, unsigned tile, unsigned lane) {
+  auto layout = loom::encoding::layout::dense<3>();
+  auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{
+      .payload_elements = 16, .scale_group_elements = 16}>();
+  auto storage = loom::encoding::define(layout, schema);
+  auto source = loom::buffer::view<loom::type::dynamic,
+                                   loom::type::dynamic, 16>(
+      data, {rows, tiles}, storage);
+  return loom::view::load(source, row, tile, lane);
+}
+)cxx",
+    nullptr, nullptr};
 constexpr SourceToModuleInput kPredicate = {
     SourceLanguage::kCxx, "#include <loomcxx/predicate.h>\n", nullptr, nullptr};
 constexpr SourceToModuleInput kKernel = {
@@ -204,6 +236,12 @@ BENCHMARK_CAPTURE(SourceToModule, Vector, &kVector)
 BENCHMARK_CAPTURE(SourceToModule, EncodingType, &kEncodingType)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, Encoding, &kEncoding)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, View, &kView)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, RankTwoView, &kRankTwoView)
+    ->Unit(::benchmark::kMicrosecond);
+BENCHMARK_CAPTURE(SourceToModule, RankThreeStorageView, &kRankThreeStorageView)
     ->Unit(::benchmark::kMicrosecond);
 BENCHMARK_CAPTURE(SourceToModule, Predicate, &kPredicate)
     ->Unit(::benchmark::kMicrosecond);

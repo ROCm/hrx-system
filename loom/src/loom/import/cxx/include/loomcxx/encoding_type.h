@@ -9,8 +9,8 @@
 
 namespace loom::encoding {
 
-// Semantic role carried by an encoding value.
-enum class role { layout, schema };
+// Semantic role carried by an encoding value. Names match the encoding dialect.
+enum class role { layout, schema, storage, transform };
 
 }  // namespace loom::encoding
 
@@ -18,17 +18,17 @@ namespace loom::type {
 
 using size_type = __SIZE_TYPE__;
 
-// A value-owned encoding. Layouts describe Rank logical axes; schemas describe
-// numeric representation and have rank zero. Private storage preserves ordinary
-// C++ copy, lifetime, and sizeof semantics. Import projects either object to
-// one first-class Loom encoding value, retaining its semantic role.
+// A value-owned encoding. Layouts and physical storage describe Rank logical
+// axes; schemas and numeric transforms have rank zero. Private storage
+// preserves ordinary C++ copy, lifetime, and sizeof semantics. Import projects
+// the object to one first-class Loom encoding value, retaining its semantic
+// role.
 template <loom::encoding::role Role,
-          size_type Rank = Role == loom::encoding::role::layout ? 2 : 0>
+          size_type Rank = (Role == loom::encoding::role::layout ||
+                            Role == loom::encoding::role::storage)
+                               ? 2
+                               : 0>
 class [[loom::type("encoding")]] encoding {
-  static_assert((Role == loom::encoding::role::layout && Rank >= 1 &&
-                 Rank <= 15) ||
-                (Role == loom::encoding::role::schema && Rank == 0));
-
   // Source storage for layout parameters or a schema identity.
   size_type parameters_[Rank ? Rank : 1];
 };

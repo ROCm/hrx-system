@@ -6,8 +6,14 @@ through `loomc_module_import_cxx`. The no-use cases share one BF16 function
 body while adding one facade or facade combination: `<stdfloat>`,
 `<loomcxx/numeric.h>`, `<loomcxx/vector.h>`,
 `<loomcxx/encoding_type.h>`, `<loomcxx/encoding.h>`,
-`<loomcxx/predicate.h>`, `<loomcxx/kernel.h>`, or the kernel and predicate
-facades together. Comparing them with `NoIncludes` isolates header cost.
+`<loomcxx/view.h>`, `<loomcxx/predicate.h>`, `<loomcxx/kernel.h>`, or the kernel
+and predicate facades together. Comparing them with `NoIncludes` isolates
+header cost.
+`RankTwoView` imports a dynamic-row, static-column view through a dense layout.
+`RankThreeStorageView` composes a rank-three layout with an FP8 schema and loads
+through the resulting physical-storage view. Together they retain the ordinary
+view path as a control while tracking the higher-rank type and overflow-dimension
+storage added for model-weight authoring.
 
 `Q8S32Providers` imports the checked Q8S32 provider translation unit used by
 the target specialization tests. Its user header is served through the public

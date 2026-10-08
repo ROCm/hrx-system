@@ -21,10 +21,18 @@ namespace loom::cxx_import {
 // destination identities reserved for the immediately following op build.
 // The object must remain alive until that build consumes every identity.
 struct BoundSignature {
+  BoundSignature() = default;
+  BoundSignature(const BoundSignature&) = delete;
+  BoundSignature& operator=(const BoundSignature&) = delete;
+  BoundSignature(BoundSignature&&) = default;
+  BoundSignature& operator=(BoundSignature&&) = default;
+
   // High component types in source-value and partition order.
   std::vector<loom_type_t> types;
   // Reserved identities in the same order; empty for a static signature.
   std::vector<loom_value_id_t> identities;
+  // Overflow dimension payloads retained until the signature's builder call.
+  BoundTypeStorage type_storage;
 };
 
 // Controls whether a static signature needs its destination identities before

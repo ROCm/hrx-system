@@ -1031,9 +1031,23 @@ def typed_views(arrays):
         case.launch("typed_view_static_layouts", "%input, %output, %origin", f"tensor<{len(inputs)}xf32>, tensor<2xf32>, i32")
         case.lines.append(f"  check.expect.bitwise actual(%input) expected(%original) : tensor<{len(inputs)}xf32>")
         cases.append(case.finish([inputs[origin + 2 * stride + 3] for stride in (8, 11)]))
+    payload = [signed_bits(index * 17 + 3, 8) for index in range(32)]
+    case = Case(arrays, "typed_storage_rank3_copy", "i8", 16)
+    case.array("input", payload)
+    case.array("original", payload)
+    case.scalar("rows", 2, "i32")
+    case.scalar("tiles", 1, "i32")
+    case.launch(
+        "typed_storage_rank3",
+        "%input, %output, %rows, %tiles",
+        "tensor<32xi8>, tensor<16xi8>, i32, i32",
+    )
+    case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<32xi8>")
+    cases.append(case.finish(payload[:16]))
     declarations = (
         "kernel.decl @typed_view_copy() launch(%input: buffer, %output: buffer, %rows: i32, %input_stride: i32, %input_origin: i32, %output_origin: i32)\n\n"
         "kernel.decl @typed_view_static_layouts() launch(%input: buffer, %output: buffer, %input_origin: i32)\n\n"
+        "kernel.decl @typed_storage_rank3() launch(%input: buffer, %output: buffer, %rows: i32, %tiles: i32)\n\n"
     )
     return declarations + "\n".join(cases)
 

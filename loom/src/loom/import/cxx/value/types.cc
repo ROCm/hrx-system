@@ -14,6 +14,7 @@
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
+#include <algorithm>
 #include <limits>
 #include <optional>
 
@@ -41,7 +42,64 @@ const cxx::Attribute* type_binding(cxx::ClassSymbol* source) {
   return primary == source ? nullptr : find(primary);
 }
 
+const cxx::ParameterPackSymbol* template_argument_pack(
+    cxx::ClassSymbol* source) {
+  auto arguments = source->templateArguments();
+  if (arguments.size() != 1) {
+    return nullptr;
+  }
+  auto* symbol = std::get_if<cxx::Symbol*>(&arguments.front());
+  return symbol ? cxx::symbol_cast<cxx::ParameterPackSymbol>(*symbol) : nullptr;
+}
+
+loom_type_t make_view_type(loom_scalar_type_t element,
+                           std::span<const uint64_t> dimensions,
+                           loom_value_id_t encoding,
+                           BoundTypeStorage& storage) {
+  bool all_static = true;
+  for (auto dimension : dimensions) {
+    all_static &= !loom_dim_is_dynamic(dimension);
+  }
+  uint8_t flags = all_static ? LOOM_TYPE_FLAG_ALL_STATIC : 0;
+  if (dimensions.size() <= 2) {
+    flags |= LOOM_TYPE_FLAG_INLINE_DIMS;
+  }
+  loom_type_t result = {};
+  result.header = loom_type_make_header(
+      LOOM_TYPE_VIEW, element, static_cast<uint8_t>(dimensions.size()), flags);
+  result.encoding_id = static_cast<uint16_t>(encoding);
+  result.encoding_flags = LOOM_ENCODING_FLAG_SSA;
+  if (dimensions.size() <= 2) {
+    std::copy(dimensions.begin(), dimensions.end(), result.dims);
+  } else {
+    auto* retained = storage.retain_dimensions(dimensions);
+    result.dims[0] = reinterpret_cast<uintptr_t>(retained);
+  }
+  return result;
+}
+
 }  // namespace
+
+const loom_overflow_dim_t* BoundTypeStorage::retain_dimensions(
+    std::span<const loom_overflow_dim_t> dimensions) {
+  IREE_ASSERT(dimensions.size() >= 3 &&
+              dimensions.size() <= LOOM_TYPE_MAX_RANK);
+  auto& payload = dimension_payloads_.emplace_front();
+  std::copy(dimensions.begin(), dimensions.end(), payload.begin());
+  return payload.data();
+}
+
+void ViewExtents::assign(std::span<const int64_t> extents) {
+  IREE_ASSERT(!extents.empty() && extents.size() <= LOOM_TYPE_MAX_RANK);
+  rank_ = extents.size();
+  if (rank_ <= inline_extents_.size()) {
+    std::copy(extents.begin(), extents.end(), inline_extents_.begin());
+    overflow_extents_.reset();
+    return;
+  }
+  overflow_extents_ = std::make_unique<int64_t[]>(rank_);
+  std::copy(extents.begin(), extents.end(), overflow_extents_.get());
+}
 
 const cxx::Type* Types::unqualified(const cxx::Type* type) {
   return unit_.typeTraits().remove_cv(type);
@@ -175,20 +233,33 @@ const EncodingPartition* Types::encoding(const cxx::ClassType* input,
   auto rank = cxx::template_argument_value(arguments[1]);
   auto role_value = role ? interpreter.toInt(*role) : std::nullopt;
   auto rank_value = rank ? interpreter.toInt(*rank) : std::nullopt;
-  bool layout = role_value == 0 && rank_value && *rank_value >= 1 &&
-                *rank_value <= LOOM_TYPE_MAX_RANK;
-  bool schema = role_value == 1 && rank_value == 0;
-  if (!layout && !schema) {
+  bool ranked = (role_value == 0 || role_value == 2) && rank_value &&
+                *rank_value >= 1 && *rank_value <= LOOM_TYPE_MAX_RANK;
+  bool unranked = (role_value == 1 || role_value == 3) && rank_value == 0;
+  if (!ranked && !unranked) {
     diagnostics_.reject(
         unit_, owner,
-        "encoding values require layout rank in [1, 15] or schema rank zero");
+        "encoding values require layout/storage rank in [1, 15] or "
+        "schema/transform rank zero");
   }
   auto result = std::make_unique<EncodingPartition>();
   result->kind = ValueKind::Encoding;
   result->component_count = 1;
   result->source = source;
-  result->role = layout ? LOOM_ENCODING_ROLE_ADDRESS_LAYOUT
-                        : LOOM_ENCODING_ROLE_STORAGE_SCHEMA;
+  switch (*role_value) {
+    case 0:
+      result->role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT;
+      break;
+    case 1:
+      result->role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA;
+      break;
+    case 2:
+      result->role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE;
+      break;
+    case 3:
+      result->role = LOOM_ENCODING_ROLE_NUMERIC_TRANSFORM;
+      break;
+  }
   result->rank = static_cast<size_t>(*rank_value);
   auto* admitted = result.get();
   encodings_.emplace(source, std::move(result));
@@ -215,11 +286,35 @@ const ViewPartition* Types::view(const cxx::ClassType* input, cxx::AST* owner) {
   }
   auto arguments = source->templateArguments();
   if (arguments.size() != 3) {
-    diagnostics_.reject(
-        unit_, owner,
-        "rank-two view values require an element and two extent arguments");
+    diagnostics_.reject(unit_, owner,
+                        "view values require shape, element, and encoding "
+                        "role arguments");
   }
-  auto* element_type = cxx::template_argument_type(arguments[0]);
+  auto* shape_argument = cxx::template_argument_type(arguments[0]);
+  auto* shape_type =
+      shape_argument
+          ? cxx::type_cast<cxx::ClassType>(unqualified(shape_argument))
+          : nullptr;
+  auto* shape_source = shape_type ? shape_type->definition() : nullptr;
+  auto* shape_binding = shape_source ? type_binding(shape_source) : nullptr;
+  if (!shape_binding || shape_binding->arguments.size() != 1 ||
+      shape_binding->arguments[0]->name() != "shape") {
+    diagnostics_.reject(
+        unit_, owner, "view shape must be a loom::type::shape specialization");
+  }
+  auto* shape_pack = template_argument_pack(shape_source);
+  auto shape_arguments =
+      shape_pack ? std::span<cxx::Symbol* const>(shape_pack->elements())
+                 : std::span<cxx::Symbol* const>{};
+  if (shape_arguments.empty() || shape_arguments.size() > LOOM_TYPE_MAX_RANK) {
+    diagnostics_.reject(unit_, owner,
+                        "view rank must be in Loom's supported range [1, 15]");
+  }
+  auto* element_type = cxx::template_argument_type(arguments[1]);
+  if (!element_type) {
+    diagnostics_.reject(unit_, owner,
+                        "view element requires a source type argument");
+  }
   auto element = get(element_type, owner);
   if (loom_type_kind(element) != LOOM_TYPE_SCALAR ||
       loom_type_element_type(element) == LOOM_SCALAR_TYPE_I1) {
@@ -228,12 +323,20 @@ const ViewPartition* Types::view(const cxx::ClassType* input, cxx::AST* owner) {
         "view elements require a supported non-boolean scalar type");
   }
   cxx::ASTInterpreter interpreter(&unit_);
+  auto role = cxx::template_argument_value(arguments[2]);
+  auto role_value = role ? interpreter.toInt(*role) : std::nullopt;
+  if (role_value != 0 && role_value != 2) {
+    diagnostics_.reject(
+        unit_, owner, "view encoding role must be layout or physical storage");
+  }
+  auto encoding_role = role_value == 0 ? LOOM_ENCODING_ROLE_ADDRESS_LAYOUT
+                                       : LOOM_ENCODING_ROLE_PHYSICAL_STORAGE;
   auto pointer_bytes = unit_.control()->memoryLayout()->sizeOfPointer();
   uint64_t dynamic = pointer_bytes == 4 ? UINT32_MAX : UINT64_MAX;
-  std::array<int64_t, 2> extents;
+  std::array<int64_t, LOOM_TYPE_MAX_RANK> extents;
   size_t dynamic_count = 0;
-  for (size_t axis = 0; axis < extents.size(); ++axis) {
-    auto value = cxx::template_argument_value(arguments[axis + 1]);
+  for (size_t axis = 0; axis < shape_arguments.size(); ++axis) {
+    auto value = cxx::template_argument_value(shape_arguments[axis]);
     auto number = value ? interpreter.toInt(*value) : std::nullopt;
     if (!number) {
       diagnostics_.reject(unit_, owner,
@@ -261,14 +364,17 @@ const ViewPartition* Types::view(const cxx::ClassType* input, cxx::AST* owner) {
   result->element_type = element_type;
   result->element = loom_type_element_type(element);
   result->access_flags = memory_access_flags(element_type);
-  result->extents = extents;
-  if (extents[0] < 0) {
-    result->component_names.push_back("rows");
+  result->encoding_role = encoding_role;
+  result->extents.assign(
+      std::span<const int64_t>(extents).first(shape_arguments.size()));
+  for (size_t axis = 0; axis < result->extents.size(); ++axis) {
+    if (result->extents[axis] < 0) {
+      result->component_names.push_back("dim" + std::to_string(axis));
+    }
   }
-  if (extents[1] < 0) {
-    result->component_names.push_back("columns");
-  }
-  result->component_names.push_back("layout");
+  result->component_names.push_back(
+      encoding_role == LOOM_ENCODING_ROLE_ADDRESS_LAYOUT ? "layout"
+                                                         : "storage");
   result->component_names.emplace_back();
   auto* admitted = result.get();
   views_.emplace(source, std::move(result));
@@ -673,11 +779,15 @@ void Types::append(const cxx::Type* input, cxx::AST* owner,
         unit_, owner,
         "dependent source values require reserved destination identities");
   }
-  append_bound(input, owner, {}, output);
+  // Only dependent view types use overflow payloads. The rejection above
+  // therefore guarantees that no returned type borrows this local storage.
+  BoundTypeStorage storage;
+  append_bound(input, owner, {}, storage, output);
 }
 
 void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                          std::span<const loom_value_id_t> identities,
+                         BoundTypeStorage& storage,
                          std::vector<loom_type_t>& output) {
   const auto& admitted = partition(input, owner);
   if (!identities.empty() && identities.size() != admitted.component_count) {
@@ -708,7 +818,8 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                 ? std::span<const loom_value_id_t>{}
                 : identities.subspan(member.component_offset,
                                      member.partition->component_count);
-        append_bound(member.field->type(), owner, member_identities, output);
+        append_bound(member.field->type(), owner, member_identities, storage,
+                     output);
       }
       return;
     }
@@ -721,7 +832,7 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
                 : identities.subspan(index * array.element->component_count,
                                      array.element->component_count);
         append_bound(array.source->elementType(), owner, element_identities,
-                     output);
+                     storage, output);
       }
       return;
     }
@@ -732,9 +843,9 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
             "view values require reserved destination component identities");
       }
       const auto& view = static_cast<const ViewPartition&>(admitted);
-      std::array<uint64_t, 2> dimensions;
+      std::array<uint64_t, LOOM_TYPE_MAX_RANK> dimensions;
       size_t component = 0;
-      for (size_t axis = 0; axis < dimensions.size(); ++axis) {
+      for (size_t axis = 0; axis < view.extents.size(); ++axis) {
         if (view.extents[axis] < 0) {
           dimensions[axis] = loom_dim_pack_dynamic(identities[component++]);
           output.push_back(loom_type_scalar(LOOM_SCALAR_TYPE_INDEX));
@@ -742,19 +853,17 @@ void Types::append_bound(const cxx::Type* input, cxx::AST* owner,
           dimensions[axis] = loom_dim_pack_static(view.extents[axis]);
         }
       }
-      auto layout = identities[component++];
-      if (layout > UINT16_MAX) {
+      auto encoding = identities[component++];
+      if (encoding > UINT16_MAX) {
         diagnostics_.reject(
             unit_, owner,
-            "view layout identity exceeds Loom's current type capacity");
+            "view encoding identity exceeds Loom's current type capacity");
       }
-      output.push_back(
-          loom_type_encoding_with_role(LOOM_ENCODING_ROLE_ADDRESS_LAYOUT));
-      auto type = loom_type_shaped_2d(LOOM_TYPE_VIEW, view.element,
-                                      dimensions[0], dimensions[1], 0);
-      type.encoding_id = static_cast<uint16_t>(layout);
-      type.encoding_flags = LOOM_ENCODING_FLAG_SSA;
-      output.push_back(type);
+      output.push_back(loom_type_encoding_with_role(view.encoding_role));
+      output.push_back(make_view_type(
+          view.element,
+          std::span<const uint64_t>(dimensions).first(view.extents.size()),
+          encoding, storage));
       return;
     }
   }

@@ -11,6 +11,7 @@
 #include <cxx/types_fwd.h>
 
 #include <array>
+#include <forward_list>
 #include <memory>
 #include <span>
 #include <string>
@@ -71,11 +72,65 @@ struct EncodingPartition final : Partition {
   cxx::ClassSymbol* source;
   // Semantic role preserved across calls, records, and structured results.
   loom_encoding_role_t role;
-  // Number of layout axes, or zero for a numeric schema.
+  // Number of layout/storage axes, or zero for a schema/transform.
   size_t rank;
 };
 
-// Canonical rank-two source view. Dynamic extents and the address layout are
+// Owns temporary overflow dimensions while bound High types are consumed by
+// one immediately following builder call. Rank-one and rank-two types retain
+// dimensions inline and leave this storage empty.
+class BoundTypeStorage {
+ public:
+  BoundTypeStorage() = default;
+  BoundTypeStorage(const BoundTypeStorage&) = delete;
+  BoundTypeStorage& operator=(const BoundTypeStorage&) = delete;
+  BoundTypeStorage(BoundTypeStorage&&) = default;
+  BoundTypeStorage& operator=(BoundTypeStorage&&) = default;
+
+  // Retains one bounded dimension sequence and returns stable contiguous
+  // storage. The sequence must have rank in [3, LOOM_TYPE_MAX_RANK].
+  const loom_overflow_dim_t* retain_dimensions(
+      std::span<const loom_overflow_dim_t> dimensions);
+
+ private:
+  // Each node keeps one complete shaped-type payload at a stable address.
+  std::forward_list<std::array<loom_overflow_dim_t, LOOM_TYPE_MAX_RANK>>
+      dimension_payloads_;
+};
+
+// Bounded view extents with the former rank-two representation inline. Higher
+// ranks allocate one exact overflow array when their source type is admitted.
+class ViewExtents {
+ public:
+  ViewExtents() = default;
+  ViewExtents(const ViewExtents&) = delete;
+  ViewExtents& operator=(const ViewExtents&) = delete;
+  ViewExtents(ViewExtents&&) = default;
+  ViewExtents& operator=(ViewExtents&&) = default;
+
+  // Retains |extents| for the lifetime of this projection.
+  void assign(std::span<const int64_t> extents);
+
+  size_t size() const { return rank_; }
+  const int64_t* begin() const { return data(); }
+  const int64_t* end() const { return data() + rank_; }
+  int64_t operator[](size_t axis) const { return data()[axis]; }
+
+ private:
+  const int64_t* data() const {
+    return rank_ <= inline_extents_.size() ? inline_extents_.data()
+                                           : overflow_extents_.get();
+  }
+
+  // Number of retained logical axes.
+  size_t rank_ = 0;
+  // Rank-one and rank-two extents requiring no independent allocation.
+  std::array<int64_t, 2> inline_extents_ = {};
+  // Exact extent array for ranks above two; null for inline ranks.
+  std::unique_ptr<int64_t[]> overflow_extents_;
+};
+
+// Canonical rank-generic source view. Dynamic extents and its encoding are
 // transported before the dependent High view so its type references this
 // binding's own component identities at every call and region boundary.
 struct ViewPartition final : Partition {
@@ -87,8 +142,10 @@ struct ViewPartition final : Partition {
   loom_scalar_type_t element;
   // Observation semantics retained from the source element qualifier.
   loom_memory_access_flags_t access_flags;
+  // Semantic role of the attached layout or physical-storage encoding.
+  loom_encoding_role_t encoding_role;
   // Static extent, or -1 when the axis has a transported dynamic extent.
-  std::array<int64_t, 2> extents;
+  ViewExtents extents;
   // Component labels in transport order; an empty label names the view itself.
   std::vector<std::string> component_names;
 };
@@ -161,10 +218,12 @@ class Types {
               std::vector<loom_type_t>& output);
   // Appends a High signature bound to this destination's flattened component
   // IDs. Static leaves ignore their IDs; dependent views reference their own
-  // dynamic extents and layout. |identities| is either empty for a wholly
-  // static projection or exactly the partition's component count.
+  // dynamic extents and encoding. |identities| is either empty for a wholly
+  // static projection or exactly the partition's component count. |storage|
+  // must outlive the builder call that consumes the returned types.
   void append_bound(const cxx::Type* input, cxx::AST* owner,
                     std::span<const loom_value_id_t> identities,
+                    BoundTypeStorage& storage,
                     std::vector<loom_type_t>& output);
   const cxx::Type* unqualified(const cxx::Type* type);
   // Returns the resolved vector representation, or null for a scalar/object.

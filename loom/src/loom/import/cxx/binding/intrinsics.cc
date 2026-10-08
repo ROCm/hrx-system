@@ -122,7 +122,8 @@ void Intrinsics::declaration(cxx::FunctionSymbol* function,
                                                     *selected, owner)) {
       binding.operation = *shaped;
     } else if (auto encoding = EncodingIntrinsic::admit(
-                   unit_, diagnostics_, module_->context, *selected, owner)) {
+                   unit_, diagnostics_, module_->context, function, *selected,
+                   owner)) {
       binding.operation = *encoding;
     } else if (TemplateApplyIntrinsic::admit(unit_, diagnostics_, *selected,
                                              owner)) {
@@ -184,7 +185,7 @@ Intrinsics::Binding Intrinsics::resolve(cxx::FunctionSymbol* function,
     return *decode;
   }
   if (auto encoding = EncodingIntrinsic::admit(
-          unit_, diagnostics_, module_->context, attribute, owner)) {
+          unit_, diagnostics_, module_->context, function, attribute, owner)) {
     return EncodingIntrinsic::resolve(*encoding, unit_, diagnostics_, types_,
                                       function, module_, owner);
   }
@@ -380,7 +381,7 @@ IntrinsicCallResult Intrinsics::call(const Binding& admitted,
     return {decode->call(arguments, builder, location)};
   }
   if (auto* encoding = std::get_if<EncodingIntrinsic>(binding)) {
-    return {encoding->call(arena, builder, location)};
+    return {encoding->call(arguments, arena, builder, location)};
   }
   if (auto* view = std::get_if<ViewIntrinsic>(binding)) {
     return {view->call(arguments, types_, arena, storage, owner, builder,

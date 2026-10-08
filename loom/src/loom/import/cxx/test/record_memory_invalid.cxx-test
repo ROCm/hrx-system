@@ -47,5 +47,7 @@ void write(const Record* record) { auto* values = record->values; values[0] = 7;
 
 // ====
 #include <loomcxx/view.h>
-// ERROR@+1: LOWERING/059 "Loom source types require SSA value transport"
-void read(const loom::type::view<float, 4, 4>* view) { auto value = *view; }
+// ERROR@+2: LOWERING/059 "Loom source types require SSA value transport"
+void read(const loom::type::view<loom::type::shape<4, 4>, float>* view) {
+  auto value = *view;
+}

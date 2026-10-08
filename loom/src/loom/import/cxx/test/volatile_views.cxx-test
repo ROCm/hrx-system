@@ -2,7 +2,8 @@
 // Qualified elements survive view copies, subviews and ordinary helper calls.
 #include <loomcxx/view.h>
 namespace loomt = loom::type;
-using observed_view = loomt::view<const volatile unsigned, 1, 4>;
+using observed_view =
+    loomt::view<loomt::shape<1, 4>, const volatile unsigned>;
 static unsigned read(observed_view source) {
   auto copy = source;
   loom::view::load(copy, 0, 1);
@@ -23,22 +24,22 @@ void view_observations(const volatile unsigned* input, volatile unsigned* output
 func.def public @view_observations(%input: buffer, %input_byte_offset: offset, %output: buffer, %output_byte_offset: offset) {
   %layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<2x4xi32, %layout>
-  %57 = index.constant 1 : index
-  %56 = index.constant 0 : index
-  %tail = view.subview %source[%57, %56] : view<2x4xi32, %layout> -> view<1x4xi32, %layout>
+  %47 = index.constant 1 : index
+  %46 = index.constant 0 : index
+  %tail = view.subview %source[%47, %46] : view<2x4xi32, %layout> -> view<1x4xi32, %layout>
   %destination = buffer.view %output[%output_byte_offset] : buffer -> view<1x4xi32>
   %value = func.call @read(%layout, %tail) : (encoding<layout>, view<1x4xi32, %layout>) -> (i32)
-  view.store<volatile> %value, %destination[%56, %57] : i32, view<1x4xi32>
-  view.store<volatile> %value, %destination[%56, %57] : i32, view<1x4xi32>
+  view.store<volatile> %value, %destination[%46, %47] : i32, view<1x4xi32>
+  view.store<volatile> %value, %destination[%46, %47] : i32, view<1x4xi32>
   func.return
 }
 
 func.def @read(%source_layout: encoding<layout>, %source: view<1x4xi32, %source_layout>) -> (i32) {
-  %63 = index.constant 0 : index
-  %62 = index.constant 1 : index
-  %36 = view.load<volatile> %source[%63, %62] : view<1x4xi32, %source_layout> -> i32
-  %first = view.load<volatile> %source[%63, %62] : view<1x4xi32, %source_layout> -> i32
-  %second = view.load<volatile> %source[%63, %62] : view<1x4xi32, %source_layout> -> i32
-  %51 = scalar.addi %first, %second : i32
-  func.return %51 : i32
+  %53 = index.constant 0 : index
+  %52 = index.constant 1 : index
+  %30 = view.load<volatile> %source[%53, %52] : view<1x4xi32, %source_layout> -> i32
+  %first = view.load<volatile> %source[%53, %52] : view<1x4xi32, %source_layout> -> i32
+  %second = view.load<volatile> %source[%53, %52] : view<1x4xi32, %source_layout> -> i32
+  %41 = scalar.addi %first, %second : i32
+  func.return %41 : i32
 }

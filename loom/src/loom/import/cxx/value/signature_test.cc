@@ -27,12 +27,15 @@ TEST_F(ValueBuilderTest, BindsFunctionArgumentsAndResultsToTheirOwnIdentities) {
                         "template <loom::encoding::role Role, size_type Rank> "
                         "struct [[loom::type(\"encoding\")]] encoding { "
                         "size_type strides[Rank]; }; "
-                        "template <class T, size_type Rows, size_type Columns> "
-                        "struct [[loom::type(\"view\")]] view { T* data; "
-                        "size_type shape[2]; "
-                        "encoding<loom::encoding::role::layout, 2> layout; }; "
-                        "} } using Plane = loom::type::view<const float, "
-                        "loom::type::dynamic, 32>;"),
+                        "template <size_type... Extents> "
+                        "struct [[loom::type(\"shape\")]] shape {}; "
+                        "template <class Shape, class T, "
+                        "loom::encoding::role Role = "
+                        "loom::encoding::role::layout> "
+                        "struct [[loom::type(\"view\")]] view { T* data; }; "
+                        "} } using Plane = loom::type::view<"
+                        "loom::type::shape<loom::type::dynamic, 32>, "
+                        "const float>;"),
                 IREE_SV("signature.cpp"), options());
   Types types(source.unit(), source.diagnostics());
   auto symbols = source.unit().globalScope()->find("Plane");

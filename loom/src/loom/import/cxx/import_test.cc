@@ -172,7 +172,8 @@ TEST_F(ImportTest, ViewFacadePreservesItsObjectContractAcrossDataModels) {
       "#include <loomcxx/view.h>\n"
       "namespace loomt = loom::type;\n"
       "using Layout = loomt::encoding<loom::encoding::role::layout, 2>;\n"
-      "using Rows = loomt::view<const float, loomt::dynamic, 32>;\n"
+      "using Rows = loomt::view<loomt::shape<loomt::dynamic, 32>, "
+      "const float>;\n"
       "static_assert(__is_trivially_copyable(Layout));\n"
       "static_assert(__is_trivially_copyable(Rows));\n"
       "static_assert(sizeof(Layout) == 2 * sizeof(loomt::size_type));\n"
@@ -187,7 +188,7 @@ TEST_F(ImportTest, ViewFacadePreservesItsObjectContractAcrossDataModels) {
     ASSERT_NE(module_, nullptr);
     auto text = Print();
     EXPECT_NE(text.find("func.def public @identity"), std::string::npos);
-    EXPECT_NE(text.find("view<[%value_rows]x32xf32, %value_layout>"),
+    EXPECT_NE(text.find("view<[%value_dim0]x32xf32, %value_layout>"),
               std::string::npos);
   }
   EXPECT_EQ(diagnostic_count_, 0);

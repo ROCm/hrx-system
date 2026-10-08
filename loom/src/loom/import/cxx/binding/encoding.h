@@ -11,6 +11,7 @@
 #include <cxx/symbols_fwd.h>
 
 #include <optional>
+#include <span>
 #include <string_view>
 
 #include "loom/import/cxx/value/types.h"
@@ -25,7 +26,14 @@ namespace loom::cxx_import {
 // encoding identity, so emission never reevaluates its source parameters.
 class EncodingIntrinsic {
  public:
+  enum class Operation {
+    StaticSchema,
+    PhysicalStorage,
+  };
+
   struct Family {
+    // Operation selected by the declaration's attribute spelling.
+    Operation operation;
     // Public family or alias spelling, borrowed from the source declaration.
     std::string_view name;
     // Registered static parameter contract, valid for the context lifetime.
@@ -39,34 +47,45 @@ class EncodingIntrinsic {
   static std::optional<Family> admit(cxx::TranslationUnit& unit,
                                      Diagnostics& diagnostics,
                                      const loom_context_t* context,
+                                     cxx::FunctionSymbol* function,
                                      const cxx::Attribute& attribute,
                                      cxx::AST* owner);
 
-  // Admits a no-argument function returning encoding<schema>, with exactly one
-  // constant aggregate template argument. Scalar parameter fields are integers,
-  // booleans, or enums; the module interner owns schema normalization and the
-  // normal IR verifier owns numeric semantics.
+  // Admits either a static schema definition or dynamic physical-storage
+  // composition. The module interner owns encoding normalization and the
+  // normal IR verifier owns family semantics.
   static EncodingIntrinsic resolve(Family family, cxx::TranslationUnit& unit,
                                    Diagnostics& diagnostics, Types& types,
                                    cxx::FunctionSymbol* function,
                                    loom_module_t* module, cxx::AST* owner);
 
-  // Emits the retained schema without source inspection or temporary storage.
-  Value call(ValueArena& arena, loom_builder_t* builder,
-             loom_location_id_t location) const;
+  // Emits the retained definition without source inspection.
+  Value call(std::span<const Value> arguments, ValueArena& arena,
+             loom_builder_t* builder, loom_location_id_t location) const;
 
   bool equivalent(const EncodingIntrinsic& other) const {
-    return encoding_id_ == other.encoding_id_ && result_ == other.result_;
+    return operation_ == other.operation_ &&
+           encoding_id_ == other.encoding_id_ && result_ == other.result_ &&
+           layout_name_id_ == other.layout_name_id_ &&
+           schema_name_id_ == other.schema_name_id_;
   }
 
  private:
-  EncodingIntrinsic(uint16_t encoding_id, const EncodingPartition* result)
-      : encoding_id_(encoding_id), result_(result) {}
+  EncodingIntrinsic(Operation operation, uint16_t encoding_id,
+                    const EncodingPartition* result)
+      : operation_(operation), encoding_id_(encoding_id), result_(result) {}
 
-  // Static encoding interned in the invocation's output module.
+  // Selected definition kind.
+  Operation operation_;
+
+  // Encoding definition interned in the invocation's output module.
   uint16_t encoding_id_;
   // Source result partition owned by this invocation's Types projection.
   const EncodingPartition* result_;
+  // Physical-storage layout operand key, absent for static schemas.
+  loom_string_id_t layout_name_id_ = LOOM_STRING_ID_INVALID;
+  // Physical-storage schema operand key, absent for static schemas.
+  loom_string_id_t schema_name_id_ = LOOM_STRING_ID_INVALID;
 };
 
 }  // namespace loom::cxx_import

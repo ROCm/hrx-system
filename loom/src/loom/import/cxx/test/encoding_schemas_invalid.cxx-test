@@ -1,6 +1,6 @@
 // RUN: verify
-// Family names are validated even on unused templates.
-// ERROR@+2: LOWERING/059 "encoding.define requires one encoding family name"
+// Static definitions require an encoding family even when they are unused.
+// ERROR@+2: LOWERING/059 "static encoding.define requires one encoding family name"
 template <auto Spec>
 [[loom::op("encoding.define")]] int invalid();
 
@@ -97,5 +97,46 @@ Schema entry() { return invalid<Parameters{32, Packing::unrelated}>(); }
 // A numeric schema cannot masquerade as a view layout.
 #include <loomcxx/encoding_type.h>
 using Schema = loom::type::encoding<loom::encoding::role::schema>;
-// ERROR@+1: LOWERING/059 "view operation requires a layout encoding value"
+// ERROR@+1: LOWERING/059 "layout operation requires a layout encoding value"
 [[loom::op("encoding.layout.dense")]] Schema invalid();
+
+// ====
+// Physical storage composition requires both semantic inputs.
+#include <loomcxx/encoding_type.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 3>;
+using Storage = loom::type::encoding<loom::encoding::role::storage, 3>;
+// ERROR@+1: LOWERING/059 "physical storage composition requires layout and schema operands"
+[[loom::op("encoding.define")]] Storage invalid(Layout);
+
+// ====
+// Composition cannot substitute a schema for its address layout.
+#include <loomcxx/encoding_type.h>
+using Schema = loom::type::encoding<loom::encoding::role::schema>;
+using Storage = loom::type::encoding<loom::encoding::role::storage, 3>;
+// ERROR@+1: LOWERING/059 "physical storage composition requires a layout encoding first"
+[[loom::op("encoding.define")]] Storage invalid(Schema, Schema);
+
+// ====
+// Composition cannot substitute another layout for its storage schema.
+#include <loomcxx/encoding_type.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 3>;
+using Storage = loom::type::encoding<loom::encoding::role::storage, 3>;
+// ERROR@+1: LOWERING/059 "physical storage composition requires a schema encoding second"
+[[loom::op("encoding.define")]] Storage invalid(Layout, Layout);
+
+// ====
+// The result must carry the composed physical-storage role.
+#include <loomcxx/encoding_type.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 3>;
+using Schema = loom::type::encoding<loom::encoding::role::schema>;
+// ERROR@+1: LOWERING/059 "physical storage composition must return a storage encoding"
+[[loom::op("encoding.define")]] Schema invalid(Layout, Schema);
+
+// ====
+// The composed storage rank is the layout rank.
+#include <loomcxx/encoding_type.h>
+using Layout = loom::type::encoding<loom::encoding::role::layout, 3>;
+using Schema = loom::type::encoding<loom::encoding::role::schema>;
+using Storage = loom::type::encoding<loom::encoding::role::storage, 2>;
+// ERROR@+1: LOWERING/059 "physical storage result rank must match its layout rank"
+[[loom::op("encoding.define")]] Storage invalid(Layout, Schema);

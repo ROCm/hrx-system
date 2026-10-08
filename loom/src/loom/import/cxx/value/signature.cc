@@ -38,7 +38,7 @@ BoundSignature bind_signature(Types& types,
     types.append_bound(source, owner,
                        std::span<const loom_value_id_t>(result.identities)
                            .subspan(component_offset, count),
-                       result.types);
+                       result.type_storage, result.types);
     component_offset += count;
   }
   return result;

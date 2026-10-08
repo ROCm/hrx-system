@@ -10,6 +10,7 @@
 #include <cxx/attributes.h>
 #include <cxx/types_fwd.h>
 
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -73,6 +74,12 @@ class ViewIntrinsic {
   const ViewPartition* source_view_ = nullptr;
   // Admitted dependent result view for buffer.view/subview.
   const ViewPartition* result_view_ = nullptr;
+  // Source arguments whose fixed-width integer values are unsigned.
+  uint32_t unsigned_argument_mask_ = 0;
+  // Flattened dimension components whose integer values are unsigned.
+  uint16_t unsigned_dimension_mask_ = 0;
+  // Flattened subview origin components whose integer values are unsigned.
+  uint16_t unsigned_origin_mask_ = 0;
   // Native scalar result for view.load.
   loom_type_t scalar_result_ = {};
 };

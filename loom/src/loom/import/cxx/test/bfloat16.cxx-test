@@ -116,10 +116,10 @@ func.def public @element(%input: buffer, %input_byte_offset: offset, %row: i32, 
   %source_layout = encoding.layout.dense : encoding<layout>
   %source = buffer.view %input[%input_byte_offset] : buffer -> view<4x8xbf16, %source_layout>
   %7 = scalar.extui %row : i32 to i64
-  %8 = scalar.extui %column : i32 to i64
-  %9 = index.cast %7 : i64 to index
-  %10 = index.cast %8 : i64 to index
-  %11 = view.load %source[%9, %10] : view<4x8xbf16, %source_layout> -> bf16
+  %8 = index.cast %7 : i64 to index
+  %9 = scalar.extui %column : i32 to i64
+  %10 = index.cast %9 : i64 to index
+  %11 = view.load %source[%8, %10] : view<4x8xbf16, %source_layout> -> bf16
   func.return %11 : bf16
 }
 

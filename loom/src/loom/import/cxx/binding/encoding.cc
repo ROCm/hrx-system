@@ -11,6 +11,7 @@
 #include <cxx/symbols.h>
 #include <cxx/types.h>
 
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -60,10 +61,28 @@ loom_attribute_t scalar_parameter(cxx::TranslationUnit& unit,
 
 std::optional<EncodingIntrinsic::Family> EncodingIntrinsic::admit(
     cxx::TranslationUnit& unit, Diagnostics& diagnostics,
-    const loom_context_t* context, const cxx::Attribute& attribute,
-    cxx::AST* owner) {
+    const loom_context_t* context, cxx::FunctionSymbol* function,
+    const cxx::Attribute& attribute, cxx::AST* owner) {
   if (attribute.arguments[0]->name() != "encoding.define") {
     return std::nullopt;
+  }
+  if (attribute.arguments.size() == 1) {
+    auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+    if (signature && !signature->isVariadic() &&
+        signature->parameterTypes().size() == 2) {
+      return Family{Operation::PhysicalStorage, "encoding.storage", nullptr,
+                    nullptr};
+    }
+    if (signature && !signature->isVariadic() &&
+        signature->parameterTypes().empty()) {
+      diagnostics.reject(
+          unit, owner,
+          "static encoding.define requires one encoding family name");
+    } else {
+      diagnostics.reject(
+          unit, owner,
+          "physical storage composition requires layout and schema operands");
+    }
   }
   if (attribute.arguments.size() != 2) {
     diagnostics.reject(unit, owner,
@@ -78,7 +97,8 @@ std::optional<EncodingIntrinsic::Family> EncodingIntrinsic::admit(
     diagnostics.reject(unit, owner,
                        "encoding.define requires a registered schema family");
   }
-  return Family{name, vtable->descriptor, resolution.alias};
+  return Family{Operation::StaticSchema, name, vtable->descriptor,
+                resolution.alias};
 }
 
 EncodingIntrinsic EncodingIntrinsic::resolve(
@@ -86,6 +106,56 @@ EncodingIntrinsic EncodingIntrinsic::resolve(
     Types& types, cxx::FunctionSymbol* function, loom_module_t* module,
     cxx::AST* owner) {
   auto* signature = cxx::type_cast<cxx::FunctionType>(function->type());
+  if (family.operation == Operation::PhysicalStorage) {
+    auto parameters = signature->parameterTypes();
+    const auto& layout_partition = types.partition(parameters[0], owner);
+    const auto& schema_partition = types.partition(parameters[1], owner);
+    const auto& result_partition =
+        types.partition(signature->returnType(), owner);
+    if (layout_partition.kind != ValueKind::Encoding ||
+        static_cast<const EncodingPartition&>(layout_partition).role !=
+            LOOM_ENCODING_ROLE_ADDRESS_LAYOUT) {
+      diagnostics.reject(
+          unit, owner,
+          "physical storage composition requires a layout encoding first");
+    }
+    if (schema_partition.kind != ValueKind::Encoding ||
+        static_cast<const EncodingPartition&>(schema_partition).role !=
+            LOOM_ENCODING_ROLE_STORAGE_SCHEMA) {
+      diagnostics.reject(
+          unit, owner,
+          "physical storage composition requires a schema encoding second");
+    }
+    const auto& layout =
+        static_cast<const EncodingPartition&>(layout_partition);
+    if (result_partition.kind != ValueKind::Encoding ||
+        static_cast<const EncodingPartition&>(result_partition).role !=
+            LOOM_ENCODING_ROLE_PHYSICAL_STORAGE) {
+      diagnostics.reject(
+          unit, owner,
+          "physical storage composition must return a storage encoding");
+    }
+    if (static_cast<const EncodingPartition&>(result_partition).rank !=
+        layout.rank) {
+      diagnostics.reject(
+          unit, owner,
+          "physical storage result rank must match its layout rank");
+    }
+    loom_encoding_t encoding = {};
+    encoding.alias_id = LOOM_STRING_ID_INVALID;
+    check(loom_module_intern_string(module, IREE_SV("encoding.storage"),
+                                    &encoding.name_id));
+    uint16_t encoding_id;
+    check(loom_module_add_encoding(module, &encoding, &encoding_id));
+    EncodingIntrinsic result(
+        Operation::PhysicalStorage, encoding_id,
+        &static_cast<const EncodingPartition&>(result_partition));
+    check(loom_module_intern_string(module, IREE_SV("layout"),
+                                    &result.layout_name_id_));
+    check(loom_module_intern_string(module, IREE_SV("schema"),
+                                    &result.schema_name_id_));
+    return result;
+  }
   if (signature->isVariadic() || !signature->parameterTypes().empty()) {
     diagnostics.reject(unit, owner,
                        "static encoding.define has no runtime arguments");
@@ -169,16 +239,36 @@ EncodingIntrinsic EncodingIntrinsic::resolve(
   encoding.attributes = parameters.data();
   uint16_t encoding_id;
   check(loom_module_add_encoding(module, &encoding, &encoding_id));
-  return EncodingIntrinsic(encoding_id,
+  return EncodingIntrinsic(Operation::StaticSchema, encoding_id,
                            &static_cast<const EncodingPartition&>(result));
 }
 
-Value EncodingIntrinsic::call(ValueArena& arena, loom_builder_t* builder,
+Value EncodingIntrinsic::call(std::span<const Value> arguments,
+                              ValueArena& arena, loom_builder_t* builder,
                               loom_location_id_t location) const {
   loom_op_t* op;
-  check(loom_encoding_define_build(builder, encoding_id_, nullptr, 0,
-                                   loom_type_encoding_with_role(result_->role),
-                                   location, &op));
+  if (operation_ == Operation::StaticSchema) {
+    check(loom_encoding_define_build(
+        builder, encoding_id_, nullptr, 0,
+        loom_type_encoding_with_role(result_->role), location, &op));
+    return arena.capture(*result_, {loom_op_results(op), 1});
+  }
+  IREE_ASSERT(arguments.size() == 2);
+  loom_named_value_t parameters[] = {
+      {
+          .name_id = layout_name_id_,
+          .reserved = {},
+          .value_id = arguments[0].components()[0],
+      },
+      {
+          .name_id = schema_name_id_,
+          .reserved = {},
+          .value_id = arguments[1].components()[0],
+      },
+  };
+  check(loom_encoding_define_build(
+      builder, encoding_id_, parameters, std::size(parameters),
+      loom_type_encoding_with_role(result_->role), location, &op));
   return arena.capture(*result_, {loom_op_results(op), 1});
 }
 

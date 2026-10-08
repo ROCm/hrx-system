@@ -746,17 +746,20 @@ remain subject to C++ source checking even though only one is imported.
 
 ## Typed views and layouts
 
-`<loomcxx/view.h>` exposes Loom views without hiding their shape and address
-mapping behind a pointer intrinsic. Static extents remain template arguments;
-`loom::type::dynamic` marks each extent supplied when the view is formed. Layout
-values live in the matching `loom::encoding` namespace and can be dense or use
-runtime element strides.
+`<loomcxx/view.h>` exposes Loom views without hiding their shape and encoding
+behind a pointer intrinsic. `view<shape<...>, element, role>` follows the same
+left-to-right order as a Loom IR shaped type. Ranks one through fifteen are
+supported. Static extents remain template arguments; `loom::type::dynamic`
+marks each extent supplied when the view is formed. Layout values live in the
+matching `loom::encoding` namespace and can be dense or use runtime element
+strides.
 
 ```cpp
 #include <loomcxx/view.h>
 
 namespace loomt = loom::type;
-using rows32 = loomt::view<const float, loomt::dynamic, 32>;
+using rows32 =
+    loomt::view<loomt::shape<loomt::dynamic, 32>, const float>;
 
 rows32 suffix(rows32 source, unsigned first, unsigned remaining) {
   return loom::view::subview(source, {first, 0}, {remaining});
@@ -780,8 +783,8 @@ The deduced `subview` overload retains the source's static/dynamic extent
 pattern. An explicit `subview<loom::type::dynamic, 16>(...)` selects a different
 result pattern while still deducing the element and source shape. Dimensions
 are supplied in source-axis order, with no slot for an axis already fixed by
-the type. A `view<const T, ...>` supports loads; ordinary C++ template deduction
-rejects attempts to store through it.
+the type. A `view<shape<...>, const T>` supports loads; ordinary C++ template
+deduction rejects attempts to store through it.
 
 The facade types have real, trivially copyable C++ object representations, so
 copies, overload resolution, `sizeof`, and data-model-dependent layout remain
@@ -791,8 +794,8 @@ structured branches reserve all destination identities before constructing the
 dependent view type. A helper returning `rows32` therefore has the shape:
 
 ```loom
-func.def @suffix(...) -> (%rows: index, %layout: encoding<layout>,
-                          view<[%rows]x32xf32, %layout>)
+func.def @suffix(...) -> (%dim0: index, %layout: encoding<layout>,
+                          view<[%dim0]x32xf32, %layout>)
 ```
 
 Every call result and control-flow join names its own extent and layout instead
@@ -822,6 +825,38 @@ float read_view(View source) {
 `make_view<true>` returns a dynamic-row view with an explicit row stride. Each
 specialization deduces its own return type. The generic reader accepts either
 type, and Loom retains the shape and layout facts through the helper calls.
+
+Physical storage uses the same view type with an explicit storage role. The
+actual encoding remains an ordinary SSA value composed from a layout and
+schema; only its semantic role is part of the C++ type. This keeps helper
+signatures precise without trying to put a runtime value in a template
+argument:
+
+```cpp
+#include <loomcxx/encoding.h>
+#include <loomcxx/numeric.h>
+
+using Weight = loom::type::float8_e4m3fn_t;
+using Weights = loom::type::view<
+    loom::type::shape<loom::type::dynamic, loom::type::dynamic, 16>,
+    const Weight, loom::encoding::role::storage>;
+
+Weights weights(const Weight* data, unsigned rows, unsigned tiles) {
+  auto layout = loom::encoding::layout::dense<3>();
+  auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{
+      .payload_elements = 16, .scale_group_elements = 16}>();
+  auto storage = loom::encoding::define(layout, schema);
+  return loom::buffer::view<loom::type::dynamic, loom::type::dynamic, 16>(
+      data, {rows, tiles}, storage);
+}
+```
+
+The result imports as a
+`view<[%rows]x[%tiles]x16xf8E4M3, %storage>`. Layout and storage encodings carry
+the view rank. Schema and numeric-transform encodings have rank zero. A view
+accepts only layout or storage because either must own its address mapping;
+runtime scales, zero points and codebooks stay explicit operands of the decode
+or matrix operation that consumes them.
 
 ## Integer bit counts
 
@@ -2114,8 +2149,9 @@ unsigned observe(const volatile unsigned* input, volatile unsigned* output) {
 }
 ```
 
-Typed views use the same contract. A `loom::type::view<volatile unsigned, ...>`
-preserves its element qualifier through copies, helpers and subviews;
+Typed views use the same contract. A
+`loom::type::view<loom::type::shape<...>, volatile unsigned>` preserves its
+element qualifier through copies, helpers and subviews;
 `loom::view::load` returns an ordinary scalar and `loom::view::store` accepts
 one. A `const volatile` element permits observations but rejects stores.
 Volatile supplies observable accesses, without atomicity, synchronization or a

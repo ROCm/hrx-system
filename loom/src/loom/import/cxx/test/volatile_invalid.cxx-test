@@ -21,7 +21,11 @@ template <class View>
 concept Writable = requires(View destination) {
   loom::view::store(7u, destination, 0, 0);
 };
-static_assert(Writable<loom::type::view<unsigned, 2, 4>>);
-static_assert(Writable<loom::type::view<volatile unsigned, 2, 4>>);
-static_assert(!Writable<loom::type::view<const unsigned, 2, 4>>);
-static_assert(!Writable<loom::type::view<const volatile unsigned, 2, 4>>);
+static_assert(
+    Writable<loom::type::view<loom::type::shape<2, 4>, unsigned>>);
+static_assert(Writable<
+              loom::type::view<loom::type::shape<2, 4>, volatile unsigned>>);
+static_assert(!Writable<
+              loom::type::view<loom::type::shape<2, 4>, const unsigned>>);
+static_assert(!Writable<loom::type::view<loom::type::shape<2, 4>,
+                                        const volatile unsigned>>);

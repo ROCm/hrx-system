@@ -82,6 +82,14 @@ template <f8e4m3fn Parameters>
 [[loom::op("encoding.define", "encoding.f8e4m3fn")]]
 type::encoding<role::schema> define();
 
+// Composes an address layout and storage schema for the same logical rank.
+// Dynamic schema auxiliaries remain explicit operands of decode operations.
+template <type::size_type Rank>
+[[loom::op("encoding.define")]]
+type::encoding<role::storage, Rank> define(
+    type::encoding<role::layout, Rank> layout,
+    type::encoding<role::schema> schema);
+
 }  // namespace loom::encoding
 
 #endif  // LOOMCXX_ENCODING_H_

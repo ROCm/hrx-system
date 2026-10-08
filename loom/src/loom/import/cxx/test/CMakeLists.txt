@@ -146,6 +146,7 @@ loom_check_test_suite(
     "vectors.cxx-test"
     "vectors_invalid.cxx-test"
     "view_values.cxx-test"
+    "view_values_invalid.cxx-test"
     "volatile.cxx-test"
     "volatile_invalid.cxx-test"
     "volatile_views.cxx-test"

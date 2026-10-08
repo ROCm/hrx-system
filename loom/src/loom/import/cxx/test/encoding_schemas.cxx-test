@@ -151,3 +151,24 @@ func.def public @selected_group() -> (encoding<schema>) {
   %1 = encoding.define #encoding.f4e2m1<affine=scale_only, payload_elements=64, payload_packing=little_endian_nibbles, payload_registers=8, scale_format=e8m0, scale_group_elements=32, scale_operands=1, scale_topology=block_1d, zero_scale_fallback=true> : encoding<schema>
   func.return %1 : encoding<schema>
 }
+
+// ====
+// Physical storage composition preserves its layout rank and schema value.
+#include <loomcxx/encoding.h>
+#include <loomcxx/view.h>
+using Storage3 = loom::type::encoding<loom::encoding::role::storage, 3>;
+Storage3 weight_storage() {
+  auto layout = loom::encoding::layout::dense<3>();
+  auto schema = loom::encoding::define<loom::encoding::f8e4m3fn{
+      .payload_elements = 16, .scale_group_elements = 16}>();
+  auto storage = loom::encoding::define(layout, schema);
+  return storage;
+}
+
+// ----
+func.def public @weight_storage() -> (encoding<storage>) {
+  %layout = encoding.layout.dense : encoding<layout>
+  %schema = encoding.define #encoding.f8e4m3fn<affine=scale_only, payload_elements=16, scale_format=e8m0, scale_group_elements=16, scale_operands=1, scale_topology=block_1d> : encoding<schema>
+  %storage = encoding.define #encoding.storage {layout = %layout : encoding<layout>, schema = %schema : encoding<schema>} : encoding<storage>
+  func.return %storage : encoding<storage>
+}

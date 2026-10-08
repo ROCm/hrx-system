@@ -424,6 +424,7 @@ loom_cc_library(
     loom::ops::encoding
     loom::ops::index
     loom::ops::op_defs
+    loom::ops::scalar
     loom::ops::view
   PUBLIC
 )

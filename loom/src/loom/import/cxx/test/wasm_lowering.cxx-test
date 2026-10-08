@@ -33,65 +33,65 @@ int evaluate(const int* pointer, int index, const Pair* pair,
 
 // ----
 low.func.def public target<wasm.core.simd128> abi(wasm_function) @evaluate(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %index: reg<wasm.i32>, %pair: reg<wasm.i32>, %pair_byte_offset: reg<wasm.i32>, %matrix: reg<wasm.i32>, %matrix_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %94 = low.func.call @read(%pointer, %pointer_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
-  %95 = low.func.call @read_dynamic(%pointer, %pointer_byte_offset, %index) : (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
-  %96 = i32.add %94, %95
-  %97 = low.func.call @read_member(%pair, %pair_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %96 = low.func.call @read(%pointer, %pointer_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %97 = low.func.call @read_dynamic(%pointer, %pointer_byte_offset, %index) : (reg<wasm.i32>, reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
   %98 = i32.add %96, %97
-  %99 = low.func.call @read_helper(%pointer, %pointer_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %99 = low.func.call @read_member(%pair, %pair_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
   %100 = i32.add %98, %99
-  %101 = low.func.call @read_view(%matrix, %matrix_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %101 = low.func.call @read_helper(%pointer, %pointer_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
   %102 = i32.add %100, %101
-  return %102
+  %103 = low.func.call @read_view(%matrix, %matrix_byte_offset) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  %104 = i32.add %102, %103
+  return %104
 }
 
 low.func.def target<wasm.core.simd128> @read(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %106 = i32.add %pointer, %pointer_byte_offset
-  %107 = i32.load %106
-  return %107
+  %108 = i32.add %pointer, %pointer_byte_offset
+  %109 = i32.load %108
+  return %109
 }
 
 low.func.def target<wasm.core.simd128> @read_dynamic(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>, %index: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %112 = i64.extend_i32_s %index
-  %113 = i64.const 2
-  %114 = i64.shl %112, %113
-  %115 = i64.extend_i32_u %pointer_byte_offset
-  %116 = i64.add %115, %114
-  %117 = i32.wrap_i64 %116
-  %118 = i32.add %pointer, %117
-  %119 = i32.load %118
-  return %119
+  %114 = i64.extend_i32_s %index
+  %115 = i64.const 2
+  %116 = i64.shl %114, %115
+  %117 = i64.extend_i32_u %pointer_byte_offset
+  %118 = i64.add %117, %116
+  %119 = i32.wrap_i64 %118
+  %120 = i32.add %pointer, %119
+  %121 = i32.load %120
+  return %121
 }
 
 low.func.def target<wasm.core.simd128> @read_member(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %123 = i32.const 4
-  %124 = i32.add %pointer_byte_offset, %123
-  %125 = i32.add %pointer, %124
-  %second = i32.load %125
+  %125 = i32.const 4
+  %126 = i32.add %pointer_byte_offset, %125
+  %127 = i32.add %pointer, %126
+  %second = i32.load %127
   return %second
 }
 
 low.func.def target<wasm.core.simd128> @read_helper(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %130 = i64.const 4
-  %131 = i64.extend_i32_u %pointer_byte_offset
-  %132 = i64.add %131, %130
-  %133 = i32.wrap_i64 %132
-  %134 = low.func.call @load_next(%pointer, %133) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
-  return %134
+  %132 = i64.const 4
+  %133 = i64.extend_i32_u %pointer_byte_offset
+  %134 = i64.add %133, %132
+  %135 = i32.wrap_i64 %134
+  %136 = low.func.call @load_next(%pointer, %135) : (reg<wasm.i32>, reg<wasm.i32>) -> (reg<wasm.i32>)
+  return %136
 }
 
 low.func.def target<wasm.core.simd128> @read_view(%source: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %138 = i32.add %source, %pointer_byte_offset
-  %139 = i32.load %138
-  return %139
+  %140 = i32.add %source, %pointer_byte_offset
+  %141 = i32.load %140
+  return %141
 }
 
 low.func.def target<wasm.core.simd128> @load_next(%pointer: reg<wasm.i32>, %pointer_byte_offset: reg<wasm.i32>) -> (reg<wasm.i32>) asm {
-  %143 = i64.const 4
-  %144 = i64.extend_i32_u %pointer_byte_offset
-  %145 = i64.add %144, %143
-  %146 = i32.wrap_i64 %145
-  %147 = i32.add %pointer, %146
-  %148 = i32.load %147
-  return %148
+  %145 = i64.const 4
+  %146 = i64.extend_i32_u %pointer_byte_offset
+  %147 = i64.add %146, %145
+  %148 = i32.wrap_i64 %147
+  %149 = i32.add %pointer, %148
+  %150 = i32.load %149
+  return %150
 }
