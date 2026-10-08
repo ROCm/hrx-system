@@ -980,14 +980,17 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
                         &search_context, interval, capacity, &location_base);
     const uint32_t retained_fixed_value_index_plus_one =
         search_context.retained_fixed_value_index_plus_one;
+    const loom_low_allocation_spill_register_requirement_t spill_requirement =
+        loom_low_allocation_spill_register_requirement_for_value(
+            context->module, context->liveness->region, interval->value_id);
     const bool requires_register =
         loom_low_allocation_storage_lease_state_value_has_records(
             context->storage_leases, context->liveness, interval->value_id) ||
         (interval->value_id < context->required_register_values.bit_count &&
          iree_bitmap_test(context->required_register_values,
                           interval->value_id)) ||
-        loom_low_allocation_spill_traffic_interval_requires_register_location(
-            context->module, interval);
+        spill_requirement !=
+            LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE;
     const bool interval_requires_register =
         !capacity.is_spillable || requires_register;
     if (!assigned) {
@@ -1013,9 +1016,13 @@ static iree_status_t loom_low_allocation_interval_assignment_assign(
     if (!assigned && (!capacity.is_spillable || requires_register)) {
       const uint32_t budget_units =
           capacity.is_bounded ? capacity.max_units : UINT32_MAX;
-      const iree_string_view_t failure_code =
+      iree_string_view_t failure_code =
           requires_register ? IREE_SV("spill-traffic-register-exhausted")
                             : IREE_SV("unspillable-register-exhausted");
+      if (spill_requirement ==
+          LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NESTED_REGION_ARGUMENT) {
+        failure_code = IREE_SV("nested-region-argument-register-exhausted");
+      }
       IREE_RETURN_IF_ERROR(
           loom_low_allocation_interval_assignment_record_failure(
               state, interval, value_ordinal, &capacity, budget_units,

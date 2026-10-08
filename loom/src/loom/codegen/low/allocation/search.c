@@ -1001,8 +1001,9 @@ iree_status_t loom_low_allocation_search_assignment_spill_capacity(
   if ((assignment->value_id < context->required_register_values.bit_count &&
        iree_bitmap_test(context->required_register_values,
                         assignment->value_id)) ||
-      loom_low_allocation_spill_traffic_value_requires_register_location(
-          context->module, assignment->value_id)) {
+      loom_low_allocation_spill_register_requirement_for_value(
+          context->module, context->liveness->region, assignment->value_id) !=
+          LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE) {
     return iree_ok_status();
   }
   loom_low_allocation_class_capacity_t capacity = {0};

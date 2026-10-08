@@ -175,6 +175,44 @@ low.func.def target<test.low.core>(@test_target) @block_arg_spill(%row: reg<test
 
 // ====
 
+// Structured-region arguments are part of the op's register ABI. They cannot
+// use the function-CFG block-argument spill path.
+// RUN: pass low-materialize-allocation{budgets=test.i32=3}
+
+test.target<low_core> @test_target
+
+// ERROR@+1: BACKEND/005 {function_name="structured_for_argument_exhaustion", budget="3", peak="4", failure_code="nested-region-argument-register-exhausted"}
+low.func.def target<test.low.core>(@test_target) @structured_for_argument_exhaustion(%lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %init: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.scf.for signed [%lower to %upper step %step] iter_args(%init: reg<test.i32>) -> (reg<test.i32>) do(%iv: reg<test.i32>, %state: reg<test.i32>) {
+    %next = test.add.i32 %state, %iv
+    low.scf.yield %next : reg<test.i32>
+  }
+  return %result
+}
+
+// ----
+
+// ====
+
+// RUN: pass low-materialize-allocation{budgets=test.i32=2}
+
+test.target<low_core> @test_target
+
+// ERROR@+1: BACKEND/005 {function_name="structured_while_argument_exhaustion", budget="2", peak="3", failure_code="spill-traffic-register-exhausted"}
+low.func.def target<test.low.core>(@test_target) @structured_while_argument_exhaustion(%condition: reg<test.i32>, %init: reg<test.i32>, %bias: reg<test.i32>) -> (reg<test.i32>) asm {
+  %result = low.scf.while(%before = %init : reg<test.i32>) -> (reg<test.i32>) {
+    low.scf.condition %condition, %before : reg<test.i32>, reg<test.i32>
+  } do(%body: reg<test.i32>) {
+    %next = test.add.i32 %body, %bias
+    low.scf.yield %next : reg<test.i32>
+  }
+  return %result
+}
+
+// ----
+
+// ====
+
 // The temporary overlaps the original scalar and tuple, forcing a spill even
 // when scalar and aggregate packing leaves no fragmentation.
 // RUN: with-low-asm pass low-materialize-allocation{budgets=test.i32=5}

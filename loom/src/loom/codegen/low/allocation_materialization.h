@@ -128,11 +128,12 @@ typedef struct loom_low_allocation_materialization_result_t {
 // order or byte offsets. New reservations append to that prefix, dominating
 // all generated traffic even when earlier repairs inserted executable entry
 // copies. Stores are inserted at the defining point of each spilled op-result
-// value, non-entry block argument stores are inserted on incoming edges before
-// the branch, and
-// reloads are inserted immediately before each remaining original operand use.
-// Materialized non-entry block arguments are removed from the block signature
-// and from all predecessor low.br payloads.
+// value, function-region non-entry block argument stores are inserted on
+// incoming edges before the branch, and reloads are inserted immediately before
+// each remaining original operand use. Materialized function-region non-entry
+// block arguments are removed from the block signature and from all predecessor
+// low.br payloads. Nested-region block arguments are register ABI values and
+// never appear in a spill plan.
 iree_status_t loom_low_allocation_materialize_spills(
     const loom_low_allocation_table_t* table,
     const loom_low_allocation_materialization_options_t* options,

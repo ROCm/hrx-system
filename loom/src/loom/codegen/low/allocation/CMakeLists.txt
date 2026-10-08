@@ -459,7 +459,6 @@ loom_cc_library(
     "spill_traffic.c"
   DEPS
     iree::base
-    loom::analysis::liveness
     loom::ir
     loom::ops::low
   PUBLIC

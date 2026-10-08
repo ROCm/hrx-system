@@ -83,6 +83,16 @@ class LowAllocationSpillTrafficTest : public ::testing::Test {
     return LOOM_VALUE_ID_INVALID;
   }
 
+  loom_op_t* FindLowFunction(loom_module_t* module, iree_string_view_t name) {
+    const loom_string_id_t name_id = loom_module_lookup_string(module, name);
+    IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
+    const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
+    IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
+    loom_op_t* op = module->symbols.entries[symbol_id].defining_op;
+    IREE_ASSERT(loom_low_func_def_isa(op));
+    return op;
+  }
+
   iree_arena_block_pool_t block_pool_;
   loom_context_t context_;
   loom_low_descriptor_registry_t descriptor_registry_ = {};
@@ -105,28 +115,74 @@ low.func.def target<test.low.core>(@test_target) @roundtrip(%input: reg<test.i32
       FindValueByName(module.get(), IREE_SV("storage"));
   const loom_value_id_t reload =
       FindValueByName(module.get(), IREE_SV("reload"));
+  const loom_region_t* function_region = loom_low_func_def_body(
+      FindLowFunction(module.get(), IREE_SV("roundtrip")));
 
-  EXPECT_TRUE(
-      loom_low_allocation_spill_traffic_value_requires_register_location(
-          module.get(), input));
-  EXPECT_TRUE(
-      loom_low_allocation_spill_traffic_value_requires_register_location(
-          module.get(), reload));
-  EXPECT_FALSE(
-      loom_low_allocation_spill_traffic_value_requires_register_location(
-          module.get(), other));
-  EXPECT_FALSE(
-      loom_low_allocation_spill_traffic_value_requires_register_location(
-          module.get(), storage));
-  EXPECT_FALSE(
-      loom_low_allocation_spill_traffic_value_requires_register_location(
-          module.get(), LOOM_VALUE_ID_INVALID));
+  EXPECT_EQ(
+      loom_low_allocation_spill_register_requirement_for_value(
+          module.get(), function_region, input),
+      LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_MATERIALIZED_TRAFFIC);
+  EXPECT_EQ(
+      loom_low_allocation_spill_register_requirement_for_value(
+          module.get(), function_region, reload),
+      LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_MATERIALIZED_TRAFFIC);
+  EXPECT_EQ(loom_low_allocation_spill_register_requirement_for_value(
+                module.get(), function_region, other),
+            LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE);
+  EXPECT_EQ(loom_low_allocation_spill_register_requirement_for_value(
+                module.get(), function_region, storage),
+            LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE);
+  EXPECT_EQ(loom_low_allocation_spill_register_requirement_for_value(
+                module.get(), function_region, LOOM_VALUE_ID_INVALID),
+            LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE);
+}
 
-  loom_liveness_interval_t interval = {};
-  interval.value_id = reload;
-  EXPECT_TRUE(
-      loom_low_allocation_spill_traffic_interval_requires_register_location(
-          module.get(), &interval));
+TEST_F(LowAllocationSpillTrafficTest, DetectsNestedRegionArguments) {
+  ModulePtr module = ParseModule(R"(
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @structured(%condition: reg<test.i32>, %lower: reg<test.i32>, %upper: reg<test.i32>, %step: reg<test.i32>, %seed: reg<test.i32>) -> (reg<test.i32>) asm {
+  low.br ^body(%seed: reg<test.i32>)
+^body(%forwarded: reg<test.i32>):
+  %for_result = low.scf.for signed [%lower to %upper step %step] iter_args(%forwarded: reg<test.i32>) -> (reg<test.i32>) do(%for_iv: reg<test.i32>, %for_state: reg<test.i32>) {
+    %for_next = test.add.i32 %for_state, %for_iv
+    low.scf.yield %for_next : reg<test.i32>
+  }
+  %while_result = low.scf.while(%while_before = %for_result : reg<test.i32>) -> (reg<test.i32>) {
+    low.scf.condition %condition, %while_before : reg<test.i32>, reg<test.i32>
+  } do(%while_body: reg<test.i32>) {
+    %while_next = test.add.i32 %while_body, %step
+    low.scf.yield %while_next : reg<test.i32>
+  }
+  return %while_result
+}
+)");
+  const loom_region_t* function_region = loom_low_func_def_body(
+      FindLowFunction(module.get(), IREE_SV("structured")));
+
+  const iree_string_view_t nested_argument_names[] = {
+      IREE_SV("for_iv"),
+      IREE_SV("for_state"),
+      IREE_SV("while_before"),
+      IREE_SV("while_body"),
+  };
+  for (iree_string_view_t name : nested_argument_names) {
+    EXPECT_EQ(
+        loom_low_allocation_spill_register_requirement_for_value(
+            module.get(), function_region, FindValueByName(module.get(), name)),
+        LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NESTED_REGION_ARGUMENT);
+  }
+
+  const iree_string_view_t supported_value_names[] = {
+      IREE_SV("forwarded"),  IREE_SV("for_next"),     IREE_SV("for_result"),
+      IREE_SV("while_next"), IREE_SV("while_result"),
+  };
+  for (iree_string_view_t name : supported_value_names) {
+    EXPECT_EQ(
+        loom_low_allocation_spill_register_requirement_for_value(
+            module.get(), function_region, FindValueByName(module.get(), name)),
+        LOOM_LOW_ALLOCATION_SPILL_REGISTER_REQUIREMENT_NONE);
+  }
 }
 
 }  // namespace
