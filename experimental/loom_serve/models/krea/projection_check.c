@@ -154,7 +154,8 @@ static iree_status_t projection_initialize(projection_check_t* check,
         iree_make_cstring_view(policy_path), &check->weight_plans[i],
         allocator);
     if (iree_status_is_ok(status)) {
-      status = loom_serve_weights_activate(check->weight_plans[i]);
+      status =
+          loom_serve_weights_activate(check->weight_plans[i], check->execution);
     }
     if (iree_status_is_ok(status)) {
       status = loom_serve_jit_stage_record(

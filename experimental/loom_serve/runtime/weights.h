@@ -6,6 +6,7 @@
 #ifndef EXPERIMENTAL_LOOM_SERVE_RUNTIME_WEIGHTS_H_
 #define EXPERIMENTAL_LOOM_SERVE_RUNTIME_WEIGHTS_H_
 
+#include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/runtime/jit.h"
 #include "experimental/loom_serve/storage/memory.h"
 
@@ -72,10 +73,18 @@ iree_status_t loom_serve_weights_create(
     iree_allocator_t host_allocator);
 
 // Commits storage and streams/prepares directly into final roots through four
-// independent queue lanes. An already active plan is unchanged. Success joins
-// all readiness frontiers; every accepted read/preparation retires before
-// return, including failures. Failure ends this model run, not a retry signal.
-iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights);
+// independent queue lanes, importing readiness into the consuming execution
+// domain. An already active plan is unchanged. Success means submission, not
+// completion; consuming commands use that same domain. No host wait occurs.
+// The caller pins backing until consuming work retires. Failure is terminal,
+// preserving backing and accepted I/O ownership until final plan destruction.
+iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights,
+                                          loom_serve_execution_t* execution);
+
+// Cold outer-thread join for an activation already submitted above. Joins
+// accepted read/preparation ownership even on failure. Task workers observe the
+// execution frontier asynchronously instead of calling this function.
+iree_status_t loom_serve_weights_await(loom_serve_weights_t* weights);
 
 // Releases physical backing, preserving parameter roots and replay plans.
 // The caller first retires all consuming work and excludes new submission.

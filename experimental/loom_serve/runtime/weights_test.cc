@@ -6,13 +6,17 @@
 #include "experimental/loom_serve/runtime/weights.h"
 
 #include <array>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 
 #include "experimental/loom_serve/runtime/device.h"
 #include "experimental/loom_serve/runtime/execution.h"
 #include "experimental/loom_serve/runtime/residency.h"
+#include "iree/async/operations/semaphore.h"
 #include "iree/base/tooling/flags.h"
+#include "iree/task/executor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
 #include "iree/testing/temp_file.h"
@@ -20,6 +24,146 @@
 IREE_FLAG(string, weight_sources, "", "Weight loader source catalog.");
 
 namespace {
+
+// The only worker submits activation and native consumption, then returns.
+// Another task must run to release consumption's predecessor. Completion is a
+// public proactor multi-wait, not a worker join or a driver-specific callback.
+struct Activation {
+  static iree_status_t Submit(iree_task_process_t* process,
+                              const iree_task_worker_context_t*,
+                              iree_task_process_drain_result_t* result) {
+    auto* self = static_cast<Activation*>(process->user_data);
+    auto status =
+        loom_serve_residency_try_acquire(self->residency, &self->admitted);
+    if (iree_status_is_ok(status) && !self->admitted) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+                                "native invocation was not admitted");
+    }
+    uint64_t completion = 0;
+    const iree_hal_buffer_binding_t binding = {self->output, 0,
+                                               sizeof(*self->readback)};
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_execution_execute(self->execution, self->command,
+                                            {1, &binding}, &completion);
+    }
+    const iree_hal_transfer_operation_t download = {
+        .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
+        .download = {.source_buffer = self->output,
+                     .target = self->readback->data(),
+                     .length = sizeof(*self->readback)}};
+    if (iree_status_is_ok(status)) {
+      status = loom_serve_execution_feedback(self->execution, 1, &download,
+                                             &completion);
+    }
+    if (iree_status_is_ok(status)) {
+      self->frontier = loom_serve_execution_frontier(self->execution);
+      for (size_t i = 0; i < self->semaphores.size(); ++i) {
+        self->semaphores[i] = reinterpret_cast<iree_async_semaphore_t*>(
+            self->frontier.semaphores[i]);
+      }
+      self->wait.base.type = IREE_ASYNC_OPERATION_TYPE_SEMAPHORE_WAIT;
+      self->wait.base.completion_fn = Ready;
+      self->wait.base.user_data = self;
+      self->wait.semaphores = self->semaphores.data();
+      self->wait.values = self->frontier.values;
+      self->wait.count = self->semaphores.size();
+      self->wait.mode = IREE_ASYNC_WAIT_MODE_ALL;
+      status = iree_async_proactor_submit_one(self->proactor, &self->wait.base);
+    }
+    if (!iree_status_is_ok(status)) {
+      Ready(self, nullptr, status, IREE_ASYNC_COMPLETION_FLAG_NONE);
+    }
+    iree_task_executor_schedule_process(self->executor, &self->unblock);
+    result->did_work = true;
+    result->completed = true;
+    return iree_ok_status();
+  }
+
+  static iree_status_t Unblock(iree_task_process_t* process,
+                               const iree_task_worker_context_t*,
+                               iree_task_process_drain_result_t* result) {
+    auto* self = static_cast<Activation*>(process->user_data);
+    auto status = iree_hal_semaphore_signal(self->gate, 1, nullptr);
+    if (!iree_status_is_ok(status)) {
+      iree_hal_semaphore_fail(self->gate, iree_status_clone(status));
+    }
+    {
+      std::lock_guard<std::mutex> lock(self->mutex);
+      self->status = iree_status_join(self->status, status);
+    }
+    result->did_work = true;
+    result->completed = true;
+    return iree_ok_status();
+  }
+
+  static void Ready(void* user_data, iree_async_operation_t*,
+                    iree_status_t status, iree_async_completion_flags_t) {
+    auto* self = static_cast<Activation*>(user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    self->status = iree_status_join(self->status, status);
+    self->ready = true;
+    self->condition.notify_one();
+  }
+
+  static void Release(iree_task_process_t* process) {
+    auto* self = static_cast<Activation*>(process->user_data);
+    std::lock_guard<std::mutex> lock(self->mutex);
+    ++self->released;
+    self->condition.notify_one();
+  }
+
+  iree_status_t Run() {
+    iree_task_process_initialize(Submit, 0, 1, &submit);
+    iree_task_process_initialize(Unblock, 0, 1, &unblock);
+    for (auto* process : {&submit, &unblock}) {
+      process->user_data = this;
+      process->release_fn = Release;
+    }
+    iree_task_executor_schedule_process(executor, &submit);
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [&] { return ready && released == 2; });
+    return status;
+  }
+
+  // Borrowed shared executor with exactly one worker.
+  iree_task_executor_t* executor = nullptr;
+  // Borrowed host proactor whose pool runner drives completion.
+  iree_async_proactor_t* proactor = nullptr;
+  // Borrowed model admission and activation group.
+  loom_serve_residency_t* residency = nullptr;
+  // Borrowed model work and feedback timelines.
+  loom_serve_execution_t* execution = nullptr;
+  // Borrowed native consumer, recorded before activation.
+  iree_hal_command_buffer_t* command = nullptr;
+  // Borrowed output storage retained through final queue retirement.
+  iree_hal_buffer_t* output = nullptr;
+  // Borrowed host feedback storage retained through completion.
+  std::array<int32_t, 8>* readback = nullptr;
+  // Borrowed explicit dependency that requires another task turn to resolve.
+  iree_hal_semaphore_t* gate = nullptr;
+  // Submitting model service turn.
+  iree_task_process_t submit = {};
+  // Independent work required for the model to complete.
+  iree_task_process_t unblock = {};
+  // Owned asynchronous wait storage retained through final callback.
+  iree_async_semaphore_wait_operation_t wait = {};
+  // Borrowed HAL timelines captured after the native consumer and feedback.
+  loom_serve_execution_frontier_t frontier = {};
+  // Toll-free async handles referring to the captured HAL semaphores.
+  std::array<iree_async_semaphore_t*, 2> semaphores = {};
+  // Joins final callback/process access with the outer test thread.
+  std::mutex mutex;
+  // Wakes only the outer thread, never a task worker.
+  std::condition_variable condition;
+  // Acquired pin remains held for the owner to consume the result.
+  bool admitted = false;
+  // Completion callback has published a terminal result.
+  bool ready = false;
+  // Number of executor-owned processes that have fully retired.
+  unsigned released = 0;
+  // Joined status transferred to the outer owner.
+  iree_status_t status = iree_ok_status();
+};
 
 class WeightsTest : public ::testing::TestWithParam<bool> {
  protected:
@@ -152,7 +296,9 @@ class WeightsTest : public ::testing::TestWithParam<bool> {
                           const loom_serve_weight_root_t* roots,
                           const std::string& path) {
     IREE_RETURN_IF_ERROR(CreateRoots(shared_count, root_count, roots, path));
-    return loom_serve_weights_activate(plans_[plan_count_ - 1]);
+    auto* plan = plans_[plan_count_ - 1];
+    auto status = loom_serve_weights_activate(plan, execution_);
+    return iree_status_join(status, loom_serve_weights_await(plan));
   }
 
   iree_status_t Register(iree_host_size_t index, iree_host_size_t first_plan,
@@ -266,6 +412,53 @@ TEST_P(WeightsTest, MultiplePreparersAndSharedRootsPrepareEachTensorOnce) {
   Run(2, 93);
 }
 
+TEST_P(WeightsTest, OneWorkerActivatesAndConsumesThroughAsyncTimelineWait) {
+  IREE_ASSERT_OK(Compile(0, "target"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  IREE_ASSERT_OK(loom_serve_jit_stage_record(
+      compiled_[0], iree_hal_queue_family(dispatch_),
+      IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT, buffers_[0].data(), &commands_[0]));
+  auto* host = loom_serve_device_host(device_owner_);
+  Activation activation;
+  activation.executor = loom_serve_host_executor(host);
+  IREE_ASSERT_OK(iree_async_proactor_pool_get(
+      loom_serve_host_proactor_pool(host), 0, &activation.proactor));
+  activation.residency = residencies_[0];
+  activation.execution = execution_;
+  activation.command = commands_[0];
+  activation.output = output_buffer_;
+  activation.readback = &output_;
+  IREE_ASSERT_OK(iree_hal_semaphore_create(
+      device_, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
+      IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &activation.gate));
+  uint64_t held = 1;
+  auto status =
+      loom_serve_execution_barrier(execution_, {1, &activation.gate, &held});
+  if (iree_status_is_ok(status)) {
+    status = activation.Run();
+  }
+  iree_hal_semaphore_release(activation.gate);
+  IREE_ASSERT_OK(status);
+  ASSERT_TRUE(activation.admitted);
+  for (int32_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(output_[i], 70 + 3 * i);
+  }
+  // Readiness publication retains the pin. Pressure cannot evict the result's
+  // parameters before the owning scheduler consumes completion.
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            GetParam() ? kSlabBytes : 0);
+  loom_serve_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes, 0u);
+  // The same compiled consumer survives a complete asynchronous reload.
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 70));
+}
+
 TEST_P(WeightsTest, CanonicalWeightsNeedNoPreparationOrLeadingSharedGroup) {
   IREE_ASSERT_OK(Compile(0, "raw"));
   IREE_ASSERT_OK(Load(0, 1));
@@ -319,6 +512,34 @@ TEST_P(WeightsTest, LateMissingParameterRetiresEarlierAcceptedReads) {
   }
 }
 
+TEST_P(WeightsTest, RejectedActivationRetainsProtectionUntilActualRetirement) {
+  IREE_ASSERT_OK(Compile(0, "partial"));
+  const auto root = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  bool admitted = false;
+  IREE_ASSERT_STATUS_IS(IREE_STATUS_NOT_FOUND, loom_serve_residency_try_acquire(
+                                                   residencies_[0], &admitted));
+  EXPECT_FALSE(admitted);
+  // The rejection can precede earlier accepted file reads' final accesses.
+  // It preserves a terminal pin even though no invocation was admitted.
+  IREE_ASSERT_OK(loom_serve_residency_cache_trim(
+      loom_serve_device_residency_cache(device_owner_), 0));
+  EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,
+            GetParam() ? kSlabBytes : 0);
+  IREE_EXPECT_STATUS_IS(IREE_STATUS_NOT_FOUND,
+                        loom_serve_weights_await(plans_[0]));
+  loom_serve_residency_destroy(residencies_[0]);
+  residencies_[0] = nullptr;
+  iree_hal_buffer_release(buffers_[0][0]);
+  buffers_[0][0] = nullptr;
+  IREE_ASSERT_OK(loom_serve_weights_destroy(plans_[0]));
+  plans_[0] = nullptr;
+  if (GetParam()) {
+    EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
+  }
+}
+
 TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   IREE_ASSERT_OK(Compile(0, "target"));
   IREE_ASSERT_OK(Compile(1, "target"));
@@ -357,8 +578,8 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
       loom_serve_execution_transfer(execution_, 1, &fill, &completion));
   IREE_ASSERT_OK(loom_serve_execution_wait(execution_, completion));
   IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(other));
-  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
-  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0]));
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+  IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
   EXPECT_EQ(buffers_[0][0], root);
   EXPECT_EQ(commands_[0], command);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,

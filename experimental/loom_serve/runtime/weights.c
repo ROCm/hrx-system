@@ -65,6 +65,17 @@ struct loom_serve_weights_t {
   loom_serve_memory_statistics_t statistics;
   // Final consumer ownership before virtual roots can be unmapped at teardown.
   loom_serve_retirement_t retirement;
+  // Activation lanes retained independently of their submitting host turn.
+  struct {
+    // Accepted I/O/preparation views, including after failed readiness.
+    loom_serve_retirement_t retirement;
+    // Owned lane readiness handles imported into the consuming model timeline.
+    iree_hal_semaphore_t* semaphores[WEIGHT_LANES];
+    // Last submitted preparation or canonical read on each initialized lane.
+    uint64_t values[WEIGHT_LANES];
+    // Initialized handles, including a partially failed activation.
+    iree_host_size_t count;
+  } activation;
   // Owned original checkpoint provider and imported-file cache.
   iree_io_parameter_provider_t* provider;
   // Owned placement/preparation records, with keys in the owned key storage.
@@ -77,7 +88,7 @@ struct loom_serve_weights_t {
   weight_storage_t* storages;
   // Number of initialized unique roots, including partial creation.
   iree_host_size_t storage_count;
-  // All parameter bytes are ready for consumption after successful activation.
+  // Activation was enqueued into the owning model's execution domain.
   bool active;
 };
 
@@ -371,17 +382,16 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
     status = iree_allocator_malloc_array(allocator, weights->storage_count,
                                          sizeof(*views), (void**)&views);
   }
-  loom_serve_retirement_t retirement;
-  loom_serve_retirement_initialize(&retirement);
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
     views[i] = weights->storages[i].buffer;
     iree_hal_buffer_retain(views[i]);
-    status = loom_serve_retirement_track(&retirement, &views[i], allocator);
+    status = loom_serve_retirement_track(&weights->activation.retirement,
+                                         &views[i], allocator);
   }
   iree_hal_semaphore_t* reads[WEIGHT_LANES] = {0};
-  iree_hal_semaphore_t* ready[WEIGHT_LANES] = {0};
-  uint64_t frontiers[WEIGHT_LANES] = {0};
+  iree_hal_semaphore_t** ready = weights->activation.semaphores;
+  uint64_t* frontiers = weights->activation.values;
   for (iree_host_size_t i = 0; i < WEIGHT_LANES && iree_status_is_ok(status);
        ++i) {
     status =
@@ -391,6 +401,9 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
       status = iree_hal_semaphore_create(
           device, IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY, 0,
           IREE_HAL_SEMAPHORE_FLAG_DEFAULT, &ready[i]);
+      if (iree_status_is_ok(status)) {
+        ++weights->activation.count;
+      }
     }
   }
   iree_host_size_t group_count = 0;
@@ -453,11 +466,6 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
         span->prepare, (iree_hal_buffer_binding_table_t){1, &binding},
         IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
   }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_semaphore_list_wait(
-        (iree_hal_semaphore_list_t){WEIGHT_LANES, ready, frontiers},
-        iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
-  }
   if (!iree_status_is_ok(status)) {
     // Release waits for preparations that were never submitted. Queue-owned
     // file, command and buffer references survive until those operations
@@ -473,14 +481,12 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
   }
   for (iree_host_size_t i = 0; i < WEIGHT_LANES; ++i) {
     iree_hal_semaphore_release(reads[i]);
-    iree_hal_semaphore_release(ready[i]);
   }
   if (views) {
     for (iree_host_size_t i = 0; i < weights->storage_count; ++i) {
       iree_hal_buffer_release(views[i]);
     }
   }
-  loom_serve_retirement_deinitialize(&retirement);
   iree_allocator_free(allocator, views);
   iree_allocator_free(allocator, gathers);
   iree_allocator_free(allocator, groups);
@@ -505,6 +511,7 @@ iree_status_t loom_serve_weights_create(
   weights->dispatch = dispatch;
   weights->pool = pool;
   loom_serve_retirement_initialize(&weights->retirement);
+  loom_serve_retirement_initialize(&weights->activation.retirement);
   *out_weights = weights;
   IREE_TRACE_ZONE_BEGIN(z0);
   iree_host_size_t capacity =
@@ -585,7 +592,8 @@ iree_status_t loom_serve_weights_create(
   return status;
 }
 
-iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights) {
+iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights,
+                                          loom_serve_execution_t* execution) {
   if (weights->active) {
     return iree_ok_status();
   }
@@ -603,8 +611,24 @@ iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights) {
     status = weight_stream(weights);
   }
   if (iree_status_is_ok(status)) {
+    status = loom_serve_execution_barrier(
+        execution, (iree_hal_semaphore_list_t){weights->activation.count,
+                                               weights->activation.semaphores,
+                                               weights->activation.values});
+  }
+  if (iree_status_is_ok(status)) {
     weights->active = true;
   }
+  return status;
+}
+
+iree_status_t loom_serve_weights_await(loom_serve_weights_t* weights) {
+  iree_status_t status = iree_hal_semaphore_list_wait(
+      (iree_hal_semaphore_list_t){weights->activation.count,
+                                  weights->activation.semaphores,
+                                  weights->activation.values},
+      iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE);
+  loom_serve_retirement_await(&weights->activation.retirement);
   return status;
 }
 
@@ -622,6 +646,12 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights) {
   }
   if (iree_status_is_ok(status)) {
     weights->active = false;
+    for (iree_host_size_t i = 0; i < weights->activation.count; ++i) {
+      iree_hal_semaphore_release(weights->activation.semaphores[i]);
+      weights->activation.semaphores[i] = NULL;
+      weights->activation.values[i] = 0;
+    }
+    weights->activation.count = 0;
   }
   return status;
 }
@@ -636,6 +666,7 @@ iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights) {
     return iree_ok_status();
   }
   loom_serve_retirement_await(&weights->retirement);
+  loom_serve_retirement_await(&weights->activation.retirement);
   iree_status_t status = iree_ok_status();
   for (iree_host_size_t i = 0;
        i < weights->storage_count && iree_status_is_ok(status); ++i) {
@@ -647,6 +678,10 @@ iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights) {
   }
   if (iree_status_is_ok(status)) {
     loom_serve_retirement_deinitialize(&weights->retirement);
+    loom_serve_retirement_deinitialize(&weights->activation.retirement);
+    for (iree_host_size_t i = 0; i < weights->activation.count; ++i) {
+      iree_hal_semaphore_release(weights->activation.semaphores[i]);
+    }
     for (iree_host_size_t i = 0; i < weights->span_count; ++i) {
       iree_hal_command_buffer_release(weights->spans[i].prepare);
     }

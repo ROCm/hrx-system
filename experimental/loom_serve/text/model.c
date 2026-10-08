@@ -1007,6 +1007,10 @@ iree_status_t loom_serve_text_row_try_reserve(
   if (!pinned) {
     return iree_ok_status();
   }
+  // Request reservation can release its pin without ever submitting an epoch.
+  // This synchronous entry therefore completes activation before admitting a
+  // cancellable reservation. Epoch admission itself only enqueues readiness.
+  IREE_RETURN_IF_ERROR(loom_serve_residency_await(row->model->residency));
   iree_status_t status = loom_serve_text_state_row_try_reserve(
       row->state, mode, checkpoint ? checkpoint->state : NULL, extent,
       out_admitted);

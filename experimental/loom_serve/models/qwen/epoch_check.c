@@ -161,6 +161,10 @@ static iree_status_t qwen_check_shared_residency(loom_serve_device_t* device,
       status = loom_serve_residency_try_acquire(
           loom_serve_text_model_residency(second), &admitted);
       if (iree_status_is_ok(status) && admitted) {
+        status =
+            loom_serve_residency_await(loom_serve_text_model_residency(second));
+      }
+      if (iree_status_is_ok(status) && admitted) {
         loom_serve_residency_release(loom_serve_text_model_residency(second));
         status = iree_make_status(
             IREE_STATUS_INVALID_ARGUMENT,

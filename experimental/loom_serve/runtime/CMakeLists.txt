@@ -442,6 +442,7 @@ loom_cc_library(
   SRCS
     "weights.c"
   DEPS
+    ::execution
     ::jit
     ::program
     ::retirement
@@ -473,10 +474,13 @@ loom_cc_test(
     ::jit
     ::residency
     ::weights
+    iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::tooling::flags
     iree::experimental::loom_serve::storage::memory
     iree::hal
+    iree::task
     iree::testing::gtest
     iree::testing::gtest_main
     iree::testing::temp_file

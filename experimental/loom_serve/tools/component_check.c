@@ -222,7 +222,8 @@ static iree_status_t component_initialize(component_check_t* check,
           checkpoints.values[r], iree_make_cstring_view(FLAG_weight_policy),
           &check->weight_plans[r], allocator);
       if (iree_status_is_ok(status)) {
-        status = loom_serve_weights_activate(check->weight_plans[r]);
+        status = loom_serve_weights_activate(check->weight_plans[r],
+                                             check->execution);
       }
     }
     IREE_RETURN_IF_ERROR(status);

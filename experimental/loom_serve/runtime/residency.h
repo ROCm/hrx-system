@@ -38,9 +38,10 @@ iree_status_t loom_serve_residency_cache_trim(
 // Registers the weight plans consumed together by one model invocation. Copies
 // the pointer array, not the plans. Plans belong to this cache's physical pool,
 // are initially inactive, belong exclusively to this registration, and outlive
-// it. Borrows the model's execution domain for synchronous error retirement;
-// the shared cache never waits on unrelated model timelines. All calls on the
-// cache and registered models are serialized by their shared host owner.
+// it. Borrows the model's execution domain for activation dependencies and
+// synchronous outer-thread error retirement; the shared cache never waits on
+// unrelated model timelines. All calls on the cache and registered models are
+// serialized by their shared host owner.
 iree_status_t loom_serve_residency_create(
     loom_serve_residency_cache_t* cache, loom_serve_execution_t* execution,
     iree_host_size_t weight_count, loom_serve_weights_t* const* weights,
@@ -52,17 +53,24 @@ iree_status_t loom_serve_residency_create(
 void loom_serve_residency_destroy(loom_serve_residency_t* residency);
 
 // Pins the entire group before admission/loading. Already active groups need
-// no I/O. On success admitted=true owns one pin, released only after work
-// retires or the caller relinquishes explicit retention. admitted=false owns no
+// no I/O. Enqueues loading before consumption on the model timeline, without
+// waiting on device or I/O completion. On success admitted=true owns one pin,
+// released only after activation and consuming work retire (or after activation
+// if the caller relinquishes explicit retention). admitted=false owns no
 // pin and reports ordinary backpressure, with no partial parameter load. Real
 // loading failures are terminal and preserve protection until residency
 // destruction.
 iree_status_t loom_serve_residency_try_acquire(
     loom_serve_residency_t* residency, bool* out_admitted);
 
-// Synchronous invocation admission: capacity denial is an execution error.
+// Invocation admission: capacity denial is an execution error. Like
+// try_acquire this only enqueues activation and does not wait for readiness.
 // Schedulers needing to queue on pressure use try_acquire instead.
 iree_status_t loom_serve_residency_acquire(loom_serve_residency_t* residency);
+
+// Cold outer-thread activation join for a pinned group. Task services consume
+// the model timeline asynchronously. Failure preserves the pin until teardown.
+iree_status_t loom_serve_residency_await(loom_serve_residency_t* residency);
 
 // Releases one owned pin after consumption has retired. No allocation or wait.
 void loom_serve_residency_release(loom_serve_residency_t* residency);
@@ -74,8 +82,9 @@ void loom_serve_residency_release(loom_serve_residency_t* residency);
 iree_status_t loom_serve_residency_finish(loom_serve_residency_t* residency,
                                           iree_status_t status);
 
-// Warmup without retaining a pin across calls. The next pressure event may
-// evict it. Explicit deactivation rejects pinned or fixed-backed residency.
+// Synchronous outer-thread warmup without retaining a pin across calls. The
+// next pressure event may evict it. Explicit deactivation rejects pinned or
+// fixed-backed residency.
 iree_status_t loom_serve_residency_activate(loom_serve_residency_t* residency);
 iree_status_t loom_serve_residency_deactivate(
     loom_serve_residency_t* residency);

@@ -29,7 +29,7 @@ struct loom_serve_residency_t {
   loom_serve_residency_t* next;
   // Accepted consumers and explicit retention owners excluding eviction.
   iree_host_size_t pin_count;
-  // Every checkpoint domain has completed activation.
+  // Every checkpoint domain has enqueued readiness on the model timeline.
   bool active;
   // Number of borrowed checkpoint plans in the trailing array.
   iree_host_size_t weight_count;
@@ -208,7 +208,8 @@ iree_status_t loom_serve_residency_try_acquire(
     iree_status_t status = iree_ok_status();
     for (iree_host_size_t i = 0;
          i < residency->weight_count && iree_status_is_ok(status); ++i) {
-      status = loom_serve_weights_activate(residency->weights[i]);
+      status = loom_serve_weights_activate(residency->weights[i],
+                                           residency->execution);
     }
     IREE_RETURN_IF_ERROR(status);
     residency->active = true;
@@ -223,6 +224,15 @@ iree_status_t loom_serve_residency_acquire(loom_serve_residency_t* residency) {
   return admitted ? iree_ok_status()
                   : iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
                                      "model residency is waiting for capacity");
+}
+
+iree_status_t loom_serve_residency_await(loom_serve_residency_t* residency) {
+  iree_status_t status = iree_ok_status();
+  for (iree_host_size_t i = 0; i < residency->weight_count; ++i) {
+    status = iree_status_join(status,
+                              loom_serve_weights_await(residency->weights[i]));
+  }
+  return status;
 }
 
 void loom_serve_residency_release(loom_serve_residency_t* residency) {
@@ -247,6 +257,7 @@ iree_status_t loom_serve_residency_finish(loom_serve_residency_t* residency,
 
 iree_status_t loom_serve_residency_activate(loom_serve_residency_t* residency) {
   IREE_RETURN_IF_ERROR(loom_serve_residency_acquire(residency));
+  IREE_RETURN_IF_ERROR(loom_serve_residency_await(residency));
   loom_serve_residency_release(residency);
   return iree_ok_status();
 }
