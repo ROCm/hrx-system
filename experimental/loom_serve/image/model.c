@@ -47,8 +47,19 @@ struct loom_serve_image_model_t {
   loom_serve_retirement_t retirement;
   // Shared-device admission group protecting every checkpoint domain together.
   loom_serve_residency_t* residency;
-  // Request upload bytes retained through success or terminal queue retirement.
-  iree_vm_buffer_t* input_payload;
+  // One invocation spanning CPU preparation, device submission and completion.
+  struct {
+    // Upload bytes retained through success or terminal queue retirement.
+    iree_vm_buffer_t* payload;
+    // Retained command selected by source preparation.
+    uint32_t stage;
+    // CPU preparation start, in nanoseconds.
+    iree_time_t begin;
+    // CPU preparation completion, in nanoseconds.
+    iree_time_t prepared;
+    // Host submission completion, not device completion, in nanoseconds.
+    iree_time_t submitted;
+  } invocation;
   // Cold live-source compiler and its task pool.
   loom_serve_jit_t* jit;
   // Owned source declarations, independent of the bootstrap VM and arguments.
@@ -119,7 +130,7 @@ iree_status_t loom_serve_image_model_destroy(loom_serve_image_model_t* model) {
     iree_hal_buffer_release(model->bindings[i].buffer);
   }
   loom_serve_retirement_deinitialize(&model->retirement);
-  iree_vm_buffer_release(model->input_payload);
+  iree_vm_buffer_release(model->invocation.payload);
   loom_serve_residency_destroy(model->residency);
   loom_serve_execution_release(model->execution);
   for (iree_host_size_t i = 0; model->weights.plans && i < model->weights.count;
@@ -695,34 +706,32 @@ loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
   return loom_serve_residency_statistics(model->residency);
 }
 
-iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
-                                              iree_string_view_t prompt,
-                                              uint64_t seed, float strength,
-                                              iree_const_byte_span_t* out_rgb) {
-  *out_rgb = iree_const_byte_span_empty();
-  const iree_time_t prepare_begin = iree_time_now();
+iree_status_t loom_serve_image_model_prepare_request(
+    loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
+    float strength) {
+  model->invocation.begin = iree_time_now();
   fprintf(stderr, "{\"event\":\"image_preparing\"}\n");
-  iree_vm_buffer_t* payload = NULL;
-  uint32_t stage_index = 0;
-  iree_status_t status = image_prepare_request(model, prompt, seed, strength,
-                                               &stage_index, &payload);
-  IREE_RETURN_IF_ERROR(status);
-  status = loom_serve_residency_acquire(model->residency);
-  if (!iree_status_is_ok(status)) {
-    iree_vm_buffer_release(payload);
-    return status;
-  }
-  model->input_payload = payload;
-  iree_const_byte_span_t input = iree_const_byte_span_empty();
-  if (iree_status_is_ok(status)) {
-    status = iree_vm_buffer_map_read(payload, 0, iree_vm_buffer_length(payload),
-                                     &input);
-  }
-  const iree_time_t prepare_end = iree_time_now();
+  IREE_RETURN_IF_ERROR(image_prepare_request(model, prompt, seed, strength,
+                                             &model->invocation.stage,
+                                             &model->invocation.payload));
+  model->invocation.prepared = iree_time_now();
   fprintf(stderr,
           "{\"event\":\"image_prepared\",\"prepare_ns\":%" PRId64
           ",\"stage\":%u,\"input_bytes\":%zu}\n",
-          prepare_end - prepare_begin, stage_index, input.data_length);
+          model->invocation.prepared - model->invocation.begin,
+          model->invocation.stage,
+          iree_vm_buffer_length(model->invocation.payload));
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_image_model_submit(
+    loom_serve_image_model_t* model,
+    loom_serve_execution_frontier_t* out_frontier) {
+  *out_frontier = (loom_serve_execution_frontier_t){0};
+  iree_vm_buffer_t* payload = model->invocation.payload;
+  iree_const_byte_span_t input = iree_const_byte_span_empty();
+  IREE_RETURN_IF_ERROR(iree_vm_buffer_map_read(
+      payload, 0, iree_vm_buffer_length(payload), &input));
   iree_hal_transfer_operation_t upload = {0};
   upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
   upload.upload.source = input.data;
@@ -730,46 +739,67 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
   upload.upload.length = input.data_length;
   loom_serve_execution_t* execution = model->execution;
   uint64_t completion = 0;
+  iree_status_t status =
+      loom_serve_execution_transfer(execution, 1, &upload, &completion);
   if (iree_status_is_ok(status)) {
-    status = loom_serve_execution_transfer(execution, 1, &upload, &completion);
+    status = image_submit(model, model->invocation.stage);
   }
+  model->invocation.submitted = iree_time_now();
   if (iree_status_is_ok(status)) {
-    status = image_submit(model, stage_index);
-  }
-  const iree_time_t submit_end = iree_time_now();
-  if (iree_status_is_ok(status)) {
+    *out_frontier = loom_serve_execution_frontier(execution);
     fprintf(stderr,
             "{\"event\":\"image_submitted\",\"submit_ns\":%" PRId64 "}\n",
-            submit_end - prepare_end);
+            model->invocation.submitted - model->invocation.prepared);
   }
-  // Success retires the borrowed upload. Failure preserves it until teardown
-  // joins actual view ownership, independently of failed readiness.
-  status = iree_status_join(status, loom_serve_execution_drain(execution));
-  const iree_time_t completion_end = iree_time_now();
+  return status;
+}
+
+iree_const_byte_span_t loom_serve_image_model_complete(
+    loom_serve_image_model_t* model) {
+  iree_vm_buffer_release(model->invocation.payload);
+  model->invocation.payload = NULL;
+  loom_serve_residency_release(model->residency);
+  const loom_serve_device_memory_statistics_t memory =
+      loom_serve_device_memory_statistics(model->owner);
+  fprintf(stderr,
+          "{\"event\":\"image_execution\",\"prepare_ns\":%" PRId64
+          ",\"submit_ns\":%" PRId64 ",\"completion_wait_ns\":%" PRId64
+          ",\"device_memory\":{\"retained_committed_bytes\":%" PRIu64
+          ",\"workspace_committed_bytes\":%" PRIu64
+          ",\"workspace_live_bytes\":%" PRIu64
+          ",\"workspace_slab_count\":%u,\"workspace_reuse_count\":%" PRIu64
+          "}}\n",
+          model->invocation.prepared - model->invocation.begin,
+          model->invocation.submitted - model->invocation.prepared,
+          iree_time_now() - model->invocation.submitted,
+          memory.retained.committed_bytes,
+          (uint64_t)memory.workspace.bytes_committed,
+          (uint64_t)memory.workspace.bytes_reserved,
+          memory.workspace.slab_count, memory.workspace.reuse_count);
+  return iree_make_const_byte_span(model->output.data,
+                                   model->output.data_length);
+}
+
+iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
+                                              iree_string_view_t prompt,
+                                              uint64_t seed, float strength,
+                                              iree_const_byte_span_t* out_rgb) {
+  *out_rgb = iree_const_byte_span_empty();
+  IREE_RETURN_IF_ERROR(
+      loom_serve_image_model_prepare_request(model, prompt, seed, strength));
+  iree_status_t status = loom_serve_residency_acquire(model->residency);
+  if (!iree_status_is_ok(status)) {
+    iree_vm_buffer_release(model->invocation.payload);
+    model->invocation.payload = NULL;
+    return status;
+  }
+  loom_serve_execution_frontier_t frontier;
+  status = loom_serve_image_model_submit(model, &frontier);
   if (iree_status_is_ok(status)) {
-    *out_rgb = iree_make_const_byte_span(model->output.data,
-                                         model->output.data_length);
+    status = loom_serve_execution_drain(model->execution);
   }
   if (iree_status_is_ok(status)) {
-    iree_vm_buffer_release(model->input_payload);
-    model->input_payload = NULL;
-    // Submission overlaps device work. The remaining wait includes queued
-    // transfers and final readback, not an isolated GPU execution interval.
-    const loom_serve_device_memory_statistics_t memory =
-        loom_serve_device_memory_statistics(model->owner);
-    fprintf(stderr,
-            "{\"event\":\"image_execution\",\"prepare_ns\":%" PRId64
-            ",\"submit_ns\":%" PRId64 ",\"completion_wait_ns\":%" PRId64
-            ",\"device_memory\":{\"retained_committed_bytes\":%" PRIu64
-            ",\"workspace_committed_bytes\":%" PRIu64
-            ",\"workspace_live_bytes\":%" PRIu64
-            ",\"workspace_slab_count\":%u,\"workspace_reuse_count\":%" PRIu64
-            "}}\n",
-            prepare_end - prepare_begin, submit_end - prepare_end,
-            completion_end - submit_end, memory.retained.committed_bytes,
-            (uint64_t)memory.workspace.bytes_committed,
-            (uint64_t)memory.workspace.bytes_reserved,
-            memory.workspace.slab_count, memory.workspace.reuse_count);
+    *out_rgb = loom_serve_image_model_complete(model);
   }
-  return loom_serve_residency_finish(model->residency, status);
+  return status;
 }

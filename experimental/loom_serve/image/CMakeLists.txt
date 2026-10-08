@@ -70,17 +70,21 @@ loom_cc_library(
     ::output
     ::request
     iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::internal::base64
     iree::base::threading
-    iree::base::threading::thread
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::host
+    iree::task
     loom::util::json
     loom::util::stream
   PUBLIC
 )
 
+if(IREE_HAL_DRIVER_AMDGPU)
 loom_cc_test(
   NAME
     service_test
@@ -91,9 +95,18 @@ loom_cc_test(
     iree::async
     iree::base
     iree::experimental::loom_serve::http::server
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::host
+    iree::hal
     iree::testing::gtest
     iree::testing::gtest_main
+  LABELS
+    "iree-run-requirement=runtime.resource.amd_gpu"
+  RESOURCE_GROUP
+    gpu-device
 )
+endif()
 
 if(LOOM_TARGET_ARCH_VM)
 loom_cc_binary(

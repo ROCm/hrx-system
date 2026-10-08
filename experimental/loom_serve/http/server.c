@@ -63,6 +63,8 @@ struct loom_serve_http_server_t {
   iree_slim_mutex_t mutex;
   // Advisory wakeup for the single application owner.
   iree_notification_t notification;
+  // Application task wake target, with publication joined by the server mutex.
+  loom_serve_http_observer_t observer;
   // Network proactor, independent of the model's execution services.
   iree_async_proactor_t* proactor;
   // Standard polling owner; remains alive until all network resources retire.
@@ -90,6 +92,11 @@ struct loom_serve_http_server_t {
 };
 
 static void http_notify(loom_serve_http_server_t* server) {
+  iree_slim_mutex_lock(&server->mutex);
+  if (server->observer.wake) {
+    server->observer.wake(server->observer.user_data);
+  }
+  iree_slim_mutex_unlock(&server->mutex);
   iree_notification_post(&server->notification, IREE_ALL_WAITERS);
 }
 
@@ -525,6 +532,16 @@ const iree_async_address_t* loom_serve_http_server_address(
 iree_notification_t* loom_serve_http_server_notification(
     loom_serve_http_server_t* server) {
   return &server->notification;
+}
+
+void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
+                                         loom_serve_http_observer_t observer) {
+  iree_slim_mutex_lock(&server->mutex);
+  server->observer = observer;
+  if (observer.wake) {
+    observer.wake(observer.user_data);
+  }
+  iree_slim_mutex_unlock(&server->mutex);
 }
 
 bool loom_serve_http_server_is_stopping(loom_serve_http_server_t* server) {

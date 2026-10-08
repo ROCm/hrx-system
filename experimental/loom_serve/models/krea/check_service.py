@@ -82,6 +82,9 @@ class Journal:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--server", nargs="+", required=True)
+    parser.add_argument(
+        "--workers", type=int, default=1, help="Shared JIT/serving CPU workers."
+    )
     parser.add_argument("--model", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--adapter", type=Path, required=True)
@@ -96,6 +99,7 @@ def main():
     args.output.mkdir(parents=True, exist_ok=False)
     command = [
         *args.server,
+        f"--workers={args.workers}",
         f"--model={args.model}",
         f"--checkpoint={args.checkpoint}",
         f"--adapter={args.adapter}",

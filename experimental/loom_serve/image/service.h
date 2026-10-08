@@ -9,24 +9,32 @@
 
 #include "experimental/loom_serve/http/server.h"
 #include "experimental/loom_serve/image/request.h"
+#include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/host.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Coarse finite-image invocation. Calls are serialized on one worker; the
-// implementation retires all work borrowing request storage before returning.
-// Successful RGB is little-endian F32 CHW in [-1,1], borrowed until the next
-// call. The service encodes it before allowing another call. Failure after
-// request admission is terminal, and stops the service after retiring
-// ownership.
+// Finite-image invocation with explicit CPU and device phases. The scheduler
+// owns admission, submission and successful completion; prepare runs as a CPU
+// task with exclusive model access. None of these functions waits for device
+// or I/O completion. Failure is terminal and preserves accepted model ownership
+// until outer-thread model destruction. One invocation is active at a time.
 typedef struct loom_serve_image_generator_t {
-  // Borrowed model owner, outliving service_run and its joined worker.
+  // Borrowed model owner, outliving service_run and every accepted task/wait.
   void* self;
-  // Complete native image generation, with no HTTP or connection ownership.
-  iree_status_t (*generate)(void* self,
-                            const loom_serve_image_request_t* request,
-                            iree_const_byte_span_t* out_rgb);
+  // Pins and enqueues parameter activation; false means insufficient capacity.
+  iree_status_t (*try_acquire)(void* self, bool* out_admitted);
+  // CPU source preparation, with no shared admission-policy mutation.
+  iree_status_t (*prepare)(void* self,
+                           const loom_serve_image_request_t* request);
+  // Enqueues consumption and feedback, returning borrowed completion handles.
+  iree_status_t (*submit)(void* self,
+                          loom_serve_execution_frontier_t* out_frontier);
+  // Consumes successful completion and releases model pins. Borrowed F32 CHW
+  // RGB in [-1,1] remains live until the next invocation or model destruction.
+  iree_const_byte_span_t (*complete)(void* self);
 } loom_serve_image_generator_t;
 
 typedef struct loom_serve_image_service_options_t {
@@ -50,10 +58,12 @@ typedef struct loom_serve_image_service_options_t {
 // Queued requests own only decoded host input. Peer reset removes queued work
 // or discards an active result at the complete-image boundary. Slow readers own
 // copied response bytes, never model output or workspace. Return joins the
-// worker and relinquishes all connection views before either borrowed owner
-// can be destroyed. JSONL lifecycle events omit prompts.
+// shared tasks and asynchronous waits and relinquishes all connection views
+// before either borrowed owner can be destroyed. Only this outer application
+// call joins; scheduler workers never wait. JSONL events omit prompts.
 iree_status_t loom_serve_image_service_run(
-    loom_serve_image_generator_t generator, loom_serve_http_server_t* server,
+    loom_serve_host_t* host, loom_serve_image_generator_t generator,
+    loom_serve_http_server_t* server,
     const loom_serve_image_service_options_t* options,
     iree_allocator_t host_allocator);
 

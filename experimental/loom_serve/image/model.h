@@ -85,6 +85,28 @@ loom_serve_memory_statistics_t loom_serve_image_model_weight_statistics(
 iree_string_view_t loom_serve_image_model_name(
     const loom_serve_image_model_t* model);
 
+// CPU-only source preparation, serialized with other model calls. Suitable for
+// a CPU task: no device submission, wait or shared residency mutation occurs.
+// Retains the resulting payload until successful completion or destruction.
+iree_status_t loom_serve_image_model_prepare_request(
+    loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
+    float strength);
+
+// Queues a prepared request and returns its work/feedback frontiers. The caller
+// first acquires the model residency on the shared scheduler owner. Only one
+// request may be outstanding. Failure is terminal and preserves payload and
+// residency protection for outer-thread destruction; no host wait occurs.
+iree_status_t loom_serve_image_model_submit(
+    loom_serve_image_model_t* model,
+    loom_serve_execution_frontier_t* out_frontier);
+
+// Consumes successful completion of both submitted frontiers on the scheduler
+// owner. Releases the request payload and residency pin. Returned F32 CHW RGB
+// remains borrowed until another submission or model destruction. Failed
+// readiness never calls this function: teardown joins actual queue ownership.
+iree_const_byte_span_t loom_serve_image_model_complete(
+    loom_serve_image_model_t* model);
+
 // Source prepares one opaque payload and selects a retained command. Its
 // payload is kept alive through both accepted execution frontiers, including
 // failures after partial submission. Request errors before submission leave

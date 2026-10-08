@@ -57,6 +57,21 @@ const iree_async_address_t* loom_serve_http_server_address(
 iree_notification_t* loom_serve_http_server_notification(
     loom_serve_http_server_t* server);
 
+// Single application wakeup target. The callback only publishes a task wake;
+// it never calls back into the transport or waits. Registration immediately
+// wakes the observer so requests published before registration are consumed.
+// Replacing with an empty callback joins all prior callback accesses. The
+// observer's storage remains live until replacement or server destruction.
+typedef struct loom_serve_http_observer_t {
+  // Nonblocking wake callback invoked on network or application producers.
+  void (*wake)(void* user_data);
+  // Borrowed callback state protected by registration lifetime.
+  void* user_data;
+} loom_serve_http_observer_t;
+
+void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,
+                                         loom_serve_http_observer_t observer);
+
 // True after a shutdown signal or terminal listener failure.
 bool loom_serve_http_server_is_stopping(loom_serve_http_server_t* server);
 
