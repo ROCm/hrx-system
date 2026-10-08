@@ -31,13 +31,22 @@ struct ImageGate {
   float pixel[3] = {};
   // Successful completions consumed by the scheduler, read after service join.
   uint32_t completed = 0;
+  // Request-selected dependency outcome, published by CPU preparation.
+  bool admission_available = true;
+  // Unsubmitted payloads discarded on denied admission, read after join.
+  uint32_t discarded = 0;
 
-  static iree_status_t Acquire(void*, bool* out_admitted) {
-    *out_admitted = true;
+  static iree_status_t Acquire(void* self, bool* out_admitted) {
+    *out_admitted = static_cast<ImageGate*>(self)->admission_available;
     return iree_ok_status();
   }
-  static iree_status_t Prepare(void*, const loom_serve_image_request_t*) {
+  static iree_status_t Prepare(void* self,
+                               const loom_serve_image_request_t* request) {
+    static_cast<ImageGate*>(self)->admission_available = request->seed == 0;
     return iree_ok_status();
+  }
+  static void DiscardPreparedRequest(void* self) {
+    ++static_cast<ImageGate*>(self)->discarded;
   }
   static iree_status_t Submit(void* self,
                               loom_serve_execution_frontier_t* out_frontier) {
@@ -92,7 +101,11 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   ASSERT_NE(reader, nullptr);
 
   const loom_serve_image_generator_t generator = {
-      &gate, ImageGate::Acquire, ImageGate::Prepare, ImageGate::Submit,
+      &gate,
+      ImageGate::Prepare,
+      ImageGate::DiscardPreparedRequest,
+      ImageGate::Acquire,
+      ImageGate::Submit,
       ImageGate::Complete};
   const loom_serve_image_service_options_t options = {
       .model = IREE_SV("image-witness"),
@@ -120,6 +133,33 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   };
   EXPECT_FALSE(wait_event("\"event\":\"image_ready\"", "").empty());
   const auto* address = loom_serve_http_server_address(server);
+  auto read_response = [](int socket) {
+    std::string response;
+    char buffer[4096];
+    ssize_t count = 0;
+    while ((count = recv(socket, buffer, sizeof(buffer), 0)) > 0) {
+      response.append(buffer, count);
+    }
+    EXPECT_EQ(count, 0);
+    return response;
+  };
+  // Admission denial follows CPU preparation but precedes the held device
+  // frontier. The same service must remain usable for the next request.
+  const int denied = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  EXPECT_GE(denied, 0);
+  EXPECT_EQ(connect(denied, reinterpret_cast<const sockaddr*>(address->storage),
+                    address->length),
+            0);
+  const std::string denied_body = R"({"prompt":"denied","seed":1})";
+  const std::string denied_request =
+      "POST /v1/images/generations HTTP/1.1\r\nHost: local\r\n"
+      "Content-Type: application/json\r\nContent-Length: " +
+      std::to_string(denied_body.size()) + "\r\n\r\n" + denied_body;
+  EXPECT_EQ(
+      send(denied, denied_request.data(), denied_request.size(), MSG_NOSIGNAL),
+      static_cast<ssize_t>(denied_request.size()));
+  EXPECT_EQ(read_response(denied).find("HTTP/1.1 503"), 0u);
+  EXPECT_EQ(close(denied), 0);
   const int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
   EXPECT_GE(client, 0);
   EXPECT_EQ(connect(client, reinterpret_cast<const sockaddr*>(address->storage),
@@ -134,7 +174,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
             static_cast<ssize_t>(request.size()));
   const std::string active =
       wait_event("\"event\":\"image_heartbeat\"", "\"phase\":\"generating\"");
-  EXPECT_NE(active.find("\"active_request\":1"), std::string::npos);
+  EXPECT_NE(active.find("\"active_request\":2"), std::string::npos);
   EXPECT_NE(active.find("\"completed\":0"), std::string::npos);
 
   const int health = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
@@ -147,16 +187,6 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
   EXPECT_EQ(
       send(health, health_request.data(), health_request.size(), MSG_NOSIGNAL),
       static_cast<ssize_t>(health_request.size()));
-  auto read_response = [](int socket) {
-    std::string response;
-    char buffer[4096];
-    ssize_t count = 0;
-    while ((count = recv(socket, buffer, sizeof(buffer), 0)) > 0) {
-      response.append(buffer, count);
-    }
-    EXPECT_EQ(count, 0);
-    return response;
-  };
   EXPECT_NE(read_response(health).find("\"active\":1"), std::string::npos);
   EXPECT_EQ(close(health), 0);
 
@@ -164,7 +194,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
     EXPECT_EQ(kill(getpid(), SIGTERM), 0);
     const std::string draining =
         wait_event("\"event\":\"image_heartbeat\"", "\"stopping\":true");
-    EXPECT_NE(draining.find("\"active_request\":1"), std::string::npos);
+    EXPECT_NE(draining.find("\"active_request\":2"), std::string::npos);
     EXPECT_NE(draining.find("\"completed\":0"), std::string::npos);
   }
   if (completion_mode == CompletionMode::kDeviceFailure) {
@@ -191,6 +221,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
     IREE_EXPECT_OK(service_status);
   }
   EXPECT_EQ(gate.completed, failed ? 0u : 1u);
+  EXPECT_EQ(gate.discarded, 1u);
   EXPECT_EQ(close(client), 0);
   IREE_EXPECT_OK(loom_serve_http_server_destroy(server));
   EXPECT_EQ(dup2(saved_stderr, STDERR_FILENO), STDERR_FILENO);

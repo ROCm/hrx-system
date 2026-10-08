@@ -726,6 +726,12 @@ iree_status_t loom_serve_image_model_prepare_request(
   return iree_ok_status();
 }
 
+void loom_serve_image_model_discard_prepared_request(
+    loom_serve_image_model_t* model) {
+  iree_vm_buffer_release(model->invocation.payload);
+  model->invocation.payload = NULL;
+}
+
 iree_status_t loom_serve_image_model_submit(
     loom_serve_image_model_t* model,
     loom_serve_execution_frontier_t* out_frontier) {
@@ -791,8 +797,7 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
       loom_serve_image_model_prepare_request(model, prompt, seed, strength));
   iree_status_t status = loom_serve_residency_acquire(model->residency);
   if (!iree_status_is_ok(status)) {
-    iree_vm_buffer_release(model->invocation.payload);
-    model->invocation.payload = NULL;
+    loom_serve_image_model_discard_prepared_request(model);
     return status;
   }
   loom_serve_execution_frontier_t frontier;

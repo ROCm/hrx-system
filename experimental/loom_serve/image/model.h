@@ -88,9 +88,16 @@ iree_string_view_t loom_serve_image_model_name(
 // CPU-only source preparation, serialized with other model calls. Suitable for
 // a CPU task: no device submission, wait or shared residency mutation occurs.
 // Retains the resulting payload until successful completion or destruction.
+// INVALID_ARGUMENT rejects the request with no retained payload. No prepared
+// request may already be outstanding; prepare is serialized with submission.
 iree_status_t loom_serve_image_model_prepare_request(
     loom_serve_image_model_t* model, iree_string_view_t prompt, uint64_t seed,
     float strength);
+
+// Releases a successfully prepared request that has not been submitted. This
+// does not release residency pins or retire device work. The model is reusable.
+void loom_serve_image_model_discard_prepared_request(
+    loom_serve_image_model_t* model);
 
 // Queues a prepared request and returns its work/feedback frontiers. The caller
 // first acquires the model residency on the shared scheduler owner. Only one

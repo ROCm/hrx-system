@@ -10,6 +10,8 @@ The tokenizer recognizes `a`, `b`, and `x`, with one token per character. Red
 depends on seed parity, green on token-count parity, and blue on pixel parity.
 Pixel extents are independently configurable from 1 through 64. The output is
 a transport/ownership oracle, not a neural quality or throughput benchmark.
+The source rejects prompts beyond the configured token limit, exercising
+request validation in the VM rather than in the HTTP parser.
 
 The integration test runs real source JIT, VM control, command submission and
 HTTP responses with one and four shared CPU workers:

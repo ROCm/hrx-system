@@ -50,6 +50,10 @@ static iree_status_t image_submit(
   return loom_serve_image_model_submit(self, out_frontier);
 }
 
+static void image_discard_prepared_request(void* self) {
+  loom_serve_image_model_discard_prepared_request(self);
+}
+
 static iree_const_byte_span_t image_complete(void* self) {
   return loom_serve_image_model_complete(self);
 }
@@ -98,7 +102,8 @@ int main(int argc, char** argv) {
   }
   if (iree_status_is_ok(status)) {
     const loom_serve_image_generator_t generator = {
-        model, image_acquire, image_prepare, image_submit, image_complete};
+        model,         image_prepare, image_discard_prepared_request,
+        image_acquire, image_submit,  image_complete};
     const loom_serve_image_service_options_t options = {
         .model = loom_serve_image_model_name(model),
         .width = (uint32_t)FLAG_width,

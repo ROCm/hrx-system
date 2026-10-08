@@ -73,6 +73,9 @@ typedef struct image_service_t {
     uint32_t ready;
     // Joined asynchronous outcomes awaiting consumption by the scheduler.
     iree_status_t status;
+    // CPU result consumed only with its release event, before classifying input
+    // rejection separately from terminal device/timer/encoding failures.
+    iree_status_t cpu_status;
     // Executor has relinquished the scheduler and all drain accesses.
     bool released;
   } events;
@@ -255,7 +258,7 @@ static void image_cpu_completed(iree_task_process_t* process,
                                 iree_status_t status) {
   image_service_t* service = process->user_data;
   iree_slim_mutex_lock(&service->events.mutex);
-  service->events.status = iree_status_join(service->events.status, status);
+  service->events.cpu_status = status;
   iree_slim_mutex_unlock(&service->events.mutex);
 }
 
@@ -277,24 +280,7 @@ static void image_schedule_cpu(image_service_t* service, image_phase_t phase) {
   iree_task_executor_schedule_process(service->executor, &service->cpu.process);
 }
 
-static iree_status_t image_start(image_service_t* service,
-                                 image_pending_t pending) {
-  bool admitted = false;
-  iree_status_t status =
-      service->generator.try_acquire(service->generator.self, &admitted);
-  if (!iree_status_is_ok(status) || !admitted) {
-    // This entry owns only one model. With no active invocation, a denied
-    // admission has no producer that could release capacity for this request.
-    if (iree_status_is_ok(status)) {
-      status =
-          image_reject(service, pending.connection, "503 Service Unavailable",
-                       IREE_SV("model parameters exceed available capacity"));
-    } else {
-      loom_serve_http_connection_abort(pending.connection);
-    }
-    loom_serve_image_request_deinitialize(&pending.job.request);
-    return status;
-  }
+static void image_start(image_service_t* service, image_pending_t pending) {
   service->active = pending.job.id;
   service->active_start = iree_time_now();
   service->connection = pending.connection;
@@ -302,7 +288,6 @@ static iree_status_t image_start(image_service_t* service,
   fprintf(stderr, "{\"event\":\"image_started\",\"request\":%" PRIu64 "}\n",
           service->active);
   image_schedule_cpu(service, IMAGE_PHASE_PREPARING);
-  return iree_ok_status();
 }
 
 static void image_device_completed(void* user_data,
@@ -362,17 +347,66 @@ static void image_finish(image_service_t* service) {
   service->phase = IMAGE_PHASE_IDLE;
 }
 
+static void image_prepared(image_service_t* service) {
+  if (service->stopping || !service->connection) {
+    service->generator.discard_prepared_request(service->generator.self);
+    image_finish(service);
+    return;
+  }
+  bool admitted = false;
+  service->status =
+      service->generator.try_acquire(service->generator.self, &admitted);
+  if (iree_status_is_ok(service->status) && !admitted) {
+    // This entry owns only one model. With no device invocation, a denied
+    // admission has no producer that could release capacity for this request.
+    service->generator.discard_prepared_request(service->generator.self);
+    service->status =
+        image_reject(service, service->connection, "503 Service Unavailable",
+                     IREE_SV("model parameters exceed available capacity"));
+    service->connection = NULL;
+    image_finish(service);
+    return;
+  } else if (iree_status_is_ok(service->status)) {
+    service->status = image_submit(service);
+  }
+  if (!iree_status_is_ok(service->status)) {
+    image_finish(service);
+  }
+}
+
 static void image_collect(image_service_t* service, bool* progress) {
   iree_slim_mutex_lock(&service->events.mutex);
   uint32_t ready = service->events.ready;
   service->events.ready = 0;
   service->status = iree_status_join(service->status, service->events.status);
   service->events.status = iree_ok_status();
+  iree_status_t cpu_status = iree_ok_status();
+  if (iree_any_bit_set(ready, IMAGE_EVENT_CPU)) {
+    cpu_status = service->events.cpu_status;
+    service->events.cpu_status = iree_ok_status();
+  }
   iree_slim_mutex_unlock(&service->events.mutex);
   if (!ready) {
     return;
   }
   *progress = true;
+  if (service->phase == IMAGE_PHASE_PREPARING &&
+      iree_status_is_invalid_argument(cpu_status) &&
+      iree_status_is_ok(service->status)) {
+    if (service->connection) {
+      iree_string_view_t message = iree_status_message(cpu_status);
+      if (!message.size) {
+        message = IREE_SV("source rejected image input");
+      }
+      service->status = image_reject(service, service->connection,
+                                     "400 Bad Request", message);
+      service->connection = NULL;
+    }
+    image_diagnose("Image source input rejected", cpu_status);
+    image_finish(service);
+    return;
+  }
+  service->status = iree_status_join(service->status, cpu_status);
   if (!iree_status_is_ok(service->status)) {
     image_finish(service);
     return;
@@ -381,10 +415,7 @@ static void image_collect(image_service_t* service, bool* progress) {
     service->cpu.rgb = service->generator.complete(service->generator.self);
     image_schedule_cpu(service, IMAGE_PHASE_ENCODING);
   } else if (service->phase == IMAGE_PHASE_PREPARING) {
-    service->status = image_submit(service);
-    if (!iree_status_is_ok(service->status)) {
-      image_finish(service);
-    }
+    image_prepared(service);
   } else {
     ++service->completed;
     fprintf(stderr,
@@ -536,7 +567,7 @@ static iree_status_t image_admit(image_service_t* service,
           ",\"seed\":%" PRIu64 "}\n",
           pending.job.id, pending.job.request.seed);
   if (!service->active) {
-    return image_start(service, pending);
+    image_start(service, pending);
   } else {
     service->pending[service->pending_count++] = pending;
   }
@@ -654,7 +685,7 @@ static iree_status_t image_drain(iree_task_process_t* process,
     --service->pending_count;
     memmove(service->pending, service->pending + 1,
             service->pending_count * sizeof(*service->pending));
-    service->status = image_start(service, pending);
+    image_start(service, pending);
     progress = true;
   }
   for (iree_host_size_t i = 0;
@@ -714,7 +745,8 @@ iree_status_t loom_serve_image_service_run(
     loom_serve_http_server_t* server,
     const loom_serve_image_service_options_t* options,
     iree_allocator_t host_allocator) {
-  if (!generator.try_acquire || !generator.prepare || !generator.submit ||
+  if (!generator.try_acquire || !generator.prepare ||
+      !generator.discard_prepared_request || !generator.submit ||
       !generator.complete || !options->width || !options->height ||
       !options->model.size || !options->pending_capacity ||
       options->heartbeat_interval < 0 ||

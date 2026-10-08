@@ -87,6 +87,10 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
     return loom_serve_image_model_submit(
         static_cast<loom_serve_image_model_t*>(self), frontier);
   }
+  static void DiscardPreparedRequest(void* self) {
+    loom_serve_image_model_discard_prepared_request(
+        static_cast<loom_serve_image_model_t*>(self));
+  }
   static iree_const_byte_span_t Complete(void* self) {
     return loom_serve_image_model_complete(
         static_cast<loom_serve_image_model_t*>(self));
@@ -94,8 +98,8 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
 
   void Start() {
     service_ = std::thread([this] {
-      const loom_serve_image_generator_t generator = {model_, Acquire, Prepare,
-                                                      Submit, Complete};
+      const loom_serve_image_generator_t generator = {
+          model_, Prepare, DiscardPreparedRequest, Acquire, Submit, Complete};
       const loom_serve_image_service_options_t options = {
           .model = loom_serve_image_model_name(model_),
           .width = kWidth,
@@ -174,6 +178,9 @@ class SourceImageServiceTest : public ::testing::TestWithParam<uint32_t> {
 };
 
 TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
+  IREE_ASSERT_OK(
+      loom_serve_image_model_prepare_request(model_, IREE_SV("x"), 0, 1.0f));
+  loom_serve_image_model_discard_prepared_request(model_);
   // Verify source arithmetic independently of the image encoder.
   for (uint64_t seed : {0u, 1u}) {
     iree_const_byte_span_t rgb;
@@ -193,6 +200,13 @@ TEST_P(SourceImageServiceTest, SourcePixelsAndHttpPngPreserveRequestIdentity) {
       Read(Send("POST", "/v1/images/generations", R"({"prompt":"ab","n":2})"))
           .find("HTTP/1.1 400"),
       0u);
+  // This rejection comes from the source VM after ordinary HTTP parsing.
+  const std::string too_long =
+      Read(Send("POST", "/v1/images/generations",
+                "{\"prompt\":\"" + std::string(33, 'a') + "\"}"));
+  ASSERT_EQ(too_long.find("HTTP/1.1 400"), 0u);
+  EXPECT_NE(too_long.find("prompt exceeds fixture text capacity"),
+            std::string::npos);
   const char* prompts[] = {"ab", "aba", "b", "abba"};
   std::vector<int> clients;
   for (size_t i = 0; i < IREE_ARRAYSIZE(prompts); ++i) {
