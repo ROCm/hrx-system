@@ -10,7 +10,10 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <atomic>
+#include <condition_variable>
 #include <deque>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -31,6 +34,50 @@ struct ModelService {
       pending;
   // This model waits for another service's request/maintenance to retire.
   bool wait_for_shared_activity = false;
+  // The test owns this model dependency's device-readiness boundary.
+  bool hold_completion = false;
+  // Protects completion publication and observer detachment.
+  std::mutex mutex;
+  // Publishes explicit submission and stopping phases to the test.
+  std::condition_variable condition;
+  // Borrowed owner wake target, detached only after accepted work retires.
+  loom_serve_http_observer_t observer = {};
+  // An accepted completion retains this service until Advance consumes it.
+  bool waiting = false;
+  // The test has released the accepted completion.
+  bool ready = false;
+  // The router has requested wind-down while completion is still held.
+  bool stopping = false;
+  // Terminal completion result, transferred to the router exactly once.
+  iree_status_t result = iree_ok_status();
+
+  static void SetObserver(void* self, loom_serve_http_observer_t observer) {
+    auto* service = static_cast<ModelService*>(self);
+    std::lock_guard<std::mutex> lock(service->mutex);
+    EXPECT_FALSE(service->waiting);
+    service->observer = observer;
+  }
+  static bool IsPending(void* self) {
+    auto* service = static_cast<ModelService*>(self);
+    std::lock_guard<std::mutex> lock(service->mutex);
+    return service->waiting;
+  }
+
+  void WaitSubmitted() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this] { return waiting; });
+  }
+  void WaitStopping() {
+    std::unique_lock<std::mutex> lock(mutex);
+    condition.wait(lock, [this] { return stopping; });
+  }
+  void Release(iree_status_t status = iree_ok_status()) {
+    std::lock_guard<std::mutex> lock(mutex);
+    EXPECT_TRUE(waiting);
+    ready = true;
+    result = status;
+    observer.wake(observer.user_data);
+  }
 
   static bool IsActive(void* self) {
     const auto* service = static_cast<ModelService*>(self);
@@ -49,6 +96,30 @@ struct ModelService {
                                loom_serve_http_service_flags_t flags,
                                bool* progress) {
     auto* service = static_cast<ModelService*>(self);
+    *progress = false;
+    if (service->hold_completion && !service->pending.empty()) {
+      std::lock_guard<std::mutex> lock(service->mutex);
+      if (!service->waiting) {
+        service->waiting = true;
+        *progress = true;
+        service->condition.notify_all();
+        return iree_ok_status();
+      }
+      service->stopping =
+          iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING);
+      service->condition.notify_all();
+      if (!service->ready) {
+        return iree_ok_status();
+      }
+      service->waiting = false;
+      service->ready = false;
+      *progress = true;
+      iree_status_t status = service->result;
+      service->result = iree_ok_status();
+      if (service->stopping || !iree_status_is_ok(status)) {
+        return status;
+      }
+    }
     if (service->wait_for_shared_activity &&
         iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
       *progress = false;
@@ -88,20 +159,31 @@ class HttpRouterTest : public ::testing::Test {
                                                  iree_allocator_system()));
     owner_ = std::thread([this] {
       const loom_serve_http_service_t services[] = {
-          {IREE_SV("a"), &a_, ModelService::IsActive, ModelService::Accept,
-           ModelService::Advance},
-          {IREE_SV("b"), &b_, ModelService::IsActive, ModelService::Accept,
-           ModelService::Advance}};
+          {IREE_SV("a"), &a_, ModelService::SetObserver,
+           ModelService::IsPending, ModelService::IsActive,
+           ModelService::Accept, ModelService::Advance},
+          {IREE_SV("b"), &b_, ModelService::SetObserver,
+           ModelService::IsPending, ModelService::IsActive,
+           ModelService::Accept, ModelService::Advance},
+          {IREE_SV("held"), &held_, ModelService::SetObserver,
+           ModelService::IsPending, ModelService::IsActive,
+           ModelService::Accept, ModelService::Advance},
+          {IREE_SV("other"), &other_, ModelService::SetObserver,
+           ModelService::IsPending, ModelService::IsActive,
+           ModelService::Accept, ModelService::Advance}};
       status_ =
           loom_serve_http_router_run(server_, IREE_ARRAYSIZE(services),
                                      services, 4, iree_allocator_system());
+      returned_.store(true);
     });
   }
   void TearDown() override {
-    EXPECT_EQ(kill(getpid(), SIGTERM), 0);
-    owner_.join();
-    IREE_EXPECT_OK(status_);
-    for (auto* service : {&a_, &b_}) {
+    if (owner_.joinable()) {
+      EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+      owner_.join();
+    }
+    IREE_EXPECT_STATUS_IS(expected_code_, status_);
+    for (auto* service : {&a_, &b_, &held_, &other_}) {
       for (auto& [connection, request] : service->pending) {
         (void)request;
         loom_serve_http_connection_abort(connection);
@@ -152,10 +234,18 @@ class HttpRouterTest : public ::testing::Test {
   ModelService a_{"a"};
   // Second model dependency used only by the joined application owner.
   ModelService b_{"b", {}, true};
+  // Explicitly held device-readiness dependencies, independent of a and b.
+  ModelService held_{"held", {}, false, true};
+  // A second held dependency proves failure drains every accepted callback.
+  ModelService other_{"other", {}, false, true};
   // Application owner running the production router.
   std::thread owner_;
   // Terminal result published by joining owner_.
   iree_status_t status_ = iree_ok_status();
+  // Owner return observation independent of its joined terminal status.
+  std::atomic<bool> returned_{false};
+  // Expected terminal result; service errors are not hidden by shutdown.
+  iree_status_code_t expected_code_ = IREE_STATUS_OK;
 };
 
 TEST_F(HttpRouterTest, DiscoveryAndIndependentBorrowedRequests) {
@@ -204,6 +294,47 @@ TEST_F(HttpRouterTest, RejectsAmbiguousSelectorsWithoutInvokingModels) {
   EXPECT_NE(Read(Send("POST", "/v1/chat/completions", R"({"model":"b"})"))
                 .find("b:/v1/chat/completions:"),
             std::string::npos);
+}
+
+TEST_F(HttpRouterTest, HeldModelLeavesIndependentRequestsRunnable) {
+  const std::string body = R"({"model":"held","messages":["retained"]})";
+  const int held = Send("POST", "/v1/chat/completions", body);
+  held_.WaitSubmitted();
+  EXPECT_NE(Read(Send("POST", "/v1/chat/completions", R"({"model":"a"})"))
+                .find("a:/v1/chat/completions:"),
+            std::string::npos);
+  EXPECT_NE(Read(Send("GET", "/healthz")).find(R"({"status":"ready"})"),
+            std::string::npos);
+  held_.Release();
+  EXPECT_NE(Read(held).find("held:/v1/chat/completions:" + body),
+            std::string::npos);
+}
+
+TEST_F(HttpRouterTest, ShutdownDrainsAcceptedReadinessBeforeDetaching) {
+  const int held = Send("POST", "/v1/chat/completions", R"({"model":"held"})");
+  held_.WaitSubmitted();
+  EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  held_.WaitStopping();
+  EXPECT_FALSE(returned_.load());
+  held_.Release();
+  owner_.join();
+  EXPECT_EQ(close(held), 0);
+}
+
+TEST_F(HttpRouterTest, FailedReadinessStillDrainsOtherAcceptedCallbacks) {
+  const int held = Send("POST", "/v1/chat/completions", R"({"model":"held"})");
+  const int other =
+      Send("POST", "/v1/chat/completions", R"({"model":"other"})");
+  held_.WaitSubmitted();
+  other_.WaitSubmitted();
+  expected_code_ = IREE_STATUS_UNAVAILABLE;
+  held_.Release(iree_make_status(IREE_STATUS_UNAVAILABLE, "device failed"));
+  other_.WaitStopping();
+  EXPECT_FALSE(returned_.load());
+  other_.Release();
+  owner_.join();
+  EXPECT_EQ(close(held), 0);
+  EXPECT_EQ(close(other), 0);
 }
 
 }  // namespace

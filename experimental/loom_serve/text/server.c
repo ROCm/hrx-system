@@ -31,7 +31,7 @@ IREE_FLAG(int32_t, rows, 16, "Maximum resident model rows (1-16).");
 IREE_FLAG(int32_t, connections, 64,
           "Maximum simultaneous TCP connections, including queued requests.");
 IREE_FLAG(int32_t, pending_requests, 32,
-          "Maximum validated requests waiting for a model row or KV credit.");
+          "Maximum claimed requests waiting for a model row or KV credit.");
 IREE_FLAG(int32_t, request_body_bytes, 8 * 1024 * 1024,
           "Maximum HTTP request body bytes per connection.");
 IREE_FLAG(int32_t, chunk_size, 0,

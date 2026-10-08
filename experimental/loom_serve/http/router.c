@@ -197,6 +197,10 @@ static iree_status_t router_accept(loom_serve_http_connection_t* connection,
                        IREE_SV("model is not registered"), output);
 }
 
+static void router_wake(void* user_data) {
+  iree_notification_post((iree_notification_t*)user_data, IREE_ALL_WAITERS);
+}
+
 iree_status_t loom_serve_http_router_run(
     loom_serve_http_server_t* server, iree_host_size_t service_count,
     const loom_serve_http_service_t* services,
@@ -227,15 +231,19 @@ iree_status_t loom_serve_http_router_run(
   iree_string_builder_initialize(host_allocator, &output);
   iree_notification_t* notification =
       loom_serve_http_server_notification(server);
+  for (iree_host_size_t i = 0; i < service_count; ++i) {
+    services[i].set_observer(services[i].self, (loom_serve_http_observer_t){
+                                                   router_wake, notification});
+  }
   iree_host_size_t cursor = 0;
   iree_status_t status = iree_ok_status();
-  while (iree_status_is_ok(status) &&
-         !loom_serve_http_server_is_stopping(server)) {
+  bool stopping = false;
+  for (;;) {
     const iree_wait_token_t token =
         iree_notification_prepare_wait(notification);
+    stopping |= loom_serve_http_server_is_stopping(server);
     bool progress = false;
-    for (iree_host_size_t i = 0;
-         i < request_capacity && iree_status_is_ok(status); ++i) {
+    for (iree_host_size_t i = 0; i < request_capacity && !stopping; ++i) {
       const loom_serve_http_request_t* request = NULL;
       loom_serve_http_connection_t* connection =
           loom_serve_http_server_take_request(server, &request);
@@ -244,28 +252,43 @@ iree_status_t loom_serve_http_router_run(
       }
       status =
           router_accept(connection, request, service_count, services, &output);
+      stopping = !iree_status_is_ok(status) ||
+                 loom_serve_http_server_is_stopping(server);
       progress = true;
     }
-    for (iree_host_size_t i = 0;
-         i < service_count && iree_status_is_ok(status) &&
-         !loom_serve_http_server_is_stopping(server);
-         ++i) {
+    for (iree_host_size_t i = 0; i < service_count; ++i) {
       const iree_host_size_t index = (cursor + i) % service_count;
       const loom_serve_http_service_t* service = &services[index];
+      stopping |= loom_serve_http_server_is_stopping(server);
+      if (stopping && !service->is_pending(service->self)) {
+        continue;
+      }
       bool service_progress = false;
-      status = service->advance(
-          service->self, router_service_flags(index, service_count, services),
-          &service_progress);
+      const loom_serve_http_service_flags_t flags =
+          router_service_flags(index, service_count, services) |
+          (stopping ? LOOM_SERVE_HTTP_SERVICE_FLAG_STOPPING : 0);
+      status = iree_status_join(
+          status, service->advance(service->self, flags, &service_progress));
+      stopping |= !iree_status_is_ok(status);
       progress |= service_progress;
     }
     cursor = (cursor + 1) % service_count;
-    if (progress || !iree_status_is_ok(status) ||
-        loom_serve_http_server_is_stopping(server)) {
+    bool pending = false;
+    for (iree_host_size_t i = 0; i < service_count; ++i) {
+      pending |= services[i].is_pending(services[i].self);
+    }
+    if (stopping && !pending) {
+      iree_notification_cancel_wait(notification);
+      break;
+    } else if (progress) {
       iree_notification_cancel_wait(notification);
     } else {
       iree_notification_commit_wait(notification, token, IREE_DURATION_ZERO,
                                     IREE_TIME_INFINITE_FUTURE);
     }
+  }
+  for (iree_host_size_t i = 0; i < service_count; ++i) {
+    services[i].set_observer(services[i].self, (loom_serve_http_observer_t){0});
   }
   iree_string_builder_deinitialize(&output);
   return status;

@@ -40,7 +40,7 @@ typedef struct loom_serve_text_service_options_t {
   iree_host_size_t chunk_size;
   // Output bound when a request omits max_tokens.
   iree_host_size_t default_max_tokens;
-  // Positive bound on validated requests waiting without a model row.
+  // Positive bound on claimed requests waiting without a model row.
   iree_host_size_t pending_capacity;
   // Reporting interval in nanoseconds; zero disables periodic heartbeats.
   iree_duration_t heartbeat_interval;
@@ -76,13 +76,15 @@ loom_serve_http_service_t loom_serve_text_service_interface(
 // failure, unresolved device reservations remain pinned for model destruction;
 // on ordinary completed-boundary shutdown, unused reservations are released.
 // terminal_code is the owner loop's result, including another model's failure.
+// The owner has consumed all accepted readiness callbacks before this call.
 // Null is accepted. The borrowed model and transport both outlive this call.
 void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
                                      iree_status_code_t terminal_code);
 
 // Runs one application owner until transport shutdown or model failure. Model
 // and transport are borrowed. Each epoch gathers credited ready rows, executes
-// their known/verifier spans and commits outputs before reusing feedback.
+// their known/verifier spans asynchronously and commits outputs after readiness
+// before reusing feedback. Other services can advance while an epoch executes.
 // Heartbeats observe a copied snapshot and continue during model waits.
 // Admission owns and physically backs the exact completion high-water, private
 // recurrent writer and partial-tail COW while pinning required parameters.

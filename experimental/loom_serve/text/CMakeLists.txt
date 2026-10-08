@@ -132,6 +132,22 @@ loom_cc_library(
   PUBLIC
 )
 
+loom_cc_library(
+  NAME
+    heartbeat
+  HDRS
+    "heartbeat.h"
+  SRCS
+    "heartbeat.c"
+  DEPS
+    iree::base
+    iree::base::threading
+    iree::base::threading::thread
+    iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::storage::memory
+  PUBLIC
+)
+
 if(LOOM_TARGET_ARCH_VM AND IREE_HAL_DRIVER_AMDGPU)
 loom_cc_library(
   NAME
@@ -142,15 +158,19 @@ loom_cc_library(
     "service.c"
   DEPS
     ::chat
+    ::heartbeat
     ::model
     ::schedule
+    iree::async
+    iree::async::util::proactor_pool
     iree::base
     iree::base::threading
-    iree::base::threading::thread
     iree::experimental::loom_serve::http::request
     iree::experimental::loom_serve::http::router
     iree::experimental::loom_serve::http::server
     iree::experimental::loom_serve::runtime::device
+    iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::host
     iree::experimental::loom_serve::scheduling::packing
     iree::tokenizer
     iree::vm
