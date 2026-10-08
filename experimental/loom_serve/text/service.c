@@ -31,6 +31,7 @@ typedef enum text_work_e {
   TEXT_WORK_NONE,
   TEXT_WORK_EPOCH,
   TEXT_WORK_CHECKPOINT,
+  TEXT_WORK_TRIM,
 } text_work_t;
 
 typedef enum text_checkpoint_action_e {
@@ -245,8 +246,15 @@ struct loom_serve_text_service_t {
   struct {
     // Immutable logical geometry; availability is queried at observation.
     loom_serve_text_pool_usage_t geometry;
-    // Retired rows released storage since the last cohort maintenance cut.
-    bool trim_pending;
+    // One maintenance cut, retained through model readiness.
+    struct {
+      // Retired rows released storage since the last completed cut.
+      bool pending;
+      // Host observation time before submitting maintenance.
+      iree_time_t start_time;
+      // Native relocation plan consumed only after successful readiness.
+      loom_serve_text_trim_result_t result;
+    } trim;
   } pool;
   // Fixed named endpoint registry, independent of active session row count.
   struct {
@@ -407,7 +415,7 @@ static iree_status_t text_reject(loom_serve_text_service_t* service,
 
 static void text_request_release(loom_serve_text_service_t* service,
                                  text_session_t* session) {
-  service->pool.trim_pending = true;
+  service->pool.trim.pending = true;
   loom_serve_text_chat_deinitialize(&session->request.chat);
   iree_tokenizer_decode_state_deinitialize(session->decoder);
   session->decoder = NULL;
@@ -553,7 +561,7 @@ static iree_status_t text_complete_checkpoint(
     loom_serve_text_checkpoint_complete_suspend(checkpoint->state);
     service->checkpoints.host_bytes +=
         loom_serve_text_checkpoint_suspended_bytes(checkpoint->state);
-    service->pool.trim_pending = true;
+    service->pool.trim.pending = true;
   }
   loom_serve_http_connection_t* connection = service->control.connection;
   memset(&service->control, 0, sizeof(service->control));
@@ -702,7 +710,7 @@ static iree_status_t text_checkpoint_request(
   loom_serve_text_checkpoint_release(checkpoint->state);
   loom_serve_text_chat_completion_deinitialize(&checkpoint->completion);
   memset(checkpoint, 0, sizeof(*checkpoint));
-  service->pool.trim_pending = true;
+  service->pool.trim.pending = true;
   return text_checkpoint_reply(service, connection, TEXT_CHECKPOINT_RELEASE,
                                name, position, 0);
 }
@@ -799,15 +807,23 @@ static void text_pending_cancel_failed(loom_serve_text_service_t* service,
 // Reclaim completed ownership before trying the next physical reservation.
 // Compaction itself admits its temporary destinations and may leave a sparse
 // map when moving would exceed the shared physical budget.
-static iree_status_t text_trim_state(loom_serve_text_service_t* service) {
-  if (!service->pool.trim_pending) {
+static iree_status_t text_submit_trim(loom_serve_text_service_t* service) {
+  if (!service->pool.trim.pending) {
     return iree_ok_status();
   }
   text_observe(service, "trim");
-  const iree_time_t start = iree_time_now();
-  loom_serve_text_trim_result_t result;
-  IREE_RETURN_IF_ERROR(loom_serve_text_model_trim(service->model, &result));
-  service->pool.trim_pending = false;
+  service->pool.trim.start_time = iree_time_now();
+  IREE_RETURN_IF_ERROR(loom_serve_text_model_submit_trim(
+      service->model, &service->pool.trim.result,
+      &service->completion.frontier));
+  return text_await_work(service, TEXT_WORK_TRIM);
+}
+
+static iree_status_t text_complete_trim(loom_serve_text_service_t* service) {
+  loom_serve_text_trim_result_t* result = &service->pool.trim.result;
+  IREE_RETURN_IF_ERROR(
+      loom_serve_text_model_complete_trim(service->model, result));
+  service->pool.trim.pending = false;
   const loom_serve_memory_statistics_t memory =
       loom_serve_text_model_memory_statistics(service->model);
   fprintf(stderr,
@@ -816,13 +832,14 @@ static iree_status_t text_trim_state(loom_serve_text_service_t* service) {
           ",\"released_bytes\":%" PRIu64 ",\"committed_bytes\":%" PRIu64 "}\n",
           (int)iree_string_builder_size(&service->identity),
           iree_string_builder_buffer(&service->identity),
-          (iree_time_now() - start) / 1e6, result.moved_blocks,
-          result.copied_bytes, result.released_bytes, memory.committed_bytes);
+          (iree_time_now() - service->pool.trim.start_time) / 1e6,
+          result->moved_blocks, result->copied_bytes, result->released_bytes,
+          memory.committed_bytes);
   return iree_ok_status();
 }
 
-static iree_status_t text_evict(loom_serve_text_service_t* service,
-                                text_session_t* session) {
+static void text_evict(loom_serve_text_service_t* service,
+                       text_session_t* session) {
   fprintf(
       stderr,
       "{\"model\":%.*s,\"event\":\"evict\",\"session\":\"%s\",\"position\":%zu,"
@@ -831,12 +848,11 @@ static iree_status_t text_evict(loom_serve_text_service_t* service,
       iree_string_builder_buffer(&service->identity), session->name,
       loom_serve_text_row_position(session->row),
       loom_serve_text_row_pool_usage(session->row));
-  IREE_RETURN_IF_ERROR(loom_serve_text_row_reset(session->row));
-  service->pool.trim_pending = true;
+  loom_serve_text_row_reset_retired(session->row);
+  service->pool.trim.pending = true;
   session->name[0] = 0;
   session->serial = 0;
   loom_serve_text_chat_completion_deinitialize(&session->completion);
-  return iree_ok_status();
 }
 
 // Native ownership knows the source geometry and exact physical slab union;
@@ -855,12 +871,14 @@ static iree_status_t text_reclaim_idle(loom_serve_text_service_t* service,
                  : LOOM_SERVE_TEXT_RESERVE_FRESH;
   iree_status_t status = iree_ok_status();
   while (iree_status_is_ok(status)) {
-    status = text_trim_state(service);
-    if (iree_status_is_ok(status)) {
-      status = loom_serve_text_row_try_reserve(
-          selected->row, mode, checkpoint ? checkpoint->state : NULL,
-          reservation, out_admitted);
+    status = text_submit_trim(service);
+    if (!iree_status_is_ok(status) ||
+        service->completion.work != TEXT_WORK_NONE) {
+      break;
     }
+    status = loom_serve_text_row_try_reserve(
+        selected->row, mode, checkpoint ? checkpoint->state : NULL, reservation,
+        out_admitted);
     if (!iree_status_is_ok(status) || *out_admitted) {
       break;
     }
@@ -876,7 +894,7 @@ static iree_status_t text_reclaim_idle(loom_serve_text_service_t* service,
     if (!oldest) {
       break;
     }
-    status = text_evict(service, oldest);
+    text_evict(service, oldest);
   }
   return status;
 }
@@ -932,7 +950,8 @@ static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
     bool admitted = false;
     status = text_reclaim_idle(service, session, pending->checkpoint,
                                retained_count, reservation, &admitted);
-    if (!iree_status_is_ok(status)) {
+    if (!iree_status_is_ok(status) ||
+        service->completion.work != TEXT_WORK_NONE) {
       break;
     }
     if (!admitted) {
@@ -1269,7 +1288,7 @@ static iree_status_t text_selected_tokens(loom_serve_text_service_t* service,
   }
   if (session->request.phase == TEXT_REQUEST_FINISHING) {
     loom_serve_text_row_release_reservation(session->row);
-    service->pool.trim_pending = true;
+    service->pool.trim.pending = true;
   }
   return status;
 }
@@ -1290,8 +1309,9 @@ static iree_status_t text_prepare_ready(loom_serve_text_service_t* service,
   if (loom_serve_http_connection_failed(session->request.connection)) {
     text_request_cancel(service, session);
     *out_progress = true;
-    service->pool.trim_pending = true;
-    return loom_serve_text_row_reset(session->row);
+    service->pool.trim.pending = true;
+    loom_serve_text_row_reset_retired(session->row);
+    return iree_ok_status();
   }
   if (iree_string_builder_size(&session->packet)) {
     if (!loom_serve_http_connection_can_send(session->request.connection)) {
@@ -1304,8 +1324,9 @@ static iree_status_t text_prepare_ready(loom_serve_text_service_t* service,
     if (!iree_status_is_ok(status)) {
       text_diagnose("Chat stream peer failed", status);
       text_request_cancel(service, session);
-      service->pool.trim_pending = true;
-      return loom_serve_text_row_reset(session->row);
+      service->pool.trim.pending = true;
+      loom_serve_text_row_reset_retired(session->row);
+      return iree_ok_status();
     }
     iree_string_builder_reset(&session->packet);
     if (session->request.phase == TEXT_REQUEST_FINISHING) {
@@ -1856,7 +1877,7 @@ static bool text_is_pending(void* self) {
 static bool text_is_active(void* self) {
   const loom_serve_text_service_t* service = self;
   if (service->completion.work != TEXT_WORK_NONE ||
-      service->pool.trim_pending) {
+      service->pool.trim.pending) {
     return true;
   }
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
@@ -1886,9 +1907,20 @@ static iree_status_t text_advance(void* self,
     service->completion.work = TEXT_WORK_NONE;
     *out_progress = true;
     IREE_RETURN_IF_ERROR(status);
-    IREE_RETURN_IF_ERROR(work == TEXT_WORK_EPOCH
-                             ? text_complete_epoch(service, flags)
-                             : text_complete_checkpoint(service, flags));
+    switch (work) {
+      case TEXT_WORK_EPOCH:
+        status = text_complete_epoch(service, flags);
+        break;
+      case TEXT_WORK_CHECKPOINT:
+        status = text_complete_checkpoint(service, flags);
+        break;
+      case TEXT_WORK_TRIM:
+        status = text_complete_trim(service);
+        break;
+      case TEXT_WORK_NONE:
+        break;
+    }
+    IREE_RETURN_IF_ERROR(status);
     if (service->completion.work != TEXT_WORK_NONE) {
       return iree_ok_status();
     }
@@ -1919,6 +1951,10 @@ static iree_status_t text_advance(void* self,
   text_observe(service, "admit");
   iree_status_t status = text_admit_pending(service, flags);
   *out_progress |= pending_count != service->pending.count;
+  if (service->completion.work != TEXT_WORK_NONE) {
+    *out_progress = true;
+    return status;
+  }
   loom_serve_ready_span_t ready[LOOM_SERVE_TEXT_ROW_CAPACITY] = {0};
   for (iree_host_size_t i = 0;
        i < service->row_count && iree_status_is_ok(status); ++i) {
@@ -1926,11 +1962,10 @@ static iree_status_t text_advance(void* self,
                                 &ready[i]);
   }
   if (iree_status_is_ok(status)) {
-    const bool trim_pending = service->pool.trim_pending;
-    status = text_trim_state(service);
-    *out_progress |= trim_pending && !service->pool.trim_pending;
+    *out_progress |= service->pool.trim.pending;
+    status = text_submit_trim(service);
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && service->completion.work == TEXT_WORK_NONE) {
     if (service->packing_mode == LOOM_SERVE_TEXT_PACKING_SEPARATE) {
       text_separate_ready(service, ready);
     }

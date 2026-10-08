@@ -287,6 +287,13 @@ once. Trim preserves pinned anchors even without a live row. An unadvanced
 fork's suspension captures its actual shared state. The last release makes
 storage reusable; no automatic soft history retains a released endpoint.
 
+HTTP maintenance submits compaction on the model timeline and yields the owner
+until readiness. Source and destination backing remain owned through the copy;
+only completion commits block reuse and physical release. Admission resumes
+against that completed accounting. Cancellation resets an already-retired row
+without another device wait. Native allocation and mapping calls remain cold
+platform operations, outside the steady-state epoch path.
+
 These handles are serialized model API objects. The HTTP service owns them
 through explicitly named endpoints; automatic prefix discovery is not enabled.
 The native real-model witness is
