@@ -12,6 +12,7 @@ load("@bazel_skylib//rules:common_settings.bzl", "bool_flag")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library", "py_test")
 load("//build_tools/bazel:cc.bzl", "iree_cc_binary", "iree_cc_library")
 load("//build_tools/bazel:cc_link.bzl", "cc_link")
+load("//build_tools/bazel:cc_test.bzl", "iree_cc_test")
 load("//build_tools/bazel:python.bzl", "iree_py_test")
 
 package(default_visibility = ["//visibility:public"])
@@ -20,9 +21,22 @@ package(default_visibility = ["//visibility:public"])
 # A static Windows CRT keeps startup independent of source-adjacent DLLs.
 iree_cc_binary(
     name = "executable_launcher",
-    srcs = ["executable_launcher.c"],
+    srcs = [
+        "executable_launcher.c",
+        "windows_command_line.c",
+        "windows_command_line.h",
+    ],
     features = ["static_link_msvcrt"],
     tags = ["manual"],
+)
+
+iree_cc_test(
+    name = "windows_command_line_test",
+    srcs = [
+        "windows_command_line.c",
+        "windows_command_line.h",
+        "windows_command_line_test.c",
+    ],
 )
 
 iree_cc_library(

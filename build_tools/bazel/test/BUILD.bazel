@@ -126,10 +126,17 @@ iree_executable_test(
     data = [":dynamic_library_dependency.so"],
 )
 
+_EXECUTABLE_WRAPPER_ARGUMENTS = [
+    "'argument with spaces'",
+    "''",
+    "'embedded\"quote'",
+    "'trailing\\'",
+]
+
 iree_executable_test(
     name = "cross_package_executable_wrapper_test",
     src = "//build_tools/bazel/test/executable_fixture:binary",
-    args = ["'argument with spaces'"],
+    args = _EXECUTABLE_WRAPPER_ARGUMENTS,
 )
 
 iree_executable_alias(
@@ -142,7 +149,7 @@ iree_executable_alias(
 iree_executable_test(
     name = "nested_executable_wrapper_test",
     src = ":cross_package_executable_alias_fixture",
-    args = ["'argument with spaces'"],
+    args = _EXECUTABLE_WRAPPER_ARGUMENTS,
 )
 
 iree_cc_benchmark(

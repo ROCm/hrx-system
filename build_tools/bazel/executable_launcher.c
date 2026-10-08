@@ -20,6 +20,8 @@
 #include <wchar.h>
 #include <windows.h>
 
+#include "build_tools/bazel/windows_command_line.h"
+
 #define IREE_BAZEL_EXECUTABLE_RUNFILE_ENV L"IREE_BAZEL_EXECUTABLE_RUNFILE"
 
 static wchar_t* iree_bazel_read_environment(const wchar_t* name) {
@@ -157,24 +159,38 @@ int wmain(int argc, wchar_t** argv) {
     free(target_path);
     return 127;
   }
-  const wchar_t** target_argv =
-      (const wchar_t**)malloc(((size_t)argc + 1) * sizeof(wchar_t*));
+  wchar_t** target_argv =
+      (wchar_t**)malloc(((size_t)argc + 1) * sizeof(wchar_t*));
   if (!target_argv) {
     fwprintf(stderr, L"iree-executable-launcher: argument allocation failed\n");
     free(target_path);
     return 127;
   }
-  target_argv[0] = target_path;
-  for (int i = 1; i < argc; ++i) {
-    target_argv[i] = argv[i];
+  // _wspawnv inserts spaces between strings but does not quote their contents.
+  // Encode every argument, including argv[0], for the child's CRT parser.
+  int quoted_count = 0;
+  for (; quoted_count < argc; ++quoted_count) {
+    target_argv[quoted_count] = iree_bazel_quote_windows_argument(
+        quoted_count == 0 ? target_path : argv[quoted_count]);
+    if (!target_argv[quoted_count]) {
+      break;
+    }
   }
   target_argv[argc] = NULL;
 
-  intptr_t result = _wspawnv(_P_WAIT, target_path, target_argv);
-  if (result == -1) {
-    fwprintf(stderr, L"iree-executable-launcher: unable to launch %ls: %d\n",
-             target_path, errno);
-    result = 127;
+  intptr_t result = 127;
+  if (quoted_count == argc) {
+    result = _wspawnv(_P_WAIT, target_path, (const wchar_t* const*)target_argv);
+    if (result == -1) {
+      fwprintf(stderr, L"iree-executable-launcher: unable to launch %ls: %d\n",
+               target_path, errno);
+      result = 127;
+    }
+  } else {
+    fwprintf(stderr, L"iree-executable-launcher: argument encoding failed\n");
+  }
+  for (int index = 0; index < quoted_count; ++index) {
+    free(target_argv[index]);
   }
   free(target_argv);
   free(target_path);
