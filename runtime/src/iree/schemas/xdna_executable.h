@@ -26,10 +26,12 @@
 // run on bind, after prior users have drained. Shards and device role
 // transitions are compiled payload details, not entries or loader operations.
 //
-// Invocation zero establishes entry state. After terminal completion, the named
-// next invocation is valid while context, backing and resident state remain
-// intact. Reset or replacement by another entry invalidates that continuation.
-// The current finite protocol is 0 -> 1 -> 1; a self-contained range can use
+// Invocation zero establishes entry state. A named continuation describes a
+// command range usable only when the execution environment separately proves
+// that the required context, backing, and tile state remain intact after
+// terminal completion. The metadata itself supplies no residency guarantee.
+// Reset or replacement by another entry invalidates a continuation. The
+// current encoded protocol is 0 -> 1 -> 1; a self-contained range can use
 // 0 -> 0. The caller owns the continuation ordinal and completion frontier.
 
 #ifndef IREE_SCHEMAS_XDNA_EXECUTABLE_H_
@@ -323,7 +325,7 @@ typedef struct iree_xdna_elf_invocation_record_t {
   uint32_t byte_offset;
   // Number of initialized command bytes submitted.
   uint32_t byte_length;
-  // Entry-relative continuation after terminal completion with state intact.
+  // Entry-relative continuation requiring externally proven retained state.
   uint32_t next_invocation;
 } iree_xdna_elf_invocation_record_t;
 
