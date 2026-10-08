@@ -1216,6 +1216,8 @@ def generate_tables_c(
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_SUCCESSOR_SELECTOR")
         if any(attr.attr_type == ATTR_TYPE_PREDICATE_LIST for attr in non_flags):
             vtable_flag_bits.append("LOOM_OP_VTABLE_HAS_PREDICATE_LIST")
+        if op.structural_materialization:
+            vtable_flag_bits.append("LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION")
         vtable_flags_str = " | ".join(vtable_flag_bits) if vtable_flag_bits else "0"
 
         sym_kind = _symbol_kind(op)

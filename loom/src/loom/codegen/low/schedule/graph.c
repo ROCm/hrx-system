@@ -16,6 +16,7 @@
 #include "loom/codegen/low/schedule/effect_dependencies.h"
 #include "loom/codegen/low/storage_relation.h"
 #include "loom/codegen/low/storage_transport.h"
+#include "loom/ir/context.h"
 #include "loom/ops/low/ops.h"
 #include "loom/ops/op_defs.h"
 #include "loom/util/cfg_graph.h"
@@ -67,16 +68,6 @@ static void loom_low_schedule_reset_state_accesses(
 
 static bool loom_low_schedule_op_is_descriptor_packet(const loom_op_t* op) {
   return loom_low_op_isa(op) || loom_low_const_isa(op);
-}
-
-// Structural low operations that may emit target register packets after
-// scheduling must carry any target state dependencies their eventual packets
-// require.
-static bool loom_low_schedule_op_is_structural_materialization(
-    const loom_op_t* op) {
-  return loom_low_copy_isa(op) || loom_low_move_isa(op) ||
-         loom_low_slice_isa(op) || loom_low_concat_isa(op) ||
-         loom_low_storage_address_isa(op);
 }
 
 static bool loom_low_schedule_op_is_terminator(const loom_module_t* module,
@@ -1259,7 +1250,9 @@ static iree_status_t loom_low_schedule_note_structural_state_reads(
   }
   const loom_low_schedule_node_t* node = &state->nodes[node_index];
   if (node->descriptor != NULL ||
-      !loom_low_schedule_op_is_structural_materialization(node->op)) {
+      !iree_any_bit_set(
+          node->flags,
+          LOOM_LOW_SCHEDULE_NODE_FLAG_STRUCTURAL_MATERIALIZATION)) {
     return iree_ok_status();
   }
   const loom_value_ordinal_t* result_ordinals =
@@ -1451,6 +1444,9 @@ iree_status_t loom_low_schedule_fill_nodes(
 
     loom_op_t* op = NULL;
     loom_block_for_each_op(block, op) {
+      const loom_op_vtable_t* vtable = loom_op_vtable(state->module, op);
+      const bool is_structural_materialization = iree_any_bit_set(
+          vtable->vtable_flags, LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION);
       loom_low_schedule_node_t* node = &state->nodes[next_node_index];
       *node = (loom_low_schedule_node_t){
           .op = op,
@@ -1461,7 +1457,10 @@ iree_status_t loom_low_schedule_fill_nodes(
           .issue_cycle = LOOM_LOW_SCHEDULE_NODE_NONE,
           .issue_group_ordinal = LOOM_LOW_SCHEDULE_NODE_NONE,
           .kind = LOOM_LOW_SCHEDULE_NODE_STRUCTURAL,
-          .flags = source_order_flags,
+          .flags = source_order_flags |
+                   (is_structural_materialization
+                        ? LOOM_LOW_SCHEDULE_NODE_FLAG_STRUCTURAL_MATERIALIZATION
+                        : 0),
           .traits = loom_op_effective_traits(state->module, op),
           .descriptor = NULL,
           .schedule_class = NULL,
@@ -1475,7 +1474,8 @@ iree_status_t loom_low_schedule_fill_nodes(
       } else if (loom_low_func_call_isa(op)) {
         ++state->call_node_count;
       } else if (op->region_count == 0 &&
-                 iree_any_bit_set(node->traits, LOOM_TRAIT_STORAGE_RELATION)) {
+                 (iree_any_bit_set(node->traits, LOOM_TRAIT_STORAGE_RELATION) ||
+                  is_structural_materialization)) {
         node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_STORAGE_SETUP;
         if (op->kind == LOOM_OP_LOW_SLICE || op->kind == LOOM_OP_LOW_CONCAT) {
           node->flags |= LOOM_LOW_SCHEDULE_NODE_FLAG_PAIR_TRANSPARENT;

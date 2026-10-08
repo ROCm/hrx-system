@@ -129,6 +129,18 @@ def test_generate_tables_marks_executable_predicates() -> None:
     assert ".vtable_flags = LOOM_OP_VTABLE_HAS_PREDICATE_LIST," in source
 
 
+def test_generate_tables_marks_structural_materializations() -> None:
+    op = Op(
+        "test.materialize",
+        group=Dialect("test"),
+        results=[Result("result", ANY)],
+        structural_materialization=True,
+    )
+
+    source = generate_tables_c("test", 0x01, [op])
+    assert ".vtable_flags = LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION," in source
+
+
 def test_rejects_duplicate_assembly_mnemonics() -> None:
     dialect = Dialect("test")
     ops = [Op(f"test.{name}", group=dialect, assembly=AssemblyFormat("copy")) for name in ("first", "second")]

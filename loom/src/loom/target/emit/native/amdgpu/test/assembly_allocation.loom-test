@@ -123,6 +123,31 @@ low.func.def target<amdgpu.rdna3_5.core>(@target) @d16_concat_reserves_past_addr
 
 // ====
 
+// Materialize the LDS address only after the payload is ready so it can reuse
+// the released payload register instead of raising the function from two to
+// three VGPRs.
+// RUN: emit amdgpu-assembly @storage_address_follows_payload strategy=resource-stall waits=none
+
+amdgpu.target<gfx1100> @target
+
+low.func.def target<amdgpu.rdna3.core>(@target) @storage_address_follows_payload(%lhs: reg<amdgpu.vgpr>, %rhs: reg<amdgpu.vgpr>) asm {
+  %storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<workgroup>
+  %address = storage_address %storage : low.storage<workgroup> -> reg<amdgpu.vgpr>
+  %payload0 = v_add_u32 %lhs, %rhs
+  %payload1 = v_add_u32 %payload0, %rhs
+  ds_write_b32 %address, %payload1
+  return
+}
+
+// ----
+  v_add_u32 v0, v0, v1
+  v_add_u32 v0, v0, v1
+  v_mov_b32 v1, 0
+  ds_write_b32 v1, v0 offset:0
+  s_endpgm
+
+// ====
+
 // RUN: emit amdgpu-assembly @d16_tied_sources_assemble_aligned_concat waits=none
 
 amdgpu.target<gfx1151> @target {subgroup_size = 64}

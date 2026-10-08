@@ -1272,6 +1272,7 @@ low_copy = Op(
         ),
     ],
     results=[Result("result", REGISTER, allocates=True)],
+    structural_materialization=True,
     traits=[STORAGE_RELATION],
     verify="loom_low_copy_verify",
     facts="loom_low_copy_facts",
@@ -1309,6 +1310,7 @@ low_move = Op(
         ),
     ],
     results=[Result("result", REGISTER, allocates=True)],
+    structural_materialization=True,
     constraints=[
         SameRegisterClass("source", "result"),
     ],
@@ -1343,6 +1345,7 @@ low_slice = Op(
     ],
     operands=[Operand("source", REGISTER)],
     results=[Result("result", REGISTER)],
+    structural_materialization=True,
     traits=[PURE, STORAGE_RELATION],
     constraints=[
         SameRegisterClass("source", "result"),
@@ -1379,6 +1382,7 @@ low_concat = Op(
     doc=("Compose one fresh register-range identity from ordered register subranges."),
     operands=[Operand("sources", REGISTER, variadic=True)],
     results=[Result("result", REGISTER, allocates=True)],
+    structural_materialization=True,
     traits=[STORAGE_RELATION],
     constraints=[
         SameRegisterClass("sources", "result"),
@@ -1571,6 +1575,7 @@ low_storage_address = Op(
         AttrDef("offset", ATTR_TYPE_I64, default=0, elide_default=True),
     ],
     results=[Result("result", REGISTER)],
+    structural_materialization=True,
     traits=[PURE],
     verify="loom_low_storage_address_verify",
     format=[

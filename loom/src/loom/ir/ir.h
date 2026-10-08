@@ -992,6 +992,10 @@ enum loom_op_vtable_flag_bits_e {
   // At least one attribute carries a predicate list requiring semantic
   // verification after its retained SSA references have been checked.
   LOOM_OP_VTABLE_HAS_PREDICATE_LIST = 1u << 9,
+  // Descriptor-free op may emit target register packets while materializing
+  // its results. Schedulers model the generated packet effects and the
+  // resulting register lifetimes even though the source node is structural.
+  LOOM_OP_VTABLE_STRUCTURAL_MATERIALIZATION = 1u << 10,
 };
 typedef uint16_t loom_op_vtable_flags_t;
 

@@ -6345,6 +6345,8 @@ class Op:
     symbol_def: Symbol definition descriptor for SYMBOL_DEFINE ops.
     format: Format element list describing textual assembly.
     assembly: Short target-assembly spelling using the same operation fields.
+    structural_materialization: Whether a descriptor-free operation may emit
+        target register packets while materializing its results.
     legacy_formats: Legacy textual formats accepted by migration tooling.
     examples: List of example IR strings for documentation.
 
@@ -6387,6 +6389,7 @@ class Op:
     ] = ()  # Interface implementations (FuncLikeInterface, etc.).
     format: tuple[FormatElement, ...] = ()
     assembly: AssemblyFormat | None = None
+    structural_materialization: bool = False
     legacy_formats: tuple[LegacyFormat, ...] = ()
     examples: tuple[str, ...] = ()
 
@@ -6422,6 +6425,7 @@ class Op:
         interfaces: list[Any] | tuple[Any, ...] = (),
         format: list[FormatElement] | tuple[FormatElement, ...] = (),
         assembly: AssemblyFormat | None = None,
+        structural_materialization: bool = False,
         legacy_formats: list[LegacyFormat] | tuple[LegacyFormat, ...] = (),
         examples: list[str] | tuple[str, ...] = (),
     ) -> None:
@@ -6476,6 +6480,9 @@ class Op:
         object.__setattr__(self, "interfaces", tuple(interfaces))
         object.__setattr__(self, "format", frozen_format)
         object.__setattr__(self, "assembly", assembly)
+        object.__setattr__(
+            self, "structural_materialization", structural_materialization
+        )
         object.__setattr__(self, "legacy_formats", frozen_legacy_formats)
         object.__setattr__(self, "examples", tuple(examples))
         has_symbol_define = any(trait.name == "SymbolDefine" for trait in traits)
