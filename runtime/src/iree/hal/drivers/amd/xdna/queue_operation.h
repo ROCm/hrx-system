@@ -203,6 +203,10 @@ iree_status_t iree_hal_amd_xdna_operation_create(
     iree_hal_semaphore_list_t signals, iree_hal_amd_xdna_operation_kind_t kind,
     iree_hal_amd_xdna_operation_t** out_operation);
 
+// Verifies that the queue can execute the requested visibility boundaries.
+iree_status_t iree_hal_amd_xdna_operation_validate_barriers(
+    const iree_hal_queue_barriers_t* barriers);
+
 // Releases a captured operation that has not been submitted.
 void iree_hal_amd_xdna_operation_discard(
     iree_hal_amd_xdna_operation_t* operation);
@@ -250,7 +254,8 @@ iree_status_t iree_hal_amd_xdna_queue_dealloca(
 iree_status_t iree_hal_amd_xdna_queue_transfer(
     iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
     iree_hal_semaphore_list_t signals, iree_host_size_t count,
-    const iree_hal_transfer_operation_t* operations);
+    const iree_hal_transfer_operation_t* operations,
+    const iree_hal_queue_barriers_t* barriers);
 
 #ifdef __cplusplus
 }  // extern "C"

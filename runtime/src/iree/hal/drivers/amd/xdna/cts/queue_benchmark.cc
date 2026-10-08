@@ -190,7 +190,7 @@ class XdnaQueueBenchmark : public benchmark::Fixture {
         functions_[program_ordinal],
         iree_hal_make_static_dispatch_config(1, 1, 1),
         iree_const_byte_span_empty(), {IREE_ARRAYSIZE(bindings), bindings},
-        IREE_HAL_DISPATCH_FLAG_NONE);
+        /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE);
   }
 
   iree_status_t Wait(uint64_t value) {

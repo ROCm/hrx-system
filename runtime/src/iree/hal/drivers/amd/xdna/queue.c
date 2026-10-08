@@ -1585,7 +1585,10 @@ iree_status_t iree_hal_amd_xdna_operation_submit(
 
 static iree_status_t iree_hal_amd_xdna_queue_barrier(
     iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_queue_barrier_flags_t flags) {
+    iree_hal_semaphore_list_t signals,
+    const iree_hal_queue_barriers_t* barriers,
+    iree_hal_queue_barrier_flags_t flags) {
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_validate_barriers(barriers));
   iree_hal_amd_xdna_operation_t* operation = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_create(
       (iree_hal_amd_xdna_queue_t*)base, waits, signals,
@@ -1599,7 +1602,9 @@ static iree_status_t iree_hal_amd_xdna_queue_dispatch(
     iree_hal_executable_function_t function,
     const iree_hal_dispatch_config_t config, iree_const_byte_span_t constants,
     const iree_hal_buffer_ref_list_t bindings,
+    const iree_hal_queue_barriers_t* barriers,
     iree_hal_dispatch_flags_t flags) {
+  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_validate_barriers(barriers));
   const iree_hal_dispatch_flags_t supported_flags =
       IREE_HAL_DISPATCH_FLAG_ALLOW_INLINE_EXECUTION |
       IREE_HAL_DISPATCH_FLAG_BORROW_RESOURCE_LIFETIMES;
@@ -1616,7 +1621,7 @@ static iree_status_t iree_hal_amd_xdna_queue_dispatch(
   }
   if (!config.workgroup_count[0] || !config.workgroup_count[1] ||
       !config.workgroup_count[2]) {
-    return iree_hal_amd_xdna_queue_barrier(base, waits, signals, 0);
+    return iree_hal_amd_xdna_queue_barrier(base, waits, signals, barriers, 0);
   }
   iree_host_size_t binding_length = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
@@ -1899,7 +1904,8 @@ static iree_status_t iree_hal_amd_xdna_queue_atomic_wait(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_wait_params_t params) {
+    iree_hal_atomic_wait_params_t params,
+    const iree_hal_queue_barriers_t* barriers) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA queue does not support atomic_wait");
 }
@@ -1909,7 +1915,8 @@ static iree_status_t iree_hal_amd_xdna_queue_atomic_store(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_store_params_t params) {
+    iree_hal_atomic_store_params_t params,
+    const iree_hal_queue_barriers_t* barriers) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA queue does not support atomic_store");
 }
@@ -1919,7 +1926,8 @@ static iree_status_t iree_hal_amd_xdna_queue_atomic_rmw(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_hal_atomic_rmw_params_t params) {
+    iree_hal_atomic_rmw_params_t params,
+    const iree_hal_queue_barriers_t* barriers) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA queue does not support atomic_rmw");
 }
@@ -1929,6 +1937,7 @@ static iree_status_t iree_hal_amd_xdna_queue_timestamp(
     const iree_hal_semaphore_list_t wait_semaphore_list,
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
+    const iree_hal_queue_barriers_t* barriers,
     iree_hal_timestamp_flags_t flags) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA queue does not support timestamp");
@@ -1940,7 +1949,8 @@ static iree_status_t iree_hal_amd_xdna_queue_read(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_file_t* source_file, uint64_t source_offset,
     iree_hal_buffer_t* target_buffer, iree_device_size_t target_offset,
-    iree_device_size_t length, iree_hal_read_flags_t flags) {
+    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
+    iree_hal_read_flags_t flags) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA queue does not support read");
 }
@@ -1951,7 +1961,8 @@ static iree_status_t iree_hal_amd_xdna_queue_write(
     const iree_hal_semaphore_list_t signal_semaphore_list,
     iree_hal_buffer_t* source_buffer, iree_device_size_t source_offset,
     iree_hal_file_t* target_file, uint64_t target_offset,
-    iree_device_size_t length, iree_hal_write_flags_t flags) {
+    iree_device_size_t length, const iree_hal_queue_barriers_t* barriers,
+    iree_hal_write_flags_t flags) {
   return iree_make_status(IREE_STATUS_UNIMPLEMENTED,
                           "XDNA queue does not support write");
 }

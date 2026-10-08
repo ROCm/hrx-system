@@ -234,7 +234,7 @@ TEST_F(XdnaNativeTest, ConsumerBeforeProducerCapturesArguments) {
       queue_, {1, &ready, &value}, {1, &done, &value}, executable_, function_,
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(), {IREE_ARRAYSIZE(bindings), bindings},
-      IREE_HAL_DISPATCH_FLAG_NONE));
+      /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
   std::fill(std::begin(bindings), std::end(bindings), iree_hal_buffer_ref_t{});
   iree_hal_executable_release(executable_);
   executable_ = nullptr;
@@ -253,8 +253,8 @@ TEST_F(XdnaNativeTest, ConsumerBeforeProducerCapturesArguments) {
   uploads[1] = uploads[0];
   uploads[1].update.source_buffer = rhs.data();
   uploads[1].update.target_buffer = rhs_buffer;
-  IREE_ASSERT_OK(
-      iree_hal_queue_transfer(queue_, {}, {1, &ready, &value}, 2, uploads));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {}, {1, &ready, &value}, 2,
+                                         uploads, /*barriers=*/NULL));
   lhs.fill(0);
   rhs.fill(0);
   IREE_ASSERT_OK(iree_hal_semaphore_wait(done, 1, iree_infinite_timeout(),
@@ -306,9 +306,9 @@ TEST_F(XdnaNativeTest, SlabPoolAllocationExecutesThroughPreparedBindings) {
   }
   uint64_t wait_value = progress_value;
   ++progress_value;
-  IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &progress, &wait_value},
-                                         {1, &progress, &progress_value},
-                                         fills.size(), fills.data()));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queue_, {1, &progress, &wait_value}, {1, &progress, &progress_value},
+      fills.size(), fills.data(), /*barriers=*/NULL));
 
   std::array<uint32_t, 16> lhs, rhs;
   for (size_t i = 0; i < lhs.size(); ++i) {
@@ -324,9 +324,9 @@ TEST_F(XdnaNativeTest, SlabPoolAllocationExecutesThroughPreparedBindings) {
   }
   wait_value = progress_value;
   ++progress_value;
-  IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &progress, &wait_value},
-                                         {1, &progress, &progress_value},
-                                         updates.size(), updates.data()));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      queue_, {1, &progress, &wait_value}, {1, &progress, &progress_value},
+      updates.size(), updates.data(), /*barriers=*/NULL));
 
   std::array<iree_hal_buffer_ref_t, 3> binding_refs;
   for (size_t i = 0; i < binding_refs.size(); ++i) {
@@ -337,7 +337,8 @@ TEST_F(XdnaNativeTest, SlabPoolAllocationExecutesThroughPreparedBindings) {
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       queue_, {1, &progress, &wait_value}, {1, &progress, &progress_value},
       executable_, function_, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-      {binding_refs.size(), binding_refs.data()}, IREE_HAL_DISPATCH_FLAG_NONE));
+      {binding_refs.size(), binding_refs.data()}, /*barriers=*/NULL,
+      IREE_HAL_DISPATCH_FLAG_NONE));
 
   std::array<uint32_t, 48> output;
   iree_hal_transfer_operation_t download = {};
@@ -349,7 +350,7 @@ TEST_F(XdnaNativeTest, SlabPoolAllocationExecutesThroughPreparedBindings) {
   ++progress_value;
   IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &progress, &wait_value},
                                          {1, &progress, &progress_value}, 1,
-                                         &download));
+                                         &download, /*barriers=*/NULL));
 
   wait_value = progress_value;
   ++progress_value;
@@ -395,7 +396,7 @@ TEST_F(XdnaNativeTest, RebindsExecutableAfterCheckedRetirement) {
         queue_, {}, {1, &done, &iteration}, executable_, function_,
         iree_hal_make_static_dispatch_config(1, 1, 1),
         iree_const_byte_span_empty(), {IREE_ARRAYSIZE(bindings), bindings},
-        IREE_HAL_DISPATCH_FLAG_NONE));
+        /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_semaphore_wait(
         done, iteration, iree_infinite_timeout(), IREE_ASYNC_WAIT_FLAG_NONE));
     CheckOutput(output, lhs, rhs);
@@ -440,7 +441,8 @@ TEST_F(XdnaNativeTest, ReusesIndependentBindingsAcrossPendingBatches) {
       IREE_ASSERT_OK(iree_hal_queue_dispatch(
           queue_, {}, {1, &invocation.done, &iteration}, executable_, function_,
           iree_hal_make_static_dispatch_config(1, 1, 1), {},
-          {IREE_ARRAYSIZE(bindings), bindings}, IREE_HAL_DISPATCH_FLAG_NONE));
+          {IREE_ARRAYSIZE(bindings), bindings}, /*barriers=*/NULL,
+          IREE_HAL_DISPATCH_FLAG_NONE));
     }
     for (const auto& invocation : invocations) {
       IREE_ASSERT_OK(iree_hal_semaphore_wait(invocation.done, iteration,
@@ -496,7 +498,8 @@ TEST_F(XdnaNativeTest, AlternatesExecutablesAcrossAcceptedChains) {
       IREE_ASSERT_OK(iree_hal_queue_dispatch(
           queue_, waits, signals, executable, function,
           iree_hal_make_static_dispatch_config(1, 1, 1), {},
-          {IREE_ARRAYSIZE(bindings), bindings}, IREE_HAL_DISPATCH_FLAG_NONE));
+          {IREE_ARRAYSIZE(bindings), bindings}, /*barriers=*/NULL,
+          IREE_HAL_DISPATCH_FLAG_NONE));
     }
     IREE_ASSERT_OK(iree_hal_semaphore_wait(completion, completion_value,
                                            iree_infinite_timeout(),
@@ -534,7 +537,8 @@ TEST_F(XdnaNativeTest, TransfersCaptureAndBorrowAtTheirDeclaredBoundary) {
   operations[3].download.target = download.data();
   operations[3].download.length = kBytes;
   IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {1, &ready, &value},
-                                         {1, &done, &value}, 4, operations));
+                                         {1, &done, &value}, 4, operations,
+                                         /*barriers=*/NULL));
   pattern = 0;
   upload.fill(0xABCDEF01);
   IREE_ASSERT_OK(iree_hal_semaphore_signal(ready, value, nullptr));
@@ -567,8 +571,8 @@ TEST_F(XdnaNativeTest, EmptyTransfersIgnoreUnusedPayloads) {
   operations[2].copy.length = 0;
   operations[3].upload.length = 0;
   operations[4].download.length = 0;
-  IREE_ASSERT_OK(
-      iree_hal_queue_transfer(queue_, {}, {1, &done, &value}, 5, operations));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(queue_, {}, {1, &done, &value}, 5,
+                                         operations, /*barriers=*/NULL));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(done, value, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 }
@@ -579,14 +583,15 @@ TEST_F(XdnaNativeTest, FailedDependencyFailsOnlyItsConsumer) {
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&failed));
   ASSERT_NO_FATAL_FAILURE(MakeSemaphore(&done));
   uint64_t value = 1;
-  IREE_ASSERT_OK(iree_hal_queue_barrier(queue_, {1, &ready, &value},
-                                        {1, &failed, &value}, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(
+      queue_, {1, &ready, &value}, {1, &failed, &value}, /*barriers=*/NULL, 0));
   iree_hal_semaphore_fail(ready, iree_status_from_code(IREE_STATUS_CANCELLED));
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_CANCELLED,
       iree_hal_semaphore_wait(failed, value, iree_infinite_timeout(),
                               IREE_ASYNC_WAIT_FLAG_NONE));
-  IREE_ASSERT_OK(iree_hal_queue_barrier(queue_, {}, {1, &done, &value}, 0));
+  IREE_ASSERT_OK(iree_hal_queue_barrier(queue_, {}, {1, &done, &value},
+                                        /*barriers=*/NULL, 0));
   IREE_ASSERT_OK(iree_hal_semaphore_wait(done, value, iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
 }

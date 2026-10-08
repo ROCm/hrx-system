@@ -660,7 +660,8 @@ class QueueHarness {
     auto binding = iree_hal_make_buffer_ref(buffer, 0, 64);
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         queue, waits, {1, &completion, &completion_value}, executable, function,
-        iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding}, 0));
+        iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
+        /*barriers=*/NULL, 0));
     iree_hal_executable_release(executable);
     iree_hal_buffer_release(buffer);
     EXPECT_EQ(native.live_memories, previous_live_memories + 3);
@@ -979,7 +980,7 @@ TEST(XdnaQueueTest, DispatchValidatesImageBindingContractAtCapture) {
     return iree_hal_queue_dispatch(
         harness.queue, {}, {}, executable, function,
         iree_hal_make_static_dispatch_config(1, 1, 1), {}, bindings,
-        IREE_HAL_DISPATCH_FLAG_NONE);
+        /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE);
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, dispatch({}));
@@ -1056,7 +1057,7 @@ TEST(XdnaQueueTest, QueueWaitPublishesContractBindingBeforePreparation) {
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       harness.queue, {1, &allocation_ready, &value}, {1, &completion, &value},
       executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+      {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
   EXPECT_EQ(harness.native.submission_count, 0u);
 
   prepared_buffer.Publish(kPublishedAddress);
@@ -1152,11 +1153,11 @@ TEST(XdnaQueueTest, CachedQueueAllocationPublishesContractBeforeDispatch) {
 
   const iree_hal_buffer_ref_t binding =
       iree_hal_make_buffer_ref(buffers[0], 0, requests[0].allocation_size);
-  IREE_ASSERT_OK(
-      iree_hal_queue_dispatch(harness.queue, {1, &allocation_ready, &value},
-                              {1, &dispatch_done, &value}, executable, function,
-                              iree_hal_make_static_dispatch_config(1, 1, 1), {},
-                              {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+  IREE_ASSERT_OK(iree_hal_queue_dispatch(
+      harness.queue, {1, &allocation_ready, &value},
+      {1, &dispatch_done, &value}, executable, function,
+      iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
+      /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(1));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilNotificationCount(1));
   {
@@ -1229,7 +1230,7 @@ TEST(XdnaQueueTest, QueueTransfersUsePrivateCachedPoolMapping) {
   uint64_t upload_value = 2;
   IREE_ASSERT_OK(iree_hal_queue_transfer(harness.queue, {1, &progress, &value},
                                          {1, &progress, &upload_value}, 1,
-                                         &upload));
+                                         &upload, /*barriers=*/NULL));
 
   std::array<uint32_t, 4> actual = {};
   iree_hal_transfer_operation_t download = {};
@@ -1238,9 +1239,9 @@ TEST(XdnaQueueTest, QueueTransfersUsePrivateCachedPoolMapping) {
   download.download.target = actual.data();
   download.download.length = sizeof(actual);
   uint64_t download_value = 3;
-  IREE_ASSERT_OK(
-      iree_hal_queue_transfer(harness.queue, {1, &progress, &upload_value},
-                              {1, &progress, &download_value}, 1, &download));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(
+      harness.queue, {1, &progress, &upload_value},
+      {1, &progress, &download_value}, 1, &download, /*barriers=*/NULL));
 
   IREE_ASSERT_OK(iree_hal_queue_dealloca(harness.queue,
                                          {1, &progress, &download_value},
@@ -1554,7 +1555,7 @@ TEST(XdnaQueueTest, DeferredConsumersTargetLowestPendingSignal) {
     IREE_EXPECT_OK(iree_hal_queue_dispatch(
         harness.queue, {}, {1, &anchor_done, &anchor_value}, anchor_executable,
         anchor_function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-        {1, &anchor_binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+        {1, &anchor_binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
   });
   harness.native.AwaitBlockedSubmission();
   harness.SubmitAfter(gate, 1, edge, 2);
@@ -1654,7 +1655,7 @@ TEST(XdnaQueueTest, LargeSignalSetUsesPooledProducerChunks) {
       harness.queue, {1, &gate, &gate_value},
       {signals.size(), signals.data(), signal_values.data()}, executable,
       function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+      {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
 
   IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
                                           iree_infinite_timeout(), nullptr));
@@ -1888,14 +1889,16 @@ TEST(XdnaQueueTest, PublicationClaimContentionUsesQueuedPublication) {
   std::thread first_submitter([&]() {
     IREE_EXPECT_OK(iree_hal_queue_dispatch(
         harness.queue, {}, {1, &completions[0], &value}, executable, function,
-        iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding}, 0));
+        iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
+        /*barriers=*/NULL, 0));
     first_submission_returned.store(true, std::memory_order_release);
   });
   harness.native.AwaitBlockedSubmission();
   EXPECT_EQ(harness.native.submission_attempt_count, 1u);
   iree_status_t second_status = iree_hal_queue_dispatch(
       harness.queue, {}, {1, &completions[1], &value}, executable, function,
-      iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding}, 0);
+      iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
+      /*barriers=*/NULL, 0);
   IREE_EXPECT_OK(second_status);
   EXPECT_EQ(harness.native.submission_attempt_count, 1u);
   IREE_EXPECT_OK(iree_async_proactor_poll(harness.proactor,
@@ -1943,7 +1946,7 @@ TEST(XdnaQueueTest, PendingInvocationsKeepPrivateBindingsAndReuseBacking) {
       IREE_ASSERT_OK(iree_hal_queue_dispatch(
           harness.queue, {}, {1, &completions[i], &iteration}, executable,
           function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-          {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+          {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     }
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(iteration * 2));
     ASSERT_EQ(harness.native.pending_commands.size(), 2u);
@@ -2070,7 +2073,8 @@ TEST(XdnaQueueTest, PrivateAddressesPropagateThroughImmutableClosure) {
         IREE_HAL_SEMAPHORE_FLAG_NONE, &completion));
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         harness.queue, {}, {1, &completion, &value}, executable, function,
-        iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding}, 0));
+        iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
+        /*barriers=*/NULL, 0));
   }
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(2));
   EXPECT_EQ(harness.native.memory_create_count, 9u);
@@ -2116,7 +2120,8 @@ TEST(XdnaQueueTest, HostProducerProgressesWithFullNativeQueue) {
   transfer.update.length = sizeof(payload);
   uint64_t value = 1;
   IREE_ASSERT_OK(iree_hal_queue_transfer(harness.queue, {},
-                                         {1, &produced, &value}, 1, &transfer));
+                                         {1, &produced, &value}, 1, &transfer,
+                                         /*barriers=*/NULL));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilDone(IREE_STATUS_OK, produced));
   uint32_t actual = 0;
   IREE_ASSERT_OK(iree_hal_buffer_map_read(buffer, 0, &actual, sizeof(actual)));
@@ -2166,8 +2171,9 @@ TEST(XdnaQueueTest, BlockedNativePublicationDoesNotBlockHostOrProactor) {
   transfer.update.source_buffer = &payload;
   transfer.update.length = sizeof(payload);
   uint64_t value = 1;
-  IREE_ASSERT_OK(iree_hal_queue_transfer(
-      harness.queue, {}, {1, &host_completion, &value}, 1, &transfer));
+  IREE_ASSERT_OK(iree_hal_queue_transfer(harness.queue, {},
+                                         {1, &host_completion, &value}, 1,
+                                         &transfer, /*barriers=*/NULL));
 
   std::atomic<bool> sibling_completed{false};
   iree_async_operation_t sibling_operation = {};
@@ -2274,7 +2280,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         harness.queue, {}, {1, &ready_completion, &iteration}, executable,
         function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-        {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+        {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     harness.PollUntilValue(ready_completion, iteration);
   }
   check_steady_state("ready dispatch", before, native_allocations_before);
@@ -2306,12 +2312,12 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         harness.queue, preceding_wait, {1, &switching_completion, &first_value},
         executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-        {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+        {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
         harness.queue, {1, &switching_completion, &first_value},
         {1, &switching_completion, &second_value}, switching_executable,
         switching_function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-        {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+        {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 2));
     harness.native.hold_retirement = false;
     harness.native.Wake();
@@ -2332,7 +2338,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
         {IREE_ARRAYSIZE(wait_semaphores), wait_semaphores, wait_values},
         {1, &wait_completion, &iteration}, executable, function,
         iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
-        IREE_HAL_DISPATCH_FLAG_NONE));
+        /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
                                             iree_infinite_timeout(), nullptr));
     IREE_ASSERT_OK(iree_hal_semaphore_signal(wait_gate, iteration, nullptr));
@@ -2362,7 +2368,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
       IREE_ASSERT_OK(iree_hal_queue_dispatch(
           harness.queue, {}, {1, &completion, &iteration}, executable, function,
           iree_hal_make_static_dispatch_config(1, 1, 1), {}, {1, &binding},
-          IREE_HAL_DISPATCH_FLAG_NONE));
+          /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
     }
     ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 2));
     harness.native.hold_retirement = false;
@@ -2382,7 +2388,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       harness.queue, {}, {1, &capacity_completions[0], &retry_value},
       executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+      {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(harness.PollUntilSubmitted(submission_count + 1));
   ASSERT_NO_FATAL_FAILURE(
       harness.PollUntilNotificationCount(notification_count + 1));
@@ -2390,7 +2396,7 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       harness.queue, {}, {1, &capacity_completions[1], &retry_value},
       executable, function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-      {1, &binding}, IREE_HAL_DISPATCH_FLAG_NONE));
+      {1, &binding}, /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_async_proactor_poll(harness.proactor,
                                           iree_infinite_timeout(), nullptr));
   EXPECT_EQ(harness.native.submission_count, submission_count + 1);
@@ -2432,8 +2438,9 @@ TEST(XdnaQueueTest, WarmQueueOperationsAllocateNoHostStorage) {
         before = SnapshotHostAllocations(allocation_counters);
         native_allocations_before = harness.native.memory_create_count;
       }
-      IREE_ASSERT_OK(iree_hal_queue_transfer(
-          harness.queue, {}, {1, &completion, &iteration}, 1, &transfer));
+      IREE_ASSERT_OK(iree_hal_queue_transfer(harness.queue, {},
+                                             {1, &completion, &iteration}, 1,
+                                             &transfer, /*barriers=*/NULL));
       harness.PollUntilValue(completion, iteration);
     }
   };
@@ -2491,7 +2498,7 @@ TEST(XdnaQueueTest, FailedDependencyDoesNotWaitForNativeCapacity) {
   IREE_ASSERT_OK(iree_hal_queue_dispatch(
       harness.queue, {1, &dependency, &value}, {1, &failed, &value}, executable,
       function, iree_hal_make_static_dispatch_config(1, 1, 1), {},
-      {1, &binding}, 0));
+      {1, &binding}, /*barriers=*/NULL, 0));
   iree_hal_buffer_release(buffer);
   iree_hal_executable_release(executable);
   iree_hal_semaphore_fail(dependency,
