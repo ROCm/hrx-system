@@ -123,6 +123,20 @@ def _shared_storage_descriptor_set(
     )
 
 
+def descriptor_set_family_specs(
+    storage_info: X86DescriptorSetInfo,
+    view_infos: Sequence[X86DescriptorSetInfo],
+) -> tuple[DescriptorSet, tuple[DescriptorSet, ...]]:
+    """Builds the shared storage spec and ordered public view specs."""
+    descriptor_set = _descriptor_set_for_info(storage_info)
+    view_descriptor_sets = tuple(_descriptor_set_for_info(info) for info in view_infos)
+    storage_descriptor_set = _shared_storage_descriptor_set(
+        descriptor_set,
+        view_descriptor_sets,
+    )
+    return storage_descriptor_set, (*view_descriptor_sets, descriptor_set)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Generate x86 target-low descriptor C tables.")
     parser.add_argument(
@@ -156,16 +170,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     if storage_info != descriptor_set_info:
         raise ValueError(f"x86 descriptor target {args.target} is a view of storage target {storage_info.generator_target}; generate the storage target with --view-header instead")
     view_infos = _view_infos_for_storage_target(descriptor_set_info, view_headers)
-    descriptor_set = _descriptor_set_for_info(descriptor_set_info)
     if view_infos:
-        view_descriptor_sets = tuple(_descriptor_set_for_info(info) for info in view_infos)
-        storage_descriptor_set = _shared_storage_descriptor_set(
-            descriptor_set,
-            view_descriptor_sets,
-        )
+        storage_descriptor_set, view_descriptor_sets = descriptor_set_family_specs(descriptor_set_info, view_infos)
         generated = generate_descriptor_set_family(
             storage_descriptor_set,
-            (*view_descriptor_sets, descriptor_set),
+            view_descriptor_sets,
         )
         write_text_file(args.header, generated.view_headers[-1])
         write_text_file(args.source, generated.source)
@@ -178,6 +187,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_text_file(view_header_path, view_header)
         return 0
 
+    descriptor_set = _descriptor_set_for_info(descriptor_set_info)
     write_descriptor_set_to_paths(
         descriptor_set,
         header_path=args.header,

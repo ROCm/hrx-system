@@ -180,11 +180,11 @@ static iree_status_t loom_low_verify_stable_id_field(uint64_t actual_id,
 static iree_status_t loom_low_verify_tables_present(
     const loom_low_descriptor_set_t* descriptor_set) {
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
-      descriptor_set->descriptors, descriptor_set->descriptor_count,
+      descriptor_set->descriptors, descriptor_set->descriptor_ordinal_count,
       "descriptors"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
-      descriptor_set->descriptor_views, descriptor_set->descriptor_count,
-      "descriptor_views"));
+      descriptor_set->descriptor_views,
+      descriptor_set->descriptor_ordinal_count, "descriptor_views"));
   IREE_RETURN_IF_ERROR(loom_low_verify_pointer_for_count(
       descriptor_set->descriptor_refs, descriptor_set->descriptor_ref_count,
       "descriptor_refs"));
@@ -290,11 +290,11 @@ static iree_status_t loom_low_verify_tables_present(
 static iree_status_t loom_low_verify_descriptor_refs(
     const loom_low_descriptor_set_t* descriptor_set) {
   if (descriptor_set->descriptor_ref_count < descriptor_set->descriptor_count) {
-    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
-                            "low descriptor reference map count %" PRIu32
-                            " is smaller than descriptor count %" PRIu32,
-                            descriptor_set->descriptor_ref_count,
-                            descriptor_set->descriptor_count);
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "low descriptor reference map count %" PRIu32
+        " is smaller than available descriptor count %" PRIu32,
+        descriptor_set->descriptor_ref_count, descriptor_set->descriptor_count);
   }
   iree_string_view_t previous_key = iree_string_view_empty();
   uint32_t visible_ref_count = 0;
@@ -334,8 +334,8 @@ static iree_status_t loom_low_verify_descriptor_refs(
                               descriptor_ref->descriptor_ordinal,
                               (int)descriptor_key.size, descriptor_key.data);
     }
-    visible_ref_count +=
-        descriptor_ref->descriptor_ordinal < descriptor_set->descriptor_count;
+    visible_ref_count += loom_low_descriptor_set_has_descriptor(
+        descriptor_set, descriptor_ref->descriptor_ordinal);
     previous_key = ref_key;
   }
   if (visible_ref_count != descriptor_set->descriptor_count) {
@@ -757,13 +757,13 @@ static iree_status_t loom_low_verify_asm_form(
         descriptor_set, asm_form->native_assembly_mnemonic_string_ref,
         "asm_form.native_assembly_mnemonic", NULL));
   }
-  if (asm_form->descriptor_ordinal >= descriptor_set->descriptor_count) {
+  if (!loom_low_descriptor_set_has_descriptor(descriptor_set,
+                                              asm_form->descriptor_ordinal)) {
     return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                             "low asm form %" PRIu32
                             " references descriptor ordinal %" PRIu32
-                            " but only %" PRIu32 " descriptors exist",
-                            asm_form_index, asm_form->descriptor_ordinal,
-                            descriptor_set->descriptor_count);
+                            " not available in the descriptor set",
+                            asm_form_index, asm_form->descriptor_ordinal);
   }
   const loom_low_descriptor_t* descriptor =
       &descriptor_set->descriptors[asm_form->descriptor_ordinal];
@@ -984,10 +984,11 @@ static iree_status_t loom_low_verify_asm_forms(
   for (uint32_t i = 0; i < descriptor_set->asm_form_count; ++i) {
     const loom_low_asm_form_t* asm_form = &descriptor_set->asm_forms[i];
     iree_string_view_t mnemonic = iree_string_view_empty();
-    if (asm_form->descriptor_ordinal >= descriptor_set->descriptor_count) {
-      // Shared backing storage may carry extension rows for larger descriptor
-      // set views. Smaller views keep those rows sorted for lookup, but the
-      // extension view owns full payload validation.
+    if (!loom_low_descriptor_set_has_descriptor(descriptor_set,
+                                                asm_form->descriptor_ordinal)) {
+      // Shared backing storage may carry rows outside this descriptor-set
+      // view. The rows remain sorted for lookup, but a view containing each
+      // descriptor owns full payload validation.
       IREE_RETURN_IF_ERROR(loom_low_verify_non_empty_required_string(
           descriptor_set, asm_form->mnemonic_string_ref, "asm_form.mnemonic",
           &mnemonic));
@@ -1296,15 +1297,14 @@ static iree_status_t loom_low_verify_descriptor_operand_forms(
     const uint32_t form_index = descriptor->operand_form_start + i;
     const loom_low_operand_form_t* form =
         &descriptor_set->operand_forms[form_index];
-    if (form->replacement_descriptor_ordinal >=
-        descriptor_set->descriptor_count) {
+    if (!loom_low_descriptor_set_has_descriptor(
+            descriptor_set, form->replacement_descriptor_ordinal)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "low descriptor %" PRIu32 " operand form %" PRIu32
                               " references replacement descriptor %" PRIu32
-                              " but only %" PRIu32 " descriptors exist",
+                              " not available in the descriptor set",
                               descriptor_index, form_index,
-                              form->replacement_descriptor_ordinal,
-                              descriptor_set->descriptor_count);
+                              form->replacement_descriptor_ordinal);
     }
     if (form->match_count == 0) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -3471,7 +3471,10 @@ iree_status_t loom_low_descriptor_set_verify(
   IREE_RETURN_IF_ERROR(loom_low_verify_optional_string(
       descriptor_set, descriptor_set->feature_key_string_ref, "set.feature"));
 
-  for (uint32_t i = 0; i < descriptor_set->descriptor_count; ++i) {
+  for (uint32_t i = 0; i < descriptor_set->descriptor_ordinal_count; ++i) {
+    if (!loom_low_descriptor_set_has_descriptor(descriptor_set, i)) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_low_verify_descriptor(descriptor_set, i));
   }
   for (uint32_t i = 0; i < descriptor_set->operand_count; ++i) {

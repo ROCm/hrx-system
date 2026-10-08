@@ -155,6 +155,7 @@ void InitializeRequirementTables(RequirementTables* tables) {
   tables->set.descriptors = tables->descriptors;
   tables->set.descriptor_views = tables->descriptor_views;
   tables->set.descriptor_count = IREE_ARRAYSIZE(tables->descriptors);
+  tables->set.descriptor_ordinal_count = IREE_ARRAYSIZE(tables->descriptors);
   tables->set.descriptor_refs = tables->descriptor_refs;
   tables->set.descriptor_ref_count = IREE_ARRAYSIZE(tables->descriptor_refs);
   tables->set.operands = tables->operands;

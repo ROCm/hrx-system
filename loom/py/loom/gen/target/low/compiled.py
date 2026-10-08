@@ -218,18 +218,20 @@ class DescriptorSetView:
     reg_classes: tuple[RegClass | None, ...]
     descriptors: tuple[Descriptor, ...]
     instruction_classes: tuple[tuple[InstructionClass, ...], ...]
-    descriptor_ordinals: tuple[int, ...]
+    storage_descriptor_ordinals: tuple[int, ...]
+    descriptor_ordinal_count: int
+    descriptor_membership_words: tuple[int, ...]
     descriptor_refs: list[tuple[str, int]]
     schedule_alternative_rows: list[tuple[int, int]]
     descriptor_rows: list[dict[str, int]]
     canonical_asm_form_ordinals: list[int | None]
     asm_forms: list[CompiledAsmForm]
     operand_forms: list[CompiledOperandForm]
-    # Structural descriptor rows are a prefix of the storage table.
+    # Structural descriptor rows use shared storage ordinals.
     uses_storage_descriptor_tables: bool
-    # View-owned descriptor rows are a prefix of the storage table.
+    # View-owned descriptor rows use shared storage ordinals.
     uses_storage_descriptor_view_tables: bool
-    # Descriptor-key references address the shared storage descriptor prefix.
+    # Descriptor-key references use shared storage ordinals.
     uses_storage_descriptor_ref_tables: bool
     uses_storage_asm_form_tables: bool
     uses_storage_operand_form_tables: bool
@@ -237,7 +239,13 @@ class DescriptorSetView:
 
     @property
     def descriptor_count(self) -> int:
-        return len(self.descriptor_ordinals)
+        return len(self.storage_descriptor_ordinals)
+
+    @property
+    def runtime_descriptor_ordinals(self) -> tuple[int, ...]:
+        if self.uses_storage_descriptor_tables:
+            return self.storage_descriptor_ordinals
+        return tuple(range(self.descriptor_count))
 
 
 @dataclass(frozen=True, slots=True)

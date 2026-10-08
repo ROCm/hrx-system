@@ -258,6 +258,7 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
   descriptors.operand_count = 3;
   descriptors.descriptors = &descriptor;
   descriptors.descriptor_count = 1;
+  descriptors.descriptor_ordinal_count = 1;
   loom_low_resolved_target_t target = {};
   target.descriptor_set = &descriptors;
   auto* module = AllocateModule();
@@ -321,6 +322,7 @@ TEST_P(LowAllocationDefinitionLivenessTest, DistinguishesWritesFromTransport) {
   descriptors.operand_count = 1;
   descriptors.descriptors = &descriptor;
   descriptors.descriptor_count = 1;
+  descriptors.descriptor_ordinal_count = 1;
   loom_low_resolved_target_t target = {};
   target.descriptor_set = &descriptors;
 

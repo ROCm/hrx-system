@@ -26,7 +26,7 @@ extern "C" {
 #endif
 
 // ABI version for descriptor sets consumed by this header.
-#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 52u
+#define LOOM_LOW_DESCRIPTOR_SET_ABI_VERSION 53u
 
 // Sentinel for absent target-family or descriptor-set stable IDs.
 #define LOOM_LOW_STABLE_ID_NONE UINT64_C(0)
@@ -1452,15 +1452,20 @@ typedef struct loom_low_descriptor_set_t {
   loom_string_ref_t feature_key_string_ref;
   // Shared immutable byte pool used by all compact string references.
   loom_string_pool_t string_pool;
-  // Dense structural descriptor rows owned or shared by this set.
+  // Structural descriptor rows indexed by descriptor ordinal.
   const loom_low_descriptor_t* descriptors;
-  // Dense view-owned descriptor rows corresponding to |descriptors|.
+  // View-specific descriptor rows indexed by descriptor ordinal.
   const loom_low_descriptor_view_t* descriptor_views;
-  // Number of descriptor rows owned by this set.
+  // Optional bitset selecting descriptor ordinals in this view. A NULL pointer
+  // selects every ordinal below |descriptor_ordinal_count|.
+  const uint64_t* descriptor_membership_words;
+  // Number of descriptors selected by this view.
   uint32_t descriptor_count;
+  // Exclusive upper bound of descriptor ordinals addressable by this view.
+  uint32_t descriptor_ordinal_count;
   // Sorted symbolic descriptor-key reference rows. Shared backing storage may
-  // include references to a hidden descriptor suffix; lookup filters those
-  // rows against |descriptor_count|.
+  // include references to descriptors outside the view; lookup filters those
+  // rows through |descriptor_membership_words|.
   const loom_low_descriptor_ref_t* descriptor_refs;
   // Number of symbolic descriptor-key reference rows in backing storage.
   uint32_t descriptor_ref_count;
@@ -1656,6 +1661,22 @@ loom_low_operand_reg_class_alt(const loom_low_descriptor_set_t* descriptor_set,
     }
   }
   return NULL;
+}
+
+// Returns whether |descriptor_ordinal| is available in |descriptor_set|.
+IREE_ATTRIBUTE_ALWAYS_INLINE static inline bool
+loom_low_descriptor_set_has_descriptor(
+    const loom_low_descriptor_set_t* descriptor_set,
+    uint32_t descriptor_ordinal) {
+  if (descriptor_ordinal >= descriptor_set->descriptor_ordinal_count) {
+    return false;
+  }
+  if (descriptor_set->descriptor_membership_words == NULL) {
+    return true;
+  }
+  const uint64_t word =
+      descriptor_set->descriptor_membership_words[descriptor_ordinal / 64u];
+  return (word & (UINT64_C(1) << (descriptor_ordinal % 64u))) != 0;
 }
 
 // Returns the view-owned facts for |descriptor_ordinal|. The ordinal must be a

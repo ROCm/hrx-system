@@ -237,26 +237,27 @@ def test_storage_generation_emits_current_public_views() -> None:
     assert "static const loom_low_operand_t kX86Avx512CoreOperands[]" not in source
     assert "static const loom_low_operand_t kX86PackedDotCoreOperands[]" not in source
     assert "static const loom_low_descriptor_t kX86Avx512PackedDotCoreStorageDescriptors[]" in source
-    assert "static const loom_low_descriptor_t kX86Avx512CoreDescriptors[]" not in source
-    assert "static const loom_low_descriptor_t kX86PackedDotCoreDescriptors[]" in source
+    for view_prefix in (
+        "X86Avx512Core",
+        "X86Avx2Core",
+        "X86Avx2PackedDotCore",
+        "X86PackedDotCore",
+        "X86ScalarCore",
+        "X86Simd128Core",
+    ):
+        assert f"static const loom_low_descriptor_t k{view_prefix}Descriptors[]" not in source
+        assert f"static const loom_low_descriptor_view_t k{view_prefix}DescriptorViews[]" not in source
+        assert f"static const loom_low_descriptor_ref_t k{view_prefix}DescriptorRefs[]" not in source
+        assert f"static const loom_low_asm_form_t k{view_prefix}AsmForms[]" not in source
     assert "static const loom_low_asm_form_t kX86AvxVnniCoreAsmForms[]" in source
-    assert source.count(".descriptors = kX86Avx512PackedDotCoreStorageDescriptors,") == 3
-    assert ".descriptors = kX86PackedDotCoreDescriptors," in source
-    assert source.count(".descriptor_views = kX86Avx512PackedDotCoreStorageDescriptorViews,") == 3
-    assert ".descriptor_views = kX86PackedDotCoreDescriptorViews," in source
+    assert source.count(".descriptors = kX86Avx512PackedDotCoreStorageDescriptors,") == 7
+    assert source.count(".descriptor_views = kX86Avx512PackedDotCoreStorageDescriptorViews,") == 7
     assert ".asm_forms = kX86AvxVnniCoreAsmForms," in source
-    assert source.count(".asm_forms = kX86Avx512PackedDotCoreStorageAsmForms,") == 3
-    assert source.count(".descriptor_refs = kX86Avx512PackedDotCoreStorageDescriptorRefs,") == 3
-    assert ".descriptor_refs = kX86PackedDotCoreDescriptorRefs," in source
-    assert ".descriptor_refs = kX86ScalarCoreDescriptorRefs," in source
-    assert "static const loom_low_descriptor_t kX86Simd128CoreDescriptors[]" not in source
-    assert ("static const loom_low_descriptor_view_t kX86Simd128CoreDescriptorViews[]") not in source
-    assert "static const loom_low_descriptor_ref_t kX86Simd128CoreDescriptorRefs[]" not in source
-    assert "static const loom_low_asm_form_t kX86Simd128CoreAsmForms[]" not in source
-    assert source.count(".descriptors = kX86ScalarCoreDescriptors,") == 2
-    assert source.count(".descriptor_views = kX86ScalarCoreDescriptorViews,") == 2
-    assert source.count(".descriptor_refs = kX86ScalarCoreDescriptorRefs,") == 2
-    assert source.count(".asm_forms = kX86ScalarCoreAsmForms,") == 2
+    assert source.count(".asm_forms = kX86Avx512PackedDotCoreStorageAsmForms,") == 7
+    assert source.count(".descriptor_refs = kX86Avx512PackedDotCoreStorageDescriptorRefs,") == 7
+    assert "kX86Avx2PackedDotCoreDescriptorMembershipWords" in source
+    assert "kX86PackedDotCoreDescriptorMembershipWords" in source
+    assert source.count(".descriptor_membership_words = kX86ScalarCoreDescriptorMembershipWords,") == 2
     # A shared spelling may span adjacent literals in the compact byte pool.
     string_data = source.replace('"\n    "', "")
     assert "avx_vnni.vpdpbusd.ymm" in string_data

@@ -31,8 +31,27 @@ from loom.target.low_descriptors import (
 def _descriptor_refs_for_ordinals(
     descriptors: Sequence[Descriptor],
     descriptor_ordinals: Sequence[int],
+    uses_storage_ordinals: bool,
 ) -> list[tuple[str, int]]:
-    return sorted((descriptors[descriptor_ordinal].key, view_ordinal) for view_ordinal, descriptor_ordinal in enumerate(descriptor_ordinals))
+    return sorted(
+        (
+            descriptors[storage_ordinal].key,
+            storage_ordinal if uses_storage_ordinals else view_ordinal,
+        )
+        for view_ordinal, storage_ordinal in enumerate(descriptor_ordinals)
+    )
+
+
+def _descriptor_membership_words(
+    descriptor_ordinal_count: int,
+    descriptor_ordinals: Sequence[int],
+) -> tuple[int, ...]:
+    if tuple(sorted(descriptor_ordinals)) == tuple(range(descriptor_ordinal_count)):
+        return ()
+    words = [0] * ((descriptor_ordinal_count + 63) // 64)
+    for descriptor_ordinal in descriptor_ordinals:
+        words[descriptor_ordinal // 64] |= 1 << (descriptor_ordinal % 64)
+    return tuple(words)
 
 
 def _clone_operand_form_for_view(
@@ -100,6 +119,7 @@ def _schedule_alternative_rows_for_view(
     compiled: CompiledDescriptorSet,
     view_spec: DescriptorSet,
     descriptor_ordinals: Sequence[int],
+    uses_storage_ordinals: bool,
 ) -> list[tuple[int, int]]:
     storage_to_view_ordinals = {storage_ordinal: view_ordinal for view_ordinal, storage_ordinal in enumerate(descriptor_ordinals)}
     rows: list[tuple[int, int]] = []
@@ -112,7 +132,12 @@ def _schedule_alternative_rows_for_view(
             source = compiled.descriptors[storage_source]
             alternative = compiled.descriptors[storage_alternative]
             raise ValueError(f"descriptor set view '{view_spec.key}' selects descriptor '{source.key}' without schedule alternative descriptor '{alternative.key}'")
-        rows.append((view_source, view_alternative))
+        rows.append(
+            (
+                storage_source if uses_storage_ordinals else view_source,
+                storage_alternative if uses_storage_ordinals else view_alternative,
+            )
+        )
     return rows
 
 
@@ -205,12 +230,19 @@ def _view_descriptor_views_match_storage(
     descriptors: Sequence[Descriptor],
     instruction_classes: Sequence[tuple[InstructionClass, ...]],
     canonical_asm_form_ordinals: Sequence[int | None],
+    descriptor_ordinals: Sequence[int],
 ) -> bool:
     return all(
-        descriptor.schedule_class == compiled.descriptors[i].schedule_class
-        and instruction_classes[i] == compiled.instruction_classes[i]
-        and canonical_asm_form_ordinals[i] == compiled.canonical_asm_form_ordinals[i]
-        for i, descriptor in enumerate(descriptors)
+        descriptor.schedule_class == compiled.descriptors[storage_ordinal].schedule_class
+        and instruction_class == compiled.instruction_classes[storage_ordinal]
+        and canonical_asm_form_ordinal == compiled.canonical_asm_form_ordinals[storage_ordinal]
+        for descriptor, instruction_class, canonical_asm_form_ordinal, storage_ordinal in zip(
+            descriptors,
+            instruction_classes,
+            canonical_asm_form_ordinals,
+            descriptor_ordinals,
+            strict=True,
+        )
     )
 
 
@@ -343,25 +375,27 @@ def descriptor_set_view_for_spec(
         view_spec,
         descriptor_ordinal_tuple,
     )
-    schedule_alternative_rows = _schedule_alternative_rows_for_view(
+    is_storage_prefix = descriptor_ordinal_tuple == tuple(range(len(descriptor_ordinal_tuple)))
+    storage_asm_forms_match = _view_asm_forms_match_storage(
         compiled,
         view_spec,
         descriptor_ordinal_tuple,
+    ) and not _asm_forms_have_duplicate_mnemonics(compiled.asm_forms)
+    storage_canonical_asm_form_ordinals = [compiled.canonical_asm_form_ordinals[storage_ordinal] for storage_ordinal in descriptor_ordinal_tuple]
+    storage_descriptor_views_match = storage_asm_forms_match and _view_descriptor_views_match_storage(
+        compiled,
+        descriptors,
+        instruction_classes,
+        storage_canonical_asm_form_ordinals,
+        descriptor_ordinal_tuple,
     )
-    uses_storage_descriptor_tables = descriptor_ordinal_tuple == tuple(range(len(descriptor_ordinal_tuple)))
-    uses_storage_asm_form_tables = (
-        uses_storage_descriptor_tables
-        and _view_asm_forms_match_storage(
-            compiled,
-            view_spec,
-            descriptor_ordinal_tuple,
-        )
-        and not _asm_forms_have_duplicate_mnemonics(compiled.asm_forms)
-    )
-    uses_storage_operand_form_tables = uses_storage_descriptor_tables
+    uses_storage_ordinals = is_storage_prefix or storage_descriptor_views_match
+    uses_storage_descriptor_tables = uses_storage_ordinals
+    uses_storage_asm_form_tables = uses_storage_ordinals and storage_asm_forms_match
+    uses_storage_operand_form_tables = uses_storage_ordinals
     if uses_storage_asm_form_tables:
         asm_forms = compiled.asm_forms
-        canonical_asm_form_ordinals = compiled.canonical_asm_form_ordinals[: len(descriptor_ordinal_tuple)]
+        canonical_asm_form_ordinals = storage_canonical_asm_form_ordinals
     else:
         asm_forms = _compile_view_asm_forms(compiled, view_spec)
         _validate_view_asm_forms_unique(view_spec, asm_forms)
@@ -370,11 +404,28 @@ def descriptor_set_view_for_spec(
             asm_forms,
         )
 
-    uses_storage_descriptor_view_tables = uses_storage_descriptor_tables and _view_descriptor_views_match_storage(
+    uses_storage_descriptor_view_tables = uses_storage_ordinals and _view_descriptor_views_match_storage(
         compiled,
         descriptors,
         instruction_classes,
         canonical_asm_form_ordinals,
+        descriptor_ordinal_tuple,
+    )
+
+    descriptor_ordinal_count = max(descriptor_ordinal_tuple) + 1 if uses_storage_ordinals and descriptor_ordinal_tuple else len(descriptor_ordinal_tuple)
+    descriptor_membership_words = (
+        _descriptor_membership_words(
+            descriptor_ordinal_count,
+            descriptor_ordinal_tuple,
+        )
+        if uses_storage_ordinals
+        else ()
+    )
+    schedule_alternative_rows = _schedule_alternative_rows_for_view(
+        compiled,
+        view_spec,
+        descriptor_ordinal_tuple,
+        uses_storage_ordinals,
     )
 
     descriptor_rows = [dict(compiled.descriptor_rows[storage_descriptor_ordinal]) for storage_descriptor_ordinal in descriptor_ordinal_tuple]
@@ -406,10 +457,13 @@ def descriptor_set_view_for_spec(
         reg_classes=_view_register_classes(compiled, view_spec),
         descriptors=descriptors,
         instruction_classes=instruction_classes,
-        descriptor_ordinals=descriptor_ordinal_tuple,
+        storage_descriptor_ordinals=descriptor_ordinal_tuple,
+        descriptor_ordinal_count=descriptor_ordinal_count,
+        descriptor_membership_words=descriptor_membership_words,
         descriptor_refs=_descriptor_refs_for_ordinals(
             compiled.descriptors,
             descriptor_ordinal_tuple,
+            uses_storage_ordinals,
         ),
         schedule_alternative_rows=schedule_alternative_rows,
         descriptor_rows=descriptor_rows,

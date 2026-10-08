@@ -1315,7 +1315,8 @@ TEST_F(LowEmissionFrameTest, RejectsInvalidStructuralModelDescriptor) {
       {
           /*.op_kind=*/LOOM_OP_LOW_STORAGE_ADDRESS,
           /*.result_reg_class_id=*/TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR,
-          /*.schedule_descriptor_ordinal=*/descriptor_set->descriptor_count,
+          /*.schedule_descriptor_ordinal=*/
+          descriptor_set->descriptor_ordinal_count,
       },
   };
   loom_low_emission_frame_t frame = {};

@@ -36,6 +36,7 @@ TEST(CompileReportLowMixTest, CountsExecutionBarriersFromInstructionClasses) {
   descriptor_set.descriptors = descriptors;
   descriptor_set.descriptor_views = descriptor_views;
   descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
+  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
   descriptor_set.effects = &effect;
   descriptor_set.effect_count = 1;
   loom_low_schedule_table_t schedule = {};
@@ -83,6 +84,7 @@ TEST(CompileReportLowMixTest, CountsOnlyMemoryAttachedReadWriteEffects) {
   descriptor_set.descriptors = descriptors;
   descriptor_set.descriptor_views = descriptor_views;
   descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
+  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
   descriptor_set.effects = effects;
   descriptor_set.effect_count = IREE_ARRAYSIZE(effects);
   loom_low_schedule_table_t schedule = {};
@@ -220,6 +222,7 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   descriptor_set.descriptors = descriptors;
   descriptor_set.descriptor_views = descriptor_views;
   descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
+  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
   descriptor_set.effects = effects;
   descriptor_set.effect_count = IREE_ARRAYSIZE(effects);
   descriptor_set.reg_classes = reg_classes;

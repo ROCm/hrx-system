@@ -36,13 +36,21 @@ from loom.gen.support.generated_file import (  # noqa: E402
 from loom.gen.support.native_layout import (  # noqa: E402
     NativeContractionFactTable,
 )
+from loom.gen.target.arch.x86.x86_descriptors import (  # noqa: E402
+    descriptor_set_family_specs,
+)
+from loom.gen.target.low.low_descriptors import (  # noqa: E402
+    compile_descriptor_set_family,
+)
 from loom.target.arch.x86.packed_dot_data import (  # noqa: E402
     X86_PACKED_DOT_DESCRIPTORS,
     packed_dot_native_contraction_facts,
     packed_dot_native_layout,
 )
-from loom.target.arch.x86.target_info import sorted_descriptor_set_infos  # noqa: E402
-from loom.target.descriptor_sets import resolve_descriptor_set  # noqa: E402
+from loom.target.arch.x86.target_info import (  # noqa: E402
+    sorted_descriptor_set_infos,
+    x86_descriptor_set_view_infos_by_storage_generator_target,
+)
 from loom.target.low_descriptors import descriptor_stable_id  # noqa: E402
 
 DESCRIPTION = "x86 packed-dot contract header"
@@ -59,10 +67,31 @@ def _hex_u64_literal(value: int) -> str:
 
 
 def _low_descriptor_ordinal_tables() -> tuple[tuple[int | None, ...] | None, ...]:
+    views_by_key = {}
+    for storage_info in sorted_descriptor_set_infos():
+        if storage_info.storage_generator_target is not None:
+            continue
+        view_infos = x86_descriptor_set_view_infos_by_storage_generator_target(storage_info.generator_target)
+        storage_spec, view_specs = descriptor_set_family_specs(
+            storage_info,
+            view_infos,
+        )
+        _, compiled_views = compile_descriptor_set_family(
+            storage_spec,
+            view_specs,
+        )
+        views_by_key.update((view.spec.key, view) for view in compiled_views)
+
     tables: list[tuple[int | None, ...] | None] = []
     for descriptor_set_info in sorted_descriptor_set_infos():
-        descriptor_set = resolve_descriptor_set(descriptor_set_info.key)
-        descriptor_ordinals = {descriptor.key: ordinal for ordinal, descriptor in enumerate(descriptor_set.descriptors)}
+        view = views_by_key[descriptor_set_info.key]
+        descriptor_ordinals = dict(
+            zip(
+                (descriptor.key for descriptor in view.spec.descriptors),
+                view.runtime_descriptor_ordinals,
+                strict=True,
+            )
+        )
         table = tuple(descriptor_ordinals.get(descriptor.key) for descriptor in X86_PACKED_DOT_DESCRIPTORS)
         tables.append(table if any(value is not None for value in table) else None)
     return tuple(tables)

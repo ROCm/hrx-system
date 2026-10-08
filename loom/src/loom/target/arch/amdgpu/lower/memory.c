@@ -1198,7 +1198,8 @@ bool loom_amdgpu_descriptor_offset_immediate_info(
       .signed_min = INT64_MIN,
       .unsigned_max = UINT64_MAX,
   };
-  if (descriptor_ordinal >= descriptor_set->descriptor_count) {
+  if (!loom_low_descriptor_set_has_descriptor(descriptor_set,
+                                              descriptor_ordinal)) {
     return false;
   }
   const loom_low_descriptor_t* descriptor =

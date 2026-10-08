@@ -88,6 +88,7 @@ class LowPacketProgressTest : public ::testing::Test {
     state->scheduled_node_indices.resize(packet_count);
     state->descriptor_set.descriptors = &state->descriptor;
     state->descriptor_set.descriptor_count = 1;
+    state->descriptor_set.descriptor_ordinal_count = 1;
 
     state->region_blocks[0] = &state->block;
     state->region.block_count = IREE_ARRAYSIZE(state->region_blocks);

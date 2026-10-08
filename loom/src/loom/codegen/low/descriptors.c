@@ -412,8 +412,8 @@ bool loom_low_descriptor_set_lookup_register_class(
 const loom_low_descriptor_t* loom_low_descriptor_set_descriptor_at(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
-  if (descriptor_set == NULL ||
-      descriptor_ordinal >= descriptor_set->descriptor_count) {
+  if (descriptor_set == NULL || !loom_low_descriptor_set_has_descriptor(
+                                    descriptor_set, descriptor_ordinal)) {
     return NULL;
   }
   return &descriptor_set->descriptors[descriptor_ordinal];
@@ -469,7 +469,8 @@ uint32_t loom_low_descriptor_set_descriptor_ordinal(
     return LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
   }
   const uintptr_t ordinal = offset / sizeof(*descriptor_set->descriptors);
-  if (ordinal >= descriptor_set->descriptor_count || ordinal > UINT32_MAX) {
+  if (ordinal > UINT32_MAX || !loom_low_descriptor_set_has_descriptor(
+                                  descriptor_set, (uint32_t)ordinal)) {
     return LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
   }
   return (uint32_t)ordinal;
@@ -482,13 +483,19 @@ const loom_low_asm_form_t* loom_low_descriptor_set_asm_form_at(
       asm_form_ordinal >= descriptor_set->asm_form_count) {
     return NULL;
   }
-  return &descriptor_set->asm_forms[asm_form_ordinal];
+  const loom_low_asm_form_t* asm_form =
+      &descriptor_set->asm_forms[asm_form_ordinal];
+  return loom_low_descriptor_set_has_descriptor(descriptor_set,
+                                                asm_form->descriptor_ordinal)
+             ? asm_form
+             : NULL;
 }
 
 uint32_t loom_low_descriptor_set_lookup_canonical_asm_form(
     const loom_low_descriptor_set_t* descriptor_set,
     uint32_t descriptor_ordinal) {
-  if (descriptor_ordinal >= descriptor_set->descriptor_count) {
+  if (!loom_low_descriptor_set_has_descriptor(descriptor_set,
+                                              descriptor_ordinal)) {
     return LOOM_LOW_ASM_FORM_ORDINAL_NONE;
   }
   const loom_low_descriptor_view_t* descriptor_view =
@@ -512,8 +519,8 @@ uint32_t loom_low_descriptor_set_lookup_descriptor(
         descriptor_set, descriptor_ref->key_string_ref);
     const int comparison = iree_string_view_compare(descriptor_ref_key, key);
     if (comparison == 0) {
-      return descriptor_ref->descriptor_ordinal <
-                     descriptor_set->descriptor_count
+      return loom_low_descriptor_set_has_descriptor(
+                 descriptor_set, descriptor_ref->descriptor_ordinal)
                  ? descriptor_ref->descriptor_ordinal
                  : LOOM_LOW_DESCRIPTOR_ORDINAL_NONE;
     }
@@ -538,7 +545,8 @@ uint32_t loom_low_descriptor_set_lookup_asm_form(
         descriptor_set, asm_form->mnemonic_string_ref);
     const int comparison = iree_string_view_compare(asm_mnemonic, mnemonic);
     if (comparison == 0) {
-      if (asm_form->descriptor_ordinal >= descriptor_set->descriptor_count) {
+      if (!loom_low_descriptor_set_has_descriptor(
+              descriptor_set, asm_form->descriptor_ordinal)) {
         return LOOM_LOW_ASM_FORM_ORDINAL_NONE;
       }
       return mid;

@@ -1676,16 +1676,18 @@ def test_schedule_alternatives_are_validated_closed_and_remapped() -> None:
         descriptors=(alternative_descriptor, source_descriptor),
     )
     compiled_view = views.descriptor_set_view_for_spec(compiled, view_spec)
-    assert compiled_view.schedule_alternative_rows == [(1, 0)]
-    assert not compiled_view.uses_storage_schedule_alternative_tables
+    assert compiled_view.storage_descriptor_ordinals == (1, 0)
+    assert compiled_view.runtime_descriptor_ordinals == (1, 0)
+    assert compiled_view.schedule_alternative_rows == [(0, 1)]
+    assert compiled_view.uses_storage_schedule_alternative_tables
 
     generated_family = generate_descriptor_set_family(
         descriptor_set,
         (view_spec,),
     )
-    assert "kTestLowScheduleAlternativeViewScheduleAlternatives" in (generated_family.source)
-    assert ".source_descriptor_ordinal = 1" in generated_family.source
-    assert ".alternative_descriptor_ordinal = 0" in generated_family.source
+    assert "kTestLowScheduleAlternativeViewScheduleAlternatives" not in generated_family.source
+    assert ".source_descriptor_ordinal = 0" in generated_family.source
+    assert ".alternative_descriptor_ordinal = 1" in generated_family.source
 
     generated = generate_descriptor_set(
         descriptor_set,
@@ -2089,10 +2091,19 @@ def test_descriptor_set_family_allows_view_local_non_authorable_surface() -> Non
     assert ".canonical_asm_form_ordinal = LOOM_LOW_ASM_FORM_ORDINAL_NONE" in source
 
 
-def test_descriptor_set_family_emits_sibling_view_descriptor_surfaces() -> None:
+def test_descriptor_set_family_keeps_modified_sibling_view_local() -> None:
     first_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
         descriptors=(TEST_LOW_CONST_I32_DESCRIPTOR,),
+    )
+    sibling_descriptor = replace(
+        TEST_LOW_ADD_I32_DESCRIPTOR,
+        asm_forms=(
+            replace(
+                TEST_LOW_ADD_I32_DESCRIPTOR.asm_forms[0],
+                mnemonic="sibling.add.i32",
+            ),
+        ),
     )
     sibling_view = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -2100,7 +2111,7 @@ def test_descriptor_set_family_emits_sibling_view_descriptor_surfaces() -> None:
         function_name="loom_test_low_sibling_core_descriptor_set",
         c_table_prefix="TestLowSiblingCore",
         c_enum_prefix="TEST_LOW_SIBLING_CORE",
-        descriptors=(TEST_LOW_ADD_I32_DESCRIPTOR,),
+        descriptors=(sibling_descriptor,),
     )
     storage_set = replace(
         TEST_LOW_CORE_DESCRIPTOR_SET,
@@ -2153,28 +2164,31 @@ def test_descriptor_set_family_shares_exact_sibling_view_tables() -> None:
         c_enum_prefix="TEST_LOW_SECOND_CORE",
     )
 
-    source = generate_descriptor_set_family(
+    generated = generate_descriptor_set_family(
         storage_set,
         (first_view, second_view),
-    ).source
-
-    table_fields = (
-        ("loom_low_descriptor_t", "Descriptors", "descriptors"),
-        (
-            "loom_low_descriptor_view_t",
-            "DescriptorViews",
-            "descriptor_views",
-        ),
-        ("loom_low_operand_form_t", "OperandForms", "operand_forms"),
-        ("loom_low_descriptor_ref_t", "DescriptorRefs", "descriptor_refs"),
-        ("loom_low_asm_form_t", "AsmForms", "asm_forms"),
     )
-    for c_type, table_suffix, field_name in table_fields:
-        first_table_symbol = f"kTestLowFirstCore{table_suffix}"
-        second_table_symbol = f"kTestLowSecondCore{table_suffix}"
-        assert source.count(f"static const {c_type} {first_table_symbol}[]") == 1
-        assert f"static const {c_type} {second_table_symbol}[]" not in source
-        assert source.count(f".{field_name} = {first_table_symbol},") == 2
+    source = generated.source
+
+    for table_suffix, field_name in (
+        ("Descriptors", "descriptors"),
+        ("DescriptorViews", "descriptor_views"),
+        ("OperandForms", "operand_forms"),
+        ("DescriptorRefs", "descriptor_refs"),
+        ("AsmForms", "asm_forms"),
+    ):
+        assert f"kTestLowFirstCore{table_suffix}" not in source
+        assert f"kTestLowSecondCore{table_suffix}" not in source
+        assert source.count(f".{field_name} = kTestLowCore{table_suffix},") == 2
+
+    assert source.count("static const uint64_t kTestLowFirstCoreDescriptorMembershipWords[]") == 1
+    assert "kTestLowSecondCoreDescriptorMembershipWords" not in source
+    assert source.count(".descriptor_membership_words = kTestLowFirstCoreDescriptorMembershipWords,") == 2
+    assert "UINT64_C(0x6)" in source
+    assert source.count(".descriptor_count = 2,") == 2
+    assert source.count(".descriptor_ordinal_count = 3,") == 2
+    assert "#define TEST_LOW_FIRST_CORE_DESCRIPTOR_REF_TEST_STATE_ADD_I32 1u" in generated.view_headers[0]
+    assert "#define TEST_LOW_SECOND_CORE_DESCRIPTOR_REF_TEST_STATE_ADD_I32_RHS_ZERO 2u" in generated.view_headers[1]
 
 
 def test_generate_test_low_core_descriptor_set() -> None:

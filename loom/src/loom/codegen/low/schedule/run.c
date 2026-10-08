@@ -198,16 +198,16 @@ static iree_status_t loom_low_schedule_initialize_pair_affinity_index(
   IREE_ASSERT_LE(affinities.count, UINT32_MAX);
   const loom_low_descriptor_set_t* descriptor_set =
       state->target.descriptor_set;
-  if (descriptor_set->descriptor_count == 0) {
+  if (descriptor_set->descriptor_ordinal_count == 0) {
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-      state->scratch_arena, descriptor_set->descriptor_count,
+      state->scratch_arena, descriptor_set->descriptor_ordinal_count,
       sizeof(*state->pair_affinity_heads),
       (void**)&state->pair_affinity_heads));
-  memset(
-      state->pair_affinity_heads, 0xFF,
-      descriptor_set->descriptor_count * sizeof(*state->pair_affinity_heads));
+  memset(state->pair_affinity_heads, 0xFF,
+         descriptor_set->descriptor_ordinal_count *
+             sizeof(*state->pair_affinity_heads));
 
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(state->scratch_arena, affinities.count,
@@ -254,7 +254,7 @@ static iree_status_t loom_low_schedule_initialize_pair_setup_index(
     return iree_ok_status();
   }
   const uint32_t descriptor_count =
-      state->target.descriptor_set->descriptor_count;
+      state->target.descriptor_set->descriptor_ordinal_count;
   IREE_RETURN_IF_ERROR(
       iree_arena_allocate_array(state->scratch_arena, descriptor_count,
                                 sizeof(*state->pair_affinity_reverse_heads),
@@ -569,8 +569,8 @@ static iree_status_t loom_low_schedule_verify_structural_models(
       state->target.descriptor_set;
   for (iree_host_size_t i = 0; i < models.count; ++i) {
     const loom_low_schedule_structural_model_t* model = &models.values[i];
-    if (model->schedule_descriptor_ordinal >=
-        descriptor_set->descriptor_count) {
+    if (!loom_low_descriptor_set_has_descriptor(
+            descriptor_set, model->schedule_descriptor_ordinal)) {
       return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                               "low schedule structural model %" PRIhsz
                               " references invalid descriptor ordinal %" PRIu32,

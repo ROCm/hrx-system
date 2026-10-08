@@ -244,6 +244,7 @@ void InitializeTestTables(TestTables* tables) {
   tables->set.descriptors = tables->descriptors;
   tables->set.descriptor_views = tables->descriptor_views;
   tables->set.descriptor_count = IREE_ARRAYSIZE(tables->descriptors);
+  tables->set.descriptor_ordinal_count = IREE_ARRAYSIZE(tables->descriptors);
   tables->set.descriptor_refs = tables->descriptor_refs;
   tables->set.descriptor_ref_count = IREE_ARRAYSIZE(tables->descriptor_refs);
   tables->set.asm_forms = tables->asm_forms;
@@ -1764,6 +1765,7 @@ TEST(LowDescriptorsTest, AcceptsConstDescriptorImplicitOperands) {
                              LOOM_LOW_OPERAND_FLAG_STATE_READ |
                              LOOM_LOW_OPERAND_FLAG_SCHEDULE_ONLY_STATE;
   tables.set.descriptor_count = 1;
+  tables.set.descriptor_ordinal_count = 1;
   tables.descriptor_refs[0] = tables.descriptor_refs[1];
   tables.set.descriptor_ref_count = 1;
 
@@ -1920,14 +1922,18 @@ TEST(LowDescriptorsTest, RejectsEmptyAsmFormNativeAssemblyMnemonic) {
                         loom_low_descriptor_set_verify(&tables.set));
 }
 
-TEST(LowDescriptorsTest, HidesSharedExtensionAsmFormsFromBaseView) {
+TEST(LowDescriptorsTest, HidesDescriptorsOutsideSparseViewMembership) {
   TestTables tables;
   InitializeTestTables(&tables);
   AddAsmForms(&tables);
+  const uint64_t descriptor_membership_words[] = {UINT64_C(0x1)};
+  tables.set.descriptor_membership_words = descriptor_membership_words;
   tables.set.descriptor_count = 1;
 
   IREE_ASSERT_OK(loom_low_descriptor_set_verify(&tables.set));
 
+  EXPECT_TRUE(loom_low_descriptor_set_has_descriptor(&tables.set, 0));
+  EXPECT_FALSE(loom_low_descriptor_set_has_descriptor(&tables.set, 1));
   EXPECT_EQ(loom_low_descriptor_set_descriptor_at(&tables.set, 1), nullptr);
   EXPECT_EQ(loom_low_descriptor_set_descriptor_ordinal(&tables.set,
                                                        &tables.descriptors[1]),
@@ -1944,6 +1950,8 @@ TEST(LowDescriptorsTest, HidesSharedExtensionAsmFormsFromBaseView) {
   EXPECT_EQ(
       loom_low_descriptor_set_lookup_asm_form(&tables.set, IREE_SV("add.i32")),
       LOOM_LOW_ASM_FORM_ORDINAL_NONE);
+  EXPECT_EQ(loom_low_descriptor_set_asm_form_at(&tables.set, 0), nullptr);
+  EXPECT_NE(loom_low_descriptor_set_asm_form_at(&tables.set, 1), nullptr);
   EXPECT_EQ(loom_low_descriptor_set_lookup_canonical_asm_form(&tables.set, 0),
             1u);
   EXPECT_EQ(loom_low_descriptor_set_lookup_canonical_asm_form(&tables.set, 1),

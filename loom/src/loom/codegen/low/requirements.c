@@ -201,7 +201,10 @@ iree_status_t loom_low_descriptor_set_verify_requirements(
     IREE_RETURN_IF_ERROR(
         loom_low_requirements_verify_core_tables(descriptor_set, set_key));
   }
-  for (uint32_t i = 0; i < descriptor_set->descriptor_count; ++i) {
+  for (uint32_t i = 0; i < descriptor_set->descriptor_ordinal_count; ++i) {
+    if (!loom_low_descriptor_set_has_descriptor(descriptor_set, i)) {
+      continue;
+    }
     IREE_RETURN_IF_ERROR(loom_low_requirements_verify_descriptor(
         descriptor_set, set_key, &descriptor_set->descriptors[i],
         requirements));

@@ -84,6 +84,7 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
   descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
   descriptor_set.descriptors = &descriptor;
   descriptor_set.descriptor_count = 1;
+  descriptor_set.descriptor_ordinal_count = 1;
   descriptor_set.constraints = &constraint;
   descriptor_set.constraint_count = 1;
 
@@ -289,6 +290,7 @@ TEST(LowPlacementTest, RetainsOperandConstraintsAcrossExactTiesOnly) {
   descriptor_set.operand_count = IREE_ARRAYSIZE(operands);
   descriptor_set.descriptors = descriptors;
   descriptor_set.descriptor_count = IREE_ARRAYSIZE(descriptors);
+  descriptor_set.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors);
   descriptor_set.constraints = &tie_constraint;
   descriptor_set.constraint_count = 1;
 
@@ -541,6 +543,7 @@ class LowPlacementStorageTest : public ::testing::Test {
     descriptor_set_.operand_count = IREE_ARRAYSIZE(operands_);
     descriptor_set_.descriptors = &descriptor_;
     descriptor_set_.descriptor_count = 1;
+    descriptor_set_.descriptor_ordinal_count = 1;
     descriptor_set_.constraints = &constraint_;
     descriptor_set_.constraint_count = 1;
 

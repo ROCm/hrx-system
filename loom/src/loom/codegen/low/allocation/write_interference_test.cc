@@ -135,6 +135,7 @@ class WriteInterferenceTest : public ::testing::Test {
     descriptor_set_.descriptors = descriptors_;
     descriptor_set_.descriptor_views = views_;
     descriptor_set_.descriptor_count = IREE_ARRAYSIZE(descriptors_);
+    descriptor_set_.descriptor_ordinal_count = IREE_ARRAYSIZE(descriptors_);
     rule_.register_class = IREE_SV("r");
     rule_.subgroup_size = 64;
     rule_.reader_classes = views_[0].instruction_class_flags;

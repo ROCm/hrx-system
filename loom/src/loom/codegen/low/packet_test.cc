@@ -53,6 +53,8 @@ void InitializePacketTestState(PacketTestState* state) {
   state->descriptor_set.descriptors = state->descriptors;
   state->descriptor_set.descriptor_views = state->descriptor_views;
   state->descriptor_set.descriptor_count = IREE_ARRAYSIZE(state->descriptors);
+  state->descriptor_set.descriptor_ordinal_count =
+      IREE_ARRAYSIZE(state->descriptors);
   state->descriptor_set.asm_forms = state->asm_forms;
   state->descriptor_set.asm_form_count = IREE_ARRAYSIZE(state->asm_forms);
 

@@ -77,7 +77,12 @@ def _hazard_reference_id(hazard: Hazard, resource_ids: dict[str, int]) -> int:
 def emit_header_for_spec(
     compiled: CompiledDescriptorSet,
     header_spec: DescriptorSet,
+    descriptor_ordinals: Sequence[int] | None = None,
 ) -> str:
+    if descriptor_ordinals is None:
+        descriptor_ordinals = range(len(header_spec.descriptors))
+    if len(descriptor_ordinals) != len(header_spec.descriptors):
+        raise ValueError(f"descriptor set header '{header_spec.key}' has mismatched descriptor ordinals")
     lines = [
         "// Copyright 2026 The IREE Authors",
         "//",
@@ -94,7 +99,18 @@ def emit_header_for_spec(
         '#include "loom/codegen/low/immediate_fields.h"',
         "",
     ]
-    lines.extend(c_spelling.descriptor_ref_define(header_spec, descriptor.key, i) for i, descriptor in enumerate(header_spec.descriptors))
+    lines.extend(
+        c_spelling.descriptor_ref_define(
+            header_spec,
+            descriptor.key,
+            descriptor_ordinal,
+        )
+        for descriptor, descriptor_ordinal in zip(
+            header_spec.descriptors,
+            descriptor_ordinals,
+            strict=True,
+        )
+    )
     lines.append(f"#define {header_spec.c_enum_prefix}_DESCRIPTOR_SET_ID UINT64_C(0x{descriptor_stable_id(header_spec.key):016x})")
     lines.append(
         f"#define {header_spec.c_enum_prefix}_DESCRIPTOR_SET_ORDINAL {c_spelling.u16_literal(header_spec.descriptor_set_ordinal if header_spec.descriptor_set_ordinal is not None else LOW_DESCRIPTOR_SET_ORDINAL_NONE)}"
@@ -1066,6 +1082,15 @@ def emit_source_for_views(
                 f"k{view.spec.c_table_prefix}AsmForms",
                 _asm_form_row_lines(compiled, view.asm_forms),
             )
+    descriptor_membership_table_symbols = {
+        view.spec.key: view_array_emitter.append_value_array(
+            "uint64_t",
+            f"k{view.spec.c_table_prefix}DescriptorMembershipWords",
+            [c_spelling.hex_u64_literal(word) for word in view.descriptor_membership_words],
+        )
+        for view in views
+        if view.descriptor_membership_words
+    }
     for view in views:
         if not view.spec.supported_target_contract_keys:
             continue
@@ -1167,7 +1192,15 @@ def emit_source_for_views(
             "        },",
             f"    .descriptors = {descriptor_table_symbol},",
             f"    .descriptor_views = {descriptor_view_table_symbol},",
+            *(
+                [
+                    f"    .descriptor_membership_words = {descriptor_membership_table_symbols[view_spec.key]},",
+                ]
+                if view.descriptor_membership_words
+                else []
+            ),
             f"    .descriptor_count = {view.descriptor_count},",
+            f"    .descriptor_ordinal_count = {view.descriptor_ordinal_count},",
             f"    .resource_calendar_slot_count = {compiled.resource_calendar_slot_count},",
             f"    .resource_calendar_lookback_cycles = {compiled.resource_calendar_lookback_cycles},",
             f"    .physical_register_unit_count = {max(compiled.physical_register_atomic_units, default=-1) + 1},",
@@ -1333,7 +1366,9 @@ def emit_source(compiled: CompiledDescriptorSet) -> str:
                 reg_classes=tuple(compiled.reg_classes),
                 descriptors=tuple(compiled.descriptors),
                 instruction_classes=tuple(compiled.instruction_classes),
-                descriptor_ordinals=tuple(range(len(compiled.descriptors))),
+                storage_descriptor_ordinals=tuple(range(len(compiled.descriptors))),
+                descriptor_ordinal_count=len(compiled.descriptors),
+                descriptor_membership_words=(),
                 descriptor_refs=compiled.descriptor_refs,
                 schedule_alternative_rows=compiled.schedule_alternative_rows,
                 descriptor_rows=compiled.descriptor_rows,

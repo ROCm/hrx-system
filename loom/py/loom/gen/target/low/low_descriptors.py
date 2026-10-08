@@ -19,7 +19,9 @@ from pathlib import Path
 from loom.gen.support.files import write_text_file
 from loom.gen.target.low import c_emit, compiler, views
 from loom.gen.target.low.compiled import (
+    CompiledDescriptorSet,
     DescriptorAllowlist,
+    DescriptorSetView,
     GeneratedDescriptorSet,
     GeneratedDescriptorSetFamily,
 )
@@ -37,11 +39,11 @@ def generate_descriptor_set(
     )
 
 
-def generate_descriptor_set_family(
+def compile_descriptor_set_family(
     storage_spec: DescriptorSet,
     view_specs: Sequence[DescriptorSet],
-) -> GeneratedDescriptorSetFamily:
-    """Generates shared C storage and public headers for descriptor-set views.
+) -> tuple[CompiledDescriptorSet, tuple[DescriptorSetView, ...]]:
+    """Compiles shared storage and its descriptor-set views.
 
     Each view selects descriptors from |storage_spec| by stable key. Supporting
     tables are shared as a storage superset. Register classes retain storage
@@ -51,7 +53,6 @@ def generate_descriptor_set_family(
     asm forms for the same descriptor keys; those forms are compiled and
     validated against the shared storage vocabulary during generation.
     """
-
     required_schedule_class_names = tuple(sorted({descriptor.schedule_class for view_spec in view_specs for descriptor in view_spec.descriptors if descriptor.schedule_class is not None}))
     compiled = compiler.compile_descriptor_set(
         storage_spec,
@@ -60,12 +61,31 @@ def generate_descriptor_set_family(
         required_schedule_class_names=required_schedule_class_names,
     )
     descriptor_set_views = tuple(views.descriptor_set_view_for_spec(compiled, view_spec) for view_spec in view_specs)
+    return compiled, descriptor_set_views
+
+
+def generate_descriptor_set_family(
+    storage_spec: DescriptorSet,
+    view_specs: Sequence[DescriptorSet],
+) -> GeneratedDescriptorSetFamily:
+    """Generates shared C storage and public headers for descriptor-set views."""
+    compiled, descriptor_set_views = compile_descriptor_set_family(
+        storage_spec,
+        view_specs,
+    )
     return GeneratedDescriptorSetFamily(
         source=c_emit.emit_source_for_views(
             compiled,
             views=descriptor_set_views,
         ),
-        view_headers=tuple(c_emit.emit_header_for_spec(compiled, view_spec) for view_spec in view_specs),
+        view_headers=tuple(
+            c_emit.emit_header_for_spec(
+                compiled,
+                view.spec,
+                view.runtime_descriptor_ordinals,
+            )
+            for view in descriptor_set_views
+        ),
     )
 
 

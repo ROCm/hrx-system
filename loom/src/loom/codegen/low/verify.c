@@ -2069,8 +2069,8 @@ static iree_status_t loom_low_verify_walk_op(void* user_data, loom_op_t* op,
   if (packet_kind != LOOM_LOW_DESCRIPTOR_PACKET_NONE) {
     const uint32_t descriptor_ordinal =
         loom_low_descriptor_packet_ordinal(op, packet_kind);
-    if (descriptor_ordinal >=
-        function_state->target->descriptor_set->descriptor_count) {
+    if (!loom_low_descriptor_set_has_descriptor(
+            function_state->target->descriptor_set, descriptor_ordinal)) {
       return iree_make_status(IREE_STATUS_OUT_OF_RANGE,
                               "Low packet descriptor ordinal %" PRIu32
                               " is outside the active representation contract",

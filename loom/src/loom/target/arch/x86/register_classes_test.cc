@@ -13,6 +13,7 @@
 #include "loom/codegen/low/builder.h"
 #include "loom/target/arch/x86/descriptors/avx10_2_descriptors.h"
 #include "loom/target/arch/x86/descriptors/avx2_descriptors.h"
+#include "loom/target/arch/x86/descriptors/avx2_packed_dot_descriptors.h"
 #include "loom/target/arch/x86/descriptors/avx512_bf16_descriptors.h"
 #include "loom/target/arch/x86/descriptors/avx512_descriptors.h"
 #include "loom/target/arch/x86/descriptors/avx512_packed_dot_descriptors.h"
@@ -272,6 +273,60 @@ TEST(X86RegisterClassesTest,
 
   ExpectDescriptorPresent(avx10_2_descriptor_set,
                           IREE_SV("x86.avx10_2.vpdpbssd.zmm"));
+}
+
+TEST(X86RegisterClassesTest, SparseCompositeViewUsesSharedStorageOrdinals) {
+  const loom_low_descriptor_set_t* descriptor_set =
+      loom_x86_avx2_packed_dot_core_descriptor_set();
+  const loom_low_descriptor_set_t* storage =
+      loom_x86_avx512_packed_dot_core_descriptor_set();
+
+  EXPECT_EQ(descriptor_set->descriptors, storage->descriptors);
+  EXPECT_EQ(descriptor_set->descriptor_views, storage->descriptor_views);
+  EXPECT_EQ(descriptor_set->descriptor_refs, storage->descriptor_refs);
+  EXPECT_EQ(descriptor_set->asm_forms, storage->asm_forms);
+  EXPECT_EQ(descriptor_set->operand_forms, storage->operand_forms);
+  ASSERT_NE(descriptor_set->descriptor_membership_words, nullptr);
+
+  const uint32_t hidden_ordinal = loom_low_descriptor_set_lookup_descriptor(
+      storage, IREE_SV("x86.avx512.vaddps.zmm"));
+  const uint32_t overlay_ordinal = loom_low_descriptor_set_lookup_descriptor(
+      descriptor_set, IREE_SV("x86.avx_vnni_int8.vpdpbssd.ymm"));
+  ASSERT_NE(hidden_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
+  ASSERT_NE(overlay_ordinal, LOOM_LOW_DESCRIPTOR_ORDINAL_NONE);
+  EXPECT_EQ(descriptor_set->descriptor_count, 315u);
+  EXPECT_EQ(descriptor_set->descriptor_ordinal_count, 501u);
+  ASSERT_LT(hidden_ordinal, descriptor_set->descriptor_ordinal_count);
+  EXPECT_LT(hidden_ordinal, overlay_ordinal);
+  EXPECT_FALSE(
+      loom_low_descriptor_set_has_descriptor(descriptor_set, hidden_ordinal));
+  EXPECT_TRUE(
+      loom_low_descriptor_set_has_descriptor(descriptor_set, overlay_ordinal));
+
+  ExpectDescriptorMissing(descriptor_set, IREE_SV("x86.avx512.vaddps.zmm"));
+  const uint32_t hidden_asm_form_ordinal =
+      loom_low_descriptor_set_lookup_canonical_asm_form(storage,
+                                                        hidden_ordinal);
+  ASSERT_NE(hidden_asm_form_ordinal, LOOM_LOW_ASM_FORM_ORDINAL_NONE);
+  const loom_low_asm_form_t* hidden_asm_form =
+      loom_low_descriptor_set_asm_form_at(storage, hidden_asm_form_ordinal);
+  ASSERT_NE(hidden_asm_form, nullptr);
+  const iree_string_view_t hidden_mnemonic = loom_low_descriptor_set_string(
+      storage, hidden_asm_form->mnemonic_string_ref);
+  EXPECT_EQ(
+      loom_low_descriptor_set_lookup_asm_form(descriptor_set, hidden_mnemonic),
+      LOOM_LOW_ASM_FORM_ORDINAL_NONE);
+  EXPECT_EQ(loom_low_descriptor_set_asm_form_at(descriptor_set,
+                                                hidden_asm_form_ordinal),
+            nullptr);
+
+  const uint32_t overlay_asm_form_ordinal =
+      loom_low_descriptor_set_lookup_canonical_asm_form(descriptor_set,
+                                                        overlay_ordinal);
+  EXPECT_NE(overlay_asm_form_ordinal, LOOM_LOW_ASM_FORM_ORDINAL_NONE);
+  EXPECT_NE(loom_low_descriptor_set_asm_form_at(descriptor_set,
+                                                overlay_asm_form_ordinal),
+            nullptr);
 }
 
 TEST(X86RegisterClassesTest, VectorWidthProjection) {

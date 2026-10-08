@@ -64,7 +64,7 @@ iree_status_t loom_low_schedule_ready_policy_initialize(
   // Descriptor membership is queried only by the selected pair affinities.
   const uint32_t descriptor_count =
       state->pair_affinity_record_count != 0
-          ? state->target.descriptor_set->descriptor_count
+          ? state->target.descriptor_set->descriptor_ordinal_count
           : 0;
   IREE_RETURN_IF_ERROR(loom_low_schedule_ready_frontier_initialize(
       node_count, descriptor_count, view_count, state->scratch_arena,
