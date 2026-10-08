@@ -668,6 +668,85 @@ TEST_P(WeightsTest, CheckpointGroupsAdmitAtomicallyAndRetentionPinsNest) {
   EXPECT_EQ(loom_serve_memory_pool_statistics(pool_).committed_bytes, 0u);
 }
 
+TEST_P(WeightsTest, PressureAdmissionDrainsNewPinsButNotAcceptedConsumers) {
+  WriteCheckpoint(adapter_path_.path(), 100);
+  IREE_ASSERT_OK(Compile(0, "raw"));
+  IREE_ASSERT_OK(Compile(1, "domains"));
+  const auto first = Root(0, 0);
+  IREE_ASSERT_OK(CreateRoots(0, 1, &first, path_.path()));
+  IREE_ASSERT_OK(Register(0, 0, 1));
+  for (uint32_t i = 0; i < 2; ++i) {
+    const auto root = Root(1, i);
+    IREE_ASSERT_OK(
+        CreateRoots(0, 1, &root, i ? adapter_path_.path() : path_.path()));
+  }
+  IREE_ASSERT_OK(Register(1, 1, 2));
+  IREE_ASSERT_OK(Register(2, 0, 0));
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  if (!GetParam()) {
+    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+    ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+    loom_serve_residency_release(residencies_[1]);
+    loom_serve_residency_release(residencies_[0]);
+    return;
+  }
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  // The already-admitted consumer still takes its nested execution pin and
+  // produces exact device output. A parameter-free peer cannot obstruct it.
+  ASSERT_NO_FATAL_FAILURE(RunPinned(0, 90));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[2], &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_release(residencies_[2]);
+  // Withdraw both tail and head, including repeated withdrawal. No owned
+  // invocation pin is released by cancellation of a new request.
+  loom_serve_residency_cancel_admission(residencies_[0]);
+  loom_serve_residency_cancel_admission(residencies_[0]);
+  loom_serve_residency_cancel_admission(residencies_[1]);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  loom_serve_residency_release(residencies_[0]);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[1], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_NO_FATAL_FAILURE(Run(1, 290));
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY);
+  loom_serve_residency_release(residencies_[1]);
+  IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[0], &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  ASSERT_NO_FATAL_FAILURE(Run(0, 90));
+  loom_serve_residency_release(residencies_[0]);
+}
+
+TEST_P(WeightsTest, NewAdmissionsCoexistWithoutPhysicalPressure) {
+  loom_serve_residency_admission_t admission;
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(Compile(i, "target"));
+    const auto root = Root(i, 0);
+    IREE_ASSERT_OK(CreateRoots(0, 1, &root, path_.path()));
+    IREE_ASSERT_OK(Register(i, i, 1));
+    IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[i], &admission));
+    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  }
+  for (iree_host_size_t i = 0; i < 2; ++i) {
+    IREE_ASSERT_OK(loom_serve_residency_try_admit(residencies_[i], &admission));
+    ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+    ASSERT_NO_FATAL_FAILURE(Run(i, 70));
+    loom_serve_residency_release(residencies_[i]);
+    loom_serve_residency_release(residencies_[i]);
+  }
+}
+
 TEST_P(WeightsTest, MutableGrowthReclaimsIdleParametersWithoutDiscardingState) {
   IREE_ASSERT_OK(Compile(0, "target"));
   const auto root = Root(0, 0);

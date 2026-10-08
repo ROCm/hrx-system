@@ -772,6 +772,8 @@ static iree_status_t text_prepare_input(loom_serve_text_service_t* service,
 static void text_pending_remove(loom_serve_text_service_t* service,
                                 iree_host_size_t index) {
   if (!index) {
+    loom_serve_residency_cancel_admission(
+        loom_serve_text_model_residency(service->model));
     memset(&service->pending.prepared, 0, sizeof(service->pending.prepared));
   }
   if (service->pending.values[index].checkpoint) {
@@ -865,6 +867,15 @@ static void text_evict(loom_serve_text_service_t* service,
   text_reset_session(service, session);
 }
 
+typedef enum text_admission_result_e {
+  // Physical parameters or logical/physical state cannot currently fit.
+  TEXT_ADMISSION_CAPACITY = 0,
+  // An older weight-pressure waiter must receive its next owner turn.
+  TEXT_ADMISSION_QUEUED,
+  // Parameter activation and state reservation have both completed.
+  TEXT_ADMISSION_READY,
+} text_admission_result_t;
+
 // Native ownership knows the source geometry and exact physical slab union;
 // the service only decides which idle histories may yield. Selected history,
 // named endpoints and active reservations remain protected on every denial.
@@ -873,8 +884,8 @@ static iree_status_t text_reclaim_idle(loom_serve_text_service_t* service,
                                        const text_checkpoint_t* checkpoint,
                                        iree_host_size_t retained,
                                        iree_host_size_t reservation,
-                                       bool* out_admitted) {
-  *out_admitted = false;
+                                       text_admission_result_t* out_result) {
+  *out_result = TEXT_ADMISSION_CAPACITY;
   const loom_serve_text_reserve_mode_t mode =
       checkpoint ? LOOM_SERVE_TEXT_RESERVE_CHECKPOINT
       : retained ? LOOM_SERVE_TEXT_RESERVE_CONTINUE
@@ -886,12 +897,18 @@ static iree_status_t text_reclaim_idle(loom_serve_text_service_t* service,
         service->completion.work != TEXT_WORK_NONE) {
       break;
     }
-    bool submitted = false;
+    loom_serve_residency_admission_t admission;
     loom_serve_execution_frontier_t frontier;
     status = loom_serve_text_row_submit_reserve(
         selected->row, mode, checkpoint ? checkpoint->state : NULL, reservation,
-        &submitted, &frontier);
-    if (iree_status_is_ok(status) && submitted) {
+        &admission, &frontier);
+    if (iree_status_is_ok(status) &&
+        admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
+      *out_result = TEXT_ADMISSION_QUEUED;
+      break;
+    }
+    if (iree_status_is_ok(status) &&
+        admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
       // The previous frontier was consumed successfully before this call. An
       // unchanged pair needs no new wait; warm denial must not wake itself.
       const loom_serve_execution_frontier_t previous =
@@ -902,13 +919,15 @@ static iree_status_t text_reclaim_idle(loom_serve_text_service_t* service,
                             previous.values[1] == frontier.values[1];
       service->completion.frontier = frontier;
       if (complete) {
-        *out_admitted = loom_serve_text_row_complete_reserve(selected->row);
+        if (loom_serve_text_row_complete_reserve(selected->row)) {
+          *out_result = TEXT_ADMISSION_READY;
+        }
       } else {
         status = text_await_work(service, TEXT_WORK_RESERVE);
         break;
       }
     }
-    if (!iree_status_is_ok(status) || *out_admitted) {
+    if (!iree_status_is_ok(status) || *out_result == TEXT_ADMISSION_READY) {
       break;
     }
     loom_serve_text_session_t* oldest = NULL;
@@ -1100,14 +1119,17 @@ static iree_status_t text_admit_pending(loom_serve_text_service_t* service,
         pending->checkpoint ? loom_serve_text_checkpoint_suspended_bytes(
                                   pending->checkpoint->state)
                             : 0;
-    bool admitted = false;
+    text_admission_result_t admission;
     status = text_reclaim_idle(service, session, pending->checkpoint,
-                               retained_count, reservation, &admitted);
+                               retained_count, reservation, &admission);
     if (!iree_status_is_ok(status) ||
         service->completion.work != TEXT_WORK_NONE) {
       break;
     }
-    if (!admitted) {
+    if (admission == TEXT_ADMISSION_QUEUED) {
+      break;
+    }
+    if (admission == TEXT_ADMISSION_CAPACITY) {
       bool active =
           iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY);
       for (iree_host_size_t i = 0; i < service->row_count; ++i) {
@@ -1762,6 +1784,8 @@ void loom_serve_text_service_destroy(loom_serve_text_service_t* service,
   if (!service) {
     return;
   }
+  loom_serve_residency_cancel_admission(
+      loom_serve_text_model_residency(service->model));
   const iree_allocator_t host_allocator = service->allocator;
   for (iree_host_size_t i = 0; i < service->row_count; ++i) {
     loom_serve_text_session_t* session = &service->sessions[i];

@@ -63,9 +63,34 @@ void loom_serve_residency_destroy(loom_serve_residency_t* residency);
 iree_status_t loom_serve_residency_try_acquire(
     loom_serve_residency_t* residency, bool* out_admitted);
 
+typedef enum loom_serve_residency_admission_e {
+  // Parameter backing cannot currently fit. No pin or partial load is owned.
+  LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY = 0,
+  // An older pressure waiter has priority within this physical domain.
+  LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED,
+  // One pin protects enqueued activation and subsequent consuming work.
+  LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED,
+} loom_serve_residency_admission_t;
+
+// New-work admission with one outstanding interest per residency. An actual
+// capacity denial starts a FIFO; subsequent weighted admissions join it, even
+// for an already-active model. Accepted work uses acquire/try_acquire directly
+// so nested execution pins never wait behind the work they must unblock.
+// Parameter-free groups bypass weight pressure. Success removes the interest;
+// abandoning a denied/deferred request requires cancel_admission. All calls
+// share the cache's serialized owner. No callback or task waits are installed.
+iree_status_t loom_serve_residency_try_admit(
+    loom_serve_residency_t* residency,
+    loom_serve_residency_admission_t* out_admission);
+
+// Withdraws this model's pending admission, without changing any owned pin or
+// queued device work. Idempotent; called on the owner when its prepared request
+// is cancelled/rejected. A later request joins behind surviving interests.
+void loom_serve_residency_cancel_admission(loom_serve_residency_t* residency);
+
 // Invocation admission: capacity denial is an execution error. Like
 // try_acquire this only enqueues activation and does not wait for readiness.
-// Schedulers needing to queue on pressure use try_acquire instead.
+// New-work schedulers use try_admit; accepted consumers use acquire directly.
 iree_status_t loom_serve_residency_acquire(loom_serve_residency_t* residency);
 
 // Cold outer-thread activation join for a pinned group. Task services consume

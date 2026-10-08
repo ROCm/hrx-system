@@ -180,6 +180,8 @@ static void finite_job_destroy(loom_serve_finite_service_t* service,
 }
 
 static void finite_finish(loom_serve_finite_service_t* service) {
+  loom_serve_residency_cancel_admission(
+      loom_serve_finite_model_residency(service->model));
   for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {
     finite_job_destroy(service, service->cohort[i]);
   }
@@ -493,13 +495,15 @@ static iree_status_t finite_advance(void* self,
       finite_finish(service);
       *out_progress = true;
     } else {
-      bool admitted = false;
-      status = loom_serve_residency_try_acquire(
-          loom_serve_finite_model_residency(service->model), &admitted);
-      if (iree_status_is_ok(status) && admitted) {
+      loom_serve_residency_admission_t admission;
+      status = loom_serve_residency_try_admit(
+          loom_serve_finite_model_residency(service->model), &admission);
+      if (iree_status_is_ok(status) &&
+          admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
         status = finite_submit(service);
         *out_progress = true;
       } else if (iree_status_is_ok(status) &&
+                 admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY &&
                  !iree_any_bit_set(
                      flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
         for (iree_host_size_t i = 0; i < service->cohort_count; ++i) {

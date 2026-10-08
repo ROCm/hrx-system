@@ -68,6 +68,7 @@ loom_cc_library(
     ::request
     iree::base
     iree::experimental::loom_serve::runtime::execution
+    iree::experimental::loom_serve::runtime::residency
     iree::tokenizer
   PUBLIC
 )

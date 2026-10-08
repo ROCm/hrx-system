@@ -125,9 +125,18 @@ useful idle weights rather than evicting them for a request that still cannot fi
 All elastic model reservations charge the same device physical budget;
 `--memory_bytes` excludes the execution-owned workspace pool, which has separate
 HAL accounting and explicit idle trimming. The synchronous model APIs report
-capacity denial as an execution error. Scheduling across models can use the
-non-error admission result before invoking them; the HTTP tools still each
-host one model. Text HTTP admission additionally pins
+capacity denial as an execution error. The shared HTTP server uses
+`residency_try_admit` for new work: actual weight pressure registers one waiting
+interest per model; later weighted admissions queue behind it, including new
+requests for the currently active model. `ACQUIRED` owns a pin, `CAPACITY`
+reports physical denial, and `DEFERRED` preserves an older waiter's priority.
+The prepared-request owner withdraws abandoned interests with
+`residency_cancel_admission`; success removes the interest itself. Existing
+consumers continue using ordinary acquire for nested pins, so this policy
+cannot stop the work whose completion releases capacity. Parameter-free work
+bypasses the queue, and independent caches do not share admission state.
+
+Text HTTP admission additionally pins
 parameters for the request and backs its full completion high-water, recurrent
 writer and private state before opening SSE. Budget denial queues or refuses
 without replacing the selected history. Platform allocation/IO failures remain

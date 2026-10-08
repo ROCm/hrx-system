@@ -172,8 +172,9 @@ typedef enum loom_serve_text_reserve_mode_e {
 // model frontier. No model-completion wait occurs; native allocation/remapping
 // remains synchronous cold work. Only one reservation may own a row.
 //
-// submitted=false means parameter capacity denied admission without a pin or
-// state change. submitted=true owns a parameter pin through successful ALL
+// CAPACITY/DEFERRED mean parameter admission is pending without a pin or state
+// change; abandoning the request cancels its residency admission interest.
+// ACQUIRED owns a parameter pin through successful ALL
 // readiness on the borrowed frontier and complete_reserve, even if subsequent
 // state admission was denied. The owner excludes model mutation until then;
 // request cancellation defers storage release until completion. Submission or
@@ -184,7 +185,8 @@ typedef enum loom_serve_text_reserve_mode_e {
 iree_status_t loom_serve_text_row_submit_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
-    bool* out_submitted, loom_serve_execution_frontier_t* out_frontier);
+    loom_serve_residency_admission_t* out_admission,
+    loom_serve_execution_frontier_t* out_frontier);
 
 // Consumes a submitted reservation after successful ALL readiness. True owns
 // the parameter pin and exact target/draft pages, private views and recurrent

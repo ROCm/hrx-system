@@ -9,6 +9,7 @@
 
 #include "experimental/loom_serve/image/request.h"
 #include "experimental/loom_serve/runtime/execution.h"
+#include "experimental/loom_serve/runtime/residency.h"
 #include "iree/tokenizer/tokenizer.h"
 
 #ifdef __cplusplus
@@ -29,10 +30,13 @@ typedef struct loom_serve_image_generator_t {
   // are terminal. Success retains a payload until discard or completion.
   iree_status_t (*prepare)(void* self,
                            const loom_serve_image_request_t* request);
-  // Releases prepared CPU payload before submit, without any residency change.
+  // Releases prepared CPU payload and withdraws any unsubmitted admission
+  // interest. Runs on the owner, never concurrently with other services.
   void (*discard_prepared_request)(void* self);
-  // Pins and enqueues parameter activation; false means insufficient capacity.
-  iree_status_t (*try_acquire)(void* self, bool* out_admitted);
+  // New-work admission on the shared owner; policy deferral differs from
+  // physical denial. ACQUIRED pins and enqueues parameter activation.
+  iree_status_t (*try_admit)(void* self,
+                             loom_serve_residency_admission_t* out_admission);
   // Enqueues consumption and feedback, returning borrowed completion handles.
   iree_status_t (*submit)(void* self,
                           loom_serve_execution_frontier_t* out_frontier);

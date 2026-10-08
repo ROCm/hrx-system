@@ -247,6 +247,20 @@ release; the shared LRU can then evict idle weights and stream the requested
 model back into its stable virtual roots. Retained KV and explicit checkpoints
 remain model-owned. Weight eviction is not KV eviction.
 
+Actual weight-capacity denial starts a FIFO of new-work interests within that
+device's residency cache. New requests for an already-active model join behind
+the older waiter instead of continually replenishing its pins. Accepted work
+keeps its completion reservation and can acquire nested execution pins; it
+drains normally. Successful admission or cancellation removes the interest.
+Prepared input stays intact while waiting, so retries do not repeat tokenization
+or source preparation. A physical denial with no active producer capable of
+releasing capacity returns overload; deferral behind another waiter does not.
+
+This policy queues weighted admissions conservatively within one cache after
+pressure, not all requests globally. Parameter-free work bypasses it; separate
+caches are independent. When all weights fit, no pressure FIFO is established.
+It does not preempt accepted generation or choose mutable state to offload.
+
 `--memory_bytes` bounds retained parameter/state VMM commitment, not total
 device memory. Heartbeats separately report retained commitment, workspace
 commitment/live reservations and workspace reuse. Driver overhead, fixed

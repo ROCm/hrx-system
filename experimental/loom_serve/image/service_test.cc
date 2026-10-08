@@ -67,11 +67,14 @@ struct ImageGate {
   // Unsubmitted payloads discarded on denied admission, read after join.
   uint32_t discarded = 0;
 
-  static iree_status_t Acquire(void* self, bool* out_admitted) {
+  static iree_status_t Admit(void* self,
+                             loom_serve_residency_admission_t* out_admission) {
     auto* gate = static_cast<ImageGate*>(self);
-    *out_admitted =
+    const bool admitted =
         gate->admission_available && (!gate->occupied || !*gate->occupied);
-    if (*out_admitted) {
+    *out_admission = admitted ? LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED
+                              : LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
+    if (admitted) {
       if (gate->occupied) {
         *gate->occupied = true;
       }
@@ -150,7 +153,7 @@ TEST_P(ImageServiceTest, HttpAndHeartbeatStayLiveDuringDeviceWait) {
       &gate,
       ImageGate::Prepare,
       ImageGate::DiscardPreparedRequest,
-      ImageGate::Acquire,
+      ImageGate::Admit,
       ImageGate::Submit,
       ImageGate::Complete};
   const loom_serve_image_service_options_t options = {
@@ -328,12 +331,8 @@ TEST_P(ImageAdmissionTest, PreparedPayloadWaitsWithoutPinningSharedCapacity) {
     gates[i].execution = execution;
     gates[i].occupied = &occupied;
     const loom_serve_image_generator_t generator = {
-        &gates[i],
-        ImageGate::Prepare,
-        ImageGate::DiscardPreparedRequest,
-        ImageGate::Acquire,
-        ImageGate::Submit,
-        ImageGate::Complete};
+        &gates[i],        ImageGate::Prepare, ImageGate::DiscardPreparedRequest,
+        ImageGate::Admit, ImageGate::Submit,  ImageGate::Complete};
     const loom_serve_image_service_options_t options = {
         .name = i == 0 ? IREE_SV("first") : IREE_SV("second"),
         .width = 1,

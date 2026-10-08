@@ -341,10 +341,15 @@ static void image_prepared(loom_serve_image_service_t* service,
     *progress = true;
     return;
   }
-  bool admitted = false;
+  loom_serve_residency_admission_t admission;
   service->status =
-      service->generator.try_acquire(service->generator.self, &admitted);
-  if (iree_status_is_ok(service->status) && !admitted) {
+      service->generator.try_admit(service->generator.self, &admission);
+  if (iree_status_is_ok(service->status) &&
+      admission == LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED) {
+    return;
+  }
+  if (iree_status_is_ok(service->status) &&
+      admission == LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY) {
     if (iree_any_bit_set(flags, LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY)) {
       return;
     }
@@ -673,7 +678,7 @@ iree_status_t loom_serve_image_service_create(
     const loom_serve_image_service_options_t* options,
     loom_serve_image_service_t** out_service, iree_allocator_t host_allocator) {
   *out_service = NULL;
-  if (!generator.try_acquire || !generator.prepare ||
+  if (!generator.try_admit || !generator.prepare ||
       !generator.discard_prepared_request || !generator.submit ||
       !generator.complete || !options->width || !options->height ||
       !options->name.size || !options->pending_capacity ||

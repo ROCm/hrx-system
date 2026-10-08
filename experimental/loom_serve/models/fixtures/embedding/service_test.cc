@@ -401,8 +401,8 @@ TEST_P(SourceEmbeddingServiceTest,
   IREE_ASSERT_OK(loom_serve_residency_await(retained_residency));
   EXPECT_EQ(loom_serve_residency_statistics(retained_residency).committed_bytes,
             kSlabBytes);
-  const int request = Send(R"({"model":"fixture","input":["a","bbb"]})");
-  Accept();
+  const int cancelled = Send(R"({"model":"fixture","input":["a","bbb"]})");
+  auto* connection = Accept();
   // The outer owner holds another model's pin and will release it. Queue the
   // cohort behind that activity instead of treating capacity as unreachable.
   constexpr auto kShared = LOOM_SERVE_HTTP_SERVICE_FLAG_SHARED_ACTIVITY;
@@ -418,6 +418,33 @@ TEST_P(SourceEmbeddingServiceTest,
   // source packet and result association were retained, not prepared again.
   EXPECT_EQ(wakes_.load(), wakes);
   EXPECT_EQ(loom_serve_residency_statistics(residency).committed_bytes, 0u);
+  loom_serve_residency_admission_t admission;
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(retained_residency, &admission));
+  EXPECT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED);
+  const linger reset = {1, 0};
+  ASSERT_EQ(setsockopt(cancelled, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+            0);
+  ASSERT_EQ(close(cancelled), 0);
+  iree_notification_await(
+      loom_serve_http_server_notification(server_),
+      [](void* self) {
+        return loom_serve_http_connection_failed(
+            static_cast<loom_serve_http_connection_t*>(self));
+      },
+      connection, iree_infinite_timeout());
+  EXPECT_TRUE(Step(kShared));
+  // Reset withdraws the older pressure interest. The still-pinned peer may
+  // accept again without waiting for its existing invocation to finish.
+  IREE_ASSERT_OK(
+      loom_serve_residency_try_admit(retained_residency, &admission));
+  ASSERT_EQ(admission, LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED);
+  loom_serve_residency_release(retained_residency);
+  const int request = Send(R"({"model":"fixture","input":["a","bbb"]})");
+  Accept();
+  EXPECT_TRUE(Step(kShared));
+  EXPECT_TRUE(Step(kShared));
+  EXPECT_TRUE(Step(kShared));
   loom_serve_residency_release(retained_residency);
   Drain();
   const std::string result = Read(request);

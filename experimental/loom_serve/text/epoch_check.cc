@@ -196,9 +196,14 @@ struct ModelWork {
         break;
       case Operation::kReserve: {
         auto& reservation = self->reservation;
+        loom_serve_residency_admission_t admission;
         status = loom_serve_text_row_submit_reserve(
             reservation.row, reservation.mode, reservation.checkpoint,
-            reservation.extent, &reservation.submitted, &self->frontier);
+            reservation.extent, &admission, &self->frontier);
+        loom_serve_residency_cancel_admission(
+            loom_serve_text_model_residency(self->model));
+        reservation.submitted =
+            admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
         pending = reservation.submitted;
         if (iree_status_is_ok(status) && pending &&
             loom_serve_device_memory_pool(

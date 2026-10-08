@@ -59,6 +59,7 @@ loom_cc_library(
     deps = [
         ":request",
         "//experimental/loom_serve/runtime:execution",
+        "//experimental/loom_serve/runtime:residency",
         "//runtime/src/iree/base",
         "//runtime/src/iree/tokenizer",
     ],

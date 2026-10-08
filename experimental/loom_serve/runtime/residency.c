@@ -14,6 +14,13 @@ struct loom_serve_residency_cache_t {
   loom_serve_residency_t* oldest;
   // Most recently used registration.
   loom_serve_residency_t* newest;
+  // Explicit new-work interests after a physical weight-capacity denial.
+  struct {
+    // Oldest waiting service, retried by the shared host owner.
+    loom_serve_residency_t* first;
+    // Newest waiting service.
+    loom_serve_residency_t* last;
+  } admission;
 };
 
 struct loom_serve_residency_t {
@@ -31,6 +38,13 @@ struct loom_serve_residency_t {
   iree_host_size_t pin_count;
   // Every checkpoint domain has enqueued readiness on the model timeline.
   bool active;
+  // Independent of LRU membership and all already-accepted execution pins.
+  struct {
+    // Older interest, or NULL at the head/not queued.
+    loom_serve_residency_t* previous;
+    // Newer interest, or NULL at the tail/not queued.
+    loom_serve_residency_t* next;
+  } admission;
   // Number of borrowed checkpoint plans in the trailing array.
   iree_host_size_t weight_count;
   // Immutable checkpoint plans required together by each invocation.
@@ -180,10 +194,45 @@ iree_status_t loom_serve_residency_create(
   return iree_ok_status();
 }
 
+void loom_serve_residency_cancel_admission(loom_serve_residency_t* residency) {
+  loom_serve_residency_cache_t* cache = residency->cache;
+  if (!residency->admission.previous && cache->admission.first != residency) {
+    return;
+  }
+  if (residency->admission.previous) {
+    residency->admission.previous->admission.next = residency->admission.next;
+  } else {
+    cache->admission.first = residency->admission.next;
+  }
+  if (residency->admission.next) {
+    residency->admission.next->admission.previous =
+        residency->admission.previous;
+  } else {
+    cache->admission.last = residency->admission.previous;
+  }
+  residency->admission.previous = NULL;
+  residency->admission.next = NULL;
+}
+
+static void residency_queue_admission(loom_serve_residency_t* residency) {
+  loom_serve_residency_cache_t* cache = residency->cache;
+  if (residency->admission.previous || cache->admission.first == residency) {
+    return;
+  }
+  residency->admission.previous = cache->admission.last;
+  if (cache->admission.last) {
+    cache->admission.last->admission.next = residency;
+  } else {
+    cache->admission.first = residency;
+  }
+  cache->admission.last = residency;
+}
+
 void loom_serve_residency_destroy(loom_serve_residency_t* residency) {
   if (!residency) {
     return;
   }
+  loom_serve_residency_cancel_admission(residency);
   residency_unlink(residency);
   iree_allocator_free(residency->allocator, residency);
 }
@@ -215,6 +264,28 @@ iree_status_t loom_serve_residency_try_acquire(
     residency->active = true;
   }
   *out_admitted = true;
+  return iree_ok_status();
+}
+
+iree_status_t loom_serve_residency_try_admit(
+    loom_serve_residency_t* residency,
+    loom_serve_residency_admission_t* out_admission) {
+  *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
+  loom_serve_residency_cache_t* cache = residency->cache;
+  if (cache->admission.first && cache->admission.first != residency &&
+      loom_serve_residency_statistics(residency).reserved_bytes) {
+    residency_queue_admission(residency);
+    *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_DEFERRED;
+    return iree_ok_status();
+  }
+  bool admitted = false;
+  IREE_RETURN_IF_ERROR(loom_serve_residency_try_acquire(residency, &admitted));
+  if (admitted) {
+    loom_serve_residency_cancel_admission(residency);
+    *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED;
+  } else {
+    residency_queue_admission(residency);
+  }
   return iree_ok_status();
 }
 

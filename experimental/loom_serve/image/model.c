@@ -811,9 +811,10 @@ iree_status_t loom_serve_image_model_generate(loom_serve_image_model_t* model,
   return status;
 }
 
-static iree_status_t image_generator_acquire(void* self, bool* out_admitted) {
-  return loom_serve_residency_try_acquire(
-      loom_serve_image_model_residency(self), out_admitted);
+static iree_status_t image_generator_admit(
+    void* self, loom_serve_residency_admission_t* out_admission) {
+  return loom_serve_residency_try_admit(loom_serve_image_model_residency(self),
+                                        out_admission);
 }
 
 static iree_status_t image_generator_prepare(
@@ -829,6 +830,7 @@ static iree_status_t image_generator_submit(
 }
 
 static void image_generator_discard(void* self) {
+  loom_serve_residency_cancel_admission(loom_serve_image_model_residency(self));
   loom_serve_image_model_discard_prepared_request(self);
 }
 
@@ -842,7 +844,7 @@ loom_serve_image_generator_t loom_serve_image_model_generator(
       .self = model,
       .prepare = image_generator_prepare,
       .discard_prepared_request = image_generator_discard,
-      .try_acquire = image_generator_acquire,
+      .try_admit = image_generator_admit,
       .submit = image_generator_submit,
       .complete = image_generator_complete,
       .tokenizer = model->tokenizer};

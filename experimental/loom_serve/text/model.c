@@ -1060,8 +1060,9 @@ iree_status_t loom_serve_text_row_try_restore(
 iree_status_t loom_serve_text_row_submit_reserve(
     loom_serve_text_row_t* row, loom_serve_text_reserve_mode_t mode,
     const loom_serve_text_checkpoint_t* checkpoint, iree_host_size_t extent,
-    bool* out_submitted, loom_serve_execution_frontier_t* out_frontier) {
-  *out_submitted = false;
+    loom_serve_residency_admission_t* out_admission,
+    loom_serve_execution_frontier_t* out_frontier) {
+  *out_admission = LOOM_SERVE_RESIDENCY_ADMISSION_CAPACITY;
   *out_frontier = (loom_serve_execution_frontier_t){0};
   const iree_host_size_t block_size = row->model->state.storage.block_size;
   const iree_host_size_t maximum =
@@ -1084,10 +1085,9 @@ iree_status_t loom_serve_text_row_submit_reserve(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "reservation requires an idle resident frontier");
   }
-  bool pinned = false;
   IREE_RETURN_IF_ERROR(
-      loom_serve_residency_try_acquire(row->model->residency, &pinned));
-  if (!pinned) {
+      loom_serve_residency_try_admit(row->model->residency, out_admission));
+  if (*out_admission != LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     return iree_ok_status();
   }
   // Even state-capacity denial retains the activation pin until completion.
@@ -1108,7 +1108,6 @@ iree_status_t loom_serve_text_row_submit_reserve(
                                   checkpoint->token == row->model->eos_token;
     }
   }
-  *out_submitted = true;
   *out_frontier = loom_serve_execution_frontier(row->model->execution);
   return iree_ok_status();
 }
@@ -1127,13 +1126,15 @@ iree_status_t loom_serve_text_row_try_reserve(
     bool* out_admitted) {
   *out_admitted = false;
   IREE_RETURN_IF_ERROR(loom_serve_execution_drain(row->model->execution));
-  bool submitted = false;
+  loom_serve_residency_admission_t admission;
   loom_serve_execution_frontier_t frontier;
   iree_status_t status = loom_serve_text_row_submit_reserve(
-      row, mode, checkpoint, extent, &submitted, &frontier);
+      row, mode, checkpoint, extent, &admission, &frontier);
+  loom_serve_residency_cancel_admission(row->model->residency);
   status = iree_status_join(status,
                             loom_serve_execution_drain(row->model->execution));
-  if (iree_status_is_ok(status) && submitted) {
+  if (iree_status_is_ok(status) &&
+      admission == LOOM_SERVE_RESIDENCY_ADMISSION_ACQUIRED) {
     *out_admitted = loom_serve_text_row_complete_reserve(row);
   }
   return status;
