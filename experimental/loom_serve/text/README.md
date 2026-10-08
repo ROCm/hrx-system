@@ -303,6 +303,14 @@ time, along with retained, appended and reserved token counts. Only invalid
 request arguments or context overflow become client errors; allocation and
 other preparation failures remain terminal service errors.
 
+Reservation admission also yields through activation, cold restore and map
+publication. A successful reservation becomes an active HTTP row only after
+model readiness. Cancellation after submission completes that ownership first,
+then returns its credit and resets the selected row. A no-new-work capacity
+denial consumes the already-completed semaphore/value pair immediately; it
+does not register a self-waking retry. Remaining pressure waits for transport
+or model progress, with prepared input retained unchanged.
+
 These handles are serialized model API objects. The HTTP service owns them
 through explicitly named endpoints; automatic prefix discovery is not enabled.
 The native real-model witness is
