@@ -104,8 +104,9 @@ typedef struct loom_low_allocation_unit_use_t {
   uint16_t block_index;
 } loom_low_allocation_unit_use_t;
 
-// Sparse unit demands collected by the existing use-point producer. Only
-// multi-unit values need refinement beyond the canonical value dataflow.
+// Sparse unit demands collected by the existing use-point producer. Multi-unit
+// values and their decomposed scalar sources can need storage lifetimes beyond
+// the canonical value dataflow.
 typedef struct loom_low_allocation_unit_use_index_t {
   // Mutable lifetime result receiving the recorded uses.
   loom_low_allocation_unit_liveness_t* unit_liveness;
@@ -313,6 +314,7 @@ static iree_status_t loom_low_allocation_unit_use_index_extend_boundaries(
 
 static iree_status_t loom_low_allocation_unit_liveness_record_unit_use_at_point(
     loom_low_allocation_unit_use_index_t* unit_use_index,
+    loom_value_ordinal_t value_ordinal,
     const loom_liveness_interval_t* interval, uint32_t unit_point_start,
     uint32_t unit_offset, uint32_t unit_count, uint32_t point) {
   loom_low_allocation_unit_liveness_t* unit_liveness =
@@ -326,10 +328,20 @@ static iree_status_t loom_low_allocation_unit_liveness_record_unit_use_at_point(
       *unit_end_point = end_point;
     }
   }
-  if (unit_use_index->heads != NULL && interval->unit_count > 1) {
-    return loom_low_allocation_unit_use_index_record(
-        unit_use_index, interval->definition_point,
-        (iree_host_size_t)unit_point_start + unit_offset, unit_count);
+  if (unit_use_index->heads != NULL) {
+    // A decomposed aggregate handoff can read a scalar constituent after its
+    // last direct SSA use. That storage demand must survive CFG backedges just
+    // like a demand for one unit of a multi-unit value.
+    const bool has_multiple_units = interval->unit_count > 1;
+    const bool has_extended_storage = iree_bitmap_test(
+        unit_liveness->values_with_incomplete_storage_segments, value_ordinal);
+    const bool needs_storage_dataflow =
+        has_multiple_units || has_extended_storage;
+    if (needs_storage_dataflow) {
+      return loom_low_allocation_unit_use_index_record(
+          unit_use_index, interval->definition_point,
+          (iree_host_size_t)unit_point_start + unit_offset, unit_count);
+    }
   }
   return iree_ok_status();
 }
@@ -375,8 +387,8 @@ static iree_status_t loom_low_allocation_unit_liveness_note_unit_use_at_point(
                     value_ordinal);
   }
   return loom_low_allocation_unit_liveness_record_unit_use_at_point(
-      unit_use_index, interval, unit_point_start, unit_offset, unit_count,
-      point);
+      unit_use_index, value_ordinal, interval, unit_point_start, unit_offset,
+      unit_count, point);
 }
 
 static iree_status_t
@@ -428,8 +440,8 @@ loom_low_allocation_unit_liveness_note_value_ordinal_physical_read(
           unit_use_index->unit_liveness, liveness, value_ordinal);
   IREE_ASSERT_NE(unit_point_start, UINT32_MAX);
   return loom_low_allocation_unit_liveness_record_unit_use_at_point(
-      unit_use_index, interval, unit_point_start, /*unit_offset=*/0,
-      interval->unit_count, physical_point);
+      unit_use_index, value_ordinal, interval, unit_point_start,
+      /*unit_offset=*/0, interval->unit_count, physical_point);
 }
 
 static iree_status_t loom_low_allocation_unit_liveness_note_value_use_at_point(
@@ -1420,8 +1432,8 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
   }
 
   // Actual unit uses refine both local lifetime ends and CFG boundary demand.
-  // Scalar values keep the canonical value-granular boundaries. Terminator
-  // edge facts additionally decompose aggregate handoffs into their sources.
+  // Ordinary scalar values keep the canonical value-granular boundaries.
+  // Terminator edge facts also propagate demand for decomposed scalar sources.
   IREE_RETURN_IF_ERROR(loom_low_allocation_write_interference_create(
       target, placement, liveness, decision_arena,
       &out_unit_liveness->write_interference));
