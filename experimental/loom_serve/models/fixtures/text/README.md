@@ -42,6 +42,11 @@ Every host token/span bucket uses that command; a bucket does not inherently
 require another compiled kernel. Supported configurations use pooled capacity,
 packed epochs and no MTP. Unsupported configurations fail through the cold
 source program's `input.require` capability.
+The source sizes its packet storage and specializes the token view for the
+largest requested shape, through the runner's 262144-token context ceiling.
+Tests exercise 513-, 1024- and 4097-token shapes, mixed decode/prefill, and
+4089-token HTTP history reuse against the dense oracle. The same two-kernel
+command serves every smaller bucket; no native capacity edit is required.
 
 [advance.loom](advance.loom) consumes known spans, then selects output. The
 command has one parameter root and the text ABI's six dynamic bindings. Its

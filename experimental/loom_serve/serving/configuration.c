@@ -131,7 +131,11 @@ static iree_status_t configuration_text(const configuration_field_t* fields,
   IREE_RETURN_IF_ERROR(
       configuration_size(&fields[7], 1, 4194304, &text->pool_capacity));
   IREE_RETURN_IF_ERROR(
-      configuration_size(&fields[8], 1, 512, &text->prefill_capacity));
+      configuration_size(&fields[8], 1, 262144, &text->prefill_capacity));
+  if (text->prefill_capacity > text->context_capacity) {
+    return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                            "prefill capacity exceeds context capacity");
+  }
   IREE_RETURN_IF_ERROR(configuration_size(&fields[9], 0, IREE_HOST_SIZE_MAX,
                                           &text->checkpoint_capacity));
   IREE_RETURN_IF_ERROR(

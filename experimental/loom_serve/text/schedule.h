@@ -14,13 +14,13 @@
 extern "C" {
 #endif
 
-// Five token classes through 512 and five span classes through 16.
-enum { LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY = 25 };
+// Fourteen token classes through 262144 and five span classes through 16.
+enum { LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY = 70 };
 
 // Cold catalog construction for validated row_count in [1, 16] and maximum
-// token capacity in [1, 512]. Token classes start at 32; span classes at one.
-// Each axis doubles and includes its exact terminal capacity, including odd
-// counts. Shapes with more spans than tokens are omitted. Writes at most
+// token capacity in [1, 262144]. Token classes start at 32; span classes at
+// one. Each axis doubles and includes its exact terminal capacity, including
+// odd counts. Shapes with more spans than tokens are omitted. Writes at most
 // DEFAULT_SHAPE_CAPACITY entries and returns the nonzero count.
 iree_host_size_t loom_serve_text_default_shapes(
     iree_host_size_t row_count, iree_host_size_t token_capacity,

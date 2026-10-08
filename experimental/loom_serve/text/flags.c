@@ -92,14 +92,15 @@ iree_status_t loom_serve_text_model_create_from_flags(
     loom_serve_text_model_t** out_model, iree_allocator_t host_allocator) {
   *out_model = NULL;
   if (!FLAG_model[0] || !FLAG_weights[0] || !FLAG_tokenizer[0] ||
-      FLAG_prefill_capacity < 1 || FLAG_prefill_capacity > 512 ||
-      FLAG_context_capacity < 1 || FLAG_pool_capacity < -1 ||
+      FLAG_prefill_capacity < 1 ||
+      FLAG_prefill_capacity > FLAG_context_capacity ||
+      FLAG_context_capacity > 262144 || FLAG_pool_capacity < -1 ||
       FLAG_checkpoint_capacity < 0 || defaults->row_count < 1 ||
       defaults->row_count > LOOM_SERVE_TEXT_ROW_CAPACITY) {
     return iree_make_status(
         IREE_STATUS_INVALID_ARGUMENT,
         "provide model sources, weights, tokenizer, 1-16 rows, positive "
-        "context and prefill capacity in [1, 512]");
+        "prefill capacity no larger than context, and context in [1, 262144]");
   }
   const iree_flag_string_list_t epochs = FLAG_epoch_list();
   loomc_sanitizer_options_t sanitizer;

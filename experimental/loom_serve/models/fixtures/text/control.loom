@@ -255,7 +255,7 @@ func.def public @encode_epoch(%plan: buffer, %inputs: buffer, %first_count: i32,
   %origin = index.constant 0 : offset
   %header_bytes = index.constant 16 : offset
   %plan_bytes = index.constant 512 : offset
-  %token_bytes = index.constant 2048 : offset
+  %token_bytes = buffer.length %tokens
   %header = buffer.view %metadata[%origin] : buffer -> view<4xi32>
   %zero = scalar.constant 0 : i32
   view.store %first_count, %header[0] : i32, view<4xi32>

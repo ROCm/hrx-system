@@ -58,8 +58,11 @@ speculation. It is not an arbitrary model-graph interpreter.
   device packets and chooses commands. Attention and recurrent state layout
   are source concerns; the host owns physical page IDs and completion credit.
 * Known input, one-token decode and speculative verification can share an
-  epoch. The runner currently supports 1–16 resident rows, up to 512 input
-  tokens per epoch, and a logical context ceiling of 262144 positions.
+  epoch. The runner currently supports 1–16 resident rows and a logical
+  context ceiling of 262144 positions. Token capacity may reach that ceiling;
+  the source package owns any tighter kernel or packet limit. The current
+  Qwen package supports up to 512 input tokens per epoch and rejects larger
+  shapes in its bootstrap. This is not a generic serving limit.
   Physical pool capacity is independent, up to 4194304 positions, divisible
   by the source-declared page size.
 * MTP is optional. Depth three consumes one anchor and three proposals;
@@ -81,6 +84,9 @@ The automatic shape catalog crosses token classes up to `--prefill_capacity`
 with span classes up to `--rows`, including exact odd endpoints. Repeated
 `--epoch=tokens:spans` replaces that catalog. Source may reject unsupported
 specializations; the runner never substitutes another model or stale code.
+Input staging is allocated once for the largest configured cohorts and
+source-declared dense token views. It is shared by the serialized model
+invocation; rows retain only their pending prediction, not padded host inputs.
 
 ## Bootstrap and storage
 

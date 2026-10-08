@@ -1,5 +1,6 @@
 config.decl @fixture.context : %value: index where [range(%value, 1, 262144)]
 config.decl @fixture.rows : %value: index where [range(%value, 1, 16)]
+config.decl @fixture.tokens : %value: index where [range(%value, 1, 262144)]
 amdgpu.target<gfx11-generic> @target {subgroup_size = 32}
 
 // Logical positions resolve through the native row-major page map. The opaque
@@ -51,10 +52,10 @@ kernel.def target(@target) @consume() {
     %position32 = view.load %packets[%span, 1] : view<16x8xi32> -> i32
     %row32 = view.load %packets[%span, 2] : view<16x8xi32> -> i32
     %input32 = view.load %packets[%span, 3] : view<16x8xi32> -> i32
-    %length_bound = scalar.assume %length32 [range(%length32, 1, 512)] : i32
+    %length_bound = scalar.assume %length32 [range(%length32, 1, 262144)] : i32
     %position_bound = scalar.assume %position32 [range(%position32, 0, 262143)] : i32
     %row_bound = scalar.assume %row32 [range(%row32, 0, 15)] : i32
-    %input_bound = scalar.assume %input32 [range(%input32, 0, 511)] : i32
+    %input_bound = scalar.assume %input32 [range(%input32, 0, 262143)] : i32
     %length = index.cast %length_bound : i32 to index
     %position = index.cast %position_bound : i32 to index
     %row = index.cast %row_bound : i32 to index
@@ -93,15 +94,16 @@ kernel.def target(@target) @consume() {
       scf.yield %h, %k : i32, i32
     }
     %bias_value = view.load %bias[0] : view<1xi32> -> i32
-    %ids = buffer.view %tokens[%origin] : buffer -> view<512xi32>
+    %capacity = config.get @fixture.tokens : index
+    %ids = buffer.view %tokens[%origin] : buffer -> view<[%capacity]xi32>
     %five32 = scalar.constant 5 : i32
     %seven32 = scalar.constant 7 : i32
     %ninety_seven = scalar.constant 97 : i32
     %hundred_one = scalar.constant 101 : i32
     %final_h, %final_k = scf.for %i = [%zero to %length step %one](%h = %initial_h : i32, %k = %initial_k : i32) -> (i32, i32) {
       %input_position = index.add %input, %i : index
-      %bounded_input = index.assume %input_position [range(%input_position, 0, 511)] : index
-      %token = view.load %ids[%bounded_input] : view<512xi32> -> i32
+      %bounded_input = index.assume %input_position [lt(%input_position, %capacity)] : index
+      %token = view.load %ids[%bounded_input] : view<[%capacity]xi32> -> i32
       %scaled_h = scalar.muli %h, %five32 : i32
       %with_token = scalar.addi %scaled_h, %token : i32
       %with_bias = scalar.addi %with_token, %bias_value : i32

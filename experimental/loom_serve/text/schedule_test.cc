@@ -6,14 +6,31 @@
 
 #include "experimental/loom_serve/text/schedule.h"
 
+#include <vector>
+
 #include "experimental/loom_serve/scheduling/packing.h"
 #include "iree/testing/gtest.h"
 
 namespace {
 
 TEST(TextScheduleTest, DefaultCatalogCoversTheCapacityFamily) {
+  std::vector<iree_host_size_t> capacities;
+  for (iree_host_size_t tokens = 1; tokens <= 512; ++tokens) {
+    capacities.push_back(tokens);
+  }
+  // Exercise both sides of every larger power transition and the terminal
+  // context capacity without turning catalog construction into a large run.
+  for (iree_host_size_t tokens = 512; tokens <= 262144; tokens *= 2) {
+    capacities.push_back(tokens - 1);
+    capacities.push_back(tokens);
+    if (tokens < 262144) {
+      capacities.push_back(tokens + 1);
+    }
+  }
   for (iree_host_size_t rows = 1; rows <= 16; ++rows) {
-    for (iree_host_size_t tokens = 1; tokens <= 512; ++tokens) {
+    for (iree_host_size_t tokens : capacities) {
+      SCOPED_TRACE(rows);
+      SCOPED_TRACE(tokens);
       loom_serve_packing_shape_t
           shapes[LOOM_SERVE_TEXT_DEFAULT_SHAPE_CAPACITY + 1] = {};
       const iree_host_size_t count =

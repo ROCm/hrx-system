@@ -6,6 +6,7 @@ func.decl import("prepare") @parameter(%stage: i32, %binding: i32, %directory: b
 global.rodata.def @root = bytes("616476616e6365")
 global.rodata.def @context_key = bytes("666978747572652e636f6e74657874")
 global.rodata.def @rows_key = bytes("666978747572652e726f7773")
+global.rodata.def @tokens_key = bytes("666978747572652e746f6b656e73")
 global.rodata.def @policy = bytes("776569676874732e6c6f6f6d")
 global.rodata.def @terminal = bytes("23")
 global.rodata.def @empty = bytes("")
@@ -66,10 +67,18 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   }
   %smaller = scalar.cmpi ult, %maximum, %prefill : i64
   %effective = scf.select %smaller, %maximum, %prefill : i64
+  %tokens_key = global.load @tokens_key : buffer
+  func.call @config_i64(%stage, %tokens_key, %maximum) : (i32, buffer, i64) -> ()
   %bounded_rows = scalar.assume %rows [range(%rows, 1, 16)] : i64
   %row_count = index.cast %bounded_rows : i64 to index
-  %row_stride = scalar.constant 2560 : i64
   %slot_stride = scalar.constant 256 : i64
+  %token_bytes = scalar.muli %maximum, %four64 : i64
+  %alignment_bias = scalar.constant 255 : i64
+  %biased_token_bytes = scalar.addi %token_bytes, %alignment_bias : i64
+  %token_slots = scalar.divui %biased_token_bytes, %slot_stride : i64
+  %padded_token_bytes = scalar.muli %token_slots, %slot_stride : i64
+  %progress_offset = scalar.addi %slot_stride, %padded_token_bytes : i64
+  %row_stride = scalar.addi %progress_offset, %slot_stride : i64
   %private_rows = scalar.muli %rows, %row_stride : i64
   %pinned = scalar.cmpi ne, %pins, %zero64 : i64
   %twice_rows = scalar.addi %rows, %rows : i64
@@ -95,7 +104,6 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   }
   %residual_bytes = scalar.constant 64 : i64
   %metadata_bytes = scalar.constant 528 : i64
-  %token_bytes = scalar.constant 2048 : i64
   %two = index.constant 2 : index
   %three = index.constant 3 : index
   %four = index.constant 4 : index
@@ -117,7 +125,6 @@ func.def public @prepare(%prefill: i64, %context: i64, %pool: i64, %rows: i64, %
   %origin_records = buffer.view %origins[%origin] : buffer -> view<16x4xi64>
   %control_bytes = scalar.constant 12 : i64
   %progress_bytes = scalar.constant 32 : i64
-  %progress_offset = scalar.constant 2304 : i64
   scf.for %row = [%zero to %row_count step %one] {
     %row64 = index.cast %row : index to i64
     %base = scalar.muli %row64, %row_stride : i64

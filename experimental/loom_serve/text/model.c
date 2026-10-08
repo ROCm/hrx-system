@@ -33,7 +33,6 @@
 #include "iree/vm/sync.h"
 
 enum {
-  TEXT_TOKEN_CAPACITY = 512,
   TEXT_ROW_CAPACITY = LOOM_SERVE_TEXT_ROW_CAPACITY,
   TEXT_HOST_PLAN = 0,
   TEXT_HOST_INPUT = 1,
@@ -191,8 +190,8 @@ struct loom_serve_text_row_t {
   struct {
     // Active prefill count, absolute base, and EOS ID.
     int32_t control[3];
-    // Fixed-capacity padded upload and current-token readback at slot zero.
-    int32_t tokens[TEXT_TOKEN_CAPACITY];
+    // Pending prediction, retained independently of shared input staging.
+    int32_t token;
     // Device-generated count at zero and EOS flag at seven.
     int32_t progress[8];
   } transfer;
@@ -332,9 +331,38 @@ static iree_status_t text_create_program(loom_serve_text_model_t* runner,
   IREE_RETURN_IF_ERROR(
       iree_hal_module_register_types(runner->environment, &table));
   IREE_RETURN_IF_ERROR(iree_hal_module_types_resolve(table, &runner->types));
+  // Both dense padding and semantic packed inputs belong to the single model
+  // invocation. Only the final prediction persists independently in each row.
+  iree_host_size_t input_length = 0;
+  for (iree_host_size_t i = 0; i < runner->shape_count; ++i) {
+    input_length = iree_max(
+        input_length, 2 * runner->shapes[i].token_capacity * sizeof(int32_t));
+  }
+  const bool packed =
+      runner->state.cache.capacity ||
+      iree_any_bit_set(runner->state.flags, LOOM_SERVE_TEXT_STATE_FLAG_MTP);
+  if (packed &&
+      runner->prefill_capacity > input_length / (2 * sizeof(int32_t))) {
+    return iree_make_status(
+        IREE_STATUS_INVALID_ARGUMENT,
+        "source prefill capacity exceeds the epoch catalog");
+  }
+  for (iree_host_size_t i = 0; i < runner->row_count; ++i) {
+    const iree_device_size_t length =
+        iree_hal_buffer_byte_length(runner->state.rows[i].buffers[TEXT_TOKENS]);
+    const iree_host_size_t minimum =
+        (packed ? 1 : runner->prefill_capacity) * sizeof(int32_t);
+    if (length < minimum || length > IREE_HOST_SIZE_MAX) {
+      return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                              "source row %zu has an invalid token extent", i);
+    }
+    if (!packed) {
+      input_length = iree_max(input_length, (iree_host_size_t)length);
+    }
+  }
   const iree_host_size_t lengths[TEXT_HOST_BUFFER_COUNT] = {
       2 * TEXT_ROW_CAPACITY * 8 * sizeof(int32_t),
-      2 * TEXT_TOKEN_CAPACITY * sizeof(int32_t),
+      input_length,
       runner->shape_count
           ? iree_hal_buffer_byte_length(runner->state.epoch.buffers[1])
           : 0,
@@ -544,7 +572,8 @@ static iree_status_t text_prepare(loom_serve_text_model_t* model,
     status = iree_vm_i32_from_variant(results[1], &shared_stage_count);
   }
   if (iree_status_is_ok(status) &&
-      (prefill_capacity < 1 || prefill_capacity > TEXT_TOKEN_CAPACITY ||
+      (prefill_capacity < 1 ||
+       (uint64_t)prefill_capacity > model->context_capacity ||
        shared_stage_count < 1 ||
        (iree_host_size_t)shared_stage_count >
            loom_serve_preparation_stage_count(model->preparation))) {
@@ -726,7 +755,6 @@ iree_status_t loom_serve_text_model_create(
                             "text row count must be in [1, 16]");
   }
   if (options->prefill_capacity < 1 ||
-      options->prefill_capacity > TEXT_TOKEN_CAPACITY ||
       options->context_capacity < options->prefill_capacity ||
       options->context_capacity > 262144 || options->epoch_count > INT32_MAX ||
       options->epoch_count > SIZE_MAX / (2 * sizeof(int64_t)) ||
@@ -742,7 +770,6 @@ iree_status_t loom_serve_text_model_create(
   for (iree_host_size_t i = 0; i < options->epoch_count; ++i) {
     const loom_serve_packing_shape_t shape = options->epoch_shapes[i];
     if (shape.token_capacity < 1 ||
-        shape.token_capacity > TEXT_TOKEN_CAPACITY ||
         shape.token_capacity > options->context_capacity ||
         shape.span_capacity < 1 || shape.span_capacity > TEXT_ROW_CAPACITY) {
       return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
@@ -1016,7 +1043,7 @@ iree_status_t loom_serve_text_row_submit_pin(
       (loom_serve_text_checkpoint_t){.model = row->model,
                                      .state = state,
                                      .has_prediction = row->has_prediction,
-                                     .token = row->transfer.tokens[0]};
+                                     .token = row->transfer.token};
   *out_checkpoint = checkpoint;
   *out_frontier = loom_serve_execution_frontier(row->model->execution);
   return iree_ok_status();
@@ -1055,7 +1082,7 @@ iree_status_t loom_serve_text_row_try_restore(
   if (*out_restored) {
     row->has_prediction = checkpoint->has_prediction;
     memset(&row->transfer, 0, sizeof(row->transfer));
-    row->transfer.tokens[0] = checkpoint->token;
+    row->transfer.token = checkpoint->token;
     row->transfer.progress[0] = checkpoint->has_prediction;
     row->transfer.progress[7] = checkpoint->has_prediction &&
                                 checkpoint->token == row->model->eos_token;
@@ -1108,7 +1135,7 @@ iree_status_t loom_serve_text_row_submit_reserve(
     } else if (checkpoint) {
       row->has_prediction = checkpoint->has_prediction;
       memset(&row->transfer, 0, sizeof(row->transfer));
-      row->transfer.tokens[0] = checkpoint->token;
+      row->transfer.token = checkpoint->token;
       row->transfer.progress[0] = checkpoint->has_prediction;
       row->transfer.progress[7] = checkpoint->has_prediction &&
                                   checkpoint->token == row->model->eos_token;
@@ -1230,7 +1257,7 @@ static iree_status_t text_submit_step(
   const iree_hal_transfer_operation_t downloads[] = {
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
        .download = {.source_buffer = row->state->buffers[TEXT_TOKENS],
-                    .target = row->transfer.tokens,
+                    .target = &row->transfer.token,
                     .length = sizeof(int32_t)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD,
        .download = {.source_buffer = row->state->buffers[TEXT_PROGRESS],
@@ -1415,7 +1442,7 @@ iree_status_t loom_serve_text_model_submit_epoch(
       if (output_limits[i] > 4 * epoch_count || span->token_count != 4 ||
           !iree_any_bit_set(span->flags, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT) ||
           !row->has_prediction || row->transfer.progress[7] ||
-          span->token_ids[0] != row->transfer.tokens[0]) {
+          span->token_ids[0] != row->transfer.token) {
         return iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
                                 "invalid speculative text span %zu", i);
       }
@@ -1661,9 +1688,9 @@ iree_status_t loom_serve_text_model_complete_epoch(
     loom_serve_text_state_row_trim(row->state);
     row->has_prediction = result.output_count != 0;
     if (row->has_prediction) {
-      row->transfer.tokens[0] = result.tokens[result.output_count - 1];
+      row->transfer.token = result.tokens[result.output_count - 1];
       row->transfer.progress[0] = (int32_t)result.output_count;
-      row->transfer.progress[7] = row->transfer.tokens[0] == model->eos_token;
+      row->transfer.progress[7] = row->transfer.token == model->eos_token;
     }
   }
   model->invocation.span_count = 0;
@@ -1738,8 +1765,11 @@ iree_status_t loom_serve_text_row_submit_prefill(
                                               NULL, NULL, out_frontier);
   }
   IREE_RETURN_IF_ERROR(loom_serve_text_state_row_activate(row->state));
-  memset(row->transfer.tokens, 0, sizeof(row->transfer.tokens));
-  memcpy(row->transfer.tokens, token_ids, count * sizeof(int32_t));
+  uint8_t* input = model->host.bytes[TEXT_HOST_INPUT].data;
+  const iree_host_size_t input_length =
+      iree_hal_buffer_byte_length(row->state->buffers[TEXT_TOKENS]);
+  memset(input, 0, input_length);
+  memcpy(input, token_ids, count * sizeof(int32_t));
   row->transfer.control[0] = (int32_t)count;
   row->transfer.control[1] = (int32_t)row->state->position;
   row->transfer.control[2] = model->eos_token;
@@ -1749,9 +1779,9 @@ iree_status_t loom_serve_text_row_submit_prefill(
                   .target_buffer = row->state->buffers[TEXT_CONTROL],
                   .length = sizeof(row->transfer.control)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-       .upload = {.source = row->transfer.tokens,
+       .upload = {.source = input,
                   .target_buffer = row->state->buffers[TEXT_TOKENS],
-                  .length = sizeof(row->transfer.tokens)}},
+                  .length = input_length}},
   };
   uint64_t completion = 0;
   iree_status_t status = loom_serve_execution_transfer(
@@ -1784,7 +1814,7 @@ iree_status_t loom_serve_text_row_submit_decode(
   if (iree_any_bit_set(row->model->state.flags,
                        LOOM_SERVE_TEXT_STATE_FLAG_MTP) ||
       row->model->state.cache.capacity) {
-    const int32_t token = row->transfer.tokens[0];
+    const int32_t token = row->transfer.token;
     const loom_serve_text_span_t span = {
         (iree_host_size_t)(row - row->model->rows),
         1,
@@ -1805,7 +1835,7 @@ iree_status_t loom_serve_text_row_submit_decode(
                   .target_buffer = row->state->buffers[TEXT_CONTROL],
                   .length = sizeof(row->transfer.control)}},
       {.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD,
-       .upload = {.source = row->transfer.tokens,
+       .upload = {.source = &row->transfer.token,
                   .target_buffer = row->state->buffers[TEXT_TOKENS],
                   .length = sizeof(int32_t)}},
   };
@@ -1858,7 +1888,7 @@ iree_status_t loom_serve_text_row_decode(loom_serve_text_row_t* row) {
 }
 
 int32_t loom_serve_text_row_token(const loom_serve_text_row_t* row) {
-  return row->transfer.tokens[0];
+  return row->transfer.token;
 }
 
 bool loom_serve_text_row_is_eos(const loom_serve_text_row_t* row) {

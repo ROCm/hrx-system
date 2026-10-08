@@ -95,6 +95,23 @@ TEST(ConfigurationTest, MixedModalitiesKeepDisjointOptionsAndOwnedStrings) {
   loom_serve_configuration_deinitialize(&configuration);
 }
 
+TEST(ConfigurationTest, TokenCapacityIsBoundedByContextNotOneModel) {
+  for (size_t capacity : {513u, 1024u, 4097u, 262144u}) {
+    const std::string json = "{\"models\":[" +
+                             Model("wide",
+                                   ",\"context_capacity\":262144,"
+                                   "\"prefill_capacity\":" +
+                                       std::to_string(capacity)) +
+                             "]}";
+    loom_serve_configuration_t configuration;
+    IREE_ASSERT_OK(loom_serve_configuration_initialize(
+        iree_make_cstring_view(json.c_str()), &configuration,
+        iree_allocator_system()));
+    EXPECT_EQ(configuration.models[0].text.prefill_capacity, capacity);
+    loom_serve_configuration_deinitialize(&configuration);
+  }
+}
+
 TEST(ConfigurationTest, EmbeddingPolicyStaysSourceOwned) {
   std::string json = R"({"models":[
     {"kind":"embedding","name":"query","source":"encoder","assets":"weights",
@@ -148,7 +165,10 @@ TEST(ConfigurationTest,
        "{\"models\":[" + Model("x", R"(,"continuation_epochs":2)") + "]}",
        "{\"models\":[" + Model("x", R"(,"prefill_capacity":2,"mtp_depth":3)") +
            "]}",
-       "{\"models\":[" + Model("x", R"(,"prefill_capacity":1024)") + "]}",
+       "{\"models\":[" + Model("x", R"(,"prefill_capacity":262145)") + "]}",
+       "{\"models\":[" +
+           Model("x", R"(,"prefill_capacity":1024,"context_capacity":513)") +
+           "]}",
        "{\"models\":[" + Model("x", R"(,"pool_capacity":0)") + "]}",
        "{\"models\":[" + Model("x", R"(,"pending_requests":-1)") + "]}",
        "{\"models\":[" + Model("x", R"(,"max_tokens":1.5)") + "]}",

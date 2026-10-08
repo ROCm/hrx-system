@@ -167,9 +167,10 @@ class SourceTextServiceTest : public ::testing::TestWithParam<uint32_t> {
     };
   }
 
-  void Start() {
-    service_ = std::thread([this] {
-      const auto options = ServiceOptions();
+  void Start(iree_host_size_t chunk_size = 3) {
+    service_ = std::thread([this, chunk_size] {
+      auto options = ServiceOptions();
+      options.chunk_size = chunk_size;
       status_ =
           loom_serve_text_service_run(model_, server_, &options, allocator_);
     });
@@ -391,6 +392,86 @@ TEST_P(SourceTextServiceTest,
   EXPECT_NE(continued.find("\"cached_tokens\":11"), std::string::npos)
       << continued;
   EXPECT_EQ(Content(Read(Send(next))), Content(continued));
+}
+
+TEST_P(SourceTextServiceTest, WideSourceEpochsRetainExactHttpHistory) {
+  for (size_t capacity : {513u, 1024u, 4097u}) {
+    SCOPED_TRACE(capacity);
+    IREE_ASSERT_OK(loom_serve_text_model_destroy(model_));
+    model_ = nullptr;
+    const loom_serve_packing_shape_t shapes[] = {{32, 4}, {capacity, 4}};
+    auto options = ModelOptions();
+    options.prefill_capacity = capacity;
+    options.context_capacity = capacity + 64;
+    options.pool_capacity = 4 * ((options.context_capacity + 3) / 4 * 4);
+    options.epoch_count = IREE_ARRAYSIZE(shapes);
+    options.epoch_shapes = shapes;
+    IREE_ASSERT_OK(
+        loom_serve_text_model_create(device_, &options, &model_, allocator_));
+    EXPECT_EQ(loom_serve_text_model_prefill_capacity(model_), capacity);
+    std::vector<int32_t> tokens(capacity - 9);
+    Oracle reference;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+      tokens[i] = i % 3;
+      reference.Consume(tokens[i]);
+    }
+    auto* full = loom_serve_text_model_row(model_, 0);
+    auto* chunks = loom_serve_text_model_row(model_, 1);
+    IREE_ASSERT_OK(
+        loom_serve_text_row_prefill(full, tokens.size(), tokens.data()));
+    for (size_t offset = 0; offset < tokens.size(); offset += 31) {
+      IREE_ASSERT_OK(loom_serve_text_row_prefill(
+          chunks, std::min<size_t>(31, tokens.size() - offset),
+          tokens.data() + offset));
+    }
+    EXPECT_EQ(loom_serve_text_row_token(full), reference.Predict());
+    EXPECT_EQ(loom_serve_text_row_token(chunks), reference.Predict());
+
+    // The decode row and a fresh long prefill fill the same wide epoch.
+    const int32_t pending = loom_serve_text_row_token(full);
+    tokens.resize(capacity - 1, 1);
+    const loom_serve_text_span_t spans[] = {
+        {0, 1, &pending, LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+        {2, tokens.size(), tokens.data(), LOOM_SERVE_TEXT_SPAN_FLAG_SELECT},
+    };
+    IREE_ASSERT_OK(
+        loom_serve_text_model_epoch(model_, 1, IREE_ARRAYSIZE(spans), spans));
+    reference.Consume(pending);
+    EXPECT_EQ(loom_serve_text_row_token(full), reference.Predict());
+    Oracle fresh;
+    for (int32_t token : tokens) {
+      fresh.Consume(token);
+    }
+    EXPECT_EQ(loom_serve_text_row_token(loom_serve_text_model_row(model_, 2)),
+              fresh.Predict());
+    for (size_t row = 0; row < 4; ++row) {
+      IREE_ASSERT_OK(
+          loom_serve_text_row_reset(loom_serve_text_model_row(model_, row)));
+    }
+    EXPECT_EQ(loom_serve_text_model_pool_usage(model_).available,
+              options.pool_capacity);
+  }
+
+  // Same server binary and source package, now with a 4097-token host shape.
+  Start(4097);
+  std::string prompt;
+  for (size_t i = 0; i < 4088; ++i) {
+    prompt.push_back("abx"[i % 3]);
+  }
+  const int retained =
+      Send(Request(Message("user", prompt), 2), "X-Loom-Session: wide\r\n");
+  const int other = Send(Request(Message("user", std::string(769, 'x'))));
+  const std::string first = Content(Read(retained));
+  ASSERT_EQ(first, Oracle::Complete(prompt, 2));
+  EXPECT_EQ(Content(Read(other)), Oracle::Complete(std::string(769, 'x'), 16));
+  const std::string request =
+      Request(Message("user", prompt) + "," + Message("assistant", first) +
+              "," + Message("user", "bax"));
+  const std::string resumed = Read(Send(request, "X-Loom-Session: wide\r\n"));
+  EXPECT_EQ(Content(resumed), Oracle::Complete(prompt + first + "#bax", 16));
+  EXPECT_NE(resumed.find("\"cached_tokens\":4089"), std::string::npos)
+      << resumed;
+  EXPECT_EQ(Content(Read(Send(request))), Content(resumed));
 }
 
 TEST_P(SourceTextServiceTest,
