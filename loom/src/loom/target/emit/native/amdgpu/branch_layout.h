@@ -121,8 +121,10 @@ typedef struct loom_amdgpu_branch_layout_t {
   iree_host_size_t group_count;
 } loom_amdgpu_branch_layout_t;
 
-// Builds an exact converged branch-island layout. Empty output means every
-// measured edge is directly encodable and the original bytes remain unchanged.
+// Builds an exact converged branch-island layout owned by |arena|. Empty output
+// means every measured edge is directly encodable and the original bytes remain
+// unchanged. Transient relaxation state is released before returning so the
+// arena retains only the immutable output tables.
 iree_status_t loom_amdgpu_branch_layout_build(
     const loom_amdgpu_branch_layout_input_t* input,
     iree_arena_allocator_t* arena, loom_amdgpu_branch_layout_t* out_layout);

@@ -8,6 +8,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 #include "iree/base/internal/arena.h"
 #include "iree/testing/gtest.h"
@@ -89,6 +90,7 @@ TEST_F(AmdgpuBranchLayoutTest, LeavesSignedRangeBoundariesUnchanged) {
   EXPECT_EQ(layout.island_count, 0u);
   EXPECT_EQ(layout.group_count, 0u);
   EXPECT_EQ(layout.edge_count, 0u);
+  EXPECT_EQ(arena_.used_allocation_size, 0u);
 }
 
 TEST_F(AmdgpuBranchLayoutTest, RelaxesJustOutsideForwardRange) {
@@ -118,6 +120,27 @@ TEST_F(AmdgpuBranchLayoutTest, RelaxesJustOutsideForwardRange) {
   EXPECT_EQ(layout.islands[0].target.index, 1u);
   EXPECT_EQ(layout.edges[0].relative_dword_offset, 16384);
   EXPECT_EQ(layout.islands[0].relative_dword_offset, 16385);
+}
+
+TEST_F(AmdgpuBranchLayoutTest, PicksFirstAnchorAtNearestTiedOffset) {
+  constexpr uint64_t kTarget = 4u + (uint64_t{INT16_MAX} + 1u) * 4u;
+  const std::array blocks = {
+      BlockAt(0),
+      BlockAt(kTarget),
+  };
+  const std::array edges = {
+      EdgeTo(/*source_byte_offset=*/0, /*target_block_index=*/1),
+  };
+  const std::array anchors = {
+      AnchorAt(/*byte_offset=*/65536, /*packet_index=*/3),
+      AnchorAt(/*byte_offset=*/65536, /*packet_index=*/4),
+      AnchorAt(/*byte_offset=*/65540, /*packet_index=*/5),
+  };
+
+  const loom_amdgpu_branch_layout_t layout =
+      Build(kTarget + 4u, blocks, edges, anchors);
+  ASSERT_EQ(layout.group_count, 1u);
+  EXPECT_EQ(layout.groups[0].packet_index, 3u);
 }
 
 TEST_F(AmdgpuBranchLayoutTest, RelaxesJustOutsideBackwardRange) {
@@ -166,6 +189,70 @@ TEST_F(AmdgpuBranchLayoutTest, RecomputesDirectSiblingEdgeAfterInsertion) {
   EXPECT_EQ(layout.edges[1].relative_dword_offset, 17920);
 }
 
+TEST_F(AmdgpuBranchLayoutTest, RevisitsEarlierEdgeAfterLaterGrowth) {
+  constexpr uint64_t kNearTarget = 4u + uint64_t{INT16_MAX} * 4u;
+  constexpr uint64_t kFarTarget = 200000u;
+  const std::array blocks = {
+      BlockAt(kNearTarget),
+      BlockAt(kFarTarget),
+  };
+  const std::array edges = {
+      EdgeTo(/*source_byte_offset=*/0, /*target_block_index=*/0),
+      EdgeTo(/*source_byte_offset=*/4, /*target_block_index=*/1),
+  };
+  const std::array anchors = {
+      AnchorAt(/*byte_offset=*/65536, /*packet_index=*/7),
+      AnchorAt(/*byte_offset=*/100000, /*packet_index=*/11),
+  };
+
+  const loom_amdgpu_branch_layout_t layout =
+      Build(kFarTarget + 4u, blocks, edges, anchors);
+  ASSERT_EQ(layout.edge_count, 2u);
+  ASSERT_EQ(layout.island_count, 2u);
+  ASSERT_EQ(layout.group_count, 2u);
+  EXPECT_EQ(layout.byte_length, kFarTarget + 20u);
+  EXPECT_EQ(layout.edges[0].target.kind, LOOM_AMDGPU_BRANCH_TARGET_ISLAND);
+  EXPECT_EQ(layout.edges[0].target.index, 0u);
+  EXPECT_EQ(layout.edges[0].relative_dword_offset, 16384);
+  EXPECT_EQ(layout.islands[0].target.kind, LOOM_AMDGPU_BRANCH_TARGET_BLOCK);
+  EXPECT_EQ(layout.islands[0].target.index, 0u);
+  EXPECT_EQ(layout.islands[0].relative_dword_offset, 16386);
+  EXPECT_EQ(layout.edges[1].target.kind, LOOM_AMDGPU_BRANCH_TARGET_ISLAND);
+  EXPECT_EQ(layout.edges[1].target.index, 1u);
+  EXPECT_EQ(layout.edges[1].relative_dword_offset, 25001);
+  EXPECT_EQ(layout.islands[1].target.kind, LOOM_AMDGPU_BRANCH_TARGET_BLOCK);
+  EXPECT_EQ(layout.islands[1].target.index, 1u);
+  EXPECT_EQ(layout.islands[1].relative_dword_offset, 25000);
+}
+
+TEST_F(AmdgpuBranchLayoutTest, GroupsIslandsSharingAnAnchor) {
+  constexpr uint64_t kTarget = 4u + (uint64_t{INT16_MAX} + 2u) * 4u;
+  const std::array blocks = {
+      BlockAt(0),
+      BlockAt(kTarget),
+  };
+  const std::array edges = {
+      EdgeTo(/*source_byte_offset=*/0, /*target_block_index=*/1),
+      EdgeTo(/*source_byte_offset=*/4, /*target_block_index=*/1),
+  };
+  const std::array anchors = {
+      AnchorAt(/*byte_offset=*/65536, /*packet_index=*/9),
+  };
+
+  const loom_amdgpu_branch_layout_t layout =
+      Build(kTarget + 4u, blocks, edges, anchors);
+  ASSERT_EQ(layout.group_count, 1u);
+  ASSERT_EQ(layout.island_count, 2u);
+  EXPECT_EQ(layout.byte_length, kTarget + 16u);
+  EXPECT_EQ(layout.groups[0].packet_index, 9u);
+  EXPECT_EQ(layout.groups[0].island_start, 0u);
+  EXPECT_EQ(layout.groups[0].island_count, 2u);
+  EXPECT_EQ(layout.edges[0].target.index, 0u);
+  EXPECT_EQ(layout.edges[1].target.index, 1u);
+  EXPECT_EQ(layout.islands[0].relative_dword_offset, 16387);
+  EXPECT_EQ(layout.islands[1].relative_dword_offset, 16386);
+}
+
 TEST_F(AmdgpuBranchLayoutTest, BuildsConvergedMultiHopPath) {
   constexpr uint64_t kTarget = 1024u * 1024u;
   const std::array blocks = {
@@ -192,6 +279,51 @@ TEST_F(AmdgpuBranchLayoutTest, BuildsConvergedMultiHopPath) {
     EXPECT_GE(layout.islands[i].relative_dword_offset, INT16_MIN);
     EXPECT_LE(layout.islands[i].relative_dword_offset, INT16_MAX);
   }
+}
+
+TEST_F(AmdgpuBranchLayoutTest, BuildsSharedLongEdgeStressLayout) {
+  constexpr uint32_t kAnchorCount = 8192;
+  constexpr uint32_t kEdgeCount = 128;
+  constexpr uint64_t kAnchorSpacing = 64;
+  constexpr uint64_t kByteLength =
+      (uint64_t{kAnchorCount} + 1u) * kAnchorSpacing;
+  const std::array blocks = {
+      BlockAt(kByteLength),
+  };
+  std::vector<loom_amdgpu_branch_layout_input_edge_t> edges(kEdgeCount);
+  for (uint32_t i = 0; i < kEdgeCount; ++i) {
+    edges[i] = EdgeTo(/*source_byte_offset=*/uint64_t{i} * 4u,
+                      /*target_block_index=*/0);
+  }
+  std::vector<loom_amdgpu_branch_layout_anchor_t> anchors(kAnchorCount);
+  for (uint32_t i = 0; i < kAnchorCount; ++i) {
+    anchors[i] = AnchorAt(/*byte_offset=*/uint64_t{i + 1u} * kAnchorSpacing,
+                          /*packet_index=*/i);
+  }
+  const loom_amdgpu_branch_layout_input_t input = {
+      /*byte_length=*/kByteLength,
+      /*blocks=*/blocks.data(),
+      /*block_count=*/blocks.size(),
+      /*edges=*/edges.data(),
+      /*edge_count=*/edges.size(),
+      /*anchors=*/anchors.data(),
+      /*anchor_count=*/anchors.size(),
+  };
+
+  loom_amdgpu_branch_layout_t layout = {};
+  IREE_ASSERT_OK(loom_amdgpu_branch_layout_build(&input, &arena_, &layout));
+  EXPECT_EQ(layout.byte_length, 528076u);
+  EXPECT_EQ(layout.edge_count, kEdgeCount);
+  EXPECT_EQ(layout.island_count, 896u);
+  EXPECT_EQ(layout.group_count, 35u);
+  const iree_host_size_t expected_retained_bytes =
+      iree_host_align(layout.edge_count * sizeof(*layout.edges),
+                      iree_max_align_t) +
+      iree_host_align(layout.island_count * sizeof(*layout.islands),
+                      iree_max_align_t) +
+      iree_host_align(layout.group_count * sizeof(*layout.groups),
+                      iree_max_align_t);
+  EXPECT_EQ(arena_.used_allocation_size, expected_retained_bytes);
 }
 
 }  // namespace

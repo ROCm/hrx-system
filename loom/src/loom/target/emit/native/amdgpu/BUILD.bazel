@@ -76,6 +76,17 @@ loom_cc_test(
     ],
 )
 
+loom_cc_benchmark(
+    name = "branch_layout_benchmark",
+    srcs = ["branch_layout_benchmark.cc"],
+    deps = [
+        ":branch_layout",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:benchmark_main",
+    ],
+)
+
 loom_cc_library(
     name = "assembly",
     srcs = ["assembly.c"],
