@@ -209,10 +209,10 @@ TEST_F(X86ProviderTest, ProjectsCompleteCpuFactsAndExecutableFeatures) {
   iree_cpu_data_t cpu_data = {
       .architecture = IREE_CPU_ARCHITECTURE_X86_64,
       .fields = {kAvx2CpuFeatures | IREE_CPU_DATA0_X86_64_AVXVNNI |
-                      IREE_CPU_DATA0_X86_64_AVXVNNIINT8 |
-                      IREE_CPU_DATA0_X86_64_AVXVNNIINT16 |
-                      IREE_CPU_DATA0_X86_64_AVXNECONVERT,
-                  2, 3, 4, 5, 6, 7, 8},
+                     IREE_CPU_DATA0_X86_64_AVXVNNIINT8 |
+                     IREE_CPU_DATA0_X86_64_AVXVNNIINT16 |
+                     IREE_CPU_DATA0_X86_64_AVXNECONVERT,
+                 2, 3, 4, 5, 6, 7, 8},
   };
   loom_target_profile_selection_t selection = Select(&cpu_data);
   ASSERT_NE(selection.profile, nullptr);
