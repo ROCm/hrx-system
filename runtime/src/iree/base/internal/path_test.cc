@@ -307,13 +307,13 @@ TEST(FilePathTest, ToWin32ConvertsPathBeyondCommonLimit) {
   ASSERT_GT(input.size(), IREE_MAX_PATH);
 
   counting_allocator_t allocator_state = {
-      /*.delegate=*/iree_allocator_system(),
-      /*.allocation_count=*/0,
-      /*.free_count=*/0,
+      .delegate = iree_allocator_system(),
+      .allocation_count = 0,
+      .free_count = 0,
   };
   iree_allocator_t allocator = {
-      /*.self=*/&allocator_state,
-      /*.ctl=*/counting_allocator_ctl,
+      .self = &allocator_state,
+      .ctl = counting_allocator_ctl,
   };
   wchar_t* converted_path = NULL;
   IREE_ASSERT_OK(
