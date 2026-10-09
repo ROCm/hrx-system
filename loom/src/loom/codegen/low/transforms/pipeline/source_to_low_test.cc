@@ -494,7 +494,7 @@ TEST_F(LowLowerPassTest, FinalizesPoliciesOnceWithoutAdditionalStorage) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool_, &arena);
   const loom_low_source_selection_options_t options = {
-      /*.policy_registry=*/&policy_registry_,
+      .policy_registry = &policy_registry_,
   };
   loom_low_source_selection_list_t selections = {};
   IREE_ASSERT_OK(loom_low_select_lowering_symbols(module.get(), &options,
@@ -504,12 +504,13 @@ TEST_F(LowLowerPassTest, FinalizesPoliciesOnceWithoutAdditionalStorage) {
   std::vector<int> order;
   loom_low_lower_policy_t first = *selections.values[2].policy;
   first.finalize_module = {
-      /*.fn=*/[](void* user_data, loom_module_t*,
-                 loom_low_lower_module_state_t*, iree_arena_allocator_t*) {
-        static_cast<std::vector<int>*>(user_data)->push_back(1);
-        return iree_ok_status();
-      },
-      /*.user_data=*/&order,
+      .fn =
+          [](void* user_data, loom_module_t*, loom_low_lower_module_state_t*,
+             iree_arena_allocator_t*) {
+            static_cast<std::vector<int>*>(user_data)->push_back(1);
+            return iree_ok_status();
+          },
+      .user_data = &order,
   };
   loom_low_lower_policy_t second = first;
   second.finalize_module.fn = [](void* user_data, loom_module_t*,

@@ -801,7 +801,7 @@ TEST_F(LowLowerSourcePlanTest, RejectsLaneWidthBeforeLowConstruction) {
   IREE_ASSERT_OK(loom_builder_intern_string(&builder, IREE_SV("lane"), &name));
   uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
   IREE_ASSERT_OK(loom_module_add_symbol(module_, name, &symbol_id));
-  const loom_symbol_ref_t symbol = {/*.module_id=*/0, /*.symbol_id=*/symbol_id};
+  const loom_symbol_ref_t symbol = {.module_id = 0, .symbol_id = symbol_id};
   loom_op_t* function_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0, symbol,
