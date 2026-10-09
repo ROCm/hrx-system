@@ -77,7 +77,7 @@ class SpirvModuleValueTableTest : public ::testing::Test {
   }
 
   loom_spirv_value_type_t U32ValueType() {
-    return (loom_spirv_value_type_t){
+    return loom_spirv_value_type_t{
         .value_class = LOOM_SPIRV_VALUE_CLASS_SCALAR,
         .scalar_type = LOOM_SPIRV_SCALAR_TYPE_U32,
     };
@@ -114,7 +114,7 @@ TEST_F(SpirvModuleValueTableTest, ReservesDefinesAndLooksUpValueRefs) {
   EXPECT_EQ(second_result_id, first_result_id);
 
   loom_spirv_module_value_table_define(&table, value_id,
-                                       (loom_spirv_module_value_ref_t){
+                                       loom_spirv_module_value_ref_t{
                                            .id = first_result_id,
                                            .type_id = 7,
                                            .value_type = U32ValueType(),

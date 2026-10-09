@@ -226,7 +226,7 @@ static iree_status_t InitializeFakeHalContext(
   }
 
   out_dispatch_queue->queue_family = iree_hal_device_queue_family(device, 0);
-  context->runtime = (loom_run_hal_runtime_t){
+  context->runtime = loom_run_hal_runtime_t{
       .device = device,
       .dispatch_queue = out_dispatch_queue,
   };

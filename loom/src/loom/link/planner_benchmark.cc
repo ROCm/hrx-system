@@ -361,7 +361,7 @@ static void BenchmarkPlan(benchmark::State& state, loom_link_plan_mode_t mode,
       iree_make_string_view(root_name.data(), root_name.size());
   iree_string_view_list_t root_symbols = iree_string_view_list_empty();
   if (mode == LOOM_LINK_PLAN_LINK) {
-    root_symbols = (iree_string_view_list_t){
+    root_symbols = iree_string_view_list_t{
         .count = 1,
         .values = &root,
     };
@@ -655,7 +655,7 @@ static void BenchmarkLinkMaterializeAndLink(
         fixture.module()->context, fixture.block_pool(),
         &provider->bytecode.metadata,
         (uint16_t)selection.source_module->provider_module_ordinal,
-        (loom_bytecode_symbol_ordinal_list_t){
+        loom_bytecode_symbol_ordinal_list_t{
             .count = source_symbol_ordinals.size(),
             .ordinals = source_symbol_ordinals.data(),
         },

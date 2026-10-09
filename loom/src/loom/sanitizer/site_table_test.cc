@@ -127,7 +127,7 @@ TEST_F(SiteTableTest, EncodesRecordsPayloadsSourcesAndUnknownLocations) {
       AddFileLocation(IREE_SV("model.loom"), 12, 3, 12, 19);
 
   loom_sanitizer_site_row_t rows[3] = {};
-  rows[0] = (loom_sanitizer_site_row_t){
+  rows[0] = loom_sanitizer_site_row_t{
       .site_id = 0,
       .op = nullptr,
       .op_kind = LOOM_OP_SANITIZER_ASSERT_ACCESS,
@@ -137,7 +137,7 @@ TEST_F(SiteTableTest, EncodesRecordsPayloadsSourcesAndUnknownLocations) {
       .flags = LOOM_SANITIZER_SITE_ROW_HAS_PAYLOAD,
       .payload = payload,
   };
-  rows[1] = (loom_sanitizer_site_row_t){
+  rows[1] = loom_sanitizer_site_row_t{
       .site_id = 1,
       .op = nullptr,
       .op_kind = LOOM_OP_SANITIZER_ASSERT_VALUE,
@@ -147,7 +147,7 @@ TEST_F(SiteTableTest, EncodesRecordsPayloadsSourcesAndUnknownLocations) {
       .flags = 0,
       .payload = {},
   };
-  rows[2] = (loom_sanitizer_site_row_t){
+  rows[2] = loom_sanitizer_site_row_t{
       .site_id = 2,
       .op = nullptr,
       .op_kind = LOOM_OP_SANITIZER_ASSERT_OP,

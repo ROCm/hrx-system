@@ -845,7 +845,7 @@ TEST_F(FactTableTest, SmallStaticLanesPreserveCommonFloatPredicates) {
   loom_value_facts_t facts = loom_value_facts_unknown();
   IREE_ASSERT_OK(loom_value_facts_make_small_static_lanes(
       &table.context,
-      (loom_value_fact_small_static_lanes_t){
+      loom_value_fact_small_static_lanes_t{
           .lanes = lanes,
           .count = IREE_ARRAYSIZE(lanes),
       },

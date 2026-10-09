@@ -922,7 +922,7 @@ TEST(TLSFPool, TrimRetainsSlabWithTaintedDeathFrontier) {
   iree_hal_pool_t* pool = NULL;
   IREE_ASSERT_OK(CreateTLSFPool(options, slab_provider, notification,
                                 test_frontier_tracker(),
-                                (iree_hal_pool_epoch_query_t){
+                                iree_hal_pool_epoch_query_t{
                                     .fn = iree_hal_test_epoch_query,
                                     .user_data = &query,
                                 },

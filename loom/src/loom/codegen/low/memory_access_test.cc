@@ -19,7 +19,7 @@ namespace {
 static loom_low_memory_access_summary_t MakeStridedSummary(
     uint32_t alias_root_id, uint64_t stride_bytes, uint64_t begin_bytes,
     uint64_t end_bytes) {
-  return (loom_low_memory_access_summary_t){
+  return loom_low_memory_access_summary_t{
       .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
       .source_flags = 0,
       .alias_root_id = alias_root_id,
@@ -39,7 +39,7 @@ static loom_low_memory_access_summary_t MakeStridedSummary(
 static loom_low_memory_access_summary_t MakeIntervalSummary(
     loom_low_byte_interval_t* interval, uint32_t alias_root_id,
     int64_t begin_bytes, int64_t end_bytes) {
-  *interval = (loom_low_byte_interval_t){
+  *interval = loom_low_byte_interval_t{
       .begin_facts = loom_value_facts_make(begin_bytes, begin_bytes, 1),
       .end_facts = loom_value_facts_make(end_bytes, end_bytes, 1),
       .begin_expr_id = LOOM_LOW_MEMORY_EXPR_ID_NONE,
@@ -47,7 +47,7 @@ static loom_low_memory_access_summary_t MakeIntervalSummary(
       .precision_flags = LOOM_LOW_BYTE_INTERVAL_PRECISION_BEGIN_RANGE |
                          LOOM_LOW_BYTE_INTERVAL_PRECISION_END_RANGE,
   };
-  return (loom_low_memory_access_summary_t){
+  return loom_low_memory_access_summary_t{
       .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
       .source_flags = 0,
       .alias_root_id = alias_root_id,

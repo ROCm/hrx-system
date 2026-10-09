@@ -159,7 +159,7 @@ class AmdgpuNativePreflightTest : public ::testing::Test {
       const loom_low_descriptor_set_t* descriptor_set) const {
     const loom_target_bundle_t* target_bundle =
         loom_target_facts_bundle(&target_facts_.base);
-    return (loom_low_resolved_target_t){
+    return loom_low_resolved_target_t{
         .target_facts = &target_facts_.base,
         .target_name = loom_target_facts_identity_name(&target_facts_.base),
         .descriptor_set_key = loom_low_descriptor_set_string(

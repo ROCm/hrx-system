@@ -49,7 +49,7 @@ class LowAllocationTargetConstraintsTest : public ::testing::Test {
     IREE_ASSERT(target_bundle != nullptr);
     loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                          target_bundle, &target_facts_);
-    target_ = (loom_low_resolved_target_t){
+    target_ = loom_low_resolved_target_t{
         .target_facts = &target_facts_,
         .target_name = target_bundle->name,
         .descriptor_set_key = target_bundle->config->contract_set_key,

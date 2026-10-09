@@ -516,7 +516,7 @@ TEST_F(AqlCommandBufferTest, AtomicCommandsPreserveTargetsAndDependencies) {
       IREE_HAL_EXECUTION_STAGE_ATOMIC,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/8,
                                         /*length=*/8),
-      (iree_hal_atomic_wait_params_t){
+      iree_hal_atomic_wait_params_t{
           .value = 42,
           .mask = UINT64_MAX,
           .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
@@ -529,7 +529,7 @@ TEST_F(AqlCommandBufferTest, AtomicCommandsPreserveTargetsAndDependencies) {
       IREE_HAL_EXECUTION_STAGE_ATOMIC,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/16,
                                         /*length=*/4),
-      (iree_hal_atomic_store_params_t){
+      iree_hal_atomic_store_params_t{
           .value = 7,
           .flags =
               IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
@@ -541,7 +541,7 @@ TEST_F(AqlCommandBufferTest, AtomicCommandsPreserveTargetsAndDependencies) {
       IREE_HAL_EXECUTION_STAGE_HOST,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/24,
                                         /*length=*/8),
-      (iree_hal_atomic_rmw_params_t){
+      iree_hal_atomic_rmw_params_t{
           .operand = 3,
           .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE |
                    IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,

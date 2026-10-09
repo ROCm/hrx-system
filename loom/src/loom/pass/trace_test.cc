@@ -46,7 +46,7 @@ static iree_status_t CountingAllocatorCtl(void* self,
 }
 
 static iree_allocator_t CountingAllocator(CountingAllocatorState* state) {
-  return (iree_allocator_t){
+  return iree_allocator_t{
       .self = state,
       .ctl = CountingAllocatorCtl,
   };
@@ -147,7 +147,7 @@ static iree_status_t OpenArtifact(void* user_data,
   (void)event_ordinal;
   auto* state = static_cast<ArtifactSinkState*>(user_data);
   ++state->open_count;
-  *out_artifact = (loom_pass_trace_artifact_t){
+  *out_artifact = loom_pass_trace_artifact_t{
       .stream = &state->stream,
       .path = IREE_SV("ir/000000.loom"),
   };
@@ -178,7 +178,7 @@ class TraceOutput {
                      void* user_data) {
     loom_pass_trace_initialize(&options, &trace);
     loom_pass_trace_bind_snapshot_projector(
-        &trace, (loom_pass_trace_snapshot_projector_t){
+        &trace, loom_pass_trace_snapshot_projector_t{
                     .project = project,
                     .user_data = user_data,
                 });
@@ -233,7 +233,7 @@ class PassTraceTest : public ::testing::Test {
 
   ProjectionState MakeProjectionState(CountingAllocatorState* allocator_state,
                                       int64_t counter_value = 2) {
-    return (ProjectionState){
+    return ProjectionState{
         .context = &context_,
         .block_pool = &block_pool_,
         .allocator_state = allocator_state,
@@ -246,7 +246,7 @@ class PassTraceTest : public ::testing::Test {
         .kind = LOOM_PASS_PROGRAM_INSTRUCTION_INVOKE,
         .anchor_kind = LOOM_PASS_MODULE,
     };
-    return (loom_pass_trace_event_t){
+    return loom_pass_trace_event_t{
         .module = module,
         .instruction = &instruction,
         .instruction_index = 0,

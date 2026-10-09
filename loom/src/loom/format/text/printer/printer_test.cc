@@ -2745,7 +2745,7 @@ TEST_F(PrintOpTest, BoundsCheckIndexListDynamicOutOfRange) {
   loom_test_update_initialize_static_offsets(
       op, loom_attr_i64_array(static_offsets, 1));
   loom_op_results(op)[0] = def(tensor_type);
-  loom_op_tied_results(op)[0] = (loom_tied_result_t){
+  loom_op_tied_results(op)[0] = loom_tied_result_t{
       .result_index = 0,
       .operand_index = 1,
       .has_type_change = true,

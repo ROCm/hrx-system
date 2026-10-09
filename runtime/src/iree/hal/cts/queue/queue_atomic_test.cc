@@ -177,7 +177,7 @@ class QueueAtomicTest : public CtsTestBase<> {
             status = iree_hal_queue_atomic_wait(
                 atomic_queue_, empty_wait, signal, buffer,
                 /*target_offset=*/0,
-                (iree_hal_atomic_wait_params_t){
+                iree_hal_atomic_wait_params_t{
                     .value = 0,
                     .mask = width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX
                                                               : UINT64_MAX,
@@ -192,7 +192,7 @@ class QueueAtomicTest : public CtsTestBase<> {
             status = iree_hal_queue_atomic_store(
                 atomic_queue_, empty_wait, signal, buffer,
                 /*target_offset=*/0,
-                (iree_hal_atomic_store_params_t){
+                iree_hal_atomic_store_params_t{
                     .value = 1,
                     .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
                     .width = width,
@@ -204,7 +204,7 @@ class QueueAtomicTest : public CtsTestBase<> {
             status = iree_hal_queue_atomic_rmw(
                 atomic_queue_, empty_wait, signal, buffer,
                 /*target_offset=*/0,
-                (iree_hal_atomic_rmw_params_t){
+                iree_hal_atomic_rmw_params_t{
                     .operand = 1,
                     .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
                              IREE_HAL_ATOMIC_FLAG_RELEASE,

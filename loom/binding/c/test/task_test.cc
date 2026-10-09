@@ -82,7 +82,7 @@ static loomc_status_t SubmitTestTask(void* user_data, loomc_task_t* task) {
 }
 
 static loomc_task_sink_t TestTaskSink(test_sink_t* sink) {
-  return (loomc_task_sink_t){
+  return loomc_task_sink_t{
       .submit = SubmitTestTask,
       .user_data = sink,
   };

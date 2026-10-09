@@ -774,7 +774,7 @@ TEST_F(PassInterpreterTest, PropagatesDescriptorCallbackFailure) {
   loom_test_pass_trace_t trace = {};
   DiagnosticCapture diagnostic_capture;
   loom_pass_interpreter_options_t options =
-      InterpreterOptions(&trace, (iree_diagnostic_emitter_t){
+      InterpreterOptions(&trace, iree_diagnostic_emitter_t{
                                      .fn = CaptureDiagnostic,
                                      .user_data = &diagnostic_capture,
                                  });

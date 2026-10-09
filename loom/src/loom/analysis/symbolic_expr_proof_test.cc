@@ -1684,7 +1684,7 @@ TEST_F(SymbolicExprTest, SelectConditionProvesDynamicLoopDivBounds) {
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(irrelevant_selects); ++i) {
     const loom_value_id_t selected =
         loom_scf_select_result(irrelevant_selects[i]);
-    tap_predicates[i + 2] = (loom_predicate_t){
+    tap_predicates[i + 2] = loom_predicate_t{
         .kind = LOOM_PREDICATE_EQ,
         .arg_count = 2,
         .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE},

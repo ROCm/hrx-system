@@ -45,10 +45,10 @@ loom_value_fact_storage_schema_t BlockQuantSchema(uint16_t static_schema_id) {
 loom_contract_view_payload_t PlainPayload(
     loom_contract_operand_role_t role,
     loom_contract_numeric_type_t numeric_type) {
-  return (loom_contract_view_payload_t){
+  return loom_contract_view_payload_t{
       .kind = LOOM_CONTRACT_VIEW_PAYLOAD_PLAIN_ELEMENT,
       .operand =
-          (loom_contract_operand_t){
+          loom_contract_operand_t{
               .role = role,
               .numeric_type = numeric_type,
           },
@@ -72,16 +72,16 @@ loom_contract_view_payload_t MatrixPayload(
 loom_contract_view_payload_t BlockQuantPayload(
     loom_contract_operand_role_t role,
     loom_value_fact_storage_schema_t schema) {
-  return (loom_contract_view_payload_t){
+  return loom_contract_view_payload_t{
       .kind = LOOM_CONTRACT_VIEW_PAYLOAD_UNSUPPORTED_STORAGE_SCHEMA,
       .operand =
-          (loom_contract_operand_t){
+          loom_contract_operand_t{
               .role = role,
               .numeric_type = {},
               .payload_register_count = {},
               .payload_element_count = {},
               .encoded =
-                  (loom_contract_encoded_operand_t){
+                  loom_contract_encoded_operand_t{
                       .source_schema = schema,
                   },
           },
@@ -90,7 +90,7 @@ loom_contract_view_payload_t BlockQuantPayload(
 
 loom_value_fact_address_layout_t StridedLayout(
     const loom_value_facts_t* strides, uint8_t rank) {
-  return (loom_value_fact_address_layout_t){
+  return loom_value_fact_address_layout_t{
       .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
       .rank = rank,
       .strides = strides,
@@ -100,7 +100,7 @@ loom_value_fact_address_layout_t StridedLayout(
 loom_contract_operand_preparation_options_t BaseRhsOptions(
     loom_contract_view_payload_t payload,
     loom_value_fact_address_layout_t address_layout) {
-  return (loom_contract_operand_preparation_options_t){
+  return loom_contract_operand_preparation_options_t{
       .role = LOOM_CONTRACT_OPERAND_ROLE_RHS,
       .family = LOOM_CONTRACT_PREPARATION_FAMILY_MMT4D_RHS_N_MAJOR_BLOCKED,
       .availability = LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE,
@@ -114,9 +114,9 @@ loom_contract_operand_preparation_options_t BaseRhsOptions(
 
 loom_contract_matrix_request_options_t BaseMatrixOptions(
     loom_contract_view_payload_t lhs, loom_contract_view_payload_t rhs) {
-  return (loom_contract_matrix_request_options_t){
+  return loom_contract_matrix_request_options_t{
       .shape =
-          (loom_contract_shape_t){
+          loom_contract_shape_t{
               .m = 16,
               .n = 16,
               .k = 64,
@@ -304,7 +304,7 @@ TEST(ContractPreparationTest, SamePayloadsFeedCpuAndGpuPreparationFamilies) {
       PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS, LOOM_CONTRACT_NUMERIC_I8);
   loom_contract_matrix_request_options_t cpu_options =
       BaseMatrixOptions(lhs, rhs);
-  cpu_options.fragment = (loom_contract_fragment_t){
+  cpu_options.fragment = loom_contract_fragment_t{
       .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
       .vector_bit_width = 256,
       .source_lane_count = 32,
@@ -314,7 +314,7 @@ TEST(ContractPreparationTest, SamePayloadsFeedCpuAndGpuPreparationFamilies) {
 
   loom_contract_matrix_request_options_t gpu_options =
       BaseMatrixOptions(lhs, rhs);
-  gpu_options.fragment = (loom_contract_fragment_t){
+  gpu_options.fragment = loom_contract_fragment_t{
       .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
       .vector_bit_width = {},
       .source_lane_count = {},
@@ -404,7 +404,7 @@ TEST(ContractPreparationTest, RejectsMmt4dPreparationForNonRhsRole) {
 TEST(ContractPreparationTest, RejectsMalformedPreparationFacts) {
   loom_contract_operand_preparation_options_t options = BaseRhsOptions(
       PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_NUMERIC_I8),
-      (loom_value_fact_address_layout_t){
+      loom_value_fact_address_layout_t{
           .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_DENSE,
       });
   options.logical_flags = LOOM_CONTRACT_PREPARATION_PHYSICAL_PACKING;

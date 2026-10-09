@@ -61,7 +61,7 @@ class XdnaProductTest : public ::testing::Test {
         loom_xdna_device_profile_lookup(IREE_SV("amd.xdna.strix_halo.17f0_11"));
     IREE_ASSERT(profile != nullptr);
     *out_program = (loom_aie2p_array_program_t){0};
-    *out_entry = (loom_aie2p_xdna_entry_t){
+    *out_entry = loom_aie2p_xdna_entry_t{
         .name = IREE_SV("entry"),
         .column_count = 1,
         .bindings = nullptr,
@@ -70,7 +70,7 @@ class XdnaProductTest : public ::testing::Test {
         .tiles = nullptr,
         .tile_count = 0,
     };
-    *out_product = (loom_aie2p_xdna_product_t){
+    *out_product = loom_aie2p_xdna_product_t{
         .device_profile = profile,
         .entries = out_entry,
         .entry_count = 1,
@@ -281,7 +281,7 @@ class SyntheticXdnaProduct {
     IREE_ASSERT_LE(tile_count, (iree_host_size_t)family_->column_count *
                                    compute->row_count);
 
-    sections_[0] = (loom_native_section_t){
+    sections_[0] = loom_native_section_t{
         .name = IREE_SV(".text.kernel"),
         .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
         .access = LOOM_NATIVE_SECTION_ACCESS_READ |
@@ -290,7 +290,7 @@ class SyntheticXdnaProduct {
         .alignment = 16,
         .contents = iree_make_const_byte_span(code_.data(), code_.size()),
     };
-    sections_[1] = (loom_native_section_t){
+    sections_[1] = loom_native_section_t{
         .name = IREE_SV(".storage.first"),
         .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
         .access =
@@ -300,7 +300,7 @@ class SyntheticXdnaProduct {
         .contents = iree_const_byte_span_empty(),
         .reservation_length = 64,
     };
-    sections_[2] = (loom_native_section_t){
+    sections_[2] = loom_native_section_t{
         .name = IREE_SV(".storage.second"),
         .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
         .access =
@@ -313,7 +313,7 @@ class SyntheticXdnaProduct {
     placements_[0].memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM;
     placements_[1].memory_space = LOOM_XDNA_MEMORY_SPACE_DATA;
     placements_[2].memory_space = LOOM_XDNA_MEMORY_SPACE_DATA;
-    linked_tile_ = (loom_aie2p_linked_tile_t){
+    linked_tile_ = loom_aie2p_linked_tile_t{
         .assembly =
             {
                 .sections = sections_.data(),
@@ -326,7 +326,7 @@ class SyntheticXdnaProduct {
         .entry_section_index = 0,
         .entry_address = 0,
     };
-    entry_symbol_ = (loom_native_object_symbol_t){
+    entry_symbol_ = loom_native_object_symbol_t{
         .name = IREE_SV("kernel"),
         .section_contribution_index = 0,
         .section_offset = 0,
@@ -353,7 +353,7 @@ class SyntheticXdnaProduct {
     for (iree_host_size_t i = 0; i < entry_count; ++i) {
       names_.emplace_back("entry_" + std::to_string(i));
       for (iree_host_size_t j = 0; j < tile_count; ++j) {
-        tiles_[i * tile_count + j] = (loom_aie2p_xdna_tile_t){
+        tiles_[i * tile_count + j] = loom_aie2p_xdna_tile_t{
             .coordinate = {(uint16_t)(j / compute->row_count),
                            (uint16_t)(compute->first_row +
                                       j % compute->row_count)},
@@ -361,7 +361,7 @@ class SyntheticXdnaProduct {
             .linked_tile = &linked_tile_,
         };
       }
-      entries_[i] = (loom_aie2p_xdna_entry_t){
+      entries_[i] = loom_aie2p_xdna_entry_t{
           .name = iree_make_cstring_view(names_[i].c_str()),
           .column_count = (uint16_t)((tile_count + compute->row_count - 1u) /
                                      compute->row_count),
@@ -372,7 +372,7 @@ class SyntheticXdnaProduct {
           .tile_count = tile_count,
       };
     }
-    product_ = (loom_aie2p_xdna_product_t){
+    product_ = loom_aie2p_xdna_product_t{
         .device_profile = profile_,
         .entries = entries_.data(),
         .entry_count = entries_.size(),
@@ -706,7 +706,7 @@ TEST_F(XdnaProductTest, RejectsExactSectionHeaderOverflow) {
   std::vector<loom_native_section_t> linked_sections(kLinkedSectionCount);
   std::vector<loom_aie2p_linked_section_placement_t> linked_placements(
       kLinkedSectionCount);
-  linked_sections[0] = (loom_native_section_t){
+  linked_sections[0] = loom_native_section_t{
       .name = IREE_SV(".text.kernel"),
       .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
       .access =
@@ -717,7 +717,7 @@ TEST_F(XdnaProductTest, RejectsExactSectionHeaderOverflow) {
   };
   linked_placements[0].memory_space = LOOM_XDNA_MEMORY_SPACE_PROGRAM;
   for (iree_host_size_t i = 1; i < kLinkedSectionCount; ++i) {
-    linked_sections[i] = (loom_native_section_t){
+    linked_sections[i] = loom_native_section_t{
         .name = IREE_SV(".discard"),
         .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
         .access = LOOM_NATIVE_SECTION_ACCESS_NONE,

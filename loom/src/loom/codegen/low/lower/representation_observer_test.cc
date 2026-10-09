@@ -324,7 +324,7 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
     target_facts_.fact_type = &loom_test_target_fact_type;
     target_facts_.storage.bundle = *loom_test_target_bundles.values[1];
 
-    provider_ = (loom_low_lower_representation_provider_t){
+    provider_ = loom_low_lower_representation_provider_t{
         .relation = RelatesValues,
         .observe_boundary = ObserveBoundary,
         .observe_callable_boundary = ObserveCallableBoundary,
@@ -337,7 +337,7 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
         .relation_mask = LOOM_VALUE_RELATION_MASK_ALL,
         .user_data = this,
     };
-    source_plan_observer_ = (loom_low_lower_source_plan_observer_t){
+    source_plan_observer_ = loom_low_lower_source_plan_observer_t{
         .begin = BeginObservation,
         .observe = Observe,
         .end = EndObservation,
@@ -407,7 +407,7 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
     IREE_CHECK_OK(loom_builder_intern_string(builder, name, &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_CHECK_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return (loom_symbol_ref_t){
+    return loom_symbol_ref_t{
         .module_id = 0,
         .symbol_id = symbol_id,
     };

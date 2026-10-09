@@ -82,7 +82,7 @@ TEST(FileTest, WritesSegmentedByteSequenceInLogicalOrder) {
   ByteSequencePtr sequence_owner(sequence, iree_byte_sequence_release);
   iree_host_size_t segment_count = 0;
   IREE_ASSERT_OK(iree_byte_sequence_enumerate(
-      sequence, (iree_byte_sequence_segment_callback_t){
+      sequence, iree_byte_sequence_segment_callback_t{
                     .fn = CountSegment,
                     .user_data = &segment_count,
                 }));

@@ -113,12 +113,12 @@ void InitializeAddressabilityTestState(
   };
 
   state->reg_classes[0].name_string_ref = ADDRESSABILITY_STRING_REF(reg_gpr);
-  state->reg_class_alts[0] = (loom_low_reg_class_alt_t){
+  state->reg_class_alts[0] = loom_low_reg_class_alt_t{
       .reg_class_id = 0,
       .register_part_id = LOOM_LOW_REGISTER_PART_NONE,
       .flags = LOOM_LOW_REG_CLASS_ALT_FLAG_PREFERRED,
   };
-  state->operands[0] = (loom_low_operand_t){
+  state->operands[0] = loom_low_operand_t{
       .field_name_string_ref = ADDRESSABILITY_STRING_REF(field_dst),
       .encoding_field_id = {},
       .source_value_index = 0,
@@ -134,7 +134,7 @@ void InitializeAddressabilityTestState(
       .address_state_slot = {},
       .data_format_id = {},
   };
-  state->operands[1] = (loom_low_operand_t){
+  state->operands[1] = loom_low_operand_t{
       .field_name_string_ref = ADDRESSABILITY_STRING_REF(field_src),
       .encoding_field_id = {},
       .source_value_index = 0,
@@ -169,7 +169,7 @@ void InitializeAddressabilityTestState(
       loom_low_schedule_node_value_ordinals(&state->nodes[0]);
   value_ordinals[0] = 1;
   value_ordinals[1] = 0;
-  state->blocks[0] = (loom_low_schedule_block_t){
+  state->blocks[0] = loom_low_schedule_block_t{
       .block = &state->block,
       .node_start = 0,
       .node_count = 1,
@@ -188,7 +188,7 @@ void InitializeAddressabilityTestState(
   state->schedule.scheduled_node_count =
       IREE_ARRAYSIZE(state->scheduled_node_indices);
 
-  state->assignments[0] = (loom_low_allocation_assignment_t){
+  state->assignments[0] = loom_low_allocation_assignment_t{
       .value_id = 0,
       .descriptor_reg_class_id = 0,
       .flags = {},
@@ -199,7 +199,7 @@ void InitializeAddressabilityTestState(
       .location_base = 0,
       .location_count = 1,
   };
-  state->assignments[1] = (loom_low_allocation_assignment_t){
+  state->assignments[1] = loom_low_allocation_assignment_t{
       .value_id = 1,
       .descriptor_reg_class_id = 0,
       .flags = {},

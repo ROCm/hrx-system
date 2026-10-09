@@ -125,7 +125,7 @@ class CanonicalizerTest : public ::testing::Test {
     IREE_RETURN_IF_ERROR(loom_module_intern_string(module_, name, &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_RETURN_IF_ERROR(loom_module_add_symbol(module_, name_id, &symbol_id));
-    *out_symbol_ref = (loom_symbol_ref_t){
+    *out_symbol_ref = loom_symbol_ref_t{
         .module_id = 0,
         .symbol_id = symbol_id,
     };
@@ -537,7 +537,7 @@ TEST_F(CanonicalizerTest, FactRefinementBatchesVariadicRelations) {
                                              &constant_op));
     exact_values[i] = loom_index_constant_result(constant_op);
     result_types[i] = index_type;
-    predicates[i] = (loom_predicate_t){
+    predicates[i] = loom_predicate_t{
         .kind = LOOM_PREDICATE_LT,
         .arg_count = 2,
         .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_VALUE,

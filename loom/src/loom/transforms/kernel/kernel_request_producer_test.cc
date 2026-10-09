@@ -292,7 +292,7 @@ TEST_F(KernelRequestProducerTest,
   IREE_ASSERT_OK(loom_kernel_request_producer_publish(
       producer.get(), &environment, source_symbol_ordinal, sites,
       IREE_ARRAYSIZE(sites), &collection_options,
-      (loom_kernel_request_sink_t){
+      loom_kernel_request_sink_t{
           .publish = CaptureRequest,
           .user_data = &capture,
       },
@@ -355,7 +355,7 @@ TEST_F(KernelRequestProducerTest, StopsAfterSinkFailureBeforeMaterialization) {
                         loom_kernel_request_producer_publish(
                             producer.get(), &environment, source_symbol_ordinal,
                             sites, IREE_ARRAYSIZE(sites), &collection_options,
-                            (loom_kernel_request_sink_t){
+                            loom_kernel_request_sink_t{
                                 .publish = RejectRequest,
                                 .user_data = &state,
                             },

@@ -39,10 +39,10 @@ loom_value_fact_storage_schema_t EncodedSchema(
 loom_contract_view_payload_t PlainPayload(
     loom_contract_operand_role_t role,
     loom_contract_numeric_type_t numeric_type) {
-  return (loom_contract_view_payload_t){
+  return loom_contract_view_payload_t{
       .kind = LOOM_CONTRACT_VIEW_PAYLOAD_PLAIN_ELEMENT,
       .operand =
-          (loom_contract_operand_t){
+          loom_contract_operand_t{
               .role = role,
               .numeric_type = numeric_type,
           },
@@ -218,7 +218,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestFromPayloadFacts) {
                     LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, 6, 32);
 
   loom_contract_matrix_request_options_t options = {
-      .shape = (loom_contract_shape_t){.m = 16, .n = 16, .k = 128},
+      .shape = loom_contract_shape_t{.m = 16, .n = 16, .k = 128},
       .k_group_size = 1,
       .lhs = MatrixPayloadWithAuxiliaryData(LOOM_CONTRACT_OPERAND_ROLE_LHS,
                                             lhs_schema),
@@ -228,7 +228,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestFromPayloadFacts) {
       .result_numeric_type = LOOM_CONTRACT_NUMERIC_F32,
       .arithmetic = LOOM_CONTRACT_ARITHMETIC_MIXED_DOT,
       .fragment =
-          (loom_contract_fragment_t){
+          loom_contract_fragment_t{
               .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
               .vector_bit_width = {},
               .source_lane_count = {},
@@ -273,7 +273,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
   loom_contract_matrix_request_options_t options =
       {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
            // spans intervening work.
-  options.shape = (loom_contract_shape_t){.m = 0, .n = 16, .k = 128};
+  options.shape = loom_contract_shape_t{.m = 0, .n = 16, .k = 128};
   options.shape_value_refs.m = loom_contract_value_ref_from_value_id(42);
   options.k_group_size = 1;
   options.lhs =
@@ -283,7 +283,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
   options.accumulator_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
   options.result_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
   options.arithmetic = LOOM_CONTRACT_ARITHMETIC_FLOAT_DOT;
-  options.fragment = (loom_contract_fragment_t){
+  options.fragment = loom_contract_fragment_t{
       .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
       .vector_bit_width = {},
       .source_lane_count = {},
@@ -307,7 +307,7 @@ TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
 
 TEST(ContractStorageTest, BuildsPackedDotRequestFromPlainPayloadFacts) {
   loom_contract_matrix_request_options_t options = {
-      .shape = (loom_contract_shape_t){.m = 8, .n = 1, .k = 32},
+      .shape = loom_contract_shape_t{.m = 8, .n = 1, .k = 32},
       .k_group_size = 4,
       .lhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS,
                           LOOM_CONTRACT_NUMERIC_U8),
@@ -317,7 +317,7 @@ TEST(ContractStorageTest, BuildsPackedDotRequestFromPlainPayloadFacts) {
       .result_numeric_type = LOOM_CONTRACT_NUMERIC_I32,
       .arithmetic = LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT,
       .fragment =
-          (loom_contract_fragment_t){
+          loom_contract_fragment_t{
               .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
               .vector_bit_width = 256,
               .source_lane_count = 32,
@@ -342,7 +342,7 @@ TEST(ContractStorageTest, RejectsUnsupportedPayloadForOptimizedContract) {
   loom_contract_matrix_request_options_t options =
       {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
            // spans intervening work.
-  options.shape = (loom_contract_shape_t){.m = 16, .n = 16, .k = 128};
+  options.shape = loom_contract_shape_t{.m = 16, .n = 16, .k = 128};
   options.k_group_size = 1;
   options.lhs.kind = LOOM_CONTRACT_VIEW_PAYLOAD_UNSUPPORTED_STORAGE_SCHEMA;
   options.rhs =
@@ -372,7 +372,7 @@ TEST(ContractStorageTest, RejectsMissingAuxiliaryDataOperands) {
   loom_contract_matrix_request_options_t options =
       {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
            // spans intervening work.
-  options.shape = (loom_contract_shape_t){.m = 16, .n = 16, .k = 128};
+  options.shape = loom_contract_shape_t{.m = 16, .n = 16, .k = 128};
   options.k_group_size = 1;
   options.lhs = MatrixPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_schema);
   options.rhs = MatrixPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS, rhs_schema);

@@ -341,7 +341,7 @@ TEST_F(HostQueueCommandBufferProfilingTest,
       IREE_HAL_EXECUTION_STAGE_DISPATCH,
       iree_hal_make_buffer_ref(fixture.input_buffer, /*offset=*/0,
                                sizeof(uint32_t)),
-      (iree_hal_atomic_store_params_t){
+      iree_hal_atomic_store_params_t{
           .value = 5,
           .flags =
               IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,

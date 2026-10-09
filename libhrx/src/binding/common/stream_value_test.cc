@@ -716,7 +716,7 @@ TEST(StreamValueWaitLaneTest,
   IREE_ASSERT_OK(iree_hal_queue_atomic_wait(
       wait_queue, iree_hal_semaphore_list_empty(), wait_signal_list,
       target_buffer, /*target_offset=*/0,
-      (iree_hal_atomic_wait_params_t){
+      iree_hal_atomic_wait_params_t{
           .value = 1,
           .mask = UINT32_MAX,
           .flags =

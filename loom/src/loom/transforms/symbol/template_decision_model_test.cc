@@ -656,8 +656,8 @@ func.def public target(@application_target) @entry(%value: i32) -> (i32, i32) {
         references.template_demands.values[i];
     const loom_template_decision_model_t* model =
         loom_template_decision_model_lookup(
-            &models, (loom_symbol_ref_t){.module_id = 0,
-                                         .symbol_id = demand.family_symbol_id});
+            &models, loom_symbol_ref_t{.module_id = 0,
+                                       .symbol_id = demand.family_symbol_id});
     ASSERT_NE(model, nullptr);
     const loom_template_decision_site_t site = {
         .application_op = demand.apply_op,

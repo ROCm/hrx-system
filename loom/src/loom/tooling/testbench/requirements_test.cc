@@ -79,7 +79,7 @@ static iree_status_t QueryEnabled(
   IREE_RETURN_IF_ERROR(loom_testbench_requirement_read_optional_i64_attr(
       module, attrs, IREE_SV("enabled"), &present, &enabled));
   const bool enabled_predicate = present && enabled != 0;
-  *out_result = (loom_testbench_requirement_provider_result_t){
+  *out_result = loom_testbench_requirement_provider_result_t{
       .state = enabled_predicate
                    ? LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_SATISFIED
                    : LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNSATISFIED,
@@ -98,7 +98,7 @@ static iree_status_t QueryUnavailable(
   (void)user_data;
   (void)module;
   (void)attrs;
-  *out_result = (loom_testbench_requirement_provider_result_t){
+  *out_result = loom_testbench_requirement_provider_result_t{
       .state = LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNAVAILABLE,
       .provider_code = IREE_SV("fake_runtime_unavailable"),
       .display_message = IREE_SV("fake runtime unavailable"),

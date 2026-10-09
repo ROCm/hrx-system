@@ -1617,7 +1617,7 @@ class ReaderTest : public ::testing::Test {
         iree_make_const_byte_span(bytes.data(), bytes.size()),
         IREE_SV("test.loombc"), &context_, &block_pool_, metadata,
         /*module_ordinal=*/0,
-        (loom_bytecode_symbol_ordinal_list_t){
+        loom_bytecode_symbol_ordinal_list_t{
             .count = ordinals.size(),
             .ordinals = ordinals.data(),
         },

@@ -70,7 +70,7 @@ PassReportStorage::~PassReportStorage() {
 
 loom_pass_predicate_provider_t PassTestTargetPredicateProvider(
     PassTestPredicateCapture* capture) {
-  return (loom_pass_predicate_provider_t){
+  return loom_pass_predicate_provider_t{
       .verify = VerifyTargetPredicate,
       .evaluate = EvaluateTargetPredicate,
       .user_data = capture,
@@ -271,7 +271,7 @@ loom_pass_interpreter_options_t PassTestHarness::InterpreterOptions(
     loom_test_pass_trace_t* trace, iree_diagnostic_emitter_t diagnostic_emitter,
     loom_pass_report_t* report,
     loom_pass_predicate_provider_t predicate_provider) {
-  return (loom_pass_interpreter_options_t){
+  return loom_pass_interpreter_options_t{
       .block_pool = &block_pool_,
       .function_selector = {},
       .predicate_provider = predicate_provider,
@@ -286,7 +286,7 @@ loom_pass_tool_run_options_t PassTestHarness::ToolOptions(
     loom_test_pass_trace_t* trace,
     loom_pass_predicate_provider_t predicate_provider,
     loom_pass_environment_t environment) {
-  return (loom_pass_tool_run_options_t){
+  return loom_pass_tool_run_options_t{
       .registry = loom_test_pass_registry(),
       .environment = EnvironmentWithTrace(trace, environment),
       .function_versions = nullptr,

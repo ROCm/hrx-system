@@ -152,7 +152,7 @@ class LowLowerPassTest : public ::testing::Test {
     IREE_ASSERT(name_id != LOOM_STRING_ID_INVALID);
     const uint16_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT(symbol_id != LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   iree_status_t RunSourceToLow(

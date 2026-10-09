@@ -193,7 +193,7 @@ class VerifyTest : public ::testing::Test {
         loom_builder_intern_string(&builder_, IREE_SV("callee"), &name_id));
     uint16_t symbol_id = LOOM_SYMBOL_ID_INVALID;
     IREE_EXPECT_OK(loom_module_add_symbol(module_, name_id, &symbol_id));
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   loom_verify_result_t Verify() {
@@ -925,7 +925,7 @@ TEST_F(VerifyTest, OpAfterTerminatorReportsTerminatorLocation) {
   loom_op_t* func_op = nullptr;
   IREE_ASSERT_OK(loom_test_func_build(
       &builder_, 0, 0, 0,
-      (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id}, nullptr, 0,
+      loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id}, nullptr, 0,
       nullptr, 0, nullptr, 0, nullptr, 0, LOOM_LOCATION_UNKNOWN, &func_op));
   loom_builder_set_block(&builder_,
                          loom_region_entry_block(loom_test_func_body(func_op)));

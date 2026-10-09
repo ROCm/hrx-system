@@ -211,7 +211,7 @@ class LowContractQuerySourceMemoryTest : public ::testing::Test {
     loom_predicate_t* predicate = nullptr;
     IREE_CHECK_OK(iree_arena_allocate_array(
         &module_->arena, 1, sizeof(*predicate), (void**)&predicate));
-    *predicate = (loom_predicate_t){
+    *predicate = loom_predicate_t{
         .kind = LOOM_PREDICATE_RANGE,
         .arg_count = 3,
         .arg_tags = {LOOM_PRED_ARG_VALUE, LOOM_PRED_ARG_CONST,

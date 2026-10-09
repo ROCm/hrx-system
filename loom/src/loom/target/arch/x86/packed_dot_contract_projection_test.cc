@@ -27,10 +27,10 @@ loom_contract_arithmetic_t ArithmeticForAccumulator(
 loom_contract_view_payload_t PlainPayload(
     loom_contract_operand_role_t role,
     loom_contract_numeric_type_t numeric_type) {
-  return (loom_contract_view_payload_t){
+  return loom_contract_view_payload_t{
       .kind = LOOM_CONTRACT_VIEW_PAYLOAD_PLAIN_ELEMENT,
       .operand =
-          (loom_contract_operand_t){
+          loom_contract_operand_t{
               .role = role,
               .numeric_type = numeric_type,
           },

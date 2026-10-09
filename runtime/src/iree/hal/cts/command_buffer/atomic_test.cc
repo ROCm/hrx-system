@@ -197,7 +197,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
             IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
                 command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
                 IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
-                (iree_hal_atomic_wait_params_t){
+                iree_hal_atomic_wait_params_t{
                     .value = 0,
                     .mask = width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX
                                                               : UINT64_MAX,
@@ -211,7 +211,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
             IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
                 command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
                 IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
-                (iree_hal_atomic_store_params_t){
+                iree_hal_atomic_store_params_t{
                     .value = 1,
                     .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
                     .width = width,
@@ -222,7 +222,7 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
             IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
                 command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
                 IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
-                (iree_hal_atomic_rmw_params_t){
+                iree_hal_atomic_rmw_params_t{
                     .operand = 1,
                     .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
                              IREE_HAL_ATOMIC_FLAG_RELEASE,

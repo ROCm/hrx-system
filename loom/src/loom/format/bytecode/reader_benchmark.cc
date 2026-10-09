@@ -256,7 +256,7 @@ class TypePlanBytecodeFixture final : public SerializedBytecodeFixture {
     loom_op_t* declaration_op = nullptr;
     IgnoreStatusOrAbort(loom_test_decl_build(
         &builder, /*build_flags=*/0, /*visibility=*/0, /*cc=*/0,
-        (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id},
+        loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id},
         root_types.data(), root_types.size(), /*result_types=*/nullptr,
         /*result_count=*/0, /*tied_results=*/nullptr,
         /*tied_result_count=*/0, LOOM_LOCATION_UNKNOWN, &declaration_op));
@@ -573,7 +573,7 @@ static void BenchmarkMaterializeSelectedCatalog(benchmark::State& state) {
                                   fixture.bytes().size()),
         IREE_SV("catalog_benchmark.loombc"), fixture.context(), &block_pool,
         &file_metadata, /*module_ordinal=*/0,
-        (loom_bytecode_symbol_ordinal_list_t){
+        loom_bytecode_symbol_ordinal_list_t{
             .count = ordinals.size(),
             .ordinals = ordinals.data(),
         },

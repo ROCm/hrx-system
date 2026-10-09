@@ -1516,7 +1516,7 @@ TEST_F(AqlBlockProcessorRecordedTest, RecordedAtomicsEmitKernelPackets) {
       IREE_HAL_EXECUTION_STAGE_ATOMIC,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/0,
                                         /*length=*/4),
-      (iree_hal_atomic_wait_params_t){
+      iree_hal_atomic_wait_params_t{
           .value = 5,
           .mask = 0xFF,
           .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
@@ -1528,7 +1528,7 @@ TEST_F(AqlBlockProcessorRecordedTest, RecordedAtomicsEmitKernelPackets) {
       IREE_HAL_EXECUTION_STAGE_ATOMIC,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/8,
                                         /*length=*/8),
-      (iree_hal_atomic_store_params_t){
+      iree_hal_atomic_store_params_t{
           .value = 9,
           .flags =
               IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
@@ -1539,7 +1539,7 @@ TEST_F(AqlBlockProcessorRecordedTest, RecordedAtomicsEmitKernelPackets) {
       IREE_HAL_EXECUTION_STAGE_HOST,
       iree_hal_make_indirect_buffer_ref(/*buffer_slot=*/0, /*offset=*/16,
                                         /*length=*/4),
-      (iree_hal_atomic_rmw_params_t){
+      iree_hal_atomic_rmw_params_t{
           .operand = 11,
           .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
           .width = IREE_HAL_ATOMIC_WIDTH_32,
@@ -1653,7 +1653,7 @@ TEST_F(AqlBlockProcessorRecordedTest,
       command_buffer.get(), IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
       IREE_HAL_EXECUTION_STAGE_HOST,
       iree_hal_make_buffer_ref(buffer.get(), /*offset=*/8, /*length=*/8),
-      (iree_hal_atomic_store_params_t){
+      iree_hal_atomic_store_params_t{
           .value = 17,
           .flags =
               IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,

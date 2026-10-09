@@ -127,11 +127,11 @@ TEST_F(HalInvocationTest,
   loom_run_hal_invocation_request_initialize(&request);
   request.runtime = &runtime;
   request.artifact = &executable;
-  request.bindings = (loom_run_hal_binding_specs_t){
+  request.bindings = loom_run_hal_binding_specs_t{
       .values = bindings,
       .count = IREE_ARRAYSIZE(bindings),
   };
-  request.expected_bindings = (loom_run_hal_binding_specs_t){
+  request.expected_bindings = loom_run_hal_binding_specs_t{
       .values = expected_bindings,
       .count = IREE_ARRAYSIZE(expected_bindings),
   };

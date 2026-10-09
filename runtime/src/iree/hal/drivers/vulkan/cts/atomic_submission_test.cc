@@ -105,7 +105,7 @@ TEST_P(VulkanAtomicSubmissionTest,
           status = iree_hal_queue_atomic_wait(
               atomic_queue, iree_hal_semaphore_list_empty(), signal,
               target_buffer, /*target_offset=*/0,
-              (iree_hal_atomic_wait_params_t){
+              iree_hal_atomic_wait_params_t{
                   .value = 0,
                   .mask = UINT32_MAX,
                   .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
@@ -119,7 +119,7 @@ TEST_P(VulkanAtomicSubmissionTest,
           status = iree_hal_queue_atomic_store(
               atomic_queue, iree_hal_semaphore_list_empty(), signal,
               target_buffer, /*target_offset=*/0,
-              (iree_hal_atomic_store_params_t){
+              iree_hal_atomic_store_params_t{
                   .value = 1,
                   .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
                   .width = IREE_HAL_ATOMIC_WIDTH_32,
@@ -131,7 +131,7 @@ TEST_P(VulkanAtomicSubmissionTest,
           status = iree_hal_queue_atomic_rmw(
               atomic_queue, iree_hal_semaphore_list_empty(), signal,
               target_buffer, /*target_offset=*/0,
-              (iree_hal_atomic_rmw_params_t){
+              iree_hal_atomic_rmw_params_t{
                   .operand = 1,
                   .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
                            IREE_HAL_ATOMIC_FLAG_RELEASE,
@@ -162,7 +162,7 @@ TEST_P(VulkanAtomicSubmissionTest,
           IREE_ASSERT_OK(iree_hal_command_buffer_atomic_wait(
               command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
               IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
-              (iree_hal_atomic_wait_params_t){
+              iree_hal_atomic_wait_params_t{
                   .value = 0,
                   .mask = UINT32_MAX,
                   .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
@@ -175,7 +175,7 @@ TEST_P(VulkanAtomicSubmissionTest,
           IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
               command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
               IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
-              (iree_hal_atomic_store_params_t){
+              iree_hal_atomic_store_params_t{
                   .value = 1,
                   .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
                   .width = IREE_HAL_ATOMIC_WIDTH_32,
@@ -186,7 +186,7 @@ TEST_P(VulkanAtomicSubmissionTest,
           IREE_ASSERT_OK(iree_hal_command_buffer_atomic_rmw(
               command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
               IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
-              (iree_hal_atomic_rmw_params_t){
+              iree_hal_atomic_rmw_params_t{
                   .operand = 1,
                   .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
                            IREE_HAL_ATOMIC_FLAG_RELEASE,

@@ -79,11 +79,11 @@ TEST(TargetLowProviderVerifyTest, AcceptsProviderRows) {
 TEST(TargetLowProviderVerifyTest, RejectsMissingTables) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_target_low_legality_provider_list_verify(
-                            (loom_target_low_legality_provider_list_t){
+                            loom_target_low_legality_provider_list_t{
                                 .count = 1, .values = NULL}));
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_target_low_packet_diagnostic_provider_list_verify(
-                            (loom_target_low_packet_diagnostic_provider_list_t){
+                            loom_target_low_packet_diagnostic_provider_list_t{
                                 .count = 1, .values = NULL}));
 }
 

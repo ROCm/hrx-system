@@ -204,7 +204,7 @@ class AtomicTargetValidationTest : public ::testing::Test {
   static iree_hal_atomic_wait_params_t WaitParams(
       iree_hal_atomic_target_error_mode_t target_error_mode,
       iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32) {
-    return (iree_hal_atomic_wait_params_t){
+    return iree_hal_atomic_wait_params_t{
         .value = 1,
         .mask = width == IREE_HAL_ATOMIC_WIDTH_32 ? UINT32_MAX : UINT64_MAX,
         .flags = IREE_HAL_ATOMIC_FLAG_NONE,
@@ -217,7 +217,7 @@ class AtomicTargetValidationTest : public ::testing::Test {
   static iree_hal_atomic_store_params_t StoreParams(
       iree_hal_atomic_target_error_mode_t target_error_mode,
       iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32) {
-    return (iree_hal_atomic_store_params_t){
+    return iree_hal_atomic_store_params_t{
         .value = 1,
         .flags = IREE_HAL_ATOMIC_FLAG_NONE,
         .width = width,
@@ -228,7 +228,7 @@ class AtomicTargetValidationTest : public ::testing::Test {
   static iree_hal_atomic_rmw_params_t RmwParams(
       iree_hal_atomic_target_error_mode_t target_error_mode,
       iree_hal_atomic_width_t width = IREE_HAL_ATOMIC_WIDTH_32) {
-    return (iree_hal_atomic_rmw_params_t){
+    return iree_hal_atomic_rmw_params_t{
         .operand = 1,
         .flags = IREE_HAL_ATOMIC_FLAG_NONE,
         .width = width,

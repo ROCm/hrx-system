@@ -60,7 +60,7 @@ static iree_status_t CaptureKernelRequest(
   IREE_RETURN_IF_ERROR(loom_kernel_request_materialize(
       request->kernel_request, capture->block_pool, iree_allocator_system(),
       &product));
-  capture->requests.push_back((CapturedKernelRequest){
+  capture->requests.push_back(CapturedKernelRequest{
       .entry_requirement_index = request->entry_requirement_index,
       .source_symbol_ordinal = request->kernel_request->source_symbol_ordinal,
       .class_ordinal = request->kernel_request->class_ordinal,
@@ -198,7 +198,7 @@ class CmdProgramPlanTest : public ::testing::Test {
     IREE_ASSERT_NE(name_id, LOOM_STRING_ID_INVALID);
     const loom_symbol_id_t symbol_id = loom_module_find_symbol(module, name_id);
     IREE_ASSERT_NE(symbol_id, LOOM_SYMBOL_ID_INVALID);
-    return (loom_symbol_ref_t){.module_id = 0, .symbol_id = symbol_id};
+    return loom_symbol_ref_t{.module_id = 0, .symbol_id = symbol_id};
   }
 
   // Shared arena block pool backing source and prepared modules.

@@ -159,12 +159,12 @@ class ContractVectorTest : public ::testing::Test {
   }
 
   loom_contract_vector_mma_options_t GpuMatrixMmaOptions() {
-    return (loom_contract_vector_mma_options_t){
+    return loom_contract_vector_mma_options_t{
         .fragment_projection =
             LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_EXPLICIT,
         .k_group_size = 1,
         .fragment =
-            (loom_contract_fragment_t){
+            loom_contract_fragment_t{
                 .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
                 .vector_bit_width = {},
                 .source_lane_count = {},
@@ -177,7 +177,7 @@ class ContractVectorTest : public ::testing::Test {
   }
 
   loom_contract_vector_mma_options_t PackedVectorMmaOptions() {
-    return (loom_contract_vector_mma_options_t){
+    return loom_contract_vector_mma_options_t{
         .fragment_projection =
             LOOM_CONTRACT_VECTOR_MMA_FRAGMENT_PROJECTION_PACKED_VECTOR,
         .k_group_size = 0,

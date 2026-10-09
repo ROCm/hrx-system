@@ -206,7 +206,7 @@ TEST(CleanupPatternsTest, ResolvesCanonicalizerContextThroughCapability) {
   const loom_cleanup_pass_capability_t capability =
       loom_cleanup_pass_capability_make(
           /*pattern_registry=*/nullptr,
-          (loom_cleanup_canonicalizer_context_resolver_t){
+          loom_cleanup_canonicalizer_context_resolver_t{
               .fn = ResolveCanonicalizerContext,
               .user_data = &state,
           });

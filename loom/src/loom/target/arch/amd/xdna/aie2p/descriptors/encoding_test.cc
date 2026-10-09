@@ -62,7 +62,7 @@ iree_status_t EncodeDescriptor(
       return iree_make_status(IREE_STATUS_NOT_FOUND,
                               "AIE2P test register was not found");
     }
-    assignments[i] = (loom_low_allocation_assignment_t){
+    assignments[i] = loom_low_allocation_assignment_t{
         .value_id = {},
         .descriptor_reg_class_id =
             descriptor_set->reg_class_alts[operand->reg_class_alt_start]

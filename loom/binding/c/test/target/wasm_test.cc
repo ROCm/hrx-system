@@ -181,7 +181,7 @@ loomc_status_t OpenTraceArtifact(void* user_data,
                               "-" + point + "-" + ToString(event->pass_key) +
                               ".loom";
   artifacts->open_contents.clear();
-  *out_artifact = (loomc_pass_trace_artifact_t){
+  *out_artifact = loomc_pass_trace_artifact_t{
       .reference = loomc_make_string_view(artifacts->open_reference.data(),
                                           artifacts->open_reference.size()),
       .sink =
