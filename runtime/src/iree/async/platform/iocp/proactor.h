@@ -453,6 +453,14 @@ typedef enum iree_async_iocp_wait_cancel_result_e {
   IREE_ASYNC_IOCP_WAIT_CANCEL_PUBLISHED,
 } iree_async_iocp_wait_cancel_result_t;
 
+// Finishes a wait cancellation attempt after native reachability and
+// registration cleanup have been attempted. Publishes |result| independently
+// of |cleanup_status| and clears the registration only when cleanup succeeded.
+iree_status_t iree_async_proactor_iocp_finish_wait_cancel_attempt(
+    iree_async_iocp_carrier_t* carrier,
+    iree_async_iocp_wait_cancel_result_t result, iree_status_t cleanup_status,
+    iree_async_iocp_wait_cancel_result_t* out_result);
+
 // Cancels a native wait registration and joins its publishing callback.
 // |out_result| classifies native reachability even when handle cleanup fails.
 // An unresolved result always retains the registration and its owner graph.

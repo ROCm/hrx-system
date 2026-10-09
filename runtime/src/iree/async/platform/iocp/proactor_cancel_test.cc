@@ -14,8 +14,6 @@ namespace {
 
 static constexpr LONG kNativeCancellationFailure =
     static_cast<LONG>(0xC000000DL);
-static constexpr LONG kNativeCompletionPublished =
-    static_cast<LONG>(0x00000103L);
 
 static LONG NTAPI ReturnCancellationFailure(HANDLE handle,
                                             BOOLEAN remove_packet) {
@@ -28,13 +26,6 @@ static LONG NTAPI ReturnWithdrawal(HANDLE handle, BOOLEAN remove_packet) {
   (void)handle;
   (void)remove_packet;
   return 0;
-}
-
-static LONG NTAPI ReturnPublishedCompletion(HANDLE handle,
-                                            BOOLEAN remove_packet) {
-  (void)handle;
-  (void)remove_packet;
-  return kNativeCompletionPublished;
 }
 
 struct CompletionState {
@@ -137,38 +128,36 @@ TEST(IocpWaitCancellationTest, NativeWithdrawalClosesRegistration) {
   EXPECT_EQ(carrier.data.event_wait.wait_handle, nullptr);
 }
 
-TEST(IocpWaitCancellationTest, CloseFailurePreservesPublishedResult) {
-  iree_async_proactor_iocp_t proactor = {};
-  proactor.nt_wait_api.available = true;
-  proactor.nt_wait_api.NtCancelWaitCompletionPacket = ReturnPublishedCompletion;
+TEST(IocpWaitCancellationTest, CleanupFailurePreservesPublishedResult) {
   iree_async_iocp_carrier_t carrier = {};
-  carrier.data.event_wait.wait_handle = INVALID_HANDLE_VALUE;
+  carrier.data.event_wait.wait_handle = reinterpret_cast<HANDLE>(1);
   iree_async_iocp_wait_cancel_result_t result =
       IREE_ASYNC_IOCP_WAIT_CANCEL_UNRESOLVED;
 
-  iree_status_t status =
-      iree_async_proactor_iocp_cancel_wait(&proactor, &carrier, &result);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_async_proactor_iocp_finish_wait_cancel_attempt(
+          &carrier, IREE_ASYNC_IOCP_WAIT_CANCEL_PUBLISHED,
+          iree_status_from_code(IREE_STATUS_PERMISSION_DENIED), &result));
 
-  EXPECT_FALSE(iree_status_is_ok(status));
-  iree_status_free(status);
   EXPECT_EQ(result, IREE_ASYNC_IOCP_WAIT_CANCEL_PUBLISHED);
-  EXPECT_EQ(carrier.data.event_wait.wait_handle, INVALID_HANDLE_VALUE);
+  EXPECT_EQ(carrier.data.event_wait.wait_handle, reinterpret_cast<HANDLE>(1));
 }
 
-TEST(IocpWaitCancellationTest, LegacyUnregisterFailureIsUnresolved) {
-  iree_async_proactor_iocp_t proactor = {};
+TEST(IocpWaitCancellationTest, CleanupFailurePreservesUnresolvedRegistration) {
   iree_async_iocp_carrier_t carrier = {};
-  carrier.data.event_wait.wait_handle = INVALID_HANDLE_VALUE;
+  carrier.data.event_wait.wait_handle = reinterpret_cast<HANDLE>(1);
   iree_async_iocp_wait_cancel_result_t result =
       IREE_ASYNC_IOCP_WAIT_CANCEL_WITHDRAWN;
 
-  iree_status_t status =
-      iree_async_proactor_iocp_cancel_wait(&proactor, &carrier, &result);
+  IREE_EXPECT_STATUS_IS(
+      IREE_STATUS_PERMISSION_DENIED,
+      iree_async_proactor_iocp_finish_wait_cancel_attempt(
+          &carrier, IREE_ASYNC_IOCP_WAIT_CANCEL_UNRESOLVED,
+          iree_status_from_code(IREE_STATUS_PERMISSION_DENIED), &result));
 
-  EXPECT_FALSE(iree_status_is_ok(status));
-  iree_status_free(status);
   EXPECT_EQ(result, IREE_ASYNC_IOCP_WAIT_CANCEL_UNRESOLVED);
-  EXPECT_EQ(carrier.data.event_wait.wait_handle, INVALID_HANDLE_VALUE);
+  EXPECT_EQ(carrier.data.event_wait.wait_handle, reinterpret_cast<HANDLE>(1));
 }
 
 TEST(IocpWaitCancellationTest, DestructionRetainsUnresolvedCarrier) {

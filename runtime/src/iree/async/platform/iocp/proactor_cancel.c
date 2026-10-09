@@ -33,6 +33,17 @@ iree_status_t iree_async_proactor_iocp_cancel_wait_packet(
   return iree_ok_status();
 }
 
+iree_status_t iree_async_proactor_iocp_finish_wait_cancel_attempt(
+    iree_async_iocp_carrier_t* carrier,
+    iree_async_iocp_wait_cancel_result_t result, iree_status_t cleanup_status,
+    iree_async_iocp_wait_cancel_result_t* out_result) {
+  *out_result = result;
+  if (iree_status_is_ok(cleanup_status)) {
+    carrier->data.event_wait.wait_handle = NULL;
+  }
+  return cleanup_status;
+}
+
 iree_status_t iree_async_proactor_iocp_cancel_wait(
     iree_async_proactor_iocp_t* proactor, iree_async_iocp_carrier_t* carrier,
     iree_async_iocp_wait_cancel_result_t* out_result) {
@@ -49,32 +60,40 @@ iree_status_t iree_async_proactor_iocp_cancel_wait(
     bool withdrawn = false;
     IREE_RETURN_IF_ERROR(iree_async_proactor_iocp_cancel_wait_packet(
         proactor, (uintptr_t)wait_handle, &withdrawn));
-    *out_result = withdrawn ? IREE_ASYNC_IOCP_WAIT_CANCEL_WITHDRAWN
-                            : IREE_ASYNC_IOCP_WAIT_CANCEL_PUBLISHED;
+    iree_async_iocp_wait_cancel_result_t result =
+        withdrawn ? IREE_ASYNC_IOCP_WAIT_CANCEL_WITHDRAWN
+                  : IREE_ASYNC_IOCP_WAIT_CANCEL_PUBLISHED;
+    iree_status_t cleanup_status = iree_ok_status();
     if (!CloseHandle(wait_handle)) {
       DWORD error = GetLastError();
-      return iree_make_status(iree_status_code_from_win32_error(error),
-                              "CloseHandle failed for wait completion packet: "
-                              "%lu",
-                              (unsigned long)error);
+      cleanup_status =
+          iree_make_status(iree_status_code_from_win32_error(error),
+                           "CloseHandle failed for wait completion packet: %lu",
+                           (unsigned long)error);
     }
+    return iree_async_proactor_iocp_finish_wait_cancel_attempt(
+        carrier, result, cleanup_status, out_result);
   } else {
     // Only joins the short callback that publishes a completion. It never
     // waits for peer signaling or poll progress and cannot form a poll cycle.
     if (!UnregisterWaitEx(wait_handle, INVALID_HANDLE_VALUE)) {
       DWORD error = GetLastError();
-      return iree_make_status(iree_status_code_from_win32_error(error),
-                              "UnregisterWaitEx failed: %lu",
-                              (unsigned long)error);
+      return iree_async_proactor_iocp_finish_wait_cancel_attempt(
+          carrier, IREE_ASYNC_IOCP_WAIT_CANCEL_UNRESOLVED,
+          iree_make_status(iree_status_code_from_win32_error(error),
+                           "UnregisterWaitEx failed: %lu",
+                           (unsigned long)error),
+          out_result);
     }
-    *out_result = iree_atomic_load(&carrier->fallback_completion_state,
-                                   iree_memory_order_acquire) ==
-                          IREE_ASYNC_IOCP_FALLBACK_COMPLETION_NONE
-                      ? IREE_ASYNC_IOCP_WAIT_CANCEL_WITHDRAWN
-                      : IREE_ASYNC_IOCP_WAIT_CANCEL_PUBLISHED;
+    iree_async_iocp_wait_cancel_result_t result =
+        iree_atomic_load(&carrier->fallback_completion_state,
+                         iree_memory_order_acquire) ==
+                IREE_ASYNC_IOCP_FALLBACK_COMPLETION_NONE
+            ? IREE_ASYNC_IOCP_WAIT_CANCEL_WITHDRAWN
+            : IREE_ASYNC_IOCP_WAIT_CANCEL_PUBLISHED;
+    return iree_async_proactor_iocp_finish_wait_cancel_attempt(
+        carrier, result, iree_ok_status(), out_result);
   }
-  carrier->data.event_wait.wait_handle = NULL;
-  return iree_ok_status();
 }
 
 void iree_async_proactor_iocp_release_wait_carrier(
