@@ -691,6 +691,8 @@ void loom_low_schedule_candidate_policy_select(
     return;
   }
   const uint8_t source_nominee_count = nominee_count;
+  const loom_low_schedule_candidate_score_t latency_window_source_score =
+      out_selection->chosen_score;
   const uint16_t minimum_recovery_latency_cycles =
       recover_latency_window
           ? out_selection->chosen_score.dependency_latency_cycles
@@ -717,6 +719,11 @@ void loom_low_schedule_candidate_policy_select(
         minimum_recovery_latency_cycles;
     if (nominee_scores[i].latency_cycles < minimum_recovery_latency_cycles &&
         !replenishes_non_growing_latency_window) {
+      continue;
+    }
+    if (recover_latency_window &&
+        loom_low_schedule_compare_candidate_pressure(
+            &nominee_scores[i], &latency_window_source_score) > 0) {
       continue;
     }
     if (iree_any_bit_set(

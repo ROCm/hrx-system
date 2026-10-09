@@ -887,6 +887,46 @@ low.func.def target<test.low.core>(@test_target) @resource_stall_extends_ready_l
 }
 
 // ====
+// The scalar chain fills the first load's latency before the fence, leaving 16
+// zero-stall lane extractions in the bounded source window. The later load is
+// attractive to latency recovery but opens a larger live range, so one lane
+// must issue before the load enters the ordinary source window.
+// RUN: emit low-schedule-query @resource_stall_keeps_pressure_growth_outside_latency_window strategy=resource-stall order=0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @resource_stall_keeps_pressure_growth_outside_latency_window(%ptr0: reg<test.ptr>, %ptr1: reg<test.ptr>, %lhs: reg<test.i32>, %rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32 x4>, reg<test.i32>) asm {
+  %load0 = test.load.v4i32 %ptr0
+  %gap0 = test.add.i32 %lhs, %rhs
+  %gap1 = test.add.i32 %gap0, %rhs
+  %gap2 = test.add.i32 %gap1, %rhs
+  %gap3 = test.add.i32 %gap2, %rhs
+  %gap4 = test.add.i32 %gap3, %rhs
+  low.schedule.fence
+  %lane0 = test.extract_lane.i32 %load0, 0
+  %lane1 = test.extract_lane.i32 %load0, 1
+  %lane2 = test.extract_lane.i32 %load0, 2
+  %lane3 = test.extract_lane.i32 %load0, 3
+  %lane4 = test.extract_lane.i32 %load0, 0
+  %lane5 = test.extract_lane.i32 %load0, 1
+  %lane6 = test.extract_lane.i32 %load0, 2
+  %lane7 = test.extract_lane.i32 %load0, 3
+  %lane8 = test.extract_lane.i32 %load0, 0
+  %lane9 = test.extract_lane.i32 %load0, 1
+  %lane10 = test.extract_lane.i32 %load0, 2
+  %lane11 = test.extract_lane.i32 %load0, 3
+  %lane12 = test.extract_lane.i32 %load0, 0
+  %lane13 = test.extract_lane.i32 %load0, 1
+  %lane14 = test.extract_lane.i32 %load0, 2
+  %lane15 = test.extract_lane.i32 %load0, 3
+  %load1 = test.load.v4i32 %ptr1
+  return %lane15, %load1, %gap4
+}
+
+// ----
+block 0 order: 0, 1, 2, 3, 4, 5, 6, 7, 23, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22
+
+// ====
 // RUN: emit low-schedule-json @resource_stall_advances_non_growing_latency_window strategy=resource-stall diagnostics=candidates output=none
 
 test.target<low_core> @test_target
