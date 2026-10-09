@@ -1298,10 +1298,11 @@ def gfx125x_processor_info(
 
 # Floating memory capability provenance: AMD GPU atomics operation support
 # (rocm.docs.amd.com/en/latest/reference/gpu-atomics-operation.html), RDNA4 ISA
-# chapter 13, and LLVM AgentScopeFineGrainedRemoteMemoryAtomics /
-# EmulatedSystemScopeAtomics. GFX11.7's newer VALU does not upgrade its memory
-# atomics. CDNA LDS number-extrema semantics do not establish numeric
-# preference for signaling NaNs, so that guarantee is absent.
+# chapter 13, and qualified hardware execution. GFX11.7's newer VALU does not
+# upgrade its memory atomics. CDNA3 F32 subnormal preservation is qualified on
+# gfx942; CDNA4 remains conservative until the same contract is qualified on
+# gfx950. CDNA LDS number-extrema semantics do not establish numeric preference
+# for signaling NaNs, so that guarantee is absent.
 AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
     AmdgpuDescriptorSetInfo(
         generator_target="cdna3",
@@ -1432,7 +1433,6 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         flags=(
             AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING
             | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_FLOAT_AGENT_MEMORY
-            | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_F32_ADD_DENORMALS
             | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_STORE_DATA_WAIT_STATES
         ),
         buffer_resource=AmdgpuDescriptorSetBufferResourceInfo(
@@ -1454,7 +1454,6 @@ AMDGPU_DESCRIPTOR_SET_INFOS: tuple[AmdgpuDescriptorSetInfo, ...] = (
         flags=(
             AMDGPU_DESCRIPTOR_SET_INFO_FLAG_DESCRIPTOR_PACKET_ENCODING
             | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_FLOAT_AGENT_MEMORY
-            | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_F32_ADD_DENORMALS
             | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_STORE_DATA_WAIT_STATES
         ),
         storage_generator_target="cdna3",
@@ -2699,6 +2698,15 @@ def validate_amdgpu_generic_contracts(
         _validate_amdgpu_generic_descriptor_contract(
             descriptor_set, exact_member_descriptor_sets
         )
+
+        portable_descriptor_flags = exact_member_descriptor_sets[0].flags
+        for member_descriptor_set in exact_member_descriptor_sets[1:]:
+            portable_descriptor_flags &= member_descriptor_set.flags
+        if descriptor_set.flags != portable_descriptor_flags:
+            raise ValueError(
+                f"AMDGPU generic descriptor set {descriptor_set.key} flags "
+                "do not match the member intersection"
+            )
 
         portable_flags = exact_members[0].flags
         for member in exact_members[1:]:

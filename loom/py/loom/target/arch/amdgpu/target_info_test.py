@@ -25,6 +25,7 @@ from loom.target.arch.amdgpu.target_catalog import (
     AMDGPU_TARGET_OVERLAY_INFOS,
 )
 from loom.target.arch.amdgpu.target_info import (
+    AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_F32_ADD_DENORMALS,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_OCP_FP8_NONCANONICAL_NAN,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_ARITHMETIC,
     AMDGPU_DESCRIPTOR_SET_INFO_FLAG_NATIVE_SCALAR_FLOAT_COMPARE,
@@ -463,6 +464,22 @@ def test_generic_contracts_are_portable_member_intersections() -> None:
     validate_amdgpu_generic_contracts(
         AMDGPU_PROCESSOR_INFOS, AMDGPU_DESCRIPTOR_SET_INFOS
     )
+
+
+def test_generic_contracts_reject_nonportable_descriptor_flags() -> None:
+    descriptor_sets = tuple(
+        replace(
+            info,
+            flags=(
+                info.flags | AMDGPU_DESCRIPTOR_SET_INFO_FLAG_ATOMIC_F32_ADD_DENORMALS
+            ),
+        )
+        if info.generator_target == "gfx9_4_generic"
+        else info
+        for info in AMDGPU_DESCRIPTOR_SET_INFOS
+    )
+    with _raises_value_error("flags do not match the member intersection"):
+        validate_amdgpu_generic_contracts(AMDGPU_PROCESSOR_INFOS, descriptor_sets)
 
 
 def test_generic_contracts_reject_different_ordering_with_same_cache_encoding() -> None:

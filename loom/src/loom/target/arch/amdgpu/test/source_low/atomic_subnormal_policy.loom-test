@@ -1,0 +1,160 @@
+// RUN: emit source-low target=amdgpu:gfx942 output=low
+
+func.def @native_atomic_add_f32_noftz(%storage: buffer, %value: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %view = buffer.view %global[%base] : buffer -> view<1xf32>
+  %old = view.atomic.rmw<addf, noftz> %value, %view[0] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.cdna3.core> abi(hal_kernel) @native_atomic_add_f32_noftz(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %10 = v_mov_b32 0
+  %old = global_atomic_add_f32_rtn_saddr %10, %value, %view
+  return %old
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1200 output=low
+
+func.def @native_atomic_add_f32_noftz(%storage: buffer, %value: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %view = buffer.view %global[%base] : buffer -> view<1xf32>
+  %old = view.atomic.rmw<addf, noftz> %value, %view[0] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna4.core> abi(hal_kernel) @native_atomic_add_f32_noftz(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %10 = v_mov_b32 0
+  %old = global_atomic_add_f32_rtn_saddr %10, %value, %view {scope = 2}
+  return %old
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx950 output=low
+
+func.def @cas_atomic_add_f32_noftz(%storage: buffer, %value: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %view = buffer.view %global[%base] : buffer -> view<1xf32>
+  %old = view.atomic.rmw<addf, noftz> %value, %view[0] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.cdna4.core> abi(hal_kernel) @cas_atomic_add_f32_noftz(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %23 = v_mov_b32 0
+  %29 = s_mov_b64_exec_read
+  low.br ^_bb1(%23: reg<amdgpu.vgpr>)
+^_bb1(%20: reg<amdgpu.vgpr>):
+  %24 = v_add_f32 %20, %value
+  %26 = concat(%24, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %27 = global_atomic_cmpswap_b32_rtn_saddr %23, %26, %view
+  %28 = v_cmp_ne_i32 %27, %20
+  %30, %31 = s_and_saveexec_b64 %28
+  low.cond_br %31, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb1(%27: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %29
+  return %27
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx9-4-generic output=low
+
+func.def @cas_atomic_add_f32_noftz(%storage: buffer, %value: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %view = buffer.view %global[%base] : buffer -> view<1xf32>
+  %old = view.atomic.rmw<addf, noftz> %value, %view[0] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.gfx9_4.generic.core> abi(hal_kernel) @cas_atomic_add_f32_noftz(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %23 = v_mov_b32 0
+  %29 = s_mov_b64_exec_read
+  low.br ^_bb1(%23: reg<amdgpu.vgpr>)
+^_bb1(%20: reg<amdgpu.vgpr>):
+  %24 = v_add_f32 %20, %value
+  %26 = concat(%24, %20) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %27 = global_atomic_cmpswap_b32_rtn_saddr %23, %26, %view
+  %28 = v_cmp_ne_i32 %27, %20
+  %30, %31 = s_and_saveexec_b64 %28
+  low.cond_br %31, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb1(%27: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %29
+  return %27
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx9-4-generic output=low
+
+func.def @native_atomic_add_f32_default(%storage: buffer, %value: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %view = buffer.view %global[%base] : buffer -> view<1xf32>
+  %old = view.atomic.rmw<addf> %value, %view[0] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.gfx9_4.generic.core> abi(hal_kernel) @native_atomic_add_f32_default(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %10 = v_mov_b32 0
+  %old = global_atomic_add_f32_rtn_saddr %10, %value, %view
+  return %old
+}
+
+// ====
+// RUN: emit source-low target=amdgpu:gfx1100 output=low
+
+func.def @cas_atomic_add_f32_noftz(%storage: buffer, %value: f32) -> (f32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %storage : buffer
+  %view = buffer.view %global[%base] : buffer -> view<1xf32>
+  %old = view.atomic.rmw<addf, noftz> %value, %view[0] {ordering = relaxed, scope = device} : f32, view<1xf32> -> f32
+  func.return %old : f32
+}
+
+// ----
+low.func.def target<amdgpu.rdna3.core> abi(hal_kernel) @cas_atomic_add_f32_noftz(%value: reg<amdgpu.vgpr>) -> (reg<amdgpu.vgpr>) asm {
+  %view = resource<hal_binding> {extent = 4, index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %23 = v_mov_b32 0
+  %34 = s_mov_b64_exec_read
+  low.br ^_bb1(%23: reg<amdgpu.vgpr>)
+^_bb1(%20: reg<amdgpu.vgpr>):
+  %24 = v_add_f32 %20, %value
+  %26 = s_mov_b32 0
+  %37 = slice %view[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %38 = slice %view[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %39 = s_mov_b32 65535
+  %40 = s_and_b32 %38, %39
+  %41 = concat(%37, %40) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %42 = s_mov_b32 4
+  %43 = s_mov_b32 822173696
+  %44 = concat(%41, %42, %43) : (reg<amdgpu.sgpr x2>, reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x4>
+  %28 = v_mov_b32_copy %20
+  %29 = v_mov_b32_copy %24
+  %30 = concat(%29, %28) : (reg<amdgpu.vgpr>, reg<amdgpu.vgpr>) -> reg<amdgpu.vgpr x2>
+  %31 = buffer_atomic_cmpswap_b32_rtn %30, %44, %23, %26
+  %32 = slice %31[0] : reg<amdgpu.vgpr x2> -> reg<amdgpu.vgpr>
+  %33 = v_cmp_ne_i32 %32, %20
+  %35, %36 = s_and_saveexec_b64 %33
+  low.cond_br %36, ^_bb2, ^_bb3 : reg<amdgpu.scc>
+^_bb2:
+  low.br ^_bb1(%32: reg<amdgpu.vgpr>)
+^_bb3:
+  s_mov_b64_exec %34
+  return %32
+}
