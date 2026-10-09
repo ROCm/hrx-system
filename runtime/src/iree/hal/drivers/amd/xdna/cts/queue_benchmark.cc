@@ -45,9 +45,11 @@ bool HandleStatus(benchmark::State& state, iree_status_t status,
 class XdnaQueueBenchmark : public benchmark::Fixture {
  public:
   void SetUp(benchmark::State& state) override {
+    available_ = false;
+    completion_value_ = 0;
+    stream_ordinal_ = 0;
     iree_status_t status = Initialize();
     if (!HandleStatus(state, status, "XDNA HAL device setup failed")) {
-      available_ = false;
       return;
     }
     available_ = true;
