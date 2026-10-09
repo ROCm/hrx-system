@@ -116,6 +116,23 @@ Config already_sparse = {
     .flags = 7,
 };
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wc99-extensions"
+
+Config MakeDesignatedCompoundLiteral() {
+  return (Config){.ordinal = 8, .name = "literal", .flags = 9};
+}
+
+Config MakeLabeledCompoundLiteral() {
+  return (Config){
+      /*.ordinal=*/10,
+      /*.name=*/"labeled-literal",
+      /*.flags=*/11,
+  };
+}
+
+#pragma clang diagnostic pop
+
 Config mixed_labels = {
     /*.ordinal=*/7,
     "mixed",

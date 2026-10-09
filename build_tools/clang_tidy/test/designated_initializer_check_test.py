@@ -42,6 +42,8 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             output,
             [
                 "replace comment field label with a C++20 designated initializer",
+                "replace C-style compound literal with standard C++ list "
+                "initialization",
                 "replace aggregate-style comment label on call argument with a "
                 "parameter label",
                 "comment label names 'name', but this positional initializer "
@@ -71,6 +73,13 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             ],
         )
         self.assertIn(".ordinal = 1,", fixed_source)
+        self.assertIn(
+            'return Config{.ordinal = 8, .name = "literal", .flags = 9};',
+            fixed_source,
+        )
+        self.assertIn("return Config{", fixed_source)
+        self.assertIn('.name = "labeled-literal",', fixed_source)
+        self.assertNotIn("(Config){", fixed_source)
         self.assertIn(".inner = {", fixed_source)
         self.assertIn(".x = 3,", fixed_source)
         self.assertIn("Choice labeled_union = {.integer = 9};", fixed_source)

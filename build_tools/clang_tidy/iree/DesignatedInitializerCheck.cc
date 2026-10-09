@@ -713,6 +713,49 @@ void CheckCommentLabels(DesignatedInitializerCheck& Check,
   }
 }
 
+void CheckDesignatedCompoundLiteral(DesignatedInitializerCheck& Check,
+                                    const CompoundLiteralExpr* Literal,
+                                    ASTContext& Context,
+                                    const SourceManager& SourceManager) {
+  const InitListExpr* Initializer =
+      SourceInitializerList(Literal->getInitializer());
+  if (!Initializer) {
+    return;
+  }
+
+  bool UsesDesignatedInitialization = false;
+  for (const Expr* Value : Initializer->inits()) {
+    if (isa<DesignatedInitExpr>(Value) ||
+        FindFieldLabel(Value, SourceManager, Context.getLangOpts())) {
+      UsesDesignatedInitialization = true;
+      break;
+    }
+  }
+  if (!UsesDesignatedInitialization) {
+    return;
+  }
+
+  SourceLocation LParen = Literal->getLParenLoc();
+  SourceLocation TypeEnd =
+      Literal->getTypeSourceInfo()->getTypeLoc().getEndLoc();
+  std::optional<Token> RParen = Lexer::findNextToken(
+      TypeEnd, SourceManager, Context.getLangOpts(), /*IncludeComments=*/false);
+  if (!IsMainFileLocation(LParen, SourceManager) || LParen.isMacroID() ||
+      !RParen || !RParen->is(tok::r_paren) ||
+      !IsMainFileLocation(RParen->getLocation(), SourceManager) ||
+      RParen->getLocation().isMacroID()) {
+    return;
+  }
+
+  Check.diag(LParen,
+             "replace C-style compound literal with standard C++ list "
+             "initialization")
+      << FixItHint::CreateRemoval(
+             CharSourceRange::getTokenRange(LParen, LParen))
+      << FixItHint::CreateRemoval(CharSourceRange::getTokenRange(
+             RParen->getLocation(), RParen->getLocation()));
+}
+
 template <typename CallExpression>
 void CheckArgumentLabels(DesignatedInitializerCheck& Check,
                          const CallExpression* Call, ASTContext& Context,
@@ -909,6 +952,9 @@ void DesignatedInitializerCheck::registerMatchers(
     return;
   }
   using namespace ast_matchers;
+  Finder->addMatcher(
+      compoundLiteralExpr(isExpansionInMainFile()).bind("compound_literal"),
+      this);
   if (enable_comment_label_conversion_) {
     Finder->addMatcher(initListExpr(isExpansionInMainFile()).bind("init_list"),
                        this);
@@ -927,6 +973,11 @@ void DesignatedInitializerCheck::registerMatchers(
 
 void DesignatedInitializerCheck::check(
     const ast_matchers::MatchFinder::MatchResult& Result) {
+  if (const auto* Literal =
+          Result.Nodes.getNodeAs<CompoundLiteralExpr>("compound_literal")) {
+    CheckDesignatedCompoundLiteral(*this, Literal, *Result.Context,
+                                   *Result.SourceManager);
+  }
   if (const auto* Initializer =
           Result.Nodes.getNodeAs<InitListExpr>("init_list")) {
     CheckCommentLabels(*this, Initializer, *Result.Context,
