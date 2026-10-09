@@ -553,6 +553,7 @@ enum SyntheticDataLayoutFlagBits : uint32_t {
   kSyntheticDataLayoutMissingTrailingRedzone = 1u << 2,
   kSyntheticDataLayoutOverlappingObjects = 1u << 3,
   kSyntheticDataLayoutDuplicateMarker = 1u << 4,
+  kSyntheticDataLayoutExtraKernelDescriptor = 1u << 5,
 };
 
 static std::vector<uint8_t> AddSyntheticDataLayout(
@@ -571,6 +572,12 @@ static std::vector<uint8_t> AddSyntheticDataLayout(
   const char kDescriptorName[] = "vector_add.kd";
   const uint32_t descriptor_name_offset =
       append_name(kDescriptorName, sizeof(kDescriptorName));
+  uint32_t extra_descriptor_name_offset = 0;
+  if (flags & kSyntheticDataLayoutExtraKernelDescriptor) {
+    const char kExtraDescriptorName[] = "extra_kernel.kd";
+    extra_descriptor_name_offset =
+        append_name(kExtraDescriptorName, sizeof(kExtraDescriptorName));
+  }
   // A data symbol may end in the conventional kernel-descriptor suffix; only
   // symbols actually referenced by kernel metadata are descriptors.
   const char kTableName[] = "lookup_table.kd";
@@ -610,6 +617,11 @@ static std::vector<uint8_t> AddSyntheticDataLayout(
                         /*section_index=*/2, /*value=*/0x2080,
                         /*byte_length=*/1);
     }
+  }
+  if (flags & kSyntheticDataLayoutExtraKernelDescriptor) {
+    AppendElf64Symbol(&elf, extra_descriptor_name_offset, kGlobalObject,
+                      /*section_index=*/2, /*value=*/0x2080,
+                      /*byte_length=*/64);
   }
   const size_t symbol_size = elf.size() - symbol_offset;
 
@@ -1041,6 +1053,26 @@ TEST(HsacoMetadataTest, ParsesMarkedAsanDataLayout) {
   EXPECT_EQ(ToString(metadata.data_objects[1].name), "lookup_table.kd");
   EXPECT_EQ(metadata.data_objects[1].virtual_address, 0x2060);
   EXPECT_EQ(metadata.data_objects[1].byte_length, 12);
+
+  iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
+}
+
+TEST(HsacoMetadataTest, ExcludesUnorderedKernelDescriptorsFromDataLayout) {
+  std::vector<uint8_t> elf = AddSyntheticDataLayout(
+      BuildElfWithMetadataNotes(
+          BuildKernelMetadata(),
+          BuildKernelMetadata(kBuildKernelMetadataNone, IREE_SV("extra_kernel"),
+                              IREE_SV("extra_kernel.kd")),
+          /*separate_segments=*/false),
+      kSyntheticDataLayoutExtraKernelDescriptor);
+
+  iree_hal_amdgpu_hsaco_metadata_t metadata;
+  IREE_ASSERT_OK(iree_hal_amdgpu_hsaco_metadata_initialize_from_elf(
+      ByteSpan(elf), iree_allocator_system(), &metadata));
+  ASSERT_EQ(metadata.data_object_count, 2);
+  EXPECT_EQ(ToString(metadata.data_objects[0].name),
+            IREE_HAL_AMDGPU_ASAN_GLOBAL_LAYOUT_V0_MARKER_NAME);
+  EXPECT_EQ(ToString(metadata.data_objects[1].name), "lookup_table.kd");
 
   iree_hal_amdgpu_hsaco_metadata_deinitialize(&metadata);
 }
