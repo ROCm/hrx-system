@@ -4,13 +4,12 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
-#include "test/target/iree_hal_execution.h"
-
 #include "iree/base/api.h"
 #include "iree/testing/gtest.h"
 #include "loomc/loomc.h"
 #include "loomc/target/spirv.h"
 #include "loomc/target/spirv/iree_hal.h"
+#include "test/target/iree_hal_execution_test_util.h"
 
 namespace {
 
