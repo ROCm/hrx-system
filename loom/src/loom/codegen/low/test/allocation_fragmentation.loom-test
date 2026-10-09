@@ -181,3 +181,101 @@ low.func.def target<test.low.core>(@target) @required_tuple_uses_unaligned_gap(%
 
 // ----
 value %wide: test.i32 -> target_id[1:4]
+
+// ====
+
+// An earlier fixed assignment establishes register 8 and expires. Seven later
+// values occupy the low registers before %current, whose low4 use and explicit
+// store require register storage in [0, 4). Register 7 is free at the collision
+// point but was occupied while the victim was already live, so its complete
+// lifetime only fits in register 8.
+// RUN: emit low-allocation-query @low_subset_relocation values=%p8,%a,%b,%c,%d,%e,%f,%g,%history,%current spill-count fixed=%p8:target_id:8:1 test.i32=9
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @low_subset_relocation(%p8: reg<test.i32>) -> (reg<test.i32>) asm {
+  %p8_storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %history_storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %current_storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  low.spill %p8, %p8_storage : reg<test.i32>, low.storage<private>
+  %a = test.const.zero.i32
+  %b = test.const.zero.i32
+  %c = test.const.zero.i32
+  %d = test.const.zero.i32
+  %e = test.const.zero.i32
+  %f = test.const.zero.i32
+  %g = test.const.zero.i32
+  %history = test.add.i32 %a, %b
+  low.spill %history, %history_storage : reg<test.i32>, low.storage<private>
+  %current = test.add.i32 %c, %d
+  %narrow = test.add.low4.i32 %current, %g
+  low.spill %current, %current_storage : reg<test.i32>, low.storage<private>
+  %sum0 = test.add.i32 %narrow, %a
+  %sum1 = test.add.i32 %sum0, %b
+  %sum2 = test.add.i32 %sum1, %c
+  %sum3 = test.add.i32 %sum2, %d
+  %sum4 = test.add.i32 %sum3, %e
+  %sum5 = test.add.i32 %sum4, %f
+  %sum6 = test.add.i32 %sum5, %g
+  return %sum6
+}
+
+// ----
+spills: 0
+value %p8: test.i32 -> target_id[8:1]
+value %a: test.i32 -> target_id[0:1]
+value %b: test.i32 -> target_id[1:1]
+value %c: test.i32 -> target_id[2:1]
+value %d: test.i32 -> target_id[8:1]
+value %e: test.i32 -> target_id[4:1]
+value %f: test.i32 -> target_id[5:1]
+value %g: test.i32 -> target_id[6:1]
+value %history: test.i32 -> target_id[7:1]
+value %current: test.i32 -> target_id[3:1]
+
+// ====
+
+// A victim with its own low4 use cannot be recolored above that window, even
+// with an available high register. The required %current value still takes
+// register 3, but %d must spill instead of receiving an out-of-range register
+// assignment.
+// RUN: emit low-allocation-query @bounded_victim_spill values=%a,%b,%c,%d,%e,%f,%g,%history,%current spill-count test.i32=9
+
+test.target<low_core> @target
+
+low.func.def target<test.low.core>(@target) @bounded_victim_spill() -> (reg<test.i32>) asm {
+  %history_storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %current_storage = storage {byte_alignment = 4, byte_length = 4} : low.storage<private>
+  %a = test.const.zero.i32
+  %b = test.const.zero.i32
+  %c = test.const.zero.i32
+  %d = test.const.zero.i32
+  %e = test.const.zero.i32
+  %f = test.const.zero.i32
+  %g = test.const.zero.i32
+  %history = test.add.i32 %a, %b
+  low.spill %history, %history_storage : reg<test.i32>, low.storage<private>
+  %current = test.add.low4.i32 %d, %c
+  %narrow = test.add.low4.i32 %current, %g
+  low.spill %current, %current_storage : reg<test.i32>, low.storage<private>
+  %sum0 = test.add.i32 %narrow, %a
+  %sum1 = test.add.i32 %sum0, %b
+  %sum2 = test.add.i32 %sum1, %c
+  %sum3 = test.add.i32 %sum2, %d
+  %sum4 = test.add.i32 %sum3, %e
+  %sum5 = test.add.i32 %sum4, %f
+  %sum6 = test.add.i32 %sum5, %g
+  return %sum6
+}
+
+// ----
+spills: 1
+value %a: test.i32 -> target_id[0:1]
+value %b: test.i32 -> target_id[1:1]
+value %c: test.i32 -> target_id[2:1]
+value %d: test.i32 -> spill_slot[0:1]
+value %e: test.i32 -> target_id[4:1]
+value %f: test.i32 -> target_id[5:1]
+value %g: test.i32 -> target_id[6:1]
+value %history: test.i32 -> target_id[7:1]
+value %current: test.i32 -> target_id[3:1]

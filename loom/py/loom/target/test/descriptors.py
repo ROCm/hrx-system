@@ -38,6 +38,7 @@ from loom.target.low_descriptors import (
     MemorySpace,
     ModelQuality,
     Operand,
+    OperandAddressMapKind,
     OperandFlag,
     OperandForm,
     OperandFormMatch,
@@ -601,6 +602,22 @@ TEST_LOW_ADD_I32_DESCRIPTOR = Descriptor(
     asm_forms=_asm(results=("dst",), operands=("lhs", "rhs")),
     schedule_class=_SCHEDULE_SCALAR_ALU,
     flags=(DescriptorFlag.DEAD_REMOVABLE,),
+)
+
+TEST_LOW_ADD_LOW4_I32_DESCRIPTOR = replace(
+    TEST_LOW_ADD_I32_DESCRIPTOR,
+    key="test.add.low4.i32",
+    mnemonic="test.add.low4.i32",
+    semantic_tag="test.add.low4.i32",
+    operands=(
+        _i32_result(),
+        replace(
+            _i32_operand("lhs"),
+            address_map_kind=OperandAddressMapKind.LOW_SUBSET,
+            addressable_unit_count=4,
+        ),
+        _i32_operand("rhs"),
+    ),
 )
 
 TEST_LOW_TOTAL_ADD_I32_DESCRIPTOR = replace(
@@ -2537,6 +2554,7 @@ TEST_LOW_CORE_DESCRIPTOR_SET = DescriptorSet(
         TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
         TEST_LOW_REMATERIALIZE_TIED_EXPLICIT32_DESCRIPTOR,
         TEST_LOW_ADD_I32_DESCRIPTOR,
+        TEST_LOW_ADD_LOW4_I32_DESCRIPTOR,
         TEST_LOW_TOTAL_ADD_I32_DESCRIPTOR,
         TEST_LOW_MASKED_ADD_I32_DESCRIPTOR,
         TEST_LOW_MASK_NARROW_I32_DESCRIPTOR,
