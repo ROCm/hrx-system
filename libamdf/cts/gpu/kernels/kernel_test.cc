@@ -17,7 +17,10 @@
 #include "libamdf/cts/gpu/kernels/device_sdma.h"
 #include "libamdf/cts/gpu/kernels/device_sdma_batched.h"
 #include "libamdf/cts/gpu/kernels/device_sdma_batched_kernels.h"
+#include "libamdf/cts/gpu/kernels/device_sdma_consumer_kernels.h"
 #include "libamdf/cts/gpu/kernels/device_sdma_kernels.h"
+#include "libamdf/cts/gpu/kernels/device_sdma_staged.h"
+#include "libamdf/cts/gpu/kernels/device_sdma_transfer_kernels.h"
 #include "libamdf/cts/gpu/kernels/geometry_ids.h"
 #include "libamdf/cts/gpu/kernels/geometry_ids_kernels.h"
 #include "libamdf/cts/gpu/kernels/lds_exchange.h"
@@ -127,6 +130,70 @@ TEST(KernelTest, BatchedDeviceSdmaProductsPreserveTheCallerContract) {
     EXPECT_EQ(kernel.group_segment_byte_length, 0u);
   }
   RecordProperty("device_sdma_batched_compiled_targets", targets);
+}
+
+TEST(KernelTest, StagedDeviceSdmaProductsPreserveTheCallerContract) {
+  using Arguments = kernels::device_sdma_staged::TransferArguments;
+  constexpr std::array<uint32_t, 22> kOffsets = {
+      offsetof(Arguments, ring),
+      offsetof(Arguments, read_index),
+      offsetof(Arguments, write_index),
+      offsetof(Arguments, notification),
+      offsetof(Arguments, completion),
+      offsetof(Arguments, state),
+      offsetof(Arguments, selection),
+      offsetof(Arguments, lengths),
+      offsetof(Arguments, readback),
+      offsetof(Arguments, source_address),
+      offsetof(Arguments, input_address),
+      offsetof(Arguments, output_address),
+      offsetof(Arguments, readback_address),
+      offsetof(Arguments, completion_address),
+      offsetof(Arguments, capacity),
+      offsetof(Arguments, slot_byte_length),
+      offsetof(Arguments, job_index),
+      offsetof(Arguments, slot_count),
+      offsetof(Arguments, phase),
+      offsetof(Arguments, copy_control),
+      offsetof(Arguments, fence_header),
+      offsetof(Arguments, cache_flags)};
+  constexpr std::array<uint32_t, 22> kLengths = {
+      8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 4, 4, 4, 4, 4, 4};
+  constexpr std::array<std::string_view, 22> kKinds = {
+      "global_buffer", "global_buffer", "global_buffer", "global_buffer",
+      "global_buffer", "global_buffer", "global_buffer", "global_buffer",
+      "global_buffer", "by_value",      "by_value",      "by_value",
+      "by_value",      "by_value",      "by_value",      "by_value",
+      "by_value",      "by_value",      "by_value",      "by_value",
+      "by_value",      "by_value"};
+  for (const auto& kernel : kernels::device_sdma_transfer::kKernels.variants) {
+    SCOPED_TRACE(kernel.target);
+    CheckArgumentLayout(kernel, kOffsets, kLengths, kKinds, sizeof(Arguments),
+                        alignof(Arguments));
+    EXPECT_EQ(kernel.arguments.byte_length, 152u);
+    EXPECT_EQ(kernel.required_workgroup_size,
+              (std::array<uint32_t, 3>{1, 1, 1}));
+    EXPECT_EQ(kernel.private_segment_byte_length, 0u);
+    EXPECT_EQ(kernel.group_segment_byte_length, 0u);
+  }
+
+  using Consumer = kernels::device_sdma_staged::ConsumerArguments;
+  constexpr std::array<uint32_t, 4> kConsumerOffsets = {
+      offsetof(Consumer, input), offsetof(Consumer, output),
+      offsetof(Consumer, selection), offsetof(Consumer, slot_byte_length)};
+  constexpr std::array<uint32_t, 4> kConsumerLengths = {8, 8, 8, 8};
+  constexpr std::array<std::string_view, 4> kConsumerKinds = {
+      "global_buffer", "global_buffer", "global_buffer", "by_value"};
+  for (const auto& kernel : kernels::device_sdma_consumer::kKernels.variants) {
+    SCOPED_TRACE(kernel.target);
+    CheckArgumentLayout(kernel, kConsumerOffsets, kConsumerLengths,
+                        kConsumerKinds, sizeof(Consumer), alignof(Consumer));
+    EXPECT_EQ(kernel.arguments.byte_length, 32u);
+    EXPECT_EQ(kernel.required_workgroup_size,
+              (std::array<uint32_t, 3>{64, 1, 1}));
+    EXPECT_EQ(kernel.private_segment_byte_length, 0u);
+    EXPECT_EQ(kernel.group_segment_byte_length, 0u);
+  }
 }
 
 TEST(KernelTest, TransformProductsPreserveTheCallerContract) {

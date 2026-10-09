@@ -142,6 +142,20 @@ values between observations. The next batch's seed derives from actual copied
 data. This program also uses the complete physical target matrix without
 private or workgroup storage.
 
+[device_sdma_staged.loom](device_sdma_staged.loom) exports a single-workitem
+transfer publisher and a separately dispatched 64-workitem consumer. Upload
+selects a source page, reusable slot and length from the preceding result;
+download copies the complete output slot and derives the next selection.
+The publisher shares [sdma_copy.loom](sdma_copy.loom)'s retirement protocol and
+retains its frontier across dispatches. The consumer reads an ordinary
+GPU-produced descriptor after its AQL SYSTEM acquire, transforms all selected
+words and leaves the old tail and guards intact. AQL completion barriers order
+these stages; all packet and argument storage remains immutable. The
+[typed layout](device_sdma_staged.h) carries the per-job descriptor and both
+entry-point ABIs. Both products cover the complete physical target matrix
+without private or workgroup storage. The recipe distinguishes SYSTEM and
+LOCAL placement and checks every job's returned bytes before native teardown.
+
 [resident_npu_sdma.loom](resident_npu_sdma.loom) consumes NPU-computed transfer
 requests. Its source page and copy prefix vary with the NPU payload. The GPU
 publishes SDMA, acquires every destination word and returns values derived from

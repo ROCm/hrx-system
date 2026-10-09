@@ -1,0 +1,137 @@
+// A finite sequence alternates upload, a separate compute dispatch, and
+// download. AQL completion barriers and SYSTEM scopes order every dispatch.
+// Kernargs stay immutable; the upload writes an ordinary selection descriptor.
+// The persistent state holds the SDMA frontier at byte 0 and selection seed at
+// byte 8. Source pages and payload slots have 64-byte guarded prefixes.
+// Each upload selects its page, slot and length from the preceding result.
+// Download copies the full output slot and derives the next selection from
+// the actual returned first/last processed words. Only one publisher is live.
+
+template.decl @sdma_copy(%ring: buffer, %read_index: buffer, %write_index: buffer, %notification: buffer, %completion: buffer, %source: i64, %target: i64, %completion_address: i64, %capacity: offset, %frontier: i64, %generation: i32, %word_count: i32, %copy_control: i32, %fence_header: i32, %cache_flags: i32) -> (i64)
+
+kernel.def export("device_sdma_transfer") @device_sdma_transfer() {
+  %unit = index.constant 1 : index
+  kernel.launch.config workgroups(%unit, %unit, %unit) workgroup_size(%unit, %unit, %unit) : index
+} launch(%ring: buffer, %read_index: buffer, %write_index: buffer, %notification: buffer, %completion: buffer, %state: buffer, %selection: buffer, %lengths: buffer, %readback: buffer, %source_address: i64, %input_address: i64, %output_address: i64, %readback_address: i64, %completion_address: i64, %capacity: offset, %slot_byte_length: offset, %job_index: i32, %slot_count: i32, %phase: i32, %copy_control: i32, %fence_header: i32, %cache_flags: i32) {
+  %state_aligned = buffer.assume.alignment %state {minimum_alignment = 64} : buffer
+  %selection_aligned = buffer.assume.alignment %selection {minimum_alignment = 64} : buffer
+  %readback_aligned = buffer.assume.alignment %readback {minimum_alignment = 64} : buffer
+  %origin = index.constant 0 : offset
+  %seed_offset = index.constant 8 : offset
+  %payload_offset = index.constant 64 : offset
+  %frontier_word = buffer.view %state_aligned[%origin] : buffer -> view<1xi64>
+  %seed_word = buffer.view %state_aligned[%seed_offset] : buffer -> view<1xi32>
+  %record = buffer.view %selection_aligned[%origin] : buffer -> view<16xi32>
+  %sizes = buffer.view %lengths[%origin] : buffer -> view<4xi32>
+  %zero = scalar.constant 0 : i32
+  %one = scalar.constant 1 : i32
+  %two = scalar.constant 2 : i32
+  %three = scalar.constant 3 : i32
+  %seven = scalar.constant 7 : i32
+  %eight = scalar.constant 8 : i32
+  %mix = scalar.constant -1640531535 : i32
+  %addend_mix = scalar.constant 16909061 : i32
+  %two64 = scalar.constant 2 : i64
+  %prefix = scalar.constant 64 : i64
+  %high_shift = scalar.constant 32 : i64
+  %stride = index.cast %slot_byte_length : offset to i64
+  %frontier = view.load %frontier_word[0] : view<1xi64> -> i64
+  %job_generation = scalar.addi %job_index, %one : i32
+  %twice_job = scalar.muli %job_index, %two : i32
+  %upload = scalar.cmpi eq, %phase, %zero : i32
+  scf.if %upload {
+    %seed = view.load %seed_word[0] : view<1xi32> -> i32
+    %page = scalar.andi %seed, %seven : i32
+    %slot_bits = scalar.shrui %seed, %three : i32
+    %slot_mask = scalar.subi %slot_count, %one : i32
+    %slot = scalar.andi %slot_bits, %slot_mask : i32
+    %length_bits = scalar.shrui %seed, %eight : i32
+    %length_index_bits = scalar.andi %length_bits, %three : i32
+    %length_index = index.cast %length_index_bits : i32 to index
+    %word_count = view.load %sizes[%length_index] : view<4xi32> -> i32
+    %page64 = scalar.extui %page : i32 to i64
+    %slot64 = scalar.extui %slot : i32 to i64
+    %page_base = scalar.muli %page64, %stride : i64
+    %slot_base = scalar.muli %slot64, %stride : i64
+    %source_offset = scalar.addi %page_base, %prefix : i64
+    %target_offset = scalar.addi %slot_base, %prefix : i64
+    %source = scalar.addi %source_address, %source_offset : i64
+    %target = scalar.addi %input_address, %target_offset : i64
+    %generation = scalar.addi %twice_job, %one : i32
+    %next_frontier = template.apply<@sdma_copy>(%ring, %read_index, %write_index, %notification, %completion, %source, %target, %completion_address, %capacity, %frontier, %generation, %word_count, %copy_control, %fence_header, %cache_flags) : (buffer, buffer, buffer, buffer, buffer, i64, i64, i64, offset, i64, i32, i32, i32, i32, i32) -> (i64)
+    %salt = scalar.muli %job_generation, %addend_mix : i32
+    %addend = scalar.xori %seed, %salt : i32
+    %frontier_low = scalar.trunci %next_frontier : i64 to i32
+    %frontier_high64 = scalar.shrui %next_frontier, %high_shift : i64
+    %frontier_high = scalar.trunci %frontier_high64 : i64 to i32
+    view.store %page, %record[0] : i32, view<16xi32>
+    view.store %slot, %record[1] : i32, view<16xi32>
+    view.store %word_count, %record[2] : i32, view<16xi32>
+    view.store %seed, %record[3] : i32, view<16xi32>
+    view.store %addend, %record[4] : i32, view<16xi32>
+    view.store %frontier_low, %record[6] : i32, view<16xi32>
+    view.store %frontier_high, %record[7] : i32, view<16xi32>
+    view.store %next_frontier, %frontier_word[0] : i64, view<1xi64>
+  } else {
+    %slot = view.load %record[1] : view<16xi32> -> i32
+    %word_count = view.load %record[2] : view<16xi32> -> i32
+    %slot64 = scalar.extui %slot : i32 to i64
+    %slot_base = scalar.muli %slot64, %stride : i64
+    %source = scalar.addi %output_address, %slot_base : i64
+    %slot_words64 = scalar.shrui %stride, %two64 : i64
+    %slot_words = scalar.trunci %slot_words64 : i64 to i32
+    %generation = scalar.addi %twice_job, %two : i32
+    %next_frontier = template.apply<@sdma_copy>(%ring, %read_index, %write_index, %notification, %completion, %source, %readback_address, %completion_address, %capacity, %frontier, %generation, %slot_words, %copy_control, %fence_header, %cache_flags) : (buffer, buffer, buffer, buffer, buffer, i64, i64, i64, offset, i64, i32, i32, i32, i32, i32) -> (i64)
+    %length_input = index.cast %word_count : i32 to index
+    %length = index.assume %length_input [range(%length_input, 1, 262144)] : index
+    %payload = buffer.view %readback_aligned[%payload_offset] : buffer -> view<[%length]xi32>
+    %unit = index.constant 1 : index
+    %last = index.sub %length, %unit : index
+    %first_value = view.load %payload[0] : view<[%length]xi32> -> i32
+    %last_value = view.load %payload[%last] : view<[%length]xi32> -> i32
+    %salt = scalar.muli %job_generation, %mix : i32
+    %salted = scalar.addi %last_value, %salt : i32
+    %next_seed = scalar.xori %first_value, %salted : i32
+    %frontier_low = scalar.trunci %next_frontier : i64 to i32
+    %frontier_high64 = scalar.shrui %next_frontier, %high_shift : i64
+    %frontier_high = scalar.trunci %frontier_high64 : i64 to i32
+    view.store %next_seed, %record[5] : i32, view<16xi32>
+    view.store %frontier_low, %record[8] : i32, view<16xi32>
+    view.store %frontier_high, %record[9] : i32, view<16xi32>
+    view.store %next_seed, %seed_word[0] : i32, view<1xi32>
+    view.store %next_frontier, %frontier_word[0] : i64, view<1xi64>
+  }
+  kernel.return
+}
+
+kernel.def export("device_sdma_consumer") @device_sdma_consumer(%groups_x: index) {
+  %unit = index.constant 1 : index
+  %width = index.constant 64 : index
+  kernel.launch.config workgroups(%groups_x, %unit, %unit) workgroup_size(%width, %unit, %unit) : index
+} launch(%input: buffer, %output: buffer, %selection: buffer, %slot_byte_length: offset) {
+  %origin = index.constant 0 : offset
+  %prefix = index.constant 64 : offset
+  %record = buffer.view %selection[%origin] : buffer -> view<16xi32>
+  %slot_bits = view.load %record[1] : view<16xi32> -> i32
+  %count_bits = view.load %record[2] : view<16xi32> -> i32
+  %addend = view.load %record[4] : view<16xi32> -> i32
+  %slot = index.cast %slot_bits : i32 to index
+  %count = index.cast %count_bits : i32 to index
+  %slot_offset = index.scale %slot, %slot_byte_length : index, offset -> offset
+  %payload_offset = index.add %slot_offset, %prefix : offset
+  %input_view = buffer.view %input[%payload_offset] : buffer -> view<[%count]xi32>
+  %output_view = buffer.view %output[%payload_offset] : buffer -> view<[%count]xi32>
+  %group = kernel.workgroup.id<x> : index
+  %lane = kernel.workitem.id<x> : index
+  %width = kernel.workgroup.size<x> : index
+  %position = index.madd %group, %width, %lane : index
+  %in_bounds = index.cmp ult, %position, %count : index
+  scf.if %in_bounds {
+    %value = view.load %input_view[%position] : view<[%count]xi32> -> i32
+    %three = scalar.constant 3 : i32
+    %product = scalar.muli %value, %three : i32
+    %result = scalar.addi %product, %addend : i32
+    view.store %result, %output_view[%position] : i32, view<[%count]xi32>
+  }
+  kernel.return
+}

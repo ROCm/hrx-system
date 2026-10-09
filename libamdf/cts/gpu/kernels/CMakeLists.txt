@@ -381,6 +381,89 @@ endif()
 if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
 iree_cc_library(
   NAME
+    device_sdma_staged
+  HDRS
+    "device_sdma_staged.h"
+  DEPS
+    amdf::headers
+  TESTONLY
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE))
+amdf_cts_gpu_kernel_set(
+  NAME
+    "device_sdma_transfer_kernels"
+  SRCS
+    "device_sdma_staged.loom"
+    "sdma_copy.loom"
+  TARGETS
+    "gfx1100"
+    "gfx1101"
+    "gfx1102"
+    "gfx1103"
+    "gfx1150"
+    "gfx1151"
+    "gfx1152"
+    "gfx1153"
+    "gfx1170"
+    "gfx1171"
+    "gfx1172"
+    "gfx1200"
+    "gfx1201"
+    "gfx1250"
+    "gfx1250-a0"
+    "gfx1251"
+    "gfx940"
+    "gfx941"
+    "gfx942"
+    "gfx950"
+  ENTRY_POINT
+    "device_sdma_transfer"
+  NAMESPACE
+    "kernels::device_sdma_transfer"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU AND (LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA3_5_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4M_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX125X_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1250_A0_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_RDNA4_GFX1251_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA3_CORE OR LOOM_TARGET_AMDGPU_DESCRIPTOR_SET_CDNA4_CORE))
+amdf_cts_gpu_kernel_set(
+  NAME
+    "device_sdma_consumer_kernels"
+  SRCS
+    "device_sdma_staged.loom"
+    "sdma_copy.loom"
+  TARGETS
+    "gfx1100"
+    "gfx1101"
+    "gfx1102"
+    "gfx1103"
+    "gfx1150"
+    "gfx1151"
+    "gfx1152"
+    "gfx1153"
+    "gfx1170"
+    "gfx1171"
+    "gfx1172"
+    "gfx1200"
+    "gfx1201"
+    "gfx1250"
+    "gfx1250-a0"
+    "gfx1251"
+    "gfx940"
+    "gfx941"
+    "gfx942"
+    "gfx950"
+  ENTRY_POINT
+    "device_sdma_consumer"
+  NAMESPACE
+    "kernels::device_sdma_consumer"
+)
+endif()
+
+if(AMDF_BUILD AND (AMDF_FAMILY_RDNA OR AMDF_FAMILY_CDNA) AND LOOM_TARGET_ARCH_AMDGPU AND LOOM_BUILD AND LOOM_EMIT_AMDGPU)
+iree_cc_library(
+  NAME
     byte_copy_unaligned
   HDRS
     "byte_copy_unaligned.h"
@@ -1167,7 +1250,10 @@ iree_cc_test(
     ::device_sdma
     ::device_sdma_batched
     ::device_sdma_batched_kernels
+    ::device_sdma_consumer_kernels
     ::device_sdma_kernels
+    ::device_sdma_staged
+    ::device_sdma_transfer_kernels
     ::geometry_ids
     ::geometry_ids_kernels
     ::kernel

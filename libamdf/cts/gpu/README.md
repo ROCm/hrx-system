@@ -213,6 +213,25 @@ wrap and partial final batches share the same program. This exercises a
 cooperative publisher/consumer; it assumes no concurrent residency of separate
 GPU workgroups and has a single command publisher.
 
+The staged cases separate transfer publication from the compute consumer. A
+finite batch uses one AQL queue and one device-published SDMA queue. Each job
+runs three explicitly ordered dispatches: a GPU-selected upload, a
+multi-workgroup transform, and a GPU-published download. The upload's ordinary
+data descriptor carries the selected page, slot, length and transform input;
+the already-published AQL packets and arguments remain immutable. The next
+selection depends on the actual returned result. The host records the batch
+before publishing its first packet and joins only its final completion.
+
+SYSTEM and non-host-mapped LOCAL payloads have separate cases. Both use 1, 2
+or 4 reusable input/output pairs, row lengths of 68/264/288/6336 bytes, and
+block lengths of 4 KiB/17 KiB/72 KiB/1 MiB. Every job has a distinct full-slot
+readback so the oracle checks all processed words, preserved old tails and
+guards after each reuse. Row batches also cross SDMA ring wrap. The protocol
+requires no concurrently resident GPU controller: dispatch completion returns
+the payload to its next owner, while RPTR separately releases command bytes.
+The case establishes dependent data movement and consumption, without implying
+copy/compute overlap or a throughput result.
+
 The lifecycle cases exercise the same resource helper as the `DISABLED_`
 peer-device recreation scenarios, without creating extra devices. Recreation requires
 `--gtest_also_run_disabled_tests` and is a separate qualification. The manual
