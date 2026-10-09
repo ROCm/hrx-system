@@ -1253,6 +1253,8 @@ static iree_status_t iree_hal_amdgpu_executable_publish_asan_data_layout(
         &hsaco_metadata->data_objects[i];
     uint64_t application_address = 0;
     uint64_t application_end = 0;
+    uint64_t redzone_address = 0;
+    uint64_t redzone_end = 0;
     if (IREE_UNLIKELY(!iree_hal_amdgpu_executable_apply_load_delta(
                           data_object->virtual_address, load_info.load_delta,
                           &application_address) ||
@@ -1260,17 +1262,21 @@ static iree_status_t iree_hal_amdgpu_executable_publish_asan_data_layout(
                       !iree_checked_add_u64(application_address,
                                             data_object->byte_length,
                                             &application_end) ||
+                      !iree_checked_align_u64(application_end, shadow_granule,
+                                              &redzone_address) ||
+                      !iree_checked_add_u64(redzone_address, shadow_granule,
+                                            &redzone_end) ||
                       application_address < load_info.range.device_pointer ||
-                      application_end > allocation_end)) {
+                      redzone_end > allocation_end)) {
       return iree_make_status(
           IREE_STATUS_INVALID_ARGUMENT,
-          "AMDGPU ASAN data symbol `%.*s` relocated range [0x%016" PRIx64
-          ", +%" PRIu64
+          "AMDGPU ASAN data symbol `%.*s` relocated protected range "
+          "[0x%016" PRIx64 ", 0x%016" PRIx64
           ") escapes or misaligns loader allocation "
           "[0x%016" PRIx64 ", +%" PRIu64 ")",
           (int)data_object->name.size, data_object->name.data,
-          application_address, data_object->byte_length,
-          load_info.range.device_pointer, load_info.range.byte_length);
+          application_address, redzone_end, load_info.range.device_pointer,
+          load_info.range.byte_length);
     }
     IREE_RETURN_IF_ERROR(iree_hal_amdgpu_asan_state_publish_imported_range(
                              executable->asan_state, application_address,
