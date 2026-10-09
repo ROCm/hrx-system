@@ -184,7 +184,7 @@ TEST(HipOccupancyTest, LoadedAndRegisteredFunctionsUseExactQueueOccupancy) {
   ASSERT_NE(nullptr, test_image.file)
       << "no embedded HSACO for " << properties.gcnArchName;
 
-  ScopedModule module = {/*.value=*/nullptr, /*.unload=*/module_unload};
+  ScopedModule module = {.value = nullptr, .unload = module_unload};
   ASSERT_EQ(hipSuccess, module_load_data(&module.value, test_image.file->data));
   hipFunction_t module_function = nullptr;
   ASSERT_EQ(hipSuccess,
@@ -233,8 +233,8 @@ TEST(HipOccupancyTest, LoadedAndRegisteredFunctionsUseExactQueueOccupancy) {
   EXPECT_EQ(19, unchanged_block_size);
 
   ScopedRegistration registration = {
-      /*.value=*/register_fat_binary(test_image.file->data),
-      /*.unregister=*/unregister_fat_binary,
+      .value = register_fat_binary(test_image.file->data),
+      .unregister = unregister_fat_binary,
   };
   ASSERT_NE(nullptr, registration.value);
   char device_function_name[] = "hrx_noop";

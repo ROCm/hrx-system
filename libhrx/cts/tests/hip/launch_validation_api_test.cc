@@ -405,12 +405,12 @@ TEST_F(HipLaunchValidationApiTest,
   hipGraph_t graph = nullptr;
   ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
   hipKernelNodeParams valid_params = {
-      /*.blockDim=*/valid_dimension,
-      /*.extra=*/nullptr,
-      /*.func=*/const_cast<void*>(function),
-      /*.gridDim=*/valid_dimension,
-      /*.kernelParams=*/nullptr,
-      /*.sharedMemBytes=*/0,
+      .blockDim = valid_dimension,
+      .extra = nullptr,
+      .func = const_cast<void*>(function),
+      .gridDim = valid_dimension,
+      .kernelParams = nullptr,
+      .sharedMemBytes = 0,
   };
   hipGraphNode_t node = nullptr;
   ASSERT_EQ(hipSuccess,
@@ -563,12 +563,12 @@ TEST_F(HipLaunchValidationApiTest,
 TEST_F(HipLaunchValidationApiTest, ZeroAccessPolicyWindowRemainsSupported) {
   const dim3 one = {1, 1, 1};
   hipKernelNodeParams params = {
-      /*.blockDim=*/one,
-      /*.extra=*/nullptr,
-      /*.func=*/empty_function_,
-      /*.gridDim=*/one,
-      /*.kernelParams=*/nullptr,
-      /*.sharedMemBytes=*/0,
+      .blockDim = one,
+      .extra = nullptr,
+      .func = empty_function_,
+      .gridDim = one,
+      .kernelParams = nullptr,
+      .sharedMemBytes = 0,
   };
 
   hipGraph_t graph = nullptr;
@@ -642,12 +642,12 @@ TEST_F(HipLaunchValidationApiTest, LaunchEntryPointsRejectDestroyedStreams) {
                 /*arguments=*/nullptr));
 
   hipLaunchParams multi_device_launch = {
-      /*.func=*/reinterpret_cast<void*>(uintptr_t{1}),
-      /*.gridDim=*/valid_dimension,
-      /*.blockDim=*/valid_dimension,
-      /*.args=*/nullptr,
-      /*.sharedMem=*/0,
-      /*.stream=*/stale_stream,
+      .func = reinterpret_cast<void*>(uintptr_t{1}),
+      .gridDim = valid_dimension,
+      .blockDim = valid_dimension,
+      .args = nullptr,
+      .sharedMem = 0,
+      .stream = stale_stream,
   };
   EXPECT_EQ(hipErrorInvalidValue,
             api_.launch_multi_device(&multi_device_launch,
@@ -774,12 +774,12 @@ TEST_F(HipLaunchValidationApiTest,
   hipGraph_t graph = nullptr;
   ASSERT_EQ(hipSuccess, api_.graph_create(&graph, /*flags=*/0));
   hipKernelNodeParams valid_params = {
-      /*.blockDim=*/valid_dimension,
-      /*.extra=*/nullptr,
-      /*.func=*/const_cast<void*>(function),
-      /*.gridDim=*/valid_dimension,
-      /*.kernelParams=*/nullptr,
-      /*.sharedMemBytes=*/0,
+      .blockDim = valid_dimension,
+      .extra = nullptr,
+      .func = const_cast<void*>(function),
+      .gridDim = valid_dimension,
+      .kernelParams = nullptr,
+      .sharedMemBytes = 0,
   };
   hipGraphNode_t node = nullptr;
   ASSERT_EQ(hipSuccess,
@@ -820,20 +820,20 @@ TEST_F(HipLaunchValidationApiTest,
       HIP_LAUNCH_PARAM_END,
   };
   hipKernelNodeParams empty_params = {
-      /*.blockDim=*/valid_dimension,
-      /*.extra=*/nullptr,
-      /*.func=*/empty_function_,
-      /*.gridDim=*/valid_dimension,
-      /*.kernelParams=*/nullptr,
-      /*.sharedMemBytes=*/0,
+      .blockDim = valid_dimension,
+      .extra = nullptr,
+      .func = empty_function_,
+      .gridDim = valid_dimension,
+      .kernelParams = nullptr,
+      .sharedMemBytes = 0,
   };
   hipKernelNodeParams short_prepacked_params = {
-      /*.blockDim=*/valid_dimension,
-      /*.extra=*/extra,
-      /*.func=*/prepacked_function_,
-      /*.gridDim=*/valid_dimension,
-      /*.kernelParams=*/nullptr,
-      /*.sharedMemBytes=*/0,
+      .blockDim = valid_dimension,
+      .extra = extra,
+      .func = prepacked_function_,
+      .gridDim = valid_dimension,
+      .kernelParams = nullptr,
+      .sharedMemBytes = 0,
   };
 
   EXPECT_EQ(hipErrorInvalidValue,

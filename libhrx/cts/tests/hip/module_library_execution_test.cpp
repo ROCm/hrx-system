@@ -507,9 +507,9 @@ std::vector<uint8_t> MakeBundle(
   uint64_t next_payload_offset = payload_offset;
   for (const auto& entry : entries) {
     const BundleEntry bundle_entry = {
-        /*.offset=*/next_payload_offset,
-        /*.size=*/entry.second.size(),
-        /*.triple_size=*/entry.first.size(),
+        .offset = next_payload_offset,
+        .size = entry.second.size(),
+        .triple_size = entry.first.size(),
     };
     AppendBytes(bundle, &bundle_entry, sizeof(bundle_entry));
     AppendBytes(bundle, entry.first.data(), entry.first.size());

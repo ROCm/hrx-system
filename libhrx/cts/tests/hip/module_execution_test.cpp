@@ -368,12 +368,12 @@ hipError_t AddKernelGraphNode(HipGraphAddKernelNodeFn add_kernel_node,
   uint32_t offset = 2;
   void* arguments[] = {&pointer_arguments, &scale, &offset};
   const hipKernelNodeParams params = {
-      /*.blockDim=*/{1, 1, 1},
-      /*.extra=*/nullptr,
-      /*.func=*/function,
-      /*.gridDim=*/{1, 1, 1},
-      /*.kernelParams=*/arguments,
-      /*.sharedMemBytes=*/0,
+      .blockDim = {1, 1, 1},
+      .extra = nullptr,
+      .func = function,
+      .gridDim = {1, 1, 1},
+      .kernelParams = arguments,
+      .sharedMemBytes = 0,
   };
   const hipError_t result =
       add_kernel_node(out_node, graph, /*dependencies=*/nullptr,
@@ -395,12 +395,12 @@ hipError_t AddPrintfGraphNode(HipGraphAddKernelNodeFn add_kernel_node,
   hipDeviceptr_t result = output;
   void* arguments[] = {&value, &result};
   const hipKernelNodeParams params = {
-      /*.blockDim=*/{1, 1, 1},
-      /*.extra=*/nullptr,
-      /*.func=*/function,
-      /*.gridDim=*/{1, 1, 1},
-      /*.kernelParams=*/arguments,
-      /*.sharedMemBytes=*/0,
+      .blockDim = {1, 1, 1},
+      .extra = nullptr,
+      .func = function,
+      .gridDim = {1, 1, 1},
+      .kernelParams = arguments,
+      .sharedMemBytes = 0,
   };
   const hipError_t add_result =
       add_kernel_node(out_node, graph, /*dependencies=*/nullptr,
@@ -581,10 +581,10 @@ TEST(HipModuleExecutionTest, OwnsLoadAndGraphInputsAcrossReloads) {
     // Caller-provided trailing ABI padding.
     uint8_t trailing_padding[16];
   } native_arguments = {
-      /*.pointers=*/pointer_arguments,
-      /*.scale=*/3,
-      /*.offset=*/10,
-      /*.trailing_padding=*/{},
+      .pointers = pointer_arguments,
+      .scale = 3,
+      .offset = 10,
+      .trailing_padding = {},
   };
   static_assert(offsetof(NativeArguments, scale) == 2 * sizeof(void*));
   size_t native_arguments_size = sizeof(native_arguments);
@@ -712,8 +712,8 @@ TEST(HipModuleExecutionTest,
   int original_device = 0;
   ASSERT_EQ(hipSuccess, get_device(&original_device));
   ScopedDeviceSelection restore_device = {
-      /*.original_device=*/original_device,
-      /*.set_device=*/set_device,
+      .original_device = original_device,
+      .set_device = set_device,
   };
   int available_device_count = 0;
   ASSERT_EQ(hipSuccess, get_device_count(&available_device_count));
@@ -728,8 +728,8 @@ TEST(HipModuleExecutionTest,
       << "no embedded HSACO for " << reference_properties.gcnArchName;
 
   ScopedRegistration registration = {
-      /*.value=*/register_fat_binary(test_image.file->data),
-      /*.unregister=*/unregister_fat_binary,
+      .value = register_fat_binary(test_image.file->data),
+      .unregister = unregister_fat_binary,
   };
   ASSERT_NE(nullptr, registration.value);
   char device_function_name[] = "hrx_gated_store_output";
@@ -784,12 +784,12 @@ TEST(HipModuleExecutionTest,
     state.arguments[1] = &state.output_argument;
     state.arguments[2] = &state.expected_value;
     launches[launch_count] = {
-        /*.func=*/reinterpret_cast<void*>(&MultiDeviceGatedStoreHostStub),
-        /*.gridDim=*/{1, 1, 1},
-        /*.blockDim=*/{1, 1, 1},
-        /*.args=*/state.arguments,
-        /*.sharedMem=*/0,
-        /*.stream=*/state.stream,
+        .func = reinterpret_cast<void*>(&MultiDeviceGatedStoreHostStub),
+        .gridDim = {1, 1, 1},
+        .blockDim = {1, 1, 1},
+        .args = state.arguments,
+        .sharedMem = 0,
+        .stream = state.stream,
     };
     ++launch_count;
   }
@@ -802,14 +802,12 @@ TEST(HipModuleExecutionTest,
     unsigned int flags;
   };
   const std::array<SynchronizationCase, 4> synchronization_cases = {{
-      {/*.name=*/"pre-and-post", /*.flags=*/0},
-      {/*.name=*/"post-only",
-       /*.flags=*/hipCooperativeLaunchMultiDeviceNoPreSync},
-      {/*.name=*/"pre-only",
-       /*.flags=*/hipCooperativeLaunchMultiDeviceNoPostSync},
-      {/*.name=*/"neither",
-       /*.flags=*/hipCooperativeLaunchMultiDeviceNoPreSync |
-           hipCooperativeLaunchMultiDeviceNoPostSync},
+      {.name = "pre-and-post", .flags = 0},
+      {.name = "post-only", .flags = hipCooperativeLaunchMultiDeviceNoPreSync},
+      {.name = "pre-only", .flags = hipCooperativeLaunchMultiDeviceNoPostSync},
+      {.name = "neither",
+       .flags = hipCooperativeLaunchMultiDeviceNoPreSync |
+                hipCooperativeLaunchMultiDeviceNoPostSync},
   }};
 
   for (size_t case_ordinal = 0; case_ordinal < synchronization_cases.size();
@@ -1279,8 +1277,8 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
       << "no embedded cooperative HSACO for " << properties.gcnArchName;
 
   ScopedRegistration registration = {
-      /*.value=*/register_fat_binary(test_image.file->data),
-      /*.unregister=*/unregister_fat_binary,
+      .value = register_fat_binary(test_image.file->data),
+      .unregister = unregister_fat_binary,
   };
   ASSERT_NE(nullptr, registration.value);
   char device_function_name[] = "hrx_cooperative_grid_sync";
@@ -1368,12 +1366,12 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
     void* arguments[] = {&scratch_argument, &output_argument, &incarnation,
                          &workgroup_count};
     hipLaunchConfig_t config = {
-        /*.gridDim=*/{kWorkgroupCount, 1, 1},
-        /*.blockDim=*/{kWorkgroupSize, 1, 1},
-        /*.dynamicSmemBytes=*/0,
-        /*.stream=*/stream,
-        /*.attrs=*/&cooperative_attribute,
-        /*.numAttrs=*/1,
+        .gridDim = {kWorkgroupCount, 1, 1},
+        .blockDim = {kWorkgroupSize, 1, 1},
+        .dynamicSmemBytes = 0,
+        .stream = stream,
+        .attrs = &cooperative_attribute,
+        .numAttrs = 1,
     };
     return launch_kernel_ex(
         &config, reinterpret_cast<const void*>(&CooperativeGridSyncHostStub),
@@ -1386,16 +1384,16 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
     void* arguments[] = {&scratch_argument, &output_argument, &incarnation,
                          &workgroup_count};
     HIP_LAUNCH_CONFIG config = {
-        /*.gridDimX=*/kWorkgroupCount,
-        /*.gridDimY=*/1,
-        /*.gridDimZ=*/1,
-        /*.blockDimX=*/kWorkgroupSize,
-        /*.blockDimY=*/1,
-        /*.blockDimZ=*/1,
-        /*.sharedMemBytes=*/0,
-        /*.hStream=*/stream,
-        /*.attrs=*/&cooperative_attribute,
-        /*.numAttrs=*/1,
+        .gridDimX = kWorkgroupCount,
+        .gridDimY = 1,
+        .gridDimZ = 1,
+        .blockDimX = kWorkgroupSize,
+        .blockDimY = 1,
+        .blockDimZ = 1,
+        .sharedMemBytes = 0,
+        .hStream = stream,
+        .attrs = &cooperative_attribute,
+        .numAttrs = 1,
     };
     return driver_launch_kernel_ex(&config, function, arguments,
                                    /*extra=*/nullptr);
@@ -1408,10 +1406,10 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
       uint32_t incarnation;
       uint32_t workgroup_count;
     } arguments = {
-        /*.scratch=*/static_cast<uint32_t*>(scratch),
-        /*.output=*/static_cast<uint32_t*>(output),
-        /*.incarnation=*/incarnation,
-        /*.workgroup_count=*/kWorkgroupCount,
+        .scratch = static_cast<uint32_t*>(scratch),
+        .output = static_cast<uint32_t*>(output),
+        .incarnation = incarnation,
+        .workgroup_count = kWorkgroupCount,
     };
     static_assert(offsetof(NativeArguments, output) == sizeof(void*));
     static_assert(offsetof(NativeArguments, incarnation) == 2 * sizeof(void*));
@@ -1426,16 +1424,16 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
         HIP_LAUNCH_PARAM_END,
     };
     HIP_LAUNCH_CONFIG config = {
-        /*.gridDimX=*/kWorkgroupCount,
-        /*.gridDimY=*/1,
-        /*.gridDimZ=*/1,
-        /*.blockDimX=*/kWorkgroupSize,
-        /*.blockDimY=*/1,
-        /*.blockDimZ=*/1,
-        /*.sharedMemBytes=*/0,
-        /*.hStream=*/stream,
-        /*.attrs=*/&cooperative_attribute,
-        /*.numAttrs=*/1,
+        .gridDimX = kWorkgroupCount,
+        .gridDimY = 1,
+        .gridDimZ = 1,
+        .blockDimX = kWorkgroupSize,
+        .blockDimY = 1,
+        .blockDimZ = 1,
+        .sharedMemBytes = 0,
+        .hStream = stream,
+        .attrs = &cooperative_attribute,
+        .numAttrs = 1,
     };
     return driver_launch_kernel_ex(&config, function,
                                    /*arguments=*/nullptr, extra);
@@ -1590,12 +1588,12 @@ TEST(HipModuleExecutionTest, CooperativeLaunchPreservesStreamAndGraphOrdering) {
                                &updated_output_argument, &updated_incarnation,
                                &updated_workgroup_count};
   const hipKernelNodeParams oversized_params = {
-      /*.blockDim=*/{kWorkgroupSize, 1, 1},
-      /*.extra=*/nullptr,
-      /*.func=*/reinterpret_cast<void*>(&CooperativeGridSyncHostStub),
-      /*.gridDim=*/{oversized_grid, 1, 1},
-      /*.kernelParams=*/updated_arguments,
-      /*.sharedMemBytes=*/0,
+      .blockDim = {kWorkgroupSize, 1, 1},
+      .extra = nullptr,
+      .func = reinterpret_cast<void*>(&CooperativeGridSyncHostStub),
+      .gridDim = {oversized_grid, 1, 1},
+      .kernelParams = updated_arguments,
+      .sharedMemBytes = 0,
   };
   ASSERT_EQ(hipSuccess, graph_exec_kernel_node_set_params(
                             graph_executable, kernel_node, &oversized_params));

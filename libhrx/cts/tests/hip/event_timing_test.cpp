@@ -347,12 +347,12 @@ class HipEventTimingTest : public ::testing::Test {
                    offsetof(GatedKernelState, output);
     void* arguments[] = {&device_state_, &output, &value};
     const hipKernelNodeParams params = {
-        /*.blockDim=*/{1, 1, 1},
-        /*.extra=*/nullptr,
-        /*.func=*/gated_function_,
-        /*.gridDim=*/{1, 1, 1},
-        /*.kernelParams=*/arguments,
-        /*.sharedMemBytes=*/0,
+        .blockDim = {1, 1, 1},
+        .extra = nullptr,
+        .func = gated_function_,
+        .gridDim = {1, 1, 1},
+        .kernelParams = arguments,
+        .sharedMemBytes = 0,
     };
     hipGraphNode_t kernel_node = nullptr;
     ASSERT_EQ(hipSuccess,
