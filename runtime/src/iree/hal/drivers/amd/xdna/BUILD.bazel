@@ -70,11 +70,37 @@ iree_runtime_cc_test(
 )
 
 iree_runtime_cc_library(
+    name = "memory_transition",
+    srcs = ["memory_transition.c"],
+    hdrs = ["memory_transition.h"],
+    deps = [
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal",
+        "//runtime/src/iree/hal",
+    ],
+)
+
+iree_runtime_cc_test(
+    name = "memory_transition_test",
+    srcs = ["memory_transition_test.cc"],
+    deps = [
+        ":memory_transition",
+        "//libamdf:headers",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/hal",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+iree_runtime_cc_library(
     name = "memory_backend",
     srcs = ["memory_backend.c"],
     hdrs = ["memory_backend.h"],
     deps = [
         ":context",
+        ":memory_transition",
         ":slab_provider",
         "//libamdf:headers",
         "//runtime/src/iree/base",

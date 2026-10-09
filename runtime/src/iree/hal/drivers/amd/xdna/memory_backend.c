@@ -9,6 +9,7 @@
 #include "iree/base/internal/math.h"
 #include "iree/hal/device_group.h"
 #include "iree/hal/drivers/amd/status.h"
+#include "iree/hal/drivers/amd/xdna/memory_transition.h"
 #include "iree/hal/drivers/amd/xdna/slab_provider.h"
 #include "iree/hal/memory/passthrough_pool.h"
 
@@ -126,161 +127,116 @@ static bool iree_hal_amd_xdna_memory_supports_private_mapping(
       AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE);
 }
 
-static bool iree_hal_amd_xdna_memory_host_transition(
-    const amdf_cache_transition_t* transition,
-    amdf_host_cache_operation_t operation,
-    iree_device_size_t* maintenance_alignment) {
-  if (transition->kind == AMDF_CACHE_TRANSITION_KIND_NONE) {
-    return true;
+typedef enum iree_hal_amd_xdna_memory_site_kind_e {
+  IREE_HAL_AMD_XDNA_MEMORY_SITE_UNKNOWN = 0,
+  IREE_HAL_AMD_XDNA_MEMORY_SITE_HOST = 1,
+  IREE_HAL_AMD_XDNA_MEMORY_SITE_QUEUE = 2,
+} iree_hal_amd_xdna_memory_site_kind_t;
+
+typedef struct iree_hal_amd_xdna_memory_transition_site_t {
+  // Native interpretation of this exact HAL scope.
+  iree_hal_amd_xdna_memory_site_kind_t kind;
+  // Whether this exact queue requires coherent public host access.
+  bool requires_host_coherent;
+  // Prospective libamdf site when kind is HOST or QUEUE.
+  amdf_memory_profile_site_t native;
+} iree_hal_amd_xdna_memory_transition_site_t;
+
+typedef struct iree_hal_amd_xdna_memory_transition_query_t {
+  // Borrowed native query owner.
+  const iree_hal_amd_xdna_memory_backend_t* owner;
+  // Base construction facts completed with exact sites for each query.
+  amdf_memory_profile_pair_query_t native;
+  // Borrowed dense construction-time site interpretations.
+  const iree_hal_amd_xdna_memory_transition_site_t* sites;
+  // Largest explicit range granularity observed across admitted exact pairs.
+  iree_device_size_t maintenance_alignment;
+  // Whether every host/XDNA direction requires no host cache action.
+  bool host_coherent;
+  // Whether every admitted host/queue pair has a complete native route.
+  bool complete;
+} iree_hal_amd_xdna_memory_transition_query_t;
+
+static void iree_hal_amd_xdna_memory_accumulate_pair(
+    const iree_hal_amd_xdna_memory_transition_site_t* producer,
+    const iree_hal_amd_xdna_memory_transition_site_t* consumer,
+    const iree_hal_memory_pair_info_t* pair,
+    iree_hal_amd_xdna_memory_transition_query_t* query) {
+  if (!iree_all_bits_set(pair->flags,
+                         IREE_HAL_MEMORY_PAIR_SHARED_BACKING_REACHABLE) ||
+      pair->release.kind == IREE_HAL_MEMORY_TRANSITION_KIND_UNKNOWN ||
+      pair->acquire.kind == IREE_HAL_MEMORY_TRANSITION_KIND_UNKNOWN) {
+    query->complete = false;
+    return;
   }
-  if (transition->kind != AMDF_CACHE_TRANSITION_KIND_RANGE ||
-      (transition->executor != AMDF_CACHE_TRANSITION_EXECUTOR_HOST_DIRECT &&
-       transition->executor != AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API) ||
-      transition->host_operation != operation ||
-      !iree_device_size_is_power_of_two(transition->range_granularity)) {
-    return false;
+  if (pair->release.kind == IREE_HAL_MEMORY_TRANSITION_KIND_RANGE) {
+    query->maintenance_alignment =
+        iree_max(query->maintenance_alignment, pair->release.range_granularity);
   }
-  *maintenance_alignment =
-      iree_max(*maintenance_alignment, transition->range_granularity);
-  return true;
+  if (pair->acquire.kind == IREE_HAL_MEMORY_TRANSITION_KIND_RANGE) {
+    query->maintenance_alignment =
+        iree_max(query->maintenance_alignment, pair->acquire.range_granularity);
+  }
+  if (producer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_HOST &&
+      consumer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_QUEUE) {
+    const bool coherent =
+        pair->release.kind == IREE_HAL_MEMORY_TRANSITION_KIND_NONE;
+    query->host_coherent &= coherent;
+    query->complete &= !consumer->requires_host_coherent || coherent;
+  } else if (producer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_QUEUE &&
+             consumer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_HOST) {
+    const bool coherent =
+        pair->acquire.kind == IREE_HAL_MEMORY_TRANSITION_KIND_NONE;
+    query->host_coherent &= coherent;
+    query->complete &= !producer->requires_host_coherent || coherent;
+  }
 }
 
-static iree_status_t iree_hal_amd_xdna_memory_query_pair(
-    const iree_hal_amd_xdna_memory_backend_t* owner,
-    const amdf_memory_profile_pair_query_t* query,
-    amdf_host_cache_operation_t host_operation,
-    iree_device_size_t* maintenance_alignment, bool* out_supported,
-    bool* out_no_op) {
-  *out_supported = false;
-  *out_no_op = false;
-  amdf_memory_pair_info_t pair = {
+static iree_status_t iree_hal_amd_xdna_memory_query_transition(
+    void* user_data, iree_hal_memory_scope_id_t producer_id,
+    iree_hal_memory_scope_id_t consumer_id,
+    iree_hal_memory_pair_info_t* out_info) {
+  iree_hal_amd_xdna_memory_transition_query_t* query = user_data;
+  const iree_hal_amd_xdna_memory_transition_site_t* producer =
+      &query->sites[producer_id];
+  const iree_hal_amd_xdna_memory_transition_site_t* consumer =
+      &query->sites[consumer_id];
+  if (producer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_UNKNOWN ||
+      consumer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_UNKNOWN) {
+    return iree_ok_status();
+  }
+  if (producer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_HOST &&
+      consumer->kind == IREE_HAL_AMD_XDNA_MEMORY_SITE_HOST) {
+    *out_info = (iree_hal_memory_pair_info_t){
+        .flags = IREE_HAL_MEMORY_PAIR_SHARED_BACKING_REACHABLE |
+                 IREE_HAL_MEMORY_PAIR_FIXED_COST_KNOWN,
+        .release = {.kind = IREE_HAL_MEMORY_TRANSITION_KIND_NONE},
+        .acquire = {.kind = IREE_HAL_MEMORY_TRANSITION_KIND_NONE},
+        .atomic_reach = {.scope_32 = IREE_HAL_ATOMIC_REACH_SYSTEM,
+                         .scope_64 = IREE_HAL_ATOMIC_REACH_SYSTEM},
+    };
+    return iree_ok_status();
+  }
+
+  query->native.producer = producer->native;
+  query->native.consumer = consumer->native;
+  amdf_memory_pair_info_t native = {
       .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
-      .structure_size = sizeof(pair),
+      .structure_size = sizeof(native),
   };
   const amdf_status_t native_status =
-      owner->context->api->memory_scope_query_pair_info(
-          owner->context->data_source.scope, query, &pair);
+      query->owner->context->api->memory_scope_query_pair_info(
+          query->owner->context->data_source.scope, &query->native, &native);
   if (native_status == amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED)) {
+    query->complete = false;
     return iree_ok_status();
   }
   IREE_RETURN_IF_ERROR(IREE_HAL_AMD_STATUS_FROM_AMDF(
       native_status, "memory_scope_query_pair_info"));
-  if (!iree_all_bits_set(pair.flags,
-                         AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE)) {
-    return iree_ok_status();
-  }
-
-  bool supported = false;
-  if (host_operation == AMDF_HOST_CACHE_OPERATION_FLUSH) {
-    supported = iree_hal_amd_xdna_memory_host_transition(
-                    &pair.release, host_operation, maintenance_alignment) &&
-                pair.acquire.kind == AMDF_CACHE_TRANSITION_KIND_NONE;
-    *out_no_op = pair.release.kind == AMDF_CACHE_TRANSITION_KIND_NONE;
-  } else if (host_operation == AMDF_HOST_CACHE_OPERATION_INVALIDATE) {
-    supported = pair.release.kind == AMDF_CACHE_TRANSITION_KIND_NONE &&
-                iree_hal_amd_xdna_memory_host_transition(
-                    &pair.acquire, host_operation, maintenance_alignment);
-    *out_no_op = pair.acquire.kind == AMDF_CACHE_TRANSITION_KIND_NONE;
-  } else {
-    supported = pair.release.kind == AMDF_CACHE_TRANSITION_KIND_NONE &&
-                pair.acquire.kind == AMDF_CACHE_TRANSITION_KIND_NONE;
-    *out_no_op = supported;
-  }
-  *out_supported = supported;
+  IREE_RETURN_IF_ERROR(
+      iree_hal_amd_xdna_memory_translate_pair(&native, out_info));
+  iree_hal_amd_xdna_memory_accumulate_pair(producer, consumer, out_info, query);
   return iree_ok_status();
-}
-
-static iree_status_t iree_hal_amd_xdna_memory_qualify_pairs(
-    const iree_hal_amd_xdna_memory_backend_t* owner,
-    iree_hal_pool_scope_t scope, uint32_t access_count,
-    const amdf_memory_device_access_t* accesses,
-    const uint32_t* family_access_ordinals,
-    const iree_hal_amd_xdna_memory_backend_t* const* family_backends,
-    uint32_t profile_ordinal, iree_device_size_t* out_maintenance_alignment,
-    bool* out_host_coherent, bool* out_supported) {
-  *out_maintenance_alignment = 1;
-  *out_host_coherent = true;
-  *out_supported = false;
-  amdf_memory_profile_pair_query_t query = {
-      .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
-      .structure_size = sizeof(query),
-      .memory_profile_ordinal = profile_ordinal,
-      .access_count = access_count,
-      .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
-      .accesses = accesses,
-  };
-  iree_status_t status = iree_ok_status();
-  bool supported = true;
-  for (iree_host_size_t i = 0;
-       i < scope.family_count && supported && iree_status_is_ok(status); ++i) {
-    const uint32_t access_ordinal = family_access_ordinals[i];
-    const uint32_t family_ordinal =
-        family_backends[i]->context->queue_family_ordinal;
-    query.producer = (amdf_memory_profile_site_t){
-        .kind = AMDF_MEMORY_SITE_KIND_HOST,
-        .value.host_access =
-            AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
-    };
-    query.consumer = (amdf_memory_profile_site_t){
-        .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
-        .value.device =
-            {
-                .access_ordinal = access_ordinal,
-                .queue_family_ordinal = family_ordinal,
-            },
-    };
-    bool no_op = false;
-    status = iree_hal_amd_xdna_memory_query_pair(
-        owner, &query, AMDF_HOST_CACHE_OPERATION_FLUSH,
-        out_maintenance_alignment, &supported, &no_op);
-    *out_host_coherent &= no_op;
-    if (!supported || !iree_status_is_ok(status)) {
-      break;
-    }
-    query.producer = query.consumer;
-    query.consumer = (amdf_memory_profile_site_t){
-        .kind = AMDF_MEMORY_SITE_KIND_HOST,
-        .value.host_access =
-            AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
-    };
-    status = iree_hal_amd_xdna_memory_query_pair(
-        owner, &query, AMDF_HOST_CACHE_OPERATION_INVALIDATE,
-        out_maintenance_alignment, &supported, &no_op);
-    *out_host_coherent &= no_op;
-  }
-  for (iree_host_size_t i = 0;
-       i < scope.family_count && supported && iree_status_is_ok(status); ++i) {
-    for (iree_host_size_t j = 0;
-         j < scope.family_count && supported && iree_status_is_ok(status);
-         ++j) {
-      query.producer = (amdf_memory_profile_site_t){
-          .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
-          .value.device =
-              {
-                  .access_ordinal = family_access_ordinals[i],
-                  .queue_family_ordinal =
-                      family_backends[i]->context->queue_family_ordinal,
-              },
-      };
-      query.consumer = (amdf_memory_profile_site_t){
-          .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
-          .value.device =
-              {
-                  .access_ordinal = family_access_ordinals[j],
-                  .queue_family_ordinal =
-                      family_backends[j]->context->queue_family_ordinal,
-              },
-      };
-      bool no_op = false;
-      status = iree_hal_amd_xdna_memory_query_pair(
-          owner, &query, AMDF_HOST_CACHE_OPERATION_NONE,
-          out_maintenance_alignment, &supported, &no_op);
-    }
-  }
-  if (iree_status_is_ok(status)) {
-    *out_supported = supported;
-  }
-  return status;
 }
 
 static iree_status_t iree_hal_amd_xdna_slab_pool_emit_plan(
@@ -289,7 +245,7 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_emit_plan(
     const iree_hal_slab_pool_options_t* options, uint32_t access_count,
     const amdf_memory_device_access_t* accesses,
     const uint32_t* family_access_ordinals,
-    const iree_hal_amd_xdna_memory_backend_t* const* family_backends,
+    const iree_hal_amd_xdna_memory_transition_site_t* transition_sites,
     const amdf_memory_profile_t* profile, const uint16_t* binding_types,
     iree_hal_slab_pool_plan_callback_t callback,
     iree_allocator_t host_allocator) {
@@ -321,30 +277,9 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_emit_plan(
         host.access != scope.host.access || host.modes != scope.host.modes;
   }
 
-  iree_device_size_t maintenance_alignment = 1;
-  bool host_coherent = false;
-  bool supported = false;
-  IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_memory_qualify_pairs(
-      owner, scope, access_count, accesses, family_access_ordinals,
-      family_backends, profile->ordinal, &maintenance_alignment, &host_coherent,
-      &supported));
-  if (!supported) {
-    return iree_ok_status();
-  }
-  for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
-    if (iree_any_bit_set(scope.families[i].requirements,
-                         IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST) &&
-        !host_coherent) {
-      return iree_ok_status();
-    }
-  }
-
   iree_hal_memory_type_t memory_type =
       IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL |
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  if (host_coherent) {
-    memory_type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
-  }
   iree_hal_buffer_usage_t usage = IREE_HAL_BUFFER_USAGE_NONE;
   for (iree_host_size_t i = 0; i < scope.family_count; ++i) {
     usage |= scope.families[i].usage;
@@ -376,7 +311,7 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_emit_plan(
       .accesses = plan->accesses,
       .memory_type = memory_type,
       .supported_usage = usage | mapping_usage,
-      .maintenance_alignment = maintenance_alignment,
+      .maintenance_alignment = 1,
   };
   plan->progress.notification = owner->notification;
   plan->progress.maintenance = owner->maintenance;
@@ -392,6 +327,7 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_emit_plan(
       .host_binding_index = 0,
       .types = binding_types,
   };
+  bool plan_consumed = false;
   iree_status_t status = iree_hal_memory_contract_create(
       iree_hal_device_group_memory_domain(group),
       iree_hal_device_group_memory_scope_count(group), &binding_layout,
@@ -400,12 +336,6 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_emit_plan(
     iree_hal_memory_contract_t* contract = plan->contract;
     contract->host = host;
     contract->placement = plan->base.info.placement;
-    contract->buffer_params = (iree_hal_buffer_params_t){
-        .usage = usage | mapping_usage,
-        .access = IREE_HAL_MEMORY_ACCESS_ALL,
-        .type = memory_type,
-        .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-    };
     if (host.access) {
       contract->scopes[1].interfaces = 1u << IREE_HAL_BUFFER_INTERFACE_HOST;
       contract->scopes[1].bindings[IREE_HAL_BUFFER_INTERFACE_HOST] = 0;
@@ -422,8 +352,50 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_emit_plan(
             binding_index;
       }
     }
-    status = callback.fn(callback.user_data, &plan->base);
-  } else {
+    bool host_coherent = host.access != IREE_HAL_MEMORY_ACCESS_NONE;
+    for (uint32_t i = 0; i < access_count; ++i) {
+      host_coherent &= iree_all_bits_set(accesses[i].requirements.flags,
+                                         AMDF_MEMORY_FLAG_HOST_COHERENT);
+    }
+    iree_hal_amd_xdna_memory_transition_query_t transition_query = {
+        .owner = owner,
+        .native =
+            {
+                .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY,
+                .structure_size = sizeof(amdf_memory_profile_pair_query_t),
+                .memory_profile_ordinal = profile->ordinal,
+                .access_count = access_count,
+                .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+                .accesses = accesses,
+            },
+        .sites = transition_sites,
+        .maintenance_alignment = 1,
+        .host_coherent = host_coherent,
+        .complete = true,
+    };
+    status = iree_hal_memory_contract_initialize_transitions(
+        contract, iree_hal_amd_xdna_memory_query_transition, &transition_query);
+    const bool requirements_satisfied = transition_query.complete;
+    if (iree_status_is_ok(status) && requirements_satisfied) {
+      if (transition_query.host_coherent) {
+        memory_type |= IREE_HAL_MEMORY_TYPE_HOST_COHERENT;
+      }
+      plan->provider_options.memory_type = memory_type;
+      plan->provider_options.maintenance_alignment =
+          transition_query.maintenance_alignment;
+      contract->buffer_params = (iree_hal_buffer_params_t){
+          .usage = usage | mapping_usage,
+          .access = IREE_HAL_MEMORY_ACCESS_ALL,
+          .type = memory_type,
+          .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      };
+      plan_consumed = true;
+      status = callback.fn(callback.user_data, &plan->base);
+    } else if (iree_status_is_ok(status)) {
+      iree_hal_amd_xdna_slab_pool_plan_destroy(&plan->base);
+    }
+  }
+  if (!iree_status_is_ok(status) && !plan_consumed) {
     iree_hal_amd_xdna_slab_pool_plan_destroy(&plan->base);
   }
   return status;
@@ -454,6 +426,9 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_query(
   iree_host_size_t family_backends_offset = 0;
   iree_host_size_t capabilities_offset = 0;
   iree_host_size_t binding_types_offset = 0;
+  iree_host_size_t transition_sites_offset = 0;
+  const uint32_t memory_scope_count =
+      iree_hal_device_group_memory_scope_count(group);
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &scratch_size,
       IREE_STRUCT_FIELD(scope.family_count, amdf_memory_device_access_t,
@@ -465,7 +440,10 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_query(
                         &family_backends_offset),
       IREE_STRUCT_FIELD(scope.family_count, amdf_memory_access_capabilities_t,
                         &capabilities_offset),
-      IREE_STRUCT_FIELD(binding_capacity, uint16_t, &binding_types_offset)));
+      IREE_STRUCT_FIELD(binding_capacity, uint16_t, &binding_types_offset),
+      IREE_STRUCT_FIELD(memory_scope_count,
+                        iree_hal_amd_xdna_memory_transition_site_t,
+                        &transition_sites_offset)));
   uint8_t* scratch = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, scratch_size, (void**)&scratch));
@@ -480,6 +458,18 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_query(
   amdf_memory_access_capabilities_t* capabilities =
       (amdf_memory_access_capabilities_t*)(scratch + capabilities_offset);
   uint16_t* binding_types = (uint16_t*)(scratch + binding_types_offset);
+  iree_hal_amd_xdna_memory_transition_site_t* transition_sites =
+      (iree_hal_amd_xdna_memory_transition_site_t*)(scratch +
+                                                    transition_sites_offset);
+  transition_sites[1] = (iree_hal_amd_xdna_memory_transition_site_t){
+      .kind = IREE_HAL_AMD_XDNA_MEMORY_SITE_HOST,
+      .native =
+          {
+              .kind = AMDF_MEMORY_SITE_KIND_HOST,
+              .value.host_access =
+                  AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE,
+          },
+  };
 
   bool supported = true;
   iree_host_size_t matched_family_count = 0;
@@ -549,6 +539,24 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_query(
       }
       family_access_ordinals[family_index] = access_ordinal;
       family_backends[family_index] = backend;
+      transition_sites[scope.families[family_index]
+                           .family->memory.queue_scope_id] =
+          (iree_hal_amd_xdna_memory_transition_site_t){
+              .kind = IREE_HAL_AMD_XDNA_MEMORY_SITE_QUEUE,
+              .requires_host_coherent = iree_any_bit_set(
+                  scope.families[family_index].requirements,
+                  IREE_HAL_POOL_ACCESS_REQUIRE_COHERENT_WITH_HOST),
+              .native =
+                  {
+                      .kind = AMDF_MEMORY_SITE_KIND_DEVICE,
+                      .value.device =
+                          {
+                              .access_ordinal = access_ordinal,
+                              .queue_family_ordinal =
+                                  backend->context->queue_family_ordinal,
+                          },
+                  },
+          };
     }
   }
   supported &= matched_family_count == scope.family_count && owner != NULL &&
@@ -596,7 +604,7 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_query(
     if (iree_status_is_ok(status)) {
       status = iree_hal_amd_xdna_slab_pool_emit_plan(
           owner, group, scope, options, access_count, accesses,
-          family_access_ordinals, family_backends, &profile, binding_types,
+          family_access_ordinals, transition_sites, &profile, binding_types,
           callback, host_allocator);
     }
   }
@@ -607,10 +615,6 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_query(
 static const iree_hal_slab_pool_factory_t iree_hal_amd_xdna_slab_pool_factory =
     {
         .query = iree_hal_amd_xdna_slab_pool_query,
-};
-static const iree_hal_slab_pool_factory_t* const
-    iree_hal_amd_xdna_slab_pool_factories[] = {
-        &iree_hal_amd_xdna_slab_pool_factory,
 };
 
 void iree_hal_amd_xdna_memory_backend_initialize(
@@ -623,9 +627,6 @@ void iree_hal_amd_xdna_memory_backend_initialize(
       .base =
           {
               .type = IREE_HAL_MEMORY_BACKEND_AMDF,
-              .factory_count =
-                  IREE_ARRAYSIZE(iree_hal_amd_xdna_slab_pool_factories),
-              .factories = iree_hal_amd_xdna_slab_pool_factories,
           },
       .device = device,
       .context = context,
@@ -633,4 +634,7 @@ void iree_hal_amd_xdna_memory_backend_initialize(
       .maintenance = maintenance,
       .epoch_query = epoch_query,
   };
+  out_backend->factories[0] = &iree_hal_amd_xdna_slab_pool_factory;
+  out_backend->base.factory_count = 1;
+  out_backend->base.factories = out_backend->factories;
 }
