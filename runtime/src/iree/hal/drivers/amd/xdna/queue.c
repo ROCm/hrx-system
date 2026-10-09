@@ -1358,14 +1358,18 @@ static iree_status_t iree_hal_amd_xdna_operation_capture_semaphores(
   iree_host_size_t producers_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &size,
-      IREE_STRUCT_FIELD(source.count, iree_hal_semaphore_t*,
-                        &semaphores_offset),
-      IREE_STRUCT_FIELD(source.count, uint64_t, &values_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(source.count, iree_hal_semaphore_t*,
+                                iree_alignof(iree_hal_semaphore_t*),
+                                &semaphores_offset),
+      IREE_STRUCT_FIELD_ALIGNED(source.count, uint64_t, iree_alignof(uint64_t),
+                                &values_offset)));
   const iree_host_size_t list_size = size;
-  IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
-      size, &size,
-      IREE_STRUCT_FIELD(producer_count, iree_hal_amd_xdna_producer_entry_t,
-                        &producers_offset)));
+  IREE_RETURN_IF_ERROR(
+      IREE_STRUCT_LAYOUT(size, &size,
+                         IREE_STRUCT_FIELD_ALIGNED(
+                             producer_count, iree_hal_amd_xdna_producer_entry_t,
+                             iree_alignof(iree_hal_amd_xdna_producer_entry_t),
+                             &producers_offset)));
   const iree_host_size_t maximum_record_size =
       iree_arena_block_pool_max_allocation_size(operation->metadata_block_pool);
   const bool producers_are_packed = size <= maximum_record_size;
@@ -1397,8 +1401,9 @@ static iree_status_t iree_hal_amd_xdna_operation_capture_semaphores(
     iree_host_size_t chunk_offset = 0;
     IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
         0, &chunk_size,
-        IREE_STRUCT_FIELD(chunk_count, iree_hal_amd_xdna_producer_entry_t,
-                          &chunk_offset)));
+        IREE_STRUCT_FIELD_ALIGNED(
+            chunk_count, iree_hal_amd_xdna_producer_entry_t,
+            iree_alignof(iree_hal_amd_xdna_producer_entry_t), &chunk_offset)));
     uint8_t* chunk_storage = NULL;
     IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_capture_allocate_metadata(
         &operation->capture, chunk_size, (void**)&chunk_storage));

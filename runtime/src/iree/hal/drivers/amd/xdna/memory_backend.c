@@ -431,19 +431,26 @@ static iree_status_t iree_hal_amd_xdna_slab_pool_query(
       iree_hal_device_group_memory_scope_count(group);
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       0, &scratch_size,
-      IREE_STRUCT_FIELD(scope.family_count, amdf_memory_device_access_t,
-                        &accesses_offset),
-      IREE_STRUCT_FIELD(scope.family_count, uint32_t,
-                        &family_access_ordinals_offset),
-      IREE_STRUCT_FIELD(scope.family_count,
-                        const iree_hal_amd_xdna_memory_backend_t*,
-                        &family_backends_offset),
-      IREE_STRUCT_FIELD(scope.family_count, amdf_memory_access_capabilities_t,
-                        &capabilities_offset),
-      IREE_STRUCT_FIELD(binding_capacity, uint16_t, &binding_types_offset),
-      IREE_STRUCT_FIELD(memory_scope_count,
-                        iree_hal_amd_xdna_memory_transition_site_t,
-                        &transition_sites_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(scope.family_count, amdf_memory_device_access_t,
+                                iree_alignof(amdf_memory_device_access_t),
+                                &accesses_offset),
+      IREE_STRUCT_FIELD_ALIGNED(scope.family_count, uint32_t,
+                                iree_alignof(uint32_t),
+                                &family_access_ordinals_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          scope.family_count, const iree_hal_amd_xdna_memory_backend_t*,
+          iree_alignof(const iree_hal_amd_xdna_memory_backend_t*),
+          &family_backends_offset),
+      IREE_STRUCT_FIELD_ALIGNED(scope.family_count,
+                                amdf_memory_access_capabilities_t,
+                                iree_alignof(amdf_memory_access_capabilities_t),
+                                &capabilities_offset),
+      IREE_STRUCT_FIELD_ALIGNED(binding_capacity, uint16_t,
+                                iree_alignof(uint16_t), &binding_types_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          memory_scope_count, iree_hal_amd_xdna_memory_transition_site_t,
+          iree_alignof(iree_hal_amd_xdna_memory_transition_site_t),
+          &transition_sites_offset)));
   uint8_t* scratch = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, scratch_size, (void**)&scratch));

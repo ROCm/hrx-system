@@ -168,9 +168,13 @@ static iree_status_t iree_hal_amd_xdna_invocation_create(
   iree_host_size_t size = 0, allocations_offset = 0, storage_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_xdna_invocation_t), &size,
-      IREE_STRUCT_FIELD(count, iree_hal_amd_xdna_memory_t, &allocations_offset),
-      IREE_STRUCT_FIELD(count, iree_hal_amd_xdna_executable_storage_t,
-                        &storage_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(count, iree_hal_amd_xdna_memory_t,
+                                iree_alignof(iree_hal_amd_xdna_memory_t),
+                                &allocations_offset),
+      IREE_STRUCT_FIELD_ALIGNED(
+          count, iree_hal_amd_xdna_executable_storage_t,
+          iree_alignof(iree_hal_amd_xdna_executable_storage_t),
+          &storage_offset)));
   iree_hal_amd_xdna_invocation_t* invocation = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(function->host_allocator, size,
                                              (void**)&invocation));

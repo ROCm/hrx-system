@@ -612,17 +612,25 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
   if (iree_status_is_ok(status)) {
     status = IREE_STRUCT_LAYOUT(
         0, &storage_size,
-        IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_request_t,
-                          &requests_offset),
-        IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*, &buffers_offset),
-        IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_t,
-                          &reservations_offset),
-        IREE_STRUCT_FIELD(request_count, iree_hal_pool_acquire_info_t,
-                          &infos_offset),
-        IREE_STRUCT_FIELD(request_count, iree_hal_pool_reservation_view_t,
-                          &views_offset),
-        IREE_STRUCT_FIELD(request_count, iree_hal_buffer_t*,
-                          &materialized_offset));
+        IREE_STRUCT_FIELD_ALIGNED(
+            request_count, iree_hal_pool_reservation_request_t,
+            iree_alignof(iree_hal_pool_reservation_request_t),
+            &requests_offset),
+        IREE_STRUCT_FIELD_ALIGNED(request_count, iree_hal_buffer_t*,
+                                  iree_alignof(iree_hal_buffer_t*),
+                                  &buffers_offset),
+        IREE_STRUCT_FIELD_ALIGNED(request_count, iree_hal_pool_reservation_t,
+                                  iree_alignof(iree_hal_pool_reservation_t),
+                                  &reservations_offset),
+        IREE_STRUCT_FIELD_ALIGNED(request_count, iree_hal_pool_acquire_info_t,
+                                  iree_alignof(iree_hal_pool_acquire_info_t),
+                                  &infos_offset),
+        IREE_STRUCT_FIELD_ALIGNED(
+            request_count, iree_hal_pool_reservation_view_t,
+            iree_alignof(iree_hal_pool_reservation_view_t), &views_offset),
+        IREE_STRUCT_FIELD_ALIGNED(request_count, iree_hal_buffer_t*,
+                                  iree_alignof(iree_hal_buffer_t*),
+                                  &materialized_offset));
   }
   uint8_t* storage = NULL;
   if (iree_status_is_ok(status)) {
@@ -730,9 +738,12 @@ iree_status_t iree_hal_amd_xdna_queue_dealloca(
   iree_host_size_t reservations_offset = 0;
   iree_status_t status = IREE_STRUCT_LAYOUT(
       0, &storage_size,
-      IREE_STRUCT_FIELD(buffer_count, iree_hal_buffer_t*, &buffers_offset),
-      IREE_STRUCT_FIELD(buffer_count, iree_hal_pool_reservation_t,
-                        &reservations_offset));
+      IREE_STRUCT_FIELD_ALIGNED(buffer_count, iree_hal_buffer_t*,
+                                iree_alignof(iree_hal_buffer_t*),
+                                &buffers_offset),
+      IREE_STRUCT_FIELD_ALIGNED(buffer_count, iree_hal_pool_reservation_t,
+                                iree_alignof(iree_hal_pool_reservation_t),
+                                &reservations_offset));
   uint8_t* storage = NULL;
   if (iree_status_is_ok(status)) {
     status = iree_hal_amd_xdna_queue_capture_allocate_metadata(
