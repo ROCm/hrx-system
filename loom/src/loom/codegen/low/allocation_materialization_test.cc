@@ -190,8 +190,8 @@ low.func.def target<test.low.core>(@test_target) @stale_slice_plan(%wide: reg<te
   options.supported_storage_spaces = LOOM_LOW_STORAGE_SPACE_SET_PRIVATE;
   options.record_materialized_spills = true;
   options.emitter = {
-      /*.fn=*/CountDiagnostic,
-      /*.user_data=*/&diagnostic_count,
+      .fn = CountDiagnostic,
+      .user_data = &diagnostic_count,
   };
   IREE_ASSERT_OK(loom_low_allocation_materialize_spills(&table, &options,
                                                         &arena, &result));

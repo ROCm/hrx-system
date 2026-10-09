@@ -96,15 +96,15 @@ TEST(SourceTest, BlockScanningAndRangeAnchorsPreserveCoordinates) {
   EXPECT_EQ(loom_source_byte_offset(source_view, 4, 1), source.size());
 
   const loom_source_range_t range = {
-      /*.provenance=*/LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
-      /*.filename=*/iree_string_view_empty(),
-      /*.source=*/source_view,
-      /*.start=*/401,
-      /*.end=*/source.size(),
-      /*.start_line=*/2,
-      /*.start_column=*/101,
-      /*.end_line=*/4,
-      /*.end_column=*/1,
+      .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+      .filename = iree_string_view_empty(),
+      .source = source_view,
+      .start = 401,
+      .end = source.size(),
+      .start_line = 2,
+      .start_column = 101,
+      .end_line = 4,
+      .end_column = 1,
   };
   for (const auto& position : {std::pair<uint32_t, uint32_t>{1, 250},
                                {2, 1},
@@ -270,11 +270,11 @@ TEST_F(SourceResolverTest, SparseSnapshotTablesResolveBySourceIdentity) {
       loom_module_register_source(module, IREE_SV("kernel.h"), &source_id));
   ASSERT_EQ(source_id, 1u);
   const loom_source_entry_t sources[] = {
-      {/*.source_id=*/LOOM_SOURCE_ID_INVALID},
+      {.source_id = LOOM_SOURCE_ID_INVALID},
       {
-          /*.source_id=*/source_id,
-          /*.source=*/IREE_SV("kernel"),
-          /*.filename=*/IREE_SV("kernel.h"),
+          .source_id = source_id,
+          .source = IREE_SV("kernel"),
+          .filename = IREE_SV("kernel.h"),
       },
   };
   loom_source_table_resolver_t table = {module, sources,
