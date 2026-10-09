@@ -72,13 +72,27 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "logs",
+    srcs = ["logs.c"],
+    hdrs = ["logs.h"],
+    deps = [
+        "//experimental/loom_serve/telemetry:stream",
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "router",
     srcs = ["router.c"],
     hdrs = ["router.h"],
     deps = [
+        ":logs",
         ":request",
         ":server",
         ":tokenization",
+        "//experimental/loom_serve/telemetry:stream",
         "//loom/src/loom/util:json",
         "//loom/src/loom/util:stream",
         "//runtime/src/iree/base",
@@ -86,6 +100,18 @@ loom_cc_library(
         "//runtime/src/iree/base/threading",
         "//runtime/src/iree/task",
         "//runtime/src/iree/tokenizer",
+    ],
+)
+
+loom_cc_test(
+    name = "logs_test",
+    srcs = ["logs_test.cc"],
+    deps = [
+        ":logs",
+        "//experimental/loom_serve/telemetry:stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

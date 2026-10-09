@@ -83,23 +83,53 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    logs
+  HDRS
+    "logs.h"
+  SRCS
+    "logs.c"
+  DEPS
+    iree::base
+    iree::experimental::loom_serve::telemetry::stream
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     router
   HDRS
     "router.h"
   SRCS
     "router.c"
   DEPS
+    ::logs
     ::request
     ::server
     ::tokenization
     iree::base
     iree::base::internal::json
     iree::base::threading
+    iree::experimental::loom_serve::telemetry::stream
     iree::task
     iree::tokenizer
     loom::util::json
     loom::util::stream
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    logs_test
+  SRCS
+    "logs_test.cc"
+  DEPS
+    ::logs
+    iree::base
+    iree::experimental::loom_serve::telemetry::stream
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

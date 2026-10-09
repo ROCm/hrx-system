@@ -20,6 +20,7 @@ configuration, numerical policy, and model-specific reference checks.
 | --- | --- |
 | [`runtime/`](runtime) | Source JIT, command materialization, VM imports, weight streaming and queue timelines |
 | [`http/`](http) | TCP carrier, bounded request storage and single-owner model routing |
+| [`telemetry/`](telemetry) | Typed overwrite streams and lifetime counters, independent of consumer pace |
 | [`serving/`](serving) | Deployment catalogs and multiple source models sharing one device and listener |
 | [`text/`](text) | Source-defined packed autoregressive residency, chat protocol, admission and retained token scheduling |
 | [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |

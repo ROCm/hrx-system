@@ -6,6 +6,8 @@
 
 #include "experimental/loom_serve/finite/service.h"
 
+#include <errno.h>
+#include <fcntl.h>
 #include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -31,6 +33,54 @@ IREE_FLAG(string, model_source, "",
           "Deterministic embedding bootstrap source.");
 
 namespace {
+
+// A genuinely full inherited stderr pipe reproduces the serving boundary: any
+// synchronous diagnostic write on the only worker prevents inference progress.
+// Restoration drains accepted writes before closing the read end, including on
+// a failed assertion. The outer test harness owns the deadlock guard.
+class StalledStderr {
+ public:
+  void Begin() {
+    ASSERT_EQ(pipe2(pipe_, O_CLOEXEC | O_NONBLOCK), 0);
+    saved_ = dup(STDERR_FILENO);
+    ASSERT_GE(saved_, 0);
+    const char bytes[4096] = {};
+    ssize_t result;
+    do {
+      result = write(pipe_[1], bytes, sizeof(bytes));
+    } while (result > 0);
+    ASSERT_EQ(result, -1);
+    ASSERT_EQ(errno, EAGAIN);
+    ASSERT_EQ(fcntl(pipe_[1], F_SETFL, 0), 0);
+    ASSERT_EQ(fcntl(pipe_[0], F_SETFL, 0), 0);
+    ASSERT_EQ(dup2(pipe_[1], STDERR_FILENO), STDERR_FILENO);
+    ASSERT_EQ(close(std::exchange(pipe_[1], -1)), 0);
+  }
+  ~StalledStderr() {
+    if (saved_ >= 0) {
+      EXPECT_EQ(dup2(saved_, STDERR_FILENO), STDERR_FILENO);
+      EXPECT_EQ(close(saved_), 0);
+    }
+    if (pipe_[1] >= 0) {
+      EXPECT_EQ(close(pipe_[1]), 0);
+    }
+    if (pipe_[0] >= 0) {
+      char bytes[4096];
+      ssize_t result;
+      do {
+        result = read(pipe_[0], bytes, sizeof(bytes));
+      } while (result > 0 || (result < 0 && errno == EINTR));
+      EXPECT_EQ(result, 0);
+      EXPECT_EQ(close(pipe_[0]), 0);
+    }
+  }
+
+ private:
+  // Owned saved process stderr, restored before draining the full pipe.
+  int saved_ = -1;
+  // Owned read and write handles; the write handle moves into stderr.
+  int pipe_[2] = {-1, -1};
+};
 
 class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
  protected:
@@ -101,7 +151,7 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
   }
 
   int Send(const std::string& body, const char* target = "/v1/embeddings",
-           const char* method = "POST") {
+           const char* method = "POST", const std::string& headers = {}) {
     const int client = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     EXPECT_GE(client, 0);
     const auto* address = loom_serve_http_server_address(server_);
@@ -112,7 +162,8 @@ class SourceEmbeddingServiceTest : public ::testing::TestWithParam<uint32_t> {
     const std::string request = std::string(method) + " " + target +
                                 " HTTP/1.1\r\nHost: local\r\nContent-Type: "
                                 "application/json\r\nContent-Length: " +
-                                std::to_string(body.size()) + "\r\n\r\n" + body;
+                                std::to_string(body.size()) + "\r\n" + headers +
+                                "\r\n" + body;
     size_t offset = 0;
     while (offset < request.size()) {
       const ssize_t sent = send(client, request.data() + offset,
@@ -328,6 +379,94 @@ TEST_P(SourceEmbeddingServiceTest,
   Accept();
   Drain();
   EXPECT_NE(Read(next).find(R"("embedding":[1,1,1,1])"), std::string::npos);
+  const auto& counters = *interface_.telemetry.counters;
+  EXPECT_EQ(counters.requests, 5u);
+  EXPECT_EQ(counters.completed, 3u);
+  EXPECT_EQ(counters.rejected, 1u);
+  EXPECT_EQ(counters.cancelled, 1u);
+  EXPECT_EQ(counters.failed, 0u);
+  EXPECT_EQ(counters.input_tokens, 8u);
+  EXPECT_EQ(counters.batches, 2u);
+}
+
+TEST_P(SourceEmbeddingServiceTest,
+       LogReadersWrapIndependentlyWhileStderrIsFull) {
+  StartRouter();
+  auto poll = [&](const std::string& cursor) {
+    return Read(
+        Send("", "/logz", "GET",
+             cursor.empty() ? "" : "X-Loom-Cursor: " + cursor + "\r\n"));
+  };
+  auto cursor_of = [](const std::string& response) {
+    const std::string marker = R"({"event":"cursor","value":")";
+    const size_t start = response.find(marker);
+    EXPECT_NE(start, std::string::npos);
+    if (start == std::string::npos) {
+      return std::string();
+    }
+    const size_t first = start + marker.size();
+    return response.substr(first, response.find('"', first) - first);
+  };
+  const std::string initial = poll("");
+  EXPECT_EQ(initial.find("HTTP/1.1 200"), 0u);
+  EXPECT_NE(initial.find(R"("event":"stream_begin","sequence":0)"),
+            std::string::npos);
+  EXPECT_NE(initial.find(R"("partial":false)"), std::string::npos);
+  const std::string slow = cursor_of(initial);
+  std::string fast = slow;
+  StalledStderr stalled;
+  ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  uint64_t next = 1;
+  std::string latest;
+  for (uint64_t i = 0; i < 40; ++i) {
+    const std::string inference =
+        Read(Send(R"({"model":"fixture","input":["a","bbb"],"dimensions":2})"));
+    ASSERT_EQ(inference.find("HTTP/1.1 200"), 0u);
+    EXPECT_NE(inference.find(R"("embedding":[1,1])"), std::string::npos);
+    EXPECT_NE(inference.find(R"("embedding":[6,3])"), std::string::npos);
+    latest = poll(fast);
+    EXPECT_EQ(latest.find(R"("event":"gap")"), std::string::npos);
+    // Each inference has a begin, submit, device end and request end. Counters
+    // and HTTP polls are not inserted into the producer's stream.
+    size_t offset = 0;
+    for (size_t record = 0; record < 4; ++record) {
+      const auto found =
+          latest.find("\"sequence\":" + std::to_string(next++) + ",", offset);
+      ASSERT_NE(found, std::string::npos);
+      offset = found + 12;
+    }
+    EXPECT_EQ(latest.find("\"sequence\":", offset), std::string::npos);
+    fast = cursor_of(latest);
+  }
+  EXPECT_EQ(next, 161u);
+  const std::string totals =
+      R"("requests":40,"completed":40,"rejected":0,"cancelled":0,"failed":0,"input_tokens":160,"output_tokens":0,"batches":40)";
+  EXPECT_NE(latest.find(totals), std::string::npos);
+  const std::string resumed = poll(slow);
+  EXPECT_NE(resumed.find(R"({"event":"gap","from":1,"to":33})"),
+            std::string::npos);
+  EXPECT_NE(resumed.find(totals), std::string::npos);
+  const std::string joined = poll("");
+  EXPECT_NE(joined.find(R"("partial":true)"), std::string::npos);
+  EXPECT_NE(joined.find(R"({"event":"gap","from":0,"to":33})"),
+            std::string::npos);
+  const std::string caught_up = poll(fast);
+  EXPECT_EQ(caught_up.find("\"sequence\":"), std::string::npos);
+  EXPECT_EQ(cursor_of(caught_up), fast);
+  EXPECT_NE(caught_up.find(totals), std::string::npos);
+  EXPECT_EQ(poll("bad").find("HTTP/1.1 400"), 0u);
+  EXPECT_EQ(poll("0:0:1").find("HTTP/1.1 409"), 0u);
+  EXPECT_EQ(poll(fast.substr(0, fast.find_last_of(':') + 1) + "999")
+                .find("HTTP/1.1 400"),
+            0u);
+  EXPECT_EQ(Read(Send("", "/logz", "GET", "X-Loom-Model: missing\r\n"))
+                .find("HTTP/1.1 404"),
+            0u);
+  // Shutdown itself must also retire while no stderr consumer is running.
+  EXPECT_EQ(kill(getpid(), SIGTERM), 0);
+  router_.join();
+  IREE_EXPECT_OK(status_);
+  status_ = iree_ok_status();
 }
 
 TEST_P(SourceEmbeddingServiceTest,

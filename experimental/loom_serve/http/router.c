@@ -8,6 +8,7 @@
 
 #include <stdio.h>
 
+#include "experimental/loom_serve/http/logs.h"
 #include "experimental/loom_serve/http/tokenization.h"
 #include "iree/base/internal/json.h"
 #include "iree/base/threading/mutex.h"
@@ -476,6 +477,59 @@ static iree_status_t router_metrics(router_t* router) {
   return status;
 }
 
+static iree_status_t router_logs(router_t* router,
+                                 loom_serve_http_connection_t* connection,
+                                 const loom_serve_http_request_t* request) {
+  iree_string_view_t name;
+  if (!loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
+                                             &name)) {
+    if (router->service_count != 1) {
+      return router_reject(connection, 400, "Bad Request",
+                           IREE_SV("log polling requires X-Loom-Model"),
+                           &router->output);
+    }
+    name = router->services[0].name;
+  }
+  const loom_serve_http_service_t* service = NULL;
+  for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+    if (iree_string_view_equal(name, router->services[i].name)) {
+      service = &router->services[i];
+      break;
+    }
+  }
+  if (!service) {
+    return router_reject(connection, 404, "Not Found",
+                         IREE_SV("model is not registered"), &router->output);
+  }
+  if (!service->telemetry.stream) {
+    return router_reject(connection, 501, "Not Implemented",
+                         IREE_SV("model service has no telemetry stream"),
+                         &router->output);
+  }
+  iree_string_view_t cursor;
+  loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Cursor"),
+                                        &cursor);
+  iree_status_t status = loom_serve_http_logs(
+      service->telemetry.stream, service->telemetry.counters, service->name,
+      cursor, &router->output);
+  if (iree_status_is_invalid_argument(status) ||
+      iree_status_is_failed_precondition(status)) {
+    const bool stale = iree_status_is_failed_precondition(status);
+    iree_status_t response_status = router_reject(
+        connection, stale ? 409 : 400, stale ? "Conflict" : "Bad Request",
+        iree_status_message(status), &router->output);
+    // The HTTP error owns the copied diagnostic before this status retires.
+    iree_status_free(status);
+    return response_status;
+  }
+  if (iree_status_is_ok(status)) {
+    router_send(connection, iree_string_builder_view(&router->output));
+  } else {
+    loom_serve_http_connection_abort(connection);
+  }
+  return status;
+}
+
 static iree_status_t router_accept(router_t* router,
                                    loom_serve_http_connection_t* connection,
                                    const loom_serve_http_request_t* request) {
@@ -483,6 +537,9 @@ static iree_status_t router_accept(router_t* router,
   const loom_serve_http_service_t* services = router->services;
   iree_string_builder_t* output = &router->output;
   const bool get = iree_string_view_equal(request->method, IREE_SV("GET"));
+  if (get && iree_string_view_equal(request->target, IREE_SV("/logz"))) {
+    return router_logs(router, connection, request);
+  }
   if (get && iree_string_view_equal(request->target, IREE_SV("/metrics"))) {
     iree_status_t status = router_metrics(router);
     if (iree_status_is_ok(status)) {

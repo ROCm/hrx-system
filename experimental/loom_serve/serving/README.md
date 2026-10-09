@@ -295,8 +295,50 @@ entire listener unready. Before registration no application response is served.
 Once shutdown stops application admission, the router serves no further probes;
 the listener is released after accepted asynchronous callbacks drain. It does
 not promise a final 503 response during wind-down. These endpoints do not
-promise that a particular request will fit. Existing JSONL stderr output has
-its own sink behavior; these HTTP snapshots do not make that sink asynchronous.
+promise that a particular request will fit.
+
+### Pull-based event history
+
+Embedding and decision services publish typed events into a bounded 128-record
+overwriting ring (about 20 KiB per model), independently of their always-on
+request/model counters. Publication performs no formatting, allocation or sink
+I/O. `--heartbeat_ms` adds periodic snapshots; zero disables periodic samples,
+not counters or request/invocation events. Text/image and router diagnostics
+still use their existing stderr paths; they are not covered by this guarantee.
+
+`GET /logz` returns a bounded JSONL poll. `X-Loom-Model` selects the deployment
+and can be omitted when exactly one model is registered:
+
+~~~sh
+curl -s http://127.0.0.1:8080/logz -H 'X-Loom-Model: vectors'
+~~~
+
+The first `stream` line identifies the model and stream incarnation, current
+absolute `head`, oldest retained position and ring capacity. `partial` means
+this response does not include the original start of the stream. Retained
+events include `sequence`, monotonic `time_ns` and a request lifetime ID (zero
+for model-wide events). A `gap` line reports the half-open missed interval
+`[from,to)` for this reader. The `counters` line is a fresh cumulative snapshot,
+not reconstructed from whatever events remain. The final `cursor.value` is
+passed verbatim as `X-Loom-Cursor` on the next poll. Each poll considers at most
+64 records; polling neither clears records nor adds events to the stream.
+
+Readers have independent cursors and can pause, disconnect or fall behind
+without holding ring slots or slowing inference. A late reader without a cursor
+starts at zero and receives an explicit gap when the beginning was overwritten.
+A cursor from another incarnation returns 409; malformed or ahead-of-publication
+cursors return 400. A service without this observation interface returns 501.
+Positions/identities are experimental native-lifetime values, not durable log
+storage keys. Periodic external pollers can write these JSONL responses to a
+file/stdout without putting that sink on a model worker.
+
+Counters distinguish successful carrier acceptance, rejection, peer/shutdown
+cancellation and execution/transport failure. `input_tokens` counts completed
+device work, even when the requesting peer disconnected before delivery;
+`batches` counts completed device invocations, not clients. Response acceptance
+is not proof of remote receipt. Counter samples use host monotonic time, not
+device timestamps. Bounded error messages own their bytes and explicitly report
+truncation; terminal request/process statuses retain their normal ownership.
 
 ## Scheduling and memory ownership
 

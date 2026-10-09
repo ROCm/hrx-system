@@ -8,6 +8,7 @@
 #define EXPERIMENTAL_LOOM_SERVE_HTTP_ROUTER_H_
 
 #include "experimental/loom_serve/http/server.h"
+#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/task/executor.h"
 #include "iree/tokenizer/tokenizer.h"
 
@@ -91,6 +92,14 @@ typedef struct loom_serve_http_service_t {
   // NULL means this service has no shared-capacity relationship. The owner
   // outlives the service and every accepted asynchronous obligation.
   const void* capacity_domain;
+  // Optional observation owned by the service and live through router return.
+  struct {
+    // Bounded immutable-record history; NULL when this service has no stream.
+    const loom_serve_telemetry_stream_t* stream;
+    // Cumulative state copied only on serialized owner turns, never replayed
+    // from history. Non-NULL whenever stream is present.
+    const loom_serve_telemetry_counters_t* counters;
+  } telemetry;
 } loom_serve_http_service_t;
 
 // Routes JSON request bodies by their model field and checkpoint operations by
@@ -100,6 +109,10 @@ typedef struct loom_serve_http_service_t {
 // model-free: constructors have completed, not necessarily weight activation.
 // GET /metrics exposes the same copied ownership as Prometheus text gauges,
 // capturing each service once without model invocation or device queries.
+// GET /logz polls a service's bounded JSONL stream. X-Loom-Model selects the
+// service (optional with one service); X-Loom-Cursor resumes that reader's
+// previous poll. Each response copies records and reports gaps/current counters
+// without retaining slots or slowing publication. See logs.h for cursor rules.
 // At most request_capacity claims are accepted before advancing each service
 // once, with rotating service priority on the borrowed executor. Owner turns
 // return workers while waiting for network, CPU or device readiness. The outer
