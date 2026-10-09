@@ -91,4 +91,17 @@ loom_cc_test(
     iree::testing::gtest_main
 )
 
+loom_cc_benchmark(
+  NAME
+    stream_benchmark
+  SRCS
+    "stream_benchmark.cc"
+  DEPS
+    ::record
+    ::stream
+    iree::base
+    iree::testing::benchmark_main
+  TESTONLY
+)
+
 ### BAZEL_TO_CMAKE_PRESERVES_ALL_CONTENT_BELOW_THIS_LINE ###

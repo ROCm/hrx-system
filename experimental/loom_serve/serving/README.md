@@ -321,7 +321,12 @@ existing connection-state mutex serializes diagnostic producers; readers never
 take it. No ordinary HTTP diagnostic writes to stderr.
 Text request/session/epoch events and image preparation/execution/encoding
 measurements follow the same ownership contract. CPU borrowers return timings
-with completed jobs; only the serialized service owner publishes. Cold startup
+with completed jobs; only the serialized service owner publishes. Image
+`image_prepared` records carry the source-selected stage, tag and input bytes;
+`image_generated` marks successful device completion and pin release, before
+output encoding. Weight observations count parameter-plan activations,
+deactivations and submitted read/preparation bytes, not measured device traffic.
+They distinguish retained replay from reloading evicted parameters. Cold startup
 compiler/residency diagnostics and terminal CLI failures are separate from
 these serving-work streams.
 
@@ -368,6 +373,16 @@ device work, even when the requesting peer disconnected before delivery;
 is not proof of remote receipt. Counter samples use host monotonic time, not
 device timestamps. Bounded error messages own their bytes and explicitly report
 truncation; terminal request/process statuses retain their normal ownership.
+
+The `//experimental/loom_serve/telemetry:stream_benchmark` target separates
+timestamped native publication from consumer copying/JSON formatting at the
+actual 128/256-record capacities. Build with `--config=opt` and measure on an
+excluded runner; its sanitizer smoke test checks execution, not performance.
+`BM_PublishSnapshot` reports one published record per iteration;
+`BM_CopyFormatBatch64` reports one 64-record batch per iteration. Divide the
+latter time by 64 for a per-record cost. Construction and warmed output storage
+are outside timing. Neither case includes TCP, file sinks or model execution,
+so these measurements are not end-to-end inference speedups.
 
 ## Scheduling and memory ownership
 
