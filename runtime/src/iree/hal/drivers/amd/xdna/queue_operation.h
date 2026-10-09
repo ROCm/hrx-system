@@ -234,22 +234,22 @@ void iree_hal_amd_xdna_operation_execute_host(
 
 // Captures a queue-ordered allocation transaction.
 iree_status_t iree_hal_amd_xdna_queue_alloca(
-    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
     iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
-    iree_hal_buffer_t** out_buffers);
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers);
 
 // Captures a queue-ordered deallocation transaction.
 iree_status_t iree_hal_amd_xdna_queue_dealloca(
-    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_host_size_t buffer_count,
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_host_size_t buffer_count,
     iree_hal_buffer_t* const* buffers);
 
 // Captures a host-mapped transfer transaction.
 iree_status_t iree_hal_amd_xdna_queue_transfer(
-    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_host_size_t count,
     const iree_hal_transfer_operation_t* operations,
     const iree_hal_queue_barriers_t* barriers);
 

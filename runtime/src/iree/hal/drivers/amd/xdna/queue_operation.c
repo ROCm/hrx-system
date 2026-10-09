@@ -570,11 +570,11 @@ static iree_status_t iree_hal_amd_xdna_validate_alloca_request(
 }
 
 iree_status_t iree_hal_amd_xdna_queue_alloca(
-    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_hal_pool_t* pool,
     iree_host_size_t request_count,
     const iree_hal_pool_reservation_request_t* requests,
-    iree_hal_buffer_t** out_buffers) {
+    iree_hal_buffer_t** IREE_RESTRICT out_buffers) {
   iree_hal_pool_capabilities_t capabilities;
   iree_hal_pool_query_capabilities(pool, &capabilities);
 
@@ -724,8 +724,8 @@ iree_status_t iree_hal_amd_xdna_queue_alloca(
 }
 
 iree_status_t iree_hal_amd_xdna_queue_dealloca(
-    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_host_size_t buffer_count,
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_host_size_t buffer_count,
     iree_hal_buffer_t* const* buffers) {
   iree_hal_amd_xdna_operation_t* operation = NULL;
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_operation_create(
@@ -792,8 +792,8 @@ iree_status_t iree_hal_amd_xdna_queue_dealloca(
 }
 
 iree_status_t iree_hal_amd_xdna_queue_transfer(
-    iree_hal_queue_t* base, iree_hal_semaphore_list_t waits,
-    iree_hal_semaphore_list_t signals, iree_host_size_t count,
+    iree_hal_queue_t* base, const iree_hal_semaphore_list_t waits,
+    const iree_hal_semaphore_list_t signals, iree_host_size_t count,
     const iree_hal_transfer_operation_t* operations,
     const iree_hal_queue_barriers_t* barriers) {
   IREE_RETURN_IF_ERROR(iree_hal_amd_xdna_queue_barriers_validate(barriers));
