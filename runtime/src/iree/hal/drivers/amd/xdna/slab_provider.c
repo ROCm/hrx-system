@@ -85,8 +85,9 @@ iree_status_t iree_hal_amd_xdna_slab_provider_create(
   iree_host_size_t accesses_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_xdna_slab_provider_t), &total_size,
-      IREE_STRUCT_FIELD(options->access_count, amdf_memory_device_access_t,
-                        &accesses_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(
+          options->access_count, amdf_memory_device_access_t,
+          iree_alignof(amdf_memory_device_access_t), &accesses_offset)));
   iree_hal_amd_xdna_slab_provider_t* provider = NULL;
   IREE_RETURN_IF_ERROR(
       iree_allocator_malloc(host_allocator, total_size, (void**)&provider));
@@ -151,8 +152,9 @@ static iree_status_t iree_hal_amd_xdna_slab_provider_acquire_slab(
   iree_host_size_t bindings_offset = 0;
   IREE_RETURN_IF_ERROR(IREE_STRUCT_LAYOUT(
       sizeof(iree_hal_amd_xdna_slab_handle_t), &total_size,
-      IREE_STRUCT_FIELD(binding_count, iree_hal_buffer_native_binding_t,
-                        &bindings_offset)));
+      IREE_STRUCT_FIELD_ALIGNED(binding_count, iree_hal_buffer_native_binding_t,
+                                iree_alignof(iree_hal_buffer_native_binding_t),
+                                &bindings_offset)));
   iree_hal_amd_xdna_slab_handle_t* handle = NULL;
   IREE_RETURN_IF_ERROR(iree_allocator_malloc(provider->host_allocator,
                                              total_size, (void**)&handle));
