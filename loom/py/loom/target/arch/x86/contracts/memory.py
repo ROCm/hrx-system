@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import Enum
 
@@ -221,11 +221,14 @@ def _memory_rule(
     transport: _MemoryValueTransport | None = None,
     source_nodes: Sequence[SourceNode] = (),
     load_result: ValueRef | None = None,
+    instruction_operands: Mapping[str, ValueRef] | None = None,
+    pre_memory_emits: Sequence[EmitDescriptorOp] = (),
     priority: int = 0,
     report_key: str = "",
 ) -> DescriptorRule:
     descriptor = descriptor_lookup(descriptor_key)
-    operands = {"base": ValueRef.source_memory_root()}
+    instruction_operands = instruction_operands or {}
+    operands = {"base": ValueRef.source_memory_root(), **instruction_operands}
     results: dict[str, ValueRef] = {}
     result_types: dict[str, TypePattern] = {}
     transport_emit: EmitDescriptorOp | None = None
@@ -314,6 +317,7 @@ def _memory_rule(
         )
     if operation is SourceMemoryOperation.STORE and transport_emit is not None:
         emits.append(transport_emit)
+    emits.extend(pre_memory_emits)
     emits.append(memory_emit)
     if operation is SourceMemoryOperation.LOAD and transport_emit is not None:
         emits.append(transport_emit)
@@ -337,6 +341,13 @@ def _memory_rule(
                 if transport_descriptor is not None
                 else ()
             ),
+            *(
+                Guard.descriptor_available(dependency)
+                for dependency in dict.fromkeys(
+                    emit.descriptor for emit in pre_memory_emits
+                )
+                if dependency != descriptor
+            ),
         ),
         emit=tuple(emits),
         priority=priority,
@@ -349,10 +360,17 @@ def _memory_descriptor_key(
     operation: SourceMemoryOperation,
     *,
     addressing: _MemoryAddressing,
+    memory_form: str | None = None,
+    modifiers: Sequence[str] = (),
     register_suffix: str,
 ) -> str:
     indexed = ".indexed" if addressing.is_dynamic else ""
-    return f"{descriptor_key_prefix}.{operation.value}{indexed}.{register_suffix}"
+    modifier_suffix = "".join(f".{modifier}" for modifier in modifiers)
+    memory_form = operation.value if memory_form is None else memory_form
+    return (
+        f"{descriptor_key_prefix}.{memory_form}{indexed}{modifier_suffix}."
+        f"{register_suffix}"
+    )
 
 
 def _full_width_memory_rules(
@@ -368,12 +386,15 @@ def _full_width_memory_rules(
     transport: _MemoryValueTransport | None = None,
     source_nodes: Sequence[SourceNode] = (),
     load_result: ValueRef | None = None,
+    instruction_operands: Mapping[str, ValueRef] | None = None,
+    pre_memory_emits: Sequence[EmitDescriptorOp] = (),
     priority: int = 0,
     report_key: str = "",
 ) -> tuple[DescriptorRule, ...]:
     """Materializes displacements that cannot fit an instruction's disp32."""
 
     descriptor = descriptor_lookup(descriptor_key)
+    instruction_operands = instruction_operands or {}
     result_types: dict[str, TypePattern] = {}
     transport_descriptor: Descriptor | None = None
     transport_emit: EmitDescriptorOp | None = None
@@ -465,6 +486,7 @@ def _full_width_memory_rules(
             )
         if operation is SourceMemoryOperation.STORE and transport_emit is not None:
             emits.append(transport_emit)
+        emits.extend(pre_memory_emits)
         emits.append(
             EmitDescriptorOp(
                 form=DescriptorEmitForm.OP,
@@ -472,6 +494,7 @@ def _full_width_memory_rules(
                 operands={
                     "base": ValueRef.source_memory_root(),
                     "index": byte_offset,
+                    **instruction_operands,
                     **value_operands,
                 },
                 results=results,
@@ -493,6 +516,13 @@ def _full_width_memory_rules(
                         (Guard.descriptor_available(transport_descriptor),)
                         if transport_descriptor is not None
                         else ()
+                    ),
+                    *(
+                        Guard.descriptor_available(dependency)
+                        for dependency in dict.fromkeys(
+                            emit.descriptor for emit in pre_memory_emits
+                        )
+                        if dependency != descriptor
                     ),
                 ),
                 emit=tuple(emits),
@@ -862,9 +892,14 @@ def x86_fused_load_rules(
     element_byte_count: int,
     lane_count: int,
     descriptor_key_prefix: str,
+    descriptor_memory_form: str = "load",
+    descriptor_key_modifiers: Sequence[str] = (),
     register_suffix: str,
+    instruction_operands: Mapping[str, ValueRef] | None = None,
+    pre_memory_emits: Sequence[EmitDescriptorOp] = (),
     diagnostic: GuardDiagnostic,
     report_key: str,
+    priority: int = 1,
 ) -> tuple[DescriptorRule, ...]:
     """Builds every x86 addressing form for a fused source load."""
 
@@ -880,13 +915,17 @@ def x86_fused_load_rules(
                 descriptor_key_prefix,
                 SourceMemoryOperation.LOAD,
                 addressing=addressing,
+                memory_form=descriptor_memory_form,
+                modifiers=descriptor_key_modifiers,
                 register_suffix=register_suffix,
             ),
             descriptor_lookup=descriptor_lookup,
             diagnostic=diagnostic,
             source_nodes=source_nodes,
             load_result=result,
-            priority=1,
+            instruction_operands=instruction_operands,
+            pre_memory_emits=pre_memory_emits,
+            priority=priority,
             report_key=report_key,
         )
         for addressing in _MemoryAddressing
@@ -902,13 +941,17 @@ def x86_fused_load_rules(
                 descriptor_key_prefix,
                 SourceMemoryOperation.LOAD,
                 addressing=_MemoryAddressing.MATERIALIZE_BYTE_OFFSET,
+                memory_form=descriptor_memory_form,
+                modifiers=descriptor_key_modifiers,
                 register_suffix=register_suffix,
             ),
             descriptor_lookup=descriptor_lookup,
             diagnostic=diagnostic,
             source_nodes=source_nodes,
             load_result=result,
-            priority=1,
+            instruction_operands=instruction_operands,
+            pre_memory_emits=pre_memory_emits,
+            priority=priority,
             report_key=report_key,
         )
     )

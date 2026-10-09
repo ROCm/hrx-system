@@ -1,0 +1,33 @@
+// Keeps the register-only high half and merge value across a normal Loom call
+// so the paired conversion can fold the low half from memory.
+func.def noinline @avx512_bf16_load_inputs(%high_storage: buffer, %passthrough_storage: buffer) -> (vector<16xf32>, vector<32xbf16>) {
+  %origin = index.constant 0 : offset
+  %high_view = buffer.view %high_storage[%origin] : buffer -> view<16xf32>
+  %passthrough_view = buffer.view %passthrough_storage[%origin] : buffer -> view<32xbf16>
+  %high = vector.load %high_view[0] : view<16xf32> -> vector<16xf32>
+  %passthrough = vector.load %passthrough_view[0] : view<32xbf16> -> vector<32xbf16>
+  func.return %high, %passthrough : vector<16xf32>, vector<32xbf16>
+}
+
+// Converts two F32 vectors into one BF16 vector while exercising the complete
+// indexed memory and merge-mask path from source IR through native emission.
+func.def public @avx512_bf16_convert_indexed_masked(%low_storage: buffer, %position0: index, %high_storage: buffer, %mask_lhs_storage: buffer, %mask_rhs_storage: buffer, %passthrough_storage: buffer, %output_storage: buffer) {
+  %origin = index.constant 0 : offset
+  %position = index.assume %position0 [range(%position0, 0, 16)] : index
+  %low_view = buffer.view %low_storage[%origin] : buffer -> view<32xf32>
+  %mask_lhs_view = buffer.view %mask_lhs_storage[%origin] : buffer -> view<32xi8>
+  %mask_rhs_view = buffer.view %mask_rhs_storage[%origin] : buffer -> view<32xi8>
+  %output_view = buffer.view %output_storage[%origin] : buffer -> view<32xbf16>
+
+  %high, %passthrough = func.call @avx512_bf16_load_inputs(%high_storage, %passthrough_storage) : (buffer, buffer) -> (vector<16xf32>, vector<32xbf16>)
+  %mask_lhs = vector.load %mask_lhs_view[0] : view<32xi8> -> vector<32xi8>
+  %mask_rhs = vector.load %mask_rhs_view[0] : view<32xi8> -> vector<32xi8>
+  %condition = vector.cmpi slt, %mask_lhs, %mask_rhs : vector<32xi8> -> vector<32xi1>
+  %low = vector.load %low_view[%position] : view<32xf32> -> vector<16xf32>
+  %low_bf16 = vector.fptrunc<daz> %low : vector<16xf32> to vector<16xbf16>
+  %high_bf16 = vector.fptrunc<daz> %high : vector<16xf32> to vector<16xbf16>
+  %converted = vector.concat<0> %low_bf16, %high_bf16 : vector<16xbf16>, vector<16xbf16> -> vector<32xbf16>
+  %selected = vector.select %condition, %converted, %passthrough : vector<32xbf16>
+  vector.store %selected, %output_view[0] : vector<32xbf16>, view<32xbf16>
+  func.return
+}

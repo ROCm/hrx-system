@@ -4,6 +4,7 @@
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -61,6 +62,10 @@ extern "C" void avx512_select_i32x16(const int32_t* scalar, const int32_t* lhs,
 extern "C" void avx512_reverse_i32x16(const int32_t* input, int32_t* output);
 extern "C" void avx512_reduce_f32x16(const float* values, const float* bias,
                                      const float* initial, float* output);
+extern "C" void avx512_bf16_convert_indexed_masked(
+    const float* low_values, uint64_t position, const float* high_values,
+    const int8_t* mask_lhs, const int8_t* mask_rhs, const uint16_t* passthrough,
+    uint16_t* output);
 extern "C" void call_vector_mix(uint64_t* output, I32x8 v0, uint64_t g0,
                                 I32x8 v1, uint64_t g1, I32x8 v2, uint64_t g2,
                                 I32x8 v3, uint64_t g3, I32x8 v4, uint64_t g4,
@@ -170,6 +175,22 @@ extern "C" uint64_t saturated_permutation(uint64_t, uint64_t, uint64_t,
                                           uint64_t, uint64_t, uint32_t);
 
 namespace {
+
+float FloatFromBits(uint32_t bits) {
+  float value;
+  std::memcpy(&value, &bits, sizeof(value));
+  return value;
+}
+
+uint16_t ExpectedFiniteF32ToBf16Daz(float value) {
+  uint32_t bits;
+  std::memcpy(&bits, &value, sizeof(bits));
+  if ((bits & UINT32_C(0x7f800000)) == 0) {
+    return static_cast<uint16_t>((bits >> 16) & UINT32_C(0x8000));
+  }
+  const uint32_t retained_lsb = (bits >> 16) & 1;
+  return static_cast<uint16_t>((bits + UINT32_C(0x7fff) + retained_lsb) >> 16);
+}
 
 TEST(NativeCallableTest, ReadonlyDataOutlivesTheCompilerAndCrossesCalls) {
   const std::array<uint32_t, 4> expected = {0x44332211, 0x7e00ff80, 0x89abcdef,
@@ -332,6 +353,66 @@ TEST(NativeCallableTest, Avx512CoreUsesOrdinaryCLinkage) {
   avx512_reduce_f32x16(values.data(), bias.data(), initial.data(),
                        reduced.data());
   EXPECT_EQ(reduced[0], 144.0f);
+}
+
+TEST(NativeCallableTest,
+     Avx512Bf16IndexedMaskedConversionUsesOrdinaryCLinkage) {
+  if (!__builtin_cpu_supports("avx512f") ||
+      !__builtin_cpu_supports("avx512bw") ||
+      !__builtin_cpu_supports("avx512dq") ||
+      !__builtin_cpu_supports("avx512vl") ||
+      !__builtin_cpu_supports("avx512bf16")) {
+    GTEST_SKIP() << "AVX-512F/BW/DQ/VL/BF16 are unavailable on this test host";
+  }
+
+  const std::array<float, 16> conversion_cases = {
+      0.0f,
+      -0.0f,
+      1.0f,
+      -1.0f,
+      1.00390625f,
+      1.01171875f,
+      -1.00390625f,
+      -1.01171875f,
+      3.1415927f,
+      -2.7182818f,
+      FloatFromBits(UINT32_C(0x7f7fffff)),
+      FloatFromBits(UINT32_C(0xff7fffff)),
+      FloatFromBits(UINT32_C(0x00800000)),
+      FloatFromBits(UINT32_C(0x80800000)),
+      FloatFromBits(UINT32_C(0x00000001)),
+      FloatFromBits(UINT32_C(0x807fffff)),
+  };
+  constexpr uint64_t kPosition = 3;
+  std::array<float, 32> low_values = {};
+  std::copy(conversion_cases.begin(), conversion_cases.end(),
+            low_values.begin() + kPosition);
+  std::array<float, 16> high_values;
+  for (size_t i = 0; i < high_values.size(); ++i) {
+    high_values[i] = conversion_cases[high_values.size() - i - 1];
+  }
+
+  std::array<int8_t, 32> mask_lhs;
+  std::array<int8_t, 32> mask_rhs;
+  std::array<uint16_t, 32> passthrough;
+  for (size_t i = 0; i < passthrough.size(); ++i) {
+    mask_lhs[i] = 0;
+    mask_rhs[i] = i % 2 == 0 ? 1 : -1;
+    passthrough[i] = static_cast<uint16_t>(0x5100 + i);
+  }
+
+  std::array<uint16_t, 32> output = {};
+  avx512_bf16_convert_indexed_masked(
+      low_values.data(), kPosition, high_values.data(), mask_lhs.data(),
+      mask_rhs.data(), passthrough.data(), output.data());
+  for (size_t i = 0; i < output.size(); ++i) {
+    const float converted_value =
+        i < 16 ? low_values[kPosition + i] : high_values[i - 16];
+    const uint16_t expected = mask_lhs[i] < mask_rhs[i]
+                                  ? ExpectedFiniteF32ToBf16Daz(converted_value)
+                                  : passthrough[i];
+    EXPECT_EQ(output[i], expected) << "lane " << i;
+  }
 }
 
 TEST(NativeCallableTest, NarrowMemoryPreservesNeighbors) {
