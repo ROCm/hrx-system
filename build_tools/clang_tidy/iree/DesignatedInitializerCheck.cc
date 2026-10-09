@@ -624,6 +624,28 @@ void CheckCommentLabels(DesignatedInitializerCheck& Check,
   }
 }
 
+template <typename CallExpression>
+void CheckArgumentLabels(DesignatedInitializerCheck& Check,
+                         const CallExpression* Call, ASTContext& Context,
+                         const SourceManager& SourceManager) {
+  for (unsigned I = 0; I < Call->getNumArgs(); ++I) {
+    const Expr* Argument = Call->getArg(I);
+    if (!Argument) {
+      continue;
+    }
+    std::optional<FieldLabel> Label =
+        FindFieldLabel(Argument, SourceManager, Context.getLangOpts());
+    if (!Label) {
+      continue;
+    }
+    Check.diag(Label->location,
+               "replace aggregate-style comment label on call argument with "
+               "a parameter label")
+        << FixItHint::CreateReplacement(Label->range,
+                                        "/*" + Label->name + "=*/");
+  }
+}
+
 void CheckSetupBlocks(DesignatedInitializerCheck& Check,
                       const CompoundStmt* Compound, ASTContext& Context,
                       const SourceManager& SourceManager) {
@@ -805,6 +827,9 @@ void DesignatedInitializerCheck::registerMatchers(
   if (enable_comment_label_conversion_) {
     Finder->addMatcher(initListExpr(isExpansionInMainFile()).bind("init_list"),
                        this);
+    Finder->addMatcher(callExpr(isExpansionInMainFile()).bind("call"), this);
+    Finder->addMatcher(
+        cxxConstructExpr(isExpansionInMainFile()).bind("constructor"), this);
   }
   if (enable_setup_block_folding_) {
     Finder->addMatcher(compoundStmt(isExpansionInMainFile(),
@@ -821,6 +846,14 @@ void DesignatedInitializerCheck::check(
           Result.Nodes.getNodeAs<InitListExpr>("init_list")) {
     CheckCommentLabels(*this, Initializer, *Result.Context,
                        *Result.SourceManager);
+  }
+  if (const auto* Call = Result.Nodes.getNodeAs<CallExpr>("call")) {
+    CheckArgumentLabels(*this, Call, *Result.Context, *Result.SourceManager);
+  }
+  if (const auto* Constructor =
+          Result.Nodes.getNodeAs<CXXConstructExpr>("constructor")) {
+    CheckArgumentLabels(*this, Constructor, *Result.Context,
+                        *Result.SourceManager);
   }
   if (const auto* Compound = Result.Nodes.getNodeAs<CompoundStmt>("compound")) {
     CheckSetupBlocks(*this, Compound, *Result.Context, *Result.SourceManager);

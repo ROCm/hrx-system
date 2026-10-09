@@ -42,6 +42,8 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             output,
             [
                 "replace comment field label with a C++20 designated initializer",
+                "replace aggregate-style comment label on call argument with a "
+                "parameter label",
                 "comment label names 'name', but this positional initializer "
                 "selects 'ordinal'",
                 "comment label names 'real', but this positional initializer "
@@ -83,6 +85,14 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn(".ordinal = 24,", fixed_source)
         self.assertIn('.name = "macro-argument",', fixed_source)
         self.assertIn(".flags = 25,", fixed_source)
+        self.assertIn(
+            'FORWARD_CONFIG(ConsumeConfig(/*ordinal=*/26, /*name=*/"call"));',
+            fixed_source,
+        )
+        self.assertIn(
+            'ConstructedConfig config(/*ordinal=*/27, /*name=*/"constructor");',
+            fixed_source,
+        )
         self.assertIn("Config macro_config = MAKE_CONFIG(21);", fixed_source)
         self.assertIn("Numbers configured = {.first = 20, .second = 21};", fixed_source)
         self.assertIn("Config sparse = {.flags = 22};", fixed_source)

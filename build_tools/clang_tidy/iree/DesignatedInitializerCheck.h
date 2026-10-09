@@ -23,7 +23,7 @@ class DesignatedInitializerCheck final : public ClangTidyCheck {
   void storeOptions(ClangTidyOptions::OptionMap& Options) override;
 
  private:
-  // Whether to diagnose and convert comment field labels.
+  // Whether to diagnose and convert aggregate-style comment labels.
   const bool enable_comment_label_conversion_;
 
   // Whether to diagnose and fold empty-initializer setup blocks.

@@ -136,6 +136,18 @@ Config macro_argument_config = FORWARD_CONFIG(Config{
     /*.flags=*/25,
 });
 
+void ConsumeConfig(int ordinal, const char* name);
+
+struct ConstructedConfig {
+  ConstructedConfig(int ordinal, const char* name);
+};
+
+void LabelCallArguments() {
+  FORWARD_CONFIG(ConsumeConfig(/*.ordinal=*/26, /*.name=*/"call"));
+  ConstructedConfig config(/*.ordinal=*/27, /*.name=*/"constructor");
+  (void)config;
+}
+
 void Observe(const Numbers&);
 int Next();
 

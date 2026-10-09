@@ -335,6 +335,12 @@ the check reports both names without choosing new behavior. It never inserts
 placeholder members. Sparse C++20 designated initialization already preserves
 the language's omitted-member initialization rules.
 
+The dot spelling is reserved for aggregate member migration. On function and
+constructor arguments, where C++ has no parameter designators, the check
+rewrites `/*.parameter=*/` to the established `/*parameter=*/` annotation. This
+token-only change makes it explicit that the name is documentation rather than
+language-enforced member selection.
+
 Members promoted from a standard anonymous union are named directly by the
 enclosing aggregate's designated initializer. The check resolves the union
 member activated by the positional spelling before comparing the label, so a
