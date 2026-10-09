@@ -370,8 +370,10 @@ states the rejected proof obligation so suppressions remain reviewable.
 The policy applies only to spellings in the main C++20 implementation file.
 Included headers retain their current spelling so installed public headers can
 still be consumed as C++17. C translation units keep their native designated
-initializers. Macro definitions and expansions require a source-level review
-rather than an edit through expansion locations.
+initializers. A label preceding a macro-valued member remains ordinary source
+text and can be converted at the macro invocation site. Initializer syntax
+produced inside a macro requires source-level review rather than an edit through
+the expansion.
 
 ### `iree-extent-empty-initializer`
 

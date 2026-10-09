@@ -75,7 +75,8 @@ bool IsIdentifier(StringRef Text) {
 
 std::optional<FieldLabel> FindFieldLabel(const Expr* Initializer,
                                          const SourceManager& SourceManager) {
-  SourceLocation Begin = Initializer->getBeginLoc();
+  SourceLocation Begin =
+      SourceManager.getExpansionLoc(Initializer->getBeginLoc());
   if (!IsMainFileLocation(Begin, SourceManager)) {
     return std::nullopt;
   }

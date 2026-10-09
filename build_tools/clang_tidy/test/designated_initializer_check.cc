@@ -74,6 +74,8 @@ struct NarrowConfig {
 #define MAKE_CONFIG(value) \
   Config { /*.ordinal=*/ value }
 
+#define CONFIG_VALUE(value) value
+
 #define EMPTY_BRACES \
   {                  \
   }
@@ -116,6 +118,12 @@ DerivedConfig base_label = {/*.base=*/{14}, /*.member=*/15};
 OuterConfig brace_elided = {/*.inner=*/16, 17, 18};
 
 Config macro_config = MAKE_CONFIG(19);
+
+Config macro_value_config = {
+    /*.ordinal=*/CONFIG_VALUE(20),
+    /*.name=*/"macro-value",
+    /*.flags=*/CONFIG_VALUE(21),
+};
 
 void Observe(const Numbers&);
 int Next();
