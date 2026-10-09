@@ -47,6 +47,22 @@ class VectorEncodingBehavior(IntEnum):
     LOAD = 4
     STORE = 5
     RIP_LOAD = 6
+    EVEX_MASK_LOAD = 7
+
+
+_MASK_BEHAVIORS = (
+    VectorEncodingBehavior.EVEX_MASK,
+    VectorEncodingBehavior.EVEX_MASK_LOAD,
+)
+_MEMORY_BEHAVIORS = (
+    VectorEncodingBehavior.LOAD,
+    VectorEncodingBehavior.STORE,
+    VectorEncodingBehavior.EVEX_MASK_LOAD,
+)
+_LOAD_BEHAVIORS = (
+    VectorEncodingBehavior.LOAD,
+    VectorEncodingBehavior.EVEX_MASK_LOAD,
+)
 
 
 VECTOR_ENCODING_FORMAT_MARKER = 1 << 15
@@ -61,19 +77,24 @@ def vector_encoding_recipe(
     behavior: VectorEncodingBehavior = VectorEncodingBehavior.REGISTERS,
     *,
     full_vector_tuple: bool = False,
+    broadcast32: bool = False,
+    zero_mask: bool = False,
 ) -> int:
     """Packs the direct operand selectors consumed by the native encoder."""
     if full_vector_tuple:
-        if (
-            behavior
-            not in (
-                VectorEncodingBehavior.LOAD,
-                VectorEncodingBehavior.STORE,
-            )
-            or middle > VectorRegisterSelector.FIXED_4
-        ):
+        if behavior not in _MEMORY_BEHAVIORS or int(middle) & 8:
             raise ValueError("invalid full-vector memory tuple recipe")
         middle = int(middle) | 8
+    if broadcast32:
+        if behavior not in _LOAD_BEHAVIORS or int(rm) & 8:
+            raise ValueError("invalid 32-bit broadcast memory recipe")
+        rm = int(rm) | 8
+    if full_vector_tuple and broadcast32:
+        raise ValueError("memory recipe has conflicting tuple modes")
+    if zero_mask:
+        if behavior not in _MASK_BEHAVIORS or int(reg) & 8:
+            raise ValueError("invalid zero-mask recipe")
+        reg = int(reg) | 8
     return (
         VECTOR_ENCODING_FORMAT_MARKER
         | int(reg)
@@ -96,13 +117,36 @@ def validate_vector_encoding_recipe(encoding_format_id: int) -> None:
         (encoding_format_id >> 4) & 15,
         (encoding_format_id >> 8) & 15,
     ]
-    if behavior in (VectorEncodingBehavior.LOAD, VectorEncodingBehavior.STORE):
+    if behavior in _MASK_BEHAVIORS:
+        selectors[0] &= 7
+    if behavior in _MEMORY_BEHAVIORS:
         selectors[1] &= 7
+    if behavior in _LOAD_BEHAVIORS:
+        selectors[2] &= 7
+    full_vector_tuple = bool((encoding_format_id >> 4) & 8)
+    broadcast32 = bool((encoding_format_id >> 8) & 8)
+    if behavior in _LOAD_BEHAVIORS and full_vector_tuple and broadcast32:
+        raise ValueError("vector memory recipe has conflicting tuple modes")
     try:
         for selector in selectors:
             VectorRegisterSelector(selector)
     except ValueError as error:
         raise ValueError("invalid vector register selector") from error
+
+
+def vector_encoding_address_base_input(encoding_format_id: int) -> int | None:
+    """Returns the input index selected as a memory base, when present."""
+    behavior = VectorEncodingBehavior((encoding_format_id >> 12) & 7)
+    if behavior not in _MEMORY_BEHAVIORS:
+        return None
+    selector = (encoding_format_id >> 8) & 15
+    if behavior in _LOAD_BEHAVIORS:
+        selector &= 7
+    if not (
+        VectorRegisterSelector.INPUT_0 <= selector <= VectorRegisterSelector.INPUT_2
+    ):
+        raise ValueError("vector memory base must select an input")
+    return selector - VectorRegisterSelector.INPUT_0
 
 
 @dataclass(frozen=True, slots=True)
@@ -209,6 +253,14 @@ class VectorMachineInstruction:
                 if key in seen:
                     raise ValueError("vector instruction has overlapping variants")
                 seen.add(key)
+        behavior = VectorEncodingBehavior((self.encoding_format_id >> 12) & 7)
+        requires_evex = behavior in _MASK_BEHAVIORS or (
+            behavior in _LOAD_BEHAVIORS and bool(self.encoding_format_id & (8 << 8))
+        )
+        if requires_evex and any(
+            encoding.prefix != VectorEncodingPrefix.EVEX for encoding in self.encodings
+        ):
+            raise ValueError("EVEX recipe modifier requires EVEX encodings")
 
     def bind(self, descriptor: Descriptor, prefix: VectorEncodingPrefix) -> Descriptor:
         """Validates and binds native facts to one concrete descriptor row."""

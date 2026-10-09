@@ -60,13 +60,13 @@ _EVEX_MASK_SELECT = vector_encoding_recipe(
     _R.RESULT, _R.INPUT_2, _R.INPUT_1, _B.EVEX_MASK
 )
 _INDEXED_LOAD = vector_encoding_recipe(
-    _R.RESULT, _R.INPUT_1, _R.INPUT_0, _B.LOAD, full_vector_tuple=True
+    _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, full_vector_tuple=True
 )
 _LOAD = vector_encoding_recipe(
     _R.RESULT, _R.NONE, _R.INPUT_0, _B.LOAD, full_vector_tuple=True
 )
 _INDEXED_STORE = vector_encoding_recipe(
-    _R.INPUT_0, _R.INPUT_2, _R.INPUT_1, _B.STORE, full_vector_tuple=True
+    _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, full_vector_tuple=True
 )
 _STORE = vector_encoding_recipe(
     _R.INPUT_0, _R.NONE, _R.INPUT_1, _B.STORE, full_vector_tuple=True

@@ -770,6 +770,7 @@ static iree_status_t loom_x86_function_packet(
   if (descriptor->immediate_count == 2) {
     operands.scale = (uint8_t)iree_math_count_trailing_zeros_u32(
         (uint32_t)loom_x86_function_immediate(frame, packet, 1).i64);
+    operands.has_index = true;
   }
   loom_x86_function_append(function, descriptor->encoding_format_id,
                            descriptor->encoding_id, operands, reference);
