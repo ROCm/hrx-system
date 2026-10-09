@@ -48,15 +48,15 @@ struct FuzzEndpoint {
 
   iree_net_message_endpoint_t endpoint() {
     static const iree_net_message_endpoint_vtable_t vtable = {
-        /*.set_callbacks=*/SetCallbacks,
-        /*.activate=*/Activate,
-        /*.deactivate=*/Deactivate,
-        /*.send=*/Send,
-        /*.query_send_budget=*/QuerySendBudget,
+        .set_callbacks = SetCallbacks,
+        .activate = Activate,
+        .deactivate = Deactivate,
+        .send = Send,
+        .query_send_budget = QuerySendBudget,
     };
     return {
-        /*.self=*/this,
-        /*.vtable=*/&vtable,
+        .self = this,
+        .vtable = &vtable,
     };
   }
 };
@@ -90,10 +90,10 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   iree_status_t status =
       iree_net_control_channel_allocate(endpoint.endpoint(),
                                         {
-                                            /*.on_data=*/OnData,
-                                            /*.on_goaway=*/OnGoaway,
-                                            /*.on_error=*/OnError,
-                                            /*.user_data=*/nullptr,
+                                            .on_data = OnData,
+                                            .on_goaway = OnGoaway,
+                                            .on_error = OnError,
+                                            .user_data = nullptr,
                                         },
                                         iree_allocator_system(), &channel);
   if (!iree_status_is_ok(status)) {

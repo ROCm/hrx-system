@@ -132,9 +132,9 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
   iree_net_frame_accumulator_t* accumulator =
       (iree_net_frame_accumulator_t*)storage;
   iree_net_frame_length_callback_t frame_length_callback = {
-      /*.fn=*/fuzz_frame_length,
-      /*.user_data=*/NULL,
-      /*.max_header_size=*/4,
+      .fn = fuzz_frame_length,
+      .user_data = NULL,
+      .max_header_size = 4,
   };
   iree_net_frame_complete_callback_t on_frame_complete = {
       fuzz_on_frame_complete, &frame_count};

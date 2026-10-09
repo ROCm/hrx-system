@@ -147,8 +147,8 @@ extern "C" int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
   iree_tokenizer_offset_run_t offset_runs[4096];
   iree_tokenizer_offset_run_list_t offset_run_list = {
-      /*.capacity=*/IREE_ARRAYSIZE(offset_runs),
-      /*.values=*/offset_runs,
+      .capacity = IREE_ARRAYSIZE(offset_runs),
+      .values = offset_runs,
   };
 
   status = iree_tokenizer_encode_batch(
