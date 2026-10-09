@@ -157,13 +157,13 @@ TEST(NativeObjectTest, RejectsInvalidSectionContributionIndex) {
       .section_offset = 0,
   }};
   const loom_native_object_symbol_t symbol = {
-      /*.name=*/IREE_SV("bad"),
-      /*.section_contribution_index=*/1,
-      /*.section_offset=*/{},
-      /*.size=*/{},
-      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-      /*.visibility=*/{},
-      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      .name = IREE_SV("bad"),
+      .section_contribution_index = 1,
+      .section_offset = {},
+      .size = {},
+      .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      .visibility = {},
+      .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
   loom_native_object_symbol_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
@@ -178,13 +178,13 @@ TEST(NativeObjectTest, RejectsOffsetOverflow) {
       .section_offset = std::numeric_limits<uint64_t>::max(),
   }};
   const loom_native_object_symbol_t symbol = {
-      /*.name=*/IREE_SV("overflow"),
-      /*.section_contribution_index=*/0,
-      /*.section_offset=*/1,
-      /*.size=*/{},
-      /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-      /*.visibility=*/{},
-      /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+      .name = IREE_SV("overflow"),
+      .section_contribution_index = 0,
+      .section_offset = 1,
+      .size = {},
+      .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+      .visibility = {},
+      .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
   };
   loom_native_object_symbol_layout_t layout = {};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,

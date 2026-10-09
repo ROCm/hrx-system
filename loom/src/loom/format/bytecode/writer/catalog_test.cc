@@ -33,11 +33,11 @@ static const loom_attr_descriptor_t kParameters[] = {
      .flags = LOOM_ATTR_OPTIONAL},
 };
 static const loom_encoding_family_descriptor_t kDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(12, "test.catalog"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kParameters),
-    /*.parameter_descriptors=*/kParameters,
+    .name = LOOM_BSTRING_REF(12, "test.catalog"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kParameters),
+    .parameter_descriptors = kParameters,
 };
 static const loom_encoding_vtable_t kVtable = {.descriptor = &kDescriptor};
 
@@ -430,12 +430,12 @@ TEST_F(CatalogTest, TypeAndAttributeMetadataKeepFirstUseOrder) {
        .flags = LOOM_ATTR_OPTIONAL},
   };
   static const loom_parameterized_type_descriptor_t descriptor = {
-      /*.name=*/LOOM_BSTRING_REF(17, "test.catalog_type"),
-      /*.parameter_descriptors=*/parameters,
-      /*.fact_domain=*/nullptr,
-      /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-      /*.type_flags=*/{},
-      /*.parameter_count=*/IREE_ARRAYSIZE(parameters),
+      .name = LOOM_BSTRING_REF(17, "test.catalog_type"),
+      .parameter_descriptors = parameters,
+      .fact_domain = nullptr,
+      .ir_kind = LOOM_TYPE_PARAMETERIZED,
+      .type_flags = {},
+      .parameter_count = IREE_ARRAYSIZE(parameters),
   };
   // Module insertion order intentionally differs from first-use wire order.
   const auto late = Intern(IREE_SV("late"));
@@ -511,12 +511,12 @@ TEST_F(CatalogTest, TypeAndAttributeMetadataKeepFirstUseOrder) {
 
 TEST_F(CatalogTest, ParameterizedTypesResumeAfterNestedTypes) {
   static const loom_parameterized_type_descriptor_t descriptor = {
-      /*.name=*/LOOM_BSTRING_REF(10, "test.chain"),
-      /*.parameter_descriptors=*/kPayloadParameters,
-      /*.fact_domain=*/nullptr,
-      /*.ir_kind=*/LOOM_TYPE_PARAMETERIZED,
-      /*.type_flags=*/{},
-      /*.parameter_count=*/IREE_ARRAYSIZE(kPayloadParameters),
+      .name = LOOM_BSTRING_REF(10, "test.chain"),
+      .parameter_descriptors = kPayloadParameters,
+      .fact_domain = nullptr,
+      .ir_kind = LOOM_TYPE_PARAMETERIZED,
+      .type_flags = {},
+      .parameter_count = IREE_ARRAYSIZE(kPayloadParameters),
   };
   const auto label = Intern(IREE_SV("chain_label"));
   std::vector<loom_type_id_t> types = {

@@ -29,11 +29,11 @@ static const loom_attr_descriptor_t kEncodingParameters[] = {
     },
 };
 static const loom_encoding_family_descriptor_t kEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kEncodingParameters),
-    /*.parameter_descriptors=*/kEncodingParameters,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kEncodingParameters),
+    .parameter_descriptors = kEncodingParameters,
 };
 static const loom_encoding_vtable_t kEncodingVtable = {
     .descriptor = &kEncodingDescriptor,

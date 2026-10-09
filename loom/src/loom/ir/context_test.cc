@@ -50,18 +50,18 @@ static const loom_encoding_alias_descriptor_t kQ8_0EncodingAliases[] = {
 static const uint8_t kQ8_0EncodingAliasOrdinals[] = {1};
 
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
-    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
-    /*.dynamic_parameter_count=*/0,
-    /*.dynamic_parameter_descriptors=*/nullptr,
-    /*.fixed_metadata=*/nullptr,
-    /*.alias_count=*/IREE_ARRAYSIZE(kQ8_0EncodingAliases),
-    /*.alias_discriminator_parameter_index=*/0,
-    /*.aliases=*/kQ8_0EncodingAliases,
-    /*.alias_ordinals_by_discriminator=*/kQ8_0EncodingAliasOrdinals,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    .parameter_descriptors = kQ8_0EncodingParameters,
+    .dynamic_parameter_count = 0,
+    .dynamic_parameter_descriptors = nullptr,
+    .fixed_metadata = nullptr,
+    .alias_count = IREE_ARRAYSIZE(kQ8_0EncodingAliases),
+    .alias_discriminator_parameter_index = 0,
+    .aliases = kQ8_0EncodingAliases,
+    .alias_ordinals_by_discriminator = kQ8_0EncodingAliasOrdinals,
 };
 
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
@@ -634,11 +634,11 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingName) {
 
 TEST_F(ContextTest, RegisterEncodingVtableRejectsMissingParameterDescriptors) {
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-      /*.family_flags=*/{},
-      /*.parameter_count=*/1,
-      /*.parameter_descriptors=*/nullptr,
+      .name = LOOM_BSTRING_REF(9, "malformed"),
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .family_flags = {},
+      .parameter_count = 1,
+      .parameter_descriptors = nullptr,
   };
   static const loom_encoding_vtable_t kMalformedVtable = {
       .descriptor = &kMalformedDescriptor,
@@ -664,14 +664,14 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMalformedFixedMetadata) {
           },
   };
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-      /*.family_flags=*/{},
-      /*.parameter_count=*/{},
-      /*.parameter_descriptors=*/{},
-      /*.dynamic_parameter_count=*/{},
-      /*.dynamic_parameter_descriptors=*/{},
-      /*.fixed_metadata=*/&kFixedMetadata,
+      .name = LOOM_BSTRING_REF(9, "malformed"),
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .family_flags = {},
+      .parameter_count = {},
+      .parameter_descriptors = {},
+      .dynamic_parameter_count = {},
+      .dynamic_parameter_descriptors = {},
+      .fixed_metadata = &kFixedMetadata,
   };
   static const loom_encoding_vtable_t kMalformedVtable = {
       .descriptor = &kMalformedDescriptor,
@@ -685,14 +685,14 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsMalformedFixedMetadata) {
 TEST_F(ContextTest, RegisterEncodingVtableRestrictsFixedMetadataToSchemas) {
   static const loom_encoding_family_fixed_metadata_t kFixedMetadata = {};
   static const loom_encoding_family_descriptor_t kMalformedDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(9, "malformed"),
-      /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-      /*.family_flags=*/{},
-      /*.parameter_count=*/{},
-      /*.parameter_descriptors=*/{},
-      /*.dynamic_parameter_count=*/{},
-      /*.dynamic_parameter_descriptors=*/{},
-      /*.fixed_metadata=*/&kFixedMetadata,
+      .name = LOOM_BSTRING_REF(9, "malformed"),
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .family_flags = {},
+      .parameter_count = {},
+      .parameter_descriptors = {},
+      .dynamic_parameter_count = {},
+      .dynamic_parameter_descriptors = {},
+      .fixed_metadata = &kFixedMetadata,
   };
   static const loom_encoding_vtable_t kMalformedVtable = {
       .descriptor = &kMalformedDescriptor,

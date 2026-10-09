@@ -383,9 +383,9 @@ TEST(PassRegistryCoreTest, VerifiesRequirementMetadata) {
 TEST(PassRegistryCoreTest, RejectsRequirementWithoutCapabilityType) {
   const loom_pass_requirement_def_t requirements[] = {
       {
-          /*.capability_type=*/{},
-          /*.key=*/IREE_SVL("analysis.liveness"),
-          /*.description=*/IREE_SVL("Requires precomputed liveness."),
+          .capability_type = {},
+          .key = IREE_SVL("analysis.liveness"),
+          .description = IREE_SVL("Requires precomputed liveness."),
       },
   };
   loom_pass_descriptor_t descriptor =

@@ -24,11 +24,11 @@ static const loom_attr_descriptor_t kElementParameter = {
     .attr_kind = LOOM_ATTR_TYPE,
 };
 static const loom_encoding_family_descriptor_t kTypedEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(5, "typed"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/1,
-    /*.parameter_descriptors=*/&kElementParameter,
+    .name = LOOM_BSTRING_REF(5, "typed"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = 1,
+    .parameter_descriptors = &kElementParameter,
 };
 static const loom_encoding_vtable_t kTypedEncodingVtable = {
     .descriptor = &kTypedEncodingDescriptor,

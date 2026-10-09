@@ -53,11 +53,11 @@ static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
     .flags = LOOM_ATTR_OPTIONAL,
 }};
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingParameters),
-    /*.parameter_descriptors=*/kQ8_0EncodingParameters,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kQ8_0EncodingParameters),
+    .parameter_descriptors = kQ8_0EncodingParameters,
 };
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
     .descriptor = &kQ8_0EncodingDescriptor,
@@ -76,11 +76,11 @@ static const loom_attr_descriptor_t kQuantizationEncodingParameters[] = {{
     .attr_kind = LOOM_ATTR_I64,
 }};
 static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationEncodingParameters),
-    /*.parameter_descriptors=*/kQuantizationEncodingParameters,
+    .name = LOOM_BSTRING_REF(12, "quantization"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kQuantizationEncodingParameters),
+    .parameter_descriptors = kQuantizationEncodingParameters,
 };
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
     .descriptor = &kQuantizationDescriptor,

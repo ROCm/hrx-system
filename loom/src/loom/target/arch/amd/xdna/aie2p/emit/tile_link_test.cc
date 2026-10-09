@@ -536,24 +536,25 @@ TEST(Aie2pTileLinkTest, PlacesAndRelocatesFunctionLocalStorage) {
               .fixups = &fixup,
               .fixup_count = 1,
           },
-      .realization = {
-          /*.target_identity=*/LOOM_AIE2P_LEAF_TARGET_IDENTITY,
-          /*.abi_identity=*/LOOM_AIE2P_LEAF_ABI_IDENTITY,
-          /*.entry_symbol_index=*/0,
-          /*.capability_flags=*/
-          LOOM_AIE2P_LEAF_CAPABILITY_FLAG_NATIVE_FIXUPS |
-              LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE,
-          /*.code=*/{code.size(), 16},
-          /*.read_only_data=*/{},
-          /*.read_only_data_count=*/0,
-          /*.stack=*/{},
-          /*.scratch=*/{},
-          /*.private_storage=*/{},
-          /*.workgroup_storage=*/{320, 64},
-          /*.spill=*/{},
-          /*.storage_domains=*/&storage_domain,
-          /*.storage_domain_count=*/1,
-      },
+      .realization =
+          {
+              .target_identity = LOOM_AIE2P_LEAF_TARGET_IDENTITY,
+              .abi_identity = LOOM_AIE2P_LEAF_ABI_IDENTITY,
+              .entry_symbol_index = 0,
+              .capability_flags =
+                  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_NATIVE_FIXUPS |
+                  LOOM_AIE2P_LEAF_CAPABILITY_FLAG_FUNCTION_STORAGE,
+              .code = {code.size(), 16},
+              .read_only_data = {},
+              .read_only_data_count = 0,
+              .stack = {},
+              .scratch = {},
+              .private_storage = {},
+              .workgroup_storage = {320, 64},
+              .spill = {},
+              .storage_domains = &storage_domain,
+              .storage_domain_count = 1,
+          },
   };
   const loom_aie2p_tile_storage_placement_t storage_placement = {
       .storage_space = LOOM_STORAGE_SPACE_WORKGROUP,

@@ -62,11 +62,11 @@ class LivenessTest : public ::testing::Test {
         loom_test_low_core_descriptor_set,
     };
     loom_low_descriptor_registry_t descriptor_registry = {
-        /*.descriptor_sets=*/{},
-        /*.descriptor_set_count=*/{},
-        /*.descriptor_set_providers=*/descriptor_set_providers,
-        /*.descriptor_set_provider_count=*/
-        IREE_ARRAYSIZE(descriptor_set_providers),
+        .descriptor_sets = {},
+        .descriptor_set_count = {},
+        .descriptor_set_providers = descriptor_set_providers,
+        .descriptor_set_provider_count =
+            IREE_ARRAYSIZE(descriptor_set_providers),
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &descriptor_registry, &options.low_asm_environment);

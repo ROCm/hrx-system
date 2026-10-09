@@ -126,11 +126,11 @@ class CmdProgramPlanTest : public ::testing::Test {
         loom_cmd_core_descriptor_set,
     };
     const loom_low_descriptor_registry_t descriptor_registry = {
-        /*.descriptor_sets=*/{},
-        /*.descriptor_set_count=*/{},
-        /*.descriptor_set_providers=*/descriptor_set_providers,
-        /*.descriptor_set_provider_count=*/
-        IREE_ARRAYSIZE(descriptor_set_providers),
+        .descriptor_sets = {},
+        .descriptor_set_count = {},
+        .descriptor_set_providers = descriptor_set_providers,
+        .descriptor_set_provider_count =
+            IREE_ARRAYSIZE(descriptor_set_providers),
     };
     loom_low_descriptor_text_asm_environment_initialize(
         &descriptor_registry, &parse_options.low_asm_environment);

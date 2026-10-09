@@ -690,10 +690,10 @@ TEST(LowDescriptorsTest, ProviderBackedRegistryVerifiesAndLooksUpDescriptors) {
       ProvideTestDescriptorSet,
   };
   const loom_low_descriptor_registry_t registry = {
-      /*.descriptor_sets=*/{},
-      /*.descriptor_set_count=*/{},
-      /*.descriptor_set_providers=*/providers,
-      /*.descriptor_set_provider_count=*/IREE_ARRAYSIZE(providers),
+      .descriptor_sets = {},
+      .descriptor_set_count = {},
+      .descriptor_set_providers = providers,
+      .descriptor_set_provider_count = IREE_ARRAYSIZE(providers),
   };
 
   EXPECT_EQ(loom_low_descriptor_registry_descriptor_set_count(&registry), 1u);
@@ -717,10 +717,10 @@ TEST(LowDescriptorsTest, RegistryRejectsNullDescriptorSetProvider) {
       ProvideNullDescriptorSet,
   };
   const loom_low_descriptor_registry_t registry = {
-      /*.descriptor_sets=*/{},
-      /*.descriptor_set_count=*/{},
-      /*.descriptor_set_providers=*/providers,
-      /*.descriptor_set_provider_count=*/IREE_ARRAYSIZE(providers),
+      .descriptor_sets = {},
+      .descriptor_set_count = {},
+      .descriptor_set_providers = providers,
+      .descriptor_set_provider_count = IREE_ARRAYSIZE(providers),
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

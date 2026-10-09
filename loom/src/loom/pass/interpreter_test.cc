@@ -523,10 +523,10 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
   ASSERT_NE(module, nullptr);
 
   PassTestPredicateCapture predicate_capture = {
-      /*.verify_count=*/{},
-      /*.evaluate_count=*/{},
-      /*.selected_symbol=*/IREE_SV("selected"),
-      /*.selected_function_version=*/nullptr,
+      .verify_count = {},
+      .evaluate_count = {},
+      .selected_symbol = IREE_SV("selected"),
+      .selected_function_version = nullptr,
   };
   loom_pass_predicate_provider_t predicate_provider =
       PassTestTargetPredicateProvider(&predicate_capture);

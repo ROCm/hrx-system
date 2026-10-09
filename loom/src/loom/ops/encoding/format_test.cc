@@ -41,11 +41,11 @@ static const loom_attr_descriptor_t kTestSchemaEncodingParameters[] = {
     },
 };
 static const loom_encoding_family_descriptor_t kTestSchemaEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(11, "test.schema"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kTestSchemaEncodingParameters),
-    /*.parameter_descriptors=*/kTestSchemaEncodingParameters,
+    .name = LOOM_BSTRING_REF(11, "test.schema"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kTestSchemaEncodingParameters),
+    .parameter_descriptors = kTestSchemaEncodingParameters,
 };
 static const loom_encoding_vtable_t kTestSchemaEncodingVtable = {
     .descriptor = &kTestSchemaEncodingDescriptor,
@@ -56,11 +56,11 @@ static const loom_attr_descriptor_t kQuantizationParameters[] = {{
     .attr_kind = LOOM_ATTR_ENCODING,
 }};
 static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(12, "quantization"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-    /*.family_flags=*/{},
-    /*.parameter_count=*/IREE_ARRAYSIZE(kQuantizationParameters),
-    /*.parameter_descriptors=*/kQuantizationParameters,
+    .name = LOOM_BSTRING_REF(12, "quantization"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .family_flags = {},
+    .parameter_count = IREE_ARRAYSIZE(kQuantizationParameters),
+    .parameter_descriptors = kQuantizationParameters,
 };
 static const loom_encoding_vtable_t kQuantizationEncodingVtable = {
     .descriptor = &kQuantizationDescriptor,

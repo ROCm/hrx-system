@@ -14,19 +14,19 @@ namespace {
 
 loom_target_snapshot_t TestSnapshot() {
   return loom_target_snapshot_t{
-      /*.name=*/IREE_SV("test-target"),
-      /*.codegen_format=*/{},
-      /*.artifact_format=*/{},
-      /*.default_pointer_bitwidth=*/{},
-      /*.index_bitwidth=*/{},
-      /*.offset_bitwidth=*/{},
-      /*.max_workgroup_size=*/{.x = 1024, .y = 1024, .z = 1024},
-      /*.max_flat_workgroup_size=*/1024,
-      /*.max_workgroup_storage_bytes=*/{},
-      /*.subgroup_size=*/{},
-      /*.max_grid_size=*/{.x = 4096, .y = 2048, .z = 1024},
-      /*.max_flat_grid_size=*/8388608,
-      /*.max_workgroup_count=*/{.x = 4096, .y = 2048, .z = 1024},
+      .name = IREE_SV("test-target"),
+      .codegen_format = {},
+      .artifact_format = {},
+      .default_pointer_bitwidth = {},
+      .index_bitwidth = {},
+      .offset_bitwidth = {},
+      .max_workgroup_size = {.x = 1024, .y = 1024, .z = 1024},
+      .max_flat_workgroup_size = 1024,
+      .max_workgroup_storage_bytes = {},
+      .subgroup_size = {},
+      .max_grid_size = {.x = 4096, .y = 2048, .z = 1024},
+      .max_flat_grid_size = 8388608,
+      .max_workgroup_count = {.x = 4096, .y = 2048, .z = 1024},
   };
 }
 

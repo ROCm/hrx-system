@@ -2575,11 +2575,11 @@ TEST_F(ReaderTest, RejectsNonPriorEncodingReferencesBeforeMaterialization) {
       .flags = LOOM_ATTR_OPTIONAL,
   };
   const loom_encoding_family_descriptor_t descriptor = {
-      /*.name=*/LOOM_BSTRING_REF(9, "dependent"),
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
-      /*.family_flags=*/{},
-      /*.parameter_count=*/1,
-      /*.parameter_descriptors=*/&parameter,
+      .name = LOOM_BSTRING_REF(9, "dependent"),
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .family_flags = {},
+      .parameter_count = 1,
+      .parameter_descriptors = &parameter,
   };
   const loom_encoding_vtable_t vtable = {.descriptor = &descriptor};
   loom_context_t context;

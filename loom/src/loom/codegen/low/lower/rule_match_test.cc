@@ -690,25 +690,25 @@ TEST_F(LowLowerRuleMatchTest, MatchesSubnormalPolicyPermissionOrRetainedFact) {
 TEST_F(LowLowerRuleMatchTest, MatchesCompleteStorageOperandSchema) {
   const loom_op_t* source_op = BuildScalarConstant(7);
   const loom_value_fact_encoded_operand_schema_t actual_schema = {
-      /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN,
-      /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0,
-      /*.secondary_scale_format=*/{},
-      /*.payload_packing=*/LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
-      /*.scale_topology=*/LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
-      /*.affine_policy=*/LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
-      /*.rounding_policy=*/{},
-      /*.codebook_policy=*/{},
-      /*.sparsity_policy=*/{},
-      /*.flags=*/{},
-      /*.sparsity_group=*/{},
-      /*.payload_register_count=*/{},
-      /*.payload_element_count=*/8,
-      /*.scale_group=*/
-      {
-          .element_count = 8,
-          .shape = {8},
-      },
-      /*.scale_operand_count=*/1,
+      .element_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E4M3FN,
+      .scale_format = LOOM_VALUE_FACT_NUMERIC_FORMAT_F8_E8M0,
+      .secondary_scale_format = {},
+      .payload_packing = LOOM_VALUE_FACT_PAYLOAD_PACKING_DENSE_LANES,
+      .scale_topology = LOOM_VALUE_FACT_SCALE_TOPOLOGY_BLOCK_1D,
+      .affine_policy = LOOM_VALUE_FACT_AFFINE_POLICY_SCALE_ONLY,
+      .rounding_policy = {},
+      .codebook_policy = {},
+      .sparsity_policy = {},
+      .flags = {},
+      .sparsity_group = {},
+      .payload_register_count = {},
+      .payload_element_count = 8,
+      .scale_group =
+          {
+              .element_count = 8,
+              .shape = {8},
+          },
+      .scale_operand_count = 1,
   };
   loom_value_fact_table_t facts = {};
   IREE_ASSERT_OK(loom_value_fact_table_initialize(&facts, &module_->arena,

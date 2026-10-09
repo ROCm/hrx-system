@@ -1283,11 +1283,11 @@ TEST_F(SymbolReferencesTest, TypeAndEncodingRefsUseOneTable) {
       .value = nested_encoding_dict,
   }};
   loom_encoding_t encoding = {
-      /*.name_id=*/encoding_name_id,
-      /*.alias_id=*/{},
-      /*.attribute_count=*/IREE_ARRAYSIZE(encoding_attrs),
-      /*.family=*/{},
-      /*.attributes=*/encoding_attrs,
+      .name_id = encoding_name_id,
+      .alias_id = {},
+      .attribute_count = IREE_ARRAYSIZE(encoding_attrs),
+      .family = {},
+      .attributes = encoding_attrs,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(

@@ -66,16 +66,16 @@ const loom_low_descriptor_set_t* AliasDescriptorSet() {
 const loom_low_descriptor_set_t* ExplicitDescriptorSet() {
   static const loom_low_reg_class_t kRegClasses[] = {
       {
-          /*.name_string_ref=*/{},
-          /*.target_bank_id=*/{},
-          /*.flags=*/LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
-              LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
+          .name_string_ref = {},
+          .target_bank_id = {},
+          .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                   LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
       },
       {
-          /*.name_string_ref=*/{},
-          /*.target_bank_id=*/{},
-          /*.flags=*/LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
-              LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
+          .name_string_ref = {},
+          .target_bank_id = {},
+          .flags = LOOM_LOW_REG_CLASS_FLAG_PHYSICAL |
+                   LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS,
       },
   };
   static const uint16_t kAtomicUnits[] = {0, 1, 0, 2, 3, 4, 5};

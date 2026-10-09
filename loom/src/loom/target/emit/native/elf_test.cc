@@ -512,25 +512,25 @@ TEST(NativeElfTest, FinalizesAddressesAndPayloadAfterLayout) {
 TEST(NativeElfTest, RejectsInvalidSectionAlignment) {
   const uint8_t contents[] = {0};
   const loom_native_elf_section_t sections[] = {{
-      /*.name=*/IREE_SV(".bad"),
-      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
-      /*.flags=*/{},
-      /*.address=*/{},
-      /*.alignment=*/3,
-      /*.entry_size=*/{},
-      /*.link=*/{},
-      /*.info=*/{},
-      /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
+      .name = IREE_SV(".bad"),
+      .type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS,
+      .flags = {},
+      .address = {},
+      .alignment = 3,
+      .entry_size = {},
+      .link = {},
+      .info = {},
+      .contents = iree_make_const_byte_span(contents, sizeof(contents)),
   }};
   const loom_native_elf64le_file_t file = {
-      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_REL,
-      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_X86_64,
-      /*.os_abi=*/{},
-      /*.abi_version=*/{},
-      /*.flags=*/{},
-      /*.entry=*/{},
-      /*.sections=*/sections,
-      /*.section_count=*/IREE_ARRAYSIZE(sections),
+      .type = LOOM_NATIVE_ELF_FILE_TYPE_REL,
+      .machine = LOOM_NATIVE_ELF_MACHINE_X86_64,
+      .os_abi = {},
+      .abi_version = {},
+      .flags = {},
+      .entry = {},
+      .sections = sections,
+      .section_count = IREE_ARRAYSIZE(sections),
   };
 
   TestArena arena;
@@ -543,15 +543,15 @@ TEST(NativeElfTest, RejectsInvalidSectionAlignment) {
 TEST(NativeElfTest, RejectsInvalidSegmentRange) {
   const uint8_t contents[] = {0};
   const loom_native_elf_section_t sections[] = {{
-      /*.name=*/IREE_SV(".note"),
-      /*.type=*/LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
-      /*.flags=*/{},
-      /*.address=*/{},
-      /*.alignment=*/4,
-      /*.entry_size=*/{},
-      /*.link=*/{},
-      /*.info=*/{},
-      /*.contents=*/iree_make_const_byte_span(contents, sizeof(contents)),
+      .name = IREE_SV(".note"),
+      .type = LOOM_NATIVE_ELF_SECTION_TYPE_NOTE,
+      .flags = {},
+      .address = {},
+      .alignment = 4,
+      .entry_size = {},
+      .link = {},
+      .info = {},
+      .contents = iree_make_const_byte_span(contents, sizeof(contents)),
   }};
   const loom_native_elf_segment_t segments[] = {{
       .type = LOOM_NATIVE_ELF_PROGRAM_TYPE_NOTE,
@@ -566,16 +566,16 @@ TEST(NativeElfTest, RejectsInvalidSegmentRange) {
       .alignment = 4,
   }};
   const loom_native_elf64le_file_t file = {
-      /*.type=*/LOOM_NATIVE_ELF_FILE_TYPE_DYN,
-      /*.machine=*/LOOM_NATIVE_ELF_MACHINE_AMDGPU,
-      /*.os_abi=*/{},
-      /*.abi_version=*/{},
-      /*.flags=*/{},
-      /*.entry=*/{},
-      /*.sections=*/sections,
-      /*.section_count=*/IREE_ARRAYSIZE(sections),
-      /*.segments=*/segments,
-      /*.segment_count=*/IREE_ARRAYSIZE(segments),
+      .type = LOOM_NATIVE_ELF_FILE_TYPE_DYN,
+      .machine = LOOM_NATIVE_ELF_MACHINE_AMDGPU,
+      .os_abi = {},
+      .abi_version = {},
+      .flags = {},
+      .entry = {},
+      .sections = sections,
+      .section_count = IREE_ARRAYSIZE(sections),
+      .segments = segments,
+      .segment_count = IREE_ARRAYSIZE(segments),
   };
 
   TestArena arena;

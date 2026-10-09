@@ -73,16 +73,16 @@ TEST(ExecutableMetadataTest, AppendsAndResolvesLayout) {
       },
   };
   iree_hal_amdgpu_kernarg_layout_params_t params = {
-      /*.kernarg_byte_length=*/16,
-      /*.kernarg_alignment=*/8,
-      /*.constant_byte_length=*/4,
-      /*.implicit_args_byte_offset=*/
-      IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
-      /*.declared_flags=*/{},
-      /*.binding_count=*/IREE_ARRAYSIZE(binding_slots),
-      /*.binding_slots=*/binding_slots,
-      /*.constant_span_count=*/IREE_ARRAYSIZE(constant_spans),
-      /*.constant_spans=*/constant_spans,
+      .kernarg_byte_length = 16,
+      .kernarg_alignment = 8,
+      .constant_byte_length = 4,
+      .implicit_args_byte_offset =
+          IREE_HAL_AMDGPU_KERNARG_LAYOUT_IMPLICIT_ARGS_NONE,
+      .declared_flags = {},
+      .binding_count = IREE_ARRAYSIZE(binding_slots),
+      .binding_slots = binding_slots,
+      .constant_span_count = IREE_ARRAYSIZE(constant_spans),
+      .constant_spans = constant_spans,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_kernarg_layout_initialize(
       &params, layout_storage.data_length,
