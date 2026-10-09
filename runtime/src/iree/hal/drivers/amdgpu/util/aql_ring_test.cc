@@ -140,9 +140,9 @@ TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
 // Native queues can write a DOORBELL-kind signal's MMIO pointer directly.
 TEST(AqlRingTest, NativeQueueResolvesMmioPointerForDoorbellKind) {
   volatile int64_t doorbell_mmio = 0;
-  iree_amd_signal_t signal = {};
-  signal.kind = IREE_AMD_SIGNAL_KIND_DOORBELL;
-  signal.hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_mmio;
+  iree_amd_signal_t signal = {
+      .kind = IREE_AMD_SIGNAL_KIND_DOORBELL,
+      .hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_mmio};
 
   iree_hal_amdgpu_aql_packet_t packets[4] = {};
   iree_amd_queue_t queue = {};
@@ -167,9 +167,9 @@ TEST(AqlRingTest, NativeQueueResolvesMmioPointerForDoorbellKind) {
 // HSA signal API even when the exposed signal has DOORBELL kind.
 TEST(AqlRingTest, Pm4EmulatedQueueUsesHsaSignalForDoorbellKind) {
   volatile int64_t doorbell_value = 0;
-  iree_amd_signal_t signal = {};
-  signal.kind = IREE_AMD_SIGNAL_KIND_DOORBELL;
-  signal.hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_value;
+  iree_amd_signal_t signal = {
+      .kind = IREE_AMD_SIGNAL_KIND_DOORBELL,
+      .hardware_doorbell_ptr = (volatile uint64_t*)&doorbell_value};
 
   iree_hal_amdgpu_aql_packet_t packets[4] = {};
   iree_amd_queue_t queue = {};

@@ -99,10 +99,10 @@ class ExpectationTest : public ::testing::Test {
     IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("scalar_close"),
                                         &block_pool_, nullptr, host_allocator_,
                                         &module));
-    loom_testbench_expectation_plan_t expectation = {};
-    expectation.kind = LOOM_TESTBENCH_EXPECTATION_CLOSE;
-    expectation.type = loom_type_scalar(scalar_type);
-    expectation.close = close;
+    loom_testbench_expectation_plan_t expectation = {
+        .kind = LOOM_TESTBENCH_EXPECTATION_CLOSE,
+        .type = loom_type_scalar(scalar_type),
+        .close = close};
     IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                             &expectation.actual_value_id));
     IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
@@ -112,12 +112,10 @@ class ExpectationTest : public ::testing::Test {
     loom_testbench_value_table_t table = {};
     IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(
         module, &case_plan, host_allocator_, &table));
-    loom_testbench_value_t actual_value = {};
-    actual_value.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
-    actual_value.scalar = actual;
-    loom_testbench_value_t expected_value = {};
-    expected_value.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
-    expected_value.scalar = expected;
+    loom_testbench_value_t actual_value = {
+        .kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR, .scalar = actual};
+    loom_testbench_value_t expected_value = {
+        .kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR, .scalar = expected};
     IREE_ASSERT_OK(loom_testbench_value_table_assign_move(
         &table, expectation.actual_value_id, &actual_value));
     IREE_ASSERT_OK(loom_testbench_value_table_assign_move(
@@ -297,9 +295,8 @@ TEST_F(ExpectationTest, ComparesBufferReferencesByLogicalIdentity) {
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("buffer_reference"),
                                       &block_pool_, nullptr, host_allocator_,
                                       &module));
-  loom_testbench_expectation_plan_t expectation = {};
-  expectation.kind = LOOM_TESTBENCH_EXPECTATION_EQUAL;
-  expectation.type = loom_type_buffer();
+  loom_testbench_expectation_plan_t expectation = {
+      .kind = LOOM_TESTBENCH_EXPECTATION_EQUAL, .type = loom_type_buffer()};
   IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                           &expectation.actual_value_id));
   IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
@@ -318,14 +315,12 @@ TEST_F(ExpectationTest, ComparesBufferReferencesByLogicalIdentity) {
                      loom_value_id_t expected_allocation,
                      iree_device_size_t expected_offset) {
     loom_testbench_value_table_reset(&table);
-    loom_testbench_value_t actual = {};
-    actual.kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER;
-    actual.buffer = {};
+    loom_testbench_value_t actual = {.kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER,
+                                     .buffer = {}};
     loom_testbench_value_set_buffer_reference(actual_allocation, actual_offset,
                                               /*byte_length=*/64, &actual);
-    loom_testbench_value_t expected = {};
-    expected.kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER;
-    expected.buffer = {};
+    loom_testbench_value_t expected = {.kind = LOOM_TESTBENCH_VALUE_KIND_BUFFER,
+                                       .buffer = {}};
     loom_testbench_value_set_buffer_reference(
         expected_allocation, expected_offset, /*byte_length=*/64, &expected);
     IREE_ASSERT_OK(loom_testbench_value_table_assign_move(

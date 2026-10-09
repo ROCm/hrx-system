@@ -612,15 +612,15 @@ TEST_F(HostQueueStagingTest, ConcurrentMultiChunkHostTransfersReuseSlots) {
           for (auto& value : input) {
             value += static_cast<uint8_t>(thread_index * 16 + 1);
           }
-          iree_hal_transfer_operation_t upload = {};
-          upload.type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD;
+          iree_hal_transfer_operation_t upload = {
+              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD};
           upload.upload.source = input.data();
           upload.upload.target_buffer = buffers[thread_index];
           upload.upload.length = input.size();
           IREE_ASSERT_OK(transfer_and_wait(upload));
 
-          iree_hal_transfer_operation_t download = {};
-          download.type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+          iree_hal_transfer_operation_t download = {
+              .type = IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD};
           download.download.source_buffer = buffers[thread_index];
           download.download.target = output.data();
           download.download.length = output.size();

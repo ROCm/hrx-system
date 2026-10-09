@@ -583,14 +583,14 @@ static void BM_InlineComposition(benchmark::State& state, CallableMode mode,
     const loom_pass_info_t* pass_info = loom_inline_callables_pass_info();
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
-    loom_pass_t pass = {};
-    pass.info = pass_info;
-    pass.module_run = loom_inline_callables_run;
-    pass.instance_arena = &pass_arena;
-    pass.arena = &pass_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment =
-        mode == CallableMode::kTargetLow ? &pass_environment : nullptr;
+    loom_pass_t pass = {.info = pass_info,
+                        .module_run = loom_inline_callables_run,
+                        .instance_arena = &pass_arena,
+                        .arena = &pass_arena,
+                        .statistic_storage = statistic_storage.data(),
+                        .environment = mode == CallableMode::kTargetLow
+                                           ? &pass_environment
+                                           : nullptr};
     const iree_string_view_t pass_options = mode == CallableMode::kTargetLow
                                                 ? IREE_SV("policy=target")
                                                 : IREE_SV("");

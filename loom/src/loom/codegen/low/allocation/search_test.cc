@@ -170,15 +170,15 @@ loom_low_placement_relation_t LocationRelation(
     loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal,
     loom_low_placement_relation_kind_t kind, uint32_t location_mask,
     uint16_t priority = 2) {
-  loom_low_placement_relation_t relation = {};
-  relation.result_ordinal = result_ordinal;
-  relation.source_ordinal = source_ordinal;
-  relation.unit_count = 1;
-  relation.location_mask = location_mask;
-  relation.kind = kind;
-  relation.cause = LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY;
-  relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED;
-  relation.priority = priority;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = result_ordinal,
+      .source_ordinal = source_ordinal,
+      .unit_count = 1,
+      .location_mask = location_mask,
+      .kind = kind,
+      .cause = LOOM_LOW_PLACEMENT_CAUSE_SCHEDULE_PAIR_AFFINITY,
+      .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_PREFERRED,
+      .priority = priority};
   return relation;
 }
 

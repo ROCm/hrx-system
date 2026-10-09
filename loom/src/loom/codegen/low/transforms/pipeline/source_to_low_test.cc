@@ -91,11 +91,8 @@ static loom_pass_descriptor_t MakeFunctionPassDescriptor(
     iree_string_view_t key, loom_pass_info_fn_t info,
     loom_function_pass_fn_t function_run,
     loom_pass_create_fn_t create = nullptr) {
-  loom_pass_descriptor_t descriptor = {};
-  descriptor.key = key;
-  descriptor.info = info;
-  descriptor.function_run = function_run;
-  descriptor.create = create;
+  loom_pass_descriptor_t descriptor = {
+      .key = key, .info = info, .function_run = function_run, .create = create};
   return descriptor;
 }
 
@@ -350,13 +347,12 @@ class LowLowerPassTest : public ::testing::Test {
         loom_codegen_pass_environment_storage_initialize(
             &environment_options, function_versions,
             &codegen_environment_storage);
-    loom_pass_t pass = {};
-    pass.info = pass_info;
-    pass.module_run = loom_inline_callables_run;
-    pass.instance_arena = &instance_arena;
-    pass.arena = &instance_arena;
-    pass.statistic_storage = statistic_storage.data();
-    pass.environment = &environment;
+    loom_pass_t pass = {.info = pass_info,
+                        .module_run = loom_inline_callables_run,
+                        .instance_arena = &instance_arena,
+                        .arena = &instance_arena,
+                        .statistic_storage = statistic_storage.data(),
+                        .environment = &environment};
 
     iree_status_t status = loom_inline_callables_create(&pass, options);
     if (iree_status_is_ok(status)) {

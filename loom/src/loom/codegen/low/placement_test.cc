@@ -37,20 +37,20 @@ TEST(LowPlacementTest, ClassifiesEdgeCauses) {
 }
 
 TEST(LowPlacementTest, ComposedRelationHasNoDirectSourceOperand) {
-  loom_low_placement_relation_t source_to_intermediate = {};
-  source_to_intermediate.result_ordinal = 1;
-  source_to_intermediate.source_ordinal = 0;
-  source_to_intermediate.result_unit_offset = 2;
-  source_to_intermediate.source_unit_offset = 4;
-  source_to_intermediate.unit_count = 3;
-  source_to_intermediate.source_operand_index = 1;
-  loom_low_placement_relation_t intermediate_to_result = {};
-  intermediate_to_result.result_ordinal = 2;
-  intermediate_to_result.source_ordinal = 1;
-  intermediate_to_result.result_unit_offset = 8;
-  intermediate_to_result.source_unit_offset = 3;
-  intermediate_to_result.unit_count = 3;
-  intermediate_to_result.source_operand_index = 2;
+  loom_low_placement_relation_t source_to_intermediate = {
+      .result_ordinal = 1,
+      .source_ordinal = 0,
+      .result_unit_offset = 2,
+      .source_unit_offset = 4,
+      .unit_count = 3,
+      .source_operand_index = 1};
+  loom_low_placement_relation_t intermediate_to_result = {
+      .result_ordinal = 2,
+      .source_ordinal = 1,
+      .result_unit_offset = 8,
+      .source_unit_offset = 3,
+      .unit_count = 3,
+      .source_operand_index = 2};
 
   loom_low_placement_relation_t composed = {};
   ASSERT_TRUE(loom_low_placement_relation_compose(

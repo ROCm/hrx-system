@@ -256,10 +256,10 @@ TEST_F(JsProactorTest, BatchValidationFailureIsAtomic) {
   InitNop(&nop, CountingCallback, &nop_completed_count);
 
   int unsupported_completed_count = 0;
-  iree_async_operation_t unsupported = {};
-  unsupported.type = IREE_ASYNC_OPERATION_TYPE_SOCKET_CONNECT;
-  unsupported.completion_fn = CountingCallback;
-  unsupported.user_data = &unsupported_completed_count;
+  iree_async_operation_t unsupported = {
+      .type = IREE_ASYNC_OPERATION_TYPE_SOCKET_CONNECT,
+      .completion_fn = CountingCallback,
+      .user_data = &unsupported_completed_count};
 
   iree_async_operation_t* operations[] = {&nop.base, &unsupported};
   iree_async_operation_list_t operation_list = {operations,

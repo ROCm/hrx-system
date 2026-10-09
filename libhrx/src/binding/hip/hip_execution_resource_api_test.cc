@@ -1118,8 +1118,8 @@ TEST_F(HipExecutionResourceApiTest,
                 &driver_config, (hipFunction_t)function,
                 /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
 
-  hipLaunchAttribute cooperative_attribute = {};
-  cooperative_attribute.id = hipLaunchAttributeCooperative;
+  hipLaunchAttribute cooperative_attribute = {
+      .id = hipLaunchAttributeCooperative};
   cooperative_attribute.val.cooperative = 1;
   runtime_config.attrs = &cooperative_attribute;
   runtime_config.numAttrs = 1;
@@ -1133,8 +1133,8 @@ TEST_F(HipExecutionResourceApiTest,
                 &driver_config, (hipFunction_t)function,
                 /*kernel_parameters=*/nullptr, /*extra=*/nullptr));
 
-  hipLaunchAttribute prefetch_attribute = {};
-  prefetch_attribute.id = hipLaunchAttributeExtDynDataPrefetch;
+  hipLaunchAttribute prefetch_attribute = {
+      .id = hipLaunchAttributeExtDynDataPrefetch};
   runtime_config.attrs = &prefetch_attribute;
   runtime_config.numAttrs = 1;
   driver_config.attrs = &prefetch_attribute;

@@ -2266,10 +2266,8 @@ TEST_F(ModuleTest, VerifyCanonicalAttrDictRejectsEmptyDictWithNonNullEntries) {
       .reserved = {},
       .value = loom_attr_i64(0),
   }};
-  loom_attribute_t attr = {};
-  attr.kind = LOOM_ATTR_DICT;
-  attr.count = 0;
-  attr.dict_entries = entries;
+  loom_attribute_t attr = {
+      .kind = LOOM_ATTR_DICT, .count = 0, .dict_entries = entries};
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         loom_module_verify_canonical_attr_dict(module, attr));

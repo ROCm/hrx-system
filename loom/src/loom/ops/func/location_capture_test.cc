@@ -186,8 +186,7 @@ TEST_F(LocationCaptureTest, SharedGraphRetainsOpaqueTaggedAndUnavailableData) {
                                   file, payload, sizeof(payload));
   tag.flags = LOOM_LOCATION_FLAG_SYNTHETIC;
   IREE_ASSERT_OK(loom_module_add_location(module, tag, &tagged));
-  loom_location_entry_t opaque = {};
-  opaque.kind = LOOM_LOCATION_OPAQUE;
+  loom_location_entry_t opaque = {.kind = LOOM_LOCATION_OPAQUE};
   opaque.opaque.source_id = source;
   opaque.opaque.data = payload;
   opaque.opaque.data_length = sizeof(payload);
@@ -195,8 +194,7 @@ TEST_F(LocationCaptureTest, SharedGraphRetainsOpaqueTaggedAndUnavailableData) {
   IREE_ASSERT_OK(loom_module_add_location(module, opaque, &external));
   loom_location_id_t children[] = {tagged, external, file, tagged,
                                    LOOM_LOCATION_UNKNOWN};
-  loom_location_entry_t fused = {};
-  fused.kind = LOOM_LOCATION_FUSED;
+  loom_location_entry_t fused = {.kind = LOOM_LOCATION_FUSED};
   fused.fused.count = IREE_ARRAYSIZE(children);
   fused.fused.children = children;
   loom_location_id_t root;

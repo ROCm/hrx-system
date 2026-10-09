@@ -59,11 +59,10 @@ class CFGSimplifyFactsTest : public ::testing::Test {
   iree_status_t Simplify(bool* out_changed) {
     iree_arena_allocator_t arena;
     iree_arena_initialize(&pool_, &arena);
-    loom_pass_t pass = {};
-    pass.info = loom_cfg_simplify_pass_info();
-    pass.instance_arena = &arena;
-    pass.arena = &arena;
-    pass.value_facts = &owner_;
+    loom_pass_t pass = {.info = loom_cfg_simplify_pass_info(),
+                        .instance_arena = &arena,
+                        .arena = &arena,
+                        .value_facts = &owner_};
     const auto* layout = pass.info->statistic_layout;
     iree_status_t status = iree_arena_allocate(&arena, layout->storage_size,
                                                &pass.statistic_storage);

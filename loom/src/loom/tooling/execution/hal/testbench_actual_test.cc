@@ -127,40 +127,35 @@ loomc_launch_config_program_t* HalTestbenchActualTest::LoadLaunchConfigProgram(
 }
 
 static loom_testbench_value_t I32Value(int32_t value) {
-  loom_testbench_value_t result = {};
-  result.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
+  loom_testbench_value_t result = {.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR};
   result.scalar.kind = IREE_TOOLING_VALUE_KIND_I32;
   result.scalar.storage.i32 = value;
   return result;
 }
 
 static loom_testbench_value_t RawU32Value(uint32_t value) {
-  loom_testbench_value_t result = {};
-  result.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
+  loom_testbench_value_t result = {.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR};
   result.scalar.kind = IREE_TOOLING_VALUE_KIND_RAW_U32;
   result.scalar.storage.u32 = value;
   return result;
 }
 
 static loom_testbench_value_t I64Value(int64_t value) {
-  loom_testbench_value_t result = {};
-  result.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
+  loom_testbench_value_t result = {.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR};
   result.scalar.kind = IREE_TOOLING_VALUE_KIND_I64;
   result.scalar.storage.i64 = value;
   return result;
 }
 
 static loom_testbench_value_t F32Value(float value) {
-  loom_testbench_value_t result = {};
-  result.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
+  loom_testbench_value_t result = {.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR};
   result.scalar.kind = IREE_TOOLING_VALUE_KIND_F32;
   result.scalar.storage.f32 = value;
   return result;
 }
 
 static loom_testbench_value_t F64Value(double value) {
-  loom_testbench_value_t result = {};
-  result.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR;
+  loom_testbench_value_t result = {.kind = LOOM_TESTBENCH_VALUE_KIND_SCALAR};
   result.scalar.kind = IREE_TOOLING_VALUE_KIND_F64;
   result.scalar.storage.f64 = value;
   return result;

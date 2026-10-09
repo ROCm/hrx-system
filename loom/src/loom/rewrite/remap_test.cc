@@ -887,9 +887,8 @@ TEST_F(RemapTest, RemapsLocationsAcrossModules) {
   IREE_ASSERT_OK(iree_arena_allocate_array(
       &source_->arena, 1, sizeof(loom_location_id_t), (void**)&fused_children));
   fused_children[0] = file_location_id;
-  loom_location_entry_t fused_entry = {};
-  fused_entry.kind = LOOM_LOCATION_FUSED;
-  fused_entry.flags = LOOM_LOCATION_FLAG_SYNTHETIC;
+  loom_location_entry_t fused_entry = {.kind = LOOM_LOCATION_FUSED,
+                                       .flags = LOOM_LOCATION_FLAG_SYNTHETIC};
   fused_entry.fused.count = 1;
   fused_entry.fused.children = fused_children;
   loom_location_id_t fused_location_id = LOOM_LOCATION_UNKNOWN;

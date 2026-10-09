@@ -202,16 +202,16 @@ loom_low_placement_relation_t StorageRelation(
     uint32_t unit_count, loom_low_placement_cause_t cause,
     loom_low_placement_relation_flags_t flags =
         LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE) {
-  loom_low_placement_relation_t relation = {};
-  relation.result_ordinal = result_ordinal;
-  relation.source_ordinal = source_ordinal;
-  relation.result_unit_offset = result_unit_offset;
-  relation.source_unit_offset = source_unit_offset;
-  relation.unit_count = unit_count;
-  relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
-  relation.cause = cause;
-  relation.flags = flags;
-  relation.source_operand_index = LOOM_LOW_PLACEMENT_SOURCE_OPERAND_NONE;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = result_ordinal,
+      .source_ordinal = source_ordinal,
+      .result_unit_offset = result_unit_offset,
+      .source_unit_offset = source_unit_offset,
+      .unit_count = unit_count,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+      .cause = cause,
+      .flags = flags,
+      .source_operand_index = LOOM_LOW_PLACEMENT_SOURCE_OPERAND_NONE};
   return relation;
 }
 

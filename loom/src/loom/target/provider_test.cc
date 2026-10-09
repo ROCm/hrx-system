@@ -140,10 +140,8 @@ iree_status_t EmitNothing(const loom_target_emit_request_t* request,
 
 static loom_pass_descriptor_t MakeFunctionPassDescriptor(
     iree_string_view_t key, loom_pass_info_fn_t info) {
-  loom_pass_descriptor_t descriptor = {};
-  descriptor.key = key;
-  descriptor.info = info;
-  descriptor.function_run = NoopFunctionPass;
+  loom_pass_descriptor_t descriptor = {
+      .key = key, .info = info, .function_run = NoopFunctionPass};
   return descriptor;
 }
 

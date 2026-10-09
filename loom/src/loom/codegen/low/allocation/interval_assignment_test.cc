@@ -474,14 +474,14 @@ TEST_F(LowAllocationIntervalAssignmentTest,
                                                   edge_handoff_words}};
 
   const uint32_t relation_indices_by_source[] = {0};
-  loom_low_placement_relation_t relation = {};
-  relation.result_ordinal = 1;
-  relation.source_ordinal = 0;
-  relation.unit_count = 1;
-  relation.kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE;
-  relation.cause = LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT;
-  relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
-                   LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
+  loom_low_placement_relation_t relation = {
+      .result_ordinal = 1,
+      .source_ordinal = 0,
+      .unit_count = 1,
+      .kind = LOOM_LOW_PLACEMENT_RELATION_SAME_STORAGE,
+      .cause = LOOM_LOW_PLACEMENT_CAUSE_TIED_RESULT,
+      .flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
+               LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE};
   loom_low_placement_relation_range_t ranges_by_result[] = {
       {
           .start = 0,
