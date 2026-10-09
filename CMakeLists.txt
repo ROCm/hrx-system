@@ -16,6 +16,9 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# First-party targets use headers and do not require C++ module dependency
+# scanning.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 # Static and object libraries need compile-time prerequisites, not completed
 # archives for every transitive link dependency. CMake retains explicit ordering

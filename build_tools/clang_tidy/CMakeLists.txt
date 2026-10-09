@@ -11,6 +11,8 @@ project(IREEClangTidy LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+# The plugin uses headers and does not require C++ module dependency scanning.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 
 find_package(LLVM REQUIRED CONFIG)
 find_package(Clang REQUIRED CONFIG)
