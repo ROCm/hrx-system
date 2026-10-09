@@ -1,0 +1,275 @@
+// Selected and carried view origins retain packet addressing through the
+// complete source pipeline, including subview biases and strided dimensions.
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @selected_dynamic_rank1_packets(%input: buffer, %first_input: offset, %second_input: offset, %read_first: i1, %write_first: i1) {
+  %storage = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %first_origin = index.assume %first_input [range(%first_input, 0, 128), multiple_of(%first_input, 64)] : offset
+  %second_origin = index.assume %second_input [range(%second_input, 256, 384), multiple_of(%second_input, 64)] : offset
+  %first_whole = buffer.view %storage[%first_origin] : buffer -> view<32xbf16>
+  %second_whole = buffer.view %storage[%second_origin] : buffer -> view<32xbf16>
+  %first = view.subview %first_whole[8] : view<32xbf16> -> view<24xbf16>
+  %second = view.subview %second_whole[8] : view<32xbf16> -> view<24xbf16>
+  %source = scf.select %read_first, %first, %second : view<24xbf16>
+  %destination = scf.select %write_first, %first, %second : view<24xbf16>
+  %packet = vector.load %source[0] : view<24xbf16> -> vector<8xbf16>
+  vector.store %packet, %destination[0] : vector<8xbf16>, view<24xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @selected_dynamic_rank1_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
+  %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %26 = mov.short 16
+  %27 = add.rr %first_origin, %26
+  %28 = add.rr %second_origin, %26
+  %29 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %source_offset = sel.nez %27, %28, %29
+  %31 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %destination_offset = sel.nez %27, %28, %31
+  %36 = mov.address-index %source_offset
+  %37 = vlda.128.bf16x8.index %destination, %36
+  %40 = mov.address-index %destination_offset
+  vst.128.bf16x8.index %37, %destination, %40
+  return
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @selected_dynamic_rank2_packets(%input: buffer, %first_input: offset, %second_input: offset, %row_input: index, %read_first: i1, %write_first: i1) {
+  %storage = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %first_origin = index.assume %first_input [range(%first_input, 0, 128), multiple_of(%first_input, 64)] : offset
+  %second_origin = index.assume %second_input [range(%second_input, 512, 640), multiple_of(%second_input, 64)] : offset
+  %row = index.assume %row_input [range(%row_input, 0, 3)] : index
+  %first_whole = buffer.view %storage[%first_origin] : buffer -> view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %second_whole = buffer.view %storage[%second_origin] : buffer -> view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %first = view.subview %first_whole[0, 8] : view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>> -> view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %second = view.subview %second_whole[0, 8] : view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>> -> view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %source = scf.select %read_first, %first, %second : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %destination = scf.select %write_first, %first, %second : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %packet = vector.load %source[%row, 0] : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>> -> vector<8xbf16>
+  vector.store %packet, %destination[%row, 0] : vector<8xbf16>, view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @selected_dynamic_rank2_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %row: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
+  %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %29 = mov.short 16
+  %30 = add.rr %first_origin, %29
+  %31 = add.rr %second_origin, %29
+  %32 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %source_offset = sel.nez %30, %31, %32
+  %34 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %destination_offset = sel.nez %30, %31, %34
+  %39 = mov.i32 6
+  %40 = lshl %row, %39
+  %41 = add.rr %source_offset, %40
+  %42 = mov.address-index %41
+  %43 = vlda.128.bf16x8.index %destination, %42
+  %48 = add.rr %destination_offset, %40
+  %49 = mov.address-index %48
+  vst.128.bf16x8.index %43, %destination, %49
+  return
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Loop arguments retain the view origins while current and previous roles swap.
+// Reads and writes remain packet operations.
+func.def @rotating_selected_rank1_packets(%input: buffer, %first_input: offset, %second_input: offset, %count_input: index, %read_first: i1, %write_first: i1) {
+  %storage = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %first_origin = index.assume %first_input [range(%first_input, 0, 128), multiple_of(%first_input, 64)] : offset
+  %second_origin = index.assume %second_input [range(%second_input, 256, 384), multiple_of(%second_input, 64)] : offset
+  %count = index.assume %count_input [range(%count_input, 0, 3)] : index
+  %first_whole = buffer.view %storage[%first_origin] : buffer -> view<32xbf16>
+  %second_whole = buffer.view %storage[%second_origin] : buffer -> view<32xbf16>
+  %first = view.subview %first_whole[8] : view<32xbf16> -> view<24xbf16>
+  %second = view.subview %second_whole[8] : view<32xbf16> -> view<24xbf16>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %packet_width = index.constant 8 : index
+  %last, %other = scf.for %iteration = [%begin to %count step %step](%current = %first : view<24xbf16>, %previous = %second : view<24xbf16>) -> (view<24xbf16>, view<24xbf16>) {
+    %position = index.mul %iteration, %packet_width : index
+    %source = scf.select %read_first, %current, %previous : view<24xbf16>
+    %destination = scf.select %write_first, %current, %previous : view<24xbf16>
+    %packet = vector.load %source[%position] : view<24xbf16> -> vector<8xbf16>
+    vector.store %packet, %destination[%position] : vector<8xbf16>, view<24xbf16>
+    scf.yield %previous, %current : view<24xbf16>, view<24xbf16>
+  }
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @rotating_selected_rank1_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %count: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
+  %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %55 = mov.short 16
+  %56 = add.rr %first_origin, %55
+  %57 = add.rr %second_origin, %55
+  %begin = mov.short 0
+  %step = mov.short 1
+  low.br ^_bb1(%begin: reg<aie2p.er>, %56: reg<aie2p.er>, %57: reg<aie2p.er>)
+^_bb1(%iteration: reg<aie2p.er>, %current_offset: reg<aie2p.er>, %previous_offset: reg<aie2p.er>):
+  %60 = lt %iteration, %count
+  low.cond_br %60, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %61 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %source_offset = sel.nez %current_offset, %previous_offset, %61
+  %63 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %destination_offset = sel.nez %current_offset, %previous_offset, %63
+  %68 = mov.i32 4
+  %69 = lshl %iteration, %68
+  %70 = add.rr %source_offset, %69
+  %71 = mov.address-index %70
+  %72 = vlda.128.bf16x8.index %destination, %71
+  %77 = add.rr %destination_offset, %69
+  %78 = mov.address-index %77
+  vst.128.bf16x8.index %72, %destination, %78
+  %79 = add.rr %iteration, %step
+  low.br ^_bb1(%79: reg<aie2p.er>, %previous_offset: reg<aie2p.er>, %current_offset: reg<aie2p.er>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+func.def @rotating_selected_rank2_packets(%input: buffer, %first_input: offset, %second_input: offset, %count_input: index, %read_first: i1, %write_first: i1) {
+  %storage = buffer.assume.alignment %input {minimum_alignment = 64} : buffer
+  %first_origin = index.assume %first_input [range(%first_input, 0, 128), multiple_of(%first_input, 64)] : offset
+  %second_origin = index.assume %second_input [range(%second_input, 512, 640), multiple_of(%second_input, 64)] : offset
+  %count = index.assume %count_input [range(%count_input, 0, 4)] : index
+  %first_whole = buffer.view %storage[%first_origin] : buffer -> view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %second_whole = buffer.view %storage[%second_origin] : buffer -> view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %first = view.subview %first_whole[0, 8] : view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>> -> view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %second = view.subview %second_whole[0, 8] : view<4x32xbf16, #encoding.layout.strided<strides=[32, 1]>> -> view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %last, %other = scf.for %row = [%begin to %count step %step](%current = %first : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>, %previous = %second : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>) -> (view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>, view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>) {
+    %source = scf.select %read_first, %current, %previous : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+    %destination = scf.select %write_first, %current, %previous : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+    %packet = vector.load %source[%row, 0] : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>> -> vector<8xbf16>
+    vector.store %packet, %destination[%row, 0] : vector<8xbf16>, view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+    scf.yield %previous, %current : view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>, view<4x24xbf16, #encoding.layout.strided<strides=[32, 1]>>
+  }
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @rotating_selected_rank2_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %count: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
+  %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %51 = mov.short 16
+  %52 = add.rr %first_origin, %51
+  %53 = add.rr %second_origin, %51
+  %begin = mov.short 0
+  %step = mov.short 1
+  low.br ^_bb1(%begin: reg<aie2p.er>, %52: reg<aie2p.er>, %53: reg<aie2p.er>)
+^_bb1(%row: reg<aie2p.er>, %current_offset: reg<aie2p.er>, %previous_offset: reg<aie2p.er>):
+  %56 = lt %row, %count
+  low.cond_br %56, ^_bb2, ^_bb3 : reg<aie2p.er>
+^_bb2:
+  %57 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %source_offset = sel.nez %current_offset, %previous_offset, %57
+  %59 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %destination_offset = sel.nez %current_offset, %previous_offset, %59
+  %64 = mov.i32 6
+  %65 = lshl %row, %64
+  %66 = add.rr %source_offset, %65
+  %67 = mov.address-index %66
+  %68 = vlda.128.bf16x8.index %destination, %67
+  %73 = add.rr %destination_offset, %65
+  %74 = mov.address-index %73
+  vst.128.bf16x8.index %68, %destination, %74
+  %75 = add.rr %row, %step
+  low.br ^_bb1(%75: reg<aie2p.er>, %previous_offset: reg<aie2p.er>, %current_offset: reg<aie2p.er>)
+^_bb3:
+  return
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Different materializing buffers require correlated root/origin selection.
+// Common-root offset decomposition alone does not cover this case.
+func.def @selected_distinct_root_packets(%first_input: buffer, %second_input: buffer, %first_offset: offset, %second_offset: offset, %read_first: i1, %write_first: i1) {
+  %first_storage = buffer.assume.alignment %first_input {minimum_alignment = 64} : buffer
+  %second_storage = buffer.assume.alignment %second_input {minimum_alignment = 64} : buffer
+  %first_origin = index.assume %first_offset [range(%first_offset, 0, 128), multiple_of(%first_offset, 64)] : offset
+  %second_origin = index.assume %second_offset [range(%second_offset, 256, 384), multiple_of(%second_offset, 64)] : offset
+  %first = buffer.view %first_storage[%first_origin] : buffer -> view<8xbf16>
+  %second = buffer.view %second_storage[%second_origin] : buffer -> view<8xbf16>
+  %source = scf.select %read_first, %first, %second : view<8xbf16>
+  %destination = scf.select %write_first, %first, %second : view<8xbf16>
+  %packet = vector.load %source[0] : view<8xbf16> -> vector<8xbf16>
+  vector.store %packet, %destination[0] : vector<8xbf16>, view<8xbf16>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @selected_distinct_root_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
+  %first_storage = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %second_storage = resource<native_pointer> {index = 1, source_type = buffer} : reg<aie2p.ep>
+  low.cond_br %read_first, ^_bb1, ^_bb2 : reg<aie2p.er>
+^_bb1:
+  low.br ^_bb3(%first_storage: reg<aie2p.ep>, %first_origin: reg<aie2p.er>)
+^_bb2:
+  low.br ^_bb3(%second_storage: reg<aie2p.ep>, %second_origin: reg<aie2p.er>)
+^_bb3(%source: reg<aie2p.ep>, %source_offset: reg<aie2p.er>):
+  low.cond_br %write_first, ^_bb4, ^_bb5 : reg<aie2p.er>
+^_bb4:
+  low.br ^_bb6(%first_storage: reg<aie2p.ep>, %first_origin: reg<aie2p.er>)
+^_bb5:
+  low.br ^_bb6(%second_storage: reg<aie2p.ep>, %second_origin: reg<aie2p.er>)
+^_bb6(%destination: reg<aie2p.ep>, %destination_offset: reg<aie2p.er>):
+  %38 = mov.address-index %source_offset
+  %39 = vlda.128.bf16x8.index %source, %38
+  %42 = mov.address-index %destination_offset
+  vst.128.bf16x8.index %39, %destination, %42
+  return
+}
+
+// ====
+// RUN: emit source-low target=amd.xdna.aie2p:core output=low
+
+// Four-byte alignment is sufficient for i32 but not a 16-byte memory packet.
+// Finite dynamic origins must not be mistaken for stronger alignment.
+func.def @selected_under_aligned_packets(%input: buffer, %first_input: offset, %second_input: offset, %read_first: i1, %write_first: i1) {
+  %storage = buffer.assume.alignment %input {minimum_alignment = 4} : buffer
+  %first_origin = index.assume %first_input [range(%first_input, 0, 128), multiple_of(%first_input, 4)] : offset
+  %second_origin = index.assume %second_input [range(%second_input, 256, 384), multiple_of(%second_input, 4)] : offset
+  %first = buffer.view %storage[%first_origin] : buffer -> view<4xi32>
+  %second = buffer.view %storage[%second_origin] : buffer -> view<4xi32>
+  %source = scf.select %read_first, %first, %second : view<4xi32>
+  %destination = scf.select %write_first, %first, %second : view<4xi32>
+  %packet = vector.load %source[0] : view<4xi32> -> vector<4xi32>
+  vector.store %packet, %destination[0] : vector<4xi32>, view<4xi32>
+  func.return
+}
+
+// ----
+low.func.def target<amd.xdna.aie2p.core> abi(object_function) @selected_under_aligned_packets(%first_origin: reg<aie2p.er>, %second_origin: reg<aie2p.er>, %read_first: reg<aie2p.er>, %write_first: reg<aie2p.er>) asm {
+  %destination = resource<native_pointer> {index = 0, source_type = buffer} : reg<aie2p.ep>
+  %39 = copy %read_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %source_offset = sel.nez %first_origin, %second_origin, %39
+  %41 = copy %write_first : reg<aie2p.er> -> reg<aie2p.mr27_select>
+  %destination_offset = sel.nez %first_origin, %second_origin, %41
+  %43 = mov.address-index %source_offset
+  %44 = lda.i32.index %destination, %43
+  %45 = add.address-index.immediate %source_offset, 4
+  %46 = lda.i32.index %destination, %45
+  %47 = add.address-index.immediate %source_offset, 8
+  %48 = lda.i32.index %destination, %47
+  %49 = add.address-index.immediate %source_offset, 12
+  %50 = lda.i32.index %destination, %49
+  %51 = mov.address-index %destination_offset
+  st.i32.index %44, %destination, %51
+  %52 = add.address-index.immediate %destination_offset, 4
+  st.i32.index %46, %destination, %52
+  %53 = add.address-index.immediate %destination_offset, 8
+  st.i32.index %48, %destination, %53
+  %54 = add.address-index.immediate %destination_offset, 12
+  st.i32.index %50, %destination, %54
+  return
+}

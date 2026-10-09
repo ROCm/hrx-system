@@ -134,3 +134,144 @@ func.def @injected_offset(%count: index, %inject: i1) -> (i64) {
 CHECK: %lower = scalar.constant 0 : i64
 CHECK: %upper = scalar.constant 9223372036854775807 : i64
 CHECK: %alignment = scalar.constant 128 : i64
+
+// ====
+
+// RUN: pass canonicalize
+
+// The bounded cursor reaches the previous slot through two header arguments.
+// Neither forwarded slot has an assumption of its own. Their finite bounds
+// also apply to computations in the body after the header facts converge.
+func.def @bounded_offset_ring(%count: index) -> (i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %first_slot = index.constant 0 : offset
+  %slot_bytes = index.constant 64 : offset
+  %last_slot = index.constant 128 : offset
+  %ring_bytes = index.constant 192 : offset
+  cfg.br ^header(%begin: index, %first_slot: offset, %slot_bytes: offset, %last_slot: offset)
+^header(%iteration: index, %previous: offset, %current: offset, %cursor_input: offset):
+  %previous_lower = test.fact_range_lo %previous : offset -> i64
+  %previous_upper = test.fact_range_hi %previous : offset -> i64
+  %previous_divisor = test.fact_divisor %previous : offset -> i64
+  %current_lower = test.fact_range_lo %current : offset -> i64
+  %current_upper = test.fact_range_hi %current : offset -> i64
+  %current_divisor = test.fact_divisor %current : offset -> i64
+  test.use %previous_lower, %previous_upper, %previous_divisor, %current_lower, %current_upper, %current_divisor : i64, i64, i64, i64, i64, i64
+  %more = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %cursor = index.assume %cursor_input [range(%cursor_input, 0, 128), multiple_of(%cursor_input, 64)] : offset
+  %previous_end = index.add %previous, %slot_bytes : offset
+  %previous_end_upper = test.fact_range_hi %previous_end : offset -> i64
+  test.use %previous_end_upper : i64
+  %incremented = index.add %cursor, %slot_bytes : offset
+  %at_end = index.cmp eq, %incremented, %ring_bytes : offset
+  %next_cursor = scf.select %at_end, %first_slot, %incremented : offset
+  %next_iteration = index.add %iteration, %step : index
+  cfg.br ^header(%next_iteration: index, %current: offset, %cursor: offset, %next_cursor: offset)
+^exit:
+  func.return %previous_upper : i64
+}
+
+// ----
+func.def @bounded_offset_ring(%count: index) -> (i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %first_slot = index.constant 0 : offset
+  %slot_bytes = index.constant 64 : offset
+  %last_slot = index.constant 128 : offset
+  %ring_bytes = index.constant 192 : offset
+  cfg.br ^header(%begin: index, %first_slot: offset, %slot_bytes: offset, %last_slot: offset)
+^header(%iteration: index, %previous: offset, %current: offset, %cursor_input: offset):
+  %previous_lower = scalar.constant 0 : i64
+  %previous_upper = scalar.constant 128 : i64
+  %previous_divisor = scalar.constant 64 : i64
+  %current_lower = scalar.constant 0 : i64
+  %current_upper = scalar.constant 128 : i64
+  %current_divisor = scalar.constant 64 : i64
+  test.use %previous_lower, %previous_upper, %previous_divisor, %current_lower, %current_upper, %current_divisor : i64, i64, i64, i64, i64, i64
+  %more = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %cursor = index.assume %cursor_input [range(%cursor_input, 0, 128), multiple_of(%cursor_input, 64)] : offset
+  %previous_end_upper = scalar.constant 192 : i64
+  test.use %previous_end_upper : i64
+  %incremented = index.add %cursor, %slot_bytes : offset
+  %at_end = index.cmp eq, %incremented, %ring_bytes : offset
+  %next_cursor = scf.select %at_end, %first_slot, %incremented : offset
+  %next_iteration = index.add %iteration, %step : index
+  cfg.br ^header(%next_iteration: index, %current: offset, %cursor: offset, %next_cursor: offset)
+^exit:
+  func.return %previous_upper : i64
+}
+
+// ====
+
+// The same delayed forwarding includes negative scalar values. Recovery keeps
+// both signed bounds and divisibility without relying on an offset domain.
+func.def @bounded_signed_ring(%count: index) -> (i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %first_value = scalar.constant -64 : i32
+  %middle_value = scalar.constant 0 : i32
+  %last_value = scalar.constant 64 : i32
+  %wrap_value = scalar.constant 128 : i32
+  cfg.br ^header(%begin: index, %first_value: i32, %middle_value: i32, %last_value: i32)
+^header(%iteration: index, %previous: i32, %current: i32, %cursor_input: i32):
+  %previous_lower = test.fact_range_lo %previous : i32 -> i64
+  %previous_upper = test.fact_range_hi %previous : i32 -> i64
+  %previous_divisor = test.fact_divisor %previous : i32 -> i64
+  %current_lower = test.fact_range_lo %current : i32 -> i64
+  %current_upper = test.fact_range_hi %current : i32 -> i64
+  %current_divisor = test.fact_divisor %current : i32 -> i64
+  test.use %previous_lower, %previous_upper, %previous_divisor, %current_lower, %current_upper, %current_divisor : i64, i64, i64, i64, i64, i64
+  %more = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %cursor = scalar.assume %cursor_input [range(%cursor_input, -64, 64), multiple_of(%cursor_input, 64)] : i32
+  %shifted_previous = scalar.addi %previous, %last_value : i32
+  %shifted_previous_lower = test.fact_range_lo %shifted_previous : i32 -> i64
+  %shifted_previous_upper = test.fact_range_hi %shifted_previous : i32 -> i64
+  test.use %shifted_previous_lower, %shifted_previous_upper : i64, i64
+  %incremented = scalar.addi %cursor, %last_value : i32
+  %at_end = scalar.cmpi eq, %incremented, %wrap_value : i32
+  %next_cursor = scf.select %at_end, %first_value, %incremented : i32
+  %next_iteration = index.add %iteration, %step : index
+  cfg.br ^header(%next_iteration: index, %current: i32, %cursor: i32, %next_cursor: i32)
+^exit:
+  func.return %previous_upper : i64
+}
+
+// ----
+func.def @bounded_signed_ring(%count: index) -> (i64) {
+  %begin = index.constant 0 : index
+  %step = index.constant 1 : index
+  %first_value = scalar.constant -64 : i32
+  %middle_value = scalar.constant 0 : i32
+  %last_value = scalar.constant 64 : i32
+  %wrap_value = scalar.constant 128 : i32
+  cfg.br ^header(%begin: index, %first_value: i32, %middle_value: i32, %last_value: i32)
+^header(%iteration: index, %previous: i32, %current: i32, %cursor_input: i32):
+  %previous_lower = scalar.constant -64 : i64
+  %previous_upper = scalar.constant 64 : i64
+  %previous_divisor = scalar.constant 64 : i64
+  %current_lower = scalar.constant -64 : i64
+  %current_upper = scalar.constant 64 : i64
+  %current_divisor = scalar.constant 64 : i64
+  test.use %previous_lower, %previous_upper, %previous_divisor, %current_lower, %current_upper, %current_divisor : i64, i64, i64, i64, i64, i64
+  %more = index.cmp slt, %iteration, %count : index
+  cfg.cond_br %more, ^body, ^exit
+^body:
+  %cursor = scalar.assume %cursor_input [range(%cursor_input, -64, 64), multiple_of(%cursor_input, 64)] : i32
+  %shifted_previous_lower = scalar.constant 0 : i64
+  %shifted_previous_upper = scalar.constant 128 : i64
+  test.use %shifted_previous_lower, %shifted_previous_upper : i64, i64
+  %incremented = scalar.addi %cursor, %last_value : i32
+  %at_end = scalar.cmpi eq, %incremented, %wrap_value : i32
+  %next_cursor = scf.select %at_end, %first_value, %incremented : i32
+  %next_iteration = index.add %iteration, %step : index
+  cfg.br ^header(%next_iteration: index, %current: i32, %cursor: i32, %next_cursor: i32)
+^exit:
+  func.return %previous_upper : i64
+}
