@@ -1186,8 +1186,8 @@ TEST_F(LowAllocationSearchTest,
   loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {
       {},
       {
-          /*.store_count=*/1,
-          /*.reload_count=*/1,
+          .store_count = 1,
+          .reload_count = 1,
       },
   };
   loom_low_allocation_search_context_t context = {};

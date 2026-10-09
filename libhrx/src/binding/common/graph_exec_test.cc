@@ -458,11 +458,10 @@ TEST_F(GraphExecTest, BatchMemoryNodePreservesResolvedWriteSemantics) {
       &graph));
 
   const iree_hal_atomic_store_params_t store_params = {
-      /*.value=*/47,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE |
-          IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.reserved=*/{},
+      .value = 47,
+      .flags = IREE_HAL_ATOMIC_FLAG_RELEASE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .reserved = {},
   };
   iree_hal_streaming_value_operation_t operation = {
       .kind = IREE_HAL_STREAMING_VALUE_OPERATION_STORE,
