@@ -1,9 +1,10 @@
-# Loom model runner experiment
+# Loom model server experiment
 
-This branch-local runner JIT-compiles portable model source into VM control,
-command programs, and GPU executables using the public Loom C API. Its private
-interfaces are intended to change with real models.
-It is not a general HAL VM module or a serving framework.
+This experimental server JIT-compiles portable model source into VM control,
+command programs, and GPU executables using the public Loom C API. Shared native
+services supply HTTP protocols, admission, memory ownership and observation for
+text, images, embeddings and decisions. Its model-author interfaces are intended
+to change with real models; it is not a general HAL VM module.
 
 The [model-authoring packet](docs/README.md) walks through reproduction,
 compiler/runtime ownership, a proposed second-model port, and performance
@@ -24,11 +25,15 @@ configuration, numerical policy, and model-specific reference checks.
 | [`serving/`](serving) | Deployment catalogs and multiple source models sharing one device and listener |
 | [`text/`](text) | Source-defined packed autoregressive residency, chat protocol, admission and retained token scheduling |
 | [`image/`](image) | Source-defined diffusion residency, image request validation, completed-image service and output encoding |
+| [`finite/`](finite) | Bounded source-defined request cohorts and result retirement shared by embeddings and decisions |
+| [`embedding/`](embedding) | Embedding request decoding and vector response encoding |
+| [`decision/`](decision) | Decision request and response protocol |
 | [`storage/`](storage) | Logical block IDs, shared physical slab accounting, relocation and retained-state snapshots |
 | [`scheduling/`](scheduling) | Allocation-free ready-span packing and token/span shape selection |
 | [`motifs/`](motifs) | Reusable tensor math and GGML format kernels, specialized by model source |
 | [`models/krea/`](models/krea) | Krea source programs, checkpoint/request policy and model-specific reference checks |
 | [`models/qwen/`](models/qwen) | Qwen model programs, chat/state policy and reference checks |
+| [`models/fixtures/`](models/fixtures) | Deterministic source models exercising the serving contracts without learned checkpoints |
 | [`tools/`](tools) | Observation, recording, workload replay, simulation and component checks |
 
 The shared native headers are experimental model-author interfaces, not a
@@ -44,8 +49,12 @@ The [motif guide](motifs/README.md) describes composition and shape contracts.
 For example, the image server is
 `//experimental/loom_serve/image:server`; the text server is
 `//experimental/loom_serve/text:server`. The [shared server](serving/README.md)
-is `//experimental/loom_serve/serving:server`, selecting multiple named text
-deployments with `--models=/path/to/catalog.json`. Full serving coverage runs with
+is `//experimental/loom_serve/serving:server`, selecting named text, image,
+embedding and decision deployments with `--models=/path/to/catalog.json`.
+Deployment source and asset paths are relative to the process working directory;
+entries inside each source catalog are relative to its model directory.
+The serving JIT currently selects AMDGPU; model-neutral native interfaces do
+not yet provide CPU or NPU model execution. Full serving coverage runs with
 `build_tools/bin/iree-bazel-test --config=asan //experimental/loom_serve/...`.
 
 ## Shared execution
@@ -146,7 +155,7 @@ them; it does not put image requests through Qwen's token scheduler.
 ## Shared text execution
 
 [`text/model.{h,c}`](text/model.h) owns a source-defined text residency: shared
-parameter storage prepared in place at startup, cached prefill/decode commands,
+parameter storage prepared in place on activation, cached prefill/decode commands,
 model VM process, residual buffer and packed workspace. One stable arena
 partitions private recurrent state among up to sixteen rows. With
 `--pool_capacity=N`, attention pages grow from a shared physical budget rather
@@ -160,9 +169,10 @@ that mechanism from HTTP eviction policy, shared prefixes and disk paging.
 
 Packed target completion forks compact result downloads from cache-only MTP
 catch-up. The catch-up stage consumes committed target state, not the downloaded
-result records. The synchronous model call joins both branches before publishing
-host positions and recycling payloads. Optional bounded continuation pre-issues
-a second mixed plan: the device consumes queued prompt chunks and routes
+result records. Both branches complete before host positions are published and
+payloads recycled. The synchronous CLI waits; the HTTP service registers
+asynchronous readiness and returns its task worker. Optional bounded continuation
+pre-issues a second mixed plan: the device consumes queued prompt chunks and routes
 accepted predictions into the next verifier without an intermediate host wait.
 Admission and transport are observed between these bounded cohorts; continuous
 device admission/output rings are not implemented.
@@ -180,8 +190,8 @@ itself drain captured records into the sink. Profiling retains command metadata
 only when requested. Instrumented device timings explain kernel costs;
 throughput comparisons run with profiling off.
 
-The packed server generates its JIT catalog automatically: token classes
-32/64/128/256/512 up to `--prefill_capacity`, crossed with span classes
+The packed server generates its JIT catalog automatically: power-of-two token
+classes starting at 32 up to `--prefill_capacity`, crossed with span classes
 1/2/4/8/16 up to `--rows`. Each axis includes its exact terminal capacity,
 including non-power-of-two configurations. Repeated `--epoch=tokens:spans`
 options replace this catalog for controlled experiments. Startup specializes
@@ -239,12 +249,12 @@ worker count, and cold compilation/load duration. Warm execution reuses commands
 and storage without compiler tasks.
 
 The [model source guide](models/qwen/README.md) describes the math and
-differential checks. The current source and host storage envelope is 512 input
-tokens and sixteen resident rows. JIT removes offline preparation as a
-prerequisite; larger envelopes still require changing the authored bounds and backing
-together, then qualifying the resulting kernels. Shapes are prepared at startup,
-not inserted into the fixed command table during a running session.
-These are explicit properties of this adapter, not restrictions of the JIT.
+differential checks. Qwen's source bootstrap currently limits epochs to 512
+input tokens; shared text storage is sized from the configured capacities, not
+that model-specific bound. The text adapter admits at most sixteen resident
+rows. Larger Qwen epochs require changing its authored packet bounds and checking
+the resulting kernels, not an offline compilation path. Shapes are prepared at
+startup, not inserted into the fixed command table during a running session.
 
 The [text package contract](text/README.md) specifies bootstrap results, dynamic
 bindings, semantic plans, feedback and chat policy for new models. Neither the
@@ -308,8 +318,8 @@ not ASAN correctness timings.
 
 ## Local TCP transport
 
-`http_server.{h,c}` runs raw `iree/net` TCP carriers on a standard proactor
-thread, independently of blocking model stages. Its application owner claims
+[`http/server.{h,c}`](http/server.h) runs raw `iree/net` TCP carriers on a standard
+proactor thread, independently of model execution. Its application owner claims
 fully framed requests, sends copied response bytes with bounded send credit,
 and finishes or aborts each connection. The transport has no model or chat
 semantics. A connection carries one HTTP/1.1 request and a close-delimited
@@ -344,9 +354,11 @@ not a working chat endpoint or a pi session.
 
 ## Retained chat service
 
-`text_server` serves the shared model through the TCP transport. The main
-application thread owns model state and packs ready prompt chunks and pending
-decode tokens into one model epoch. Every admitted row receives its minimum
+`text:server` serves the shared model through the TCP transport. Serialized
+service turns on the shared task executor own model state and pack ready prompt
+chunks and pending decode tokens into one model epoch. Pending device work
+returns the worker to the executor; completion wakes the owner. Every admitted
+row receives its minimum
 span before remaining capacity is filled from prompt input: one token for known
 input or four for an indivisible MTP verifier. Rotating priority bounds
 starvation when token/span capacity cannot fit every ready row and distributes
@@ -391,20 +403,25 @@ with a capacity diagnostic. There is no durable server-side conversation store.
 
 Disconnect cancels at a completed model stage and invalidates the checkpoint.
 SIGINT/SIGTERM stop admission, finish the current stage, relinquish request
-views, drain transport I/O and release model residency. Request diagnostics are
-JSON events on stderr: `enqueue`, `admit`, `complete`, `cancel`, `cancel_queued`,
-`evict`, `epoch`, and `heartbeat`. Admission reports retained/appended tokens,
-cache hit versus replay, completion reservation, and queue time. Completion adds
-per-request prefill/decode epoch counts and end-to-end timing. Each epoch reports
-its actual rows, consumed positions, prompt/decode counts, selected outputs,
-token shape, traversal count and completed model duration. Shared epoch time is
-not attributed in full to every constituent row. An independent host observer
-reports current activity, active/backpressured rows, queued requests, pool
-capacity/reserved/resident positions, completed counters and interval rates
-every second, including while model execution is waiting. Reserved and resident
-pool counts overlap: one is a completion guarantee, the other is physical use.
-`--heartbeat_ms=0` disables periodic reports. All durations include the host
-build's instrumentation and are not automatically performance data.
+views, drain transport I/O and release model residency. Typed records in `/logz`
+include `request_begin`, `prepared`, `admit`, `request_stats`, `request_end`,
+`session_begin`, `session_end`, `epoch` and `span`. Admission reports
+retained/appended tokens, completion reservation and queue time. Request records
+add consumed/selected token counters, outcome and timing. Epoch and span records
+describe consumed positions, prompt/decode counts, selected outputs, token
+shape, traversals and completed model duration. Shared epoch time is not
+attributed in full to every constituent row.
+
+Periodic snapshots publish current activity, active/backpressured rows, queued
+requests, pool capacity/reserved/resident positions and cumulative work, even
+while device execution is pending. Reserved and resident positions are disjoint:
+reserved positions are unused completion credit; resident positions include idle
+rows and explicit pins. Physical committed bytes are reported separately because
+slab backing is coarser than token ownership. `--heartbeat_ms=0` disables periodic
+records, not lifetime counters. The independent observer below collects JSONL;
+the dashboard derives interval rates from counter snapshots, not event counts.
+All durations include the host build's instrumentation and are not automatically
+performance data.
 
 ```sh
 build_tools/bin/iree-bazel-run --config=asan \
@@ -416,9 +433,12 @@ build_tools/bin/iree-bazel-run --config=asan \
 ```
 
 The packed server defaults to sixteen resident slots and a shared pool of
-65,536 positions: 4 GiB of target KV plus 256 MiB of draft KV with MTP. This
-backing is fixed at startup; individual sessions acquire pages as they grow.
-Recurrent state adds 149.625 MiB per slot; `--rows` reduces that separate cost.
+65,536 positions: address capacity for 4 GiB of target KV plus 256 MiB of draft
+KV with this Qwen model's MTP. The default `--pool_backing=elastic` commits
+physical slabs as state grows; `fixed` eagerly backs the reserved storage.
+Qwen recurrent states require 149.625 MiB each, separate from attention pages;
+row and checkpoint capacities bound their pooled storage. Virtual reservation,
+logical completion credit and physical commitment are distinct budgets.
 `--context_capacity` remains the per-row logical limit (16,384 by default).
 For a shared 256K-position budget and a 256K per-session ceiling, set
 `--pool_capacity=262144 --context_capacity=262144`. Distribution among sessions
@@ -460,7 +480,7 @@ decode. Cancellation is still observed at the completed-epoch boundary.
 Depth zero with an MTP bundle keeps its cache/carry warm without proposing;
 omitting the bundle is the target-only control. These are distinct costs.
 Epoch and heartbeat records expose proposed tokens and accepted draft inputs
-(excluding the pending anchor). `model_ms` includes drafting, verification,
+(excluding the pending anchor). `model_ns` includes drafting, verification,
 accepted-state replay and catch-up. Proposals feed each other and the verifier
 on device; only the final output/progress records are downloaded. Device
 dispatch profiling attributes inner work without inserting host waits for
@@ -654,7 +674,7 @@ For each client, ask it to remember a distinct codeword, use `read` with
 `loom/src/loom/verify/test/function_entry.loom-test`, and name the first
 function. It must execute the actual file tool and answer `count_down`. Then
 ask for the codeword without tools. The second model invocation (tool result)
-and subsequent user turn must report `cache: "hit"`, nonzero retained tokens,
+and subsequent user turn must have `admit` records with nonzero retained tokens
 and only appended suffix tokens. Text alone does not prove retention.
 
 The focused host checks are:
@@ -671,12 +691,13 @@ build_tools/bin/iree-bazel-test --config=asan \
 Kernel changes stay behind the existing stage buffers and parameter placement.
 The [model source checks](models/qwen/README.md) cover numerical behavior with
 VM oracles. The retained CLI witness, real pi tool continuation, and cancellation
-checks cover the state those kernels mutate across stages. The server prepares
-artifacts once; restart it after recompiling stages. There is no kernel hot-swap.
+checks cover the state those kernels mutate across stages. The server JITs source
+at startup; restart it after changing stages. There is no kernel hot-swap.
 
-For comparisons, preserve both artifact directories and the exact optimized
-host binary. Keep GGUF/tokenizer identity, context capacity, active prefill
-length, prompt/tool transcript, output count and concurrency fixed. Separate
+For comparisons, preserve both source/catalog closures and identify the exact
+optimized host binary, including its embedded compiler. Keep GGUF/tokenizer
+identity, context capacity, active prefill length, prompt/tool transcript, output
+count and concurrency fixed. Separate
 cold load, prefill, completed decode and whole-request latency; submit-only
 numbers do not describe agent latency. Interleave baseline/candidate runs
 (ABABA) under the benchmark lock, record hardware load/power/temperature, and
@@ -755,8 +776,9 @@ of 20000 are unsuitable for these small windows. A starting experiment can use
 2048 reserve tokens, 2048 kept tokens and a 1024-token output ceiling. These
 settings need real task-quality validation. Large incoming tool results can
 still overflow a window; pi's threshold is not an exact input-admission cap.
-The service's compiled context capacity must cover the largest window. Smaller
-client budgets do not reduce its current uniform physical row reservations.
+The service's compiled context capacity must cover the largest window. With
+pooled KV, each request reserves its actual completion envelope; smaller requests
+do not reserve the entire per-row logical ceiling. Device slabs grow with use.
 
 The recorder has a CPU integration check using real pi 0.82.1 and a scripted
 provider (no network or device). It exercises automatic/manual split-turn
@@ -818,11 +840,13 @@ build_tools/bin/iree-bazel-run //experimental/loom_serve/tools:simulate_packing 
   --epochs=/private/recordings/epochs.jsonl
 ```
 
-The required `--epoch-us` is a hypothetical uniform epoch duration, **not a
-measured cost or throughput prediction**. Varying it tests the interaction
-between service speed and recorded client delays. All shapes have that same
+The clock must be supplied as either `--epoch-us` or `--costs`. `--epoch-us`
+is a hypothetical uniform epoch duration, **not a measured cost or throughput
+prediction**. Varying it tests the interaction between service speed and recorded
+client delays. All shapes have that same
 duration in this experiment; shape occupancy is not hardware utilization.
-Measured shape/context costs require separate controlled device evidence.
+`--costs` instead supplies explicit shape/stage hypotheses or calibrations;
+measured shape/context costs require separate controlled device evidence.
 
 Both policies use the same admission rule, bounded by token and span capacity.
 Each admitted decode reserves one input token; prefill divides the remaining
@@ -830,8 +854,10 @@ budget. `single-pass` uses the count arithmetic in `qwen_workload_plan`;
 `fair-fill` redistributes short-span leftovers. Both choose the smallest listed
 shape fitting their actual plan. Final prefill selects the first prediction,
 so a request with N recorded outputs requires N-1 subsequent causal decodes.
-The defaults use round-robin admission and immediate dispatch. There is no
-speculative lookahead.
+The defaults use round-robin admission, immediate dispatch and no speculative
+lookahead. Nonzero `--depths` require explicit stage costs, transition-payload
+capacity and hypothetical conditional acceptance probabilities. Those inputs
+model speculation; they do not establish actual model acceptance or speed.
 
 `--max-hold-us` experiments with bounded collection: dispatch once the maximum
 token budget or span slots are full, or the oldest ready row reaches its hold
