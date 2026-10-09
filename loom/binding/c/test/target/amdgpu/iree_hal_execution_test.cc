@@ -276,7 +276,9 @@ void RunSparseByteOffsetExecution(
   if (!iree_hal_allocator_supports_virtual_memory(allocator)) {
     GTEST_SKIP() << "live allocator does not support sparse virtual memory";
   }
-  iree_hal_buffer_params_t params = {};
+  iree_hal_buffer_params_t params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;
   iree_device_size_t page_size = 0;

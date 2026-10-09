@@ -334,7 +334,9 @@ void InitializeFakeDevice(uint64_t identity, amdf_instance_t* instance,
 }
 
 amdf_memory_create_info_t MakeMemoryCreateInfo(FakeDevice& device) {
-  amdf_memory_create_info_t info = {};
+  amdf_memory_create_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   info.structure_size = sizeof(info);
   info.memory_profile_ordinal = 0;
@@ -348,7 +350,9 @@ amdf_memory_create_info_t MakeMemoryCreateInfo(FakeDevice& device) {
 }
 
 amdf_memory_import_info_t MakeMemoryImportInfo(FakeDevice& device) {
-  amdf_memory_import_info_t info = {};
+  amdf_memory_import_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
   info.structure_size = sizeof(info);
   info.memory_profile_ordinal = 2;

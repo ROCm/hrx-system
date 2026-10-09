@@ -214,7 +214,9 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     loom_op_t* branch = nullptr;
     IREE_ASSERT_OK(loom_low_br_build(&builder_, successor, nullptr, 0,
                                      LOOM_LOCATION_UNKNOWN, &branch));
-    loom_low_schedule_node_t branch_node = {};
+    loom_low_schedule_node_t branch_node =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     branch_node.op = branch;
     branch_node.block_index = 0;
     branch_node.source_ordinal = nodes_.size();
@@ -272,7 +274,9 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     loom_op_t* return_op = nullptr;
     IREE_ASSERT_OK(loom_low_return_build(&builder_, nullptr, 0,
                                          LOOM_LOCATION_UNKNOWN, &return_op));
-    loom_low_schedule_node_t node = {};
+    loom_low_schedule_node_t node =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     node.op = return_op;
     node.kind = LOOM_LOW_SCHEDULE_NODE_TERMINATOR;
     node.traits = return_op->traits;
@@ -361,7 +365,9 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
         loom_amdgpu_descriptor_ref_descriptor(descriptors_, descriptor_ref);
     const auto* view =
         loom_low_descriptor_set_descriptor_view(descriptors_, descriptor);
-    loom_low_schedule_node_t node = {};
+    loom_low_schedule_node_t node =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     node.source_ordinal = nodes_.size();
     node.scheduled_ordinal = nodes_.size();
     node.kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;

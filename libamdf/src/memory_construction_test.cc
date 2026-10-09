@@ -421,7 +421,9 @@ TEST_F(MemoryConstructionTest, HostOnlyPairDoesNotQueryDeviceAtomicReach) {
         ADD_FAILURE() << "A host-only pair must not describe a mapped device";
         return amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
       };
-  amdf_memory_profile_pair_query_t query = {};
+  amdf_memory_profile_pair_query_t query =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
   query.structure_size = sizeof(query);
   query.access_count = 1;
@@ -867,7 +869,9 @@ TEST_F(MemoryConstructionTest,
       }
       devices[0].profile.roles &= ~AMDF_MEMORY_PROFILE_ROLE_CREATE;
       ReleaseState release = {};
-      amdf_external_memory_t external = {};
+      amdf_external_memory_t external =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
+               // sequencing spans intervening work.
       external.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
       external.payload.file_descriptor = 83;
       external.byte_length = 4096;
@@ -954,7 +958,9 @@ TEST_F(MemoryConstructionTest, FailedImportPreservesInputOnReleaseError) {
   device.import_failure_stage = ImportFailureStage::kAfterAttachment;
   device.destroy_status = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
   ReleaseState release = {};
-  amdf_external_memory_t external = {};
+  amdf_external_memory_t external =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   external.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
   external.byte_length = 4096;
   external.payload.file_descriptor = 91;

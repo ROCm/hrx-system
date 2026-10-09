@@ -305,7 +305,9 @@ class Q8S32SelectionFixture {
     out_module->reset();
     const loomc_string_view_t root =
         loomc_make_cstring_view("q8s32_specialize");
-    loomc_cxx_import_options_t options = {};
+    loomc_cxx_import_options_t options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     options.type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS;
     options.structure_size = sizeof(options);
     options.source_provider = {ProvideHeader, this};

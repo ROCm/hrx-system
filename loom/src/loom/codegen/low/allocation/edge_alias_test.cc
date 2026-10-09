@@ -65,7 +65,9 @@ class LowAllocationEdgeAliasTest : public ::testing::Test {
 
   loom_liveness_interval_t Interval(loom_value_id_t value_id, uint32_t start,
                                     uint32_t end, uint32_t definition_point) {
-    loom_liveness_interval_t interval = {};
+    loom_liveness_interval_t interval =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     interval.value_id = value_id;
     interval.value_class.type_kind = LOOM_TYPE_REGISTER;
     interval.value_class.register_descriptor_set_stable_id = 1;
@@ -94,7 +96,9 @@ class LowAllocationEdgeAliasTest : public ::testing::Test {
       segments[i] = {intervals[i].start_point, intervals[i].end_point};
       segment_ranges[i] = {i, 1};
     }
-    loom_liveness_analysis_t liveness = {};
+    loom_liveness_analysis_t liveness =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     liveness.value_ids = value_ids;
     liveness.value_count = N;
     liveness.intervals = intervals;
@@ -104,7 +108,9 @@ class LowAllocationEdgeAliasTest : public ::testing::Test {
     liveness.segment_count = N;
     liveness.value_segment_ranges = segment_ranges;
 
-    loom_low_placement_relation_t relation = {};
+    loom_low_placement_relation_t relation =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     relation.op = branch;
     relation.source_ordinal = 0;
     relation.result_ordinal = 1;

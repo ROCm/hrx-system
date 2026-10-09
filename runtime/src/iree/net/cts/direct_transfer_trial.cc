@@ -521,7 +521,9 @@ struct Peer {
                 fragment.length),
             &target, Offset(axis, epoch) + target_offset};
       }
-      iree_net_direct_write_params_t params = {};
+      iree_net_direct_write_params_t params =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
+               // conversion differs from list initialization.
       params.flags = IREE_NET_DIRECT_WRITE_FLAG_NOTIFY;
       params.notification_cookie = (epoch << 1) | axis;
       params.entry_count = entries.size();

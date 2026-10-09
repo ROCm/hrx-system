@@ -548,7 +548,9 @@ TEST_F(XdnaKernelQueueTest, NotificationErrorDoesNotRejectAcceptedWork) {
 
 TEST_F(XdnaKernelQueueTest, NotificationRejectsInvalidOrUnsupportedInputs) {
   ASSERT_NO_FATAL_FAILURE(Submit());
-  amdf_native_event_t event = {};
+  amdf_native_event_t event =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_status_code(amdf_kernel_queue_request_notification(
@@ -660,7 +662,9 @@ TEST_F(XdnaKernelQueueTest, RefreshReportsExecutionFailureInSnapshot) {
 
 TEST_F(XdnaKernelQueueTest, RefreshValidatesOutputBeforeNativeObservation) {
   ASSERT_NO_FATAL_FAILURE(Submit());
-  amdf_kernel_queue_status_t output = {};
+  amdf_kernel_queue_status_t output =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   output.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
   output.structure_size = sizeof(output);
   EXPECT_EQ(amdf_status_code(amdf_kernel_queue_refresh_status(queue, &output)),

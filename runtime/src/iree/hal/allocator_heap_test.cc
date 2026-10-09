@@ -25,7 +25,9 @@ TEST(HeapAllocatorTest, ImportsByteAlignedStorageWithExplicitAlignment) {
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION, .size = 16};
   external_buffer.handle.host_allocation.ptr = storage + 1;
-  iree_hal_buffer_params_t params = {};
+  iree_hal_buffer_params_t params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
@@ -180,7 +182,9 @@ TEST(HeapAllocatorTest, HonorsAlignmentWithCombinedAndSeparateStorage) {
     iree_hal_allocator_t* allocator = nullptr;
     IREE_ASSERT_OK(iree_hal_allocator_create_heap(
         IREE_SV("test"), data_allocator, iree_allocator_system(), &allocator));
-    iree_hal_buffer_params_t params = {};
+    iree_hal_buffer_params_t params =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
     params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
     for (iree_device_size_t alignment : {0, 1, 64, 256, 4096}) {

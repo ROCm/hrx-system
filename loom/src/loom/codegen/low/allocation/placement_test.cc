@@ -65,7 +65,9 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
   loom_low_descriptor_t descriptor = {.operand_count = 2,
                                       .minimum_packet_operand_count = 2,
                                       .constraint_count = 1};
-  loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_set_t descriptor_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   descriptor_set.stable_id = 1;
   descriptor_set.reg_classes = classes;
   descriptor_set.reg_class_count = IREE_ARRAYSIZE(classes);
@@ -278,7 +280,9 @@ TEST(LowPlacementTest, RetainsOperandConstraintsAcrossExactTiesOnly) {
   descriptors[1].operand_start = 2;
   descriptors[1].operand_count = 1;
   descriptors[1].minimum_packet_operand_count = 1;
-  loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_set_t descriptor_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   descriptor_set.stable_id = 1;
   descriptor_set.reg_classes = classes;
   descriptor_set.reg_class_count = IREE_ARRAYSIZE(classes);

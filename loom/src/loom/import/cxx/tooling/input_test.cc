@@ -254,7 +254,9 @@ TEST_F(InputTest, RemappingCannotMergeSourceIdentities) {
 }
 
 TEST_F(InputTest, OptionsAndFailuresUseNativeAdmission) {
-  loom_input_request_t request = {};
+  loom_input_request_t request =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   request.path = IREE_SV("source.cxx-test");
   request.source = IREE_SV(
       "static_assert(sizeof(long) == 4); int entry() { return VALUE; }\n"

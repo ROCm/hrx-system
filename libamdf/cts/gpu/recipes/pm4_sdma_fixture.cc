@@ -85,7 +85,9 @@ void Pm4SdmaTest::SelectCreation(Backing& backing) {
 
 amdf_memory_profile_site_t Pm4SdmaTest::ProfileSite(
     Site site, amdf_memory_map_flags_t host_access) {
-  amdf_memory_profile_site_t result = {};
+  amdf_memory_profile_site_t result =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   result.kind = site == Site::kHost ? AMDF_MEMORY_SITE_KIND_HOST
                                     : AMDF_MEMORY_SITE_KIND_DEVICE;
   if (site == Site::kHost) {
@@ -145,7 +147,9 @@ void Pm4SdmaTest::ResolvePairs(
         .structure_size = sizeof(pair)};
     if (query_kind == PairQuery::kProfile) {
       const auto& creation = backing.creation;
-      amdf_memory_profile_pair_query_t query = {};
+      amdf_memory_profile_pair_query_t query =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
       query.structure_size = sizeof(query);
       query.memory_profile_ordinal = creation.memory_profile_ordinal;

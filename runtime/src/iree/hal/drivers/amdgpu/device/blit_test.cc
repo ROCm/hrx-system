@@ -30,7 +30,9 @@ static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
     uint32_t private_segment_size, uint32_t group_segment_size) {
   static_assert(IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE ==
                 IREE_HAL_AMDGPU_DEVICE_BUFFER_COPY_KERNARG_SIZE);
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
+  iree_hal_amdgpu_device_kernel_args_t kernel_args =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   kernel_args.kernel_object = kernel_object;
   kernel_args.kernarg_size = IREE_HAL_AMDGPU_DEVICE_BUFFER_FILL_KERNARG_SIZE;
   kernel_args.kernarg_alignment = 8;

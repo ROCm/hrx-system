@@ -81,7 +81,9 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
         {.access = kReadWrite,
          .flags =
              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t creation = {};
+    amdf_memory_create_info_t creation =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     creation.structure_size = sizeof(creation);
     creation.memory_profile_ordinal = FindMemoryProfileOrdinal(
@@ -115,7 +117,9 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
 
     std::array<amdf_memory_pair_info_t, 2> prospective = {};
     for (size_t direction = 0; direction < prospective.size(); ++direction) {
-      amdf_memory_profile_pair_query_t query = {};
+      amdf_memory_profile_pair_query_t query =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
       query.structure_size = sizeof(query);
       query.memory_profile_ordinal = creation.memory_profile_ordinal;

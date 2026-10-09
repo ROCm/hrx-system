@@ -1555,7 +1555,9 @@ TEST_F(ReplayAtomicExecutionTest, RejectsMalformedRecords) {
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT, Replay(record));
   EXPECT_EQ(0u, command_buffer_.invocation_count);
 
-  iree_hal_replay_queue_atomic_store_payload_t queue_payload = {};
+  iree_hal_replay_queue_atomic_store_payload_t queue_payload =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   queue_payload.target_ref = DirectTarget(/*offset=*/0, /*length=*/4);
   queue_payload.wait_semaphore_count = 1;
   queue_payload.signal_semaphore_count = 1;

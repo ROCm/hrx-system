@@ -2411,7 +2411,9 @@ TEST(ReplayExecuteTest, SkipsFailedUnsupportedImportedBufferRecord) {
   iree_hal_external_buffer_t external_buffer = {
       .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD, .size = 16};
 
-  iree_hal_buffer_params_t params = {};
+  iree_hal_buffer_params_t params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
   params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
@@ -2532,7 +2534,9 @@ TEST(ReplayExecuteTest, ExecutesRecordedExactQueueTransfer) {
         .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
         .buffer_ref = iree_hal_make_buffer_ref(barrier_view, 2, 4),
         .recipe = &recipe};
-    iree_hal_barrier_t after = {};
+    iree_hal_barrier_t after =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     after.source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER;
     after.target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST;
     after.effects.bits = IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM |

@@ -186,7 +186,9 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
                                ? profile.registration
                                : profile.allocation;
     ASSERT_GT(geometry.byte_length_granularity, 0u);
-    amdf_memory_create_info_t create = {};
+    amdf_memory_create_info_t create =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create.structure_size = sizeof(create);
     create.memory_profile_ordinal = profile.ordinal;
@@ -215,7 +217,9 @@ class GpuXdnaRecipeTest : public GpuXdnaDeviceFixture {
     const uint64_t granularity =
         staging_profile.allocation.byte_length_granularity;
     ASSERT_GT(granularity, 0u);
-    amdf_memory_create_info_t staging_create = {};
+    amdf_memory_create_info_t staging_create =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     staging_create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     staging_create.structure_size = sizeof(staging_create);
     staging_create.memory_profile_ordinal = staging_profile.ordinal;

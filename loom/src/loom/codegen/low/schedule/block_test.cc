@@ -109,7 +109,9 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
     resources[i].capacity_per_cycle =
         descriptors->resources[i].capacity_per_cycle;
   }
-  loom_low_schedule_build_state_t state = {};
+  loom_low_schedule_build_state_t state =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   state.arena = &arena;
   state.options = &options;
   state.target.descriptor_set = descriptors;
@@ -211,7 +213,9 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
       .direct_resources = {direct_names, cliffs, IREE_ARRAYSIZE(cliffs),
                            direct_ranges, 2},
       .derived_resources = table};
-  loom_low_schedule_options_t options = {};
+  loom_low_schedule_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
   iree_arena_block_pool_t pool;
   iree_arena_block_pool_initialize(4096, iree_allocator_system(), &pool);
@@ -219,7 +223,9 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
   iree_arena_initialize(&pool, &arena);
   loom_region_t body = {};
   loom_local_value_domain_t value_domain = {};
-  loom_low_schedule_build_state_t state = {};
+  loom_low_schedule_build_state_t state =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   state.options = &options;
   state.scratch_arena = &arena;
   state.body = &body;

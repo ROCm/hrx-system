@@ -406,7 +406,9 @@ TEST_F(MemoryAccessMapTest,
   periodic.expression.terms = &term;
   periodic.expression.term_count = 1;
   periodic.expression.flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR;
-  loom_low_memory_relative_interval_t interval = {};
+  loom_low_memory_relative_interval_t interval =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   interval.scope = source;
   interval.storage_id = 2;
   interval.disjoint_storage_ordinal = 3;

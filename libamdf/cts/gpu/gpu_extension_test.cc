@@ -210,7 +210,9 @@ TEST_F(GpuEndpointTest, RejectsMalformedOutputWithoutMutation) {
   EXPECT_EQ(amdf_status_code(gpu_api_->endpoint_query_info(endpoint_, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_gpu_endpoint_info_t info = {};
+  amdf_gpu_endpoint_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   info.structure_size = sizeof(info);
   info.gfx_ip.major = UINT32_MAX;
   EXPECT_EQ(amdf_status_code(gpu_api_->endpoint_query_info(endpoint_, &info)),
@@ -357,7 +359,9 @@ TEST_F(GpuEndpointTest, RejectsMalformedDeviceInfoWithoutMutation) {
   EXPECT_EQ(amdf_status_code(gpu_api_->device_query_info(nullptr, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_gpu_device_info_t info = {};
+  amdf_gpu_device_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   info.structure_size = sizeof(info);
   info.reset_epoch = UINT64_MAX;
   EXPECT_EQ(amdf_status_code(gpu_api_->device_query_info(device_, &info)),

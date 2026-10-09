@@ -11,7 +11,8 @@
 namespace {
 
 TEST(PciTest, RecognizesAmdEndpointVendors) {
-  amdf_pci_info_t pci = {};
+  amdf_pci_info_t pci = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
   pci.vendor_id = 0x1002u;
   EXPECT_TRUE(amdf_pci_is_amd(&pci));
   pci.vendor_id = 0x1022u;

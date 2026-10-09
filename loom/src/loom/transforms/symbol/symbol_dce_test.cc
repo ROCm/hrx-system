@@ -114,7 +114,8 @@ class SymbolDCETest : public ::testing::Test {
     const loom_pass_statistic_layout_t* statistic_layout =
         pass_info->statistic_layout;
     std::vector<uint8_t> statistic_storage(statistic_layout->storage_size, 0);
-    loom_pass_t pass = {};
+    loom_pass_t pass = {};  // NOLINT(iree-cpp-designated-initializer) --
+                            // Assignment sequencing spans intervening work.
     pass.info = pass_info;
     pass.instance_arena = &pass_arena;
     pass.arena = &pass_arena;

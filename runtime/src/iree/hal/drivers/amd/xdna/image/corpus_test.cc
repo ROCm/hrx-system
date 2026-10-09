@@ -75,7 +75,9 @@ TEST_P(XdnaImageCorpusTest,
     for (size_t segment_length : {1, 7, 31, 257}) {
       SCOPED_TRACE(targets[device]);
       SCOPED_TRACE(segment_length);
-      SegmentedSource source = {};
+      SegmentedSource source =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
+               // default member initialization.
       source.bytes = iree_make_const_byte_span(file->data, file->size);
       source.segment_length = segment_length;
       iree_byte_sequence_initialize(&kSourceVtable, file->size, &source.base);
@@ -120,7 +122,9 @@ TEST(XdnaImageSparseBindingTest, PreservesUnusedMiddleLaunchBinding) {
   iree_hal_amd_xdna_aie2p_target_t target;
   IREE_ASSERT_OK(iree_hal_amd_xdna_aie2p_npu2_target_initialize(
       iree_make_cstring_view("amd.xdna.strix_halo.17f0_11"), 1, &target));
-  SegmentedSource source = {};
+  SegmentedSource source =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
+           // default member initialization.
   source.bytes = iree_make_const_byte_span(file->data, file->size);
   source.segment_length = 7;
   iree_byte_sequence_initialize(&kSourceVtable, file->size, &source.base);

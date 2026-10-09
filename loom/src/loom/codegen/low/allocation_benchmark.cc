@@ -838,7 +838,9 @@ class AllocationBenchmark {
       benchmark::DoNotOptimize(unit_liveness.end_points);
       iree_arena_deinitialize(&decision_arena);
     } else {
-      loom_low_allocation_options_t options = {};
+      loom_low_allocation_options_t options =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
+               // sequencing spans intervening work.
       options.fixed_values = fixed_values_.data();
       options.fixed_value_count = fixed_values_.size();
       options.reserved_ranges = reserved_ranges_.data();

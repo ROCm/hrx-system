@@ -129,7 +129,9 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
       RoundUp(minimum_byte_length, plan.byte_length_granularity);
   ASSERT_LE(logical.byte_length,
             plan.destination.profile.import.maximum_byte_length);
-  amdf_memory_create_info_t create = {};
+  amdf_memory_create_info_t create =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create.structure_size = sizeof(create);
   create.memory_profile_ordinal = plan.source.profile.ordinal;
@@ -171,7 +173,9 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
   ASSERT_TRUE(amdf_physical_memory_id_is_equal(
       &external.physical_backing_id, &memory.info.physical_backing_id));
 
-  amdf_memory_import_info_t import_info = {};
+  amdf_memory_import_info_t import_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   import_info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
   import_info.structure_size = sizeof(import_info);
   import_info.memory_profile_ordinal = plan.destination.profile.ordinal;

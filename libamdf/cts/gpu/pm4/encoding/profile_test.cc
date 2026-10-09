@@ -33,7 +33,9 @@ TEST(Pm4ProfileTest, CoversThePm4PhysicalTargetFamilies) {
   for (const auto& target : targets) {
     SCOPED_TRACE(::testing::Message()
                  << target[0] << '.' << target[1] << '.' << target[2]);
-    amdf_gpu_endpoint_info_t endpoint = {};
+    amdf_gpu_endpoint_info_t endpoint =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     endpoint.gfx_ip = {target[0], target[1], target[2]};
     const auto* profile = Pm4CommandProfile::Find(endpoint);
     ASSERT_NE(profile, nullptr);

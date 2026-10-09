@@ -19,7 +19,9 @@ class DestructiveReuseTest : public ::testing::Test {
       loom_value_ordinal_t result, loom_value_ordinal_t source,
       uint32_t result_offset, uint32_t count,
       loom_low_placement_cause_t cause) {
-    loom_low_placement_relation_t row = {};
+    loom_low_placement_relation_t row =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     row.result_ordinal = result;
     row.source_ordinal = source;
     row.result_unit_offset = result_offset;
@@ -106,7 +108,9 @@ class DestructiveReuseTest : public ::testing::Test {
                  /*unit_count=*/1),
     };
     const uint32_t interval_indices[] = {0, 1, 2, 3, 4};
-    loom_liveness_analysis_t liveness = {};
+    loom_liveness_analysis_t liveness =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     liveness.intervals = intervals;
     liveness.interval_count = IREE_ARRAYSIZE(intervals);
     liveness.value_interval_indices = interval_indices;
@@ -127,7 +131,9 @@ class DestructiveReuseTest : public ::testing::Test {
     const loom_value_ordinal_t storage_order[] = {1, 0, 2, 3, 4};
     const loom_value_ordinal_t tied_origins[] = {2, 2, 2, 3, 4};
     const uint32_t write_relations[] = {1};
-    loom_low_placement_table_t placement = {};
+    loom_low_placement_table_t placement =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     placement.relations = relations_;
     placement.relation_count = IREE_ARRAYSIZE(relations_);
     placement.value_count = IREE_ARRAYSIZE(ranges);
@@ -208,7 +214,9 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
                /*unit_count=*/1),
   };
   const uint32_t interval_indices[] = {0, 1, 2, 3};
-  loom_liveness_analysis_t liveness = {};
+  loom_liveness_analysis_t liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   liveness.intervals = intervals;
   liveness.interval_count = IREE_ARRAYSIZE(intervals);
   liveness.value_interval_indices = interval_indices;
@@ -230,7 +238,9 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
   const loom_value_ordinal_t storage_order[] = {1, 3, 0, 2};
   const loom_value_ordinal_t tied_origins[] = {0, 0, 2, 2};
   const uint32_t write_relations[] = {1};
-  loom_low_placement_table_t placement = {};
+  loom_low_placement_table_t placement =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   placement.relations = relations;
   placement.relation_count = IREE_ARRAYSIZE(relations);
   placement.value_count = IREE_ARRAYSIZE(ranges);
@@ -279,7 +289,9 @@ TEST_F(DestructiveReuseTest, PreservesMappedResultUnitAcrossSourceWrite) {
   };
   const uint32_t interval_indices[] = {0, 1, 2, 3};
   const loom_liveness_segment_range_t segment_ranges[] = {{}, {}, {}, {}};
-  loom_liveness_analysis_t liveness = {};
+  loom_liveness_analysis_t liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   liveness.intervals = intervals;
   liveness.interval_count = IREE_ARRAYSIZE(intervals);
   liveness.value_interval_indices = interval_indices;
@@ -299,7 +311,9 @@ TEST_F(DestructiveReuseTest, PreservesMappedResultUnitAcrossSourceWrite) {
   const loom_value_ordinal_t storage_order[] = {2, 3, 1, 0};
   const loom_value_ordinal_t tied_origins[] = {0, 1, 0, 1};
   const uint32_t write_relations[] = {1};
-  loom_low_placement_table_t placement = {};
+  loom_low_placement_table_t placement =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   placement.relations = relations;
   placement.relation_count = IREE_ARRAYSIZE(relations);
   placement.value_count = IREE_ARRAYSIZE(ranges);

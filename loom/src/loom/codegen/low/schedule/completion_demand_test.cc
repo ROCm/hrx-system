@@ -40,7 +40,9 @@ class ScheduleCompletionDemandTest : public ::testing::Test {
   void Append(uint32_t producer, uint32_t consumer,
               loom_low_schedule_dependency_kind_t kind =
                   LOOM_LOW_SCHEDULE_DEPENDENCY_SSA) {
-    loom_low_schedule_dependency_t dependency = {};
+    loom_low_schedule_dependency_t dependency =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     dependency.producer_node = producer;
     dependency.consumer_node = consumer;
     dependency.kind = kind;

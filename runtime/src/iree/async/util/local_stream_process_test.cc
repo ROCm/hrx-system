@@ -300,7 +300,9 @@ int Importer(int, char**, const char* directory) {
   ROLE_CHECK(close(process) == 0);
 #endif
 
-  iree_shm_handle_t memory = {};
+  iree_shm_handle_t memory =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
 #if defined(IREE_PLATFORM_WINDOWS)
   memory.value = resources[0].value.win32_handle;
   for (int i = 1; i < 3; ++i) {

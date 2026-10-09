@@ -879,7 +879,9 @@ TEST_F(LoopbackCarrierTest, RejectsInvalidSpanStorageAndRanges) {
                         iree_net_carrier_send(client_, &params));
 
   uint8_t storage[4] = {0};
-  iree_async_region_t region = {};
+  iree_async_region_t region =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   region.base_ptr = storage;
   region.length = sizeof(storage);
   span = iree_async_span_make(&region, 3, 2);

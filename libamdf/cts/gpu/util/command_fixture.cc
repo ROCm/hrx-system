@@ -64,7 +64,9 @@ void GpuCommandTest::CreateMemory(amdf_memory_access_t access,
       {.access = access,
        .flags =
            AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-  amdf_memory_create_info_t creation = {};
+  amdf_memory_create_info_t creation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   creation.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   creation.structure_size = sizeof(creation);
   creation.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;

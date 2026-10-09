@@ -93,7 +93,9 @@ class HostQueueAtomicTest
         .size = byte_length};
     external_buffer.handle.host_allocation.ptr = host_pointer;
 
-    iree_hal_buffer_params_t params = {};
+    iree_hal_buffer_params_t params =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;
     params.usage =

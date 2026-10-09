@@ -83,7 +83,9 @@ loom_low_reg_class_t RegClass(uint16_t alias_set_id) {
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_set_t descriptor_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   descriptor_set.reg_classes = reg_classes;
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;
@@ -783,12 +785,16 @@ TEST_F(LowAllocationStorageLeaseTest,
       {/*start_point=*/16, /*end_point=*/20},
   };
   uint32_t unit_end_points[] = {20, 20};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  loom_low_allocation_unit_liveness_t unit_liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   unit_liveness.end_points = unit_end_points;
   unit_liveness.point_count = IREE_ARRAYSIZE(unit_end_points);
   unit_liveness.storage_segments.entries = storage_segments;
   uint32_t expiration_entry = 0;
-  loom_low_allocation_storage_lease_state_t state = {};
+  loom_low_allocation_storage_lease_state_t state =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   state.unit_liveness = &unit_liveness;
   state.availability_expiration_heap = &expiration_entry;
 
@@ -1267,7 +1273,9 @@ TEST_F(LowAllocationStorageLeaseTest,
                      /*location_base=*/10, /*location_count=*/2);
       leased_assignment.unit_count = 2;
       uint8_t instance_written = 1;
-      loom_low_allocation_storage_lease_state_t state = {};
+      loom_low_allocation_storage_lease_state_t state =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       state.lease_table = &table;
       state.assignments = &leased_assignment;
       state.unit_liveness = &unit_liveness;

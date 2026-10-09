@@ -140,7 +140,9 @@ static iree_hal_replay_file_record_metadata_t MakeAtomicRecordMetadata(
     uint64_t sequence_ordinal, iree_hal_replay_object_type_t object_type,
     iree_hal_replay_payload_type_t payload_type,
     iree_hal_replay_operation_code_t operation_code) {
-  iree_hal_replay_file_record_metadata_t metadata = {};
+  iree_hal_replay_file_record_metadata_t metadata =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   metadata.sequence_ordinal = sequence_ordinal;
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
   metadata.object_type = object_type;
@@ -437,11 +439,15 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
   const char target_key[] = "metadata";
   const uint8_t executable_data[] = {0x00, 0x01, 0x02, 0x03};
   const uint32_t constants[] = {0xABCD1234u};
-  iree_hal_replay_executable_metadata_header_t metadata_header = {};
+  iree_hal_replay_executable_metadata_header_t metadata_header =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   metadata_header.function_count = 1;
   const char function_name[] = "main";
   metadata_header.function_name_storage_length = sizeof(function_name) - 1;
-  iree_hal_replay_executable_function_metadata_t function_metadata = {};
+  iree_hal_replay_executable_function_metadata_t function_metadata =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   function_metadata.binding_count = 2;
   function_metadata.workgroup_size[0] = 3;
   function_metadata.workgroup_size[1] = 1;
@@ -469,7 +475,9 @@ static std::vector<uint8_t> MakeExecutableLoadReplayFileStorage() {
       iree_make_const_byte_span(&function_metadata, sizeof(function_metadata)),
       iree_make_const_byte_span(function_name, sizeof(function_name) - 1),
   };
-  iree_hal_replay_file_record_metadata_t metadata = {};
+  iree_hal_replay_file_record_metadata_t metadata =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   metadata.sequence_ordinal = 0;
   metadata.device_id = 1;
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
@@ -1005,7 +1013,9 @@ TEST(ReplayDumpTest, EmitsQueueSubmissionPayloads) {
       iree_make_const_byte_span(&signal, sizeof(signal)),
       iree_make_const_byte_span(&binding, sizeof(binding)),
   };
-  iree_hal_replay_file_record_metadata_t metadata = {};
+  iree_hal_replay_file_record_metadata_t metadata =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   metadata.sequence_ordinal = 0;
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
   metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER;
@@ -1135,7 +1145,9 @@ TEST(ReplayDumpTest, EmitsFilePayloads) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_file_object_payload_t file_payload = {};
+  iree_hal_replay_file_object_payload_t file_payload =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   file_payload.queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY;
   file_payload.file_length = 4096;
   file_payload.file_device = 10;
@@ -1223,7 +1235,9 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
       .family_ordinal = 2, .queue_ordinal = 1};
   iree_const_byte_span_t queue_iovec =
       iree_make_const_byte_span(&queue_payload, sizeof(queue_payload));
-  iree_hal_replay_file_record_metadata_t metadata = {};
+  iree_hal_replay_file_record_metadata_t metadata =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   metadata.sequence_ordinal = 0;
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT;
   metadata.payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT;
@@ -1261,7 +1275,9 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
                                                         .value = 1};
   iree_hal_replay_semaphore_timepoint_payload_t signal = {.semaphore_id = 43,
                                                           .value = 2};
-  iree_hal_replay_queue_transfer_operation_payload_t operation = {};
+  iree_hal_replay_queue_transfer_operation_payload_t operation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   operation.type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_UPDATE;
   operation.target_ref.buffer_id = 7;
   operation.target_ref.length = 4;
@@ -1285,7 +1301,9 @@ TEST(ReplayDumpTest, EmitsQueueObjectsAndTransferRanges) {
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, IREE_ARRAYSIZE(iovecs), iovecs, nullptr));
 
-  iree_hal_replay_queue_read_payload_t read_payload = {};
+  iree_hal_replay_queue_read_payload_t read_payload =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   read_payload.source_file_id = 8;
   read_payload.source_offset = 64;
   read_payload.target_ref.buffer_id = 7;
@@ -1778,7 +1796,9 @@ TEST(ReplayDumpTest, RejectsMalformedAtomicPayloadLayouts) {
 
 TEST(ReplayDumpTest, QueueBarriersDistinguishDefaultAndExplicitEmpty) {
   ReplayFileBuilder builder(4096);
-  iree_hal_replay_file_record_metadata_t metadata = {};
+  iree_hal_replay_file_record_metadata_t metadata =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
   metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE;
   metadata.operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER;
@@ -1807,7 +1827,9 @@ TEST(ReplayDumpTest, QueueBarriersDistinguishDefaultAndExplicitEmpty) {
   iree_hal_replay_memory_transition_recipe_payload_t recipe = {
       .effects = IREE_HAL_MEMORY_EFFECT_RANGE_RELEASE_TO_SYSTEM,
       .operation_count = 1};
-  iree_hal_replay_memory_transition_operation_payload_t transition = {};
+  iree_hal_replay_memory_transition_operation_payload_t transition =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   transition.kind = IREE_HAL_MEMORY_TRANSITION_KIND_RANGE;
   transition.executor = IREE_HAL_MEMORY_TRANSITION_EXECUTOR_QUEUE;
   transition.operation = IREE_HAL_MEMORY_TRANSITION_OPERATION_RELEASE_TO_SYSTEM;

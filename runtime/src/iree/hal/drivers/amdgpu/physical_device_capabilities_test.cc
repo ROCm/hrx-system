@@ -36,7 +36,9 @@ static hsa_amd_hdp_flush_t HdpFlush(uintptr_t mem_flush_control,
 
 static iree_hal_amdgpu_gfxip_version_t GfxIp(uint16_t major, uint16_t minor,
                                              uint16_t stepping) {
-  iree_hal_amdgpu_gfxip_version_t version = {};
+  iree_hal_amdgpu_gfxip_version_t version =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   version.major = major;
   version.minor = minor;
   version.stepping = stepping;
@@ -53,7 +55,9 @@ static iree_hal_amdgpu_gfxip_version_t GfxIpFromProcessor(
 
 static hsa_amd_memory_pool_link_info_t LinkInfo(
     hsa_amd_link_info_type_t link_type) {
-  hsa_amd_memory_pool_link_info_t link_info = {};
+  hsa_amd_memory_pool_link_info_t link_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   link_info.link_type = link_type;
   link_info.atomic_support_32bit = true;
   link_info.atomic_support_64bit = true;
@@ -182,7 +186,9 @@ class PhysicalDeviceCapabilitiesTest : public ::testing::Test {
  protected:
   iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t
   MakeCoarseMemorySelection() {
-    iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection = {};
+    iree_hal_amdgpu_cpu_visible_device_coarse_memory_selection_t selection =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     selection.device_agent = Agent(10);
     selection.memory_pool = MemoryPool(20);
     selection.gfxip_version = GfxIp(9, 4, 2);

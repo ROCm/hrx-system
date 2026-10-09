@@ -196,7 +196,9 @@ TEST(CleanupPatternsTest, ExplicitEmptyProviderSetSatisfiesComposition) {
 }
 
 TEST(CleanupPatternsTest, ResolvesCanonicalizerContextThroughCapability) {
-  CanonicalizerContextResolverState state = {};
+  CanonicalizerContextResolverState state =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   state.target_facts =
       reinterpret_cast<const loom_target_facts_t*>(&state.target_facts);
   state.math_policy =

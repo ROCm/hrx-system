@@ -110,7 +110,9 @@ class LowAllocationActiveCapacityTest : public ::testing::Test {
         range.start = static_cast<uint32_t>(i);
       }
     }
-    loom_low_placement_table_t placement = {};
+    loom_low_placement_table_t placement =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     placement.value_count = static_cast<loom_value_ordinal_t>(intervals.size());
     placement.relations = relations.data();
     placement.relation_count = relations.size();

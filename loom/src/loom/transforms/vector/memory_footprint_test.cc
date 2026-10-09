@@ -77,7 +77,8 @@ TEST_F(VectorMemoryFootprintPassTest, PreservesReadOnlyFunctionFacts) {
   loom_pass_value_fact_lifecycle_counts_t counts = {};
   value_facts_.lifecycle_counts = &counts;
 
-  loom_pass_t pass = {};
+  loom_pass_t pass = {};  // NOLINT(iree-cpp-designated-initializer) --
+                          // Assignment sequencing spans intervening work.
   pass.info = loom_vector_memory_footprint_pass_info();
   pass.instance_arena = &pass_arena_;
   pass.arena = &pass_arena_;

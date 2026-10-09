@@ -67,7 +67,9 @@ class LowAllocationScalarPackingTest : public ::testing::Test {
         .value_interval_indices = interval_indices.data(),
         .pressure_summaries = summaries_,
         .pressure_summary_count = IREE_ARRAYSIZE(summaries_)};
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
+    loom_low_allocation_unit_liveness_t unit_liveness =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     unit_liveness.values = values.data();
     unit_liveness.point_count = unit_count;
     const loom_low_placement_table_t placement = {};

@@ -107,7 +107,9 @@ TEST(CompileReportFormatTest, FormatsCoreReport) {
   loom_target_compile_report_record_memory(&report, /*private_memory_bytes=*/16,
                                            /*local_memory_bytes=*/32);
 
-  loom_target_compile_report_workload_t workload = {};
+  loom_target_compile_report_workload_t workload =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   workload.flags =
       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_SIZE |
       LOOM_TARGET_COMPILE_REPORT_WORKLOAD_WORKGROUP_COUNT |
@@ -520,7 +522,9 @@ TEST(CompileReportFormatTest, KeepsResidencyTransitionsOnTheirOwnEntries) {
       loom_target_compile_report_initialize(&entry, iree_allocator_system());
       entry.function_name = iree_make_cstring_view(test_case.function_name);
       if (entry_index != missing_entry) {
-        loom_target_compile_report_target_resources_t resources = {};
+        loom_target_compile_report_target_resources_t resources =
+            {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
+                 // conversion differs from list initialization.
         resources.scalar_register_class = IREE_SVL("amdgpu.sgpr");
         resources.scalar_register_count = 36;
         resources.vector_register_class = IREE_SVL("amdgpu.vgpr");
@@ -629,7 +633,9 @@ TEST(CompileReportFormatTest, FormatsEntryReportsAndTargetCapabilities) {
   loom_target_compile_report_record_emission_breakdown(&entry,
                                                        &emission_breakdown);
 
-  loom_target_compile_report_target_capability_row_t capability = {};
+  loom_target_compile_report_target_capability_row_t capability =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   capability.function_name = entry.function_name;
   capability.target_family_name = IREE_SVL("amdgpu");
   capability.namespace_name = IREE_SVL("amdgpu");

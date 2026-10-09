@@ -54,7 +54,9 @@ TEST(InstanceTest, ValidatesCreateInfoBeforePlatformInitialization) {
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   EXPECT_EQ(instance, sentinel);
 
-  amdf_instance_create_info_t create_info = {};
+  amdf_instance_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   create_info.structure_size = sizeof(create_info);
   EXPECT_EQ(amdf_status_code(api->instance_create(&create_info, &instance)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
@@ -294,7 +296,9 @@ TEST_F(DiscoveryTest, RejectsMalformedQueueFamilyQueryWithoutMutation) {
                 api_->endpoint_query_queue_family_info(endpoint_, 0, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_queue_family_info_t family_info = {};
+  amdf_queue_family_info_t family_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   family_info.structure_size = sizeof(family_info);
   family_info.ordinal = UINT32_MAX;
   EXPECT_EQ(amdf_status_code(api_->endpoint_query_queue_family_info(
@@ -322,7 +326,9 @@ TEST_F(DiscoveryTest, RejectsMalformedInfoWithoutMutation) {
   EXPECT_EQ(amdf_status_code(api_->endpoint_query_info(endpoint_, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_endpoint_info_t info = {};
+  amdf_endpoint_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   info.structure_size = sizeof(info);
   info.engine_kind = UINT32_MAX;
   EXPECT_EQ(amdf_status_code(api_->endpoint_query_info(endpoint_, &info)),

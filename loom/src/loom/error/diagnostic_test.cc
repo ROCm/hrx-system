@@ -230,7 +230,9 @@ TEST(Diagnostic, NoSource) {
 
 TEST(Diagnostic, LocationsDoNotRequireSourceText) {
   loom_diagnostic_param_t params[] = {loom_param_string(IREE_SV("x"))};
-  loom_diagnostic_t diagnostic = {};
+  loom_diagnostic_t diagnostic =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
   diagnostic.params = params;

@@ -569,7 +569,9 @@ TEST(CompileReportFormatTest, FormatsAndAggregatesLowPlanningStatistics) {
 }
 
 TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
-  loom_target_compile_report_pipeline_worker_row_t worker = {};
+  loom_target_compile_report_pipeline_worker_row_t worker =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   worker.worker_index = 0;
   worker.group_index = 2;
   worker.lane = 1;
@@ -595,7 +597,9 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
   worker.maximum_bank_storage_byte_count = 352;
   worker.bank_storage_capacity_byte_count = 16384;
 
-  loom_target_compile_report_pipeline_channel_row_t channel = {};
+  loom_target_compile_report_pipeline_channel_row_t channel =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   channel.channel_index = 0;
   channel.transport = IREE_SVL("external-dma");
   channel.sender.owner =

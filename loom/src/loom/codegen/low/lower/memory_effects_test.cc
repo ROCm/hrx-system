@@ -92,7 +92,9 @@ TEST_F(LowLowerMemoryEffectsTest, RetainedOriginSurvivesAnalysisRetirement) {
 }
 
 TEST_F(LowLowerMemoryEffectsTest, StaticGeometryNeedsNoDynamicProof) {
-  loom_low_source_memory_access_plan_t source = {};
+  loom_low_source_memory_access_plan_t source =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   source.root_value_id = 7;
   source.root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
   source.element_byte_count = 4;

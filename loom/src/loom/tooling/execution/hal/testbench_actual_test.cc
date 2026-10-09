@@ -791,7 +791,9 @@ func.def public pure @device_dynamic(%workgroup_count: index) -> (index, index, 
   uint64_t workload_argument_bits[1] = {};
   loom_run_hal_testbench_context_t context = {.host_allocator =
                                                   iree_allocator_system()};
-  loom_run_hal_testbench_actual_provider_t provider = {};
+  loom_run_hal_testbench_actual_provider_t provider =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   provider.context = &context;
   provider.native_module = native_module;
   provider.kernel_launch = kernel_launch;

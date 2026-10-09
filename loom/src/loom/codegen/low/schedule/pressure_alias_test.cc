@@ -66,7 +66,9 @@ class PressureAliasTest : public ::testing::Test {
       rows[i].kind = LOOM_LOW_STORAGE_RELATION_CONTIGUOUS_PART;
     }
     loom_local_value_domain_t domain = {.value_count = IREE_ARRAYSIZE(values)};
-    loom_low_schedule_build_state_t state = {};
+    loom_low_schedule_build_state_t state =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     state.values = values;
     state.value_producer_nodes = value_producer_nodes;
     state.nodes = nodes;

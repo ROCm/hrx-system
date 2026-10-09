@@ -237,7 +237,9 @@ class MemoryBenchmark {
     create_info_.byte_length = byte_length;
     CheckStatus(api_->memory_create(scope_, &create_info_, &memory_),
                 "memory_create");
-    amdf_memory_map_info_t map = {};
+    amdf_memory_map_info_t map =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
     map.structure_size = sizeof(map);
     map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;

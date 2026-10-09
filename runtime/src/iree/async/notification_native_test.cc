@@ -251,7 +251,9 @@ int Observer(int, char**, const char* directory) {
       offered.callback()));
   offered.Wait(peer.proactor);
   ROLE_CHECK(offer == 1);
-  iree_shm_handle_t mapping_handle = {};
+  iree_shm_handle_t mapping_handle =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
 #if defined(IREE_PLATFORM_WINDOWS)
   mapping_handle.value = handles[0].value.win32_handle;
 #else

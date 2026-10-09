@@ -16,7 +16,9 @@ static iree_hal_amdgpu_dispatch_concurrency_capabilities_t Capabilities(
     uint32_t major, uint32_t minor, uint32_t stepping,
     uint32_t maximum_waves_per_compute_unit,
     uint32_t simd_count_per_compute_unit) {
-  iree_hal_amdgpu_dispatch_concurrency_capabilities_t capabilities = {};
+  iree_hal_amdgpu_dispatch_concurrency_capabilities_t capabilities =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   capabilities.target_kind = IREE_HAL_AMDGPU_TARGET_KIND_EXACT;
   capabilities.gfxip_version.major = major;
   capabilities.gfxip_version.minor = minor;
@@ -192,7 +194,9 @@ TEST(DispatchConcurrencyTest, RejectsUnmodeledGfx125ModesWithoutPublishing) {
       /*simd_count_per_compute_unit=*/2);
   const auto topology = Topology(/*execution_unit_count=*/4,
                                  /*execution_units_per_resource=*/2);
-  iree_hal_amdgpu_kernel_descriptor_t descriptor = {};
+  iree_hal_amdgpu_kernel_descriptor_t descriptor =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   descriptor.kernel_code_properties =
       IREE_HAL_AMDGPU_KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
   const auto inputs = Inputs(&capabilities, &topology, &descriptor);

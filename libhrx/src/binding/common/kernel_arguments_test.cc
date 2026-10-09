@@ -78,7 +78,9 @@ TEST(KernelArgumentsTest,
 
 TEST(KernelArgumentsTest,
      RawArgsPackingRejectsSourceOrdinalOutsideOperationCount) {
-  iree_hal_streaming_parameter_op_t operation = {};
+  iree_hal_streaming_parameter_op_t operation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment selects the
+           // active union member after zero initialization.
   operation.copy = {
       .size = sizeof(uint32_t),
       .native_abi_destination_offset = 0,

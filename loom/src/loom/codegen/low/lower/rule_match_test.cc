@@ -29,7 +29,9 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
     diagnostics.rejection_diagnostic_indices[reason] =
         static_cast<uint16_t>(100 + reason);
   }
-  loom_low_lower_source_memory_t constraint = {};
+  loom_low_lower_source_memory_t constraint =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   constraint.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
   constraint.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ANY;
   constraint.address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY;
@@ -46,7 +48,9 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
       .static_byte_offset_minimum = 0,
       .static_byte_offset_maximum = 0};
 
-  loom_low_source_memory_access_plan_t access = {};
+  loom_low_source_memory_access_plan_t access =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   access.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
   access.root_value_id = 0;
   access.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
@@ -121,11 +125,15 @@ TEST(LowLowerSourceMemoryMatchTest, SelectsExactRejectionReason) {
 }
 
 TEST(LowLowerRuleSelectionTest, RanksActionableFailuresBeforeDepth) {
-  loom_low_lower_rule_failure_t diagnostic_failure = {};
+  loom_low_lower_rule_failure_t diagnostic_failure =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   diagnostic_failure.has_source_op_span = true;
   diagnostic_failure.diagnostic_index = 1;
   diagnostic_failure.matched_guard_count = 1;
-  loom_low_lower_rule_failure_t structural_nonmatch = {};
+  loom_low_lower_rule_failure_t structural_nonmatch =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   structural_nonmatch.has_source_op_span = true;
   structural_nonmatch.diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE;
   structural_nonmatch.matched_guard_count = 10;
@@ -138,11 +146,15 @@ TEST(LowLowerRuleSelectionTest, RanksActionableFailuresBeforeDepth) {
 }
 
 TEST(LowLowerRuleSelectionTest, UsesCompatibilityThenDepthForEqualFailures) {
-  loom_low_lower_rule_failure_t shallow_failure = {};
+  loom_low_lower_rule_failure_t shallow_failure =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   shallow_failure.has_source_op_span = true;
   shallow_failure.diagnostic_index = 1;
   shallow_failure.matched_guard_count = 1;
-  loom_low_lower_rule_failure_t deep_failure = {};
+  loom_low_lower_rule_failure_t deep_failure =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   deep_failure.has_source_op_span = true;
   deep_failure.diagnostic_index = 2;
   deep_failure.matched_guard_count = 2;
@@ -240,7 +252,9 @@ class LowLowerRuleMatchTest : public ::testing::Test {
       loom_low_lower_source_node_relation_t relation,
       bool reject_related_guard = false) {
     loom_low_lower_value_ref_t value_refs[2] = {};
-    loom_low_lower_source_node_t source_node = {};
+    loom_low_lower_source_node_t source_node =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     source_node.relation = relation;
     source_node.source_op_kind = related_op_kind;
     source_node.parent_node_index = 0;
@@ -275,7 +289,9 @@ class LowLowerRuleMatchTest : public ::testing::Test {
         .rule_start = 0,
         .rule_count = 1,
     };
-    loom_low_lower_rule_set_t rule_set = {};
+    loom_low_lower_rule_set_t rule_set =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     rule_set.spans = &span;
     rule_set.span_count = 1;
     rule_set.rules = &rule;
@@ -325,7 +341,9 @@ class LowLowerRuleMatchTest : public ::testing::Test {
         .rule_start = 0,
         .rule_count = 1,
     };
-    loom_low_lower_rule_set_t rule_set = {};
+    loom_low_lower_rule_set_t rule_set =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     rule_set.spans = &span;
     rule_set.span_count = 1;
     rule_set.rules = &rule;
@@ -449,7 +467,9 @@ TEST_F(LowLowerRuleMatchTest, SelectsFirstMatchAndResetsReusedSelection) {
 }
 
 TEST_F(LowLowerRuleMatchTest, MatchesI64AttributeSumsWithoutSignedOverflow) {
-  loom_low_lower_guard_t guard = {};
+  loom_low_lower_guard_t guard =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   guard.kind = LOOM_LOW_LOWER_GUARD_ATTR_I64_SUM_EQ;
   guard.selector.attribute.attr_index = 0;
   guard.selector.attribute.other_attr_index = 0;
@@ -513,7 +533,9 @@ TEST_F(LowLowerRuleMatchTest, MatchesBiasedPowersWithoutSignedOverflow) {
       .rule_start = 0,
       .rule_count = 1,
   };
-  loom_low_lower_rule_set_t rule_set = {};
+  loom_low_lower_rule_set_t rule_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rule_set.spans = &span;
   rule_set.span_count = 1;
   rule_set.rules = &rule;
@@ -585,7 +607,9 @@ TEST_F(LowLowerRuleMatchTest, MatchesFloatingPowersInExponentRange) {
       .rule_start = 0,
       .rule_count = 1,
   };
-  loom_low_lower_rule_set_t rule_set = {};
+  loom_low_lower_rule_set_t rule_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rule_set.spans = &span;
   rule_set.span_count = 1;
   rule_set.rules = &rule;
@@ -630,7 +654,9 @@ TEST_F(LowLowerRuleMatchTest, MatchesSubnormalPolicyPermissionOrRetainedFact) {
           LOOM_LOW_LOWER_GUARD_VALUE_NOT_SUBNORMAL_OR_INSTANCE_FLAGS_HAS_ALL,
       .diagnostic_index = LOOM_LOW_LOWER_DIAGNOSTIC_NONE,
       .payload_ordinal = 1};
-  loom_low_lower_guard_payload_t guard_payload = {};
+  loom_low_lower_guard_payload_t guard_payload =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment selects the
+           // active union member after zero initialization.
   guard_payload.u64 = LOOM_SCALAR_FLOATCONVERSIONFLAGS_DAZ;
   const loom_low_lower_guard_ref_t guard_ref = 0;
   loom_low_lower_value_ref_t value_ref = {.kind =
@@ -740,7 +766,9 @@ TEST_F(LowLowerRuleMatchTest, MatchesCompleteStorageOperandSchema) {
       .rule_count = 1,
   };
   loom_value_fact_encoded_operand_schema_t expected_schema = actual_schema;
-  loom_low_lower_rule_set_t rule_set = {};
+  loom_low_lower_rule_set_t rule_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rule_set.spans = &span;
   rule_set.span_count = 1;
   rule_set.rules = &rule;
@@ -780,7 +808,9 @@ TEST_F(LowLowerRuleMatchTest, ContractQueriesMaySelectContractOnlyRules) {
                                         .span_count = 1,
                                         .rules = rules,
                                         .rule_count = IREE_ARRAYSIZE(rules)};
-  loom_low_lower_rule_match_context_t match_context = {};
+  loom_low_lower_rule_match_context_t match_context =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   match_context.module = module_;
   const loom_op_t* source_op = BuildConstant(5);
 
@@ -900,7 +930,9 @@ TEST_F(LowLowerRuleMatchTest, SelectsRootKindRejection) {
   loom_low_lower_source_memory_diagnostics_t diagnostics = {};
   diagnostics.rejection_diagnostic_indices
       [LOOM_LOW_SOURCE_MEMORY_REJECTION_REASON_ROOT_KIND] = 7;
-  loom_low_lower_source_memory_t constraint = {};
+  loom_low_lower_source_memory_t constraint =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   constraint.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
   constraint.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_ALLOCA;
   constraint.address_layout = LOOM_LOW_LOWER_SOURCE_MEMORY_ADDRESS_LAYOUT_ANY;
@@ -916,7 +948,9 @@ TEST_F(LowLowerRuleMatchTest, SelectsRootKindRejection) {
       .static_byte_offset_minimum = 0,
       .static_byte_offset_maximum = 0};
 
-  loom_low_source_memory_access_plan_t access = {};
+  loom_low_source_memory_access_plan_t access =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   access.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
   access.root_value_id = loom_index_constant_result(BuildConstant(0));
   access.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;

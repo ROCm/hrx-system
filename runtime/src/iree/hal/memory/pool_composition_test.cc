@@ -110,7 +110,9 @@ class PoolCompositionTest : public ::testing::TestWithParam<
       status =
           iree_hal_tlsf_pool_create(parent, &options, allocator_, out_pool);
     } else {
-      iree_hal_fixed_block_pool_options_t options = {};
+      iree_hal_fixed_block_pool_options_t options =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
+               // conversion differs from list initialization.
       options.block_size = block_size;
       options.blocks_per_slab = slab_size / block_size;
       options.alignment = 16;

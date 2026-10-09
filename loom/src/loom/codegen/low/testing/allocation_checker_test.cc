@@ -49,7 +49,9 @@ loom_low_allocation_assignment_t MakeAssignment(
 loom_low_placement_relation_t MakeAliasRelation(
     loom_value_ordinal_t result_ordinal, loom_value_ordinal_t source_ordinal,
     loom_low_placement_relation_flags_t flags) {
-  loom_low_placement_relation_t relation = {};
+  loom_low_placement_relation_t relation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   relation.result_ordinal = result_ordinal;
   relation.source_ordinal = source_ordinal;
   relation.unit_count = 1;

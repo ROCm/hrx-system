@@ -162,7 +162,9 @@ TEST(CompileReportFormatTest, FormatsSourceToLowSelectionAndMemory) {
   IREE_ASSERT_OK(
       loom_target_compile_report_record_source_low_row(&report, &selection));
 
-  loom_target_compile_report_source_low_memory_row_t memory = {};
+  loom_target_compile_report_source_low_memory_row_t memory =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   memory.function_name = IREE_SVL("branchy");
   memory.source_op_name = IREE_SVL("vector.load");
   memory.source_op_kind = 43;
@@ -434,7 +436,9 @@ TEST(CompileReportFormatTest,
     loom_target_compile_report_initialize(&entry, iree_allocator_system());
     entry.function_name =
         entry_index == 0 ? IREE_SV("first") : IREE_SV("second");
-    loom_target_compile_report_source_low_row_t selection = {};
+    loom_target_compile_report_source_low_row_t selection =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     selection.function_name = IREE_SVL("multiply");
     selection.source_op_name = IREE_SVL("scalar.mulf");
     selection.selection_kind =

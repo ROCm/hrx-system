@@ -365,7 +365,9 @@ TEST_P(DispatchReuseTest, DirectionalStorageBindings) {
   };
   Ref<iree_hal_buffer_t> buffers[2];
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-    iree_hal_buffer_params_t params = {};
+    iree_hal_buffer_params_t params =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
     params.usage = usages[i] | IREE_HAL_BUFFER_USAGE_TRANSFER;
     IREE_ASSERT_OK(iree_hal_allocator_allocate_buffer(
@@ -502,7 +504,9 @@ TEST_P(DispatchReuseTest, MixedDirectAndIndirectBindings) {
 #if IREE_HAL_COMMAND_BUFFER_VALIDATION_ENABLE
   // An opaque dispatch binding must preserve the known WRITE requirement
   // contributed by the fill using the same indirect slot.
-  iree_hal_buffer_params_t params = {};
+  iree_hal_buffer_params_t params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
   params.access = IREE_HAL_MEMORY_ACCESS_READ;
   params.usage = IREE_HAL_BUFFER_USAGE_STORAGE | IREE_HAL_BUFFER_USAGE_TRANSFER;

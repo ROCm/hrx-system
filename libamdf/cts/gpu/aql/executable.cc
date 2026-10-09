@@ -23,7 +23,9 @@ void CreateStorage(const amdf_api_t* api, amdf_memory_scope_t* scope,
       {.access = access,
        .flags =
            AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-  amdf_memory_create_info_t create = {};
+  amdf_memory_create_info_t create =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create.structure_size = sizeof(create);
   create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;

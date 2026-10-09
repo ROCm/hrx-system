@@ -275,7 +275,9 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
     ASSERT_EQ(major(info.st_rdev), identity.major);
     ASSERT_EQ(minor(info.st_rdev), identity.minor);
     drm_amdgpu_info_device device_info = {};
-    drm_amdgpu_info query = {};
+    drm_amdgpu_info query =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     query.return_pointer = reinterpret_cast<uintptr_t>(&device_info);
     query.return_size = sizeof(device_info);
     query.query = AMDGPU_INFO_DEV_INFO;

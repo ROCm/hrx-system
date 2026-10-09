@@ -28,7 +28,9 @@ loom_low_move_location_t Location(
     uint16_t reg_class_id, uint32_t location,
     loom_low_allocation_location_kind_t location_kind =
         LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-  loom_low_move_location_t unit_location = {};
+  loom_low_move_location_t unit_location =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   unit_location.location_kind = location_kind;
   unit_location.descriptor_reg_class_id = reg_class_id;
   unit_location.location = location;
@@ -37,7 +39,9 @@ loom_low_move_location_t Location(
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_set_t descriptor_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   descriptor_set.reg_classes = reg_classes;
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;

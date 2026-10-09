@@ -60,7 +60,9 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
   }
 
   amdf_memory_create_info_t MakeSystemMemoryCreateInfo() {
-    amdf_memory_create_info_t info = {};
+    amdf_memory_create_info_t info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     info.structure_size = sizeof(info);
     memory_access_.requirements.access =
@@ -126,7 +128,9 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
                          : 0) |
                     access_case.additional_flags},
       };
-      amdf_memory_create_info_t create_info = {};
+      amdf_memory_create_info_t create_info =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
       create_info.structure_size = sizeof(create_info);
       create_info.access_count = 1;
@@ -493,7 +497,9 @@ TEST_F(GpuLinuxMemoryTest, RegistersOverlappingCallerPagesWithExactAccess) {
                   AMDF_MEMORY_FLAG_DEVICE_ADDRESS |
                   access_case.additional_flags},
     };
-    amdf_memory_create_info_t create_info = {};
+    amdf_memory_create_info_t create_info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create_info.structure_size = sizeof(create_info);
     create_info.access_count = 1;
@@ -580,7 +586,9 @@ TEST_F(GpuLinuxMemoryTest, RegistersOverlappingCallerPagesWithExactAccess) {
   EXPECT_EQ(caller_pages_[kCallerOffsets.front() - 1], 0x5A);
   EXPECT_EQ(caller_pages_[kCallerOffsets.back() + logical_byte_length], 0x5A);
 
-  amdf_memory_map_info_t overrun = {};
+  amdf_memory_map_info_t overrun =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   overrun.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
   overrun.structure_size = sizeof(overrun);
   overrun.flags = AMDF_MEMORY_MAP_FLAG_READ;
@@ -591,7 +599,9 @@ TEST_F(GpuLinuxMemoryTest, RegistersOverlappingCallerPagesWithExactAccess) {
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
   EXPECT_EQ(reinterpret_cast<uintptr_t>(output), uintptr_t{1});
 
-  amdf_memory_create_info_t invalid_access = {};
+  amdf_memory_create_info_t invalid_access =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   invalid_access.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   invalid_access.structure_size = sizeof(invalid_access);
   invalid_access.memory_profile_ordinal =

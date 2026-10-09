@@ -68,7 +68,9 @@ static void TestStoreAndRmw(iree_hal_atomic_width_t width) {
   EXPECT_EQ(iree_atomic_load(&target, iree_memory_order_acquire),
             static_cast<ValueType>(10));
 
-  iree_hal_atomic_rmw_params_t rmw_params = {};
+  iree_hal_atomic_rmw_params_t rmw_params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rmw_params.flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
                      IREE_HAL_ATOMIC_FLAG_RELEASE |
                      IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE;
@@ -109,7 +111,9 @@ template <typename AtomicType, typename ValueType>
 static void TestWait(iree_hal_atomic_width_t width) {
   AtomicType target = IREE_ATOMIC_VAR_INIT(0x12);
 
-  iree_hal_atomic_wait_params_t wait_params = {};
+  iree_hal_atomic_wait_params_t wait_params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   wait_params.value = 0x2;
   wait_params.mask = 0xF;
   wait_params.flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE;

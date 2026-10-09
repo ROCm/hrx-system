@@ -185,7 +185,9 @@ class CopyDispatchRecipeTest : public AqlDispatchTest {
                         const amdf_memory_profile_site_t& producer,
                         const amdf_memory_profile_site_t& consumer,
                         amdf_memory_pair_info_t* out_pair) {
-    amdf_memory_profile_pair_query_t query = {};
+    amdf_memory_profile_pair_query_t query =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
     query.structure_size = sizeof(query);
     query.memory_profile_ordinal = creation.memory_profile_ordinal;

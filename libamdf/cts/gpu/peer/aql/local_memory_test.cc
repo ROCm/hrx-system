@@ -60,7 +60,9 @@ struct JointMemory {
   std::array<uint64_t, 2> addresses = {};
 
   amdf_memory_site_t Site(int device, uint32_t family = 0) const {
-    amdf_memory_site_t result = {};
+    amdf_memory_site_t result =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     result.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE;
     result.structure_size = sizeof(result);
     result.kind =
@@ -134,7 +136,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
 
   void QueryPair(JointMemory& memory, int from, int to,
                  amdf_memory_pair_info_t* prospective) {
-    amdf_memory_profile_pair_query_t query = {};
+    amdf_memory_profile_pair_query_t query =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
     query.structure_size = sizeof(query);
     query.memory_profile_ordinal = memory.creation.memory_profile_ordinal;
@@ -271,7 +275,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
     ASSERT_EQ(memory->info.access_count, 2u);
     ASSERT_EQ(memory->info.byte_length, creation.byte_length);
     if (system) {
-      amdf_memory_map_info_t map = {};
+      amdf_memory_map_info_t map =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
       map.structure_size = sizeof(map);
       map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
@@ -408,7 +414,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
         {.access = access,
          .flags =
              AMDF_MEMORY_FLAG_HOST_COHERENT | AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t create = {};
+    amdf_memory_create_info_t create =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create.structure_size = sizeof(create);
     create.memory_profile_ordinal = FindGpuMemoryProfileOrdinal(

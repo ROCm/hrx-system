@@ -147,7 +147,9 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
               0u);
 
     const uint64_t granularity = profile.allocation.byte_length_granularity;
-    amdf_memory_create_info_t create = {};
+    amdf_memory_create_info_t create =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create.structure_size = sizeof(create);
     create.access_count = 1;
@@ -184,7 +186,9 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
         AllocateInstructions(context_, second.size(), &memory_));
     ASSERT_LE(first.size(), instruction_stride_);
 
-    amdf_memory_map_info_t map = {};
+    amdf_memory_map_info_t map =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
     map.structure_size = sizeof(map);
     map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
@@ -273,7 +277,9 @@ class XdnaKernelQueueTest : public XdnaContextFixture {
     ASSERT_NE(info.maximum_pending_submission_count, 0u);
     const uint32_t command_count =
         std::min(info.maximum_pending_submission_count, uint32_t{4096});
-    amdf_xdna_kernel_command_t command = {};
+    amdf_xdna_kernel_command_t command =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     command.memory = memory_;
     command.byte_length = first.size();
     amdf_xdna_kernel_queue_submission_info_t submit = {
@@ -408,7 +414,9 @@ TEST_F(XdnaKernelQueueNotificationTest,
   if (IsSkipped()) {
     return;
   }
-  amdf_xdna_kernel_command_t command = {};
+  amdf_xdna_kernel_command_t command =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   command.memory = memory_;
   command.byte_length = transaction.size();
   amdf_xdna_kernel_queue_submission_info_t submit = {
@@ -449,7 +457,9 @@ TEST_F(XdnaKernelQueueNotificationTest,
   if (IsSkipped()) {
     return;
   }
-  amdf_xdna_kernel_command_t command = {};
+  amdf_xdna_kernel_command_t command =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   command.memory = memory_;
   command.byte_length = transaction.size();
   amdf_xdna_kernel_queue_submission_info_t submit = {
@@ -496,7 +506,9 @@ TEST_F(XdnaKernelQueueTest, SubmitsImmutableRangesAndReacquiresQueue) {
   const auto transaction = MakeNoOpTransaction();
   ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
   ASSERT_NO_FATAL_FAILURE(CreateQueue());
-  amdf_xdna_kernel_command_t command = {};
+  amdf_xdna_kernel_command_t command =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   command.memory = memory_;
   command.byte_length = MakeNoOpTransaction().size();
   amdf_xdna_kernel_queue_submission_info_t submit = {
@@ -568,7 +580,9 @@ TEST_F(XdnaKernelQueueTest, RefreshRetiresBatchesAndReusesPacketStorage) {
   ASSERT_EQ(api_->kernel_queue_refresh_status(queue_, &checked),
             AMDF_STATUS_OK);
   EXPECT_EQ(checked.retired_submission, 0u);
-  amdf_xdna_kernel_command_t command = {};
+  amdf_xdna_kernel_command_t command =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   command.memory = memory_;
   command.byte_length = transaction.size();
   amdf_xdna_kernel_queue_submission_info_t submit = {
@@ -626,7 +640,9 @@ TEST_F(XdnaKernelQueueTest, PrivateBackingIsQualifiedByExactContext) {
   ASSERT_NO_FATAL_FAILURE(AllocateInstructions(
       sibling_.context, transaction.size(), &sibling_.memory));
   EXPECT_NE(memory_, sibling_.memory);
-  amdf_xdna_kernel_command_t command = {};
+  amdf_xdna_kernel_command_t command =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   command.memory = sibling_.memory;
   command.byte_length = MakeNoOpTransaction().size();
   amdf_xdna_kernel_queue_submission_info_t submit = {
@@ -715,7 +731,9 @@ TEST_F(XdnaKernelQueueTest,
   }
   ASSERT_NO_FATAL_FAILURE(CreateInstructions(transaction, transaction));
   ASSERT_NO_FATAL_FAILURE(CreateQueue());
-  amdf_xdna_kernel_command_t command = {};
+  amdf_xdna_kernel_command_t command =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   command.memory = memory_;
   command.byte_length = transaction.size();
   amdf_xdna_kernel_queue_submission_info_t submit = {

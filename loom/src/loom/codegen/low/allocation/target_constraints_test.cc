@@ -549,7 +549,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
   uint32_t unit_start_points[] = {2, 0, 1, 0};
   uint32_t unit_end_points[] = {3, 2, 3, 3};
   const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.phys"));
-  loom_liveness_value_class_t value_class = {};
+  loom_liveness_value_class_t value_class =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   value_class.type_kind = LOOM_TYPE_REGISTER;
   value_class.register_descriptor_set_stable_id =
       target_.descriptor_set->stable_id;
@@ -579,7 +581,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
       .value_ids = values,
       .value_count = kValueCount,
       .value_interval_indices = interval_indices};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  loom_low_allocation_unit_liveness_t unit_liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   unit_liveness.values = unit_values;
   unit_liveness.start_points = unit_start_points;
   unit_liveness.end_points = unit_end_points;
@@ -599,7 +603,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
                      LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE;
     relation.unit_count = 1;
   }
-  loom_low_placement_table_t placement = {};
+  loom_low_placement_table_t placement =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   placement.relations = relations;
   placement.relation_count = IREE_ARRAYSIZE(relations);
   const loom_value_ordinal_t tied_storage_origins[] = {1, 1, 1};
@@ -696,7 +702,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
       .value_ids = &value,
       .value_count = 1,
       .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
-  loom_liveness_interval_t interval = {};
+  loom_liveness_interval_t interval =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   interval.value_id = value;
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.value_class.register_descriptor_set_stable_id =
@@ -711,7 +719,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
                                        .value_count = 1,
                                        .value_interval_indices = &zero};
   loom_low_allocation_unit_liveness_value_t unit_value = {};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  loom_low_allocation_unit_liveness_t unit_liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   unit_liveness.values = &unit_value;
   unit_liveness.start_points = &zero;
   unit_liveness.end_points = &one;
@@ -781,7 +791,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
   uint32_t unit_ends[kValueCount];
   loom_low_allocation_fixed_value_t fixed_values[kFixedCount] = {};
   const uint16_t reg_class_id = RegisterClassId(IREE_SV("test.i32"));
-  loom_liveness_value_class_t value_class = {};
+  loom_liveness_value_class_t value_class =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   value_class.type_kind = LOOM_TYPE_REGISTER;
   value_class.register_descriptor_set_stable_id =
       target_.descriptor_set->stable_id;
@@ -826,7 +838,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
       .value_ids = values,
       .value_count = kValueCount,
       .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
-  loom_liveness_analysis_t liveness = {};
+  loom_liveness_analysis_t liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   liveness.intervals = intervals;
   liveness.interval_count = kValueCount;
   liveness.value_ids = values;
@@ -835,7 +849,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
   liveness.segments = segments;
   liveness.segment_count = segment_count;
   liveness.value_segment_ranges = segment_ranges;
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  loom_low_allocation_unit_liveness_t unit_liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   unit_liveness.values = unit_values;
   unit_liveness.start_points = unit_starts;
   unit_liveness.end_points = unit_ends;
@@ -876,7 +892,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
                 &constraints, LOOM_VALUE_ID_INVALID),
             nullptr);
 
-  loom_low_allocation_assignment_t candidate = {};
+  loom_low_allocation_assignment_t candidate =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   candidate.value_id = values[kFixedCount];
   candidate.descriptor_reg_class_id = reg_class_id;
   candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_TARGET_ID;
@@ -1052,7 +1070,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
       .value_ids = values,
       .value_count = kValueCount,
       .value_interval_indices = interval_indices};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
+  loom_low_allocation_unit_liveness_t unit_liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   unit_liveness.values = unit_values;
   unit_liveness.start_points = unit_starts;
   unit_liveness.end_points = unit_ends;
@@ -1083,7 +1103,9 @@ TEST_F(LowAllocationTargetConstraintsTest,
   }
   ASSERT_EQ(constraints.error_count, 0u);
 
-  loom_low_allocation_assignment_t candidate = {};
+  loom_low_allocation_assignment_t candidate =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   candidate.value_id = values[1];
   candidate.descriptor_reg_class_id = narrow_reg_class_id;
   candidate.start_point = 0;

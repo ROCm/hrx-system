@@ -1010,7 +1010,9 @@ func.def public @entry(%x: i32) -> (i32) {
       DeserializeModuleFromSource(context.get(), workspace.get(), source.get());
   LinkerPtr linker = CreateLinker(context.get());
 
-  loomc_link_options_t options = {};
+  loomc_link_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS;
   options.structure_size = sizeof(options);
   options.module_provider_count = 1;

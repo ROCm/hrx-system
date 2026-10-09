@@ -15,7 +15,9 @@ namespace iree::hal::amdgpu {
 namespace {
 
 static iree_hal_amdgpu_device_kernel_args_t MakeQueueInitializeKernelArgs() {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
+  iree_hal_amdgpu_device_kernel_args_t kernel_args =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   kernel_args.kernel_object = 0x12345678ull;
   kernel_args.setup = 1;
   kernel_args.workgroup_size[0] = 32;

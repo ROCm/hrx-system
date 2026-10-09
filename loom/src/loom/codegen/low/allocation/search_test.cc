@@ -80,7 +80,9 @@ class LowAllocationSearchTest : public ::testing::Test {
 };
 
 loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
-  loom_liveness_value_class_t value_class = {};
+  loom_liveness_value_class_t value_class =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   value_class.type_kind = LOOM_TYPE_REGISTER;
   value_class.register_descriptor_set_stable_id = descriptor_set_id;
   value_class.register_class_id = 0;
@@ -147,7 +149,9 @@ loom_low_reg_class_t RegClass(uint32_t allocatable_count,
 
 loom_low_resolved_target_t ResolvedTarget(
     const loom_low_descriptor_set_t* descriptor_set) {
-  loom_low_resolved_target_t target = {};
+  loom_low_resolved_target_t target =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   target.descriptor_set = descriptor_set;
   target.descriptor_set_key = IREE_SV("test");
   return target;
@@ -287,7 +291,9 @@ uint32_t FindFreeLocationWithPlacement(
     placement.ranges_by_source_ordinal = source_ranges;
   }
 
-  loom_low_allocation_search_context_t context = {};
+  loom_low_allocation_search_context_t context =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   context.module = module;
   context.descriptor_set = &descriptor_set;
   context.liveness = &liveness;
@@ -302,7 +308,9 @@ uint32_t FindFreeLocationWithPlacement(
       {0, LOOM_LOW_PLACEMENT_VALUE_RESULT, 0},
       {1, LOOM_LOW_PLACEMENT_VALUE_RESULT, 0},
   };
-  loom_low_placement_predicate_t predicate = {};
+  loom_low_placement_predicate_t predicate =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   predicate.result = 0;
   predicate.source = 1;
   predicate.unit_count = 1;
@@ -418,7 +426,9 @@ uint32_t FindFreeLocationWithStorageLease(
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {options.lease_base + 1};
-  loom_low_allocation_target_constraints_t target_constraints = {};
+  loom_low_allocation_target_constraints_t target_constraints =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   target_constraints.target = &target;
   target_constraints.max_assigned_location_end_by_reg_class =
       max_assigned_location_end_by_reg_class;
@@ -490,7 +500,9 @@ uint32_t FindFreeLocationWithStorageLease(
   lease_instances[0].location_base = options.lease_base;
   lease_instances[0].location_count = 1;
   uint8_t lease_instance_written[] = {1};
-  loom_low_allocation_storage_lease_state_t storage_leases = {};
+  loom_low_allocation_storage_lease_state_t storage_leases =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   storage_leases.lease_table = &lease_table;
   storage_leases.value_domain = &value_domain;
   storage_leases.unit_liveness = &unit_liveness;
@@ -685,7 +697,9 @@ TEST_F(LowAllocationSearchTest,
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {0};
-  loom_low_allocation_target_constraints_t target_constraints = {};
+  loom_low_allocation_target_constraints_t target_constraints =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   target_constraints.target = &target;
   target_constraints.max_assigned_location_end_by_reg_class =
       max_assigned_location_end_by_reg_class;

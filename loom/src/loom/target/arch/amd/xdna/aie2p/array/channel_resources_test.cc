@@ -192,7 +192,9 @@ TEST(Aie2pArrayChannelResourcesTest, ShimProposalRetainsExactTransition) {
 }
 
 TEST(Aie2pArrayChannelResourcesTest, ShimProposalRejectsWithoutMutation) {
-  loom_aie2p_array_tile_resources_t resources = {};
+  loom_aie2p_array_tile_resources_t resources =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   resources.facts = ShimFacts();
   resources.next_memory_to_stream_channel =
       ShimFacts()->dma.channel_count_per_direction;

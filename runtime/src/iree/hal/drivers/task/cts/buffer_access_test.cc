@@ -44,7 +44,9 @@ TEST_P(TaskBufferAccessTest, DirectionalStorageBindings) {
   };
   Ref<iree_hal_buffer_t> buffers[3];
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(buffers); ++i) {
-    iree_hal_buffer_params_t params = {};
+    iree_hal_buffer_params_t params =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     params.type =
         IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
     params.access =
@@ -99,7 +101,9 @@ TEST_P(TaskBufferAccessTest, DirectionalStorageBindings) {
       const iree_hal_buffer_ref_t atomic_ref =
           indirect ? iree_hal_make_indirect_buffer_ref(2, 0, sizeof(uint32_t))
                    : iree_hal_make_buffer_ref(buffers[2], 0, sizeof(uint32_t));
-      iree_hal_atomic_store_params_t store = {};
+      iree_hal_atomic_store_params_t store =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       store.width = IREE_HAL_ATOMIC_WIDTH_32;
       store.flags = IREE_HAL_ATOMIC_FLAG_RELEASE;
       IREE_ASSERT_OK(iree_hal_command_buffer_atomic_store(
@@ -124,7 +128,9 @@ TEST_P(TaskBufferAccessTest, DirectionalStorageBindings) {
       if (indirect) {
         // The opaque dispatch must preserve the atomic store's exact WRITE
         // requirement on the same slot. Rejection occurs before submission.
-        iree_hal_buffer_params_t params = {};
+        iree_hal_buffer_params_t params =
+            {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+                 // differs from declaration order.
         params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
                       IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
         params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
@@ -209,7 +215,9 @@ TEST_P(TaskBufferAccessTest, ExecutionOnlyNestedViews) {
       SemaphoreList executed(device_, {0}, {1});
       SemaphoreList downloaded(device_, {0}, {1});
       AllocationGate release_gate(gate.semaphores[0]);
-      iree_hal_buffer_params_t params = {};
+      iree_hal_buffer_params_t params =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       params.type = IREE_HAL_MEMORY_TYPE_OPTIMAL_FOR_DEVICE;
       params.access = IREE_HAL_MEMORY_ACCESS_ALL;
       params.usage =

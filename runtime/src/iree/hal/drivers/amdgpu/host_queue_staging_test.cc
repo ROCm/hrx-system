@@ -918,7 +918,9 @@ TEST_F(HostQueueStagingTest, ShortReadReleasesBuffersBeforeFailure) {
     Ref<iree_hal_file_t> file;
     IREE_ASSERT_OK(ImportNativeFile(test_device.base_device(), path,
                                     IREE_HAL_MEMORY_ACCESS_READ, file.out()));
-    iree_hal_buffer_params_t params = {};
+    iree_hal_buffer_params_t params =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     params.type = memory_type;
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;
     params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;

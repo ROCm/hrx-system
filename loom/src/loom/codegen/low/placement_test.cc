@@ -65,7 +65,9 @@ TEST(LowPlacementTest, ComposedRelationHasNoDirectSourceOperand) {
 }
 
 TEST(LowPlacementTest, StorageCompositionDoesNotImplyBitIdentity) {
-  loom_low_placement_relation_t write = {};
+  loom_low_placement_relation_t write =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   write.source_ordinal = 0;
   write.result_ordinal = 1;
   write.unit_count = 2;
@@ -73,7 +75,9 @@ TEST(LowPlacementTest, StorageCompositionDoesNotImplyBitIdentity) {
   write.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD |
                 LOOM_LOW_PLACEMENT_RELATION_FLAG_CAN_ALIAS_STORAGE |
                 LOOM_LOW_PLACEMENT_RELATION_FLAG_WRITES_STORAGE;
-  loom_low_placement_relation_t edge = {};
+  loom_low_placement_relation_t edge =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   edge.source_ordinal = 1;
   edge.result_ordinal = 2;
   edge.unit_count = 2;

@@ -213,7 +213,9 @@ TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
   rbx.inputs[0] = 3;
   loom_x86_encoding_operands_t r12 = {};
   r12.inputs[0] = 12;
-  loom_x86_encoding_operands_t stack = {};
+  loom_x86_encoding_operands_t stack =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   stack.result = 4;
   stack.immediate = 24;
   EXPECT_EQ(Read(),
@@ -285,7 +287,9 @@ TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
       -static_cast<int64_t>(branch_length + body_length + jump_length);
   loom_x86_encoding_operands_t rbx = {};
   rbx.inputs[0] = 3;
-  loom_x86_encoding_operands_t stack = {};
+  loom_x86_encoding_operands_t stack =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   stack.result = 4;
   stack.immediate = 16;
   EXPECT_EQ(Read(),
@@ -318,17 +322,23 @@ TEST_F(FunctionTest, RealignmentRestoresTheSavedStackPointerBeforePops) {
   rbx.inputs[0] = 3;
   loom_x86_encoding_operands_t capture = {.result = 11};
   capture.inputs[0] = 4;
-  loom_x86_encoding_operands_t align = {};
+  loom_x86_encoding_operands_t align =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   align.result = 4;
   align.immediate = -64;
-  loom_x86_encoding_operands_t allocate = {};
+  loom_x86_encoding_operands_t allocate =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   allocate.result = 4;
   allocate.immediate = 64;
   loom_x86_encoding_operands_t save = {};
   save.inputs[0] = 11;
   save.inputs[1] = 4;
   save.immediate = 8;
-  loom_x86_encoding_operands_t restore = {};
+  loom_x86_encoding_operands_t restore =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   restore.result = 4;
   restore.inputs[0] = 4;
   restore.immediate = 8;
@@ -404,10 +414,14 @@ TEST_F(FunctionTest, FramePointerDoesNotSuppressOutgoingStackRealignment) {
   rbp.inputs[0] = 5;
   loom_x86_encoding_operands_t establish = {.result = 5};
   establish.inputs[0] = 4;
-  loom_x86_encoding_operands_t align = {};
+  loom_x86_encoding_operands_t align =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   align.result = 4;
   align.immediate = -32;
-  loom_x86_encoding_operands_t allocate = {};
+  loom_x86_encoding_operands_t allocate =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   allocate.result = 4;
   allocate.immediate = 64;
   loom_x86_encoding_operands_t restore = {.result = 4};

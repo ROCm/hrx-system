@@ -131,7 +131,9 @@ TEST(BufferRangeTest, AcceptsContainedRanges) {
 }
 
 TEST(BufferRangeTest, RejectsOutOfRangeAndOverflowingRanges) {
-  iree_hal_buffer_t buffer = {};
+  iree_hal_buffer_t buffer =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   buffer.byte_length = 16;
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,

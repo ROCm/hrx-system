@@ -26,7 +26,9 @@ ResultPtr Capture(
                                       source_retention,
                                       loomc_allocator_system(), &result));
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-  loom_diagnostic_t diagnostic = {};
+  loom_diagnostic_t diagnostic =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.emitter = LOOM_EMITTER_PARSER;
@@ -82,7 +84,9 @@ TEST(DiagnosticTest, InputIdentityAloneCannotSupplyOriginalText) {
       SCOPED_TRACE(original);
       auto source = CreateSource(input_name, "different contents");
       std::string text = original;
-      loom_source_range_t range = {};
+      loom_source_range_t range =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       range.filename = IREE_SV("header.h");
       range.source = iree_make_string_view(text.data(), text.size());
       range.provenance = text.empty()
@@ -113,7 +117,9 @@ TEST(DiagnosticTest, InputIdentityAloneCannotSupplyOriginalText) {
 TEST(DiagnosticTest, RetainsMatchingSourceOwner) {
   auto source = CreateSource("source.loom", "original");
   auto contents = loomc_source_contents(source.get());
-  loom_source_range_t range = {};
+  loom_source_range_t range =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   range.provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
   range.filename = IREE_SV("source.loom");
   range.source = iree_make_string_view(
@@ -164,7 +170,9 @@ TEST(DiagnosticTest, MetadataRetentionOwnsIdentityAndCoordinatesOnly) {
 TEST(DiagnosticTest, RetainsCanonicalFormatting) {
   auto source = CreateSource("source.loom", "duplicate");
   const auto contents = loomc_source_contents(source.get());
-  loom_source_range_t range = {};
+  loom_source_range_t range =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   range.provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE;
   range.filename = IREE_SV("source.loom");
   range.source = iree_make_string_view(
@@ -174,7 +182,9 @@ TEST(DiagnosticTest, RetainsCanonicalFormatting) {
   range.end_column = 10;
   range.end = contents.data_length;
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("value"));
-  loom_diagnostic_t diagnostic = {};
+  loom_diagnostic_t diagnostic =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 2);
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.emitter = LOOM_EMITTER_PARSER;
@@ -218,7 +228,9 @@ TEST(DiagnosticTest, RelatedLocationsOwnLabelsAndShareOnlyMatchingSnapshots) {
     std::string filename = "header.h";
     std::string text = "x\ndeclaration";
     std::string label = "defined here";
-    loom_source_range_t primary = {};
+    loom_source_range_t primary =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     primary.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
     primary.filename = IREE_SV("input.loom");
     primary.start_line = primary.start_column = primary.end_line = 1;
@@ -255,7 +267,9 @@ TEST(DiagnosticTest, RelatedLocationsOwnLabelsAndShareOnlyMatchingSnapshots) {
     related[3].source_location.end = 8;
 
     loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-    loom_diagnostic_t diagnostic = {};
+    loom_diagnostic_t diagnostic =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
     diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
     diagnostic.emitter = LOOM_EMITTER_PARSER;
@@ -348,7 +362,9 @@ struct DiagnosticAllocator {
 TEST(DiagnosticTest,
      FailedRelatedCaptureReleasesSourcesAndLeavesResultReusable) {
   loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-  loom_diagnostic_t diagnostic = {};
+  loom_diagnostic_t diagnostic =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.emitter = LOOM_EMITTER_PARSER;

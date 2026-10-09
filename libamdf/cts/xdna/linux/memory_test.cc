@@ -92,7 +92,9 @@ class XdnaLinuxMemoryTest : public XdnaDeviceFixture {
 };
 
 TEST_F(XdnaLinuxMemoryTest, PortableImportDoesNotInheritNativeHostProtocol) {
-  amdf_memory_create_info_t create = {};
+  amdf_memory_create_info_t create =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create.structure_size = sizeof(create);
   create.memory_profile_ordinal = FindMemoryProfileOrdinal(
@@ -113,7 +115,9 @@ TEST_F(XdnaLinuxMemoryTest, PortableImportDoesNotInheritNativeHostProtocol) {
   ASSERT_EQ(
       api_->memory_export(memories_[0], &export_info, &external_memories_[0]),
       AMDF_STATUS_OK);
-  amdf_memory_import_info_t import = {};
+  amdf_memory_import_info_t import =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   import.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
   import.structure_size = sizeof(import);
   import.memory_profile_ordinal = FindMemoryProfileOrdinal(

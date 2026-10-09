@@ -1096,7 +1096,9 @@ TEST_F(HipExecutionResourceApiTest,
             api_.batch_mem_op(stream, 1, &parameter, /*flags=*/0));
 
   const dim3 one = {1, 1, 1};
-  hipLaunchConfig_t runtime_config = {};
+  hipLaunchConfig_t runtime_config =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   runtime_config.gridDim = one;
   runtime_config.blockDim = one;
   runtime_config.stream = stream;
@@ -1105,7 +1107,9 @@ TEST_F(HipExecutionResourceApiTest,
             api_.launch_kernel_ex(&runtime_config, function,
                                   /*arguments=*/nullptr));
 
-  HIP_LAUNCH_CONFIG driver_config = {};
+  HIP_LAUNCH_CONFIG driver_config =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   driver_config.gridDimX = 1;
   driver_config.gridDimY = 1;
   driver_config.gridDimZ = 1;

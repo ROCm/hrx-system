@@ -51,7 +51,9 @@ loom_x86_packed_dot_match_request_t MatchRequest(
     loom_x86_packed_dot_numeric_type_t result_numeric_type,
     loom_x86_packed_dot_feature_bits_t feature_bits,
     loom_x86_packed_dot_contract_flags_t semantic_flags) {
-  loom_x86_packed_dot_match_request_t request = {};
+  loom_x86_packed_dot_match_request_t request =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   request.family = family;
   request.shape.vector_bit_width = vector_bit_width;
   request.shape.input_lane_count = input_lane_count;

@@ -150,7 +150,9 @@ class PeerSdmaSystemTest : public GpuPeerDeviceFixture {
 
   void QueryProspectivePair(int from, int to,
                             amdf_memory_pair_info_t* prospective) {
-    amdf_memory_profile_pair_query_t query = {};
+    amdf_memory_profile_pair_query_t query =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
     query.structure_size = sizeof(query);
     query.memory_profile_ordinal = creation_.memory_profile_ordinal;

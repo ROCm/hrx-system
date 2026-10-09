@@ -91,7 +91,9 @@ const amdf_api_t* QueryApi() {
 
 amdf_instance_create_info_t MakeInstanceCreateInfo(
     RecordingAllocator* allocator) {
-  amdf_instance_create_info_t create_info = {};
+  amdf_instance_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create_info.type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
   create_info.structure_size = sizeof(create_info);
   create_info.host_allocator = allocator->MakeAllocator();

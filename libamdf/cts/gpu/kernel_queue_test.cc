@@ -153,7 +153,9 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
         {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                    AMDF_MEMORY_ACCESS_EXECUTE,
          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t create_info = {};
+    amdf_memory_create_info_t create_info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create_info.structure_size = sizeof(create_info);
     create_info.access_count = 1;
@@ -224,7 +226,9 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
         {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                    AMDF_MEMORY_ACCESS_EXECUTE,
          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t create_info = {};
+    amdf_memory_create_info_t create_info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create_info.structure_size = sizeof(create_info);
     create_info.access_count = 1;
@@ -323,7 +327,9 @@ class GpuKernelQueueTest : public GpuDeviceFixture {
                     sizeof(command));
       }
     }
-    amdf_gpu_kernel_command_t command = {};
+    amdf_gpu_kernel_command_t command =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     command.memory = memory_;
     command.byte_length = command_byte_length;
     amdf_gpu_kernel_queue_submission_info_t submit = {
@@ -455,7 +461,9 @@ TEST_F(Pm4KernelQueueTest, ExecutesMaterializedCopyData) {
   ASSERT_TRUE(amdf_status_is_ok(api_->host_mapping_cache_control(
       mapping_, AMDF_HOST_CACHE_OPERATION_FLUSH, 0, kMemoryByteLength)));
 
-  amdf_gpu_kernel_command_t command_descriptor = {};
+  amdf_gpu_kernel_command_t command_descriptor =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   command_descriptor.memory = memory_;
   command_descriptor.byte_offset = kCommandByteOffset;
   command_descriptor.byte_length = sizeof(command);
@@ -736,7 +744,9 @@ TEST_F(Pm4KernelQueueTest, ExecutesDeviceLocalCommandStream) {
       .byte_offset = kCommandByteOffset,
       .byte_length = sizeof(upload_command),
   };
-  amdf_gpu_kernel_queue_submission_info_t submission_info = {};
+  amdf_gpu_kernel_queue_submission_info_t submission_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   submission_info.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO;
   submission_info.structure_size = sizeof(submission_info);
   submission_info.command_count = 1;

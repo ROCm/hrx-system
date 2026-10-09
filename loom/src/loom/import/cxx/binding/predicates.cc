@@ -154,7 +154,9 @@ std::optional<PredicateValue> predicate_value(cxx::TranslationUnit& unit,
   }
   std::reverse(members.begin(), members.end());
 
-  PredicateValue value = {};
+  PredicateValue value =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
+           // nontrivial member initialization.
   value.members = std::move(members);
   value.source = unwrap_expression(expression);
   value.converted = expression;

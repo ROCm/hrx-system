@@ -162,7 +162,9 @@ TEST_F(ExpectationTest, ComparesNarrowScalarsUsingSourceTypes) {
     iree_tooling_value_t actual = {.kind = IREE_TOOLING_VALUE_KIND_RAW_U32};
     actual.storage.u32 = format.one;
     iree_tooling_value_t expected = actual;
-    loom_testbench_close_expectation_plan_t close = {};
+    loom_testbench_close_expectation_plan_t close =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     close.nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT;
     ExpectScalarClose(format.type, actual, expected, close, true);
     actual.storage.u32 = format.next;

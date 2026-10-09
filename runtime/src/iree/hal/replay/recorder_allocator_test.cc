@@ -85,7 +85,9 @@ class ReplayRecorderAllocatorTest : public ::testing::Test {
   }
 
   iree_status_t Import(iree_hal_buffer_t** out_buffer) {
-    iree_hal_buffer_params_t params = {};
+    iree_hal_buffer_params_t params =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
     params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
     iree_hal_external_buffer_t external_buffer = {

@@ -230,7 +230,9 @@ EncodingIntrinsic EncodingIntrinsic::resolve(
                          member.value, module, owner);
     parameters.push_back(parameter);
   }
-  loom_encoding_t encoding = {};
+  loom_encoding_t encoding =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   encoding.alias_id = LOOM_STRING_ID_INVALID;
   check(
       loom_module_intern_string(module, view(family.name), &encoding.name_id));

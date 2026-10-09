@@ -107,7 +107,9 @@ class UserQueueMemoryScenario {
         kRequiredFlags, access.requirements);
     ASSERT_NE(profile_ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
 
-    amdf_memory_create_info_t create_info = {};
+    amdf_memory_create_info_t create_info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create_info.structure_size = sizeof(create_info);
     create_info.memory_profile_ordinal = profile_ordinal;

@@ -445,7 +445,9 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
       AMDF_STATUS_OK);
   ASSERT_NE(xdna_profile_ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
 
-  amdf_memory_profile_pair_query_t pool_query = {};
+  amdf_memory_profile_pair_query_t pool_query =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   pool_query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
   pool_query.structure_size = sizeof(pool_query);
   pool_query.memory_profile_ordinal = xdna_profile_ordinal;
@@ -497,7 +499,9 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
   EXPECT_EQ(device_only.release.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
   EXPECT_EQ(device_only.acquire.kind, AMDF_CACHE_TRANSITION_KIND_NONE);
 
-  amdf_memory_create_info_t create_info = {};
+  amdf_memory_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create_info.structure_size = sizeof(create_info);
   create_info.memory_profile_ordinal = gpu_profile_ordinal;
@@ -569,7 +573,9 @@ void GpuXdnaMemoryInteropTest::ImportGpuSubrangeAndReleaseAllocation() {
       amdf_physical_memory_id_is_equal(&external_memory_.physical_backing_id,
                                        &gpu_memory_info.physical_backing_id));
 
-  amdf_memory_import_info_t import_info = {};
+  amdf_memory_import_info_t import_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   import_info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
   import_info.structure_size = sizeof(import_info);
   import_info.memory_profile_ordinal = xdna_profile_ordinal;
@@ -887,7 +893,9 @@ TEST_F(GpuXdnaMemoryInteropTest,
       ASSERT_EQ(role, AMDF_MEMORY_PROFILE_ROLE_REGISTER);
       continue;
     }
-    amdf_memory_profile_pair_query_t query = {};
+    amdf_memory_profile_pair_query_t query =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
     query.structure_size = sizeof(query);
     query.memory_profile_ordinal = profile.ordinal;
@@ -928,7 +936,9 @@ TEST_F(GpuXdnaMemoryInteropTest,
       caller_pages_.byte_length = length;
     }
     for (uint32_t iteration = 0; iteration < 3; ++iteration) {
-      amdf_memory_create_info_t create = {};
+      amdf_memory_create_info_t create =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
       create.structure_size = sizeof(create);
       create.memory_profile_ordinal = profile.ordinal;
@@ -1284,7 +1294,9 @@ TEST_F(GpuXdnaMemoryInteropTest,
       AMDF_STATUS_OK);
   ASSERT_NE(gpu_profile_ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
 
-  amdf_memory_create_info_t create_info = {};
+  amdf_memory_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create_info.structure_size = sizeof(create_info);
   create_info.memory_profile_ordinal = gpu_profile_ordinal;
@@ -1312,7 +1324,9 @@ TEST_F(GpuXdnaMemoryInteropTest,
   const int descriptor =
       static_cast<int>(external_memory_.payload.file_descriptor);
 
-  amdf_memory_import_info_t import_info = {};
+  amdf_memory_import_info_t import_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   import_info.type = AMDF_STRUCTURE_TYPE_MEMORY_IMPORT_INFO;
   import_info.structure_size = sizeof(import_info);
   import_info.memory_profile_ordinal = xdna_profile_ordinal;

@@ -108,7 +108,9 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
   iree_benchmark_loom_benchmark_policy_t policy = {
       .measure_kind = IREE_BENCHMARK_LOOM_MEASURE_CASE_END_TO_END,
       .measure = IREE_SV("case_end_to_end")};
-  iree_benchmark_loom_benchmark_result_t result = {};
+  iree_benchmark_loom_benchmark_result_t result =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   result.executed = true;
   result.passed = true;
   result.has_sample_ordinal = true;
@@ -503,7 +505,9 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedCompileReport) {
   loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
   iree_benchmark_loom_benchmark_policy_t policy = {
       .measure = IREE_SV("case_end_to_end")};
-  iree_benchmark_loom_benchmark_result_t result = {};
+  iree_benchmark_loom_benchmark_result_t result =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   result.executed = true;
   result.passed = true;
   result.samples_per_iteration = 1;

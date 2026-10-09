@@ -221,7 +221,9 @@ static void InitializeDirectDispatchCommand(
 static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
     uint64_t kernel_object, uint16_t setup, uint16_t workgroup_size_x,
     uint32_t private_segment_size, uint32_t group_segment_size) {
-  iree_hal_amdgpu_device_kernel_args_t kernel_args = {};
+  iree_hal_amdgpu_device_kernel_args_t kernel_args =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   kernel_args.kernel_object = kernel_object;
   kernel_args.kernarg_size = 32;
   kernel_args.kernarg_alignment = 8;
@@ -515,7 +517,9 @@ static iree_hal_amdgpu_aql_block_processor_t MakeProcessor(
     iree_hal_command_buffer_t* command_buffer = nullptr,
     iree_hal_buffer_binding_table_t binding_table =
         iree_hal_buffer_binding_table_empty()) {
-  iree_hal_amdgpu_aql_block_processor_t processor = {};
+  iree_hal_amdgpu_aql_block_processor_t processor =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   processor.transfer_context = transfer_context;
   processor.command_buffer = command_buffer;
   processor.bindings.table = binding_table;
@@ -1679,7 +1683,9 @@ TEST_F(AqlBlockProcessorRecordedTest,
   uint16_t packet_setup = 0;
   iree_hal_amdgpu_kernarg_block_t kernarg_block = {};
 
-  iree_hal_amdgpu_aql_block_processor_profile_t processor_params = {};
+  iree_hal_amdgpu_aql_block_processor_profile_t processor_params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   processor_params.queue = &queue;
   processor_params.command_buffer = command_buffer.get();
   processor_params.block = block;

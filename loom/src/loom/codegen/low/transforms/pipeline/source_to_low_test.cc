@@ -180,7 +180,8 @@ class LowLowerPassTest : public ::testing::Test {
         loom_codegen_pass_environment_storage_initialize(
             &environment_options, function_versions,
             &codegen_environment_storage);
-    loom_pass_t pass = {};
+    loom_pass_t pass = {};  // NOLINT(iree-cpp-designated-initializer) --
+                            // Assignment sequencing spans intervening work.
     pass.info = pass_info;
     pass.module_run = loom_low_source_to_low_run;
     pass.instance_arena = &instance_arena;

@@ -102,11 +102,15 @@ TEST(BenchmarkReportTest, WritesSelectedSampleAndCliIterationOverrides) {
   iree_benchmark_loom_candidate_identity_t candidate = {
       .candidate_id = IREE_SV("candidate")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
+  loom_testbench_benchmark_plan_t benchmark_plan =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   benchmark_plan.name = IREE_SV("sampled_choice_latency");
   benchmark_plan.sample_count = 2;
   benchmark_plan.cartesian_sample_count = 2;
-  loom_testbench_case_plan_t case_plan = {};
+  loom_testbench_case_plan_t case_plan =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   case_plan.name = IREE_SV("sampled_choice");
   case_plan.sample_count = 2;
   case_plan.cartesian_sample_count = 2;
@@ -147,7 +151,9 @@ TEST(BenchmarkReportTest, WritesSelectedSampleAndCliIterationOverrides) {
 TEST(BenchmarkReportTest, WritesScenarioPlanDomain) {
   iree_benchmark_loom_run_identity_t run = {.run_id = IREE_SV("run")};
   loom_module_t module = {};
-  loom_testbench_benchmark_plan_t benchmark_plan = {};
+  loom_testbench_benchmark_plan_t benchmark_plan =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   benchmark_plan.name = IREE_SV("scenario_throughput");
   benchmark_plan.sample_count = 10;
   benchmark_plan.cartesian_sample_count = 10;
@@ -260,7 +266,9 @@ TEST(BenchmarkReportTest, OmitsEmptyStatusCodeMessage) {
 }
 
 TEST(BenchmarkReportTest, WritesHalProfileErrorWithStatusCodeFields) {
-  loom_run_hal_profile_summary_t profile = {};
+  loom_run_hal_profile_summary_t profile =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   profile.requested = true;
   profile.executed = true;
   profile.has_error = true;
@@ -304,7 +312,9 @@ TEST(BenchmarkReportTest, WritesCanonicalCompileReportTree) {
   loom_testbench_case_plan_t case_plan = {.name = IREE_SV("kernel_case")};
   iree_benchmark_loom_benchmark_policy_t policy = {
       .measure = IREE_SV("case_end_to_end")};
-  iree_benchmark_loom_benchmark_result_t result = {};
+  iree_benchmark_loom_benchmark_result_t result =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   result.executed = true;
   result.passed = true;
   result.samples_per_iteration = 1;
@@ -421,7 +431,9 @@ TEST(BenchmarkReportTest, WritesHalTimingCountsAndWarnings) {
       .measure = IREE_SV("dispatch_complete")};
   policy.hal_options.timing.stable_p90_to_p50_delta_ppm = 100000;
 
-  iree_benchmark_loom_benchmark_result_t result = {};
+  iree_benchmark_loom_benchmark_result_t result =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   result.executed = true;
   result.passed = true;
   result.samples_per_iteration = 1;

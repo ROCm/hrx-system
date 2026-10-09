@@ -115,7 +115,9 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   if (selected == AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN) {
     GTEST_SKIP() << "no joint construction profile for this physical pair";
   }
-  amdf_memory_create_info_t create_info = {};
+  amdf_memory_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create_info.structure_size = sizeof(create_info);
   create_info.memory_profile_ordinal = selected;
@@ -185,7 +187,9 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   if (local) {
     return;
   }
-  amdf_memory_map_info_t map_info = {};
+  amdf_memory_map_info_t map_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
   map_info.structure_size = sizeof(map_info);
   map_info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;

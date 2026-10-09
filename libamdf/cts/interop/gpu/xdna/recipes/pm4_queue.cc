@@ -66,7 +66,9 @@ void Pm4RecipeQueue::Initialize(
             AMDF_STATUS_OK);
   const uint64_t granularity = profile.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create = {};
+  amdf_memory_create_info_t create =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create.structure_size = sizeof(create);
   create.memory_profile_ordinal = ordinal;

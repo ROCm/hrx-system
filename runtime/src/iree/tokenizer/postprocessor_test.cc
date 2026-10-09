@@ -563,7 +563,9 @@ TEST(PostprocessorEncodeState, AssignTypeIdsNoOpNullTypeIds) {
                            /*prefix_type_ids=*/{}, /*infix_type_ids=*/{},
                            /*suffix_type_ids=*/{},
                            /*sequence_a_type_id=*/1);
-  iree_tokenizer_postprocessor_encode_state_t state = {};
+  iree_tokenizer_postprocessor_encode_state_t state =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   state.phase = IREE_TOKENIZER_POSTPROCESSOR_PHASE_SEQUENCE_A;
   state.active_template = &tmpl;
 

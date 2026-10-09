@@ -33,7 +33,9 @@ void Diagnostics::emit(const cxx::Token& token,
   if (!sink_.fn || !iree_status_is_ok(status_)) {
     return;
   }
-  loom_source_range_t range = {};
+  loom_source_range_t range =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   range.provenance = LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE;
   if (token.fileId()) {
     auto first = preprocessor_->tokenStartPosition(token);

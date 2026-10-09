@@ -332,7 +332,9 @@ TEST_P(Aie2pCompletionRouteTest, EmitsSelectedPacketResources) {
       .buffer_descriptor_count = 1,
       .credit_lock_index = UINT32_MAX,
   };
-  loom_aie2p_array_plan_t plan = {};
+  loom_aie2p_array_plan_t plan =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   plan.family = loom_xdna_npu2_array_family();
   plan.bindings = &binding;
   plan.binding_count = 1;

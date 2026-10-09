@@ -35,7 +35,9 @@ loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
                                         iree_host_size_t reg_class_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_set_t descriptor_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   descriptor_set.reg_classes = reg_classes;
   descriptor_set.reg_class_count = reg_class_count;
   return descriptor_set;

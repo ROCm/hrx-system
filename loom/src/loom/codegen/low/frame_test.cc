@@ -160,7 +160,9 @@ TEST_F(LowEmissionFrameTest, StorageLeaseFrameRetainsValueProducers) {
             return iree_ok_status();
           },
   };
-  loom_low_emission_frame_options_t options = {};
+  loom_low_emission_frame_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   options.descriptor_registry = &registry_.registry;
   options.storage_lease_provider = &storage_lease_provider;
   options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
@@ -726,7 +728,9 @@ low.func.def target<test.low.core> @too_wide(%wide: reg<test.special x2>) -> (re
   } captured;
   loom_low_allocation_budget_t budget = {IREE_SV("test.special"), 1};
   loom_low_planning_statistics_t statistics = {};
-  loom_low_emission_frame_options_t options = {};
+  loom_low_emission_frame_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.descriptor_registry = &registry_.registry;
   options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
   options.allocation_budgets = &budget;
@@ -812,7 +816,9 @@ low.func.def target<test.low.core> @invalid_budget(%value: reg<test.i32>) -> (re
       {IREE_SV("test.i32"), 2},
   };
   loom_low_planning_statistics_t statistics = {};
-  loom_low_emission_frame_options_t options = {};
+  loom_low_emission_frame_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.descriptor_registry = &registry_.registry;
   options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
   options.allocation_budgets = budgets;

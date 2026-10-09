@@ -219,7 +219,9 @@ check.case @device_events {
     IREE_EXPECT_OK(
         loom_testbench_run_case_sample(&executor, 0, &sample_result));
 
-    DeviceEventExecutionResult result = {};
+    DeviceEventExecutionResult result =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment follows
+             // nontrivial member initialization.
     result.passed = sample_result.passed;
     result.captured_event_count = sample_result.device_events->count;
     result.dropped_event_count = sample_result.device_events->dropped_count;

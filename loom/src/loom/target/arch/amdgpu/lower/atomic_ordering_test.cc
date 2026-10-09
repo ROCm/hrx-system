@@ -21,7 +21,9 @@ TEST(AmdgpuAtomicOrderingTest, SystemAdmissionRequiresCoherenceRecipe) {
     GTEST_SKIP() << "RDNA 3.5 descriptors are not linked.";
   }
 
-  loom_low_source_memory_access_plan_t source = {};
+  loom_low_source_memory_access_plan_t source =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   source.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
   source.atomic.scope = LOOM_ATOMIC_SCOPE_SYSTEM;
   EXPECT_TRUE(loom_amdgpu_atomic_scope_supported(

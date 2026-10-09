@@ -40,7 +40,9 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
     loom_module_value_ordinal_scratch_set(module, value_ids[i], i);
   }
 
-  loom_liveness_value_class_t value_class = {};
+  loom_liveness_value_class_t value_class =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   value_class.type_kind = LOOM_TYPE_REGISTER;
   value_class.register_descriptor_set_stable_id = 17;
   value_class.register_class_id = 0;
@@ -92,7 +94,9 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   const loom_low_placement_relation_range_t source_ranges[] = {
       {0, 1}, {1, 1}, {2, 0}, {2, 0}};
   const uint32_t source_relations[] = {0, 1};
-  loom_low_placement_table_t placement = {};
+  loom_low_placement_table_t placement =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   placement.value_ids = value_ids;
   placement.value_count = IREE_ARRAYSIZE(value_ids);
   placement.relations = relations;
@@ -124,7 +128,9 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
       .max_assigned_location_end_by_reg_class = high_water,
       .max_constrained_location_end_by_reg_class = constrained_high_water};
 
-  loom_low_allocation_assignment_t future = {};
+  loom_low_allocation_assignment_t future =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   future.value_id = value_ids[3];
   future.descriptor_reg_class_id = value_class.register_class_id;
   future.unit_count = 2;
@@ -140,7 +146,9 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
       .assignment_count = 1,
       .assignment_indices_by_value_ordinal = assignment_indices};
   loom_low_allocation_storage_lease_state_t leases = {};
-  loom_low_allocation_search_context_t context = {};
+  loom_low_allocation_search_context_t context =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   context.module = module;
   context.descriptor_set = &descriptors;
   context.liveness = &liveness;

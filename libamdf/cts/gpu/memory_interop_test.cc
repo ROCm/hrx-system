@@ -118,7 +118,9 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
         {.access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE |
                    AMDF_MEMORY_ACCESS_EXECUTE,
          .flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS}};
-    amdf_memory_create_info_t memory_info = {};
+    amdf_memory_create_info_t memory_info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     memory_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     memory_info.structure_size = sizeof(memory_info);
     memory_info.access_count = 1;
@@ -153,7 +155,9 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
       return status;
     }
 
-    amdf_memory_map_info_t map_info = {};
+    amdf_memory_map_info_t map_info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
     map_info.structure_size = sizeof(map_info);
     map_info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;

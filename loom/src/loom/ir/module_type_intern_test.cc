@@ -294,7 +294,8 @@ TEST_F(TypeImportTest, TemporaryMemoDistinguishesNamesSharingOneChildArray) {
 
 TEST_F(TypeImportTest, SharedPayloadWithChangedOuterTypeGetsDistinctIdentity) {
   const loom_overflow_dim_t dimensions[] = {1, 2, 3};
-  loom_type_t type = {};
+  loom_type_t type = {};  // NOLINT(iree-cpp-designated-initializer) --
+                          // Assignment sequencing spans intervening work.
   type.header = loom_type_make_header(LOOM_TYPE_TILE, LOOM_SCALAR_TYPE_F32, 3,
                                       LOOM_TYPE_FLAG_ALL_STATIC);
   type.dims[0] = reinterpret_cast<uintptr_t>(dimensions);

@@ -13,7 +13,9 @@ namespace {
 
 static loom_trait_flags_t ProjectEffects(const loom_low_effect_t* effects,
                                          uint16_t effect_count) {
-  loom_low_descriptor_set_t descriptor_set = {};
+  loom_low_descriptor_set_t descriptor_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   descriptor_set.effects = effects;
   descriptor_set.effect_count = effect_count;
   loom_low_descriptor_t descriptor = {.effect_count = effect_count};
@@ -80,7 +82,9 @@ TEST(LowDescriptorTraitsTest, CounterOrdersWithoutAccessingMemory) {
 }
 
 TEST(LowDescriptorTraitsTest, ExternalResourcesRemainEffectful) {
-  loom_low_effect_t effect = {};
+  loom_low_effect_t effect =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   effect.kind = LOOM_LOW_EFFECT_KIND_READ;
   const loom_trait_flags_t read_traits = ProjectEffects(&effect, 1);
   EXPECT_TRUE(iree_all_bits_set(read_traits, LOOM_TRAIT_NON_DETERMINISTIC));

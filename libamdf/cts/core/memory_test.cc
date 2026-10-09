@@ -210,7 +210,9 @@ TEST_F(HostMemoryTest, BorrowsCallerStorageWithoutTakingOwnership) {
   ASSERT_NO_FATAL_FAILURE(
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_REGISTER, &profile));
   storage_.assign(4099, 0x42);
-  amdf_memory_create_info_t create_info = {};
+  amdf_memory_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create_info.structure_size = sizeof(create_info);
   create_info.memory_profile_ordinal = profile.ordinal;
@@ -242,7 +244,9 @@ TEST_F(HostMemoryTest, QualifiesCpuPairsAndRejectsUnestablishedRegistration) {
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_REGISTER, &profile));
   EXPECT_EQ(profile.registration.registered_host_cacheability,
             AMDF_HOST_CACHEABILITY_WRITE_BACK);
-  amdf_memory_profile_pair_query_t query = {};
+  amdf_memory_profile_pair_query_t query =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
   query.structure_size = sizeof(query);
   query.memory_profile_ordinal = profile.ordinal;
@@ -271,7 +275,9 @@ TEST_F(HostMemoryTest, QualifiesCpuPairsAndRejectsUnestablishedRegistration) {
     query.registered_host_cacheability = cacheability;
     expect_rejection(AMDF_STATUS_CODE_UNSUPPORTED);
     storage_.resize(4096);
-    amdf_memory_create_info_t create = {};
+    amdf_memory_create_info_t create =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create.structure_size = sizeof(create);
     create.memory_profile_ordinal = profile.ordinal;
@@ -299,7 +305,9 @@ TEST_F(HostMemoryTest, RejectsInvalidConstructionWithoutPublishingOutputs) {
   amdf_memory_profile_t profile = {};
   ASSERT_NO_FATAL_FAILURE(
       FindProfile(AMDF_MEMORY_PROFILE_ROLE_CREATE, &profile));
-  amdf_memory_create_info_t create_info = {};
+  amdf_memory_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create_info.structure_size = sizeof(create_info);
   create_info.memory_profile_ordinal = profile.ordinal;

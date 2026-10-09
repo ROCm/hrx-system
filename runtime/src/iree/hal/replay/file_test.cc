@@ -177,7 +177,9 @@ TEST(ReplayFileWriterTest, RejectsInvalidMetadata) {
       file_handle, iree_allocator_system(), &writer));
   iree_io_file_handle_release(file_handle);
 
-  iree_hal_replay_file_record_metadata_t metadata = {};
+  iree_hal_replay_file_record_metadata_t metadata =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_NONE;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_replay_file_writer_append_record(
@@ -377,7 +379,9 @@ TEST(ReplayFileReaderTest, QueueBarriersPreserveDefaultAndEmptyLists) {
   const iree_hal_replay_queue_barrier_payload_t operation = {};
   const iree_hal_replay_queue_barriers_footer_t footer = {
       .payload_length = 0, .before_count = UINT64_MAX, .after_count = 0};
-  iree_hal_replay_file_record_header_t header = {};
+  iree_hal_replay_file_record_header_t header =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   header.header_length = sizeof(header);
   header.payload_length = sizeof(operation) + sizeof(footer);
   header.record_length = header.header_length + header.payload_length;
@@ -444,7 +448,9 @@ TEST(ReplayFileReaderTest, RejectsRecipeEffectsWithoutOperations) {
       .before_count = 1,
       .after_count = 0,
   };
-  iree_hal_replay_file_record_header_t header = {};
+  iree_hal_replay_file_record_header_t header =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   header.header_length = sizeof(header);
   header.payload_length =
       sizeof(operation) + footer.payload_length + sizeof(footer);

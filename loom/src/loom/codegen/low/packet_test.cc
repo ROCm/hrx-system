@@ -32,7 +32,9 @@ TEST(LowPacketTest, ReadsSparseImmediateValuesAndPreservesOmission) {
   loom_low_schedule_node_t node = {
       .op = &storage.op, .immediate_presence = (1u << 1) | (1u << 31)};
   loom_low_packet_view_t packet = {.node = &node};
-  loom_low_immediate_t field = {};
+  loom_low_immediate_t field =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   field.attribute_mask = 1u << 1;
   EXPECT_EQ(loom_low_packet_immediate_attr(&packet, &field).i64, 17);
   field.attribute_mask = 1u << 31;
@@ -95,7 +97,9 @@ TEST(LowPacketTest, GetsPacketViewAttrs) {
       &low_op_storage.op,
       loom_make_canonical_attr_dict(named_attrs, IREE_ARRAYSIZE(named_attrs)));
 
-  loom_low_schedule_node_t node = {};
+  loom_low_schedule_node_t node =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   node.op = &low_op_storage.op;
   loom_low_packet_view_t packet = {.node = &node};
 
@@ -164,7 +168,9 @@ TEST(LowDescriptorTest, IndexesPacketOperandRoles) {
   constraints[1].lhs_operand_index = 0;
   constraints[1].rhs_operand_index = 4;
 
-  loom_low_descriptor_t descriptor = {};
+  loom_low_descriptor_t descriptor =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   descriptor.operand_start = 0;
   descriptor.result_count = 1;
   descriptor.operand_count = IREE_ARRAYSIZE(operands);

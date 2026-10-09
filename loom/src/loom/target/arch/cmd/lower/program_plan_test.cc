@@ -120,7 +120,9 @@ class CmdProgramPlanTest : public ::testing::Test {
   }
 
   ModulePtr ParseAndVerify(const char* source) {
-    loom_text_parse_options_t parse_options = {};
+    loom_text_parse_options_t parse_options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     parse_options.max_errors = 20;
     const loom_low_descriptor_set_provider_t descriptor_set_providers[] = {
         loom_cmd_core_descriptor_set,
@@ -150,7 +152,9 @@ class CmdProgramPlanTest : public ::testing::Test {
       return module_ptr;
     }
 
-    loom_verify_options_t verify_options = {};
+    loom_verify_options_t verify_options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     verify_options.max_errors = 20;
     verify_options.sink = capture.sink();
     loom_verify_result_t result = {};

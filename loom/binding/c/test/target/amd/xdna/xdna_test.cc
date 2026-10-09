@@ -349,7 +349,9 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
     const std::string prepared_text = SerializeModuleToText(module.get());
     ASSERT_FALSE(prepared_text.empty());
 
-    loomc_emit_options_t emit_options = {};
+    loomc_emit_options_t emit_options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     emit_options.type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS;
     emit_options.artifact_format =
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA);

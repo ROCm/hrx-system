@@ -136,7 +136,9 @@ TEST_F(SlabProviderTest, CapturesAccessBeforeNativeAcquisition) {
     values.fill(0xA5A5A5A5u);
     IREE_ASSERT_OK(iree_hsa_memory_copy(IREE_LIBHSA(&libhsa_), slab.base_ptr,
                                         values.data(), sizeof(values)));
-    iree_hal_buffer_params_t params = {};
+    iree_hal_buffer_params_t params =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     params.type = properties.memory_type;
     params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
     params.access = IREE_HAL_MEMORY_ACCESS_ALL;

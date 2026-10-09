@@ -224,7 +224,9 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
     EXPECT_EQ(device->heap.host_pointer, nullptr);
   }
 
-  amdf_xdna_context_create_info_t create_info = {};
+  amdf_xdna_context_create_info_t create_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create_info.acceptable_scheduling_modes =
       AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED;
   create_info.logical_column_count = 1;
@@ -365,7 +367,9 @@ TEST_P(LinuxXdnaDeviceTest, NativeMetadataSuppliesArrayGeometry) {
                                   amdf_allocator_system(), &device, &result),
       AMDF_STATUS_OK);
   struct amdxdna_drm_query_aie_metadata metadata = {};
-  struct amdxdna_drm_get_info query = {};
+  struct amdxdna_drm_get_info query =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   query.param = DRM_AMDXDNA_QUERY_AIE_METADATA;
   query.buffer_size = sizeof(metadata);
   query.buffer = reinterpret_cast<uintptr_t>(&metadata);

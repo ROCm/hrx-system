@@ -222,7 +222,9 @@ low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @loom_kernel()
       .count = IREE_ARRAYSIZE(version_values),
   };
 
-  loom_target_emit_request_t request = {};
+  loom_target_emit_request_t request =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   request.low_descriptor_registry = &low_registry_.registry;
   request.module = module.get();
   request.function_versions = &function_versions;

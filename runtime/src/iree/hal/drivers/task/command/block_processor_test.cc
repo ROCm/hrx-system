@@ -360,7 +360,8 @@ TEST_P(BlockProcessorTest, SingleDispatch) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  DispatchDesc desc = {};
+  DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                           // Assignment sequencing spans intervening work.
   desc.function = kernel_count_tiles;
   desc.workgroup_count[0] = 8;
   desc.workgroup_count[1] = 1;
@@ -399,7 +400,8 @@ TEST_P(BlockProcessorTest, DispatchWritesTileIds) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  DispatchDesc desc = {};
+  DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                           // Assignment sequencing spans intervening work.
   desc.function = kernel_write_tile_id;
   desc.workgroup_count[0] = 16;
   desc.workgroup_count[1] = 1;
@@ -432,7 +434,9 @@ TEST_P(BlockProcessorTest, DispatchWithByteConstants) {
     SCOPED_TRACE(length);
     iree_atomic_int32_t result = IREE_ATOMIC_VAR_INIT(0);
     iree_hal_cmd_binding_entry_t table[] = {{&result, sizeof(result)}};
-    iree_hal_executable_dispatch_attrs_v0_t attributes = {};
+    iree_hal_executable_dispatch_attrs_v0_t attributes =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     attributes.constant_byte_length = length;
     attributes.binding_count = 1;
     attributes.workgroup_size_x = 1;
@@ -909,7 +913,8 @@ TEST_P(BlockProcessorTest, BarrierOrdering) {
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
   // Dispatch A: write tile IDs to buffer_a.
-  DispatchDesc desc_a = {};
+  DispatchDesc desc_a = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
   desc_a.function = kernel_write_tile_id;
   desc_a.workgroup_count[0] = 8;
   desc_a.workgroup_count[1] = 1;
@@ -921,7 +926,8 @@ TEST_P(BlockProcessorTest, BarrierOrdering) {
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_barrier(&builder));
 
   // Dispatch B: copy buffer_a to buffer_b.
-  DispatchDesc desc_b = {};
+  DispatchDesc desc_b = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
   desc_b.function = kernel_copy_elements;
   desc_b.workgroup_count[0] = 8;
   desc_b.workgroup_count[1] = 1;
@@ -959,7 +965,8 @@ TEST_P(BlockProcessorTest, DirectFixup) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  DispatchDesc desc = {};
+  DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                           // Assignment sequencing spans intervening work.
   desc.function = kernel_count_tiles;
   desc.workgroup_count[0] = 5;
   desc.workgroup_count[1] = 1;
@@ -1018,7 +1025,8 @@ TEST_P(BlockProcessorTest, MultiBlockExecution) {
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
   for (int i = 0; i < 200; ++i) {
-    DispatchDesc desc = {};
+    DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
     desc.function = kernel_count_tiles;
     desc.workgroup_count[0] = 1;
     desc.workgroup_count[1] = 1;
@@ -1190,7 +1198,8 @@ TEST_P(BlockProcessorTest, ThreeDimensionalDispatch) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  DispatchDesc desc = {};
+  DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                           // Assignment sequencing spans intervening work.
   desc.function = kernel_count_tiles;
   desc.workgroup_count[0] = 4;
   desc.workgroup_count[1] = 3;
@@ -1253,7 +1262,8 @@ TEST_P(BlockProcessorTest, MixedCommandSequence) {
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_barrier(&builder));
 
   // Step 2: Dispatch writes tile IDs into source (overwrites fill).
-  DispatchDesc desc = {};
+  DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                           // Assignment sequencing spans intervening work.
   desc.function = kernel_write_tile_id;
   desc.workgroup_count[0] = 4;
   desc.workgroup_count[1] = 1;
@@ -1311,7 +1321,8 @@ TEST_P(BlockProcessorTest, LargeDispatchMultiWorker) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  DispatchDesc desc = {};
+  DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                           // Assignment sequencing spans intervening work.
   desc.function = kernel_write_tile_id;
   desc.workgroup_count[0] = 1024;
   desc.workgroup_count[1] = 1;
@@ -1354,7 +1365,8 @@ TEST_P(BlockProcessorTest, MultiRegionMultiDispatch) {
 
   // Region 0: 3 dispatches × 10 tiles = 30 tiles.
   for (int i = 0; i < 3; ++i) {
-    DispatchDesc desc = {};
+    DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
     desc.function = kernel_count_tiles;
     desc.workgroup_count[0] = 10;
     desc.workgroup_count[1] = 1;
@@ -1368,7 +1380,8 @@ TEST_P(BlockProcessorTest, MultiRegionMultiDispatch) {
 
   // Region 1: 2 dispatches × 20 tiles = 40 tiles.
   for (int i = 0; i < 2; ++i) {
-    DispatchDesc desc = {};
+    DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
     desc.function = kernel_count_tiles;
     desc.workgroup_count[0] = 20;
     desc.workgroup_count[1] = 1;
@@ -1382,7 +1395,8 @@ TEST_P(BlockProcessorTest, MultiRegionMultiDispatch) {
 
   // Region 2: 1 dispatch × 50 tiles = 50 tiles.
   {
-    DispatchDesc desc = {};
+    DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
     desc.function = kernel_count_tiles;
     desc.workgroup_count[0] = 50;
     desc.workgroup_count[1] = 1;
@@ -1426,7 +1440,8 @@ TEST_P(BlockProcessorTest, NarrowToWideTransition) {
 
   // Region 0: 1 tile.
   {
-    DispatchDesc desc = {};
+    DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
     desc.function = kernel_count_tiles;
     desc.workgroup_count[0] = 1;
     desc.workgroup_count[1] = 1;
@@ -1440,7 +1455,8 @@ TEST_P(BlockProcessorTest, NarrowToWideTransition) {
 
   // Region 1: 128 tiles.
   {
-    DispatchDesc desc = {};
+    DispatchDesc desc = {};  // NOLINT(iree-cpp-designated-initializer) --
+                             // Assignment sequencing spans intervening work.
     desc.function = kernel_count_tiles;
     desc.workgroup_count[0] = 128;
     desc.workgroup_count[1] = 1;

@@ -380,7 +380,9 @@ func.def public abi(array_program) @entry() {
 }
 )");
   const iree_string_view_t roots[] = {IREE_SV("entry")};
-  loom_compile_request_options_t options = {};
+  loom_compile_request_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.target_profile = &kTargetProfile;
   for (iree_host_size_t root_count : {0, 1}) {
     options.roots = {root_count, roots};
@@ -400,7 +402,9 @@ func.def public abi(object_function) @entry() {
 }
 )");
   const iree_string_view_t roots[] = {IREE_SV("entry")};
-  loom_compile_request_options_t options = {};
+  loom_compile_request_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.format = IREE_SV("DiagnosticFormat123");
   for (iree_host_size_t root_count : {0, 1}) {
     options.roots = {root_count, roots};
@@ -584,7 +588,9 @@ func.def abi(array_program) @entry() {
 }
 )");
   const iree_string_view_t roots[] = {IREE_SV("entry")};
-  loom_compile_request_options_t options = {};
+  loom_compile_request_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.target_profile = &kTargetProfile;
   loom_compile_request_t rejected_request = {};
   IREE_EXPECT_STATUS_IS(

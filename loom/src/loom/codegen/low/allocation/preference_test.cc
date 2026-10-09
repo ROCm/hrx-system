@@ -182,7 +182,9 @@ TEST_F(LowAllocationPreferenceTest, InstructionUsesDoNotAffectStorageSearch) {
 
 TEST_F(LowAllocationPreferenceTest,
        WholeCopyPredictionYieldsToPublishedMembers) {
-  loom_low_placement_relation_t copy = {};
+  loom_low_placement_relation_t copy =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   copy.result_ordinal = 1;
   copy.source_ordinal = 3;
   copy.unit_count = 2;

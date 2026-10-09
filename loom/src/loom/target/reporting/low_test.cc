@@ -42,7 +42,9 @@ TEST(CompileReportLowMixTest, CountsExecutionBarriersFromInstructionClasses) {
   loom_low_allocation_table_t allocation = {};
   loom_target_compile_report_static_instruction_mix_t mix = {};
   for (const auto& descriptor : descriptors) {
-    loom_low_schedule_node_t node = {};
+    loom_low_schedule_node_t node =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     node.kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
     node.descriptor = &descriptor;
     loom_target_compile_report_accumulate_low_node_static_mix(
@@ -91,7 +93,9 @@ TEST(CompileReportLowMixTest, CountsOnlyMemoryAttachedReadWriteEffects) {
   loom_target_compile_report_static_instruction_mix_t mix = {};
 
   for (const auto& descriptor : descriptors) {
-    loom_low_schedule_node_t node = {};
+    loom_low_schedule_node_t node =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     node.kind = LOOM_LOW_SCHEDULE_NODE_DESCRIPTOR;
     node.descriptor = &descriptor;
     loom_target_compile_report_accumulate_low_node_static_mix(
@@ -595,7 +599,9 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
                           : 0,
       .descriptor_set = &descriptor_set,
   };
-  loom_low_schedule_table_t schedule = {};
+  loom_low_schedule_table_t schedule =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   schedule.module = module;
   schedule.target = target;
   schedule.blocks = schedule_blocks;
@@ -609,7 +615,9 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   schedule.hazard_gap_count = 2;
   schedule.model_summary_count = 1;
 
-  loom_low_emission_frame_t frame = {};
+  loom_low_emission_frame_t frame =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   frame.target = target;
   frame.schedule = schedule;
   frame.allocation.module = module;

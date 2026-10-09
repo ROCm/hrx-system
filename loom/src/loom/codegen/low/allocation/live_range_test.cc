@@ -15,7 +15,9 @@ loom_low_allocation_assignment_t Assignment(
     loom_value_id_t value_id, uint16_t descriptor_reg_class_id,
     uint32_t start_point, uint32_t end_point, uint32_t location_base,
     uint32_t location_count, uint32_t unit_count, uint32_t unit_point_start) {
-  loom_low_allocation_assignment_t assignment = {};
+  loom_low_allocation_assignment_t assignment =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   assignment.value_id = value_id;
   assignment.descriptor_reg_class_id = descriptor_reg_class_id;
   assignment.start_point = start_point;
@@ -315,7 +317,9 @@ TEST(LowAllocationLiveRangeTest, PreservesSparseGapsAgainstContiguousStorage) {
     reg_class.flags = flags;
     reg_class.allocatable_count = 1;
     reg_class.candidate_lookup.register_count = 1;
-    loom_low_descriptor_set_t descriptor_set = {};
+    loom_low_descriptor_set_t descriptor_set =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     descriptor_set.reg_classes = &reg_class;
     descriptor_set.reg_class_count = 1;
     descriptor_set.physical_registers = physical_registers;

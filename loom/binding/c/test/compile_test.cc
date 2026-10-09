@@ -1072,7 +1072,9 @@ TEST(CompileTest, EmissionNotesUseTheirOwnModuleAndCountOnlyResolvedOmissions) {
     related[6].label = IREE_SV("unknown location");
     related[6].op = unknown_op;
     loom_diagnostic_param_t param = loom_param_string(IREE_SV("x"));
-    loom_diagnostic_emission_t emission = {};
+    loom_diagnostic_emission_t emission =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     emission.module = other_module;
     emission.op = other_op;
     emission.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1);

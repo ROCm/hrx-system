@@ -37,7 +37,9 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
                                                    uint32_t start_point,
                                                    uint32_t end_point,
                                                    uint32_t unit_count) {
-    loom_liveness_interval_t interval = {};
+    loom_liveness_interval_t interval =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     interval.value_id = value_id;
     interval.value_class.type_kind = LOOM_TYPE_REGISTER;
     interval.start_point = start_point;
@@ -47,7 +49,9 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
   }
 
   static loom_liveness_interval_t ScalarInterval(loom_value_id_t value_id) {
-    loom_liveness_interval_t interval = {};
+    loom_liveness_interval_t interval =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     interval.value_id = value_id;
     interval.value_class.type_kind = LOOM_TYPE_SCALAR;
     interval.unit_count = 1;
@@ -92,7 +96,9 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
         .value_ids = value_ids.data(),
         .value_count = count,
         .value_interval_indices = interval_indices.data()};
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
+    loom_low_allocation_unit_liveness_t unit_liveness =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     unit_liveness.values = values.data();
     unit_liveness.point_count = unit_count;
     return loom_low_allocation_interval_order_build(&descriptor_set_, &liveness,

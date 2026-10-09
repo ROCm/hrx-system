@@ -214,7 +214,9 @@ void GpuXdnaDeviceFixture::QueryProfilePairs(
     const amdf_memory_create_info_t& create, uint32_t gpu_ordinal,
     std::span<const GpuXdnaEdge> edges,
     std::span<amdf_memory_pair_info_t> pairs) {
-  amdf_memory_profile_pair_query_t query = {};
+  amdf_memory_profile_pair_query_t query =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   query.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE_PAIR_QUERY;
   query.structure_size = sizeof(query);
   query.memory_profile_ordinal = create.memory_profile_ordinal;
@@ -341,7 +343,9 @@ void GpuXdnaDeviceFixture::CreateShaderMemory(
   ASSERT_NE(profile.ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
   const uint64_t granularity = profile.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create = {};
+  amdf_memory_create_info_t create =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create.structure_size = sizeof(create);
   create.memory_profile_ordinal = profile.ordinal;

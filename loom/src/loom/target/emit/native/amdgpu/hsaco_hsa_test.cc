@@ -839,7 +839,9 @@ class LowKernelEmitter {
 
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options = {};
+    loom_low_emission_frame_options_t frame_options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     frame_options.descriptor_registry = &target_registry_.registry;
     frame_options.function_target_facts = function_target_facts;
     frame_options.allocation_fixed_values = abi_verify_result.fixed_values;

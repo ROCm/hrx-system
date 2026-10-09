@@ -104,7 +104,9 @@ TEST(AqlRingTest, CommitsExtendedDispatchFormatAndSetupAtomically) {
   iree_hal_amdgpu_aql_packet_t packet;
   std::memset(&packet, 0xCC, sizeof(packet));
 
-  iree_hal_amdgpu_aql_dispatch_params_t params = {};
+  iree_hal_amdgpu_aql_dispatch_params_t params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   params.kernel_object = 0x1234;
   params.workgroup_size[0] = 64;
   params.workgroup_size[1] = 1;
@@ -188,7 +190,9 @@ TEST(AqlRingTest, Pm4EmulatedQueueUsesHsaSignalForDoorbellKind) {
 // A USER-kind signal stores a value (not a pointer) in the same union slot, so
 // the fast-path pointer must stay NULL even when that value is non-zero.
 TEST(AqlRingTest, InitializeLeavesPointerNullForUserKind) {
-  iree_amd_signal_t signal = {};
+  iree_amd_signal_t signal =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   signal.kind = IREE_AMD_SIGNAL_KIND_USER;
   signal.value = 0x1234;  // a blind pointer read would yield a non-NULL ptr
 

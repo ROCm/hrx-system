@@ -116,7 +116,9 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
                           uint32_t start_point, uint32_t end_point,
                           const loom_liveness_segment_t* segments = nullptr,
                           uint32_t segment_count = 0) {
-    loom_low_allocation_unit_liveness_t liveness = {};
+    loom_low_allocation_unit_liveness_t liveness =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     liveness.end_points = &end_point;
     liveness.point_count = 1;
     liveness.storage_segments.entries = segments;
@@ -176,7 +178,9 @@ loom_liveness_interval_t RegisterInterval(loom_value_id_t value_id,
                                           uint32_t start_point,
                                           uint32_t end_point,
                                           uint32_t unit_count) {
-  loom_liveness_interval_t interval = {};
+  loom_liveness_interval_t interval =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   interval.value_id = value_id;
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.start_point = start_point;
@@ -192,7 +196,9 @@ loom_liveness_analysis_t Liveness(const loom_value_id_t* value_ids,
                                   iree_host_size_t interval_count,
                                   const loom_liveness_block_info_t* blocks,
                                   iree_host_size_t block_count) {
-  loom_liveness_analysis_t liveness = {};
+  loom_liveness_analysis_t liveness =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   liveness.value_ids = value_ids;
   liveness.value_count = value_count;
   liveness.value_interval_indices = value_interval_indices;
@@ -317,7 +323,9 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
     operands[i + 1].unit_count = i == 0 ? 3 : 1;
   }
   loom_low_descriptor_t descriptor = {.operand_count = 3, .result_count = 1};
-  loom_low_descriptor_set_t descriptors = {};
+  loom_low_descriptor_set_t descriptors =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   descriptors.stable_id = 1;
   descriptors.reg_classes = classes;
   descriptors.reg_class_count = 2;
@@ -572,12 +580,16 @@ TEST_P(LowAllocationDefinitionLivenessTest, DistinguishesWritesFromTransport) {
   loom_low_reg_class_t register_class = {.alloc_unit_bits = 32};
   const loom_low_reg_class_alt_t alternative = {0, LOOM_LOW_REGISTER_PART_NONE,
                                                 0, 0};
-  loom_low_operand_t operand = {};
+  loom_low_operand_t operand =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   operand.role = LOOM_LOW_OPERAND_ROLE_RESULT;
   operand.reg_class_alt_count = 1;
   operand.unit_count = width;
   loom_low_descriptor_t descriptor = {.operand_count = 1, .result_count = 1};
-  loom_low_descriptor_set_t descriptors = {};
+  loom_low_descriptor_set_t descriptors =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   descriptors.stable_id = 1;
   descriptors.reg_classes = &register_class;
   descriptors.reg_class_count = 1;

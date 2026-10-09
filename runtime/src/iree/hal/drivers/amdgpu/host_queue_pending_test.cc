@@ -395,7 +395,9 @@ TEST_F(HostQueuePendingTest,
                                          iree_infinite_timeout(),
                                          IREE_ASYNC_WAIT_FLAG_NONE));
   Ref<iree_hal_buffer_t> readback;
-  iree_hal_buffer_params_t readback_params = {};
+  iree_hal_buffer_params_t readback_params =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   readback_params.type =
       IREE_HAL_MEMORY_TYPE_HOST_VISIBLE | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
   readback_params.access = IREE_HAL_MEMORY_ACCESS_ALL;

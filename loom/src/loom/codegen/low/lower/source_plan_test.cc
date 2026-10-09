@@ -638,7 +638,9 @@ TEST_F(LowLowerSourcePlanTest, InheritedCarrierTracksLaterProducerSelection) {
                                           LOOM_LOCATION_UNKNOWN, &second_op));
   const loom_value_id_t second = loom_op_const_results(second_op)[0];
 
-  loom_low_lower_context_t lowering = {};
+  loom_low_lower_context_t lowering =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   lowering.module = module_;
   loom_low_lowering_frame_t frame = {};
   lowering.lowering = &frame;

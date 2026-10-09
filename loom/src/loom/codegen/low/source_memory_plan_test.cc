@@ -1276,7 +1276,9 @@ TEST_F(SourceMemoryPlanTest, NoaliasBufferArgFeedsComparableAliasScope) {
 }
 
 TEST_F(SourceMemoryPlanTest, SummaryCapturesStridedPacketSlot) {
-  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_plan_t plan =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_STORE;
   plan.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
   plan.alias_scope_id = 7;
@@ -1350,7 +1352,9 @@ TEST(SourceMemoryPlan, SummaryRetainsAtomicObservationSemantics) {
 }
 
 TEST(SourceMemoryPlan, DynamicPacketOffsetsPreserveDivisibility) {
-  loom_low_source_memory_access_plan_t plan = {};
+  loom_low_source_memory_access_plan_t plan =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   plan.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
   plan.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_GLOBAL;
   plan.alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE;
@@ -1388,7 +1392,9 @@ TEST(SourceMemoryPlan, DynamicPacketOffsetsPreserveDivisibility) {
 }
 
 TEST(SourceMemoryComponentTest, RetainedComponentConvertsExactCoordinateUnits) {
-  loom_low_source_memory_dynamic_term_t term = {};
+  loom_low_source_memory_dynamic_term_t term =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   term.byte_stride = 4;
   loom_low_source_memory_access_plan_t access = {
       .retained_component = {&term, 0b1010}};
@@ -1405,7 +1411,9 @@ TEST(SourceMemoryComponentTest, RetainedComponentConvertsExactCoordinateUnits) {
 
 TEST(SourceMemoryComponentTest, MaterializedPrefixCannotOverlapComponent) {
   loom_low_source_memory_dynamic_term_t term = {.byte_stride = 4};
-  loom_low_source_memory_access_plan_t access = {};
+  loom_low_source_memory_access_plan_t access =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   access.retained_component = {&term, 0b1010};
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 1, 1),
             &access.retained_component);

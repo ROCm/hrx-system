@@ -370,7 +370,9 @@ TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&block_pool, &arena);
 
-  loom_low_lower_guard_payload_t guard_payload = {};
+  loom_low_lower_guard_payload_t guard_payload =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment selects the
+           // active union member after zero initialization.
   guard_payload.u64 = 1;
   loom_low_lower_guard_t guards[2] = {};
   guards[0].kind = LOOM_LOW_LOWER_GUARD_INSTANCE_FLAGS_HAS_ALL;
@@ -514,7 +516,9 @@ TEST_F(LowContractQuerySourceMemoryTest,
       .rule_start = 0,
       .rule_count = 2,
   };
-  loom_low_lower_rule_set_t rule_set = {};
+  loom_low_lower_rule_set_t rule_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rule_set.spans = &span;
   rule_set.span_count = 1;
   rule_set.rules = rules;
@@ -578,7 +582,9 @@ TEST_F(LowContractQuerySourceMemoryTest,
           },
   };
   const loom_target_facts_t target_facts = MakeTargetFacts();
-  loom_target_contract_query_environment_t environment = {};
+  loom_target_contract_query_environment_t environment =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   environment.module = module_;
   environment.function = function_;
   environment.target_facts = &target_facts;
@@ -619,10 +625,14 @@ TEST(LowContractQueryTest, TargetSubgroupSizeRangeRequiresKnownInRangeSize) {
   loom_low_lower_emit_t emit = {.kind = LOOM_LOW_LOWER_EMIT_DESCRIPTOR_OP,
                                 .descriptor_ref = 0};
   const loom_low_lower_emit_ref_t emit_ref = 0;
-  loom_low_lower_rule_t rule = {};
+  loom_low_lower_rule_t rule =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rule.guard_count = 1;
   rule.emit_count = 1;
-  loom_low_lower_rule_set_t rule_set = {};
+  loom_low_lower_rule_set_t rule_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rule_set.string_pool = kRuleStringPool;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
@@ -730,7 +740,9 @@ TEST(LowContractQueryTest, ContractIndexDescriptorRuleReportsRejectedCase) {
       .error_ref = LOOM_ERR_TARGET_003_REF,
       .param_count = IREE_ARRAYSIZE(diagnostic_params)};
   loom_low_lower_rule_t rule = {.guard_count = 1};
-  loom_low_lower_rule_set_t rule_set = {};
+  loom_low_lower_rule_set_t rule_set =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   rule_set.string_pool = kRuleStringPool;
   rule_set.rules = &rule;
   rule_set.rule_count = 1;
@@ -833,7 +845,9 @@ TEST_F(LowContractQuerySourceMemoryTest,
   IREE_ASSERT_OK(loom_view_region_table_initialize(
       &value_domain, &expression_context, &view_regions));
   IREE_ASSERT_OK(loom_view_region_table_analyze(&view_regions));
-  loom_low_lower_source_memory_t source_memory = {};
+  loom_low_lower_source_memory_t source_memory =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   source_memory.operation_kind = LOOM_LOW_SOURCE_MEMORY_OPERATION_LOAD;
   source_memory.root_kind = LOOM_LOW_LOWER_SOURCE_MEMORY_ROOT_BLOCK_ARGUMENT;
   source_memory.memory_space_mask = LOOM_LOW_LOWER_MEMORY_SPACE_UNKNOWN |

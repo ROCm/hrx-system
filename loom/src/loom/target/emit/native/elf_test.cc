@@ -463,18 +463,24 @@ TEST(NativeElfTest, WritesAmdgpuNoteElfEnvelope) {
 
 TEST(NativeElfTest, FinalizesAddressesAndPayloadAfterLayout) {
   uint8_t contents[8] = {};
-  loom_native_elf_section_t section = {};
+  loom_native_elf_section_t section =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   section.name = IREE_SV(".data");
   section.type = LOOM_NATIVE_ELF_SECTION_TYPE_PROGBITS;
   section.flags = LOOM_NATIVE_ELF_SECTION_FLAG_ALLOC;
   section.alignment = 16;
   section.contents = iree_make_const_byte_span(contents, sizeof(contents));
-  loom_native_elf_segment_t segment = {};
+  loom_native_elf_segment_t segment =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   segment.type = LOOM_NATIVE_ELF_PROGRAM_TYPE_LOAD;
   segment.flags = LOOM_NATIVE_ELF_PROGRAM_FLAG_READ;
   segment.section_count = 1;
   segment.alignment = 16;
-  loom_native_elf64le_file_t file = {};
+  loom_native_elf64le_file_t file =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   file.type = LOOM_NATIVE_ELF_FILE_TYPE_DYN;
   file.machine = LOOM_NATIVE_ELF_MACHINE_X86_64;
   file.sections = &section;

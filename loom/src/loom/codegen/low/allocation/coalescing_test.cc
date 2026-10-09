@@ -56,7 +56,9 @@ class LowAllocationCoalescingTest : public ::testing::Test {
 };
 
 loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
-  loom_liveness_value_class_t value_class = {};
+  loom_liveness_value_class_t value_class =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   value_class.type_kind = LOOM_TYPE_REGISTER;
   value_class.register_descriptor_set_stable_id = descriptor_set_id;
   value_class.register_class_id = 0;
@@ -130,7 +132,9 @@ TEST_F(LowAllocationCoalescingTest, ConcatMayPrecedeItsSourceAssignments) {
   const loom_low_placement_relation_range_t source_ranges[] = {
       {0, 1}, {1, 1}, {2, 0}};
   const uint32_t source_relations[] = {0, 1};
-  loom_low_placement_table_t placement = {};
+  loom_low_placement_table_t placement =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   placement.value_ids = value_ids;
   placement.value_count = IREE_ARRAYSIZE(value_ids);
   placement.relations = relations;
@@ -143,7 +147,9 @@ TEST_F(LowAllocationCoalescingTest, ConcatMayPrecedeItsSourceAssignments) {
       Assignment(value_ids[0], /*start=*/0, /*end=*/12, value_class,
                  /*location_base=*/0, /*unit_point_start=*/0);
   uint32_t assignment_indices[] = {UINT32_MAX, UINT32_MAX, UINT32_MAX};
-  loom_low_allocation_assignment_map_t assignment_map = {};
+  loom_low_allocation_assignment_map_t assignment_map =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   assignment_map.module = module;
   assignment_map.liveness = &liveness;
   assignment_map.assignments = &first_assignment;
@@ -155,7 +161,9 @@ TEST_F(LowAllocationCoalescingTest, ConcatMayPrecedeItsSourceAssignments) {
                                     .spill_class_id = LOOM_LOW_REG_CLASS_NONE};
   loom_low_descriptor_set_t descriptor_set = {
       .stable_id = 17, .reg_classes = &reg_class, .reg_class_count = 1};
-  loom_low_resolved_target_t target = {};
+  loom_low_resolved_target_t target =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   target.descriptor_set = &descriptor_set;
   target.descriptor_set_key = IREE_SV("test");
   loom_low_allocation_target_constraints_t target_constraints = {.target =
@@ -165,7 +173,9 @@ TEST_F(LowAllocationCoalescingTest, ConcatMayPrecedeItsSourceAssignments) {
       .liveness = &liveness,
       .placement = &placement};
 
-  loom_low_allocation_coalescing_context_t context = {};
+  loom_low_allocation_coalescing_context_t context =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   context.arena = &arena_;
   context.liveness = &liveness;
   context.placement = &placement;
@@ -219,7 +229,9 @@ TEST_F(LowAllocationCoalescingTest,
       .value_count = IREE_ARRAYSIZE(value_ids),
       .value_interval_indices = interval_indices};
 
-  loom_low_placement_relation_t relation = {};
+  loom_low_placement_relation_t relation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   relation.result_ordinal = 1;
   relation.source_ordinal = 0;
   relation.unit_count = 1;
@@ -228,7 +240,9 @@ TEST_F(LowAllocationCoalescingTest,
   const loom_low_placement_relation_range_t result_ranges[] = {{0, 0}, {0, 1}};
   const loom_low_placement_relation_range_t source_ranges[] = {{0, 1}, {1, 0}};
   const uint32_t source_relations[] = {0};
-  loom_low_placement_table_t placement = {};
+  loom_low_placement_table_t placement =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   placement.value_ids = value_ids;
   placement.value_count = IREE_ARRAYSIZE(value_ids);
   placement.relations = &relation;

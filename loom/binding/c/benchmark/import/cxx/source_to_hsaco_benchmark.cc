@@ -140,7 +140,9 @@ class CxxSourceScenarioBase : public TargetCompileScenario {
   iree_status_t ImportSource(WorkspacePtr& workspace, ModulePtr* out_module) {
     out_module->reset();
     const loomc_string_view_t root = loomc_make_cstring_view(kernel_.root);
-    loomc_cxx_import_options_t options = {};
+    loomc_cxx_import_options_t options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     options.type = LOOMC_STRUCTURE_TYPE_CXX_IMPORT_OPTIONS;
     options.structure_size = sizeof(options);
     options.flags = LOOMC_CXX_IMPORT_FLAG_APPROXIMATE_FUNCTIONS;

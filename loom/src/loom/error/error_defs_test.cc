@@ -101,7 +101,9 @@ TEST(ErrorDefsTest, LookupComposedCatalogFallsBackAndShadows) {
   ASSERT_NE(expected, nullptr);
 
   uint16_t error_indices[] = {UINT16_MAX, UINT16_MAX};
-  loom_error_catalog_t catalog = {};
+  loom_error_catalog_t catalog =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   catalog.error_indices_by_code = error_indices;
   catalog.domain_spans[LOOM_ERROR_DOMAIN_TYPE].code_count =
       IREE_ARRAYSIZE(error_indices);

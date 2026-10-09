@@ -147,7 +147,9 @@ class SemaphoreTest : public ::testing::Test {
       iree_hal_amdgpu_epoch_signal_table_register(
           table, i, hsa_signal_t{uint64_t(i + 1)});
     }
-    iree_hal_amdgpu_host_queue_t queue = {};
+    iree_hal_amdgpu_host_queue_t queue =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     queue.logical_device = reinterpret_cast<iree_hal_device_t*>(fake_device_);
     queue.axis = test_queue_axis(queue_index);
     queue.epoch_table = table;

@@ -20,7 +20,9 @@ void CtsMappedMemory::Create(const amdf_api_t* api, amdf_memory_scope_t* scope,
   ASSERT_EQ(info.flags & create_info.required_flags,
             create_info.required_flags);
 
-  amdf_memory_map_info_t map = {};
+  amdf_memory_map_info_t map =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
   map.structure_size = sizeof(map);
   map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;

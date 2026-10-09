@@ -103,7 +103,9 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
   IREE_ASSERT_OK(
       loom_target_compile_report_record_pressure_origin_row(&report, &origin));
 
-  loom_target_compile_report_schedule_band_row_t band = {};
+  loom_target_compile_report_schedule_band_row_t band =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   band.flags = LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX;
   band.function_name = IREE_SVL("branchy");
   band.block_name = IREE_SVL("body");
@@ -124,7 +126,9 @@ TEST(CompileReportFormatTest, FormatsAllocationPlanningRows) {
   IREE_ASSERT_OK(
       loom_target_compile_report_record_schedule_band_row(&report, &band));
 
-  loom_target_compile_report_schedule_band_summary_row_t band_summary = {};
+  loom_target_compile_report_schedule_band_summary_row_t band_summary =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   band_summary.flags = band.flags;
   band_summary.function_name = band.function_name;
   band_summary.block_name = band.block_name;

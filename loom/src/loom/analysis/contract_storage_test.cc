@@ -270,7 +270,9 @@ TEST(ContractStorageTest, BuildsMatrixRequestFromPayloadFacts) {
 }
 
 TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
-  loom_contract_matrix_request_options_t options = {};
+  loom_contract_matrix_request_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.shape = (loom_contract_shape_t){.m = 0, .n = 16, .k = 128};
   options.shape_value_refs.m = loom_contract_value_ref_from_value_id(42);
   options.k_group_size = 1;
@@ -337,7 +339,9 @@ TEST(ContractStorageTest, BuildsPackedDotRequestFromPlainPayloadFacts) {
 }
 
 TEST(ContractStorageTest, RejectsUnsupportedPayloadForOptimizedContract) {
-  loom_contract_matrix_request_options_t options = {};
+  loom_contract_matrix_request_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.shape = (loom_contract_shape_t){.m = 16, .n = 16, .k = 128};
   options.k_group_size = 1;
   options.lhs.kind = LOOM_CONTRACT_VIEW_PAYLOAD_UNSUPPORTED_STORAGE_SCHEMA;
@@ -365,7 +369,9 @@ TEST(ContractStorageTest, RejectsMissingAuxiliaryDataOperands) {
       EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_BF6, 32,
                     LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, 6, 32);
 
-  loom_contract_matrix_request_options_t options = {};
+  loom_contract_matrix_request_options_t options =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   options.shape = (loom_contract_shape_t){.m = 16, .n = 16, .k = 128};
   options.k_group_size = 1;
   options.lhs = MatrixPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_schema);

@@ -195,7 +195,9 @@ TEST_F(SymbolReferenceSummaryTest, SharedArrayPayloadRetainsFieldSemantics) {
   const auto attr = loom_attr_symbol_array(targets, 3);
   loom_symbol_reference_descriptor_t dependency = {
       .interfaces = LOOM_SYMBOL_INTERFACE_GLOBAL};
-  loom_symbol_reference_descriptor_t availability = {};
+  loom_symbol_reference_descriptor_t availability =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   availability.role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY;
   availability.interfaces = LOOM_SYMBOL_INTERFACE_CALLABLE;
   for (const auto* semantics : {&dependency, &availability, &dependency}) {

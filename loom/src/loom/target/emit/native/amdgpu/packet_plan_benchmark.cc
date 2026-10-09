@@ -608,7 +608,9 @@ class PacketPlanFixture {
     }
     loom_low_storage_lease_provider_t storage_lease_provider = {};
     loom_amdgpu_storage_lease_provider(&storage_lease_provider);
-    loom_low_emission_frame_options_t frame_options = {};
+    loom_low_emission_frame_options_t frame_options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     frame_options.descriptor_registry = &target_registry_.registry;
     frame_options.residency_query = loom_amdgpu_occupancy_residency_view;
     frame_options.instruction_preferences =

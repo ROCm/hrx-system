@@ -38,7 +38,9 @@ class BufferRangeTest : public ::testing::TestWithParam<bool> {
     }
     IREE_ASSERT_OK(iree_hal_cpu_slab_provider_create(/*min_alignment=*/0,
                                                      allocator_, &provider_));
-    iree_hal_fixed_block_pool_options_t options = {};
+    iree_hal_fixed_block_pool_options_t options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     options.block_size = 4096;
     options.blocks_per_slab = 1;
     options.frontier_capacity = 2;
@@ -109,7 +111,9 @@ class BufferRangeTest : public ::testing::TestWithParam<bool> {
       status = iree_hal_tlsf_pool_create_from_buffer(
           buffer, offset, length, &options, allocator_, out_pool);
     } else {
-      iree_hal_fixed_block_pool_options_t options = {};
+      iree_hal_fixed_block_pool_options_t options =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment
+               // conversion differs from list initialization.
       options.block_size = 256;
       options.frontier_capacity = frontier_capacity;
       status = iree_hal_fixed_block_pool_create_from_buffer(
@@ -317,7 +321,9 @@ TEST_P(BufferRangeTest, AlignsNativeCoordinatesWithinVisibleRange) {
     IREE_ASSERT_OK(iree_hal_tlsf_pool_create_from_buffer(view, 2, 64, &options,
                                                          allocator_, &child));
   } else {
-    iree_hal_fixed_block_pool_options_t options = {};
+    iree_hal_fixed_block_pool_options_t options =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+             // spans intervening work.
     options.block_size = 13;
     options.alignment = 24;
     IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

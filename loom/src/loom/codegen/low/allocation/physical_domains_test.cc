@@ -29,7 +29,9 @@ loom_liveness_interval_t Interval(uint16_t class_id, uint32_t start,
 loom_low_placement_relation_t Relation(loom_value_ordinal_t source,
                                        loom_value_ordinal_t result,
                                        loom_low_placement_cause_t cause) {
-  loom_low_placement_relation_t relation = {};
+  loom_low_placement_relation_t relation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   relation.source_ordinal = source;
   relation.result_ordinal = result;
   relation.unit_count = 1;
@@ -92,7 +94,9 @@ class LowAllocationPhysicalDomainsTest : public ::testing::Test {
         .start_points = starts.data(),
         .end_points = ends.data(),
         .point_count = count};
-    loom_low_placement_table_t placement = {};
+    loom_low_placement_table_t placement =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     placement.value_ids = value_ids.data();
     placement.value_count = count;
     placement.relations = relations.data();

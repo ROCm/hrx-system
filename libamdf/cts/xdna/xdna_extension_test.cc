@@ -197,7 +197,9 @@ TEST_F(XdnaEndpointTest, RejectsMalformedOutputWithoutMutation) {
       amdf_status_code(xdna_api_->endpoint_query_info(endpoint_, nullptr)),
       AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_xdna_endpoint_info_t info = {};
+  amdf_xdna_endpoint_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   info.structure_size = sizeof(info);
   info.architecture = UINT32_MAX;
   EXPECT_EQ(amdf_status_code(xdna_api_->endpoint_query_info(endpoint_, &info)),
@@ -327,7 +329,9 @@ TEST_F(XdnaMemoryDiscoveryTest, SelectsLiveProfileAndUsesNativeLimits) {
 
   const uint64_t granularity = live.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create = {};
+  amdf_memory_create_info_t create =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create.structure_size = sizeof(create);
   create.memory_profile_ordinal = live.ordinal;
@@ -352,7 +356,9 @@ TEST_F(XdnaMemoryDiscoveryTest, SelectsLiveProfileAndUsesNativeLimits) {
 
   const auto& host = live.host_mapping;
   ASSERT_GT(host.byte_length_granularity, 0u);
-  amdf_memory_map_info_t map = {};
+  amdf_memory_map_info_t map =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   map.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
   map.structure_size = sizeof(map);
   map.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
@@ -649,7 +655,9 @@ TEST_F(XdnaEndpointTest, RejectsMalformedDeviceInfoWithoutMutation) {
   EXPECT_EQ(amdf_status_code(xdna_api_->device_query_info(nullptr, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_xdna_device_info_t info = {};
+  amdf_xdna_device_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   info.structure_size = sizeof(info);
   info.reset_epoch = UINT64_MAX;
   EXPECT_EQ(amdf_status_code(xdna_api_->device_query_info(device_, &info)),
@@ -675,7 +683,9 @@ TEST_F(XdnaContextTest, RejectsMalformedContextInfoWithoutMutation) {
                 xdna_api_->context_query_placement_info(nullptr, nullptr)),
             AMDF_STATUS_CODE_INVALID_ARGUMENT);
 
-  amdf_xdna_context_placement_info_t placement = {};
+  amdf_xdna_context_placement_info_t placement =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   placement.structure_size = sizeof(placement);
   placement.column_count = UINT32_MAX;
   EXPECT_EQ(amdf_status_code(
@@ -689,7 +699,9 @@ TEST_F(XdnaContextTest, RejectsMalformedContextInfoWithoutMutation) {
             AMDF_STATUS_CODE_UNSUPPORTED);
   EXPECT_EQ(placement.column_count, UINT32_MAX);
 
-  amdf_xdna_context_info_t info = {};
+  amdf_xdna_context_info_t info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   info.structure_size = sizeof(info);
   info.reset_epoch = UINT64_MAX;
   EXPECT_EQ(amdf_status_code(xdna_api_->context_query_info(context_, &info)),

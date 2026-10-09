@@ -31,7 +31,9 @@ class AmdgpuSgprReadHazardTest : public ::testing::Test {
 
   static loom_low_allocation_assignment_t PhysicalSgpr(uint32_t base,
                                                        uint32_t count) {
-    loom_low_allocation_assignment_t assignment = {};
+    loom_low_allocation_assignment_t assignment =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
     assignment.descriptor_reg_class_id = LOOM_AMDGPU_REG_CLASS_ID_SGPR;
     assignment.location_base = base;

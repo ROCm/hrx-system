@@ -38,7 +38,9 @@ TEST_F(TestDiagnosticTest, MatchesStructuredConstraints) {
       {.name = IREE_SV("expected_type"),
        .value = IREE_SV("floating-point scalar")},
   };
-  loom_test_diagnostic_t diagnostic = {};
+  loom_test_diagnostic_t diagnostic =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
   diagnostic.domain = LOOM_ERROR_DOMAIN_TYPE;
   diagnostic.code = 3;
@@ -48,7 +50,9 @@ TEST_F(TestDiagnosticTest, MatchesStructuredConstraints) {
   diagnostic.params = params;
   diagnostic.param_count = IREE_ARRAYSIZE(params);
 
-  loom_test_annotation_t annotation = {};
+  loom_test_annotation_t annotation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   annotation.message_substring_count = 1;
   annotation.param_match_count = 1;
   annotation.severity = LOOM_DIAGNOSTIC_ERROR;
@@ -108,7 +112,9 @@ TEST_F(TestDiagnosticTest, MaterializationPreservesSourceIdentity) {
   std::string filename = "included.h";
   loom_diagnostic_param_t parameter =
       loom_param_string(IREE_SV("invalid input"));
-  loom_diagnostic_t emitted = {};
+  loom_diagnostic_t emitted =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   emitted.severity = LOOM_DIAGNOSTIC_ERROR;
   emitted.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 36);
   ASSERT_NE(emitted.error, nullptr);

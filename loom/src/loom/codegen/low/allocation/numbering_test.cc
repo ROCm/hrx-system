@@ -376,7 +376,9 @@ TEST_F(LowAllocationNumberingTest, KeepsTargetAddressStateUnchanged) {
 }
 
 TEST_F(LowAllocationNumberingTest, AnchorsHardMaskedRelations) {
-  loom_low_placement_relation_t relation = {};
+  loom_low_placement_relation_t relation =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   relation.kind = LOOM_LOW_PLACEMENT_RELATION_DIFFERENT_MASKED_LOCATION;
   relation.flags = LOOM_LOW_PLACEMENT_RELATION_FLAG_HARD;
   relation.result_ordinal = 0;

@@ -252,7 +252,8 @@ class TargetCallgraphSpecializationTest : public ::testing::Test {
         loom_target_callgraph_specialization_pass_info();
     std::vector<uint8_t> statistic_storage(
         pass_info->statistic_layout->storage_size, 0);
-    loom_pass_t pass = {};
+    loom_pass_t pass = {};  // NOLINT(iree-cpp-designated-initializer) --
+                            // Assignment sequencing spans intervening work.
     pass.info = pass_info;
     pass.module_run = loom_target_callgraph_specialization_run;
     pass.instance_arena = &pass_arena;

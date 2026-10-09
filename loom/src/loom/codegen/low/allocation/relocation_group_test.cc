@@ -54,7 +54,9 @@ TEST(LowAllocationRelocationGroupTest, RetainsCoalescedTransportClosure) {
   const auto relation = [](uint32_t result, uint32_t source,
                            uint32_t result_offset, uint32_t source_offset,
                            uint32_t count, loom_low_placement_cause_t cause) {
-    loom_low_placement_relation_t row = {};
+    loom_low_placement_relation_t row =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     row.result_ordinal = result;
     row.source_ordinal = source;
     row.result_unit_offset = result_offset;

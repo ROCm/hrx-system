@@ -39,7 +39,9 @@ class LowAllocationStorageLeaseIndexTest : public ::testing::Test {
       uint16_t reg_class = 0,
       loom_low_allocation_location_kind_t kind =
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-    loom_low_allocation_storage_lease_t lease = {};
+    loom_low_allocation_storage_lease_t lease =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     lease.start_point = start;
     lease.end_point = end;
     lease.location_base = location;

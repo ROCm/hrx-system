@@ -63,7 +63,9 @@ TEST_F(MemoryTest, HostSitesUseTheSelectedPeerAndPreserveNativeApiOperations) {
   mapping.info.flush.range_granularity = 64;
   mapping.info.invalidate = mapping.info.flush;
   mapping.info.invalidate.host_operation = AMDF_HOST_CACHE_OPERATION_INVALIDATE;
-  amdf_memory_site_t host = {};
+  amdf_memory_site_t host =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   host.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE;
   host.structure_size = sizeof(host);
   host.kind = AMDF_MEMORY_SITE_KIND_HOST;
@@ -293,7 +295,9 @@ TEST_F(MemoryTest, HostAtomicReachUsesOnlyTheExactPeersSystemWidths) {
 
 TEST(ExternalMemoryTest, ReleaseInvokesCallbackOnceAndZerosValue) {
   ReleaseState release_state = {};
-  amdf_external_memory_t value = {};
+  amdf_external_memory_t value =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   value.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
   value.payload.file_descriptor = 19;
   value.source_byte_offset = 128;
@@ -326,7 +330,9 @@ TEST_F(MemoryAddressTest, QueriesCachedAddressAndRejectsUnavailableConsumers) {
   ASSERT_EQ(amdf_memory_query_info(memory, &memory_info), AMDF_STATUS_OK);
   EXPECT_EQ(memory_info.access_count, 1u);
   EXPECT_EQ(memory_info.flags & AMDF_MEMORY_ACCESS_FLAGS, 0u);
-  amdf_memory_access_info_t access_info = {};
+  amdf_memory_access_info_t access_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
   access_info.structure_size = sizeof(access_info);
   ASSERT_EQ(amdf_memory_query_access_info(memory, 0, &access_info),
@@ -483,7 +489,9 @@ TEST_F(MemoryExternalTest, CompletesProfileExportImportPairAndReverseTeardown) {
   const amdf_memory_site_t producer_site = MakeMemorySite(source_memory, 3);
   const amdf_memory_site_t consumer_site =
       MakeMemorySite(destination_memory, 5);
-  amdf_memory_pair_info_t pair_info = {};
+  amdf_memory_pair_info_t pair_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   pair_info.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
   pair_info.structure_size = sizeof(pair_info);
   ASSERT_EQ(
@@ -530,7 +538,9 @@ TEST_F(MemoryExternalTest, ImportFailureNeverConsumesInputOrPublishesOutput) {
   InitializeFakeDevice(41, &instance_, &device);
   const amdf_memory_import_info_t import_info = MakeMemoryImportInfo(device);
   ReleaseState release_state = {};
-  amdf_external_memory_t external_memory = {};
+  amdf_external_memory_t external_memory =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   external_memory.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
   external_memory.payload.file_descriptor = 83;
   external_memory.source_byte_offset = 4096;
@@ -580,7 +590,9 @@ TEST_F(MemoryExternalTest, ImportProfileRejectionPrecedesLeafMutation) {
   const amdf_memory_import_info_t supported_import_info =
       MakeMemoryImportInfo(device);
   ReleaseState release_state = {};
-  amdf_external_memory_t external_memory = {};
+  amdf_external_memory_t external_memory =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   external_memory.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
   external_memory.payload.file_descriptor = 89;
   external_memory.source_byte_offset = 4096;
@@ -686,7 +698,9 @@ TEST_F(MemoryExternalTest, PublishedDestroyConsumesMetadataOnNativeFailure) {
   FakeDevice device;
   InitializeFakeDevice(53, &instance_, &device);
   ReleaseState release_state = {};
-  amdf_external_memory_t external_memory = {};
+  amdf_external_memory_t external_memory =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   external_memory.type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
   external_memory.payload.file_descriptor = 101;
   external_memory.byte_length = 4096;

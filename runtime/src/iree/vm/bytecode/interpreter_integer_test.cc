@@ -322,7 +322,9 @@ void CheckCompareRecords() {
 
   for (uint8_t destination = 0; destination < 2; ++destination) {
     uint64_t values[] = {kMax, 1};
-    typename Traits::CompareRecord record = {};
+    typename Traits::CompareRecord record =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+             // differs from list initialization.
     record.destination_v8 = destination;
     record.left_v8 = 0;
     record.right_v8 = 1;
@@ -342,7 +344,9 @@ void CheckLeaRecords() {
   constexpr uint64_t kNegativeThree = kMax - 2;
   SCOPED_TRACE(sizeof(UInt) * 8);
   uint64_t lea_values[] = {13, kNegativeThree, UINT64_MAX};
-  typename Traits::LeaRecord lea_record = {};
+  typename Traits::LeaRecord lea_record =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   lea_record.destination_v8 = 2;
   lea_record.base_v8 = 0;
   lea_record.index_v8 = 1;

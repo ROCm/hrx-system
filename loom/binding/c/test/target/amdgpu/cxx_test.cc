@@ -338,7 +338,9 @@ TEST(CxxDiagnosticTest, CompilationSourceRetentionControlsHeaderSnapshots) {
       SourcePtr source_owner(source);
       const loomc_string_view_t include_path =
           loomc_make_cstring_view("/headers");
-      loomc_cxx_import_options_t import_options = {};
+      loomc_cxx_import_options_t import_options =
+          {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+               // differs from declaration order.
       import_options.source_provider = {HeaderProvider::Resolve, &provider};
       import_options.include_paths = &include_path;
       import_options.include_path_count = 1;

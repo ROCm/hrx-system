@@ -29,7 +29,9 @@ class XdnaMemoryTest : public XdnaDeviceFixture {
   }
 
   amdf_memory_create_info_t MakeMemoryCreateInfo() {
-    amdf_memory_create_info_t create_info = {};
+    amdf_memory_create_info_t create_info =
+        {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+             // differs from declaration order.
     create_info.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
     create_info.structure_size = sizeof(create_info);
     create_info.access_count = 1;
@@ -223,7 +225,9 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
                         sizeof(invalid_memory_info)),
             0);
 
-  amdf_memory_map_info_t map_info = {};
+  amdf_memory_map_info_t map_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment conversion
+           // differs from list initialization.
   map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
   map_info.structure_size = sizeof(map_info);
   map_info.byte_offset = 32;
@@ -330,7 +334,9 @@ TEST_F(XdnaMemoryTest, RejectsInvalidMappingRequestsBeforeNativeMapping) {
       api_->memory_create(system_scope_, &create_info, &memory_);
   ASSERT_TRUE(amdf_status_is_ok(create_status));
 
-  amdf_memory_map_info_t map_info = {};
+  amdf_memory_map_info_t map_info =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
   map_info.structure_size = sizeof(map_info);
   map_info.byte_length = 1;

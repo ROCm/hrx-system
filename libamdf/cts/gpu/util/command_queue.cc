@@ -85,7 +85,9 @@ void GpuCommandQueue::Initialize(
             AMDF_STATUS_OK);
   const uint64_t granularity = profile.allocation.byte_length_granularity;
   ASSERT_GT(granularity, 0u);
-  amdf_memory_create_info_t create_memory = {};
+  amdf_memory_create_info_t create_memory =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment order
+           // differs from declaration order.
   create_memory.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
   create_memory.structure_size = sizeof(create_memory);
   create_memory.memory_profile_ordinal = ordinal;

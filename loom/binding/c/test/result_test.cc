@@ -81,7 +81,9 @@ TEST(ResultTest, OwnsDiagnosticsAndArtifacts) {
           },
   };
   char label[] = "defined here";
-  loomc_diagnostic_related_location_t related = {};
+  loomc_diagnostic_related_location_t related =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   related.label = loomc_make_cstring_view(label);
   related.range = diagnostic.range;
   diagnostic.related_locations = &related;

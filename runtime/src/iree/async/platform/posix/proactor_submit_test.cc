@@ -162,7 +162,9 @@ iree_status_t CreateManagedUdpSender(iree_async_proactor_t* proactor,
                             "receiver socket creation failed");
   }
 
-  sockaddr_in receiver_address = {};
+  sockaddr_in receiver_address =
+      {};  // NOLINT(iree-cpp-designated-initializer) -- Assignment sequencing
+           // spans intervening work.
   receiver_address.sin_family = AF_INET;
   receiver_address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   receiver_address.sin_port = 0;
