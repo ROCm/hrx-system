@@ -377,11 +377,8 @@ bool IntegerConstantFits(const Expr* Expression, QualType TargetType,
 }
 
 bool CanMoveAssignmentValue(const Expr* Value, const FieldDecl* Field,
-                            const VarDecl* Variable, ASTContext& Context,
-                            const SourceManager& SourceManager) {
-  if (!Value || ReferencesVariable(Value, Variable) ||
-      !IsMainFileLocation(Value->getBeginLoc(), SourceManager) ||
-      !IsMainFileLocation(Value->getEndLoc(), SourceManager)) {
+                            const VarDecl* Variable, ASTContext& Context) {
+  if (!Value || ReferencesVariable(Value, Variable)) {
     return false;
   }
   QualType FieldType = Field->getType();
@@ -409,14 +406,20 @@ bool CanMoveAssignmentValue(const Expr* Value, const FieldDecl* Field,
 std::optional<std::string> SourceText(const Expr* Expression,
                                       const SourceManager& SourceManager,
                                       const LangOptions& LangOptions) {
-  if (!Expression || Expression->getBeginLoc().isMacroID() ||
-      Expression->getEndLoc().isMacroID()) {
+  if (!Expression) {
+    return std::nullopt;
+  }
+  CharSourceRange FileRange = Lexer::makeFileCharRange(
+      CharSourceRange::getTokenRange(Expression->getSourceRange()),
+      SourceManager, LangOptions);
+  if (FileRange.isInvalid() ||
+      !IsMainFileLocation(FileRange.getBegin(), SourceManager) ||
+      !IsMainFileLocation(FileRange.getEnd(), SourceManager)) {
     return std::nullopt;
   }
   bool Invalid = false;
-  StringRef Text = Lexer::getSourceText(
-      CharSourceRange::getTokenRange(Expression->getSourceRange()),
-      SourceManager, LangOptions, &Invalid);
+  StringRef Text =
+      Lexer::getSourceText(FileRange, SourceManager, LangOptions, &Invalid);
   if (Invalid || Text.empty()) {
     return std::nullopt;
   }
@@ -454,15 +457,16 @@ bool ContainsOnlyWhitespaceOrSemicolon(SourceLocation Begin, SourceLocation End,
 std::optional<CharSourceRange> WholeLineStatementRange(
     const Stmt* Statement, const SourceManager& SourceManager,
     const LangOptions& LangOptions) {
-  SourceLocation Begin = Statement->getBeginLoc();
-  SourceLocation End = Statement->getEndLoc();
-  if (!IsMainFileLocation(Begin, SourceManager) ||
-      !IsMainFileLocation(End, SourceManager) || Begin.isMacroID() ||
-      End.isMacroID()) {
+  CharSourceRange FileRange = Lexer::makeFileCharRange(
+      CharSourceRange::getTokenRange(Statement->getSourceRange()),
+      SourceManager, LangOptions);
+  if (FileRange.isInvalid()) {
     return std::nullopt;
   }
-  End = Lexer::getLocForEndOfToken(End, 0, SourceManager, LangOptions);
-  if (End.isInvalid()) {
+  SourceLocation Begin = FileRange.getBegin();
+  SourceLocation End = FileRange.getEnd();
+  if (!IsMainFileLocation(Begin, SourceManager) ||
+      !IsMainFileLocation(End, SourceManager)) {
     return std::nullopt;
   }
   std::pair<FileID, unsigned> BeginOffset =
@@ -734,7 +738,7 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
       } else if (HasPreviousField && *Index <= PreviousFieldIndex) {
         Rejection = "member assignments are not in declaration order";
       } else if (!CanMoveAssignmentValue(Parsed->value, Parsed->field, Variable,
-                                         Context, SourceManager)) {
+                                         Context)) {
         Rejection = "an assignment value may change initialization semantics";
       } else if (!ValueText || !RemovalRange || !PreservesInterstatementText) {
         Rejection =
@@ -752,16 +756,7 @@ void CheckSetupBlocks(DesignatedInitializerCheck& Check,
       });
       PreviousFieldIndex = *Index;
       HasPreviousField = true;
-      PreviousStatementEnd =
-          Lexer::getLocForEndOfToken(Statements[NextStatement]->getEndLoc(), 0,
-                                     SourceManager, Context.getLangOpts());
-      if (PreviousStatementEnd.isInvalid()) {
-        Rejection =
-            "the source spelling cannot be rewritten without moving "
-            "comments or macros";
-        Assignments.clear();
-        break;
-      }
+      PreviousStatementEnd = RemovalRange->getEnd();
     }
     if (Rejection) {
       DiagnoseSetupIssue(Check, Initializer, *Rejection);

@@ -85,6 +85,8 @@ struct NarrowConfig {
 
 #define CONFIG_VALUE(value) value
 
+#define CONFIG_ORDINAL 41
+
 #define FORWARD_CONFIG(...) __VA_ARGS__
 
 #define EMPTY_BRACES \
@@ -177,6 +179,11 @@ void FoldSetupBlocks() {
   evaluated_in_order.first = Next();
   evaluated_in_order.second = Next();
   Observe(evaluated_in_order);
+
+  Numbers macro_values = {};
+  macro_values.first = CONFIG_VALUE(40);
+  macro_values.second = CONFIG_ORDINAL;
+  Observe(macro_values);
 }
 
 void PreserveUnsafeSetupBlocks(bool condition) {

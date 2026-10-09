@@ -104,6 +104,11 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             "Numbers evaluated_in_order = {.first = Next(), .second = Next()};",
             fixed_source,
         )
+        self.assertIn(
+            "Numbers macro_values = {.first = CONFIG_VALUE(40), "
+            ".second = CONFIG_ORDINAL};",
+            fixed_source,
+        )
 
         self.assertIn("/*.ordinal=*/7", fixed_source)
         self.assertIn("/*.flags=*/8", fixed_source)
