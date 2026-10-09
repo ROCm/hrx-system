@@ -1231,6 +1231,10 @@ typedef uint16_t loom_low_lower_rule_set_flags_t;
 // Rule set contains source graphs that may span intervening operations.
 #define LOOM_LOW_LOWER_RULE_SET_FLAG_NONLOCAL_SOURCE_GRAPHS \
   ((loom_low_lower_rule_set_flags_t)1u << 1)
+// Rule set contains primary descriptors whose complete feature masks must be
+// resolved dynamically.
+#define LOOM_LOW_LOWER_RULE_SET_FLAG_DYNAMIC_PRIMARY_DESCRIPTOR_FEATURES \
+  ((loom_low_lower_rule_set_flags_t)1u << 2)
 
 typedef struct loom_low_lower_rule_set_t {
   // Rule-set behavior flags.

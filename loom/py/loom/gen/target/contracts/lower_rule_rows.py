@@ -1105,6 +1105,7 @@ def rule_set_row(
     rules_name: str,
     primary_descriptor_feature_masks: tuple[int, ...],
     primary_descriptor_feature_masks_name: str,
+    has_dynamic_primary_descriptor_features: bool,
     report_keys: tuple[str, ...],
     report_keys_name: str,
     type_patterns_name: str,
@@ -1157,6 +1158,8 @@ def rule_set_row(
         for source_node in table.source_nodes
     ):
         flags.append("LOOM_LOW_LOWER_RULE_SET_FLAG_NONLOCAL_SOURCE_GRAPHS")
+    if has_dynamic_primary_descriptor_features:
+        flags.append("LOOM_LOW_LOWER_RULE_SET_FLAG_DYNAMIC_PRIMARY_DESCRIPTOR_FEATURES")
     if flags:
         fields.append(f".flags = {' | '.join(flags)}")
     if string_pool.entries:

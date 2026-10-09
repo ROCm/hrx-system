@@ -127,8 +127,8 @@ class SingleOpContract {
                                                    entries_};
   // Query-ready index, with the same representation as generated policy tables.
   loom_target_contract_index_t index_ = {
-      OpKind >> 8,    1, &dialect_,         1,
-      kContractCases, 1, kContractBindings, nullptr,
+      OpKind >> 8, 1, &dialect_,         1,       kContractCases,
+      1,           0, kContractBindings, nullptr, nullptr,
   };
 };
 
@@ -455,7 +455,9 @@ TEST(LowContractQueryTest,
       IREE_ARRAYSIZE(cases),
       cases,
       IREE_ARRAYSIZE(bindings),
+      0,
       bindings,
+      nullptr,
       nullptr,
   };
   const loom_low_lower_contract_query_options_t options = {
@@ -489,7 +491,6 @@ TEST(LowContractQueryTest,
   EXPECT_EQ(result.case_index, 1);
   EXPECT_EQ(result.selected_descriptor, &descriptors[1]);
   EXPECT_EQ(selection.rule, &rules[1]);
-  EXPECT_FALSE(selection.primary_descriptor_unavailable);
 
   descriptors[1].feature_mask_word_count = 1;
   result = loom_target_contract_query_result_empty();
@@ -500,7 +501,6 @@ TEST(LowContractQueryTest,
   EXPECT_EQ(result.case_index, 0);
   EXPECT_EQ(result.selected_descriptor, &descriptors[0]);
   EXPECT_EQ(selection.rule, &rules[0]);
-  EXPECT_TRUE(selection.primary_descriptor_unavailable);
 }
 
 TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
@@ -571,8 +571,10 @@ TEST(LowContractQueryTest, IndexedMissReplaysCompleteOrderForBestRejection) {
       IREE_ARRAYSIZE(cases),
       cases,
       1,
+      0,
       &binding,
       selection_data,
+      nullptr,
   };
   const loom_low_lower_contract_query_options_t options = {
       /*.contract_index=*/&index,
@@ -707,8 +709,10 @@ TEST_F(LowContractQuerySourceMemoryTest,
       IREE_ARRAYSIZE(cases),
       cases,
       1,
+      0,
       &binding,
       selection_data,
+      nullptr,
   };
   const loom_low_lower_contract_query_options_t options = {
       /*.contract_index=*/&contract_index,

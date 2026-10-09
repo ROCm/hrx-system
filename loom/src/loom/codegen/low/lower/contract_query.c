@@ -320,6 +320,21 @@ static iree_status_t loom_low_lower_query_target_contract_index(
               &case_match_context, rule_set, source_op, rule_index, 1,
               &selection));
       if (selection.rule != NULL) {
+        loom_low_lower_rule_primary_descriptor_status_t primary_status =
+            LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE;
+        IREE_RETURN_IF_ERROR(loom_low_lower_rule_query_primary_descriptor(
+            &case_match_context, rule_set, selection.rule, &primary_status));
+        if (primary_status == LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_MISSING) {
+          if (loom_low_lower_rule_failure_is_better(selection.failure,
+                                                    best_failure)) {
+            failed_rule_set = rule_set;
+            best_failure = selection.failure;
+            failed_binding_index = contract_case->binding_index;
+            failed_case_index = case_index;
+            failed_rule_set_index = binding->rule_set_index;
+          }
+          continue;
+        }
         const bool has_unavailable_selection =
             unavailable_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL;
         if (has_unavailable_selection &&
@@ -328,7 +343,8 @@ static iree_status_t loom_low_lower_query_target_contract_index(
           continue;
         }
         if (has_unavailable_selection &&
-            selection.primary_descriptor_unavailable) {
+            primary_status ==
+                LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE) {
           continue;
         }
         if (options->accept_rule.fn != NULL) {
@@ -366,7 +382,8 @@ static iree_status_t loom_low_lower_query_target_contract_index(
             .missing_fact_bits = 0,
             .rejection = NULL,
         };
-        if (selection.primary_descriptor_unavailable) {
+        if (primary_status ==
+            LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE) {
           if (unavailable_result.outcome ==
               LOOM_TARGET_CONTRACT_QUERY_UNHANDLED) {
             unavailable_result = legal_result;

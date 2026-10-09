@@ -133,6 +133,7 @@ from loom.target.contracts.lower_rule_tables import (
     _build_spans,
     _intern_program_rows,
     _op_kind_key,
+    _op_kind_value,
 )
 from loom.target.contracts.patterns import TypePattern
 from loom.target.contracts.rules import (
@@ -408,6 +409,19 @@ class _LowerRuleSetCompiler:
             for index, rule in enumerate(rules)
         )
         spans = _build_spans(rules, self._op_ordinals)
+        nonlocal_source_op_kinds = tuple(
+            sorted(
+                {
+                    _op_kind_value(source_node.source_op, self._op_ordinals)
+                    for source_node in source_nodes
+                    if source_node.relation
+                    in (
+                        SourceNodeRelation.EXCLUSIVE_USER,
+                        SourceNodeRelation.EXCLUSIVE_DEFINITION,
+                    )
+                }
+            )
+        )
         return CompiledLowerRuleSet(
             name=self._table.name,
             authored_case_indices=tuple(self._authored_case_indices),
@@ -416,6 +430,7 @@ class _LowerRuleSetCompiler:
             type_patterns=tuple(self._type_patterns),
             value_refs=tuple(self._value_refs),
             source_nodes=source_nodes,
+            nonlocal_source_op_kinds=nonlocal_source_op_kinds,
             source_memories=tuple(self._source_memories),
             guards=guards,
             attr_copies=tuple(self._attr_copies),

@@ -85,21 +85,28 @@ def _intern_rows[RowT: Hashable](
 
 def _primary_descriptor_feature_classes(
     table: CompiledLowerRuleSet,
-) -> tuple[tuple[int, ...], tuple[int, ...]]:
+) -> tuple[tuple[int, ...], tuple[int, ...], bool]:
     """Interns primary descriptor feature masks and returns rule classes."""
 
     masks: list[int] = []
     mask_classes: dict[int, int] = {}
     rule_classes: list[int] = []
+    has_dynamic_class = False
     for rule in table.rules:
-        if rule.primary_emit_ordinal == LOWER_RULE_PRIMARY_EMIT_NONE or rule.primary_emit_ordinal >= _U8_MAX:
+        if rule.primary_emit_ordinal == LOWER_RULE_PRIMARY_EMIT_NONE:
             rule_classes.append(_U8_MAX)
             continue
         emit = table.emits[rule.emit_start + rule.primary_emit_ordinal]
         descriptor = emit.descriptor
         feature_mask_words = descriptor.feature_mask_words if descriptor is not None else ()
+        if rule.primary_emit_ordinal >= _U8_MAX:
+            rule_classes.append(_U8_MAX)
+            if any(feature_mask_words):
+                has_dynamic_class = True
+            continue
         if any(feature_mask_words[1:]):
             rule_classes.append(_U8_MAX)
+            has_dynamic_class = True
             continue
         mask = feature_mask_words[0] if feature_mask_words else 0
         if mask == 0:
@@ -109,12 +116,13 @@ def _primary_descriptor_feature_classes(
         if feature_class is None:
             if len(masks) == _U8_MAX - 1:
                 rule_classes.append(_U8_MAX)
+                has_dynamic_class = True
                 continue
             masks.append(mask)
             feature_class = len(masks)
             mask_classes[mask] = feature_class
         rule_classes.append(feature_class)
-    return tuple(masks), tuple(rule_classes)
+    return tuple(masks), tuple(rule_classes), has_dynamic_class
 
 
 def _intern_optional_rows[RowT: Hashable](
@@ -301,7 +309,11 @@ def _generate_source(
     ) = _intern_optional_rows(tuple(row.address_materializer for row in table.source_memories))
     source_memory_diagnostics, source_memory_diagnostic_indices = _intern_rows(tuple(lower_rule_rows.source_memory_diagnostic_indices(row) for row in table.source_memories))
     _validate_c_table_shape(table, source_contract, descriptor_ref_keys)
-    primary_descriptor_feature_masks, primary_descriptor_feature_classes = _primary_descriptor_feature_classes(table)
+    (
+        primary_descriptor_feature_masks,
+        primary_descriptor_feature_classes,
+        has_dynamic_primary_descriptor_features,
+    ) = _primary_descriptor_feature_classes(table)
     descriptor_refs = {key: index for index, key in enumerate(descriptor_ref_keys)}
     report_key_ordinals = {key: index + 1 for index, key in enumerate(report_keys)}
     string_pool = _build_string_pool(
@@ -672,6 +684,7 @@ def _generate_source(
             rules_name=rules_name,
             primary_descriptor_feature_masks=primary_descriptor_feature_masks,
             primary_descriptor_feature_masks_name=(primary_descriptor_feature_masks_name),
+            has_dynamic_primary_descriptor_features=(has_dynamic_primary_descriptor_features),
             report_keys=report_keys,
             report_keys_name=report_keys_name,
             type_patterns_name=type_patterns_name,

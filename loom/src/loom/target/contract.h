@@ -351,10 +351,14 @@ typedef struct loom_target_contract_index_t {
   const loom_target_contract_case_t* cases;
   // Number of active fragment bindings.
   uint8_t binding_count;
+  // Number of operation kinds that nonlocal source graphs may claim.
+  uint16_t nonlocal_source_op_kind_count;
   // Active fragment bindings referenced by composed case rows.
   const loom_target_contract_binding_t* bindings;
   // Relocation-free candidate-selection rows, buckets, and ordinal sequences.
   const uint32_t* selection_data;
+  // Sorted operation kinds that may appear as nonlocal source graph nodes.
+  const loom_op_kind_t* nonlocal_source_op_kinds;
 } loom_target_contract_index_t;
 
 // Looks up the compact case span for an op kind in a composed index.
@@ -376,6 +380,24 @@ loom_target_contract_index_lookup_kind(
     return loom_target_contract_op_entry_empty();
   }
   return dialect_table->op_entries[op_index];
+}
+
+// Returns true when |op_kind| may need a direct selected-plan index for a
+// nonlocal source graph. The generated set is exact and sorted.
+static inline bool loom_target_contract_index_has_nonlocal_source_op_kind(
+    const loom_target_contract_index_t* index, loom_op_kind_t op_kind) {
+  uint16_t lower_bound = 0;
+  uint16_t upper_bound = index->nonlocal_source_op_kind_count;
+  while (lower_bound < upper_bound) {
+    const uint16_t middle = lower_bound + (upper_bound - lower_bound) / 2;
+    if (index->nonlocal_source_op_kinds[middle] < op_kind) {
+      lower_bound = middle + 1;
+    } else {
+      upper_bound = middle;
+    }
+  }
+  return lower_bound < index->nonlocal_source_op_kind_count &&
+         index->nonlocal_source_op_kinds[lower_bound] == op_kind;
 }
 
 // Returns an empty target contract query result.

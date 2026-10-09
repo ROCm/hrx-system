@@ -846,7 +846,6 @@ TEST_F(LowLowerRuleMatchTest, ContractQueriesMaySelectContractOnlyRules) {
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
       &match_context, &rule_set, source_op, &selection));
   EXPECT_EQ(selection.rule, &rules[1]);
-  EXPECT_FALSE(selection.primary_descriptor_unavailable);
 
   match_context.flags = LOOM_LOW_LOWER_RULE_MATCH_FLAG_CONTRACT_ONLY;
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
@@ -860,7 +859,8 @@ TEST_F(LowLowerRuleMatchTest, ContractQueriesMaySelectContractOnlyRules) {
   EXPECT_EQ(selection.rule, &rules[1]);
 }
 
-TEST_F(LowLowerRuleMatchTest, FallsBackFromUnavailablePrimaryDescriptor) {
+TEST_F(LowLowerRuleMatchTest,
+       QueriesPrimaryDescriptorAvailabilityAfterSemanticSelection) {
   const uint64_t feature_mask_words[] = {1};
   loom_low_descriptor_t descriptors[2] = {};
   descriptors[0].feature_mask_word_count = 1;
@@ -911,19 +911,26 @@ TEST_F(LowLowerRuleMatchTest, FallsBackFromUnavailablePrimaryDescriptor) {
 
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
       &match_context, &rule_set, source_op, &selection));
-  EXPECT_EQ(selection.rule, &rules[1]);
+  EXPECT_EQ(selection.rule, &rules[0]);
+  loom_low_lower_rule_primary_descriptor_status_t primary_status =
+      LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE;
+  IREE_ASSERT_OK(loom_low_lower_rule_query_primary_descriptor(
+      &match_context, &rule_set, selection.rule, &primary_status));
+  EXPECT_EQ(primary_status,
+            LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE);
 
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_rule_range_with_match_context(
       &match_context, &rule_set, source_op, /*rule_start=*/0,
       /*rule_count=*/1, &selection));
   EXPECT_EQ(selection.rule, &rules[0]);
-  EXPECT_TRUE(selection.primary_descriptor_unavailable);
 
   match_context.feature_bits = 1;
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
       &match_context, &rule_set, source_op, &selection));
   EXPECT_EQ(selection.rule, &rules[0]);
-  EXPECT_FALSE(selection.primary_descriptor_unavailable);
+  IREE_ASSERT_OK(loom_low_lower_rule_query_primary_descriptor(
+      &match_context, &rule_set, selection.rule, &primary_status));
+  EXPECT_EQ(primary_status, LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE);
 
   // Source planning binds generated rules and descriptors as one trusted
   // policy. Embedded feature classes retain fallback without descriptor
@@ -935,14 +942,19 @@ TEST_F(LowLowerRuleMatchTest, FallsBackFromUnavailablePrimaryDescriptor) {
   match_context.feature_bits = 0;
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
       &match_context, &rule_set, source_op, &selection));
-  EXPECT_EQ(selection.rule, &rules[1]);
-  EXPECT_FALSE(selection.primary_descriptor_unavailable);
+  EXPECT_EQ(selection.rule, &rules[0]);
+  IREE_ASSERT_OK(loom_low_lower_rule_query_primary_descriptor(
+      &match_context, &rule_set, selection.rule, &primary_status));
+  EXPECT_EQ(primary_status,
+            LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE);
 
   match_context.feature_bits = 1;
   IREE_ASSERT_OK(loom_low_lower_rule_set_select_with_match_context(
       &match_context, &rule_set, source_op, &selection));
   EXPECT_EQ(selection.rule, &rules[0]);
-  EXPECT_FALSE(selection.primary_descriptor_unavailable);
+  IREE_ASSERT_OK(loom_low_lower_rule_query_primary_descriptor(
+      &match_context, &rule_set, selection.rule, &primary_status));
+  EXPECT_EQ(primary_status, LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE);
 }
 
 TEST_F(LowLowerRuleMatchTest, SelectsAdjacentUniqueUserSourceNode) {

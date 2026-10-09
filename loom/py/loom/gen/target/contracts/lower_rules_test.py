@@ -161,6 +161,7 @@ def _compiled_lower_rule_set(
         type_patterns=type_patterns,
         value_refs=value_refs,
         source_nodes=source_nodes,
+        nonlocal_source_op_kinds=(),
         source_memories=source_memories,
         guards=guards,
         attr_copies=attr_copies,
@@ -417,10 +418,11 @@ def test_primary_descriptor_feature_classes_intern_masks() -> None:
         ),
     )
 
-    masks, classes = _primary_descriptor_feature_classes(table)
+    masks, classes, has_dynamic_class = _primary_descriptor_feature_classes(table)
 
     assert masks == (1, 4)
     assert classes == (1, 2, 1, 0xFF, 0)
+    assert has_dynamic_class
 
     generated = generate_lower_rule_set_from_compiled(
         _c_shape_contract(),
@@ -431,7 +433,35 @@ def test_primary_descriptor_feature_classes_intern_masks() -> None:
     assert "UINT64_C(0x4)" in generated.source
     assert ".primary_descriptor_feature_mask_count = IREE_ARRAYSIZE(" in generated.source
     assert ".primary_descriptor_feature_masks = " in generated.source
+    assert "LOOM_LOW_LOWER_RULE_SET_FLAG_DYNAMIC_PRIMARY_DESCRIPTOR_FEATURES" in generated.source
     assert "LOOM_LOW_LOWER_RULE_PRIMARY_EMIT(0, 255)" in generated.source
+
+
+def test_primary_descriptor_feature_classes_ignore_featureless_wide_primary() -> None:
+    descriptor_emit = LowerEmit(
+        kind=LowerEmitKind.DESCRIPTOR_OP,
+        descriptor=TEST_LOW_REMATERIALIZE_I32_DESCRIPTOR,
+    )
+    table = _compiled_lower_rule_set(
+        rules=(
+            LowerRule(
+                source_op=scalar_arithmetic.scalar_addi,
+                temporary_count=0,
+                guard_start=0,
+                guard_count=0,
+                emit_start=0,
+                emit_count=256,
+                primary_emit_ordinal=255,
+            ),
+        ),
+        emits=(descriptor_emit,) * 256,
+    )
+
+    masks, classes, has_dynamic_class = _primary_descriptor_feature_classes(table)
+
+    assert masks == ()
+    assert classes == (0xFF,)
+    assert not has_dynamic_class
 
 
 def test_validate_c_table_shape_accepts_structural_emit_without_primary() -> None:

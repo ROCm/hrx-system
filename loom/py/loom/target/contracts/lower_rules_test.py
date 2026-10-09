@@ -592,6 +592,10 @@ def test_compile_nonlocal_source_graph_marks_the_whole_rule() -> None:
         SourceNodeRelation.EXCLUSIVE_USER,
         SourceNodeRelation.ADJACENT_UNIQUE_USER,
     )
+    assert compiled.nonlocal_source_op_kinds == (
+        (scalar_arithmetic.scalar_muli.group.dialect_id << 8)
+        | ALL_SCALAR_OPS.index(scalar_arithmetic.scalar_muli),
+    )
 
 
 def test_related_source_node_requires_observable_result() -> None:

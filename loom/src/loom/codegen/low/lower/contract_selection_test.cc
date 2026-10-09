@@ -77,7 +77,7 @@ class ContractSelectionTest : public ::testing::Test {
       loom_target_contract_vector_lane_projection_t vector_lane_projection =
           {}) {
     const loom_target_contract_index_t index = {
-        0, 0, nullptr, 0, nullptr, 0, nullptr, selection_data,
+        0, 0, nullptr, 0, nullptr, 0, 0, nullptr, selection_data, nullptr,
     };
     loom_low_lower_contract_case_iterator_t iterator;
     loom_low_lower_contract_case_iterator_initialize(

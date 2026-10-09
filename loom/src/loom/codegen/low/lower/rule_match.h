@@ -174,9 +174,6 @@ typedef struct loom_low_lower_rule_selection_t {
   uint16_t rule_index;
   // True when the selected rule consumes the canonical source-memory plan.
   bool uses_source_memory_access;
-  // True when the selected rule's primary descriptor requires target features
-  // absent from the current contract.
-  bool primary_descriptor_unavailable;
   // Number of populated source_nodes entries for the selected rule.
   uint8_t source_node_count;
 } loom_low_lower_rule_selection_t;
@@ -273,6 +270,25 @@ iree_status_t loom_low_lower_rule_resolve_descriptor_ref(
 loom_low_lower_descriptor_ref_t loom_low_lower_rule_primary_descriptor_ref(
     const loom_low_lower_rule_set_t* rule_set,
     const loom_low_lower_rule_t* rule);
+
+typedef uint8_t loom_low_lower_rule_primary_descriptor_status_t;
+enum loom_low_lower_rule_primary_descriptor_status_e {
+  // The rule has no primary descriptor or it is ready for selection.
+  LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE = 0,
+  // The descriptor key is absent from an externally supplied descriptor set.
+  LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_MISSING = 1,
+  // The descriptor is present but requires unavailable target features.
+  LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_FEATURES_UNAVAILABLE = 2,
+};
+
+// Queries the selected rule's primary descriptor status. Bound policy rule
+// sets use their generated feature class; external queries resolve the
+// complete descriptor mask and distinguish missing descriptor keys.
+iree_status_t loom_low_lower_rule_query_primary_descriptor(
+    const loom_low_lower_rule_match_context_t* match_context,
+    const loom_low_lower_rule_set_t* rule_set,
+    const loom_low_lower_rule_t* rule,
+    loom_low_lower_rule_primary_descriptor_status_t* out_status);
 
 // Emits the structured diagnostic for a failed selection.
 iree_status_t loom_low_lower_rule_set_emit_selection_failure(

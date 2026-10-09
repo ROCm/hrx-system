@@ -808,11 +808,41 @@ static void loom_low_lower_prepare_plan_refinement(
   source_plan->memory.current = NULL;
   source_plan->selected_plan_count = 0;
   source_plan->selected_plan_emit_index = 0;
-  if (source_plan->selected_plan_indices_by_value_ordinal != NULL) {
-    memset(source_plan->selected_plan_indices_by_value_ordinal, 0xFF,
-           context->lowering->value_domain.value_count *
-               sizeof(*source_plan->selected_plan_indices_by_value_ordinal));
+}
+
+static inline bool loom_low_lower_source_plan_op_may_be_claimed_nonlocally(
+    const loom_low_lower_context_t* context, loom_op_kind_t op_kind) {
+  const loom_target_contract_index_t* contract_index =
+      context->policy->contract.index;
+  return contract_index != NULL &&
+         contract_index->nonlocal_source_op_kind_count != 0 &&
+         loom_target_contract_index_has_nonlocal_source_op_kind(contract_index,
+                                                                op_kind);
+}
+
+static iree_status_t loom_low_lower_record_nonlocal_source_graph_index(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    iree_host_size_t plan_index) {
+  IREE_ASSERT_LT(plan_index, UINT32_MAX);
+  IREE_ASSERT_NE(source_op->result_count, 0);
+  loom_low_lower_source_plan_t* source_plan = &context->lowering->source_plan;
+  if (source_plan->selected_plan_indices_by_value_ordinal == NULL) {
+    const loom_value_ordinal_t value_count =
+        context->lowering->value_domain.value_count;
+    uint32_t* plan_indices = NULL;
+    IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+        context, value_count, sizeof(*plan_indices), (void**)&plan_indices));
+    memset(plan_indices, 0xFF,
+           (iree_host_size_t)value_count * sizeof(*plan_indices));
+    source_plan->selected_plan_indices_by_value_ordinal = plan_indices;
   }
+  const loom_value_ordinal_t value_ordinal =
+      loom_local_value_domain_try_ordinal(&context->lowering->value_domain,
+                                          loom_op_const_results(source_op)[0]);
+  IREE_ASSERT_NE(value_ordinal, LOOM_VALUE_ORDINAL_INVALID);
+  source_plan->selected_plan_indices_by_value_ordinal[value_ordinal] =
+      (uint32_t)plan_index;
+  return iree_ok_status();
 }
 
 static iree_status_t loom_low_lower_visit_region_plan_ops(
@@ -870,6 +900,12 @@ static iree_status_t loom_low_lower_visit_region_plan_ops(
       }
       if (!is_structural &&
           !loom_low_lower_source_plan_op_is_metadata(op->kind)) {
+        if (loom_low_lower_source_plan_op_may_be_claimed_nonlocally(context,
+                                                                    op->kind)) {
+          IREE_RETURN_IF_ERROR(
+              loom_low_lower_record_nonlocal_source_graph_index(
+                  context, op, *inout_plan_capacity));
+        }
         ++(*inout_plan_capacity);
       }
     }
@@ -932,19 +968,8 @@ static void loom_low_lower_record_selected_plan(
   loom_low_lower_source_plan_t* source_plan = &context->lowering->source_plan;
   IREE_ASSERT_LT(source_plan->selected_plan_count,
                  source_plan->selected_plan_capacity);
-  IREE_ASSERT_LT(source_plan->selected_plan_count, UINT32_MAX);
-  const uint32_t plan_index = (uint32_t)source_plan->selected_plan_count++;
-  source_plan->selected_plans[plan_index] = selected_plan;
-  if (source_plan->selected_plan_indices_by_value_ordinal != NULL &&
-      selected_plan.source_op->result_count != 0) {
-    const loom_value_ordinal_t value_ordinal =
-        loom_local_value_domain_try_ordinal(
-            &context->lowering->value_domain,
-            loom_op_const_results(selected_plan.source_op)[0]);
-    IREE_ASSERT_NE(value_ordinal, LOOM_VALUE_ORDINAL_INVALID);
-    source_plan->selected_plan_indices_by_value_ordinal[value_ordinal] =
-        plan_index;
-  }
+  source_plan->selected_plans[source_plan->selected_plan_count++] =
+      selected_plan;
 }
 
 static loom_low_lower_selected_plan_t*
@@ -1014,7 +1039,8 @@ static loom_low_lower_selected_plan_t* loom_low_lower_find_recent_selected_plan(
 static bool loom_low_lower_source_op_is_reserved(
     loom_low_lower_context_t* context, const loom_op_t* source_op) {
   loom_low_lower_source_plan_t* source_plan = &context->lowering->source_plan;
-  if (source_op->result_count != 0) {
+  if (source_plan->selected_plan_indices_by_value_ordinal != NULL &&
+      source_op->result_count != 0) {
     const loom_value_ordinal_t value_ordinal =
         loom_local_value_domain_try_ordinal(
             &context->lowering->value_domain,
@@ -1405,6 +1431,150 @@ static iree_status_t loom_low_lower_record_descriptor_matrix_plan(
   return iree_ok_status();
 }
 
+static iree_status_t loom_low_lower_try_plan_descriptor_matrix_case(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    const loom_target_contract_case_t* contract_case,
+    const loom_target_contract_binding_t* binding,
+    loom_low_lower_contract_case_iteration_mode_t iteration_mode,
+    bool* out_selected) {
+  *out_selected = false;
+  if (iteration_mode == LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_ALL) {
+    return iree_ok_status();
+  }
+  const loom_target_contract_descriptor_matrix_rule_t* matrix_rule =
+      &binding->fragment->descriptor_matrices[contract_case->row_index];
+  loom_target_contract_query_result_t query_result =
+      loom_target_contract_query_result_empty();
+  loom_contract_request_t contract_request = {0};
+  loom_target_contract_query_environment_t environment = {0};
+  IREE_RETURN_IF_ERROR(loom_low_lower_source_query_environment_initialize(
+      context, context->descriptor_set, &environment));
+  IREE_RETURN_IF_ERROR(loom_low_lower_query_descriptor_matrix_contract(
+      &environment, &context->policy->descriptor_matrix, matrix_rule, source_op,
+      &contract_request, &query_result));
+  if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
+    query_result.rule_index = contract_case->row_index;
+    IREE_RETURN_IF_ERROR(loom_low_lower_record_descriptor_matrix_plan(
+        context, source_op, matrix_rule, &contract_request, &query_result));
+    *out_selected = true;
+  } else if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED ||
+             query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_INVALID_IR) {
+    IREE_RETURN_IF_ERROR(loom_low_lower_emit_contract_query_rejection(
+        context, source_op, &query_result));
+    *out_selected = true;
+  }
+  return iree_ok_status();
+}
+
+static bool loom_low_lower_source_plan_requires_primary_descriptor_query(
+    const loom_low_lower_context_t* context, uint16_t rule_set_index) {
+  const uint64_t* query_rule_set_bits =
+      context->lowering->source_plan.primary_descriptor_query_rule_set_bits;
+  return query_rule_set_bits != NULL &&
+         iree_all_bits_set(query_rule_set_bits[rule_set_index / 64u],
+                           UINT64_C(1) << (rule_set_index % 64u));
+}
+
+static iree_status_t loom_low_lower_plan_primary_descriptor_available(
+    const loom_low_lower_context_t* context,
+    const loom_low_lower_rule_match_context_t* match_context,
+    uint16_t rule_set_index, const loom_low_lower_rule_set_t* rule_set,
+    const loom_low_lower_rule_selection_t* selection, bool* out_available) {
+  if (!loom_low_lower_source_plan_requires_primary_descriptor_query(
+          context, rule_set_index)) {
+    *out_available = true;
+    return iree_ok_status();
+  }
+  loom_low_lower_rule_primary_descriptor_status_t status =
+      LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE;
+  IREE_RETURN_IF_ERROR(loom_low_lower_rule_query_primary_descriptor(
+      match_context, rule_set, selection->rule, &status));
+  IREE_ASSERT_NE(status, LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_MISSING);
+  *out_available = status == LOOM_LOW_LOWER_RULE_PRIMARY_DESCRIPTOR_AVAILABLE;
+  return iree_ok_status();
+}
+
+IREE_ATTRIBUTE_NOINLINE static iree_status_t
+loom_low_lower_plan_primary_descriptor_fallback(
+    loom_low_lower_context_t* context, const loom_op_t* source_op,
+    loom_low_lower_rule_source_memory_state_t* source_memory_state,
+    loom_low_lower_rule_match_context_t* match_context,
+    bool* inout_view_regions_resolved,
+    loom_low_lower_contract_case_iterator_t* iterator,
+    uint16_t unavailable_rule_set_index,
+    const loom_low_lower_rule_set_t* unavailable_rule_set,
+    const loom_low_lower_rule_selection_t* unavailable_selection,
+    bool* out_selected) {
+  const loom_target_contract_index_t* index = context->policy->contract.index;
+  uint16_t case_index = UINT16_MAX;
+  while (loom_low_lower_contract_case_iterator_next(iterator, &case_index)) {
+    const loom_target_contract_case_t* contract_case =
+        &index->cases[case_index];
+    const loom_target_contract_binding_t* binding =
+        &index->bindings[contract_case->binding_index];
+    if (contract_case->system ==
+        LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_MATRIX) {
+      bool selected = false;
+      IREE_RETURN_IF_ERROR(loom_low_lower_try_plan_descriptor_matrix_case(
+          context, source_op, contract_case, binding,
+          LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_CANDIDATES, &selected));
+      if (selected) {
+        *out_selected = true;
+        return iree_ok_status();
+      }
+      continue;
+    }
+    uint16_t rule_index = UINT16_MAX;
+    if (!loom_low_lower_contract_case_lower_rule_index(index, contract_case,
+                                                       &rule_index)) {
+      continue;
+    }
+    const loom_low_lower_rule_set_t* rule_set =
+        context->policy->contract.rule_sets.values[binding->rule_set_index];
+    match_context->policy_rule_set_ordinal =
+        (uint16_t)(binding->rule_set_index + 1u);
+    if (rule_set->source_memory_count != 0 && !*inout_view_regions_resolved) {
+      IREE_RETURN_IF_ERROR(loom_low_lower_context_view_regions(
+          context, &match_context->view_regions));
+      *inout_view_regions_resolved = true;
+    }
+    IREE_ASSERT(rule_set->source_memory_count == 0 ||
+                source_memory_state->access_plan != NULL);
+    loom_low_lower_rule_selection_t selection;
+    IREE_RETURN_IF_ERROR(
+        loom_low_lower_rule_set_select_rule_range_with_match_context(
+            match_context, rule_set, source_op, rule_index, 1, &selection));
+    if (selection.rule == NULL ||
+        !loom_low_lower_rule_selections_have_same_source_graph(
+            unavailable_selection, &selection)) {
+      continue;
+    }
+    bool primary_descriptor_available = false;
+    IREE_RETURN_IF_ERROR(loom_low_lower_plan_primary_descriptor_available(
+        context, match_context, binding->rule_set_index, rule_set, &selection,
+        &primary_descriptor_available));
+    if (!primary_descriptor_available) {
+      continue;
+    }
+    bool recorded = false;
+    IREE_RETURN_IF_ERROR(loom_low_lower_record_selected_rule_plan(
+        context, source_op, binding->rule_set_index, rule_set, &selection,
+        source_memory_state, &recorded));
+    if (recorded) {
+      *out_selected = true;
+      return iree_ok_status();
+    }
+  }
+
+  bool recorded = false;
+  IREE_RETURN_IF_ERROR(loom_low_lower_record_selected_rule_plan(
+      context, source_op, unavailable_rule_set_index, unavailable_rule_set,
+      unavailable_selection, source_memory_state, &recorded));
+  IREE_ASSERT(recorded);
+  *out_selected = true;
+  return iree_ok_status();
+}
+
 static iree_status_t loom_low_lower_plan_op_from_contract_index(
     loom_low_lower_context_t* context, const loom_op_t* source_op,
     loom_consumption_region_query_t* consumption_query,
@@ -1440,11 +1610,6 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
   while (true) {
     failed_rule_set = initial_failed_rule_set;
     rule_failure = initial_rule_failure;
-    const loom_low_lower_rule_set_t* unavailable_rule_set = NULL;
-    uint16_t unavailable_rule_set_index = UINT16_MAX;
-    loom_low_lower_rule_selection_t unavailable_selection = {
-        .rule_index = UINT16_MAX,
-    };
     loom_low_lower_contract_case_iterator_t iterator;
     const bool used_candidates =
         loom_low_lower_contract_case_iterator_initialize(
@@ -1458,32 +1623,11 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
           &index->bindings[contract_case->binding_index];
       if (contract_case->system ==
           LOOM_TARGET_CONTRACT_SYSTEM_DESCRIPTOR_MATRIX) {
-        if (iteration_mode == LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_ALL) {
-          continue;
-        }
-        const loom_target_contract_descriptor_matrix_rule_t* matrix_rule =
-            &binding->fragment->descriptor_matrices[contract_case->row_index];
-        loom_target_contract_query_result_t query_result =
-            loom_target_contract_query_result_empty();
-        loom_contract_request_t contract_request = {0};
-        loom_target_contract_query_environment_t environment = {0};
-        IREE_RETURN_IF_ERROR(loom_low_lower_source_query_environment_initialize(
-            context, context->descriptor_set, &environment));
-        IREE_RETURN_IF_ERROR(loom_low_lower_query_descriptor_matrix_contract(
-            &environment, &context->policy->descriptor_matrix, matrix_rule,
-            source_op, &contract_request, &query_result));
-        if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_LEGAL) {
-          query_result.rule_index = contract_case->row_index;
-          IREE_RETURN_IF_ERROR(loom_low_lower_record_descriptor_matrix_plan(
-              context, source_op, matrix_rule, &contract_request,
-              &query_result));
-          *out_selected = true;
-          return iree_ok_status();
-        }
-        if (query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_UNSUPPORTED ||
-            query_result.outcome == LOOM_TARGET_CONTRACT_QUERY_INVALID_IR) {
-          IREE_RETURN_IF_ERROR(loom_low_lower_emit_contract_query_rejection(
-              context, source_op, &query_result));
+        bool selected = false;
+        IREE_RETURN_IF_ERROR(loom_low_lower_try_plan_descriptor_matrix_case(
+            context, source_op, contract_case, binding, iteration_mode,
+            &selected));
+        if (selected) {
           *out_selected = true;
           return iree_ok_status();
         }
@@ -1514,20 +1658,19 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
         if (iteration_mode == LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_ALL) {
           continue;
         }
-        if (rule_selection.primary_descriptor_unavailable) {
-          if (unavailable_rule_set == NULL &&
-              loom_low_lower_rule_selection_can_record_plan(
+        bool primary_descriptor_available = false;
+        IREE_RETURN_IF_ERROR(loom_low_lower_plan_primary_descriptor_available(
+            context, &match_context, binding->rule_set_index, rule_set,
+            &rule_selection, &primary_descriptor_available));
+        if (!primary_descriptor_available) {
+          if (!loom_low_lower_rule_selection_can_record_plan(
                   context, source_op, rule_set, &rule_selection)) {
-            unavailable_rule_set = rule_set;
-            unavailable_rule_set_index = binding->rule_set_index;
-            unavailable_selection = rule_selection;
+            continue;
           }
-          continue;
-        }
-        if (unavailable_rule_set != NULL &&
-            !loom_low_lower_rule_selections_have_same_source_graph(
-                &unavailable_selection, &rule_selection)) {
-          continue;
+          return loom_low_lower_plan_primary_descriptor_fallback(
+              context, source_op, source_memory_state, &match_context,
+              &view_regions_resolved, &iterator, binding->rule_set_index,
+              rule_set, &rule_selection, out_selected);
         }
         bool recorded = false;
         IREE_RETURN_IF_ERROR(loom_low_lower_record_selected_rule_plan(
@@ -1544,15 +1687,6 @@ static iree_status_t loom_low_lower_plan_op_from_contract_index(
         failed_rule_set = rule_set;
         rule_failure = rule_selection.failure;
       }
-    }
-    if (unavailable_rule_set != NULL) {
-      bool recorded = false;
-      IREE_RETURN_IF_ERROR(loom_low_lower_record_selected_rule_plan(
-          context, source_op, unavailable_rule_set_index, unavailable_rule_set,
-          &unavailable_selection, source_memory_state, &recorded));
-      IREE_ASSERT(recorded);
-      *out_selected = true;
-      return iree_ok_status();
     }
     if (!used_candidates ||
         iteration_mode == LOOM_LOW_LOWER_CONTRACT_CASE_ITERATION_ALL) {
@@ -1880,12 +2014,58 @@ static iree_status_t loom_low_lower_refine_plan_region(
   return iree_ok_status();
 }
 
+static bool loom_low_lower_rule_set_requires_primary_descriptor_query(
+    const loom_low_lower_rule_set_t* rule_set, uint64_t available_features) {
+  if (iree_any_bit_set(
+          rule_set->flags,
+          LOOM_LOW_LOWER_RULE_SET_FLAG_DYNAMIC_PRIMARY_DESCRIPTOR_FEATURES)) {
+    return true;
+  }
+  for (uint16_t i = 0; i < rule_set->primary_descriptor_feature_mask_count;
+       ++i) {
+    if ((rule_set->primary_descriptor_feature_masks[i] & ~available_features) !=
+        0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static iree_status_t
+loom_low_lower_source_plan_prepare_primary_descriptor_queries(
+    loom_low_lower_context_t* context) {
+  const loom_low_lower_rule_set_list_t rule_sets =
+      context->policy->contract.rule_sets;
+  const uint64_t available_features =
+      loom_low_lower_context_bundle(context)->config->contract_feature_bits;
+  uint64_t* query_rule_set_bits = NULL;
+  for (uint16_t i = 0; i < rule_sets.count; ++i) {
+    if (!loom_low_lower_rule_set_requires_primary_descriptor_query(
+            rule_sets.values[i], available_features)) {
+      continue;
+    }
+    if (query_rule_set_bits == NULL) {
+      const iree_host_size_t word_count = (rule_sets.count + 63u) / 64u;
+      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
+          context, word_count, sizeof(*query_rule_set_bits),
+          (void**)&query_rule_set_bits));
+      memset(query_rule_set_bits, 0, word_count * sizeof(*query_rule_set_bits));
+      context->lowering->source_plan.primary_descriptor_query_rule_set_bits =
+          query_rule_set_bits;
+    }
+    query_rule_set_bits[i / 64u] |= UINT64_C(1) << (i % 64u);
+  }
+  return iree_ok_status();
+}
+
 iree_status_t loom_low_lower_source_plan_build(
     loom_low_lower_context_t* context, loom_region_t* source_body) {
   loom_low_lower_source_plan_t* source_plan = &context->lowering->source_plan;
   IREE_ASSERT(context->lowering->source_callable_exit_kind !=
               LOOM_OP_KIND_UNKNOWN);
   *source_plan = (loom_low_lower_source_plan_t){0};
+  IREE_RETURN_IF_ERROR(
+      loom_low_lower_source_plan_prepare_primary_descriptor_queries(context));
   if (source_body->block_count > 1) {
     const loom_value_fact_cfg_region_t* cfg =
         loom_low_lower_context_cfg(context);
@@ -1913,22 +2093,6 @@ iree_status_t loom_low_lower_source_plan_build(
         (void**)&source_plan->value_flags));
     memset(source_plan->value_flags, 0,
            value_count * sizeof(*source_plan->value_flags));
-    bool needs_source_graph_index = false;
-    const loom_low_lower_rule_set_list_t rule_sets =
-        context->policy->contract.rule_sets;
-    for (uint16_t i = 0; i < rule_sets.count; ++i) {
-      needs_source_graph_index |=
-          iree_any_bit_set(rule_sets.values[i]->flags,
-                           LOOM_LOW_LOWER_RULE_SET_FLAG_NONLOCAL_SOURCE_GRAPHS);
-    }
-    if (needs_source_graph_index) {
-      uint32_t* plan_indices = NULL;
-      IREE_RETURN_IF_ERROR(loom_low_lower_allocate_function_array(
-          context, value_count, sizeof(*plan_indices), (void**)&plan_indices));
-      memset(plan_indices, 0xFF,
-             (iree_host_size_t)value_count * sizeof(*plan_indices));
-      source_plan->selected_plan_indices_by_value_ordinal = plan_indices;
-    }
   }
 
   uint16_t argument_count = 0;
