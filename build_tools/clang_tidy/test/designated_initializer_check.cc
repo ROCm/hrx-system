@@ -184,6 +184,10 @@ void FoldSetupBlocks() {
   macro_values.first = CONFIG_VALUE(40);
   macro_values.second = CONFIG_ORDINAL;
   Observe(macro_values);
+
+  Numbers sized = {};
+  sized.first = sizeof(sized);
+  Observe(sized);
 }
 
 void PreserveUnsafeSetupBlocks(bool condition) {

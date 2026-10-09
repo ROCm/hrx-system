@@ -311,6 +311,14 @@ bool ReferencesVariable(const Stmt* Statement, const VarDecl* Variable) {
   if (!Statement) {
     return false;
   }
+  if (const auto* TypeTrait = dyn_cast<UnaryExprOrTypeTraitExpr>(Statement)) {
+    // Moving an unevaluated reference into the object's initializer does not
+    // make it observe the object under construction. Keep variably modified
+    // operands conservative because evaluating their bound is observable.
+    if (!TypeTrait->getTypeOfArgument()->isVariablyModifiedType()) {
+      return false;
+    }
+  }
   if (const auto* Reference = dyn_cast<DeclRefExpr>(Statement)) {
     if (Reference->getDecl()->getCanonicalDecl() ==
         Variable->getCanonicalDecl()) {

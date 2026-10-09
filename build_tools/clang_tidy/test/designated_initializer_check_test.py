@@ -109,6 +109,7 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
             ".second = CONFIG_ORDINAL};",
             fixed_source,
         )
+        self.assertIn("Numbers sized = {.first = sizeof(sized)};", fixed_source)
 
         self.assertIn("/*.ordinal=*/7", fixed_source)
         self.assertIn("/*.flags=*/8", fixed_source)
