@@ -719,13 +719,13 @@ TEST_F(LowAllocationUnitLivenessTest, InitializesUnitStartsAndBoundaryUses) {
   const loom_value_id_t live_in_values[] = {value_ids[0]};
   const loom_liveness_block_info_t blocks[] = {
       {
-          /*.block=*/block,
-          /*.start_point=*/5,
-          /*.end_point=*/5,
-          /*.live_in_values=*/live_in_values,
-          /*.live_in_count=*/IREE_ARRAYSIZE(live_in_values),
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
+          .block = block,
+          .start_point = 5,
+          .end_point = 5,
+          .live_in_values = live_in_values,
+          .live_in_count = IREE_ARRAYSIZE(live_in_values),
+          .live_out_values = nullptr,
+          .live_out_count = 0,
       },
   };
   const loom_liveness_analysis_t liveness = Liveness(

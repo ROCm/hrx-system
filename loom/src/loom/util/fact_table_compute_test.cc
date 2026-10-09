@@ -757,9 +757,9 @@ TEST_F(FactTableComputeTest, ConditionLoopRetainsAndReplacesBodyEntryFacts) {
       .constant = 0,
   };
   const loom_condition_integer_operand_t zero = {
-      /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-      /*.value_id=*/LOOM_VALUE_ID_INVALID,
-      /*.constant=*/0,
+      .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+      .value_id = LOOM_VALUE_ID_INVALID,
+      .constant = 0,
   };
   for (loom_value_id_t body_argument : body_arguments) {
     expect_relation(LOOM_SYMBOLIC_INTEGER_RELATION_LT, body_argument,

@@ -268,9 +268,9 @@ class VerifyTest : public ::testing::Test {
     }};
     EXPECT_NE(source_entries[0].source_id, LOOM_SOURCE_ID_INVALID);
     loom_source_table_resolver_t resolver_data = {
-        /*.module=*/parsed_module,
-        /*.entries=*/source_entries,
-        /*.count=*/IREE_ARRAYSIZE(source_entries),
+        .module = parsed_module,
+        .entries = source_entries,
+        .count = IREE_ARRAYSIZE(source_entries),
     };
 
     loom_verify_options_t options = {
@@ -1282,17 +1282,17 @@ TEST_F(VerifyTest, ParsedSourceResolverHighlightsExactResultAndOperandTokens) {
 
   loom_source_entry_t source_entries[] = {
       {
-          /*.source_id=*/
-          FindModuleSourceId(parsed_module, "parsed_verify_test.loom"),
-          /*.source=*/iree_make_cstring_view(kSource),
-          /*.filename=*/IREE_SV("parsed_verify_test.loom"),
+          .source_id =
+              FindModuleSourceId(parsed_module, "parsed_verify_test.loom"),
+          .source = iree_make_cstring_view(kSource),
+          .filename = IREE_SV("parsed_verify_test.loom"),
       },
   };
   ASSERT_NE(source_entries[0].source_id, LOOM_SOURCE_ID_INVALID);
   loom_source_table_resolver_t resolver_data = {
-      /*.module=*/parsed_module,
-      /*.entries=*/source_entries,
-      /*.count=*/IREE_ARRAYSIZE(source_entries),
+      .module = parsed_module,
+      .entries = source_entries,
+      .count = IREE_ARRAYSIZE(source_entries),
   };
 
   DiagnosticCapture structured;
@@ -1355,16 +1355,16 @@ TEST_F(VerifyTest, ParsedUseAfterConsumeReportsRelatedConsumeLocation) {
   ASSERT_NE(parsed_module, nullptr);
 
   loom_source_entry_t source_entries[] = {{
-      /*.source_id=*/
-      FindModuleSourceId(parsed_module, "parsed_use_after_consume.loom"),
-      /*.source=*/iree_make_cstring_view(kSource),
-      /*.filename=*/IREE_SV("parsed_use_after_consume.loom"),
+      .source_id =
+          FindModuleSourceId(parsed_module, "parsed_use_after_consume.loom"),
+      .source = iree_make_cstring_view(kSource),
+      .filename = IREE_SV("parsed_use_after_consume.loom"),
   }};
   ASSERT_NE(source_entries[0].source_id, LOOM_SOURCE_ID_INVALID);
   loom_source_table_resolver_t resolver_data = {
-      /*.module=*/parsed_module,
-      /*.entries=*/source_entries,
-      /*.count=*/IREE_ARRAYSIZE(source_entries),
+      .module = parsed_module,
+      .entries = source_entries,
+      .count = IREE_ARRAYSIZE(source_entries),
   };
 
   DiagnosticCapture structured;
@@ -1904,14 +1904,14 @@ TEST_F(VerifyTest, DuplicateTiedResultIndexDetected) {
       IREE_ARRAYSIZE(tied_results), location, &op));
 
   loom_source_entry_t source_entries[] = {{
-      /*.source_id=*/FindModuleSourceId(module_, filename),
-      /*.source=*/iree_make_cstring_view(kSource),
-      /*.filename=*/IREE_SV("duplicate_tied_result.loom"),
+      .source_id = FindModuleSourceId(module_, filename),
+      .source = iree_make_cstring_view(kSource),
+      .filename = IREE_SV("duplicate_tied_result.loom"),
   }};
   loom_source_table_resolver_t resolver_data = {
-      /*.module=*/module_,
-      /*.entries=*/source_entries,
-      /*.count=*/IREE_ARRAYSIZE(source_entries),
+      .module = module_,
+      .entries = source_entries,
+      .count = IREE_ARRAYSIZE(source_entries),
   };
   options_.source_resolver = {loom_source_table_resolve, &resolver_data};
 

@@ -466,16 +466,16 @@ TEST_P(CompileReportLowTest, RecordsPressureSpillAndAllocationFailureRows) {
   };
   const loom_low_allocation_edge_copy_t edge_copies[kEdgeCopyCount] = {
       {
-          /*.payload_index=*/0,
-          /*.kind=*/LOOM_LOW_ALLOCATION_COPY_MATERIALIZED,
-          /*.source_ordinal=*/0,
-          /*.destination_ordinal=*/1,
-          /*.next_coalesced_incoming_copy_index=*/
-          LOOM_LOW_ALLOCATION_EDGE_COPY_INDEX_NONE,
-          /*.destination_assignment_index=*/kResultAssignmentIndex,
-          /*.source_unit_offset=*/0,
-          /*.destination_unit_offset=*/0,
-          /*.unit_count=*/1,
+          .payload_index = 0,
+          .kind = LOOM_LOW_ALLOCATION_COPY_MATERIALIZED,
+          .source_ordinal = 0,
+          .destination_ordinal = 1,
+          .next_coalesced_incoming_copy_index =
+              LOOM_LOW_ALLOCATION_EDGE_COPY_INDEX_NONE,
+          .destination_assignment_index = kResultAssignmentIndex,
+          .source_unit_offset = 0,
+          .destination_unit_offset = 0,
+          .unit_count = 1,
       },
   };
   const loom_low_allocation_edge_copy_group_t edge_copy_groups[] = {

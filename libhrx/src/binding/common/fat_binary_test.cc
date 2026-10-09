@@ -279,12 +279,12 @@ iree_hal_executable_target_t MakeExecutableTarget(
     iree_string_view_t target_key, iree_hal_executable_target_kind_t kind,
     uint32_t priority) {
   return {
-      /*.family=*/IREE_SV("amdgpu"),
-      /*.target_key=*/target_key,
-      /*.kind=*/kind,
-      /*.priority=*/priority,
-      /*.physical_device_affinity=*/1,
-      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      .family = IREE_SV("amdgpu"),
+      .target_key = target_key,
+      .kind = kind,
+      .priority = priority,
+      .physical_device_affinity = 1,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
 }
 

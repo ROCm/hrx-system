@@ -104,8 +104,8 @@ TEST(AmdgpuDriverOptionsTest, RejectsMissingSearchPathStorageBeforeLoadingHsa) {
   iree_hal_amdgpu_driver_options_t options;
   iree_hal_amdgpu_driver_options_initialize(&options);
   options.libhsa_search_paths = (iree_string_view_list_t){
-      /*.count=*/1,
-      /*.values=*/NULL,
+      .count = 1,
+      .values = NULL,
   };
 
   iree_hal_driver_t* driver = NULL;

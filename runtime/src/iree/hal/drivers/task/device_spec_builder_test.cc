@@ -34,18 +34,18 @@ static void test_executable_loader_query_spec(
     iree_hal_device_executable_spec_t* out_executable_spec) {
   static const iree_hal_executable_target_t executable_targets[] = {
       {
-          /*.family=*/IREE_SVL("test-family"),
-          /*.target_key=*/IREE_SVL("test-target"),
-          /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
-          /*.priority=*/7,
-          /*.physical_device_affinity=*/1ull,
-          /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+          .family = IREE_SVL("test-family"),
+          .target_key = IREE_SVL("test-target"),
+          .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_EXACT,
+          .priority = 7,
+          .physical_device_affinity = 1ull,
+          .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
       },
   };
   *out_executable_spec = {
-      /*.target_count=*/IREE_ARRAYSIZE(executable_targets),
-      /*.targets=*/executable_targets,
-      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+      .target_count = IREE_ARRAYSIZE(executable_targets),
+      .targets = executable_targets,
+      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
 }
 
@@ -83,30 +83,30 @@ TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
   iree_hal_executable_loader_t* loader_ptr = &loader.base;
 
   iree_hal_task_device_spec_params_t params = {
-      /*.logical_device_id=*/IREE_SV("task0"),
-      /*.display_name=*/IREE_SV("Task Device"),
-      /*.driver_id=*/IREE_SV("task-test"),
-      /*.backend_id=*/IREE_SV("task"),
-      /*.queue_count=*/2,
-      /*.default_queue_worker_count=*/8,
-      /*.atomic_capabilities=*/
-      {
-          .operations =
-              {
-                  .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
-              },
-          .wait_conditions = {},
-      },
-      /*.zero_compute_atomic_capabilities=*/
-      {
-          .operations =
-              {
-                  .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
-              },
-          .wait_conditions = {},
-      },
-      /*.loader_count=*/1,
-      /*.loaders=*/&loader_ptr,
+      .logical_device_id = IREE_SV("task0"),
+      .display_name = IREE_SV("Task Device"),
+      .driver_id = IREE_SV("task-test"),
+      .backend_id = IREE_SV("task"),
+      .queue_count = 2,
+      .default_queue_worker_count = 8,
+      .atomic_capabilities =
+          {
+              .operations =
+                  {
+                      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                  },
+              .wait_conditions = {},
+          },
+      .zero_compute_atomic_capabilities =
+          {
+              .operations =
+                  {
+                      .device_scope_32 = IREE_HAL_ATOMIC_OPERATION_FLAG_STORE,
+                  },
+              .wait_conditions = {},
+          },
+      .loader_count = 1,
+      .loaders = &loader_ptr,
   };
   iree_hal_device_spec_t* spec = NULL;
   IREE_ASSERT_OK(iree_hal_task_device_spec_create(
@@ -172,10 +172,10 @@ TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
       iree_hal_device_spec_executables(spec);
   ASSERT_NE(executables, nullptr);
   iree_hal_executable_target_selection_t target_selection = {
-      /*.family=*/IREE_SV("test-family"),
-      /*.target_key=*/IREE_SV("test-target"),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
-      /*.physical_device_affinity=*/0,
+      .family = IREE_SV("test-family"),
+      .target_key = IREE_SV("test-target"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      .physical_device_affinity = 0,
   };
   const iree_hal_executable_target_selection_result_t selection_result =
       iree_hal_device_spec_select_executable_target(spec, &target_selection);
@@ -184,10 +184,10 @@ TEST(TaskDeviceSpecBuilderTest, CapturesCommonTaskFacts) {
   ASSERT_NE(selection_result.target, nullptr);
 
   target_selection = {
-      /*.family=*/IREE_SV("cpu"),
-      /*.target_key=*/iree_string_view_empty(),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
-      /*.physical_device_affinity=*/0,
+      .family = IREE_SV("cpu"),
+      .target_key = iree_string_view_empty(),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      .physical_device_affinity = 0,
   };
   const iree_hal_executable_target_selection_result_t cpu_selection_result =
       iree_hal_device_spec_select_executable_target(spec, &target_selection);

@@ -93,28 +93,28 @@ class AmdgpuWaitPacketTest : public ::testing::Test {
 TEST_F(AmdgpuWaitPacketTest, SelectsLegacyCombinedAndVscntWaits) {
   const ExpectedWaitSelection cases[] = {
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna3.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
-          /*.immediate=*/{IREE_SV("vmcnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna3.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
+          .immediate = {IREE_SV("vmcnt"), 0},
       },
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna3.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT_VSCNT,
-          /*.immediate=*/{IREE_SV("vscnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna3.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT_VSCNT,
+          .immediate = {IREE_SV("vscnt"), 0},
       },
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna3.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
-          /*.immediate=*/{IREE_SV("lgkmcnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna3.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
+          .immediate = {IREE_SV("lgkmcnt"), 0},
       },
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.cdna3.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
-          /*.immediate=*/{IREE_SV("vmcnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.cdna3.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
+          .immediate = {IREE_SV("vmcnt"), 0},
       },
   };
   for (const ExpectedWaitSelection& expected : cases) {
@@ -126,16 +126,16 @@ TEST_F(AmdgpuWaitPacketTest, SelectsLegacyCombinedAndVscntWaits) {
 TEST_F(AmdgpuWaitPacketTest, SelectsArchitectureSpecificCombinedNoWaitValues) {
   const ExpectedWaitSelection cases[] = {
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna3.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
-          /*.immediate=*/{IREE_SV("lgkmcnt"), 63},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna3.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
+          .immediate = {IREE_SV("lgkmcnt"), 63},
       },
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.cdna3.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
-          /*.immediate=*/{IREE_SV("lgkmcnt"), 15},
+          .descriptor_set_key = IREE_SV("amdgpu.cdna3.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAITCNT,
+          .immediate = {IREE_SV("lgkmcnt"), 15},
       },
   };
   for (const ExpectedWaitSelection& expected : cases) {
@@ -172,28 +172,28 @@ TEST_F(AmdgpuWaitPacketTest, ClampsTargetCountBelowNoWaitEncoding) {
 TEST_F(AmdgpuWaitPacketTest, SelectsRdna4SplitWaits) {
   const ExpectedWaitSelection cases[] = {
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna4.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_LOADCNT,
-          /*.immediate=*/{IREE_SV("loadcnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna4.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_LOAD,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_LOADCNT,
+          .immediate = {IREE_SV("loadcnt"), 0},
       },
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna4.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_STORECNT,
-          /*.immediate=*/{IREE_SV("storecnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna4.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_VMEM_STORE,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_STORECNT,
+          .immediate = {IREE_SV("storecnt"), 0},
       },
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna4.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_DSCNT,
-          /*.immediate=*/{IREE_SV("dscnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna4.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_LDS,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_DSCNT,
+          .immediate = {IREE_SV("dscnt"), 0},
       },
       {
-          /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna4.core"),
-          /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM,
-          /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_KMCNT,
-          /*.immediate=*/{IREE_SV("kmcnt"), 0},
+          .descriptor_set_key = IREE_SV("amdgpu.rdna4.core"),
+          .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_SMEM,
+          .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_KMCNT,
+          .immediate = {IREE_SV("kmcnt"), 0},
       },
   };
   for (const ExpectedWaitSelection& expected : cases) {
@@ -204,10 +204,10 @@ TEST_F(AmdgpuWaitPacketTest, SelectsRdna4SplitWaits) {
 
 TEST_F(AmdgpuWaitPacketTest, SelectsGfx125xTranslationWait) {
   ExpectSelection({
-      /*.descriptor_set_key=*/IREE_SV("amdgpu.rdna4.gfx125x.core"),
-      /*.counter_mask=*/LOOM_AMDGPU_WAIT_COUNTER_MASK_X,
-      /*.descriptor_ref=*/LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_XCNT,
-      /*.immediate=*/{IREE_SV("xcnt"), 0},
+      .descriptor_set_key = IREE_SV("amdgpu.rdna4.gfx125x.core"),
+      .counter_mask = LOOM_AMDGPU_WAIT_COUNTER_MASK_X,
+      .descriptor_ref = LOOM_AMDGPU_DESCRIPTOR_REF_S_WAIT_XCNT,
+      .immediate = {IREE_SV("xcnt"), 0},
   });
 
   const loom_low_descriptor_set_t* rdna4_descriptor_set =

@@ -141,8 +141,8 @@ static void DestroyTrackedTask(loomc_task_t* base_task) {
 }
 
 static const loomc_task_vtable_t kTrackedTaskVtable = {
-    /*.execute=*/ExecuteTrackedTask,
-    /*.destroy=*/DestroyTrackedTask,
+    .execute = ExecuteTrackedTask,
+    .destroy = DestroyTrackedTask,
 };
 
 static loomc_task_t* AllocateTrackedTask(TaskTracker* tracker) {
@@ -218,8 +218,8 @@ static void DestroyGatedTask(loomc_task_t* base_task) {
 }
 
 static const loomc_task_vtable_t kGatedTaskVtable = {
-    /*.execute=*/ExecuteGatedTask,
-    /*.destroy=*/DestroyGatedTask,
+    .execute = ExecuteGatedTask,
+    .destroy = DestroyGatedTask,
 };
 
 static loomc_task_t* AllocateGatedTask(ExecutionGate* gate,
@@ -270,8 +270,8 @@ static void DestroyRecursiveTask(loomc_task_t* base_task) {
 }
 
 static const loomc_task_vtable_t kRecursiveTaskVtable = {
-    /*.execute=*/ExecuteRecursiveTask,
-    /*.destroy=*/DestroyRecursiveTask,
+    .execute = ExecuteRecursiveTask,
+    .destroy = DestroyRecursiveTask,
 };
 
 static loomc_task_t* AllocateRecursiveTask(loomc_task_sink_t sink,
@@ -356,8 +356,8 @@ static void DestroyPipelineTask(loomc_task_t* base_task) {
 }
 
 static const loomc_task_vtable_t kPipelineTaskVtable = {
-    /*.execute=*/ExecutePipelineTask,
-    /*.destroy=*/DestroyPipelineTask,
+    .execute = ExecutePipelineTask,
+    .destroy = DestroyPipelineTask,
 };
 
 static loomc_task_t* AllocatePipelineTask(pipeline_task_role_t role,
@@ -373,11 +373,11 @@ static loomc_task_t* AllocatePipelineTask(pipeline_task_role_t role,
 
 static TaskPoolPtr AllocateTaskPool(loomc_host_size_t max_worker_count) {
   loomc_task_pool_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
-      /*.structure_size=*/sizeof(loomc_task_pool_options_t),
-      /*.next=*/nullptr,
-      /*.max_worker_count=*/max_worker_count,
-      /*.worker_stack_size=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
+      .structure_size = sizeof(loomc_task_pool_options_t),
+      .next = nullptr,
+      .max_worker_count = max_worker_count,
+      .worker_stack_size = 0,
   };
   loomc_task_pool_t* pool = nullptr;
   IREE_CHECK_OK(iree_status_from_loomc(

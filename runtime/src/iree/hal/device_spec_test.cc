@@ -114,36 +114,36 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
   out_memory_types[0].atomic_operations.system_scope_64 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD;
   *out_memory = {
-      /*.heap_count=*/1,
-      /*.heaps=*/out_memory_heaps,
-      /*.memory_type_count=*/1,
-      /*.memory_types=*/out_memory_types,
-      /*.external_buffer_handle_count=*/0,
-      /*.external_buffer_handles=*/NULL,
-      /*.flags=*/IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
+      .heap_count = 1,
+      .heaps = out_memory_heaps,
+      .memory_type_count = 1,
+      .memory_types = out_memory_types,
+      .external_buffer_handle_count = 0,
+      .external_buffer_handles = NULL,
+      .flags = IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
   };
 
   out_queue_families[0] = {
-      /*.name=*/iree_make_cstring_view("default"),
-      /*.provisioned_queue_count=*/1,
-      /*.priority_count=*/IREE_ARRAYSIZE(kQueuePriorities),
-      /*.priorities=*/kQueuePriorities,
-      /*.execution_unit_count=*/8,
-      /*.execution_resource_group_count=*/
-      IREE_ARRAYSIZE(kQueueExecutionResourceGroups),
-      /*.execution_resource_groups=*/kQueueExecutionResourceGroups,
-      /*.execution_resource_count=*/IREE_ARRAYSIZE(kQueueExecutionResources),
-      /*.execution_resources=*/kQueueExecutionResources,
-      /*.supported_queue_features=*/
-      IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH,
-      /*.timestamp_valid_bits=*/64,
-      /*.timestamp_frequency_hz=*/1000000000ull,
-      /*.physical_device_affinity=*/1,
-      /*.role_flags=*/IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
-          IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
-      /*.atomic_capabilities=*/{},
-      /*.zero_compute_atomic_capabilities=*/{},
-      /*.flags=*/IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
+      .name = iree_make_cstring_view("default"),
+      .provisioned_queue_count = 1,
+      .priority_count = IREE_ARRAYSIZE(kQueuePriorities),
+      .priorities = kQueuePriorities,
+      .execution_unit_count = 8,
+      .execution_resource_group_count =
+          IREE_ARRAYSIZE(kQueueExecutionResourceGroups),
+      .execution_resource_groups = kQueueExecutionResourceGroups,
+      .execution_resource_count = IREE_ARRAYSIZE(kQueueExecutionResources),
+      .execution_resources = kQueueExecutionResources,
+      .supported_queue_features =
+          IREE_HAL_QUEUE_FEATURE_FLAG_COOPERATIVE_DISPATCH,
+      .timestamp_valid_bits = 64,
+      .timestamp_frequency_hz = 1000000000ull,
+      .physical_device_affinity = 1,
+      .role_flags = IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_DISPATCH |
+                    IREE_HAL_QUEUE_FAMILY_ROLE_FLAG_TRANSFER,
+      .atomic_capabilities = {},
+      .zero_compute_atomic_capabilities = {},
+      .flags = IREE_HAL_QUEUE_FAMILY_SPEC_FLAG_DYNAMIC_ACQUISITION,
   };
   out_queue_families[0].atomic_capabilities.operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
@@ -155,11 +155,11 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
       .zero_compute_atomic_capabilities.operations.device_scope_32 =
       IREE_HAL_ATOMIC_OPERATION_FLAG_STORE;
   *out_queues = {
-      /*.family_count=*/1,
-      /*.families=*/out_queue_families,
-      /*.external_timepoint_handle_count=*/0,
-      /*.external_timepoint_handles=*/NULL,
-      /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+      .family_count = 1,
+      .families = out_queue_families,
+      .external_timepoint_handle_count = 0,
+      .external_timepoint_handles = NULL,
+      .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
 
   *out_dispatch = {
@@ -247,16 +247,16 @@ static iree_hal_device_spec_params_t MakeTestSpecParams(
   };
 
   return {
-      /*.identity=*/out_identity,
-      /*.memory=*/out_memory,
-      /*.virtual_memory=*/NULL,
-      /*.queues=*/out_queues,
-      /*.dispatch=*/out_dispatch,
-      /*.timing=*/out_timing,
-      /*.executables=*/out_executables,
-      /*.sanitizer=*/out_sanitizer,
-      /*.facet_count=*/1,
-      /*.facets=*/out_facets,
+      .identity = out_identity,
+      .memory = out_memory,
+      .virtual_memory = NULL,
+      .queues = out_queues,
+      .dispatch = out_dispatch,
+      .timing = out_timing,
+      .executables = out_executables,
+      .sanitizer = out_sanitizer,
+      .facet_count = 1,
+      .facets = out_facets,
   };
 }
 
@@ -449,23 +449,23 @@ TEST(DeviceSpecTest, RejectsInvalidExternalTimepointHandleTypes) {
       .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_NONE,
   };
   iree_hal_device_queue_spec_t queues = {
-      /*.family_count=*/0,
-      /*.families=*/NULL,
-      /*.external_timepoint_handle_count=*/1,
-      /*.external_timepoint_handles=*/&external_timepoint_handle,
-      /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+      .family_count = 0,
+      .families = NULL,
+      .external_timepoint_handle_count = 1,
+      .external_timepoint_handles = &external_timepoint_handle,
+      .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/NULL,
-      /*.memory=*/NULL,
-      /*.virtual_memory=*/NULL,
-      /*.queues=*/&queues,
-      /*.dispatch=*/NULL,
-      /*.timing=*/NULL,
-      /*.executables=*/NULL,
-      /*.sanitizer=*/NULL,
-      /*.facet_count=*/0,
-      /*.facets=*/NULL,
+      .identity = NULL,
+      .memory = NULL,
+      .virtual_memory = NULL,
+      .queues = &queues,
+      .dispatch = NULL,
+      .timing = NULL,
+      .executables = NULL,
+      .sanitizer = NULL,
+      .facet_count = 0,
+      .facets = NULL,
   };
   iree_hal_device_spec_t* spec = NULL;
   IREE_EXPECT_STATUS_IS(
@@ -570,20 +570,20 @@ TEST(DeviceSpecTest,
       },
   };
   iree_hal_device_identity_spec_t identity = {
-      /*.logical_device_id=*/iree_make_cstring_view("test-device"),
-      /*.display_name=*/iree_make_cstring_view("Test Device"),
-      /*.driver_id=*/iree_make_cstring_view("test"),
-      /*.driver_version=*/iree_string_view_empty(),
-      /*.backend_id=*/iree_make_cstring_view("test"),
-      /*.device_path=*/iree_string_view_empty(),
-      /*.vendor_name=*/iree_string_view_empty(),
-      /*.vendor_id=*/0,
-      /*.device_id=*/0,
-      /*.revision_id=*/0,
-      /*.logical_ordinal=*/0,
-      /*.physical_device_count=*/IREE_ARRAYSIZE(physical_devices),
-      /*.physical_devices=*/physical_devices,
-      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+      .logical_device_id = iree_make_cstring_view("test-device"),
+      .display_name = iree_make_cstring_view("Test Device"),
+      .driver_id = iree_make_cstring_view("test"),
+      .driver_version = iree_string_view_empty(),
+      .backend_id = iree_make_cstring_view("test"),
+      .device_path = iree_string_view_empty(),
+      .vendor_name = iree_string_view_empty(),
+      .vendor_id = 0,
+      .device_id = 0,
+      .revision_id = 0,
+      .logical_ordinal = 0,
+      .physical_device_count = IREE_ARRAYSIZE(physical_devices),
+      .physical_devices = physical_devices,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
   iree_hal_executable_target_t targets[2] = {
       {
@@ -604,9 +604,9 @@ TEST(DeviceSpecTest,
       },
   };
   iree_hal_device_executable_spec_t executables = {
-      /*.target_count=*/IREE_ARRAYSIZE(targets),
-      /*.targets=*/targets,
-      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+      .target_count = IREE_ARRAYSIZE(targets),
+      .targets = targets,
+      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
   iree_hal_device_spec_params_t params = {
       .identity = &identity,
@@ -654,16 +654,16 @@ TEST(DeviceSpecTest, RejectsInvalidExtensionFacets) {
       },
   };
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/NULL,
-      /*.memory=*/NULL,
-      /*.virtual_memory=*/NULL,
-      /*.queues=*/NULL,
-      /*.dispatch=*/NULL,
-      /*.timing=*/NULL,
-      /*.executables=*/NULL,
-      /*.sanitizer=*/NULL,
-      /*.facet_count=*/1,
-      /*.facets=*/facets,
+      .identity = NULL,
+      .memory = NULL,
+      .virtual_memory = NULL,
+      .queues = NULL,
+      .dispatch = NULL,
+      .timing = NULL,
+      .executables = NULL,
+      .sanitizer = NULL,
+      .facet_count = 1,
+      .facets = facets,
   };
 
   iree_hal_device_spec_t* spec = NULL;
@@ -878,24 +878,24 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
       },
   };
   iree_hal_device_queue_spec_t queues = {
-      /*.family_count=*/0,
-      /*.families=*/NULL,
-      /*.external_timepoint_handle_count=*/1,
-      /*.external_timepoint_handles=*/external_timepoint_handles,
-      /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+      .family_count = 0,
+      .families = NULL,
+      .external_timepoint_handle_count = 1,
+      .external_timepoint_handles = external_timepoint_handles,
+      .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
 
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/NULL,
-      /*.memory=*/&memory,
-      /*.virtual_memory=*/&virtual_memory,
-      /*.queues=*/&queues,
-      /*.dispatch=*/NULL,
-      /*.timing=*/NULL,
-      /*.executables=*/NULL,
-      /*.sanitizer=*/NULL,
-      /*.facet_count=*/0,
-      /*.facets=*/NULL,
+      .identity = NULL,
+      .memory = &memory,
+      .virtual_memory = &virtual_memory,
+      .queues = &queues,
+      .dispatch = NULL,
+      .timing = NULL,
+      .executables = NULL,
+      .sanitizer = NULL,
+      .facet_count = 0,
+      .facets = NULL,
   };
   iree_hal_device_spec_t* spec = NULL;
   IREE_ASSERT_OK(
@@ -984,20 +984,20 @@ TEST(DeviceSpecTest, FindsVirtualMemoryAndExternalHandleRecords) {
 
 TEST(DeviceSpecBuilderTest, CopiesInputsAndFinalizes) {
   iree_hal_device_identity_spec_t identity = {
-      /*.logical_device_id=*/iree_make_cstring_view("builder-device"),
-      /*.display_name=*/iree_make_cstring_view("Builder Device"),
-      /*.driver_id=*/iree_make_cstring_view("test"),
-      /*.driver_version=*/iree_make_cstring_view("1.0"),
-      /*.backend_id=*/iree_make_cstring_view("test"),
-      /*.device_path=*/iree_make_cstring_view("test://builder"),
-      /*.vendor_name=*/iree_make_cstring_view("Example"),
-      /*.vendor_id=*/1,
-      /*.device_id=*/2,
-      /*.revision_id=*/3,
-      /*.logical_ordinal=*/0,
-      /*.physical_device_count=*/0,
-      /*.physical_devices=*/NULL,
-      /*.flags=*/IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
+      .logical_device_id = iree_make_cstring_view("builder-device"),
+      .display_name = iree_make_cstring_view("Builder Device"),
+      .driver_id = iree_make_cstring_view("test"),
+      .driver_version = iree_make_cstring_view("1.0"),
+      .backend_id = iree_make_cstring_view("test"),
+      .device_path = iree_make_cstring_view("test://builder"),
+      .vendor_name = iree_make_cstring_view("Example"),
+      .vendor_id = 1,
+      .device_id = 2,
+      .revision_id = 3,
+      .logical_ordinal = 0,
+      .physical_device_count = 0,
+      .physical_devices = NULL,
+      .flags = IREE_HAL_DEVICE_IDENTITY_FLAG_NONE,
   };
   iree_hal_device_dispatch_spec_t dispatch = {
       .launch =

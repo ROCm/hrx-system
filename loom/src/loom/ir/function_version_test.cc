@@ -28,7 +28,7 @@ TEST(FunctionVersionOwnerTest, GrowsStableListViewInInsertionOrder) {
   EXPECT_EQ(list->count, 0u);
 
   const loom_function_version_type_t version_type = {
-      /*.name=*/IREE_SVL("test"),
+      .name = IREE_SVL("test"),
   };
   loom_function_version_t versions[19] = {};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(versions); ++i) {

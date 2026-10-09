@@ -31,22 +31,22 @@ static SanitizerExecutableLoadExpectation GetSanitizerExecutableLoadExpectation(
   const std::string_view backend_name(backend.name);
   if (backend_name.find("asan_executable") != std::string_view::npos) {
     return {
-        /*.executable_file=*/"asan_executable_test.bin",
-        /*.global_name=*/IREE_HAL_AMDGPU_ASAN_CONFIG_GLOBAL_NAME,
-        /*.capability_name=*/"AMDGPU ASAN shadow memory",
+        .executable_file = "asan_executable_test.bin",
+        .global_name = IREE_HAL_AMDGPU_ASAN_CONFIG_GLOBAL_NAME,
+        .capability_name = "AMDGPU ASAN shadow memory",
     };
   }
   if (backend_name.find("tsan_executable") != std::string_view::npos) {
     return {
-        /*.executable_file=*/"tsan_executable_test.bin",
-        /*.global_name=*/IREE_HAL_AMDGPU_TSAN_CONFIG_GLOBAL_NAME,
-        /*.capability_name=*/"AMDGPU TSAN shadow memory",
+        .executable_file = "tsan_executable_test.bin",
+        .global_name = IREE_HAL_AMDGPU_TSAN_CONFIG_GLOBAL_NAME,
+        .capability_name = "AMDGPU TSAN shadow memory",
     };
   }
   return {
-      /*.executable_file=*/"feedback_executable_test.bin",
-      /*.global_name=*/IREE_HAL_AMDGPU_FEEDBACK_CONFIG_GLOBAL_NAME,
-      /*.capability_name=*/"the AMDGPU feedback channel",
+      .executable_file = "feedback_executable_test.bin",
+      .global_name = IREE_HAL_AMDGPU_FEEDBACK_CONFIG_GLOBAL_NAME,
+      .capability_name = "the AMDGPU feedback channel",
   };
 }
 

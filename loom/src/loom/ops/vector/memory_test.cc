@@ -80,11 +80,11 @@ class VectorMemoryTest : public ::testing::Test {
     loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
     IREE_CHECK_OK(loom_module_intern_string(module_, name, &name_id));
     loom_encoding_t encoding = {
-        /*.name_id=*/name_id,
-        /*.alias_id=*/LOOM_STRING_ID_INVALID,
-        /*.attribute_count=*/attribute_count,
-        /*.family=*/{},
-        /*.attributes=*/attributes,
+        .name_id = name_id,
+        .alias_id = LOOM_STRING_ID_INVALID,
+        .attribute_count = attribute_count,
+        .family = {},
+        .attributes = attributes,
     };
     uint16_t encoding_id = 0;
     IREE_CHECK_OK(loom_module_add_encoding(module_, &encoding, &encoding_id));

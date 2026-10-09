@@ -325,17 +325,17 @@ class LowLowerRepresentationObserverTest : public ::testing::Test {
     target_facts_.storage.bundle = *loom_test_target_bundles.values[1];
 
     provider_ = (loom_low_lower_representation_provider_t){
-        /*.relation=*/RelatesValues,
-        /*.observe_boundary=*/ObserveBoundary,
-        /*.observe_callable_boundary=*/ObserveCallableBoundary,
-        /*.observe_unclaimed_operand=*/ObserveUnclaimedOperand,
-        /*.boundaries=*/kBoundaries,
-        /*.boundary_spans=*/kBoundarySpans,
-        /*.boundary_count=*/IREE_ARRAYSIZE(kBoundaries),
-        /*.boundary_dialect_base_id=*/LOOM_DIALECT_SCALAR,
-        /*.boundary_dialect_count=*/IREE_ARRAYSIZE(kBoundarySpans),
-        /*.relation_mask=*/LOOM_VALUE_RELATION_MASK_ALL,
-        /*.user_data=*/this,
+        .relation = RelatesValues,
+        .observe_boundary = ObserveBoundary,
+        .observe_callable_boundary = ObserveCallableBoundary,
+        .observe_unclaimed_operand = ObserveUnclaimedOperand,
+        .boundaries = kBoundaries,
+        .boundary_spans = kBoundarySpans,
+        .boundary_count = IREE_ARRAYSIZE(kBoundaries),
+        .boundary_dialect_base_id = LOOM_DIALECT_SCALAR,
+        .boundary_dialect_count = IREE_ARRAYSIZE(kBoundarySpans),
+        .relation_mask = LOOM_VALUE_RELATION_MASK_ALL,
+        .user_data = this,
     };
     source_plan_observer_ = (loom_low_lower_source_plan_observer_t){
         .begin = BeginObservation,

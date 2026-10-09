@@ -39,11 +39,11 @@ static iree_status_t EmitEncodingParamError(iree_diagnostic_emitter_t emitter,
       loom_param_string(param_name),
   };
   loom_diagnostic_emission_t emission = {
-      /*.module=*/nullptr,
-      /*.op=*/op,
-      /*.error=*/error,
-      /*.params=*/diagnostic_params,
-      /*.param_count=*/IREE_ARRAYSIZE(diagnostic_params),
+      .module = nullptr,
+      .op = op,
+      .error = error,
+      .params = diagnostic_params,
+      .param_count = IREE_ARRAYSIZE(diagnostic_params),
   };
   return iree_diagnostic_emit(emitter, &emission);
 }
@@ -62,8 +62,8 @@ static iree_status_t VerifyRequiresLayoutDefine(
 
 static const loom_encoding_dynamic_parameter_descriptor_t
     kRequiresLayoutDynamicParameters[] = {{
-        /*.name=*/LOOM_BSTRING_REF(6, "layout"),
-        /*.type_constraint=*/LOOM_TYPE_CONSTRAINT_ANY_ENCODING,
+        .name = LOOM_BSTRING_REF(6, "layout"),
+        .type_constraint = LOOM_TYPE_CONSTRAINT_ANY_ENCODING,
     }};
 static const loom_encoding_family_descriptor_t kRequiresLayoutDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(15, "requires_layout"),
@@ -222,11 +222,11 @@ TEST_F(EncodingVerifyTest, UnusedMalformedStaticEncodingIsDiagnosed) {
       .value = loom_attr_string(value_id),
   };
   loom_encoding_t encoding = {
-      /*.name_id=*/encoding_name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&parameter,
+      .name_id = encoding_name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &parameter,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));

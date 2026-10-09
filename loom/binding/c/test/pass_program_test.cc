@@ -51,13 +51,13 @@ WorkspacePtr CreateWorkspace() {
 
 SourcePtr CreateTextSource(const char* identifier, const char* contents) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -222,9 +222,9 @@ TEST(PassProgramTest, RejectsUnknownOptionStructure) {
   ContextPtr context = CreateContext();
 
   loomc_pass_program_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
   };
   loomc_pass_program_t* pass_program = nullptr;
   loomc_status_t status = loomc_pass_program_create_empty(

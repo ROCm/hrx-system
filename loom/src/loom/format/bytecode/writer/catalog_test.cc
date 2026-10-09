@@ -21,17 +21,16 @@ namespace loom {
 namespace {
 
 static const loom_attr_descriptor_t kParameters[] = {
-    {/*.name=*/LOOM_BSTRING_REF(5, "block"),
-     /*.attr_kind=*/LOOM_ATTR_I64},
-    {/*.name=*/LOOM_BSTRING_REF(4, "left"),
-     /*.attr_kind=*/LOOM_ATTR_ENCODING,
-     /*.flags=*/LOOM_ATTR_OPTIONAL},
-    {/*.name=*/LOOM_BSTRING_REF(8, "metadata"),
-     /*.attr_kind=*/LOOM_ATTR_DICT,
-     /*.flags=*/LOOM_ATTR_OPTIONAL},
-    {/*.name=*/LOOM_BSTRING_REF(5, "right"),
-     /*.attr_kind=*/LOOM_ATTR_ENCODING,
-     /*.flags=*/LOOM_ATTR_OPTIONAL},
+    {.name = LOOM_BSTRING_REF(5, "block"), .attr_kind = LOOM_ATTR_I64},
+    {.name = LOOM_BSTRING_REF(4, "left"),
+     .attr_kind = LOOM_ATTR_ENCODING,
+     .flags = LOOM_ATTR_OPTIONAL},
+    {.name = LOOM_BSTRING_REF(8, "metadata"),
+     .attr_kind = LOOM_ATTR_DICT,
+     .flags = LOOM_ATTR_OPTIONAL},
+    {.name = LOOM_BSTRING_REF(5, "right"),
+     .attr_kind = LOOM_ATTR_ENCODING,
+     .flags = LOOM_ATTR_OPTIONAL},
 };
 static const loom_encoding_family_descriptor_t kDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(12, "test.catalog"),
@@ -43,18 +42,17 @@ static const loom_encoding_family_descriptor_t kDescriptor = {
 static const loom_encoding_vtable_t kVtable = {.descriptor = &kDescriptor};
 
 static const loom_attr_descriptor_t kPayloadParameters[] = {
-    {/*.name=*/LOOM_BSTRING_REF(7, "element"),
-     /*.attr_kind=*/LOOM_ATTR_TYPE},
-    {/*.name=*/LOOM_BSTRING_REF(5, "label"),
-     /*.attr_kind=*/LOOM_ATTR_STRING,
-     /*.flags=*/LOOM_ATTR_OPTIONAL},
+    {.name = LOOM_BSTRING_REF(7, "element"), .attr_kind = LOOM_ATTR_TYPE},
+    {.name = LOOM_BSTRING_REF(5, "label"),
+     .attr_kind = LOOM_ATTR_STRING,
+     .flags = LOOM_ATTR_OPTIONAL},
 };
 static const loom_parameterized_attr_descriptor_t kPayloadDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(20, "test.catalog_payload"),
-    /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
-    /*.parameter_count=*/IREE_ARRAYSIZE(kPayloadParameters),
-    /*.primary_parameter_index=*/LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
-    /*.parameter_descriptors=*/kPayloadParameters,
+    .name = LOOM_BSTRING_REF(20, "test.catalog_payload"),
+    .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+    .parameter_count = IREE_ARRAYSIZE(kPayloadParameters),
+    .primary_parameter_index = LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
+    .parameter_descriptors = kPayloadParameters,
 };
 
 // Writer arena whose backing allocation attempts can fail deterministically.
@@ -415,24 +413,21 @@ TEST_F(CatalogTest, NumberingRetainsDistinctScopedTypeIdentities) {
 TEST_F(CatalogTest, TypeAndAttributeMetadataKeepFirstUseOrder) {
   static const loom_attr_descriptor_t variants_parameter = [] {
     loom_attr_descriptor_t descriptor = {
-        /*.name=*/LOOM_BSTRING_REF(8, "variants"),
-        /*.attr_kind=*/LOOM_ATTR_PARAMETERIZED_ARRAY,
+        .name = LOOM_BSTRING_REF(8, "variants"),
+        .attr_kind = LOOM_ATTR_PARAMETERIZED_ARRAY,
     };
     descriptor.reference.parameterized_attr_kind =
         LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0);
     return descriptor;
   }();
   static const loom_attr_descriptor_t parameters[] = {
-      {/*.name=*/LOOM_BSTRING_REF(6, "before"),
-       /*.attr_kind=*/LOOM_ATTR_STRING},
-      {/*.name=*/LOOM_BSTRING_REF(8, "metadata"),
-       /*.attr_kind=*/LOOM_ATTR_DICT},
+      {.name = LOOM_BSTRING_REF(6, "before"), .attr_kind = LOOM_ATTR_STRING},
+      {.name = LOOM_BSTRING_REF(8, "metadata"), .attr_kind = LOOM_ATTR_DICT},
       variants_parameter,
-      {/*.name=*/LOOM_BSTRING_REF(5, "after"),
-       /*.attr_kind=*/LOOM_ATTR_STRING},
-      {/*.name=*/LOOM_BSTRING_REF(8, "optional"),
-       /*.attr_kind=*/LOOM_ATTR_TYPE,
-       /*.flags=*/LOOM_ATTR_OPTIONAL},
+      {.name = LOOM_BSTRING_REF(5, "after"), .attr_kind = LOOM_ATTR_STRING},
+      {.name = LOOM_BSTRING_REF(8, "optional"),
+       .attr_kind = LOOM_ATTR_TYPE,
+       .flags = LOOM_ATTR_OPTIONAL},
   };
   static const loom_parameterized_type_descriptor_t descriptor = {
       /*.name=*/LOOM_BSTRING_REF(17, "test.catalog_type"),

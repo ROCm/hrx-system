@@ -638,9 +638,9 @@ TEST_F(LowLowerRuleMatchTest, MatchesSubnormalPolicyPermissionOrRetainedFact) {
   loom_low_lower_rule_t rule = {};
   rule.guard_count = 1;
   const loom_low_lower_rule_span_t span = {
-      /*.source_op_kind=*/LOOM_OP_SCALAR_FPTRUNC,
-      /*.rule_start=*/0,
-      /*.rule_count=*/1,
+      .source_op_kind = LOOM_OP_SCALAR_FPTRUNC,
+      .rule_start = 0,
+      .rule_count = 1,
   };
   loom_low_lower_rule_set_t rule_set = {};
   rule_set.spans = &span;

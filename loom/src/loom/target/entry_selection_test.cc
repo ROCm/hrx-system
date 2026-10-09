@@ -229,20 +229,19 @@ TEST_F(TargetEntrySelectionTest, ForwardingPreservesRawEmissionIdentity) {
       loom_param_string(IREE_SV("value")),
   };
   const loom_diagnostic_related_op_t related[] = {{
-      /*.label=*/IREE_SV("related"),
-      /*.module=*/module.get(),
-      /*.op=*/op,
-      /*.field_ref=*/
-      loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
+      .label = IREE_SV("related"),
+      .module = module.get(),
+      .op = op,
+      .field_ref = loom_diagnostic_field_ref(LOOM_DIAGNOSTIC_FIELD_OPERAND, 0),
   }};
   const loom_diagnostic_emission_t emission = {
-      /*.module=*/module.get(),
-      /*.op=*/op,
-      /*.error=*/loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
-      /*.params=*/params,
-      /*.param_count=*/IREE_ARRAYSIZE(params),
-      /*.related_ops=*/related,
-      /*.related_op_count=*/IREE_ARRAYSIZE(related),
+      .module = module.get(),
+      .op = op,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 1),
+      .params = params,
+      .param_count = IREE_ARRAYSIZE(params),
+      .related_ops = related,
+      .related_op_count = IREE_ARRAYSIZE(related),
   };
   IREE_ASSERT_OK(
       iree_diagnostic_emit(loom_target_entry_emitter(&emitter), &emission));
@@ -282,8 +281,8 @@ func.def public target(@generic) @entry() {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   const loom_target_entry_t entry =
@@ -319,8 +318,8 @@ func.def public @targetless() {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   const loom_target_entry_t entry =

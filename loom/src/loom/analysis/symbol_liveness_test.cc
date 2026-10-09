@@ -173,10 +173,11 @@ func.def @dead() {
       .root_query_user_data = {},
       .contributors = {},
       .contributor_count = {},
-      .root_symbol_ids = {
-          /*.values=*/root_symbol_ids,
-          /*.count=*/IREE_ARRAYSIZE(root_symbol_ids),
-      },
+      .root_symbol_ids =
+          {
+              .values = root_symbol_ids,
+              .count = IREE_ARRAYSIZE(root_symbol_ids),
+          },
   };
   loom_symbol_liveness_t liveness = ComputeLiveness(module.get(), &options);
 

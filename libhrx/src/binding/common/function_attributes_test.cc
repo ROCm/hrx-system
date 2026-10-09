@@ -56,20 +56,20 @@ iree_hal_device_spec_t* CreateDeviceSpec(
 
 iree_hal_executable_function_info_t MakeFunctionInfo() {
   return iree_hal_executable_function_info_t{
-      /*.name=*/IREE_SV("test_kernel"),
-      /*.flags=*/IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE,
-      /*.constant_byte_length=*/0,
-      /*.binding_count=*/0,
-      /*.parameter_count=*/0,
-      /*.maximum_workgroup_invocations=*/512,
-      /*.workgroup_size=*/{},
-      /*.resource_usage=*/
-      {
-          .provided_flags = IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_ALL,
-          .fixed_workgroup_local_memory_size = 4096,
-          .fixed_private_memory_size = 64,
-          .invocation_register_count = 40,
-      },
+      .name = IREE_SV("test_kernel"),
+      .flags = IREE_HAL_EXECUTABLE_FUNCTION_FLAG_NONE,
+      .constant_byte_length = 0,
+      .binding_count = 0,
+      .parameter_count = 0,
+      .maximum_workgroup_invocations = 512,
+      .workgroup_size = {},
+      .resource_usage =
+          {
+              .provided_flags = IREE_HAL_EXECUTABLE_FUNCTION_RESOURCE_FLAG_ALL,
+              .fixed_workgroup_local_memory_size = 4096,
+              .fixed_private_memory_size = 64,
+              .invocation_register_count = 40,
+          },
   };
 }
 

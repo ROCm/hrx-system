@@ -342,26 +342,26 @@ TEST_F(LowPacketHazardPlanTest,
   };
   loom_low_storage_release_action_t storage_release_actions[1] = {
       {
-          /*.insertion_packet_index=*/2,
-          /*.insertion_node_index=*/2,
-          /*.block_index=*/0,
-          /*.scheduled_ordinal=*/2,
-          /*.release_class_id=*/kSyntheticProgressPipe,
-          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
-          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
-          /*.next_same_insertion_node_action_index=*/
-          LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
-          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
-          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
-          /*.required_progress=*/3,
-          /*.lease_record_index=*/0,
+          .insertion_packet_index = 2,
+          .insertion_node_index = 2,
+          .block_index = 0,
+          .scheduled_ordinal = 2,
+          .release_class_id = kSyntheticProgressPipe,
+          .release_class_name = IREE_SV("synthetic.pipe"),
+          .release_action_id = kSyntheticHazardActionReleaseStorage,
+          .next_same_insertion_node_action_index =
+              LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
+          .release_action_name = IREE_SV("synthetic.release-storage"),
+          .release_reason_id = kSyntheticHazardStorageRelease,
+          .release_reason_name = IREE_SV("synthetic.storage-release"),
+          .required_progress = 3,
+          .lease_record_index = 0,
       },
   };
   state_.allocation.storage_leases = {
-      /*.schedule=*/&state_.schedule,
-      /*.records=*/storage_leases,
-      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+      .schedule = &state_.schedule,
+      .records = storage_leases,
+      .record_count = IREE_ARRAYSIZE(storage_leases),
   };
   SetStorageReleaseActions(storage_release_actions,
                            IREE_ARRAYSIZE(storage_release_actions));
@@ -430,26 +430,26 @@ TEST_F(LowPacketHazardPlanTest, SatisfiedStorageReleaseRetainsNoPlanStorage) {
   };
   loom_low_storage_release_action_t storage_release_actions[1] = {
       {
-          /*.insertion_packet_index=*/2,
-          /*.insertion_node_index=*/2,
-          /*.block_index=*/0,
-          /*.scheduled_ordinal=*/2,
-          /*.release_class_id=*/kSyntheticProgressPipe,
-          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
-          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
-          /*.next_same_insertion_node_action_index=*/
-          LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
-          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
-          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
-          /*.required_progress=*/1,
-          /*.lease_record_index=*/0,
+          .insertion_packet_index = 2,
+          .insertion_node_index = 2,
+          .block_index = 0,
+          .scheduled_ordinal = 2,
+          .release_class_id = kSyntheticProgressPipe,
+          .release_class_name = IREE_SV("synthetic.pipe"),
+          .release_action_id = kSyntheticHazardActionReleaseStorage,
+          .next_same_insertion_node_action_index =
+              LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
+          .release_action_name = IREE_SV("synthetic.release-storage"),
+          .release_reason_id = kSyntheticHazardStorageRelease,
+          .release_reason_name = IREE_SV("synthetic.storage-release"),
+          .required_progress = 1,
+          .lease_record_index = 0,
       },
   };
   state_.allocation.storage_leases = {
-      /*.schedule=*/&state_.schedule,
-      /*.records=*/storage_leases,
-      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+      .schedule = &state_.schedule,
+      .records = storage_leases,
+      .record_count = IREE_ARRAYSIZE(storage_leases),
   };
   SetStorageReleaseActions(storage_release_actions,
                            IREE_ARRAYSIZE(storage_release_actions));
@@ -511,26 +511,26 @@ TEST_F(LowPacketHazardPlanTest,
   loom_low_storage_release_action_t storage_release_actions[6] = {};
   for (uint32_t i = 0; i < IREE_ARRAYSIZE(storage_release_actions); ++i) {
     storage_release_actions[i] = {
-        /*.insertion_packet_index=*/2,
-        /*.insertion_node_index=*/2,
-        /*.block_index=*/0,
-        /*.scheduled_ordinal=*/2,
-        /*.release_class_id=*/kSyntheticProgressPipe,
-        /*.release_class_name=*/IREE_SV("synthetic.pipe"),
-        /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
-        /*.next_same_insertion_node_action_index=*/
-        LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-        /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
-        /*.release_reason_id=*/kSyntheticHazardStorageRelease,
-        /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
-        /*.required_progress=*/i + 2,
-        /*.lease_record_index=*/0,
+        .insertion_packet_index = 2,
+        .insertion_node_index = 2,
+        .block_index = 0,
+        .scheduled_ordinal = 2,
+        .release_class_id = kSyntheticProgressPipe,
+        .release_class_name = IREE_SV("synthetic.pipe"),
+        .release_action_id = kSyntheticHazardActionReleaseStorage,
+        .next_same_insertion_node_action_index =
+            LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
+        .release_action_name = IREE_SV("synthetic.release-storage"),
+        .release_reason_id = kSyntheticHazardStorageRelease,
+        .release_reason_name = IREE_SV("synthetic.storage-release"),
+        .required_progress = i + 2,
+        .lease_record_index = 0,
     };
   }
   state_.allocation.storage_leases = {
-      /*.schedule=*/&state_.schedule,
-      /*.records=*/storage_leases,
-      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+      .schedule = &state_.schedule,
+      .records = storage_leases,
+      .record_count = IREE_ARRAYSIZE(storage_leases),
   };
   SetStorageReleaseActions(storage_release_actions,
                            IREE_ARRAYSIZE(storage_release_actions));
@@ -579,26 +579,26 @@ TEST_F(LowPacketHazardPlanTest, RejectsCombinedEventCountOverflow) {
   };
   loom_low_storage_release_action_t storage_release_actions[1] = {
       {
-          /*.insertion_packet_index=*/2,
-          /*.insertion_node_index=*/2,
-          /*.block_index=*/0,
-          /*.scheduled_ordinal=*/2,
-          /*.release_class_id=*/kSyntheticProgressPipe,
-          /*.release_class_name=*/IREE_SV("synthetic.pipe"),
-          /*.release_action_id=*/kSyntheticHazardActionReleaseStorage,
-          /*.next_same_insertion_node_action_index=*/
-          LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
-          /*.release_action_name=*/IREE_SV("synthetic.release-storage"),
-          /*.release_reason_id=*/kSyntheticHazardStorageRelease,
-          /*.release_reason_name=*/IREE_SV("synthetic.storage-release"),
-          /*.required_progress=*/1,
-          /*.lease_record_index=*/0,
+          .insertion_packet_index = 2,
+          .insertion_node_index = 2,
+          .block_index = 0,
+          .scheduled_ordinal = 2,
+          .release_class_id = kSyntheticProgressPipe,
+          .release_class_name = IREE_SV("synthetic.pipe"),
+          .release_action_id = kSyntheticHazardActionReleaseStorage,
+          .next_same_insertion_node_action_index =
+              LOOM_LOW_STORAGE_RELEASE_ACTION_INDEX_NONE,
+          .release_action_name = IREE_SV("synthetic.release-storage"),
+          .release_reason_id = kSyntheticHazardStorageRelease,
+          .release_reason_name = IREE_SV("synthetic.storage-release"),
+          .required_progress = 1,
+          .lease_record_index = 0,
       },
   };
   state_.allocation.storage_leases = {
-      /*.schedule=*/&state_.schedule,
-      /*.records=*/storage_leases,
-      /*.record_count=*/IREE_ARRAYSIZE(storage_leases),
+      .schedule = &state_.schedule,
+      .records = storage_leases,
+      .record_count = IREE_ARRAYSIZE(storage_leases),
   };
   SetStorageReleaseActions(storage_release_actions,
                            IREE_ARRAYSIZE(storage_release_actions));

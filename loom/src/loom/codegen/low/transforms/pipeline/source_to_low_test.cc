@@ -213,17 +213,17 @@ class LowLowerPassTest : public ::testing::Test {
       const loom_function_version_list_t* function_versions = nullptr,
       DiagnosticEmissionCollector* collector = nullptr) {
     static const loom_pass_option_enum_value_t kRewriteValues[] = {
-        {/*.value=*/IREE_SVL("call")},
-        {/*.value=*/IREE_SVL("inline")},
+        {.value = IREE_SVL("call")},
+        {.value = IREE_SVL("inline")},
     };
     static const loom_pass_option_schema_t kSelectionOptions[] = {
-        {/*.name=*/IREE_SVL("rewrite"),
-         /*.kind=*/LOOM_PASS_OPTION_SCHEMA_ENUM,
-         /*.flags=*/0,
-         /*.minimum_uint32=*/0,
-         /*.maximum_uint32=*/0,
-         /*.enum_values=*/kRewriteValues,
-         /*.enum_value_count=*/IREE_ARRAYSIZE(kRewriteValues)},
+        {.name = IREE_SVL("rewrite"),
+         .kind = LOOM_PASS_OPTION_SCHEMA_ENUM,
+         .flags = 0,
+         .minimum_uint32 = 0,
+         .maximum_uint32 = 0,
+         .enum_values = kRewriteValues,
+         .enum_value_count = IREE_ARRAYSIZE(kRewriteValues)},
     };
     static const loom_pass_descriptor_t kPassDescriptors[] = {
         {
@@ -286,8 +286,8 @@ class LowLowerPassTest : public ::testing::Test {
         },
     };
     static const loom_pass_registry_t kPassRegistry = {
-        /*.descriptors=*/kPassDescriptors,
-        /*.descriptor_count=*/IREE_ARRAYSIZE(kPassDescriptors),
+        .descriptors = kPassDescriptors,
+        .descriptor_count = IREE_ARRAYSIZE(kPassDescriptors),
     };
 
     const loom_codegen_pass_environment_options_t environment_options = {
@@ -434,8 +434,8 @@ TEST_F(LowLowerPassTest, SourceSelectionUsesPerFunctionTargetFacts) {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
   loom_low_source_selection_options_t options = {
       .policy_registry = &policy_registry,
@@ -586,8 +586,8 @@ TEST_F(LowLowerPassTest, ModuleInternalVersionLowersWithoutArtifactAbi) {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunSourceToLow(&policy_registry_, module.get(), nullptr,
@@ -644,8 +644,8 @@ TEST_F(LowLowerPassTest,
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunFlatPipeline(
@@ -769,13 +769,13 @@ TEST_F(LowLowerPassTest,
   };
   loom_low_lower_policy_t policy = *loom_test_low_lower_policy();
   policy.contract.rule_sets = {
-      /*.count=*/IREE_ARRAYSIZE(rule_sets),
-      /*.values=*/rule_sets,
+      .count = IREE_ARRAYSIZE(rule_sets),
+      .values = rule_sets,
   };
   const loom_low_lower_policy_registry_entry_t entries[] = {
       {
-          /*.contract_set_key=*/IREE_SVL("test.low.core"),
-          /*.policy=*/&policy,
+          .contract_set_key = IREE_SVL("test.low.core"),
+          .policy = &policy,
       },
   };
   loom_low_lower_policy_registry_t policy_registry = {};
@@ -856,8 +856,8 @@ TEST_F(LowLowerPassTest, InvokeNormalizesToDirectLowCallWithPolicyPreserved) {
       &entry_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
@@ -938,20 +938,20 @@ TEST_F(LowLowerPassTest,
   EXPECT_FALSE(loom_region_has_convergent_effects(body));
 
   const loom_target_snapshot_t target_snapshot = {
-      /*.name=*/IREE_SVL("test-alt"),
+      .name = IREE_SVL("test-alt"),
   };
   const loom_target_export_plan_t target_export_plan = {
-      /*.name=*/IREE_SVL("test-alt-function"),
+      .name = IREE_SVL("test-alt-function"),
   };
   const loom_target_config_t target_config = {
-      /*.name=*/IREE_SVL("test.low.alt"),
-      /*.contract_set_key=*/IREE_SVL("test.low.alt"),
+      .name = IREE_SVL("test.low.alt"),
+      .contract_set_key = IREE_SVL("test.low.alt"),
   };
   const loom_target_bundle_t target_bundle = {
-      /*.name=*/IREE_SVL("test-alt"),
-      /*.snapshot=*/&target_snapshot,
-      /*.export_plan=*/&target_export_plan,
-      /*.config=*/&target_config,
+      .name = IREE_SVL("test-alt"),
+      .snapshot = &target_snapshot,
+      .export_plan = &target_export_plan,
+      .config = &target_config,
   };
   loom_target_facts_t target_facts = {};
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
@@ -1082,8 +1082,8 @@ TEST_F(LowLowerPassTest, InlineRetainsCalleeWithImmutableFunctionVersion) {
       &helper_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
@@ -1152,8 +1152,8 @@ TEST_F(LowLowerPassTest, LowCallPolicyIsSelectedPerCallerProvider) {
       &direct_caller_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,
@@ -1218,8 +1218,8 @@ TEST_F(LowLowerPassTest, CallPolicyDistinguishesSemanticAndLowStages) {
       &low_caller_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/function_version_values,
-      /*.count=*/IREE_ARRAYSIZE(function_version_values),
+      .values = function_version_values,
+      .count = IREE_ARRAYSIZE(function_version_values),
   };
 
   IREE_ASSERT_OK(RunInlineCallables(module.get(), &function_versions,

@@ -43,14 +43,14 @@ static void CreateDeviceSpecForProcessor(
       identity.version, /*execution_unit_count=*/40,
       /*partition_count=*/1, &physical_device.queue_execution_resources));
   iree_hal_amdgpu_device_spec_params_t params = {
-      /*.logical_device_id=*/IREE_SV("amdgpu://0"),
-      /*.display_name=*/IREE_SV("AMDGPU test device"),
-      /*.physical_device_count=*/1,
-      /*.physical_devices=*/&physical_device,
-      /*.device_memory_capacity_bytes=*/64ull * 1024ull * 1024ull * 1024ull,
-      /*.device_allocator=*/allocator,
-      /*.sanitizer=*/{},
-      /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PARAM_FLAG_DMABUF,
+      .logical_device_id = IREE_SV("amdgpu://0"),
+      .display_name = IREE_SV("AMDGPU test device"),
+      .physical_device_count = 1,
+      .physical_devices = &physical_device,
+      .device_memory_capacity_bytes = 64ull * 1024ull * 1024ull * 1024ull,
+      .device_allocator = allocator,
+      .sanitizer = {},
+      .flags = IREE_HAL_AMDGPU_DEVICE_SPEC_PARAM_FLAG_DMABUF,
   };
   IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_create(
       &params, iree_allocator_system(), out_device_spec));
@@ -229,14 +229,14 @@ TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
         /*partition_count=*/1, &physical_devices[i].queue_execution_resources));
   }
   iree_hal_amdgpu_device_spec_params_t params = {
-      /*.logical_device_id=*/IREE_SV("amdgpu://group"),
-      /*.display_name=*/IREE_SV("AMDGPU test group"),
-      /*.physical_device_count=*/IREE_ARRAYSIZE(physical_devices),
-      /*.physical_devices=*/physical_devices,
-      /*.device_memory_capacity_bytes=*/0,
-      /*.device_allocator=*/allocator,
-      /*.sanitizer=*/{},
-      /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PARAM_FLAG_NONE,
+      .logical_device_id = IREE_SV("amdgpu://group"),
+      .display_name = IREE_SV("AMDGPU test group"),
+      .physical_device_count = IREE_ARRAYSIZE(physical_devices),
+      .physical_devices = physical_devices,
+      .device_memory_capacity_bytes = 0,
+      .device_allocator = allocator,
+      .sanitizer = {},
+      .flags = IREE_HAL_AMDGPU_DEVICE_SPEC_PARAM_FLAG_NONE,
   };
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_ASSERT_OK(iree_hal_amdgpu_device_spec_create(
@@ -248,10 +248,10 @@ TEST(DeviceSpecTest, AdvertisesTargetsPerPhysicalDevice) {
   ASSERT_EQ(executables->target_count, 3);
 
   iree_hal_executable_target_selection_t selection = {
-      /*.family=*/IREE_SV("amdgpu"),
-      /*.target_key=*/IREE_SV("gfx1100"),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
-      /*.physical_device_affinity=*/0,
+      .family = IREE_SV("amdgpu"),
+      .target_key = IREE_SV("gfx1100"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+      .physical_device_affinity = 0,
   };
   iree_hal_executable_target_selection_result_t result =
       iree_hal_device_spec_select_executable_target(device_spec, &selection);

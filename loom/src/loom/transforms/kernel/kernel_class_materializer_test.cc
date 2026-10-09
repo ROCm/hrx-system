@@ -436,15 +436,15 @@ kernel.def @classified() {
       .args = {0, 128},
   };
   const loom_template_provider_contract_t external_contract = {
-      /*.kind=*/LOOM_TEMPLATE_PROVIDER_KIND_DEF,
-      /*.has_body=*/true,
-      /*.argument_count=*/1,
-      /*.result_count=*/0,
-      /*.predicate_count=*/1,
-      /*.target_condition_count=*/0,
-      /*.name=*/IREE_SV("external"),
-      /*.priority=*/10,
-      /*.predicates=*/&external_predicate,
+      .kind = LOOM_TEMPLATE_PROVIDER_KIND_DEF,
+      .has_body = true,
+      .argument_count = 1,
+      .result_count = 0,
+      .predicate_count = 1,
+      .target_condition_count = 0,
+      .name = IREE_SV("external"),
+      .priority = 10,
+      .predicates = &external_predicate,
   };
   const loom_symbol_ref_t family = {
       .module_id = 0,

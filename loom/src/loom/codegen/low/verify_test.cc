@@ -196,8 +196,8 @@ low.func.def target<test.low.core> @uses_workgroup_storage() {
       &function_version.base,
   };
   const loom_function_version_list_t function_versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   DiagnosticEmissionCapture capture;

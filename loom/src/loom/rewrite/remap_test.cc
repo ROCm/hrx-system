@@ -683,11 +683,11 @@ TEST_F(RemapTest, RemapsStaticEncodingDependenciesAcrossModules) {
       },
   };
   loom_encoding_t source_encoding = {
-      /*.name_id=*/source_family_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/IREE_ARRAYSIZE(source_attrs),
-      /*.family=*/{},
-      /*.attributes=*/source_attrs,
+      .name_id = source_family_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = IREE_ARRAYSIZE(source_attrs),
+      .family = {},
+      .attributes = source_attrs,
   };
   uint16_t source_encoding_id = 0;
   IREE_ASSERT_OK(
@@ -721,11 +721,11 @@ TEST_F(RemapTest, RemapsOverflowDimsAndEncodingBeforeInterning) {
   IREE_ASSERT_OK(loom_module_intern_string(source_, IREE_SV("source_layout"),
                                            &source_family_id));
   loom_encoding_t source_encoding = {
-      /*.name_id=*/source_family_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/0,
-      /*.family=*/{},
-      /*.attributes=*/NULL,
+      .name_id = source_family_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 0,
+      .family = {},
+      .attributes = NULL,
   };
   uint16_t source_encoding_id = 0;
   IREE_ASSERT_OK(
@@ -735,11 +735,11 @@ TEST_F(RemapTest, RemapsOverflowDimsAndEncodingBeforeInterning) {
   IREE_ASSERT_OK(loom_module_intern_string(
       target_, IREE_SV("preexisting_layout"), &target_dummy_family_id));
   loom_encoding_t target_dummy_encoding = {
-      /*.name_id=*/target_dummy_family_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/0,
-      /*.family=*/{},
-      /*.attributes=*/NULL,
+      .name_id = target_dummy_family_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 0,
+      .family = {},
+      .attributes = NULL,
   };
   uint16_t target_dummy_encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(target_, &target_dummy_encoding,
@@ -805,11 +805,11 @@ TEST_F(RemapTest, RemapsSharedDeepStaticEncodingsWithoutRecursion) {
         {other_id, 0, loom_attr_encoding(previous_encoding_id)},
     };
     loom_encoding_t encoding = {
-        /*.name_id=*/family_id,
-        /*.alias_id=*/LOOM_STRING_ID_INVALID,
-        /*.attribute_count=*/attribute_count,
-        /*.family=*/{},
-        /*.attributes=*/attribute_count == 0 ? nullptr : attrs,
+        .name_id = family_id,
+        .alias_id = LOOM_STRING_ID_INVALID,
+        .attribute_count = attribute_count,
+        .family = {},
+        .attributes = attribute_count == 0 ? nullptr : attrs,
     };
     IREE_ASSERT_OK(
         loom_module_add_encoding(source_, &encoding, &previous_encoding_id));

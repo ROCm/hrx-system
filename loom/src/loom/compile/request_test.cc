@@ -27,19 +27,19 @@ using ::testing::HasSubstr;
 using ModulePtr = ::loom::testing::ModulePtr;
 
 static const loom_target_snapshot_t kTargetSnapshot = {
-    /*.name=*/IREE_SVL("Snapshot123"),
+    .name = IREE_SVL("Snapshot123"),
 };
 static const loom_target_export_plan_t kTargetExportPlan = {
-    /*.name=*/IREE_SVL("ExportPlan123"),
+    .name = IREE_SVL("ExportPlan123"),
 };
 static const loom_target_config_t kTargetConfig = {
-    /*.name=*/IREE_SVL("TargetConfig123"),
+    .name = IREE_SVL("TargetConfig123"),
 };
 static const loom_target_bundle_t kTargetBundle = {
-    /*.name=*/IREE_SVL("TargetBundle123"),
-    /*.snapshot=*/&kTargetSnapshot,
-    /*.export_plan=*/&kTargetExportPlan,
-    /*.config=*/&kTargetConfig,
+    .name = IREE_SVL("TargetBundle123"),
+    .snapshot = &kTargetSnapshot,
+    .export_plan = &kTargetExportPlan,
+    .config = &kTargetConfig,
 };
 
 static iree_status_t ProjectTargetFacts(const loom_target_profile_t* profile,
@@ -52,9 +52,9 @@ static iree_status_t ProjectTargetFacts(const loom_target_profile_t* profile,
 }
 
 static const loom_target_profile_type_t kTargetProfileType = {
-    /*.name=*/IREE_SVL("TargetFamily123"),
-    /*.fact_type=*/&loom_test_target_fact_type,
-    /*.project_facts=*/ProjectTargetFacts,
+    .name = IREE_SVL("TargetFamily123"),
+    .fact_type = &loom_test_target_fact_type,
+    .project_facts = ProjectTargetFacts,
 };
 static const loom_target_profile_t kTargetProfile = {
     .type = &kTargetProfileType,
@@ -71,20 +71,20 @@ static iree_status_t EmitDiagnosticFormat(
 }
 
 static const loom_target_emitter_t kDiagnosticEmitter = {
-    /*.name=*/IREE_SVL("DiagnosticEmitter123"),
-    /*.public_artifact_format=*/IREE_SVL("DiagnosticFormat123"),
-    /*.default_identifier=*/IREE_SVL("diagnostic.out"),
-    /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
-    /*.default_pipeline_options=*/{},
-    /*.emit=*/EmitDiagnosticFormat,
+    .name = IREE_SVL("DiagnosticEmitter123"),
+    .public_artifact_format = IREE_SVL("DiagnosticFormat123"),
+    .default_identifier = IREE_SVL("diagnostic.out"),
+    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+    .default_pipeline_options = {},
+    .emit = EmitDiagnosticFormat,
 };
 static const loom_target_emitter_t kAlternateEmitter = {
-    /*.name=*/IREE_SVL("AlternateEmitter123"),
-    /*.public_artifact_format=*/IREE_SVL("AlternateFormat123"),
-    /*.default_identifier=*/IREE_SVL("alternate.out"),
-    /*.target_artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
-    /*.default_pipeline_options=*/{},
-    /*.emit=*/EmitDiagnosticFormat,
+    .name = IREE_SVL("AlternateEmitter123"),
+    .public_artifact_format = IREE_SVL("AlternateFormat123"),
+    .default_identifier = IREE_SVL("alternate.out"),
+    .target_artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_UNKNOWN,
+    .default_pipeline_options = {},
+    .emit = EmitDiagnosticFormat,
 };
 static const loom_target_emitter_t* const kTargetEmitters[] = {
     &kDiagnosticEmitter,
@@ -684,8 +684,8 @@ pipeline.def @GenericPipeline() run() {
 
   const iree_string_view_t generic_roots[] = {IREE_SV("@GenericPipeline")};
   options.roots = {
-      /*.count=*/IREE_ARRAYSIZE(generic_roots),
-      /*.values=*/generic_roots,
+      .count = IREE_ARRAYSIZE(generic_roots),
+      .values = generic_roots,
   };
   options.format = IREE_SV("DiagnosticFormat123");
   request = Resolve(module.get(), options);
@@ -710,10 +710,11 @@ command.program.def public @Command123() launch() {
       IREE_SV("@Command123"),
   };
   const loom_compile_request_options_t options = {
-      .roots = {
-          /*.count=*/IREE_ARRAYSIZE(roots),
-          /*.values=*/roots,
-      },
+      .roots =
+          {
+              .count = IREE_ARRAYSIZE(roots),
+              .values = roots,
+          },
   };
   loom_compile_request_t request = {};
   IREE_EXPECT_STATUS_IS(
@@ -869,8 +870,8 @@ TEST_F(CompileRequestTest, ExplicitFormatSelectsNoncanonicalAlternative) {
 TEST_F(CompileRequestTest, DiagnosticFormatCanInspectKernelEntries) {
   ModulePtr module = ParseKernel(this, true);
   const loom_compile_request_options_t options = {
-      /*.roots=*/{},
-      /*.format=*/IREE_SV("DiagnosticFormat123"),
+      .roots = {},
+      .format = IREE_SV("DiagnosticFormat123"),
   };
   loom_compile_request_t request = {};
   IREE_ASSERT_OK(loom_compile_request_resolve(

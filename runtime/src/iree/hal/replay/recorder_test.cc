@@ -1231,28 +1231,25 @@ TEST(ReplayRecorderTest, RecordsAndReplaysCommandBufferAtomicOperations) {
       IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT, IREE_HAL_COMMAND_CATEGORY_ATOMIC,
       /*binding_capacity=*/1, &command_buffer));
   const iree_hal_atomic_wait_params_t wait_params = {
-      /*.value=*/UINT64_C(0x1020304050607080),
-      /*.mask=*/UINT64_C(0xFFEEDDCCBBAA9988),
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
-      /*.target_error_mode=*/
-      IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
+      .value = UINT64_C(0x1020304050607080),
+      .mask = UINT64_C(0xFFEEDDCCBBAA9988),
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+      .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
   };
   const iree_hal_atomic_store_params_t store_params = {
-      /*.value=*/UINT64_C(0xAABBCCDD),
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.target_error_mode=*/
-      IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
+      .value = UINT64_C(0xAABBCCDD),
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
   };
   const iree_hal_atomic_rmw_params_t rmw_params = {
-      /*.operand=*/UINT64_C(0x11223344),
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
-      /*.target_error_mode=*/
-      IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
+      .operand = UINT64_C(0x11223344),
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+      .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
   };
 
   IREE_ASSERT_OK(iree_hal_command_buffer_begin(command_buffer));
@@ -1435,28 +1432,25 @@ TEST(ReplayRecorderTest, RecordsAndReplaysVersion2ExactQueueAtomicOperations) {
   };
 
   const iree_hal_atomic_wait_params_t wait_params = {
-      /*.value=*/UINT64_C(0x1020304050607080),
-      /*.mask=*/UINT64_C(0xFFEEDDCCBBAA9988),
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
-      /*.target_error_mode=*/
-      IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
+      .value = UINT64_C(0x1020304050607080),
+      .mask = UINT64_C(0xFFEEDDCCBBAA9988),
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+      .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
   };
   const iree_hal_atomic_store_params_t store_params = {
-      /*.value=*/UINT64_C(0xAABBCCDD),
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.target_error_mode=*/
-      IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
+      .value = UINT64_C(0xAABBCCDD),
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
   };
   const iree_hal_atomic_rmw_params_t rmw_params = {
-      /*.operand=*/UINT64_C(0x1122334455667788),
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-      /*.target_error_mode=*/
-      IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
+      .operand = UINT64_C(0x1122334455667788),
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+      .target_error_mode = IREE_HAL_ATOMIC_TARGET_ERROR_MODE_DEFAULT,
   };
 
   IREE_ASSERT_OK(iree_hal_queue_atomic_wait(queue, wait_list, wait_signal_list,

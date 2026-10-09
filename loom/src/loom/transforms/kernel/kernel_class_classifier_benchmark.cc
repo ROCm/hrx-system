@@ -124,15 +124,16 @@ class KernelClassClassifierBenchmarkFixture {
           .projection_ordinals = &projection_ordinal_,
           .feature_outcomes = nullptr,
           .actions = actions_,
-          .generic_result = {
-              /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_SELECTED,
-              /*.reserved=*/{},
-              /*.action_ordinal=*/1,
-              /*.unresolved_action_ordinal=*/
-              LOOM_DECISION_PROGRAM_ACTION_INVALID,
-              /*.unresolved_constraint=*/
-              LOOM_DECISION_PROGRAM_CONSTRAINT_INVALID,
-          },
+          .generic_result =
+              {
+                  .kind = LOOM_DECISION_PROGRAM_RESULT_SELECTED,
+                  .reserved = {},
+                  .action_ordinal = 1,
+                  .unresolved_action_ordinal =
+                      LOOM_DECISION_PROGRAM_ACTION_INVALID,
+                  .unresolved_constraint =
+                      LOOM_DECISION_PROGRAM_CONSTRAINT_INVALID,
+              },
           .argument_count = 1,
           .result_count = 0,
           .projection_count = 1,

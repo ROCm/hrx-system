@@ -30,14 +30,14 @@ using ::loom::testing::GetStringParam;
 
 static const loom_attr_descriptor_t kTestSchemaEncodingParameters[] = {
     {
-        /*.name=*/LOOM_BSTRING_REF(5, "block"),
-        /*.attr_kind=*/LOOM_ATTR_I64,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(5, "block"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(10, "group_size"),
-        /*.attr_kind=*/LOOM_ATTR_I64,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(10, "group_size"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
 };
 static const loom_encoding_family_descriptor_t kTestSchemaEncodingDescriptor = {
@@ -52,8 +52,8 @@ static const loom_encoding_vtable_t kTestSchemaEncodingVtable = {
 };
 
 static const loom_attr_descriptor_t kQuantizationParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(4, "spec"),
-    /*.attr_kind=*/LOOM_ATTR_ENCODING,
+    .name = LOOM_BSTRING_REF(4, "spec"),
+    .attr_kind = LOOM_ATTR_ENCODING,
 }};
 static const loom_encoding_family_descriptor_t kQuantizationDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(12, "quantization"),

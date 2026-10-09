@@ -15,10 +15,10 @@ namespace {
 
 TEST(WorkspaceTest, CreateTrimRetainRelease) {
   loomc_workspace_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.block_size=*/4096,
+      .type = LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .block_size = 4096,
   };
   loomc_workspace_t* workspace = nullptr;
   loomc_status_t status =
@@ -43,7 +43,7 @@ TEST(WorkspaceTest, CreateTrimRetainRelease) {
 
 TEST(WorkspaceTest, QueryNullWorkspace) {
   loomc_workspace_statistics_t statistics = {
-      /*.total_block_size=*/1,
+      .total_block_size = 1,
   };
   loomc_workspace_query_statistics(nullptr, &statistics);
   EXPECT_EQ(statistics.total_block_size, 0u);
@@ -53,9 +53,9 @@ TEST(WorkspaceTest, QueryNullWorkspace) {
 TEST(WorkspaceTest, RejectsInvalidExtensions) {
   int extension = 0;
   loomc_workspace_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&extension,
+      .type = LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &extension,
   };
   loomc_workspace_t* workspace = reinterpret_cast<loomc_workspace_t*>(0x1);
   loomc_status_t status =
@@ -66,10 +66,10 @@ TEST(WorkspaceTest, RejectsInvalidExtensions) {
 
 TEST(WorkspaceTest, RejectsInvalidBlockSizes) {
   loomc_workspace_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.block_size=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_WORKSPACE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .block_size = 1,
   };
   loomc_workspace_t* workspace = reinterpret_cast<loomc_workspace_t*>(0x1);
   LOOMC_EXPECT_STATUS_IS(

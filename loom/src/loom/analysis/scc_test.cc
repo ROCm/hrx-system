@@ -284,8 +284,8 @@ TEST_F(SccTest, RootFilteredModeSkipsUnreachableNodes) {
   };
   const iree_host_size_t roots[] = {0};
   loom_scc_options_t options = {
-      /*.root_nodes=*/roots,
-      /*.root_count=*/IREE_ARRAYSIZE(roots),
+      .root_nodes = roots,
+      .root_count = IREE_ARRAYSIZE(roots),
   };
 
   loom_scc_list_t sccs = {};

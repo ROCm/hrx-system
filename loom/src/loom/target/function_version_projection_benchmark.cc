@@ -91,8 +91,8 @@ static iree_status_t MaterializeTestTargetDefinition(
 }
 
 static const loom_target_profile_type_t kTestProfileType = {
-    /*.name=*/IREE_SVL("function-version-projection-benchmark"),
-    /*.fact_type=*/&loom_test_target_fact_type,
+    .name = IREE_SVL("function-version-projection-benchmark"),
+    .fact_type = &loom_test_target_fact_type,
 };
 
 static const loom_target_provider_t kTestProvider = {

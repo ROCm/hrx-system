@@ -112,7 +112,7 @@ test.func @second() {
   second_version.function_target_facts = &second_facts;
 
   const loom_function_version_type_t other_type = {
-      /*.name=*/IREE_SVL("other"),
+      .name = IREE_SVL("other"),
   };
   loom_function_version_t other_version = {
       .type = &other_type,
@@ -124,8 +124,8 @@ test.func @second() {
       &first_version.base,
   };
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   iree_arena_allocator_t arena;
@@ -195,8 +195,8 @@ test.func @foreign() {
       FindFunction(foreign_module.get(), IREE_SV("foreign"));
   loom_function_version_t* version_values[] = {&version.base};
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   iree::Status status = BuildSnapshot(module.get(), &versions);
@@ -221,8 +221,8 @@ test.func @foreign() {
       FindFunction(foreign_module.get(), IREE_SV("foreign"));
   loom_function_version_t* version_values[] = {&version.base};
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   iree::Status status = BuildSnapshot(module.get(), &versions);
@@ -251,8 +251,8 @@ test.func @only() {
       &second_version.base,
   };
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   iree::Status status = BuildSnapshot(module.get(), &versions);

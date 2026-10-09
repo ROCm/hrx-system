@@ -151,68 +151,68 @@ static const loom_matrix_fragment_coordinate_projection_plan_t
 };
 
 static const loom_matrix_fragment_layout_t kTinyDistributedMmaLayout = {
-    /*.kind=*/1,
-    /*.name=*/IREE_SVL("test.tiny.distributed.mma"),
-    /*.wave_size=*/2,
-    /*.tile_shape=*/
-    {
-        .block_count = 1,
-        .result_row_count = 2,
-        .result_column_count = 2,
-        .reduction_count = 2,
-    },
-    /*.lhs=*/
-    {
-        .register_count = 1,
-        .element_bit_count = 16,
-        .payload_element_count = 2,
-        .coordinate_element_count = 2,
-        .reserved = 0,
-        .coordinate_element_stride = 1,
-        .packed_b16_publications = {},
-        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
-        .reduction_group = {},
-        .coordinate_projection_plan = &kTinyDistributedMmaLhsPlan,
-    },
-    /*.rhs=*/
-    {
-        .register_count = 1,
-        .element_bit_count = 16,
-        .payload_element_count = 2,
-        .coordinate_element_count = 2,
-        .reserved = 0,
-        .coordinate_element_stride = 1,
-        .packed_b16_publications = {},
-        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
-        .reduction_group = {},
-        .coordinate_projection_plan = &kTinyDistributedMmaRhsPlan,
-    },
-    /*.accumulator=*/
-    {
-        .register_count = 2,
-        .element_bit_count = 32,
-        .payload_element_count = 2,
-        .coordinate_element_count = 2,
-        .reserved = 0,
-        .coordinate_element_stride = 1,
-        .packed_b16_publications = {},
-        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
-        .reduction_group = {},
-        .coordinate_projection_plan = &kTinyDistributedMmaResultPlan,
-    },
-    /*.result=*/
-    {
-        .register_count = 2,
-        .element_bit_count = 32,
-        .payload_element_count = 2,
-        .coordinate_element_count = 2,
-        .reserved = 0,
-        .coordinate_element_stride = 1,
-        .packed_b16_publications = {},
-        .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
-        .reduction_group = {},
-        .coordinate_projection_plan = &kTinyDistributedMmaResultPlan,
-    },
+    .kind = 1,
+    .name = IREE_SVL("test.tiny.distributed.mma"),
+    .wave_size = 2,
+    .tile_shape =
+        {
+            .block_count = 1,
+            .result_row_count = 2,
+            .result_column_count = 2,
+            .reduction_count = 2,
+        },
+    .lhs =
+        {
+            .register_count = 1,
+            .element_bit_count = 16,
+            .payload_element_count = 2,
+            .coordinate_element_count = 2,
+            .reserved = 0,
+            .coordinate_element_stride = 1,
+            .packed_b16_publications = {},
+            .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
+            .reduction_group = {},
+            .coordinate_projection_plan = &kTinyDistributedMmaLhsPlan,
+        },
+    .rhs =
+        {
+            .register_count = 1,
+            .element_bit_count = 16,
+            .payload_element_count = 2,
+            .coordinate_element_count = 2,
+            .reserved = 0,
+            .coordinate_element_stride = 1,
+            .packed_b16_publications = {},
+            .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_REDUCTION,
+            .reduction_group = {},
+            .coordinate_projection_plan = &kTinyDistributedMmaRhsPlan,
+        },
+    .accumulator =
+        {
+            .register_count = 2,
+            .element_bit_count = 32,
+            .payload_element_count = 2,
+            .coordinate_element_count = 2,
+            .reserved = 0,
+            .coordinate_element_stride = 1,
+            .packed_b16_publications = {},
+            .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
+            .reduction_group = {},
+            .coordinate_projection_plan = &kTinyDistributedMmaResultPlan,
+        },
+    .result =
+        {
+            .register_count = 2,
+            .element_bit_count = 32,
+            .payload_element_count = 2,
+            .coordinate_element_count = 2,
+            .reserved = 0,
+            .coordinate_element_stride = 1,
+            .packed_b16_publications = {},
+            .packed_element_axis = LOOM_MATRIX_FRAGMENT_AXIS_COUNT,
+            .reduction_group = {},
+            .coordinate_projection_plan = &kTinyDistributedMmaResultPlan,
+        },
 };
 
 static loom_op_t* FindFirstOp(loom_region_t* region, loom_op_kind_t kind) {

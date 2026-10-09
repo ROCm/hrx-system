@@ -113,8 +113,8 @@ class LinkFuncContractProjectionTest : public ::testing::Test {
     IndexPtr index(raw_index);
 
     const loom_link_module_index_add_options_t input_options = {
-        /*.provider_name=*/IREE_SV("input"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("input"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     IREE_CHECK_OK(loom_link_module_index_add_text(
         index.get(), input_source_, IREE_SV("input.loom"),
@@ -124,8 +124,8 @@ class LinkFuncContractProjectionTest : public ::testing::Test {
     loom_module_t* library = Parse(library_source_, IREE_SV("library.loom"));
     library_bytes_ = WriteModule(library);
     const loom_link_module_index_add_options_t library_options = {
-        /*.provider_name=*/IREE_SV("library"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+        .provider_name = IREE_SV("library"),
+        .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
     };
     IREE_CHECK_OK(loom_link_module_index_add_bytecode(
         index.get(),

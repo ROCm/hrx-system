@@ -86,11 +86,11 @@ const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
 
 std::string SerializeModuleToText(const loomc_module_t* module) {
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("compiled.loom"),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("compiled.loom"),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(

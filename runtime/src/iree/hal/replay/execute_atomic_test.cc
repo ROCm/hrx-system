@@ -1096,13 +1096,14 @@ TEST_F(ReplayAtomicExecutionTest, ReplaysCommandBufferOperations) {
             command_buffer_.invocation.wait_params.target_error_mode);
 
   iree_hal_replay_command_buffer_atomic_store_payload_t store_payload = {
-      .target_ref = {
-          /*.buffer_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-          /*.offset=*/12,
-          /*.length=*/4,
-          /*.buffer_slot=*/0,
-          /*.reserved0=*/0,
-      },
+      .target_ref =
+          {
+              .buffer_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+              .offset = 12,
+              .length = 4,
+              .buffer_slot = 0,
+              .reserved0 = 0,
+          },
       .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
       .target_stage_mask = IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE};
   store_payload.params.value = UINT64_C(0xAABBCCDD);

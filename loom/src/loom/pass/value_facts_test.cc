@@ -19,8 +19,8 @@ namespace loom {
 namespace {
 
 static const loom_target_fact_type_t kTestTargetFactType = {
-    /*.name=*/IREE_SVL("test"),
-    /*.storage_size=*/sizeof(loom_target_facts_t),
+    .name = IREE_SVL("test"),
+    .storage_size = sizeof(loom_target_facts_t),
 };
 
 static void InitializeTestTargetFacts(iree_string_view_t name,

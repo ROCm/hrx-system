@@ -447,8 +447,8 @@ TEST_P(DispatchReuseTest, MixedDirectAndIndirectBindings) {
        /*offset=*/1 * sizeof(float), /*length=*/2 * sizeof(float)},
   };
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
   const float fill_value = -1.0f;
   IREE_ASSERT_OK(iree_hal_command_buffer_fill_buffer(
@@ -550,8 +550,8 @@ TEST_P(DispatchReuseTest, DeferredExecuteRetainsDispatchBindingTable) {
        /*offset=*/1 * sizeof(float), /*length=*/2 * sizeof(float)},
   };
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
   IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
       command_buffer, absf_executable_,

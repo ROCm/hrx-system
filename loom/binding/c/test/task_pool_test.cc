@@ -26,11 +26,11 @@ TEST(TaskPoolTest, DefaultUsesFourWorkerLimit) {
 
 TEST(TaskPoolTest, WrapperRetainsExistingExecutor) {
   loomc_task_pool_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
-      /*.structure_size=*/sizeof(loomc_task_pool_options_t),
-      /*.next=*/nullptr,
-      /*.max_worker_count=*/2,
-      /*.worker_stack_size=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
+      .structure_size = sizeof(loomc_task_pool_options_t),
+      .next = nullptr,
+      .max_worker_count = 2,
+      .worker_stack_size = 0,
   };
   loomc_task_pool_t* raw_owner = nullptr;
   LOOMC_ASSERT_OK(

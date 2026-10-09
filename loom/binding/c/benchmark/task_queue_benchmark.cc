@@ -63,8 +63,8 @@ static void DestroyBenchmarkTask(loomc_task_t* base_task) {
 }
 
 static const loomc_task_vtable_t kBenchmarkTaskVtable = {
-    /*.execute=*/ExecuteBenchmarkTask,
-    /*.destroy=*/DestroyBenchmarkTask,
+    .execute = ExecuteBenchmarkTask,
+    .destroy = DestroyBenchmarkTask,
 };
 
 static bool TaskBatchComplete(void* user_data) {
@@ -79,11 +79,11 @@ class TaskQueueBenchmarkFixture {
                             loomc_host_size_t task_count)
       : tasks_(task_count) {
     loomc_task_pool_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
-        /*.structure_size=*/sizeof(loomc_task_pool_options_t),
-        /*.next=*/nullptr,
-        /*.max_worker_count=*/worker_count,
-        /*.worker_stack_size=*/0,
+        .type = LOOMC_STRUCTURE_TYPE_TASK_POOL_OPTIONS,
+        .structure_size = sizeof(loomc_task_pool_options_t),
+        .next = nullptr,
+        .max_worker_count = worker_count,
+        .worker_stack_size = 0,
     };
     loomc_task_pool_t* pool = nullptr;
     IREE_CHECK_OK(iree_status_from_loomc(

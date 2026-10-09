@@ -371,11 +371,11 @@ TEST_F(LowPacketProgressTest, QueriesObservedProgressForClassRange) {
                          LOOM_LOW_PACKET_PROGRESS_ACTION_ADVANCE, 1),
   };
   const loom_low_packet_progress_table_t table = {
-      /*.schedule=*/&state_.schedule,
-      /*.allocation=*/&state_.allocation,
-      /*.records=*/records,
-      /*.record_count=*/IREE_ARRAYSIZE(records),
-      /*.class_name=*/SyntheticProgressClassName,
+      .schedule = &state_.schedule,
+      .allocation = &state_.allocation,
+      .records = records,
+      .record_count = IREE_ARRAYSIZE(records),
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_class_chain_index_t chain_index = {};
   IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(
@@ -451,11 +451,11 @@ TEST_F(LowPacketProgressTest, BoundsDoNotAdvanceOrResetElapsedProgress) {
                          LOOM_LOW_PACKET_PROGRESS_ACTION_RESET, 0),
   };
   const loom_low_packet_progress_table_t table = {
-      /*.schedule=*/&state_.schedule,
-      /*.allocation=*/&state_.allocation,
-      /*.records=*/records,
-      /*.record_count=*/IREE_ARRAYSIZE(records),
-      /*.class_name=*/SyntheticProgressClassName,
+      .schedule = &state_.schedule,
+      .allocation = &state_.allocation,
+      .records = records,
+      .record_count = IREE_ARRAYSIZE(records),
+      .class_name = SyntheticProgressClassName,
   };
   loom_low_packet_progress_class_chain_index_t chain_index = {};
   IREE_ASSERT_OK(loom_low_packet_progress_class_chain_index_build(

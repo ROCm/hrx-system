@@ -83,10 +83,10 @@ static std::vector<iree_async_frontier_entry_t> MakeAxes() {
           .epoch = 123,
       },
       {
-          /*.axis=*/iree_async_axis_make(
+          .axis = iree_async_axis_make(
               /*session_epoch=*/7, /*machine_index=*/3,
               IREE_ASYNC_CAUSAL_DOMAIN_HOST, /*ordinal=*/42),
-          /*.epoch=*/UINT64_C(0x0102030405060708),
+          .epoch = UINT64_C(0x0102030405060708),
       },
   };
 }

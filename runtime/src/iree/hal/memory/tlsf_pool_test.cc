@@ -915,9 +915,9 @@ TEST(TLSFPool, TrimRetainsSlabWithTaintedDeathFrontier) {
   iree_hal_tlsf_pool_options_t options = DefaultOptions();
   options.tlsf_options.frontier_capacity = 1;
   iree_hal_test_epoch_query_t query = {
-      /*.axis=*/TestQueueAxis(0),
-      /*.completed_epoch=*/UINT64_MAX,
-      /*.query_count=*/0,
+      .axis = TestQueueAxis(0),
+      .completed_epoch = UINT64_MAX,
+      .query_count = 0,
   };
   iree_hal_pool_t* pool = NULL;
   IREE_ASSERT_OK(CreateTLSFPool(options, slab_provider, notification,

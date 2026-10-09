@@ -2570,9 +2570,9 @@ TEST_F(ReaderTest, AcceptsEmptyModuleMetadata) {
 
 TEST_F(ReaderTest, RejectsNonPriorEncodingReferencesBeforeMaterialization) {
   const loom_attr_descriptor_t parameter = {
-      /*.name=*/LOOM_BSTRING_REF(4, "base"),
-      /*.attr_kind=*/LOOM_ATTR_ENCODING,
-      /*.flags=*/LOOM_ATTR_OPTIONAL,
+      .name = LOOM_BSTRING_REF(4, "base"),
+      .attr_kind = LOOM_ATTR_ENCODING,
+      .flags = LOOM_ATTR_OPTIONAL,
   };
   const loom_encoding_family_descriptor_t descriptor = {
       /*.name=*/LOOM_BSTRING_REF(9, "dependent"),
@@ -5651,8 +5651,8 @@ TEST_F(ReaderTest, RejectsUnknownEncodingFamily) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("mystery"), &encoding_name));
   loom_encoding_t encoding = {
-      /*.name_id=*/encoding_name,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      .name_id = encoding_name,
+      .alias_id = LOOM_STRING_ID_INVALID,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));

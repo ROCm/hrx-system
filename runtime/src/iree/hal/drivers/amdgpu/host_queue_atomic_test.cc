@@ -842,9 +842,9 @@ TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
       .payload_values = &first_completion_value,
   };
   const iree_hal_buffer_binding_t first_binding = {
-      /*.buffer=*/first_buffer.get(),
-      /*.offset=*/0,
-      /*.length=*/IREE_HAL_WHOLE_BUFFER,
+      .buffer = first_buffer.get(),
+      .offset = 0,
+      .length = IREE_HAL_WHOLE_BUFFER,
   };
   const iree_hal_buffer_binding_table_t first_binding_table = {
       .count = 1,
@@ -862,9 +862,9 @@ TEST_P(HostQueueAtomicTest, ReusableProgramRetainsAndRebindsResources) {
       .payload_values = &second_completion_value,
   };
   const iree_hal_buffer_binding_t second_binding = {
-      /*.buffer=*/second_buffer.get(),
-      /*.offset=*/0,
-      /*.length=*/IREE_HAL_WHOLE_BUFFER,
+      .buffer = second_buffer.get(),
+      .offset = 0,
+      .length = IREE_HAL_WHOLE_BUFFER,
   };
   const iree_hal_buffer_binding_table_t second_binding_table = {
       .count = 1,
@@ -961,9 +961,9 @@ TEST_P(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
       .payload_values = &failed_completion_value,
   };
   const iree_hal_buffer_binding_t misaligned_binding = {
-      /*.buffer=*/misaligned_buffer.get(),
-      /*.offset=*/0,
-      /*.length=*/IREE_HAL_WHOLE_BUFFER,
+      .buffer = misaligned_buffer.get(),
+      .offset = 0,
+      .length = IREE_HAL_WHOLE_BUFFER,
   };
   const iree_hal_buffer_binding_table_t misaligned_binding_table = {
       .count = 1,
@@ -1016,9 +1016,9 @@ TEST_P(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
       .payload_values = &incompatible_completion_value,
   };
   const iree_hal_buffer_binding_t incompatible_binding = {
-      /*.buffer=*/incompatible_buffer.get(),
-      /*.offset=*/0,
-      /*.length=*/IREE_HAL_WHOLE_BUFFER,
+      .buffer = incompatible_buffer.get(),
+      .offset = 0,
+      .length = IREE_HAL_WHOLE_BUFFER,
   };
   const iree_hal_buffer_binding_table_t incompatible_binding_table = {
       .count = 1,
@@ -1059,9 +1059,9 @@ TEST_P(HostQueueAtomicTest, DeferredResolvedMisalignmentFailsAndQueueRecovers) {
       .payload_values = &valid_completion_value,
   };
   const iree_hal_buffer_binding_t valid_binding = {
-      /*.buffer=*/valid_buffer.get(),
-      /*.offset=*/0,
-      /*.length=*/IREE_HAL_WHOLE_BUFFER,
+      .buffer = valid_buffer.get(),
+      .offset = 0,
+      .length = IREE_HAL_WHOLE_BUFFER,
   };
   const iree_hal_buffer_binding_table_t valid_binding_table = {
       .count = 1,
@@ -1221,9 +1221,9 @@ TEST_P(HostQueueAtomicTest, SupportsWidthsConditionsAndRmwOperations) {
       .payload_values = &completion_value,
   };
   const iree_hal_buffer_binding_t binding = {
-      /*.buffer=*/buffer.get(),
-      /*.offset=*/0,
-      /*.length=*/IREE_HAL_WHOLE_BUFFER,
+      .buffer = buffer.get(),
+      .offset = 0,
+      .length = IREE_HAL_WHOLE_BUFFER,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
       .count = 1,

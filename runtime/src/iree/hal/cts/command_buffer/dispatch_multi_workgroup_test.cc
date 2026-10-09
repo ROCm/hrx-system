@@ -81,8 +81,8 @@ TEST_P(DispatchMultiWorkgroupTest, WriteWorkgroupIds) {
       break;
   }
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   iree_hal_command_buffer_t* command_buffer = nullptr;

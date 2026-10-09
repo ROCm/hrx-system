@@ -539,13 +539,14 @@ uint32_t FindFreeLocationWithStorageLeaseAtResidencyCliff(
   };
   const loom_target_residency_model_t residency_model = {
       .best_tier = 4,
-      .direct_resources = {
-          /*.names=*/resource_names,
-          /*.cliffs=*/cliffs,
-          /*.cliff_count=*/IREE_ARRAYSIZE(cliffs),
-          /*.cliff_ranges=*/cliff_ranges,
-          /*.resource_count=*/IREE_ARRAYSIZE(resource_names),
-      },
+      .direct_resources =
+          {
+              .names = resource_names,
+              .cliffs = cliffs,
+              .cliff_count = IREE_ARRAYSIZE(cliffs),
+              .cliff_ranges = cliff_ranges,
+              .resource_count = IREE_ARRAYSIZE(resource_names),
+          },
   };
   StorageLeaseSearchOptions options;
   options.residency = loom_target_residency_view(&residency_model, tier_limit);

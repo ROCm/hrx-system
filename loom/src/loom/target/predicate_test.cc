@@ -131,15 +131,15 @@ class TargetPredicateTest : public ::testing::Test {
     loom_func_like_t function = FindFunction(module, function_name);
     bool match = false;
     const loom_pass_predicate_evaluate_context_t context = {
-        /*.pipeline_module=*/module,
-        /*.where_op=*/where_op,
-        /*.anchor_kind=*/LOOM_PASS_FUNCTION,
-        /*.predicate=*/IREE_SV("target"),
-        /*.environment=*/nullptr,
-        /*.target_module=*/module,
-        /*.symbol=*/symbol,
-        /*.function=*/function,
-        /*.function_version=*/function_version,
+        .pipeline_module = module,
+        .where_op = where_op,
+        .anchor_kind = LOOM_PASS_FUNCTION,
+        .predicate = IREE_SV("target"),
+        .environment = nullptr,
+        .target_module = module,
+        .symbol = symbol,
+        .function = function,
+        .function_version = function_version,
     };
     IREE_CHECK_OK(predicate_provider_.evaluate(predicate_provider_.user_data,
                                                &context, &match));

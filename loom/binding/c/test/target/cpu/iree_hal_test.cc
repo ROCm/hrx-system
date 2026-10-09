@@ -102,23 +102,23 @@ iree_status_t CreateCpuDeviceSpec(bool include_cpu_facet,
   std::vector<uint8_t> cpu_payload;
   if (include_cpu_facet) {
     const iree_hal_cpu_device_spec_t cpu_spec = {
-        /*.cpu_data=*/cpu_data != nullptr
+        .cpu_data = cpu_data != nullptr
             ? *cpu_data
             : iree_cpu_data_t{
-                  /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
+                  .architecture = IREE_CPU_ARCHITECTURE_X86_64,
               },
-        /*.flags=*/IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
+        .flags = IREE_HAL_CPU_DEVICE_SPEC_FLAG_NONE,
     };
     cpu_payload.resize(iree_hal_cpu_device_spec_payload_size());
     status = iree_hal_cpu_device_spec_encode(
         &cpu_spec, iree_make_byte_span(cpu_payload.data(), cpu_payload.size()));
     if (iree_status_is_ok(status)) {
       const iree_hal_device_spec_facet_t facet = {
-          /*.schema_id=*/
-          iree_make_cstring_view(IREE_HAL_CPU_DEVICE_SPEC_SCHEMA_ID),
-          /*.schema_version=*/IREE_HAL_CPU_DEVICE_SPEC_SCHEMA_VERSION,
-          /*.payload=*/
-          iree_make_const_byte_span(cpu_payload.data(), cpu_payload.size()),
+          .schema_id =
+              iree_make_cstring_view(IREE_HAL_CPU_DEVICE_SPEC_SCHEMA_ID),
+          .schema_version = IREE_HAL_CPU_DEVICE_SPEC_SCHEMA_VERSION,
+          .payload =
+              iree_make_const_byte_span(cpu_payload.data(), cpu_payload.size()),
       };
       status = iree_hal_device_spec_builder_add_facet(&builder, &facet);
     }
@@ -126,12 +126,12 @@ iree_status_t CreateCpuDeviceSpec(bool include_cpu_facet,
 
   if (iree_status_is_ok(status) && include_loader_target) {
     const iree_hal_executable_target_t target = {
-        /*.family=*/IREE_SV("cpu"),
-        /*.target_key=*/IREE_SV("x86_64"),
-        /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
-        /*.priority=*/0,
-        /*.physical_device_affinity=*/1,
-        /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+        .family = IREE_SV("cpu"),
+        .target_key = IREE_SV("x86_64"),
+        .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+        .priority = 0,
+        .physical_device_affinity = 1,
+        .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
     };
     status =
         iree_hal_device_spec_builder_add_executable_target(&builder, &target);
@@ -158,15 +158,15 @@ TargetEnvironmentPtr CreateConfiguredTargetEnvironment() {
 ContextPtr CreateConfiguredContext(
     loomc_target_environment_t* target_environment) {
   const loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment,
   };
   const loomc_context_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = &target_options,
   };
   loomc_context_t* context = nullptr;
   LOOMC_EXPECT_OK(
@@ -191,13 +191,13 @@ CompilerPtr CreateCompiler(loomc_context_t* context) {
 ModulePtr ParseModule(loomc_context_t* context, loomc_workspace_t* workspace,
                       const char* contents) {
   const loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("cpu_target.loom"),
-      /*.contents=*/loomc_make_byte_span(contents, std::strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("cpu_target.loom"),
+      .contents = loomc_make_byte_span(contents, std::strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
@@ -236,15 +236,15 @@ TargetProfilePtr SelectCpuTarget(
       loomc_cpu_iree_hal_target_provider(),
   };
   const loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("fake-cpu"),
-      /*.device=*/reinterpret_cast<iree_hal_device_t*>(device),
-      /*.physical_device_affinity=*/1,
-      /*.target_profile=*/requested_profile,
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("fake-cpu"),
+      .device = reinterpret_cast<iree_hal_device_t*>(device),
+      .physical_device_affinity = 1,
+      .target_profile = requested_profile,
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_iree_hal_target_selection_t selection = {};
   LOOMC_EXPECT_OK(loomc_target_select_iree_hal(target_environment, &options,
@@ -316,12 +316,12 @@ TEST(LoomcCpuIreeHalTargetTest, SelectsNativeProfileAndLoaderTogether) {
 
 TEST(LoomcCpuIreeHalTargetTest, SelectsStrongestProfileFromDeviceFacts) {
   const iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/
-      {IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
-       IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVX512F |
-       IREE_CPU_DATA0_X86_64_AVX512VL | IREE_CPU_DATA0_X86_64_AVX512DQ |
-       IREE_CPU_DATA0_X86_64_AVX512BW},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
+                 IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVX512F |
+                 IREE_CPU_DATA0_X86_64_AVX512VL |
+                 IREE_CPU_DATA0_X86_64_AVX512DQ |
+                 IREE_CPU_DATA0_X86_64_AVX512BW},
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
@@ -348,11 +348,11 @@ TEST(LoomcCpuIreeHalTargetTest, SelectsStrongestProfileFromDeviceFacts) {
 
 TEST(LoomcCpuIreeHalTargetTest, CompilesSerializedAvxVnniInt8ProfileToObject) {
   const iree_cpu_data_t cpu_data = {
-      /*.architecture=*/IREE_CPU_ARCHITECTURE_X86_64,
-      /*.fields=*/
-      {IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
-           IREE_CPU_DATA0_X86_64_AVX2 | IREE_CPU_DATA0_X86_64_AVXVNNIINT8,
-       2, 3, 4, 5, 6, 7, 8},
+      .architecture = IREE_CPU_ARCHITECTURE_X86_64,
+      .fields = {IREE_CPU_DATA0_X86_64_AVX | IREE_CPU_DATA0_X86_64_FMA |
+                     IREE_CPU_DATA0_X86_64_AVX2 |
+                     IREE_CPU_DATA0_X86_64_AVXVNNIINT8,
+                 2, 3, 4, 5, 6, 7, 8},
   };
   DeviceSpecPtr device_spec;
   IREE_ASSERT_OK(CreateCpuDeviceSpec(/*include_cpu_facet=*/true,
@@ -405,25 +405,25 @@ func.def public @dot4i_s8s8_256(%lhs: vector<32xi8>, %rhs: vector<32xi8>, %acc: 
 )");
   const loomc_string_view_t root = loomc_make_cstring_view("dot4i_s8s8_256");
   const loomc_emit_options_t emit_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-      /*.structure_size=*/sizeof(emit_options),
-      /*.next=*/nullptr,
-      /*.artifact_format=*/loomc_make_cstring_view("x86-elf"),
-      /*.identifier=*/loomc_make_cstring_view("dot4i_s8s8_256.o"),
-      /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+      .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+      .structure_size = sizeof(emit_options),
+      .next = nullptr,
+      .artifact_format = loomc_make_cstring_view("x86-elf"),
+      .identifier = loomc_make_cstring_view("dot4i_s8s8_256.o"),
+      .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
   };
   const loomc_compile_artifact_options_t compile_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
-      /*.structure_size=*/sizeof(compile_options),
-      /*.next=*/nullptr,
-      /*.roots=*/&root,
-      /*.root_count=*/1,
-      /*.excluded_roots=*/nullptr,
-      /*.excluded_root_count=*/0,
-      /*.target_profile=*/profile.get(),
-      /*.config=*/nullptr,
-      /*.emit_options=*/&emit_options,
-      /*.artifact_flags=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_ARTIFACT_OPTIONS,
+      .structure_size = sizeof(compile_options),
+      .next = nullptr,
+      .roots = &root,
+      .root_count = 1,
+      .excluded_roots = nullptr,
+      .excluded_root_count = 0,
+      .target_profile = profile.get(),
+      .config = nullptr,
+      .emit_options = &emit_options,
+      .artifact_flags = 0,
   };
   loomc_result_t* compile_result = nullptr;
   LOOMC_ASSERT_OK(loomc_compile_artifact(

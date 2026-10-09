@@ -746,11 +746,11 @@ TEST_P(BlockProcessorTest, AtomicCommandsExecuteOnce) {
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_barrier(&builder));
 
   const iree_hal_atomic_wait_params_t wait_params = {
-      /*.value=*/10,
-      /*.mask=*/UINT64_MAX,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      .value = 10,
+      .mask = UINT64_MAX,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
   };
   IREE_ASSERT_OK(
       iree_hal_cmd_build_atomic_wait(&builder, wait_params, &fixups, &token));
@@ -813,12 +813,12 @@ TEST_P(BlockProcessorTest,
       switch (kind) {
         case AtomicKind::kWait: {
           const iree_hal_atomic_wait_params_t params = {
-              /*.value=*/0,
-              /*.mask=*/UINT64_MAX,
-              /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-              /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-              /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-              /*.target_error_mode=*/mode,
+              .value = 0,
+              .mask = UINT64_MAX,
+              .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+              .width = IREE_HAL_ATOMIC_WIDTH_64,
+              .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+              .target_error_mode = mode,
           };
           IREE_ASSERT_OK(iree_hal_cmd_build_atomic_wait(&builder, params,
                                                         &fixups, &token));

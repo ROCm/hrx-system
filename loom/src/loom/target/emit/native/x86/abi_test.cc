@@ -51,13 +51,13 @@ struct ProfileExpectation {
 };
 
 static const ProfileExpectation kProfiles[] = {
-    {/*.name=*/"scalar",
-     /*.descriptor_key=*/"x86.scalar.core",
-     /*.carrier=*/"gpr64",
-     /*.provider=*/loom_x86_scalar_core_descriptor_set,
-     /*.vector_register_class=*/LOOM_LOW_REG_CLASS_NONE,
-     /*.vector_register_count=*/0,
-     /*.mask_register_count=*/0},
+    {.name = "scalar",
+     .descriptor_key = "x86.scalar.core",
+     .carrier = "gpr64",
+     .provider = loom_x86_scalar_core_descriptor_set,
+     .vector_register_class = LOOM_LOW_REG_CLASS_NONE,
+     .vector_register_count = 0,
+     .mask_register_count = 0},
     {.name = "simd128",
      .descriptor_key = "x86.simd128.core",
      .carrier = "xmm",

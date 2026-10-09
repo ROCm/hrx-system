@@ -43,29 +43,28 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
   const uint8_t second_text[] = {0xc5, 0xf8, 0x77, 0xc3};
   const loom_native_section_contribution_t sections[] = {
       {
-          /*.section_name=*/IREE_SV(".text"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-          /*.contribution_alignment=*/4,
-          /*.contents=*/
-          iree_make_const_byte_span(first_text, sizeof(first_text)),
+          .section_name = IREE_SV(".text"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+          .contribution_alignment = 4,
+          .contents = iree_make_const_byte_span(first_text, sizeof(first_text)),
       },
       {
-          /*.section_name=*/IREE_SV(".rodata"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ,
-          /*.contribution_alignment=*/1,
-          /*.contents=*/iree_make_const_byte_span(rodata, sizeof(rodata)),
+          .section_name = IREE_SV(".rodata"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ,
+          .contribution_alignment = 1,
+          .contents = iree_make_const_byte_span(rodata, sizeof(rodata)),
       },
       {
-          /*.section_name=*/IREE_SV(".text"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
-          /*.contribution_alignment=*/8,
-          /*.contents=*/
-          iree_make_const_byte_span(second_text, sizeof(second_text)),
+          .section_name = IREE_SV(".text"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_EXECUTE,
+          .contribution_alignment = 8,
+          .contents =
+              iree_make_const_byte_span(second_text, sizeof(second_text)),
       },
   };
 
@@ -76,31 +75,31 @@ TEST(NativeObjectTest, ResolvesSymbolsAndFixupsThroughContributionLayout) {
 
   const loom_native_object_symbol_t symbols[] = {
       {
-          /*.name=*/IREE_SV("entry"),
-          /*.section_contribution_index=*/0,
-          /*.section_offset=*/1,
-          /*.size=*/3,
-          /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-          /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
-          /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+          .name = IREE_SV("entry"),
+          .section_contribution_index = 0,
+          .section_offset = 1,
+          .size = 3,
+          .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+          .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+          .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
       },
       {
-          /*.name=*/IREE_SV("second"),
-          /*.section_contribution_index=*/2,
-          /*.section_offset=*/2,
-          /*.size=*/2,
-          /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
-          /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN,
-          /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+          .name = IREE_SV("second"),
+          .section_contribution_index = 2,
+          .section_offset = 2,
+          .size = 2,
+          .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_LOCAL,
+          .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_HIDDEN,
+          .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
       },
       {
-          /*.name=*/IREE_SV("external"),
-          /*.section_contribution_index=*/IREE_HOST_SIZE_MAX,
-          /*.section_offset=*/0,
-          /*.size=*/0,
-          /*.binding=*/LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
-          /*.visibility=*/LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
-          /*.kind=*/LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
+          .name = IREE_SV("external"),
+          .section_contribution_index = IREE_HOST_SIZE_MAX,
+          .section_offset = 0,
+          .size = 0,
+          .binding = LOOM_NATIVE_OBJECT_SYMBOL_BINDING_GLOBAL,
+          .visibility = LOOM_NATIVE_OBJECT_SYMBOL_VISIBILITY_DEFAULT,
+          .kind = LOOM_NATIVE_OBJECT_SYMBOL_KIND_FUNCTION,
       },
   };
   loom_native_object_symbol_layout_t layouts[IREE_ARRAYSIZE(symbols)] = {};

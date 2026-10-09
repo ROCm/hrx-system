@@ -376,7 +376,7 @@ TEST(ReplayFileRangeTest, RejectsDigestBytesWithoutDigestType) {
 TEST(ReplayFileReaderTest, QueueBarriersPreserveDefaultAndEmptyLists) {
   const iree_hal_replay_queue_barrier_payload_t operation = {};
   const iree_hal_replay_queue_barriers_footer_t footer = {
-      /*.payload_length=*/0, /*.before_count=*/UINT64_MAX, /*.after_count=*/0};
+      .payload_length = 0, .before_count = UINT64_MAX, .after_count = 0};
   iree_hal_replay_file_record_header_t header = {};
   header.header_length = sizeof(header);
   header.payload_length = sizeof(operation) + sizeof(footer);

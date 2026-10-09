@@ -75,8 +75,8 @@ TEST(TargetLaunchTest, RejectsRequiredFlatWorkgroupSizeAboveLimit) {
 TEST(TargetLaunchTest, RejectsRequiredFlatWorkgroupSizeOverflow) {
   loom_target_snapshot_t snapshot = TestSnapshot();
   snapshot.max_workgroup_size = {.x = 0, .y = 0, .z = 0};
-  loom_target_hal_kernel_abi_t hal_kernel = TestHalKernelAbi(
-      {/*.x=*/UINT32_MAX, /*.y=*/UINT32_MAX, /*.z=*/UINT32_MAX});
+  loom_target_hal_kernel_abi_t hal_kernel =
+      TestHalKernelAbi({.x = UINT32_MAX, .y = UINT32_MAX, .z = UINT32_MAX});
 
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_OUT_OF_RANGE,
@@ -96,7 +96,7 @@ TEST(TargetLaunchTest, ComputesFlatWorkgroupSize) {
   EXPECT_EQ(flat_size, 0u);
 
   loom_target_workgroup_size_t overflowing = {
-      /*.x=*/UINT32_MAX, /*.y=*/UINT32_MAX, /*.z=*/UINT32_MAX};
+      .x = UINT32_MAX, .y = UINT32_MAX, .z = UINT32_MAX};
   EXPECT_FALSE(
       loom_target_workgroup_size_flat_product_u32(&overflowing, &flat_size));
 }
@@ -225,12 +225,12 @@ TEST(TargetLaunchTest, RejectsFlatGridOverflow) {
   snapshot.max_grid_size = {.x = 0, .y = 0, .z = 0};
   snapshot.max_flat_grid_size = 0;
   snapshot.max_workgroup_count = {.x = 0, .y = 0, .z = 0};
-  loom_target_hal_kernel_abi_t hal_kernel = TestHalKernelAbi(
-      {/*.x=*/UINT32_MAX, /*.y=*/UINT32_MAX, /*.z=*/UINT32_MAX});
+  loom_target_hal_kernel_abi_t hal_kernel =
+      TestHalKernelAbi({.x = UINT32_MAX, .y = UINT32_MAX, .z = UINT32_MAX});
   loom_target_dispatch_workgroup_count_t workgroup_count = {
-      /*.x=*/UINT32_MAX,
-      /*.y=*/UINT32_MAX,
-      /*.z=*/UINT32_MAX,
+      .x = UINT32_MAX,
+      .y = UINT32_MAX,
+      .z = UINT32_MAX,
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,

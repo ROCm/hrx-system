@@ -175,8 +175,8 @@ kernel.def @classified() {
   iree_host_size_t AddMaterializedSource(loom_link_module_index_t* index,
                                          const loom_module_t* module) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/IREE_SV("kernel-source"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("kernel-source"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     iree_host_size_t provider_ordinal = 0;
     IREE_CHECK_OK(loom_link_module_index_add_materialized(
@@ -188,8 +188,8 @@ kernel.def @classified() {
                                      const std::vector<uint8_t>& bytecode,
                                      const loom_module_t* source_module) {
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/IREE_SV("kernel-source"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("kernel-source"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     iree_host_size_t provider_ordinal = 0;
     IREE_CHECK_OK(loom_link_module_index_add_bytecode(

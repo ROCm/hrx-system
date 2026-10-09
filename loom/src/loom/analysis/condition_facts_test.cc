@@ -461,11 +461,12 @@ TEST_F(ConditionFactsTest, ExactOperandFactsProveEquivalentLiteralRelation) {
               .value_id = value,
               .constant = 0,
           },
-      .right = {
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-          /*.value_id=*/LOOM_VALUE_ID_INVALID,
-          /*.constant=*/32,
-      },
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+              .value_id = LOOM_VALUE_ID_INVALID,
+              .constant = 32,
+          },
   };
   bool result = true;
   EXPECT_TRUE(loom_condition_fact_set_proves_integer_relation(

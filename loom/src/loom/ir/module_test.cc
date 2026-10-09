@@ -19,9 +19,9 @@ namespace loom {
 namespace {
 
 static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(5, "block"),
-    /*.attr_kind=*/LOOM_ATTR_I64,
-    /*.flags=*/LOOM_ATTR_OPTIONAL,
+    .name = LOOM_BSTRING_REF(5, "block"),
+    .attr_kind = LOOM_ATTR_I64,
+    .flags = LOOM_ATTR_OPTIONAL,
 }};
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
@@ -35,17 +35,17 @@ static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
 };
 
 static const loom_encoding_family_descriptor_t kQ6KEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q6_k"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .name = LOOM_BSTRING_REF(4, "q6_k"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
 };
 static const loom_encoding_vtable_t kQ6KEncodingVtable = {
     .descriptor = &kQ6KEncodingDescriptor,
 };
 
 static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(5, "dense"),
-    /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
-    /*.family_flags=*/LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT,
+    .name = LOOM_BSTRING_REF(5, "dense"),
+    .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    .family_flags = LOOM_ENCODING_FAMILY_IMPLICIT_SHAPED_ATTACHMENT,
 };
 static const loom_encoding_vtable_t kDenseEncodingVtable = {
     .descriptor = &kDenseEncodingDescriptor,
@@ -346,11 +346,11 @@ TEST_F(ModuleTest, CompactSymbolsRebuildsEncodingInternTable) {
       .value = loom_attr_symbol((loom_symbol_ref_t){0, target_symbol_id}),
   };
   loom_encoding_t encoding = {
-      /*.name_id=*/encoding_name,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&parameter,
+      .name_id = encoding_name,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &parameter,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
@@ -3170,8 +3170,8 @@ TEST_F(ModuleTest, InternImplicitShapedAttachmentUsesAbsentIdentity) {
   IREE_ASSERT_OK(
       loom_module_intern_string(module, IREE_SV("dense"), &dense_name_id));
   const loom_encoding_t dense_encoding = {
-      /*.name_id=*/dense_name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      .name_id = dense_name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
   };
   uint16_t dense_encoding_id = 0;
   IREE_ASSERT_OK(
@@ -3245,8 +3245,8 @@ TEST_F(ModuleTest, InternNestedTypeRequiresExistingStaticEncoding) {
 
 TEST_F(ModuleTest, InternTypesRetainPriorStaticEncodingDependencies) {
   static const loom_attr_descriptor_t kParameter = {
-      /*.name=*/LOOM_BSTRING_REF(7, "element"),
-      /*.attr_kind=*/LOOM_ATTR_TYPE,
+      .name = LOOM_BSTRING_REF(7, "element"),
+      .attr_kind = LOOM_ATTR_TYPE,
   };
   static const loom_encoding_family_descriptor_t kDescriptor = {
       /*.name=*/LOOM_BSTRING_REF(5, "typed"),
@@ -3839,11 +3839,11 @@ TEST_F(ModuleTest, AddEncodingBasic) {
   };
 
   loom_encoding_t encoding = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&param,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &param,
   };
 
   uint16_t encoding_id = 0;
@@ -3883,11 +3883,11 @@ TEST_F(ModuleTest, AddEncodingRetainsMalformedParametersForVerification) {
       .value = loom_attr_string(value_id),
   };
   loom_encoding_t encoding = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&parameter,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &parameter,
   };
 
   uint16_t encoding_id = 0;
@@ -3911,9 +3911,9 @@ TEST_F(ModuleTest, AddEncodingDedup) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("dense"), &name_id));
 
   loom_encoding_t encoding = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/0,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 0,
   };
 
   uint16_t id1 = 0, id2 = 0;
@@ -3944,11 +3944,11 @@ TEST_F(ModuleTest, AddEncodingDedupAfterInternTableGrowth) {
         .value = loom_attr_i64(i),
     };
     loom_encoding_t encoding = {
-        /*.name_id=*/name_id,
-        /*.alias_id=*/LOOM_STRING_ID_INVALID,
-        /*.attribute_count=*/1,
-        /*.family=*/{},
-        /*.attributes=*/&parameter,
+        .name_id = name_id,
+        .alias_id = LOOM_STRING_ID_INVALID,
+        .attribute_count = 1,
+        .family = {},
+        .attributes = &parameter,
     };
     uint16_t encoding_id = 0;
     IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
@@ -3963,11 +3963,11 @@ TEST_F(ModuleTest, AddEncodingDedupAfterInternTableGrowth) {
         .value = loom_attr_i64(ordinal),
     };
     loom_encoding_t encoding = {
-        /*.name_id=*/name_id,
-        /*.alias_id=*/LOOM_STRING_ID_INVALID,
-        /*.attribute_count=*/1,
-        /*.family=*/{},
-        /*.attributes=*/&parameter,
+        .name_id = name_id,
+        .alias_id = LOOM_STRING_ID_INVALID,
+        .attribute_count = 1,
+        .family = {},
+        .attributes = &parameter,
     };
     uint16_t encoding_id = 0;
     IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));
@@ -4005,11 +4005,11 @@ TEST_F(ModuleTest, AddEncodingDedupStructuralParamsAndBackfillsAlias) {
   }};
 
   loom_encoding_t plain = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/attrs_a,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = attrs_a,
   };
   loom_encoding_t aliased = {
       .name_id = name_id,
@@ -4091,18 +4091,18 @@ TEST_F(ModuleTest, AddEncodingDifferentParams) {
       .name_id = block_id, .reserved = {}, .value = loom_attr_i64(64)};
 
   loom_encoding_t enc32 = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&param32,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &param32,
   };
   loom_encoding_t enc64 = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&param64,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &param64,
   };
 
   uint16_t id32 = 0, id64 = 0;
@@ -4129,8 +4129,8 @@ TEST_F(ModuleTest, AddEncodingRejectsUnknownFamilyWhenRegistryIsPopulated) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("mystery_q"),
                                            &unknown_name_id));
   loom_encoding_t encoding = {
-      /*.name_id=*/unknown_name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      .name_id = unknown_name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
   };
   uint16_t encoding_id = 0;
   IREE_EXPECT_STATUS_IS(
@@ -4149,8 +4149,8 @@ TEST_F(ModuleTest, EncodingVtableLookupReturnsRegisteredFamily) {
   loom_string_id_t name_id = LOOM_STRING_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("q8_0"), &name_id));
   loom_encoding_t encoding = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module, &encoding, &encoding_id));

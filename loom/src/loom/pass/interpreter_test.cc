@@ -162,7 +162,7 @@ TEST_F(PassInterpreterTest, RunsFunctionRootProgram) {
   ASSERT_NE(module, nullptr);
 
   loom_function_version_type_t version_type = {
-      /*.name=*/IREE_SVL("test"),
+      .name = IREE_SVL("test"),
   };
   loom_function_version_t version = {
       .type = &version_type,
@@ -170,8 +170,8 @@ TEST_F(PassInterpreterTest, RunsFunctionRootProgram) {
   };
   loom_function_version_t* version_values[] = {&version};
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   PassProgramStorage storage;
@@ -532,7 +532,7 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
       PassTestTargetPredicateProvider(&predicate_capture);
 
   loom_function_version_type_t version_type = {
-      /*.name=*/IREE_SVL("test"),
+      .name = IREE_SVL("test"),
   };
   loom_function_version_t selected_version = {
       .type = &version_type,
@@ -547,8 +547,8 @@ TEST_F(PassInterpreterTest, AppliesProviderPredicateToCurrentFunction) {
       &skipped_version,
   };
   const loom_function_version_list_t versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   PassProgramStorage storage;

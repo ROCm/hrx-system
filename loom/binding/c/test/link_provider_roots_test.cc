@@ -86,14 +86,13 @@ class LinkProviderRootsTest : public ::testing::Test {
     const iree_string_view_t contents = FindSource(filename);
     ASSERT_FALSE(iree_string_view_is_empty(contents));
     const loomc_source_options_t source_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(source_options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/
-        loomc_make_string_view(filename.data(), filename.size()),
-        /*.contents=*/loomc_make_byte_span(contents.data, contents.size),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(source_options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_string_view(filename.data(), filename.size()),
+        .contents = loomc_make_byte_span(contents.data, contents.size),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
     };
     loomc_source_t* source = nullptr;
     LOOMC_ASSERT_OK(loomc_source_create(&source_options,
@@ -101,9 +100,9 @@ class LinkProviderRootsTest : public ::testing::Test {
     SourcePtr source_ptr(source);
 
     const loomc_link_index_source_options_t index_options = {
-        /*.provider_name=*/
-        loomc_make_string_view(provider_name.data(), provider_name.size()),
-        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
+        .provider_name =
+            loomc_make_string_view(provider_name.data(), provider_name.size()),
+        .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
     };
     loomc_link_index_source_slot_t slot = {};
     LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(

@@ -107,22 +107,22 @@ TEST(NativeContributionTest, AssemblesAlignedSectionsAndCopiesStorage) {
 TEST(NativeContributionTest, AssemblesAlignedReservationsWithoutPayloadBytes) {
   const loom_native_section_contribution_t contributions[] = {
       {
-          /*.section_name=*/IREE_SV(".bss"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_WRITE,
-          /*.contribution_alignment=*/4,
-          /*.contents=*/{},
-          /*.reservation_length=*/12,
+          .section_name = IREE_SV(".bss"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_WRITE,
+          .contribution_alignment = 4,
+          .contents = {},
+          .reservation_length = 12,
       },
       {
-          /*.section_name=*/IREE_SV(".bss"),
-          /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-          /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-              LOOM_NATIVE_SECTION_ACCESS_WRITE,
-          /*.contribution_alignment=*/16,
-          /*.contents=*/{},
-          /*.reservation_length=*/8,
+          .section_name = IREE_SV(".bss"),
+          .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+          .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                    LOOM_NATIVE_SECTION_ACCESS_WRITE,
+          .contribution_alignment = 16,
+          .contents = {},
+          .reservation_length = 8,
       },
   };
 
@@ -151,22 +151,22 @@ TEST(NativeContributionTest, RejectsReservationLayoutOverflow) {
   for (uint64_t alignment : {1u, 8u}) {
     const loom_native_section_contribution_t contributions[] = {
         {
-            /*.section_name=*/IREE_SV(".storage"),
-            /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-            /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-                LOOM_NATIVE_SECTION_ACCESS_WRITE,
-            /*.contribution_alignment=*/1,
-            /*.contents=*/{},
-            /*.reservation_length=*/UINT64_MAX,
+            .section_name = IREE_SV(".storage"),
+            .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+            .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                      LOOM_NATIVE_SECTION_ACCESS_WRITE,
+            .contribution_alignment = 1,
+            .contents = {},
+            .reservation_length = UINT64_MAX,
         },
         {
-            /*.section_name=*/IREE_SV(".storage"),
-            /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-            /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-                LOOM_NATIVE_SECTION_ACCESS_WRITE,
-            /*.contribution_alignment=*/alignment,
-            /*.contents=*/{},
-            /*.reservation_length=*/1,
+            .section_name = IREE_SV(".storage"),
+            .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+            .access = LOOM_NATIVE_SECTION_ACCESS_READ |
+                      LOOM_NATIVE_SECTION_ACCESS_WRITE,
+            .contribution_alignment = alignment,
+            .contents = {},
+            .reservation_length = 1,
         },
     };
     TestArena arena;

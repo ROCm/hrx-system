@@ -277,19 +277,21 @@ class ManualBinaryClassifier {
           .projection_ordinals = &projection_ordinals_[i],
           .feature_outcomes = nullptr,
           .actions = actions_[i],
-          .generic_result = {
-              /*.kind=*/static_cast<loom_decision_program_result_kind_t>(
-                  has_generic_residual
-                      ? LOOM_DECISION_PROGRAM_RESULT_SELECTED
-                      : LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED),
-              /*.reserved=*/{},
-              /*.action_ordinal=*/
-              has_generic_residual ? 1u : LOOM_DECISION_PROGRAM_ACTION_INVALID,
-              /*.unresolved_action_ordinal=*/
-              LOOM_DECISION_PROGRAM_ACTION_INVALID,
-              /*.unresolved_constraint=*/
-              LOOM_DECISION_PROGRAM_CONSTRAINT_INVALID,
-          },
+          .generic_result =
+              {
+                  .kind = static_cast<loom_decision_program_result_kind_t>(
+                      has_generic_residual
+                          ? LOOM_DECISION_PROGRAM_RESULT_SELECTED
+                          : LOOM_DECISION_PROGRAM_RESULT_UNRESOLVED),
+                  .reserved = {},
+                  .action_ordinal = has_generic_residual
+                                        ? 1u
+                                        : LOOM_DECISION_PROGRAM_ACTION_INVALID,
+                  .unresolved_action_ordinal =
+                      LOOM_DECISION_PROGRAM_ACTION_INVALID,
+                  .unresolved_constraint =
+                      LOOM_DECISION_PROGRAM_CONSTRAINT_INVALID,
+              },
           .argument_count = 1,
           .result_count = 0,
           .projection_count = 1,

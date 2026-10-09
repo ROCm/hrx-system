@@ -68,9 +68,9 @@ ReferenceResult EvaluateReference(
     loom_template_provider_slice_t providers,
     loom_decision_program_resolution_policy_t policy) {
   ReferenceResult result = {
-      /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
-      /*.action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
-      /*.unresolved_action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .kind = LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
+      .action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .unresolved_action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
   };
   bool has_match = false;
   bool has_maybe = false;

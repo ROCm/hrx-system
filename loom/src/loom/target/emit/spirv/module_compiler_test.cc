@@ -36,8 +36,8 @@ using ::loom::testing::ModulePtr;
 static constexpr iree_host_size_t kSpirvHeaderWordCount = 5;
 
 static const loom_target_fact_type_t kSpirvCompilerTestTargetFactType = {
-    /*.name=*/IREE_SVL("spirv-test"),
-    /*.storage_size=*/sizeof(loom_target_facts_t),
+    .name = IREE_SVL("spirv-test"),
+    .storage_size = sizeof(loom_target_facts_t),
 };
 
 static bool SpirvModuleHasCapability(const loom_spirv_module_binary_t& module,
@@ -219,8 +219,8 @@ low.kernel.def target<spirv.logical.core> workgroup_size(1, 1, 1) @loom_kernel()
       MakeFunctionVersion(module.get(), IREE_SV("loom_kernel"), &target_facts);
   loom_function_version_t* version_values[] = {&function_version.base};
   const loom_function_version_list_t function_versions = {
-      /*.values=*/version_values,
-      /*.count=*/IREE_ARRAYSIZE(version_values),
+      .values = version_values,
+      .count = IREE_ARRAYSIZE(version_values),
   };
 
   loom_target_emit_request_t request = {};

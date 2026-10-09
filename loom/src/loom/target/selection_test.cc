@@ -13,23 +13,23 @@ namespace loom {
 namespace {
 
 static const loom_target_snapshot_t kTargetSnapshot = {
-    /*.name=*/IREE_SVL("fake.snapshot"),
+    .name = IREE_SVL("fake.snapshot"),
 };
 static const loom_target_export_plan_t kTargetExportPlan = {
-    /*.name=*/IREE_SVL("fake.export"),
+    .name = IREE_SVL("fake.export"),
 };
 static const loom_target_config_t kTargetConfig = {
-    /*.name=*/IREE_SVL("fake.config"),
+    .name = IREE_SVL("fake.config"),
 };
 static const loom_target_bundle_t kTargetBundle = {
-    /*.name=*/IREE_SVL("fake.bundle"),
-    /*.snapshot=*/&kTargetSnapshot,
-    /*.export_plan=*/&kTargetExportPlan,
-    /*.config=*/&kTargetConfig,
+    .name = IREE_SVL("fake.bundle"),
+    .snapshot = &kTargetSnapshot,
+    .export_plan = &kTargetExportPlan,
+    .config = &kTargetConfig,
 };
 static const loom_target_fact_type_t kTargetFactType = {
-    /*.name=*/IREE_SVL("fake"),
-    /*.storage_size=*/sizeof(loom_target_facts_t),
+    .name = IREE_SVL("fake"),
+    .storage_size = sizeof(loom_target_facts_t),
 };
 
 static iree_status_t ProjectTargetFacts(const loom_target_profile_t* profile,
@@ -42,22 +42,22 @@ static iree_status_t ProjectTargetFacts(const loom_target_profile_t* profile,
 }
 
 static const loom_target_profile_type_t kTargetProfileType = {
-    /*.name=*/IREE_SVL("fake"),
-    /*.fact_type=*/&kTargetFactType,
-    /*.project_facts=*/ProjectTargetFacts,
+    .name = IREE_SVL("fake"),
+    .fact_type = &kTargetFactType,
+    .project_facts = ProjectTargetFacts,
 };
 static const loom_target_profile_t kTargetProfile = {
     .type = &kTargetProfileType,
     .target_bundle = &kTargetBundle,
 };
 static const loom_target_fact_type_t kOtherTargetFactType = {
-    /*.name=*/IREE_SVL("other"),
-    /*.storage_size=*/sizeof(loom_target_facts_t),
+    .name = IREE_SVL("other"),
+    .storage_size = sizeof(loom_target_facts_t),
 };
 static const loom_target_profile_type_t kOtherTargetProfileType = {
-    /*.name=*/IREE_SVL("other"),
-    /*.fact_type=*/&kOtherTargetFactType,
-    /*.project_facts=*/ProjectTargetFacts,
+    .name = IREE_SVL("other"),
+    .fact_type = &kOtherTargetFactType,
+    .project_facts = ProjectTargetFacts,
 };
 static const loom_target_profile_t kOtherTargetProfile = {
     .type = &kOtherTargetProfileType,
@@ -179,8 +179,8 @@ TEST(TargetSelectionTest, SelectsBorrowedProfile) {
       loom_target_environment_initialize(&provider_set, &environment));
 
   const loom_target_specification_t specification = {
-      /*.family=*/IREE_SVL("fake"),
-      /*.selector=*/IREE_SVL("target-123"),
+      .family = IREE_SVL("fake"),
+      .selector = IREE_SVL("target-123"),
   };
   const loom_target_profile_t* profile = nullptr;
   IREE_ASSERT_OK(loom_target_environment_select_profile(
@@ -198,8 +198,8 @@ TEST(TargetSelectionTest, RejectsUnknownFamily) {
       loom_target_environment_initialize(&provider_set, &environment));
 
   const loom_target_specification_t specification = {
-      /*.family=*/IREE_SVL("missing"),
-      /*.selector=*/IREE_SVL("target-123"),
+      .family = IREE_SVL("missing"),
+      .selector = IREE_SVL("target-123"),
   };
   const loom_target_profile_t* profile = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
@@ -220,8 +220,8 @@ TEST(TargetSelectionTest, RejectsFamilyWithoutNamedProfiles) {
       loom_target_environment_initialize(&provider_set, &environment));
 
   const loom_target_specification_t specification = {
-      /*.family=*/IREE_SVL("fake"),
-      /*.selector=*/IREE_SVL("target-123"),
+      .family = IREE_SVL("fake"),
+      .selector = IREE_SVL("target-123"),
   };
   const loom_target_profile_t* profile = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_UNIMPLEMENTED,
@@ -260,8 +260,8 @@ TEST(TargetSelectionTest, RejectsProfileFromAnotherFamily) {
       loom_target_environment_initialize(&provider_set, &environment));
 
   const loom_target_specification_t specification = {
-      /*.family=*/IREE_SVL("fake"),
-      /*.selector=*/IREE_SVL("target-123"),
+      .family = IREE_SVL("fake"),
+      .selector = IREE_SVL("target-123"),
   };
   const loom_target_profile_t* profile = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INTERNAL,

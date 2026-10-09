@@ -53,13 +53,13 @@ WorkspacePtr CreateWorkspace() {
 
 SourcePtr CreateTextSource(const char* contents) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("launch_config.loom"),
-      /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("launch_config.loom"),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
@@ -86,11 +86,11 @@ LaunchArtifact CompileLaunchArtifact(const char* text) {
   WorkspacePtr workspace = CreateWorkspace();
   ModulePtr module = ParseModule(context.get(), workspace.get(), text);
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-      /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+      .identifier = loomc_make_cstring_view("launch_config.loombc"),
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(loomc_module_serialize_to_source(
@@ -101,10 +101,10 @@ LaunchArtifact CompileLaunchArtifact(const char* text) {
       loomc_byte_sequence_create_copy(loomc_source_contents(source_ptr.get()),
                                       loomc_allocator_system(), &contents));
   const loomc_artifact_t artifact = {
-      /*.kind=*/LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
-      /*.format=*/loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
-      /*.identifier=*/loomc_make_cstring_view("launch_config.loombc"),
-      /*.contents=*/contents,
+      .kind = LOOMC_ARTIFACT_KIND_LAUNCH_CONFIG,
+      .format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_LOOM_BYTECODE),
+      .identifier = loomc_make_cstring_view("launch_config.loombc"),
+      .contents = contents,
   };
   return LaunchArtifact{ByteSequencePtr(contents), artifact};
 }
@@ -118,8 +118,8 @@ ProgramPtr LoadProgram(const LaunchArtifact& artifact) {
 
 loomc_launch_config_t EmptyConfig() {
   return loomc_launch_config_t{
-      /*.type=*/LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-      /*.structure_size=*/sizeof(loomc_launch_config_t),
+      .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+      .structure_size = sizeof(loomc_launch_config_t),
   };
 }
 
@@ -265,7 +265,7 @@ TEST(LaunchConfigProgramTest, ClearsOutputsOnInvalidArguments) {
           /*artifact=*/nullptr, loomc_allocator_system(), &program));
   EXPECT_EQ(program, nullptr);
 
-  loomc_launch_config_function_t function = {/*.value=*/0};
+  loomc_launch_config_function_t function = {.value = 0};
   LOOMC_EXPECT_STATUS_IS(
       LOOMC_STATUS_INVALID_ARGUMENT,
       loomc_launch_config_program_lookup_function(

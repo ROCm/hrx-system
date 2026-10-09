@@ -32,13 +32,13 @@ std::string ToString(loomc_byte_span_t value) {
 TEST(SourceTest, CopiesIdentifierAndRequestedContents) {
   char contents[] = "func.def @entry";
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("kernel.loom"),
-      /*.contents=*/loomc_make_byte_span(contents, sizeof(contents) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("kernel.loom"),
+      .contents = loomc_make_byte_span(contents, sizeof(contents) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -56,13 +56,13 @@ TEST(SourceTest, CopiesIdentifierAndRequestedContents) {
 TEST(SourceTest, OwnsEmptyCopiedContentsWithoutFreeingBorrowedStorage) {
   char contents[] = "borrowed-empty-storage";
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("empty.loom"),
-      /*.contents=*/loomc_make_byte_span(contents, 0),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("empty.loom"),
+      .contents = loomc_make_byte_span(contents, 0),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   LOOMC_ASSERT_OK(
@@ -78,13 +78,13 @@ TEST(SourceTest, OwnsEmptyCopiedContentsWithoutFreeingBorrowedStorage) {
 TEST(SourceTest, BorrowsContents) {
   char contents[] = "borrowed";
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
-      /*.structure_size=*/0,
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("borrowed.loom"),
-      /*.contents=*/loomc_make_byte_span(contents, sizeof(contents) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
+      .type = LOOMC_STRUCTURE_TYPE_NONE,
+      .structure_size = 0,
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("borrowed.loom"),
+      .contents = loomc_make_byte_span(contents, sizeof(contents) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -114,15 +114,15 @@ TEST(SourceTest, ReleasesExternalContentsAfterTakingOwnership) {
   char contents[] = "external";
   ExternalReleaseState state = {};
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_NONE,
-      /*.structure_size=*/0,
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("external.loom"),
-      /*.contents=*/loomc_make_byte_span(contents, sizeof(contents) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_EXTERNAL,
-      /*.release=*/ExternalRelease,
-      /*.release_user_data=*/&state,
+      .type = LOOMC_STRUCTURE_TYPE_NONE,
+      .structure_size = 0,
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("external.loom"),
+      .contents = loomc_make_byte_span(contents, sizeof(contents) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_EXTERNAL,
+      .release = ExternalRelease,
+      .release_user_data = &state,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -145,11 +145,11 @@ TEST(SourceTest, CreatesFromOpenFileAndOwnsContents) {
   ASSERT_EQ(fseek(file, 0, SEEK_SET), 0);
 
   loomc_source_load_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_LOAD_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("open-file.loom"),
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_LOAD_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("open-file.loom"),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_source_create_from_file(

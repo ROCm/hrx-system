@@ -124,8 +124,8 @@ static const iree_test_role_t kAllRoles[] = {
     {"arguments", argument_role, /*signals_ready=*/false},
 };
 static const iree_coordinated_test_config_t kAllRolesConfig = {
-    /*.roles=*/kAllRoles,
-    /*.role_count=*/IREE_ARRAYSIZE(kAllRoles),
+    .roles = kAllRoles,
+    .role_count = IREE_ARRAYSIZE(kAllRoles),
 };
 IREE_COORDINATED_TEST_REGISTER(kAllRolesConfig);
 

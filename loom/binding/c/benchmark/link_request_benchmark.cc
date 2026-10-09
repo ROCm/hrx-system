@@ -188,11 +188,11 @@ class LinkRequestFixture {
     out_request->reset();
     out_result->reset();
     const loomc_link_request_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.library_index=*/library_index_.get(),
-        /*.module_name=*/loomc_make_cstring_view("sealed-request"),
+        .type = LOOMC_STRUCTURE_TYPE_LINK_REQUEST_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .library_index = library_index_.get(),
+        .module_name = loomc_make_cstring_view("sealed-request"),
     };
     loomc_request_t* request = nullptr;
     loomc_result_t* result = nullptr;
@@ -226,13 +226,13 @@ class LinkRequestFixture {
                                  const std::string& contents,
                                  SourcePtr* out_source) const {
     const loomc_source_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-        /*.identifier=*/loomc_make_cstring_view(identifier),
-        /*.contents=*/loomc_make_byte_span(contents.data(), contents.size()),
-        /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+        .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_TEXT,
+        .identifier = loomc_make_cstring_view(identifier),
+        .contents = loomc_make_byte_span(contents.data(), contents.size()),
+        .storage = LOOMC_SOURCE_STORAGE_COPY,
     };
     loomc_source_t* source = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(
@@ -262,12 +262,12 @@ class LinkRequestFixture {
                                 const char* identifier,
                                 SourcePtr* out_source) const {
     const loomc_module_serialize_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/nullptr,
-        /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-        /*.identifier=*/loomc_make_cstring_view(identifier),
-        /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+        .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = nullptr,
+        .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+        .identifier = loomc_make_cstring_view(identifier),
+        .text_presentation = LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
     };
     loomc_source_t* source = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_module_serialize_to_source(
@@ -282,8 +282,8 @@ class LinkRequestFixture {
         context_.get(), /*options=*/nullptr, loom_allocator(), &builder)));
     LinkIndexBuilderPtr builder_ptr(builder);
     const loomc_link_index_source_options_t source_options = {
-        /*.provider_name=*/loomc_make_cstring_view("request-library"),
-        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
+        .provider_name = loomc_make_cstring_view("request-library"),
+        .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
     };
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_add_source(
         builder_ptr.get(), source, &source_options, /*out_slot=*/nullptr)));
@@ -309,8 +309,8 @@ class LinkRequestFixture {
         context_.get(), /*options=*/nullptr, loom_allocator(), &builder)));
     LinkIndexBuilderPtr builder_ptr(builder);
     const loomc_link_index_source_options_t source_options = {
-        /*.provider_name=*/loomc_make_cstring_view("input-request"),
-        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = loomc_make_cstring_view("input-request"),
+        .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
     };
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_link_index_builder_add_source(
         builder_ptr.get(), source, &source_options, /*out_slot=*/nullptr)));
@@ -337,10 +337,9 @@ class LinkRequestFixture {
                                 "request root is absent from source index");
       }
       roots.push_back({
-          /*.module_ordinal=*/
-          static_cast<uint32_t>(symbol.provider_module_ordinal),
-          /*.symbol_ordinal=*/
-          static_cast<uint32_t>(symbol.module_symbol_ordinal),
+          .module_ordinal =
+              static_cast<uint32_t>(symbol.provider_module_ordinal),
+          .symbol_ordinal = static_cast<uint32_t>(symbol.module_symbol_ordinal),
       });
     }
 

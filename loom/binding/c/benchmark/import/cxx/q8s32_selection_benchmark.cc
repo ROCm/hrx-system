@@ -46,15 +46,15 @@ static iree_status_t CreateSource(EmbeddedSource embedded,
                                   SourcePtr* out_source) {
   out_source->reset();
   const loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/format,
-      /*.identifier=*/embedded.identifier,
-      /*.contents=*/embedded.contents,
-      /*.storage=*/LOOMC_SOURCE_STORAGE_BORROWED,
-      /*.release=*/nullptr,
-      /*.release_user_data=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = format,
+      .identifier = embedded.identifier,
+      .contents = embedded.contents,
+      .storage = LOOMC_SOURCE_STORAGE_BORROWED,
+      .release = nullptr,
+      .release_user_data = nullptr,
   };
   loomc_source_t* source = nullptr;
   IREE_RETURN_IF_ERROR(
@@ -68,12 +68,12 @@ static iree_status_t SerializeModule(const loomc_module_t* module,
                                      SourcePtr* out_source) {
   out_source->reset();
   const loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.text_presentation=*/LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+      .identifier = loomc_make_cstring_view(identifier),
+      .text_presentation = LOOMC_MODULE_TEXT_PRESENTATION_DEFAULT,
   };
   loomc_source_t* source = nullptr;
   IREE_RETURN_IF_ERROR(to_iree_status(loomc_module_serialize_to_source(
@@ -105,15 +105,15 @@ class Q8S32SelectionFixture {
     target_profile_.reset(raw_profile);
 
     const loomc_context_target_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.target_environment=*/target_environment_.get(),
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .target_environment = target_environment_.get(),
     };
     const loomc_context_options_t context_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-        /*.structure_size=*/sizeof(context_options),
-        /*.next=*/&target_options,
+        .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+        .structure_size = sizeof(context_options),
+        .next = &target_options,
     };
     loomc_context_t* raw_context = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_context_create(
@@ -200,41 +200,41 @@ class Q8S32SelectionFixture {
     const loomc_string_view_t root_symbol =
         loomc_make_cstring_view("@q8s32_specialize");
     const loomc_target_specialization_t specialization = {
-        /*.function_symbol=*/root_symbol,
-        /*.target_profile=*/target_profile_.get(),
+        .function_symbol = root_symbol,
+        .target_profile = target_profile_.get(),
     };
     const loomc_target_specialization_options_t target_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
-        /*.structure_size=*/sizeof(target_options),
-        /*.next=*/nullptr,
-        /*.specializations=*/&specialization,
-        /*.specialization_count=*/1,
-        /*.target_bindings=*/nullptr,
-        /*.target_binding_count=*/0,
+        .type = LOOMC_STRUCTURE_TYPE_TARGET_SPECIALIZATION_OPTIONS,
+        .structure_size = sizeof(target_options),
+        .next = nullptr,
+        .specializations = &specialization,
+        .specialization_count = 1,
+        .target_bindings = nullptr,
+        .target_binding_count = 0,
     };
     const loomc_config_binding_t input_capacity = {
-        /*.key=*/loomc_make_cstring_view("model.q8s32.input_capacity"),
-        /*.value=*/loomc_make_cstring_view("1280"),
+        .key = loomc_make_cstring_view("model.q8s32.input_capacity"),
+        .value = loomc_make_cstring_view("1280"),
     };
     const loomc_link_options_t options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
-        /*.structure_size=*/sizeof(options),
-        /*.next=*/&target_options,
-        /*.link_index=*/link_index_.get(),
-        /*.module_name=*/loomc_make_cstring_view("q8s32_selected"),
-        /*.mode=*/LOOMC_LINK_MODE_LINK,
-        /*.root_symbols=*/&root_symbol,
-        /*.root_symbol_count=*/1,
-        /*.flags=*/LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
-        /*.config=*/
-        {
-            /*.bindings=*/&input_capacity,
-            /*.binding_count=*/1,
-            /*.json_object=*/{},
-            /*.flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-        },
-        /*.root_provider_ordinals=*/nullptr,
-        /*.root_provider_count=*/0,
+        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+        .structure_size = sizeof(options),
+        .next = &target_options,
+        .link_index = link_index_.get(),
+        .module_name = loomc_make_cstring_view("q8s32_selected"),
+        .mode = LOOMC_LINK_MODE_LINK,
+        .root_symbols = &root_symbol,
+        .root_symbol_count = 1,
+        .flags = LOOMC_LINK_FLAG_STRIP_TEST_SYMBOLS,
+        .config =
+            {
+                .bindings = &input_capacity,
+                .binding_count = 1,
+                .json_object = {},
+                .flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+            },
+        .root_provider_ordinals = nullptr,
+        .root_provider_count = 0,
     };
     loomc_module_t* raw_module = nullptr;
     loomc_result_t* raw_result = nullptr;

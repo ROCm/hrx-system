@@ -174,11 +174,11 @@ TEST(SpirvRegistersTest, StructuralIdPayloadsCoverCanonicalScalarTypes) {
 
   for (const ScalarCase& test_case : kCases) {
     const loom_register_type_data_t register_data = {
-        /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
-        /*.carrier_payload1=*/
-        loom_low_register_type_pack_payload1(SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
-                                             /*unit_count=*/1),
-        /*.value_type=*/loom_type_scalar(test_case.source_type),
+        .carrier_payload0 = SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+        .carrier_payload1 = loom_low_register_type_pack_payload1(
+            SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+            /*unit_count=*/1),
+        .value_type = loom_type_scalar(test_case.source_type),
     };
     const loom_type_t register_type =
         loom_type_register_payload_with_value_type(&register_data);
@@ -229,11 +229,10 @@ TEST(SpirvRegistersTest,
           LOOM_TYPE_VECTOR, test_case.source_type,
           loom_dim_pack_static(lane_count), /*encoding_id=*/0);
       const loom_register_type_data_t register_data = {
-          /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
-          /*.carrier_payload1=*/
-          loom_low_register_type_pack_payload1(
+          .carrier_payload0 = SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+          .carrier_payload1 = loom_low_register_type_pack_payload1(
               SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID, /*unit_count=*/1),
-          /*.value_type=*/source_value_type,
+          .value_type = source_value_type,
       };
       const loom_type_t register_type =
           loom_type_register_payload_with_value_type(&register_data);
@@ -279,11 +278,10 @@ TEST(SpirvRegistersTest, StructuralMappingRejectsAmbiguousRegisterTypes) {
       loom_spirv_value_type_from_low_register_type(untyped_id, &value_type));
 
   const loom_register_type_data_t typed_offset_data = {
-      /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
-      /*.carrier_payload1=*/
-      loom_low_register_type_pack_payload1(
+      .carrier_payload0 = SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+      .carrier_payload1 = loom_low_register_type_pack_payload1(
           SPIRV_LOGICAL_CORE_REG_CLASS_ID_OFFSET64, /*unit_count=*/1),
-      /*.value_type=*/loom_type_scalar(LOOM_SCALAR_TYPE_I64),
+      .value_type = loom_type_scalar(LOOM_SCALAR_TYPE_I64),
   };
   const loom_type_t typed_offset =
       loom_type_register_payload_with_value_type(&typed_offset_data);
@@ -295,11 +293,11 @@ TEST(SpirvRegistersTest, StructuralMappingRejectsAmbiguousRegisterTypes) {
   };
   for (loom_scalar_type_t scalar_type : kUnsupportedPayloads) {
     const loom_register_type_data_t register_data = {
-        /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
-        /*.carrier_payload1=*/
-        loom_low_register_type_pack_payload1(SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
-                                             /*unit_count=*/1),
-        /*.value_type=*/loom_type_scalar(scalar_type),
+        .carrier_payload0 = SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID,
+        .carrier_payload1 = loom_low_register_type_pack_payload1(
+            SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+            /*unit_count=*/1),
+        .value_type = loom_type_scalar(scalar_type),
     };
     const loom_type_t register_type =
         loom_type_register_payload_with_value_type(&register_data);
@@ -308,11 +306,11 @@ TEST(SpirvRegistersTest, StructuralMappingRejectsAmbiguousRegisterTypes) {
   }
 
   const loom_register_type_data_t foreign_id_data = {
-      /*.carrier_payload0=*/SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID + 1,
-      /*.carrier_payload1=*/
-      loom_low_register_type_pack_payload1(SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
-                                           /*unit_count=*/1),
-      /*.value_type=*/loom_type_scalar(LOOM_SCALAR_TYPE_I32),
+      .carrier_payload0 = SPIRV_LOGICAL_CORE_DESCRIPTOR_SET_ID + 1,
+      .carrier_payload1 = loom_low_register_type_pack_payload1(
+          SPIRV_LOGICAL_CORE_REG_CLASS_ID_ID,
+          /*unit_count=*/1),
+      .value_type = loom_type_scalar(LOOM_SCALAR_TYPE_I32),
   };
   const loom_type_t foreign_id =
       loom_type_register_payload_with_value_type(&foreign_id_data);

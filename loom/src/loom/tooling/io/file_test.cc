@@ -41,19 +41,19 @@ TEST(FileTest, ClassifiesOutputStreamAliases) {
 TEST(FileTest, ValidatesExclusiveStdoutOutput) {
   loom_tooling_output_path_t output_paths[] = {
       {
-          /*.active=*/true,
-          /*.flag_name=*/IREE_SV("--first"),
-          /*.path=*/IREE_SV("stdout"),
+          .active = true,
+          .flag_name = IREE_SV("--first"),
+          .path = IREE_SV("stdout"),
       },
       {
-          /*.active=*/true,
-          /*.flag_name=*/IREE_SV("--second"),
-          /*.path=*/IREE_SV("-"),
+          .active = true,
+          .flag_name = IREE_SV("--second"),
+          .path = IREE_SV("-"),
       },
       {
-          /*.active=*/true,
-          /*.flag_name=*/IREE_SV("--file"),
-          /*.path=*/IREE_SV("output.bin"),
+          .active = true,
+          .flag_name = IREE_SV("--file"),
+          .path = IREE_SV("output.bin"),
       },
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

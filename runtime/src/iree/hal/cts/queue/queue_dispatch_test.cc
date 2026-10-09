@@ -81,8 +81,8 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindings) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -128,8 +128,8 @@ TEST_P(QueueDispatchTest,
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   const iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
   const uint32_t constant_data[] = {5, 3};
   const iree_const_byte_span_t constants =
@@ -178,8 +178,8 @@ TEST_P(QueueDispatchTest, DispatchWithBorrowedResourceLifetimes) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -230,8 +230,8 @@ TEST_P(QueueDispatchTest, DispatchWithConstantsAndBindingsWhileProfiling) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -283,8 +283,8 @@ TEST_P(QueueDispatchTest, DispatchHostQueueEventProfiling) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -373,8 +373,8 @@ TEST_P(QueueDispatchTest, DispatchDeviceQueueEventProfiling) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -464,8 +464,8 @@ TEST_P(QueueDispatchTest, DispatchProfileFilterCanSkipDirectDispatchEvents) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -512,8 +512,8 @@ TEST_P(QueueDispatchTest, NoopDispatchSignalsAndDoesNotTouchBuffers) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -552,8 +552,8 @@ TEST_P(QueueDispatchTest, DeferredNoopDispatch) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -600,8 +600,8 @@ TEST_P(QueueDispatchTest, DeferredWaitBeforeSignalDispatch) {
   iree_hal_buffer_ref_t binding_refs[2];
   MakeScaleAndOffsetBindings(input_buffer, output_buffer, binding_refs);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   const uint32_t constant_data[] = {3, 10};
@@ -730,8 +730,8 @@ class QueueDispatchIndirectParametersTest : public CtsTestBase<> {
                                  kOutputByteLength),
     };
     iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/IREE_ARRAYSIZE(binding_refs),
-        /*.values=*/binding_refs,
+        .count = IREE_ARRAYSIZE(binding_refs),
+        .values = binding_refs,
     };
 
     iree_hal_dispatch_config_t config = iree_hal_make_static_dispatch_config(

@@ -1061,14 +1061,14 @@ TEST_F(CanonicalizerTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
   loom_target_config_t config = {};
   config.name = IREE_SVL("target-context-test");
   loom_target_bundle_t bundle = {
-      /*.name=*/IREE_SVL("target-context-test"),
-      /*.snapshot=*/&snapshot,
-      /*.export_plan=*/&export_plan,
-      /*.config=*/&config,
+      .name = IREE_SVL("target-context-test"),
+      .snapshot = &snapshot,
+      .export_plan = &export_plan,
+      .config = &config,
   };
   const loom_target_fact_type_t target_fact_type = {
-      /*.name=*/IREE_SVL("test"),
-      /*.storage_size=*/sizeof(loom_target_facts_t),
+      .name = IREE_SVL("test"),
+      .storage_size = sizeof(loom_target_facts_t),
   };
   loom_target_facts_t target_facts = {
       .fact_type = &target_fact_type,

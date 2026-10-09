@@ -456,26 +456,26 @@ TEST(SpirvModuleBuilderTest, InternsExtendedInstructionImports) {
 
 TEST(SpirvModuleBuilderTest, EmitsRawBdaHalKernelPreamble) {
   const loom_target_snapshot_t snapshot = {
-      /*.name=*/IREE_SVL("spirv-vulkan1.3"),
-      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
-      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
+      .name = IREE_SVL("spirv-vulkan1.3"),
+      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
+      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
   };
   const loom_target_export_plan_t export_plan = {
-      /*.name=*/IREE_SVL("hal-kernel"),
-      /*.export_symbol=*/{},
-      /*.calling_convention=*/{},
-      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
+      .name = IREE_SVL("hal-kernel"),
+      .export_symbol = {},
+      .calling_convention = {},
+      .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
   };
   const loom_target_config_t config = {
-      /*.name=*/IREE_SVL("spirv.logical.core"),
-      /*.contract_set_key=*/{},
-      /*.contract_feature_bits=*/LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
+      .name = IREE_SVL("spirv.logical.core"),
+      .contract_set_key = {},
+      .contract_feature_bits = LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
   };
   const loom_target_bundle_t target = {
-      /*.name=*/IREE_SVL("spirv-vulkan1.3-hal"),
-      /*.snapshot=*/&snapshot,
-      /*.export_plan=*/&export_plan,
-      /*.config=*/&config,
+      .name = IREE_SVL("spirv-vulkan1.3-hal"),
+      .snapshot = &snapshot,
+      .export_plan = &export_plan,
+      .config = &config,
   };
 
   loom_spirv_module_builder_t builder;
@@ -523,27 +523,28 @@ TEST(SpirvModuleBuilderTest, EmitsRawBdaHalKernelPreamble) {
 
 TEST(SpirvModuleBuilderTest, EmitsVulkanMemoryModelForDeviceScopeRawBda) {
   const loom_target_snapshot_t snapshot = {
-      /*.name=*/IREE_SVL("spirv-vulkan1.3"),
-      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
-      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
+      .name = IREE_SVL("spirv-vulkan1.3"),
+      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
+      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
   };
   const loom_target_export_plan_t export_plan = {
-      /*.name=*/IREE_SVL("hal-kernel"),
-      /*.export_symbol=*/{},
-      /*.calling_convention=*/{},
-      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
+      .name = IREE_SVL("hal-kernel"),
+      .export_symbol = {},
+      .calling_convention = {},
+      .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
   };
   const loom_target_config_t config = {
-      /*.name=*/IREE_SVL("spirv.logical.core"),
-      /*.contract_set_key=*/{},
-      /*.contract_feature_bits=*/LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA |
+      .name = IREE_SVL("spirv.logical.core"),
+      .contract_set_key = {},
+      .contract_feature_bits =
+          LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA |
           LOOM_SPIRV_FEATURE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
   };
   const loom_target_bundle_t target = {
-      /*.name=*/IREE_SVL("spirv-vulkan1.3-hal-device-scope"),
-      /*.snapshot=*/&snapshot,
-      /*.export_plan=*/&export_plan,
-      /*.config=*/&config,
+      .name = IREE_SVL("spirv-vulkan1.3-hal-device-scope"),
+      .snapshot = &snapshot,
+      .export_plan = &export_plan,
+      .config = &config,
   };
 
   loom_spirv_module_builder_t builder;
@@ -572,26 +573,26 @@ TEST(SpirvModuleBuilderTest, EmitsVulkanMemoryModelForDeviceScopeRawBda) {
 
 TEST(SpirvModuleBuilderTest, EmitsCooperativeMatrixRawBdaHalKernelPreamble) {
   const loom_target_snapshot_t snapshot = {
-      /*.name=*/IREE_SVL("spirv-vulkan1.3"),
-      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
-      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
+      .name = IREE_SVL("spirv-vulkan1.3"),
+      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_SPIRV,
+      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_SPIRV_BINARY,
   };
   const loom_target_export_plan_t export_plan = {
-      /*.name=*/IREE_SVL("hal-kernel"),
-      /*.export_symbol=*/{},
-      /*.calling_convention=*/{},
-      /*.abi_kind=*/LOOM_TARGET_ABI_HAL_KERNEL,
+      .name = IREE_SVL("hal-kernel"),
+      .export_symbol = {},
+      .calling_convention = {},
+      .abi_kind = LOOM_TARGET_ABI_HAL_KERNEL,
   };
   const loom_target_config_t config = {
-      /*.name=*/IREE_SVL("spirv.logical.core"),
-      /*.contract_set_key=*/{},
-      /*.contract_feature_bits=*/LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
+      .name = IREE_SVL("spirv.logical.core"),
+      .contract_set_key = {},
+      .contract_feature_bits = LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
   };
   const loom_target_bundle_t target = {
-      /*.name=*/IREE_SVL("spirv-vulkan1.3-hal-coop"),
-      /*.snapshot=*/&snapshot,
-      /*.export_plan=*/&export_plan,
-      /*.config=*/&config,
+      .name = IREE_SVL("spirv-vulkan1.3-hal-coop"),
+      .snapshot = &snapshot,
+      .export_plan = &export_plan,
+      .config = &config,
   };
 
   loom_spirv_module_builder_t builder;
@@ -697,26 +698,26 @@ TEST(SpirvModuleBuilderTest, EmitsFloatControlsOnlyWhenRequired) {
 
 TEST(SpirvModuleBuilderTest, RejectsNonSpirvTargetBundle) {
   const loom_target_snapshot_t snapshot = {
-      /*.name=*/IREE_SVL("not-spirv"),
-      /*.codegen_format=*/LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
-      /*.artifact_format=*/LOOM_TARGET_ARTIFACT_FORMAT_ELF,
+      .name = IREE_SVL("not-spirv"),
+      .codegen_format = LOOM_TARGET_CODEGEN_FORMAT_LOW_NATIVE,
+      .artifact_format = LOOM_TARGET_ARTIFACT_FORMAT_ELF,
   };
   const loom_target_export_plan_t export_plan = {
-      /*.name=*/IREE_SVL("shader-entry"),
-      /*.export_symbol=*/{},
-      /*.calling_convention=*/{},
-      /*.abi_kind=*/LOOM_TARGET_ABI_SHADER_ENTRY_POINT,
+      .name = IREE_SVL("shader-entry"),
+      .export_symbol = {},
+      .calling_convention = {},
+      .abi_kind = LOOM_TARGET_ABI_SHADER_ENTRY_POINT,
   };
   const loom_target_config_t config = {
-      /*.name=*/IREE_SVL("config"),
-      /*.contract_set_key=*/{},
-      /*.contract_feature_bits=*/LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
+      .name = IREE_SVL("config"),
+      .contract_set_key = {},
+      .contract_feature_bits = LOOM_SPIRV_FEATURE_PROFILE_VULKAN_1_3_BDA,
   };
   const loom_target_bundle_t target = {
-      /*.name=*/IREE_SVL("wrong-target"),
-      /*.snapshot=*/&snapshot,
-      /*.export_plan=*/&export_plan,
-      /*.config=*/&config,
+      .name = IREE_SVL("wrong-target"),
+      .snapshot = &snapshot,
+      .export_plan = &export_plan,
+      .config = &config,
   };
 
   loom_spirv_module_builder_t builder;

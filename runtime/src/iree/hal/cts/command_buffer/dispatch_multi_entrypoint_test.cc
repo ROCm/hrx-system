@@ -157,12 +157,12 @@ TEST_P(DispatchMultiEntrypointTest, NegateAndDouble) {
   }
 
   iree_hal_buffer_ref_list_t negate_bindings = {
-      /*.count=*/IREE_ARRAYSIZE(negate_binding_refs),
-      /*.values=*/negate_binding_refs,
+      .count = IREE_ARRAYSIZE(negate_binding_refs),
+      .values = negate_binding_refs,
   };
   iree_hal_buffer_ref_list_t double_bindings = {
-      /*.count=*/IREE_ARRAYSIZE(double_binding_refs),
-      /*.values=*/double_binding_refs,
+      .count = IREE_ARRAYSIZE(double_binding_refs),
+      .values = double_binding_refs,
   };
 
   iree_hal_command_buffer_t* command_buffer = nullptr;

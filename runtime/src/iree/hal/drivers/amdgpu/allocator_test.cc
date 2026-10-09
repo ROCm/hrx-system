@@ -1844,15 +1844,15 @@ TEST_F(AllocatorTest, AmdgpuDeviceSpecExposesRepresentativePhysicalFacts) {
   }
   if (system_info_.dmabuf_supported) {
     iree_hal_external_buffer_handle_selection_t selection = {
-        /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
-        /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-            IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
-        /*.buffer_usage=*/
-        IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH,
-        /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_NONE,
-        /*.compatible_memory_type_mask=*/UINT32_MAX,
-        /*.capability_flags=*/
-        IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
+        .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+        .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                           IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+        .buffer_usage =
+            IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_DISPATCH,
+        .memory_access = IREE_HAL_MEMORY_ACCESS_NONE,
+        .compatible_memory_type_mask = UINT32_MAX,
+        .capability_flags =
+            IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS |
             IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_OWNING,
     };
     EXPECT_NE(iree_hal_device_spec_find_external_buffer_handle(device_spec,

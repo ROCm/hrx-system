@@ -1244,10 +1244,10 @@ TEST_F(LowEmissionFrameTest, StructuralModelCarriesNativePacketTiming) {
   ModulePtr module = ParseModule();
   const loom_low_schedule_structural_model_t models[] = {
       {
-          /*.op_kind=*/LOOM_OP_LOW_STORAGE_ADDRESS,
-          /*.result_reg_class_id=*/TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR,
-          /*.schedule_descriptor_ordinal=*/
-          TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32,
+          .op_kind = LOOM_OP_LOW_STORAGE_ADDRESS,
+          .result_reg_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR,
+          .schedule_descriptor_ordinal =
+              TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32,
       },
   };
   loom_low_emission_frame_t frame = {};
@@ -1329,16 +1329,16 @@ TEST_F(LowEmissionFrameTest, RejectsOverlappingStructuralModels) {
   ModulePtr module = ParseModule();
   const loom_low_schedule_structural_model_t models[] = {
       {
-          /*.op_kind=*/LOOM_OP_LOW_STORAGE_ADDRESS,
-          /*.result_reg_class_id=*/LOOM_LOW_REG_CLASS_NONE,
-          /*.schedule_descriptor_ordinal=*/
-          TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32,
+          .op_kind = LOOM_OP_LOW_STORAGE_ADDRESS,
+          .result_reg_class_id = LOOM_LOW_REG_CLASS_NONE,
+          .schedule_descriptor_ordinal =
+              TEST_LOW_CORE_DESCRIPTOR_REF_TEST_ADD_I32,
       },
       {
-          /*.op_kind=*/LOOM_OP_LOW_STORAGE_ADDRESS,
-          /*.result_reg_class_id=*/TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR,
-          /*.schedule_descriptor_ordinal=*/
-          TEST_LOW_CORE_DESCRIPTOR_REF_TEST_CONST_I32,
+          .op_kind = LOOM_OP_LOW_STORAGE_ADDRESS,
+          .result_reg_class_id = TEST_LOW_CORE_REG_CLASS_ID_TEST_PTR,
+          .schedule_descriptor_ordinal =
+              TEST_LOW_CORE_DESCRIPTOR_REF_TEST_CONST_I32,
       },
   };
   loom_low_emission_frame_t frame = {};

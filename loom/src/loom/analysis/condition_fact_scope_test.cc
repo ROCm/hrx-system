@@ -106,20 +106,22 @@ TEST(ConditionFactScopeTest, ProjectedFragmentExposesRangeAndRelationFacts) {
       {
           .relation = LOOM_SYMBOLIC_INTEGER_RELATION_GE,
           .left = ValueOperand(value),
-          .right = {
-              /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-              /*.value_id=*/LOOM_VALUE_ID_INVALID,
-              /*.constant=*/0,
-          },
+          .right =
+              {
+                  .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+                  .value_id = LOOM_VALUE_ID_INVALID,
+                  .constant = 0,
+              },
       },
       {
           .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT,
           .left = ValueOperand(value),
-          .right = {
-              /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-              /*.value_id=*/LOOM_VALUE_ID_INVALID,
-              /*.constant=*/16,
-          },
+          .right =
+              {
+                  .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+                  .value_id = LOOM_VALUE_ID_INVALID,
+                  .constant = 16,
+              },
       },
   };
   loom_condition_edge_projection_t projection = {};
@@ -139,11 +141,12 @@ TEST(ConditionFactScopeTest, ProjectedFragmentExposesRangeAndRelationFacts) {
   const loom_condition_integer_relation_t query = {
       .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LT,
       .left = ValueOperand(value),
-      .right = {
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-          /*.value_id=*/LOOM_VALUE_ID_INVALID,
-          /*.constant=*/16,
-      },
+      .right =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+              .value_id = LOOM_VALUE_ID_INVALID,
+              .constant = 16,
+          },
   };
   bool result = false;
   EXPECT_TRUE(loom_condition_fact_scope_proves_integer_relation(

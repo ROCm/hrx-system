@@ -549,8 +549,8 @@ check.case @device_event {
   unaligned_records[1].event.payload = iree_make_const_byte_span(
       unaligned_ubsan_payload + 1, sizeof(ubsan_report));
   loom_testbench_device_event_list_t unaligned_event_list = {
-      /*.records=*/unaligned_records,
-      /*.count=*/IREE_ARRAYSIZE(unaligned_records),
+      .records = unaligned_records,
+      .count = IREE_ARRAYSIZE(unaligned_records),
   };
   observations.device_events = &unaligned_event_list;
   memset(expected_device_events, 0, sizeof(expected_device_events));

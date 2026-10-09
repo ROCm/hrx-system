@@ -182,10 +182,11 @@ class LinkIndexMaterializerTest : public ::testing::Test {
     const iree_string_view_t roots[] = {root};
     loom_link_plan_options_t plan_options = {
         .mode = mode,
-        .root_symbols = {
-            /*.count=*/IREE_ARRAYSIZE(roots),
-            /*.values=*/roots,
-        },
+        .root_symbols =
+            {
+                .count = IREE_ARRAYSIZE(roots),
+                .values = roots,
+            },
         .unresolved_policy = unresolved_policy};
     return TryMaterializeWithOptions(index, &plan_options, out_materialization);
   }
@@ -1423,10 +1424,11 @@ func.def public export("partial_unused") @partial_unused(%x: i32) -> (i32) {
     };
     loom_link_plan_options_t options = {
         .mode = LOOM_LINK_PLAN_LINK,
-        .root_symbols = {
-            /*.count=*/IREE_ARRAYSIZE(explicit_roots),
-            /*.values=*/explicit_roots,
-        },
+        .root_symbols =
+            {
+                .count = IREE_ARRAYSIZE(explicit_roots),
+                .values = explicit_roots,
+            },
         .include_input_exports = true,
         .unresolved_policy = LOOM_LINK_PLAN_UNRESOLVED_ALLOW,
     };

@@ -14,27 +14,27 @@ namespace {
 
 const loom_pass_info_t* AlphaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
-      /*.name=*/IREE_SVL("alpha"),
-      /*.description=*/IREE_SVL("Alpha pass."),
-      /*.kind=*/LOOM_PASS_FUNCTION,
+      .name = IREE_SVL("alpha"),
+      .description = IREE_SVL("Alpha pass."),
+      .kind = LOOM_PASS_FUNCTION,
   };
   return &kInfo;
 }
 
 const loom_pass_info_t* BetaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
-      /*.name=*/IREE_SVL("beta"),
-      /*.description=*/IREE_SVL("Beta pass."),
-      /*.kind=*/LOOM_PASS_FUNCTION,
+      .name = IREE_SVL("beta"),
+      .description = IREE_SVL("Beta pass."),
+      .kind = LOOM_PASS_FUNCTION,
   };
   return &kInfo;
 }
 
 const loom_pass_info_t* GammaPassInfo(void) {
   static const loom_pass_info_t kInfo = {
-      /*.name=*/IREE_SVL("gamma"),
-      /*.description=*/IREE_SVL("Gamma pass."),
-      /*.kind=*/LOOM_PASS_FUNCTION,
+      .name = IREE_SVL("gamma"),
+      .description = IREE_SVL("Gamma pass."),
+      .kind = LOOM_PASS_FUNCTION,
   };
   return &kInfo;
 }
@@ -62,12 +62,12 @@ TEST(PassRegistryStorageTest, MergesSortedRegistries) {
       MakeFunctionPassDescriptor(IREE_SV("beta"), BetaPassInfo),
   };
   static const loom_pass_registry_t kFirstRegistry = {
-      /*.descriptors=*/kFirstDescriptors,
-      /*.descriptor_count=*/IREE_ARRAYSIZE(kFirstDescriptors),
+      .descriptors = kFirstDescriptors,
+      .descriptor_count = IREE_ARRAYSIZE(kFirstDescriptors),
   };
   static const loom_pass_registry_t kSecondRegistry = {
-      /*.descriptors=*/kSecondDescriptors,
-      /*.descriptor_count=*/IREE_ARRAYSIZE(kSecondDescriptors),
+      .descriptors = kSecondDescriptors,
+      .descriptor_count = IREE_ARRAYSIZE(kSecondDescriptors),
   };
   const loom_pass_registry_t* registries[] = {
       &kFirstRegistry,
@@ -104,12 +104,12 @@ TEST(PassRegistryStorageTest, RejectsDuplicateKeys) {
       MakeFunctionPassDescriptor(IREE_SV("alpha"), AlphaPassInfo),
   };
   static const loom_pass_registry_t kFirstRegistry = {
-      /*.descriptors=*/kFirstDescriptors,
-      /*.descriptor_count=*/IREE_ARRAYSIZE(kFirstDescriptors),
+      .descriptors = kFirstDescriptors,
+      .descriptor_count = IREE_ARRAYSIZE(kFirstDescriptors),
   };
   static const loom_pass_registry_t kSecondRegistry = {
-      /*.descriptors=*/kSecondDescriptors,
-      /*.descriptor_count=*/IREE_ARRAYSIZE(kSecondDescriptors),
+      .descriptors = kSecondDescriptors,
+      .descriptor_count = IREE_ARRAYSIZE(kSecondDescriptors),
   };
   const loom_pass_registry_t* registries[] = {
       &kFirstRegistry,

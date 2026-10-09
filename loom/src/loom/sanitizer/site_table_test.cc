@@ -139,28 +139,28 @@ TEST_F(SiteTableTest, EncodesRecordsPayloadsSourcesAndUnknownLocations) {
       .payload = payload,
   };
   rows[1] = (loom_sanitizer_site_row_t){
-      /*.site_id=*/1,
-      /*.op=*/nullptr,
-      /*.op_kind=*/LOOM_OP_SANITIZER_ASSERT_VALUE,
-      /*.location=*/source_location,
-      /*.payload_location=*/LOOM_LOCATION_UNKNOWN,
-      /*.source_location=*/source_location,
-      /*.flags=*/0,
-      /*.payload=*/{},
+      .site_id = 1,
+      .op = nullptr,
+      .op_kind = LOOM_OP_SANITIZER_ASSERT_VALUE,
+      .location = source_location,
+      .payload_location = LOOM_LOCATION_UNKNOWN,
+      .source_location = source_location,
+      .flags = 0,
+      .payload = {},
   };
   rows[2] = (loom_sanitizer_site_row_t){
-      /*.site_id=*/2,
-      /*.op=*/nullptr,
-      /*.op_kind=*/LOOM_OP_SANITIZER_ASSERT_OP,
-      /*.location=*/LOOM_LOCATION_UNKNOWN,
-      /*.payload_location=*/LOOM_LOCATION_UNKNOWN,
-      /*.source_location=*/LOOM_LOCATION_UNKNOWN,
-      /*.flags=*/0,
-      /*.payload=*/{},
+      .site_id = 2,
+      .op = nullptr,
+      .op_kind = LOOM_OP_SANITIZER_ASSERT_OP,
+      .location = LOOM_LOCATION_UNKNOWN,
+      .payload_location = LOOM_LOCATION_UNKNOWN,
+      .source_location = LOOM_LOCATION_UNKNOWN,
+      .flags = 0,
+      .payload = {},
   };
   loom_sanitizer_site_collection_t collection = {
-      /*.rows=*/rows,
-      /*.row_count=*/IREE_ARRAYSIZE(rows),
+      .rows = rows,
+      .row_count = IREE_ARRAYSIZE(rows),
   };
 
   iree_const_byte_span_t table = iree_const_byte_span_empty();
@@ -299,14 +299,14 @@ TEST_F(SiteTableTest, ResolvesSourcesThroughTaggedAndFusedLocations) {
       AddFusedLocation(LOOM_LOCATION_UNKNOWN, tagged_location);
 
   loom_sanitizer_site_row_t row = {
-      /*.site_id=*/0,
-      /*.op=*/nullptr,
-      /*.op_kind=*/LOOM_OP_SANITIZER_ASSERT_LAYOUT,
-      /*.location=*/fused_location,
-      /*.payload_location=*/LOOM_LOCATION_UNKNOWN,
-      /*.source_location=*/LOOM_LOCATION_UNKNOWN,
-      /*.flags=*/0,
-      /*.payload=*/{},
+      .site_id = 0,
+      .op = nullptr,
+      .op_kind = LOOM_OP_SANITIZER_ASSERT_LAYOUT,
+      .location = fused_location,
+      .payload_location = LOOM_LOCATION_UNKNOWN,
+      .source_location = LOOM_LOCATION_UNKNOWN,
+      .flags = 0,
+      .payload = {},
   };
   loom_sanitizer_site_collection_t collection = {
       .rows = &row,

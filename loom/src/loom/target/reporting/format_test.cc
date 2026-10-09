@@ -711,20 +711,19 @@ TEST(CompileReportFormatTest, FormatsTargetInsertedPacketEconomics) {
   entry.requested_detail_flags = report.requested_detail_flags;
   entry.function_name = IREE_SVL("extended_vgpr_loop");
   loom_target_compile_report_target_insertion_row_t insertion = {
-      /*.flags=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
-      /*.function_name=*/entry.function_name,
-      /*.insertion_kind=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
-      /*.packet_key=*/IREE_SVL("amdgpu.s_set_vgpr_msb"),
-      /*.block_name=*/IREE_SVL("^loop_body"),
-      /*.block_index=*/1,
-      /*.node_index=*/7,
-      /*.scheduled_ordinal=*/3,
-      /*.boundary_operation_name=*/IREE_SVL("low.op"),
-      /*.boundary_descriptor_key=*/IREE_SVL("amdgpu.v_wmma_f32_16x16x32_bf16"),
-      /*.static_packet_count=*/1,
-      /*.dynamic_packet_count=*/4,
+      .flags =
+          LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
+      .function_name = entry.function_name,
+      .insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+      .packet_key = IREE_SVL("amdgpu.s_set_vgpr_msb"),
+      .block_name = IREE_SVL("^loop_body"),
+      .block_index = 1,
+      .node_index = 7,
+      .scheduled_ordinal = 3,
+      .boundary_operation_name = IREE_SVL("low.op"),
+      .boundary_descriptor_key = IREE_SVL("amdgpu.v_wmma_f32_16x16x32_bf16"),
+      .static_packet_count = 1,
+      .dynamic_packet_count = 4,
   };
   IREE_ASSERT_OK(loom_target_compile_report_record_target_insertion_row(
       &entry, &insertion));
@@ -830,20 +829,19 @@ TEST(CompileReportFormatTest, SummarizesTargetInsertionsWithoutDetailRows) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   const loom_target_compile_report_target_insertion_row_t insertion = {
-      /*.flags=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
-      /*.function_name=*/IREE_SVL("summary_only"),
-      /*.insertion_kind=*/
-      LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
-      /*.packet_key=*/IREE_SVL("amdgpu.s_set_vgpr_msb"),
-      /*.block_name=*/IREE_SVL("^entry"),
-      /*.block_index=*/0,
-      /*.node_index=*/2,
-      /*.scheduled_ordinal=*/1,
-      /*.boundary_operation_name=*/IREE_SVL("low.op"),
-      /*.boundary_descriptor_key=*/IREE_SVL("amdgpu.v_wmma"),
-      /*.static_packet_count=*/1,
-      /*.dynamic_packet_count=*/8,
+      .flags =
+          LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_FLAG_DYNAMIC_PACKET_COUNT,
+      .function_name = IREE_SVL("summary_only"),
+      .insertion_kind = LOOM_TARGET_COMPILE_REPORT_TARGET_INSERTION_STATE,
+      .packet_key = IREE_SVL("amdgpu.s_set_vgpr_msb"),
+      .block_name = IREE_SVL("^entry"),
+      .block_index = 0,
+      .node_index = 2,
+      .scheduled_ordinal = 1,
+      .boundary_operation_name = IREE_SVL("low.op"),
+      .boundary_descriptor_key = IREE_SVL("amdgpu.v_wmma"),
+      .static_packet_count = 1,
+      .dynamic_packet_count = 8,
   };
   IREE_ASSERT_OK(loom_target_compile_report_record_target_insertion_row(
       &report, &insertion));

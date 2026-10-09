@@ -129,29 +129,29 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
       {.type = LOOM_SCALAR_TYPE_I32, .value = 513},
   };
   iree_benchmark_loom_launch_record_t launch_record = {
-      /*.case_sample_ordinal=*/0,
-      /*.sequence_step_ordinal=*/0,
-      /*.entry=*/IREE_SV("kernel_entry"),
-      /*.workload_values=*/workload_values,
-      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
-      /*.launch_config=*/
-      {
-          .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
-          .structure_size = sizeof(loomc_launch_config_t),
-          .next = nullptr,
-          .workgroup_count = {64, 2, 1},
-          .workgroup_size = {64, 1, 1},
-          .workgroup_cluster_size = {2, 1, 1},
-          .subgroup_size = 32,
-          .workgroup_storage_bytes = 0,
-      },
+      .case_sample_ordinal = 0,
+      .sequence_step_ordinal = 0,
+      .entry = IREE_SV("kernel_entry"),
+      .workload_values = workload_values,
+      .workload_value_count = IREE_ARRAYSIZE(workload_values),
+      .launch_config =
+          {
+              .type = LOOMC_STRUCTURE_TYPE_LAUNCH_CONFIG,
+              .structure_size = sizeof(loomc_launch_config_t),
+              .next = nullptr,
+              .workgroup_count = {64, 2, 1},
+              .workgroup_size = {64, 1, 1},
+              .workgroup_cluster_size = {2, 1, 1},
+              .subgroup_size = 32,
+              .workgroup_storage_bytes = 0,
+          },
   };
   iree_benchmark_loom_launch_evidence_t launch_evidence = {
-      /*.host_allocator=*/{},
-      /*.records=*/&launch_record,
-      /*.record_count=*/1,
-      /*.workload_values=*/workload_values,
-      /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
+      .host_allocator = {},
+      .records = &launch_record,
+      .record_count = 1,
+      .workload_values = workload_values,
+      .workload_value_count = IREE_ARRAYSIZE(workload_values),
   };
   result.launch_evidence = &launch_evidence;
   loom_sanitizer_options_t sanitizer = {

@@ -137,7 +137,7 @@ func.def @helper(%x: i32) -> (i32) {
   const iree_string_view_t roots[] = {IREE_SV("@entry")};
   const loom_link_plan_options_t options = {
       .mode = LOOM_LINK_PLAN_LINK,
-      .root_symbols = {/*.count=*/IREE_ARRAYSIZE(roots), /*.values=*/roots},
+      .root_symbols = {.count = IREE_ARRAYSIZE(roots), .values = roots},
   };
   LinkPlanPtr plan = BuildPlan(index.get(), &options);
 

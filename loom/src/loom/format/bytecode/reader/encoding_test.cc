@@ -14,9 +14,9 @@ namespace loom {
 namespace {
 
 static const loom_attr_descriptor_t kEncodingParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(5, "block"),
-    /*.attr_kind=*/LOOM_ATTR_I64,
-    /*.flags=*/LOOM_ATTR_OPTIONAL,
+    .name = LOOM_BSTRING_REF(5, "block"),
+    .attr_kind = LOOM_ATTR_I64,
+    .flags = LOOM_ATTR_OPTIONAL,
 }};
 static const loom_encoding_family_descriptor_t kEncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),

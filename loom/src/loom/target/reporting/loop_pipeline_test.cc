@@ -49,18 +49,22 @@ TEST(LoopPipelineReportTest, EntryMergeOwnsScheduleRows) {
                                        LOOM_LOCATION_UNKNOWN, &terminator));
 
   const loom_source_loop_pipeline_operation_t operations[] = {
-      {/*.source_position=*/0, /*.op_name=*/IREE_SV("view.load"),
-       /*.iteration_lookahead=*/2,
-       /*.partition=*/LOOM_SOURCE_LOOP_PIPELINE_PARTITION_NONE},
-      {/*.source_position=*/1, /*.op_name=*/IREE_SV("scf.if"),
-       /*.iteration_lookahead=*/2,
-       /*.partition=*/LOOM_SOURCE_LOOP_PIPELINE_PARTITION_GUARDED},
-      {/*.source_position=*/1, /*.op_name=*/IREE_SV("scf.if"),
-       /*.iteration_lookahead=*/0,
-       /*.partition=*/LOOM_SOURCE_LOOP_PIPELINE_PARTITION_GUARDED},
-      {/*.source_position=*/2, /*.op_name=*/IREE_SV("scalar.addf"),
-       /*.iteration_lookahead=*/0,
-       /*.partition=*/LOOM_SOURCE_LOOP_PIPELINE_PARTITION_NONE},
+      {.source_position = 0,
+       .op_name = IREE_SV("view.load"),
+       .iteration_lookahead = 2,
+       .partition = LOOM_SOURCE_LOOP_PIPELINE_PARTITION_NONE},
+      {.source_position = 1,
+       .op_name = IREE_SV("scf.if"),
+       .iteration_lookahead = 2,
+       .partition = LOOM_SOURCE_LOOP_PIPELINE_PARTITION_GUARDED},
+      {.source_position = 1,
+       .op_name = IREE_SV("scf.if"),
+       .iteration_lookahead = 0,
+       .partition = LOOM_SOURCE_LOOP_PIPELINE_PARTITION_GUARDED},
+      {.source_position = 2,
+       .op_name = IREE_SV("scalar.addf"),
+       .iteration_lookahead = 0,
+       .partition = LOOM_SOURCE_LOOP_PIPELINE_PARTITION_NONE},
   };
   loom_source_loop_pipeline_t pipeline = {};
   pipeline.depth = 3;

@@ -90,11 +90,11 @@ TEST(AtomicTest, WaitX32NormalizesModeAndEmplacesDispatch) {
   packet.setup = 0xA5A5u;
   iree_hal_amdgpu_device_atomic_wait_kernargs_t kernargs = {};
   const iree_hal_atomic_wait_params_t params = {
-      /*.value=*/0x12345678u,
-      /*.mask=*/0xFFFF00FFu,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
+      .value = 0x12345678u,
+      .mask = 0xFFFF00FFu,
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_NOT_EQUAL,
   };
 
   iree_hal_amdgpu_device_atomic_wait_emplace(
@@ -119,11 +119,11 @@ TEST(AtomicTest, WaitX64SelectsWidth) {
   packet.setup = 0xA5A5u;
   iree_hal_amdgpu_device_atomic_wait_kernargs_t kernargs = {};
   const iree_hal_atomic_wait_params_t params = {
-      /*.value=*/0x123456789ABCDEF0ull,
-      /*.mask=*/UINT64_MAX,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_64,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+      .value = 0x123456789ABCDEF0ull,
+      .mask = UINT64_MAX,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_64,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
   };
 
   iree_hal_amdgpu_device_atomic_wait_emplace(
@@ -146,9 +146,9 @@ TEST(AtomicTest, StoreX32NormalizesModeAndClearsPadding) {
   iree_hal_amdgpu_device_atomic_store_kernargs_t kernargs = {};
   kernargs.reserved = UINT32_MAX;
   const iree_hal_atomic_store_params_t params = {
-      /*.value=*/0x89ABCDEFu,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      .value = 0x89ABCDEFu,
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
   };
 
   iree_hal_amdgpu_device_atomic_store_emplace(&kernels, &packet,
@@ -193,10 +193,10 @@ TEST(AtomicTest, RmwX32PreservesCompleteModeAndOperation) {
   packet.setup = 0xA5A5u;
   iree_hal_amdgpu_device_atomic_rmw_kernargs_t kernargs = {};
   const iree_hal_atomic_rmw_params_t params = {
-      /*.operand=*/0x55AA55AAu,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAGS_KNOWN,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
+      .operand = 0x55AA55AAu,
+      .flags = IREE_HAL_ATOMIC_FLAGS_KNOWN,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .operation = IREE_HAL_ATOMIC_RMW_OPERATION_XOR,
   };
 
   iree_hal_amdgpu_device_atomic_rmw_emplace(&kernels, &packet,

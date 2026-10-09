@@ -131,8 +131,8 @@ class DispatchIndirectParametersTest : public CtsTestBase<> {
       iree_device_size_t parameter_ref_length = kParameterByteLength) {
     iree_hal_buffer_ref_t binding_refs[1] = {OutputRef(output_buffer)};
     iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/IREE_ARRAYSIZE(binding_refs),
-        /*.values=*/binding_refs,
+        .count = IREE_ARRAYSIZE(binding_refs),
+        .values = binding_refs,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
         command_buffer, workgroup_id_executable_,
@@ -354,8 +354,8 @@ TEST_P(DispatchIndirectParametersTest, DynamicParametersFromDispatch) {
   {
     iree_hal_buffer_ref_t binding_refs[1] = {ParameterRef(parameter_buffer)};
     iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/IREE_ARRAYSIZE(binding_refs),
-        /*.values=*/binding_refs,
+        .count = IREE_ARRAYSIZE(binding_refs),
+        .values = binding_refs,
     };
     IREE_ASSERT_OK(iree_hal_command_buffer_dispatch(
         command_buffer, parameter_producer_executable_,

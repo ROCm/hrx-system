@@ -232,8 +232,8 @@ TEST_P(AsanAllocationTest, InBoundsAccessStaysQuiet) {
   binding_refs[0] = iree_hal_make_buffer_ref(
       buffer, /*offset=*/0, iree_hal_buffer_byte_length(buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   recorder()->Reset();
@@ -327,8 +327,8 @@ TEST_P(AsanAllocationTest, AllocationRedzonesReport) {
   binding_refs[0] = iree_hal_make_buffer_ref(
       buffer, /*offset=*/0, iree_hal_buffer_byte_length(buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   recorder()->Reset();
@@ -342,8 +342,8 @@ TEST_P(AsanAllocationTest, AllocationRedzonesReport) {
   tail_binding_refs[0] = iree_hal_make_buffer_ref(
       buffer, kAsanAllocationBufferLength - 1, /*length=*/1);
   iree_hal_buffer_ref_list_t tail_bindings = {
-      /*.count=*/IREE_ARRAYSIZE(tail_binding_refs),
-      /*.values=*/tail_binding_refs,
+      .count = IREE_ARRAYSIZE(tail_binding_refs),
+      .values = tail_binding_refs,
   };
 
   recorder()->Reset();

@@ -108,9 +108,9 @@ class CommandBufferAtomicTest : public CtsTestBase<> {
       iree_hal_command_buffer_t* command_buffer,
       iree_hal_buffer_t* indirect_buffer) {
     iree_hal_buffer_binding_t binding = {
-        /*.buffer=*/indirect_buffer,
-        /*.offset=*/0,
-        /*.length=*/IREE_HAL_WHOLE_BUFFER,
+        .buffer = indirect_buffer,
+        .offset = 0,
+        .length = IREE_HAL_WHOLE_BUFFER,
     };
     const iree_hal_buffer_binding_table_t binding_table = {
         .count = indirect_buffer ? 1u : 0u,

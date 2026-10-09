@@ -736,10 +736,10 @@ TEST(LowDescriptorsTest, RegistryRejectsDuplicateDirectAndProviderKeys) {
       ProvideTestDescriptorSet,
   };
   const loom_low_descriptor_registry_t registry = {
-      /*.descriptor_sets=*/direct_sets,
-      /*.descriptor_set_count=*/IREE_ARRAYSIZE(direct_sets),
-      /*.descriptor_set_providers=*/providers,
-      /*.descriptor_set_provider_count=*/IREE_ARRAYSIZE(providers),
+      .descriptor_sets = direct_sets,
+      .descriptor_set_count = IREE_ARRAYSIZE(direct_sets),
+      .descriptor_set_providers = providers,
+      .descriptor_set_provider_count = IREE_ARRAYSIZE(providers),
   };
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_ALREADY_EXISTS,

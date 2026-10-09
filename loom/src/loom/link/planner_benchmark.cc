@@ -79,8 +79,8 @@ class PlannerCatalogFixture {
     CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index));
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/IREE_SV("catalog"),
-        /*.role=*/role,
+        .provider_name = IREE_SV("catalog"),
+        .role = role,
     };
     CheckStatus(loom_link_module_index_add_bytecode(
         index, iree_make_const_byte_span(bytes_.data(), bytes_.size()),
@@ -95,8 +95,8 @@ class PlannerCatalogFixture {
     CheckStatus(loom_link_module_index_allocate_overlay(
         base_index, &block_pool_, iree_allocator_system(), &index));
     const loom_link_module_index_add_options_t options = {
-        /*.provider_name=*/IREE_SV("requester"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("requester"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     CheckStatus(loom_link_module_index_add_bytecode(
         index,
@@ -113,9 +113,9 @@ class PlannerCatalogFixture {
         &context_, &block_pool_, iree_allocator_system(), &index));
     for (uint32_t i = 0; i < provider_count; ++i) {
       const loom_link_module_index_add_options_t options = {
-          /*.provider_name=*/IREE_SV("duplicate-provider"),
-          /*.role=*/i == provider_count / 2 ? LOOM_LINK_PROVIDER_ROLE_INPUT
-                                            : LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+          .provider_name = IREE_SV("duplicate-provider"),
+          .role = i == provider_count / 2 ? LOOM_LINK_PROVIDER_ROLE_INPUT
+                                          : LOOM_LINK_PROVIDER_ROLE_LIBRARY,
       };
       CheckStatus(loom_link_module_index_add_bytecode(
           index, iree_make_const_byte_span(bytes_.data(), bytes_.size()),
@@ -156,8 +156,8 @@ class PlannerCatalogFixture {
           /*out_provider_ordinal=*/nullptr));
     }
     const loom_link_module_index_add_options_t input_options = {
-        /*.provider_name=*/IREE_SV("requester"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("requester"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     CheckStatus(loom_link_module_index_add_materialized(
         index, input_module_, &input_options,
@@ -539,7 +539,7 @@ static void BenchmarkExactLink(benchmark::State& state,
       .ordinals = source_symbol_ordinals.data(),
   };
   const loom_linker_options_t linker_options = {
-      /*.module_name=*/IREE_SV("linked"),
+      .module_name = IREE_SV("linked"),
   };
 
   for (auto _ : state) {
@@ -574,7 +574,7 @@ static void BM_LinkExact_LinkChain_Catalog(benchmark::State& state) {
 static void BM_LinkExactDense_Catalog(benchmark::State& state) {
   PlannerCatalogFixture fixture((uint32_t)state.range(0));
   const loom_linker_options_t linker_options = {
-      /*.module_name=*/IREE_SV("linked"),
+      .module_name = IREE_SV("linked"),
   };
 
   for (auto _ : state) {
@@ -638,7 +638,7 @@ static void BenchmarkLinkMaterializeAndLink(
   }
   const loom_bytecode_read_options_t read_options = {};
   const loom_linker_options_t linker_options = {
-      /*.module_name=*/IREE_SV("linked"),
+      .module_name = IREE_SV("linked"),
   };
 
   for (auto _ : state) {

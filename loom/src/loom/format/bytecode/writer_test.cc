@@ -1394,11 +1394,12 @@ TEST_F(WriterTest, ProjectsModuleSymbolsIntoPresentationOrder) {
       .producer = {},
       .location_mode = {},
       .low_repr_environment = {},
-      .symbol_projection = {
-          /*.module_symbol_ids=*/module_symbol_ids,
-          /*.wire_symbol_ordinals=*/wire_symbol_ordinals,
-          /*.count=*/IREE_ARRAYSIZE(module_symbol_ids),
-      },
+      .symbol_projection =
+          {
+              .module_symbol_ids = module_symbol_ids,
+              .wire_symbol_ordinals = wire_symbol_ordinals,
+              .count = IREE_ARRAYSIZE(module_symbol_ids),
+          },
   };
   auto bytes = WriteModule(module, &options);
   EXPECT_GT(bytes.size(), 0u);

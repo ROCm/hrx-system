@@ -171,8 +171,8 @@ class TestEndpoint {
   static iree_net_carrier_send_budget_t QuerySendBudget(void* self) {
     (void)self;
     return {
-        /*.bytes=*/IREE_HOST_SIZE_MAX,
-        /*.slots=*/UINT32_MAX,
+        .bytes = IREE_HOST_SIZE_MAX,
+        .slots = UINT32_MAX,
     };
   }
 

@@ -805,11 +805,12 @@ TEST_F(EncodingStorageTest, InternExactComposedStorageSummary) {
   const loom_value_fact_encoding_summary_t summary = {
       .role = LOOM_ENCODING_ROLE_PHYSICAL_STORAGE,
       .static_spec_encoding_id = 0,
-      .address_layout = {
-          /*.kind=*/LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-          /*.rank=*/IREE_ARRAYSIZE(stride_facts),
-          /*.strides=*/stride_facts,
-      },
+      .address_layout =
+          {
+              .kind = LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+              .rank = IREE_ARRAYSIZE(stride_facts),
+              .strides = stride_facts,
+          },
       .storage_schema =
           {
               .static_spec_encoding_id = schema_encoding_id,
@@ -886,12 +887,11 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
 
   const SchemaExpectation expectations[] = {
       {
-          /*.source=*/IREE_SV(
+          .source = IREE_SV(
               "%schema = encoding.define #ggml.q4_0 : encoding<schema>\n"),
-          /*.descriptor=*/&loom_encoding_ggml_q4_0_family_descriptor,
-          /*.record=*/{32, 18, 2},
-          /*.operand=*/
-          {
+          .descriptor = &loom_encoding_ggml_q4_0_family_descriptor,
+          .record = {32, 18, 2},
+          .operand = {
               /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I4,
               /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
               /*.secondary_scale_format=*/{},
@@ -909,16 +909,14 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
               /*.scale_group=*/{32, {32}},
               /*.scale_operand_count=*/1,
           },
-          /*.required_auxiliary_keys=*/
-          1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE,
+          .required_auxiliary_keys = 1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE,
       },
       {
-          /*.source=*/IREE_SV(
+          .source = IREE_SV(
               "%schema = encoding.define #ggml.q8_0 : encoding<schema>\n"),
-          /*.descriptor=*/&loom_encoding_ggml_q8_0_family_descriptor,
-          /*.record=*/{32, 34, 2},
-          /*.operand=*/
-          {
+          .descriptor = &loom_encoding_ggml_q8_0_family_descriptor,
+          .record = {32, 34, 2},
+          .operand = {
               /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8,
               /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
               /*.secondary_scale_format=*/{},
@@ -935,16 +933,14 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
               /*.scale_group=*/{32, {32}},
               /*.scale_operand_count=*/1,
           },
-          /*.required_auxiliary_keys=*/
-          1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE,
+          .required_auxiliary_keys = 1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE,
       },
       {
-          /*.source=*/IREE_SV(
+          .source = IREE_SV(
               "%schema = encoding.define #ggml.q4_k : encoding<schema>\n"),
-          /*.descriptor=*/&loom_encoding_ggml_q4_k_family_descriptor,
-          /*.record=*/{256, 144, 2},
-          /*.operand=*/
-          {
+          .descriptor = &loom_encoding_ggml_q4_k_family_descriptor,
+          .record = {256, 144, 2},
+          .operand = {
               /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_U4,
               /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
               /*.secondary_scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_U6,
@@ -961,18 +957,17 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
               /*.scale_group=*/{32, {32}},
               /*.scale_operand_count=*/2,
           },
-          /*.required_auxiliary_keys=*/
-          (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          .required_auxiliary_keys =
+              (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
               (1ull << LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE) |
               (1ull << LOOM_ENCODING_AUXILIARY_KEY_MINIMUM),
       },
       {
-          /*.source=*/IREE_SV(
+          .source = IREE_SV(
               "%schema = encoding.define #ggml.q5_k : encoding<schema>\n"),
-          /*.descriptor=*/&loom_encoding_ggml_q5_k_family_descriptor,
-          /*.record=*/{256, 176, 2},
-          /*.operand=*/
-          {
+          .descriptor = &loom_encoding_ggml_q5_k_family_descriptor,
+          .record = {256, 176, 2},
+          .operand = {
               /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_U5,
               /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
               /*.secondary_scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_U6,
@@ -989,18 +984,17 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
               /*.scale_group=*/{32, {32}},
               /*.scale_operand_count=*/2,
           },
-          /*.required_auxiliary_keys=*/
-          (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          .required_auxiliary_keys =
+              (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
               (1ull << LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE) |
               (1ull << LOOM_ENCODING_AUXILIARY_KEY_MINIMUM),
       },
       {
-          /*.source=*/IREE_SV(
+          .source = IREE_SV(
               "%schema = encoding.define #ggml.q6_k : encoding<schema>\n"),
-          /*.descriptor=*/&loom_encoding_ggml_q6_k_family_descriptor,
-          /*.record=*/{256, 210, 2},
-          /*.operand=*/
-          {
+          .descriptor = &loom_encoding_ggml_q6_k_family_descriptor,
+          .record = {256, 210, 2},
+          .operand = {
               /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I6,
               /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
               /*.secondary_scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_I8,
@@ -1018,17 +1012,16 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
               /*.scale_group=*/{16, {16}},
               /*.scale_operand_count=*/2,
           },
-          /*.required_auxiliary_keys=*/
-          (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          .required_auxiliary_keys =
+              (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
               (1ull << LOOM_ENCODING_AUXILIARY_KEY_SECONDARY_SCALE),
       },
       {
-          /*.source=*/IREE_SV(
+          .source = IREE_SV(
               "%schema = encoding.define #ggml.q8_1_x4 : encoding<schema>\n"),
-          /*.descriptor=*/&loom_encoding_ggml_q8_1_x4_family_descriptor,
-          /*.record=*/{128, 144, 16},
-          /*.operand=*/
-          {
+          .descriptor = &loom_encoding_ggml_q8_1_x4_family_descriptor,
+          .record = {128, 144, 16},
+          .operand = {
               /*.element_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_QUANT_I8,
               /*.scale_format=*/LOOM_VALUE_FACT_NUMERIC_FORMAT_F16,
               /*.secondary_scale_format=*/{},
@@ -1046,8 +1039,8 @@ TEST_F(EncodingStorageTest, FixedGgmlSchemasExposeCanonicalContracts) {
               /*.scale_group=*/{32, {32}},
               /*.scale_operand_count=*/1,
           },
-          /*.required_auxiliary_keys=*/
-          (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
+          .required_auxiliary_keys =
+              (1ull << LOOM_ENCODING_AUXILIARY_KEY_SCALE) |
               (1ull << LOOM_ENCODING_AUXILIARY_KEY_SUM_CORRECTION),
       },
   };

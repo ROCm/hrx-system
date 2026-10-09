@@ -143,17 +143,17 @@ static void AppendDeviceObjectRecord(iree_hal_replay_file_writer_t* writer,
                                      uint64_t sequence_ordinal,
                                      iree_hal_replay_object_id_t device_id) {
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/device_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_NONE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = device_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_NONE,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_DEVICE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_NONE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata, {});
 }
@@ -169,17 +169,17 @@ static void AppendQueueObjectRecord(iree_hal_replay_file_writer_t* writer,
       .reserved0 = 0,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_NONE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_PROVISIONED_QUEUE_OBJECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_NONE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -229,17 +229,17 @@ static void AppendQueueBarrierRecord(iree_hal_replay_file_writer_t* writer,
       .value = 1,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_BARRIER,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_BARRIER,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(
       writer, metadata,
@@ -290,17 +290,17 @@ static void AppendImmediateQueueTransferRecord(
   operation.source_ref.buffer_id = queue_id + 11;
   operation.source_ref.length = 4;
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/queue_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = queue_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_TRANSFER,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_QUEUE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_QUEUE_TRANSFER,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(
       writer, metadata,
@@ -372,18 +372,18 @@ static void AppendCommandBufferCreateRecords(
   AppendReplayRecord(writer, operation_metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
   const iree_hal_replay_file_record_metadata_t object_metadata = {
-      /*.sequence_ordinal=*/(*sequence_ordinal)++,
-      /*.thread_id=*/0,
-      /*.device_id=*/device_id,
-      /*.object_id=*/command_buffer_id,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/
-      IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_NONE,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = (*sequence_ordinal)++,
+      .thread_id = 0,
+      .device_id = device_id,
+      .object_id = command_buffer_id,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OBJECT,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type =
+          IREE_HAL_REPLAY_PAYLOAD_TYPE_QUEUE_FAMILY_COMMAND_BUFFER_OBJECT,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_COMMAND_BUFFER,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_NONE,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, object_metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload))});
@@ -488,17 +488,17 @@ static void AppendScopeBeginRecord(iree_hal_replay_file_writer_t* writer,
       .reserved1 = 0,
   };
   const iree_hal_replay_file_record_metadata_t metadata = {
-      /*.sequence_ordinal=*/sequence_ordinal,
-      /*.thread_id=*/0,
-      /*.device_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.related_object_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
-      /*.record_type=*/IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
-      /*.record_flags=*/IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
-      /*.payload_type=*/IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE,
-      /*.object_type=*/IREE_HAL_REPLAY_OBJECT_TYPE_NONE,
-      /*.operation_code=*/IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN,
-      /*.status_code=*/IREE_STATUS_OK,
+      .sequence_ordinal = sequence_ordinal,
+      .thread_id = 0,
+      .device_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .related_object_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .record_flags = IREE_HAL_REPLAY_FILE_RECORD_FLAG_NONE,
+      .payload_type = IREE_HAL_REPLAY_PAYLOAD_TYPE_REPLAY_SCOPE,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_NONE,
+      .operation_code = IREE_HAL_REPLAY_OPERATION_CODE_REPLAY_SCOPE_BEGIN,
+      .status_code = IREE_STATUS_OK,
   };
   AppendReplayRecord(writer, metadata,
                      {iree_make_const_byte_span(&payload, sizeof(payload)),
@@ -953,10 +953,10 @@ static void CaptureMockExecutableLoad(iree_const_byte_span_t executable_data,
   iree_hal_device_t* wrapped_device =
       iree_hal_device_group_device_at(wrapped_group, 0);
   const iree_hal_executable_target_selection_t target_selection = {
-      /*.family=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
-      /*.target_key=*/IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
-      /*.physical_device_affinity=*/1,
+      .family = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_FAMILY),
+      .target_key = IREE_SV(IREE_HAL_MOCK_EXECUTABLE_TARGET_KEY),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_VIRTUAL,
+      .physical_device_affinity = 1,
   };
   const iree_hal_executable_target_selection_result_t target_result =
       iree_hal_device_spec_select_executable_target(
@@ -1126,9 +1126,9 @@ TEST(ReplayExecuteTest, ReplaysDynamicQueueAcquisition) {
   iree_hal_semaphore_t* signal_semaphores[] = {semaphore};
   uint64_t signal_values[] = {1};
   const iree_hal_semaphore_list_t signal_list = {
-      /*.count=*/IREE_ARRAYSIZE(signal_semaphores),
-      /*.semaphores=*/signal_semaphores,
-      /*.payload_values=*/signal_values,
+      .count = IREE_ARRAYSIZE(signal_semaphores),
+      .semaphores = signal_semaphores,
+      .payload_values = signal_values,
   };
   IREE_ASSERT_OK(iree_hal_queue_barrier(queue, iree_hal_semaphore_list_empty(),
                                         signal_list, /*barriers=*/NULL,
@@ -1210,12 +1210,11 @@ TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayload) {
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1246,12 +1245,11 @@ TEST(ReplayExecuteTest, UsesRecordedExecutableMetadataForSubstitution) {
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1303,12 +1301,11 @@ TEST(ReplayExecuteTest, SubstitutesRecordedExecutablePayloadByName) {
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1337,12 +1334,11 @@ TEST(ReplayExecuteTest, RejectsExecutableSubstitutionAbiMismatch) {
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1374,12 +1370,11 @@ TEST(ReplayExecuteTest,
   CorruptFirstCapturedExecutableData(&storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();
@@ -1409,12 +1404,11 @@ TEST(ReplayExecuteTest, PreservesWideNativeParameterSize) {
       &storage);
 
   TestExecutableSubstitutionState substitution_state = {
-      /*.source=*/iree_make_cstring_view("replacement.mock"),
-      /*.executable_data=*/
-      iree_make_const_byte_span(replacement_data.data(),
-                                replacement_data.size()),
-      /*.invocation_count=*/0,
-      /*.executable_id=*/IREE_HAL_REPLAY_OBJECT_ID_NONE,
+      .source = iree_make_cstring_view("replacement.mock"),
+      .executable_data = iree_make_const_byte_span(replacement_data.data(),
+                                                   replacement_data.size()),
+      .invocation_count = 0,
+      .executable_id = IREE_HAL_REPLAY_OBJECT_ID_NONE,
   };
   iree_hal_replay_execute_options_t options =
       iree_hal_replay_execute_options_default();

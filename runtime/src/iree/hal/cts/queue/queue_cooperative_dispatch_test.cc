@@ -119,8 +119,8 @@ class QueueCooperativeDispatchTest : public CtsTestBase<> {
         iree_hal_make_buffer_ref(output_buffer, 0, IREE_HAL_WHOLE_BUFFER),
     };
     const iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/IREE_ARRAYSIZE(binding_values),
-        /*.values=*/binding_values,
+        .count = IREE_ARRAYSIZE(binding_values),
+        .values = binding_values,
     };
     SemaphoreList completion(device_, {0}, {1});
     IREE_ASSERT_OK(iree_hal_queue_dispatch(
@@ -234,8 +234,8 @@ TEST_P(QueueCooperativeDispatchTest,
                                         IREE_HAL_WHOLE_BUFFER),
   };
   const iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   Ref<iree_hal_command_buffer_t> command_buffer;
@@ -269,16 +269,16 @@ TEST_P(QueueCooperativeDispatchTest,
       {first_output_buffer, 0, IREE_HAL_WHOLE_BUFFER},
   };
   const iree_hal_buffer_binding_table_t first_binding_table = {
-      /*.count=*/IREE_ARRAYSIZE(first_binding_values),
-      /*.bindings=*/first_binding_values,
+      .count = IREE_ARRAYSIZE(first_binding_values),
+      .bindings = first_binding_values,
   };
   const iree_hal_buffer_binding_t second_binding_values[] = {
       {second_scratch_buffer, 0, IREE_HAL_WHOLE_BUFFER},
       {second_output_buffer, 0, IREE_HAL_WHOLE_BUFFER},
   };
   const iree_hal_buffer_binding_table_t second_binding_table = {
-      /*.count=*/IREE_ARRAYSIZE(second_binding_values),
-      /*.bindings=*/second_binding_values,
+      .count = IREE_ARRAYSIZE(second_binding_values),
+      .bindings = second_binding_values,
   };
 
   SemaphoreList completions(device_, {0, 0}, {1, 1});

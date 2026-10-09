@@ -145,12 +145,12 @@ TEST(KernelArgumentsTest,
      RawArgsPackingRejectsOperationCountOutsideOrdinalRange) {
   iree_hal_streaming_parameter_op_t operation = {};
   const iree_hal_streaming_parameter_info_t parameters = {
-      /*.buffer_size=*/sizeof(uint32_t),
-      /*.constant_bytes=*/sizeof(uint32_t),
-      /*.direct_arg_bytes=*/sizeof(uint32_t),
-      /*.binding_count=*/1,
-      /*.copy_count=*/UINT16_MAX,
-      /*.ops=*/&operation,
+      .buffer_size = sizeof(uint32_t),
+      .constant_bytes = sizeof(uint32_t),
+      .direct_arg_bytes = sizeof(uint32_t),
+      .binding_count = 1,
+      .copy_count = UINT16_MAX,
+      .ops = &operation,
   };
   uint32_t value = 7;
   std::array<void*, 1> arguments = {&value};

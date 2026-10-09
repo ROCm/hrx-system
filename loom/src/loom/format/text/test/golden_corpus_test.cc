@@ -68,8 +68,8 @@ class GoldenCorpusTest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(&low_registry_.registry,
                                                         &low_asm_environment);
     const loom_text_print_options_t options = {
-        /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
-        /*.low_asm_environment=*/low_asm_environment,
+        .flags = LOOM_TEXT_PRINT_DEFAULT,
+        .low_asm_environment = low_asm_environment,
     };
     IREE_EXPECT_OK(loom_text_print_module_to_builder_with_options(
         module, &builder, &options));

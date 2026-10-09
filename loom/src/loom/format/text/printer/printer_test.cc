@@ -27,16 +27,16 @@ namespace loom {
 namespace {
 
 static const loom_encoding_family_descriptor_t kQ8_0EncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-    /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+    .name = LOOM_BSTRING_REF(4, "q8_0"),
+    .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
 };
 static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
     .descriptor = &kQ8_0EncodingDescriptor,
 };
 
 static const loom_encoding_family_descriptor_t kDenseEncodingDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(5, "dense"),
-    /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    .name = LOOM_BSTRING_REF(5, "dense"),
+    .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
 static const loom_encoding_vtable_t kDenseEncodingVtable = {
     .descriptor = &kDenseEncodingDescriptor,
@@ -2225,11 +2225,11 @@ TEST_F(PrintOpTest, TypeWithStaticEncoding) {
   loom_named_attr_t param = {
       .name_id = block_id, .reserved = {}, .value = loom_attr_i64(32)};
   loom_encoding_t encoding = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&param,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &param,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module_, &encoding, &encoding_id));
@@ -2265,9 +2265,9 @@ TEST_F(PrintOpTest, TypeWithEncodingNoParams) {
       loom_module_intern_string(module_, IREE_SV("dense"), &name_id));
 
   loom_encoding_t encoding = {
-      /*.name_id=*/name_id,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/0,
+      .name_id = name_id,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 0,
   };
   uint16_t encoding_id = 0;
   IREE_ASSERT_OK(loom_module_add_encoding(module_, &encoding, &encoding_id));

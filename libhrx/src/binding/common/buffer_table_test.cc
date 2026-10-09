@@ -609,11 +609,11 @@ TEST(BufferTableTest, BulkLookupRetainsEachAllocationOnce) {
       reinterpret_cast<void*>(UINT64_C(2)))));
 
   const hrx_buffer_table_range_request_t requests[] = {
-      {/*.address=*/UINT64_C(0x1010), /*.length=*/4},
-      {/*.address=*/UINT64_C(0x3020), /*.length=*/8},
-      {/*.address=*/UINT64_C(0x5080), /*.length=*/8},
-      {/*.address=*/UINT64_C(0x9000), /*.length=*/4},
-      {/*.address=*/UINT64_C(0x1030), /*.length=*/4},
+      {.address = UINT64_C(0x1010), .length = 4},
+      {.address = UINT64_C(0x3020), .length = 8},
+      {.address = UINT64_C(0x5080), .length = 8},
+      {.address = UINT64_C(0x9000), .length = 4},
+      {.address = UINT64_C(0x1030), .length = 4},
   };
   hrx_buffer_table_retained_ref_t refs[IREE_ARRAYSIZE(requests)] = {};
   hrx_buffer_table_range_match_t matches[IREE_ARRAYSIZE(requests)] = {};
@@ -673,8 +673,8 @@ TEST(BufferTableTest, BulkLookupReportsRetainedPrefixOnCallbackFailure) {
       /*user_data=*/nullptr)));
 
   const hrx_buffer_table_range_request_t requests[] = {
-      {/*.address=*/UINT64_C(0x1010), /*.length=*/4},
-      {/*.address=*/UINT64_C(0x5010), /*.length=*/4},
+      {.address = UINT64_C(0x1010), .length = 4},
+      {.address = UINT64_C(0x5010), .length = 4},
   };
   hrx_buffer_table_retained_ref_t refs[IREE_ARRAYSIZE(requests)] = {};
   hrx_buffer_table_range_match_t matches[IREE_ARRAYSIZE(requests)] = {};

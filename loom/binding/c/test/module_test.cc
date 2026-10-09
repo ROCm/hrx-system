@@ -36,10 +36,10 @@ using ResultPtr = HandlePtr<loomc_result_t, loomc_result_release>;
 ContextPtr CreateContext(
     loomc_source_retention_t source_retention = LOOMC_SOURCE_RETENTION_EXACT) {
   const loomc_context_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.source_retention=*/source_retention,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .source_retention = source_retention,
   };
   loomc_context_t* context = nullptr;
   loomc_status_t status =
@@ -59,13 +59,13 @@ WorkspacePtr CreateWorkspace() {
 SourcePtr CreateSource(loomc_source_format_t format, const char* identifier,
                        const char* contents) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/format,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = format,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -181,11 +181,11 @@ func.def public @identity(%x: i32) -> (i32) {
   ASSERT_NE(text_module.get(), nullptr);
 
   loomc_module_serialize_options_t text_serialize_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(text_serialize_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
-      /*.identifier=*/loomc_make_cstring_view("roundtrip.loom"),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(text_serialize_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_UNKNOWN,
+      .identifier = loomc_make_cstring_view("roundtrip.loom"),
   };
   loomc_source_t* serialized_text_source = nullptr;
   LOOMC_ASSERT_OK(loomc_module_serialize_text_to_source(
@@ -198,11 +198,11 @@ func.def public @identity(%x: i32) -> (i32) {
             "roundtrip.loom");
 
   loomc_module_serialize_options_t serialize_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(serialize_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
-      /*.identifier=*/loomc_make_cstring_view("explicit.loombc"),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(serialize_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_UNKNOWN,
+      .identifier = loomc_make_cstring_view("explicit.loombc"),
   };
   loomc_source_t* bytecode_source = nullptr;
   LOOMC_ASSERT_OK(loomc_module_serialize_bytecode_to_source(
@@ -213,13 +213,13 @@ func.def public @identity(%x: i32) -> (i32) {
             LOOMC_SOURCE_FORMAT_BYTECODE);
 
   const loomc_source_options_t mislabeled_bytecode_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(mislabeled_bytecode_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("explicit.loombc"),
-      /*.contents=*/loomc_source_contents(bytecode_source_ptr.get()),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(mislabeled_bytecode_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("explicit.loombc"),
+      .contents = loomc_source_contents(bytecode_source_ptr.get()),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* mislabeled_bytecode_source = nullptr;
   LOOMC_ASSERT_OK(loomc_source_create(&mislabeled_bytecode_options,
@@ -244,10 +244,10 @@ TEST(ModuleTest, RejectsContradictoryExplicitSerializeFormat) {
   ModulePtr module =
       DeserializeTextModule(context.get(), workspace.get(), source.get());
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
   };
   loomc_source_t* serialized_source = reinterpret_cast<loomc_source_t*>(0x1);
   loomc_status_t status = loomc_module_serialize_text_to_source(
@@ -401,11 +401,11 @@ TEST(ModuleTest, RejectsMalformedSerializeIdentifier) {
   ModulePtr module =
       DeserializeTextModule(context.get(), workspace.get(), source.get());
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_string_view(nullptr, 1),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_string_view(nullptr, 1),
   };
   loomc_source_t* serialized_source = reinterpret_cast<loomc_source_t*>(0x1);
   loomc_status_t status = loomc_module_serialize_text_to_source(
@@ -419,10 +419,10 @@ TEST(ModuleTest, RejectsContradictoryExplicitSourceFormat) {
   WorkspacePtr workspace = CreateWorkspace();
   SourcePtr source = CreateTextSource("explicit.loom", "module {}\n");
   loomc_module_deserialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_DESERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_DESERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
   };
   loomc_module_t* module = reinterpret_cast<loomc_module_t*>(0x1);
   loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);
@@ -439,11 +439,11 @@ TEST(ModuleTest, RejectsMalformedDeserializeIdentifier) {
   WorkspacePtr workspace = CreateWorkspace();
   SourcePtr source = CreateTextSource("explicit.loom", "module {}\n");
   loomc_module_deserialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_DESERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_string_view(nullptr, 1),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_DESERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_string_view(nullptr, 1),
   };
   loomc_module_t* module = reinterpret_cast<loomc_module_t*>(0x1);
   loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);
@@ -481,11 +481,11 @@ TEST(ModuleTest, QueriesFunctionsAndKernelSidecars) {
   ModulePtr module = CreateFunctionModule(context.get(), workspace.get());
 
   loomc_module_function_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.function_symbol=*/loomc_string_view_empty(),
-      /*.kind=*/LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .function_symbol = loomc_string_view_empty(),
+      .kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
   };
   loomc_host_size_t function_count = 0;
   loomc_result_t* result = nullptr;
@@ -628,11 +628,11 @@ TEST(ModuleTest, QueryReportsTotalFunctionCountForPartialStorage) {
   ModulePtr module = CreateFunctionModule(context.get(), workspace.get());
 
   loomc_module_function_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.function_symbol=*/loomc_string_view_empty(),
-      /*.kind=*/LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .function_symbol = loomc_string_view_empty(),
+      .kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
   };
   loomc_module_function_t function = {};
   loomc_host_size_t function_count = 0;
@@ -681,11 +681,11 @@ TEST(ModuleTest, ReportsNamedFunctionQueryMissInResult) {
   ModulePtr module = CreateFunctionModule(context.get(), workspace.get());
 
   loomc_module_function_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.function_symbol=*/loomc_make_cstring_view("@missing"),
-      /*.kind=*/LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .function_symbol = loomc_make_cstring_view("@missing"),
+      .kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
   };
   loomc_module_function_t function = {};
   loomc_host_size_t function_count = 1;
@@ -705,11 +705,11 @@ TEST(ModuleTest, QueriesGlobalsInMixedModule) {
   ModulePtr module = CreateMixedSymbolModule(context.get(), workspace.get());
 
   loomc_module_global_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.global_symbol=*/loomc_string_view_empty(),
-      /*.kind=*/LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .global_symbol = loomc_string_view_empty(),
+      .kind = LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
   };
   loomc_host_size_t global_count = 0;
   loomc_result_t* result = nullptr;
@@ -742,11 +742,11 @@ TEST(ModuleTest, QueriesGlobalsInMixedModule) {
   EXPECT_EQ(state->kind, LOOMC_MODULE_GLOBAL_KIND_VARIABLE);
 
   loomc_module_function_query_options_t function_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(function_options),
-      /*.next=*/nullptr,
-      /*.function_symbol=*/loomc_string_view_empty(),
-      /*.kind=*/LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_FUNCTION_QUERY_OPTIONS,
+      .structure_size = sizeof(function_options),
+      .next = nullptr,
+      .function_symbol = loomc_string_view_empty(),
+      .kind = LOOMC_MODULE_FUNCTION_KIND_UNKNOWN,
   };
   loomc_host_size_t function_count = 0;
   result = nullptr;
@@ -765,11 +765,11 @@ TEST(ModuleTest, FiltersGlobalsByKind) {
   ModulePtr module = CreateMixedSymbolModule(context.get(), workspace.get());
 
   loomc_module_global_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.global_symbol=*/loomc_string_view_empty(),
-      /*.kind=*/LOOMC_MODULE_GLOBAL_KIND_CONSTANT,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .global_symbol = loomc_string_view_empty(),
+      .kind = LOOMC_MODULE_GLOBAL_KIND_CONSTANT,
   };
   loomc_module_global_t global = {};
   loomc_host_size_t global_count = 0;
@@ -851,11 +851,11 @@ TEST(ModuleTest, QueryReportsTotalGlobalCountForPartialStorage) {
   ModulePtr module = CreateMixedSymbolModule(context.get(), workspace.get());
 
   loomc_module_global_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.global_symbol=*/loomc_string_view_empty(),
-      /*.kind=*/LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .global_symbol = loomc_string_view_empty(),
+      .kind = LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
   };
   loomc_module_global_t global = {};
   loomc_host_size_t global_count = 0;
@@ -905,11 +905,11 @@ TEST(ModuleTest, RejectsMalformedGlobalQueriesWithoutCrashing) {
   LOOMC_EXPECT_STATUS_IS(LOOMC_STATUS_INVALID_ARGUMENT, status);
 
   loomc_module_global_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.global_symbol=*/invalid_symbol_name,
-      /*.kind=*/LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .global_symbol = invalid_symbol_name,
+      .kind = LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
   };
   loomc_host_size_t global_count = 0;
   loomc_result_t* result = nullptr;
@@ -926,11 +926,11 @@ TEST(ModuleTest, ReportsNamedGlobalQueryMissInResult) {
   ModulePtr module = CreateMixedSymbolModule(context.get(), workspace.get());
 
   loomc_module_global_query_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.global_symbol=*/loomc_make_cstring_view("@missing"),
-      /*.kind=*/LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_GLOBAL_QUERY_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .global_symbol = loomc_make_cstring_view("@missing"),
+      .kind = LOOMC_MODULE_GLOBAL_KIND_UNKNOWN,
   };
   loomc_module_global_t global = {};
   loomc_host_size_t global_count = 1;

@@ -31,8 +31,8 @@ namespace loom {
 namespace {
 
 static const loom_target_fact_type_t kTestTargetFactType = {
-    /*.name=*/IREE_SVL("test"),
-    /*.storage_size=*/sizeof(loom_target_facts_t),
+    .name = IREE_SVL("test"),
+    .storage_size = sizeof(loom_target_facts_t),
 };
 
 static void InitializeTestTargetFacts(loom_target_facts_t* out_facts) {
@@ -42,10 +42,10 @@ static void InitializeTestTargetFacts(loom_target_facts_t* out_facts) {
       .explicit_fields = 0,
       .storage =
           {
-              .snapshot = {/*.name=*/IREE_SVL("test")},
-              .export_plan = {/*.name=*/IREE_SVL("test")},
-              .config = {/*.name=*/IREE_SVL("test")},
-              .bundle = {/*.name=*/IREE_SVL("test")},
+              .snapshot = {.name = IREE_SVL("test")},
+              .export_plan = {.name = IREE_SVL("test")},
+              .config = {.name = IREE_SVL("test")},
+              .bundle = {.name = IREE_SVL("test")},
           },
   };
   loom_target_bundle_storage_rebind(&out_facts->storage);
@@ -186,9 +186,9 @@ static void initialize_pattern_registry(
     const loom_rewrite_pattern_t* patterns, uint16_t pattern_count,
     loom_rewrite_pattern_registry_storage_t* out_storage) {
   const loom_rewrite_pattern_provider_t provider = {
-      /*.name=*/IREE_SVL("test"),
-      /*.patterns=*/patterns,
-      /*.pattern_count=*/pattern_count,
+      .name = IREE_SVL("test"),
+      .patterns = patterns,
+      .pattern_count = pattern_count,
   };
   const loom_rewrite_pattern_provider_t* provider_values[] = {&provider};
   IREE_ASSERT_OK(loom_rewrite_pattern_registry_storage_initialize(

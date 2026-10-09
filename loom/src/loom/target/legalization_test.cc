@@ -24,39 +24,39 @@ static bool TargetMatch(const loom_target_legalizer_entry_t* entry,
 }
 
 static const loom_target_legalizer_rule_t kTargetRules[] = {
-    {/*.flags=*/0,
-     /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
-     /*.first_operand_element_types=*/0,
-     /*.match=*/TargetMatch,
-     /*.legalize=*/nullptr},
-    {/*.flags=*/0,
-     /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 2),
-     /*.first_operand_element_types=*/0,
-     /*.match=*/nullptr,
-     /*.legalize=*/nullptr},
+    {.flags = 0,
+     .root_kind = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
+     .first_operand_element_types = 0,
+     .match = TargetMatch,
+     .legalize = nullptr},
+    {.flags = 0,
+     .root_kind = LOOM_OP_KIND(LOOM_DIALECT_VECTOR, 2),
+     .first_operand_element_types = 0,
+     .match = nullptr,
+     .legalize = nullptr},
 };
 
 static const loom_target_legalizer_rule_t kReferenceRules[] = {
-    {/*.flags=*/0,
-     /*.root_kind=*/LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
-     /*.first_operand_element_types=*/LOOM_SCALAR_TYPE_SET_I8 |
-         LOOM_SCALAR_TYPE_SET_I16,
-     /*.match=*/nullptr,
-     /*.legalize=*/nullptr},
+    {.flags = 0,
+     .root_kind = LOOM_OP_KIND(LOOM_DIALECT_SCALAR, 3),
+     .first_operand_element_types =
+         LOOM_SCALAR_TYPE_SET_I8 | LOOM_SCALAR_TYPE_SET_I16,
+     .match = nullptr,
+     .legalize = nullptr},
 };
 
 static const loom_target_legalizer_provider_t kTargetProvider = {
-    /*.name=*/IREE_SVL("target"),
-    /*.strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
-    /*.rules=*/kTargetRules,
-    /*.rule_count=*/IREE_ARRAYSIZE(kTargetRules),
+    .name = IREE_SVL("target"),
+    .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_TARGET,
+    .rules = kTargetRules,
+    .rule_count = IREE_ARRAYSIZE(kTargetRules),
 };
 
 static const loom_target_legalizer_provider_t kReferenceProvider = {
-    /*.name=*/IREE_SVL("reference"),
-    /*.strategy=*/LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
-    /*.rules=*/kReferenceRules,
-    /*.rule_count=*/IREE_ARRAYSIZE(kReferenceRules),
+    .name = IREE_SVL("reference"),
+    .strategy = LOOM_TARGET_LEGALIZER_STRATEGY_REFERENCE,
+    .rules = kReferenceRules,
+    .rule_count = IREE_ARRAYSIZE(kReferenceRules),
 };
 
 TEST(TargetLegalizerRegistryTest, ComposesOrderedProviderListsIntoOneSlab) {

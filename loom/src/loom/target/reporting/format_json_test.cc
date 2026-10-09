@@ -69,13 +69,13 @@ static void ExpectArrayLength(iree_string_view_t array,
 TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
   loom_target_compile_report_pressure_row_t pressure_rows[] = {
       {
-          /*.function_name=*/IREE_SVL("summary_only"),
-          /*.register_class=*/IREE_SVL("test.i32"),
-          /*.type_kind=*/LOOM_TYPE_REGISTER,
-          /*.element_type=*/LOOM_SCALAR_TYPE_I32,
-          /*.peak_live_units=*/7,
-          /*.peak_live_values=*/4,
-          /*.peak_point=*/3,
+          .function_name = IREE_SVL("summary_only"),
+          .register_class = IREE_SVL("test.i32"),
+          .type_kind = LOOM_TYPE_REGISTER,
+          .element_type = LOOM_SCALAR_TYPE_I32,
+          .peak_live_units = 7,
+          .peak_live_values = 4,
+          .peak_point = 3,
       },
   };
   loom_target_compile_report_t report = {};
@@ -87,67 +87,67 @@ TEST(CompileReportFormatTest, FormatsJsonSummaryWithoutDetailRows) {
       &report, &pressure_rows[0]));
   const loom_target_compile_report_schedule_band_summary_row_t
       schedule_band_summary = {
-          /*.flags=*/
-          LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
-          /*.function_name=*/IREE_SVL("summary_only"),
-          /*.block_name=*/IREE_SVL("^entry"),
-          /*.block_index=*/0,
-          /*.first_packet_index=*/5,
-          /*.band_count=*/2,
-          /*.node_count=*/3,
-          /*.max_band_node_count=*/2,
-          /*.origin_kind=*/LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_MATRIX,
-          /*.origin_operation_name=*/IREE_SVL("low.op<amdgpu.wmma>"),
-          /*.semantic_tag=*/IREE_SVL("matrix.wmma.f32"),
-          /*.sample_value_name=*/IREE_SVL("%acc"),
-          /*.static_instruction_mix=*/
-          {
-              .descriptor_count = 2,
-              .unknown_count = {},
-              .scalar_alu_count = {},
-              .vector_alu_count = {},
-              .matrix_count = 2,
-              .mfma_count = {},
-              .smfmac_count = {},
-              .wmma_count = 2,
-              .swmmac_count = {},
-          },
-          /*.dynamic_instruction_mix=*/
-          {
-              .descriptor_count = 4,
-              .unknown_count = {},
-              .scalar_alu_count = {},
-              .vector_alu_count = {},
-              .matrix_count = 4,
-              .mfma_count = {},
-              .smfmac_count = {},
-              .wmma_count = 4,
-              .swmmac_count = {},
-          },
-          /*.result_value_count=*/1,
-          /*.result_unit_count=*/8,
+          .flags =
+              LOOM_TARGET_COMPILE_REPORT_SCHEDULE_BAND_DYNAMIC_INSTRUCTION_MIX,
+          .function_name = IREE_SVL("summary_only"),
+          .block_name = IREE_SVL("^entry"),
+          .block_index = 0,
+          .first_packet_index = 5,
+          .band_count = 2,
+          .node_count = 3,
+          .max_band_node_count = 2,
+          .origin_kind = LOOM_TARGET_COMPILE_REPORT_PRESSURE_ORIGIN_MATRIX,
+          .origin_operation_name = IREE_SVL("low.op<amdgpu.wmma>"),
+          .semantic_tag = IREE_SVL("matrix.wmma.f32"),
+          .sample_value_name = IREE_SVL("%acc"),
+          .static_instruction_mix =
+              {
+                  .descriptor_count = 2,
+                  .unknown_count = {},
+                  .scalar_alu_count = {},
+                  .vector_alu_count = {},
+                  .matrix_count = 2,
+                  .mfma_count = {},
+                  .smfmac_count = {},
+                  .wmma_count = 2,
+                  .swmmac_count = {},
+              },
+          .dynamic_instruction_mix =
+              {
+                  .descriptor_count = 4,
+                  .unknown_count = {},
+                  .scalar_alu_count = {},
+                  .vector_alu_count = {},
+                  .matrix_count = 4,
+                  .mfma_count = {},
+                  .smfmac_count = {},
+                  .wmma_count = 4,
+                  .swmmac_count = {},
+              },
+          .result_value_count = 1,
+          .result_unit_count = 8,
       };
   IREE_ASSERT_OK(loom_target_compile_report_record_schedule_band_summary_row(
       &report, &schedule_band_summary));
   const loom_target_compile_report_wait_reason_summary_row_t
       wait_reason_summary = {
-          /*.function_name=*/IREE_SVL("summary_only"),
-          /*.counter_name=*/IREE_SVL("vmem_load"),
-          /*.reason_name=*/IREE_SVL("amdgpu.ssa_use"),
-          /*.counter_id=*/1,
-          /*.reason_id=*/2,
-          /*.summary=*/
-          {
-              .action_count = 3,
-              .explicit_action_count = 0,
-              .planned_action_count = 3,
-              .full_drain_count = 1,
-              .partial_wait_count = 2,
-              .drained_count = 5,
-              .max_drained_count = 4,
-              .max_outstanding_before = 7,
-              .max_full_drain_outstanding_before = 6,
-          },
+          .function_name = IREE_SVL("summary_only"),
+          .counter_name = IREE_SVL("vmem_load"),
+          .reason_name = IREE_SVL("amdgpu.ssa_use"),
+          .counter_id = 1,
+          .reason_id = 2,
+          .summary =
+              {
+                  .action_count = 3,
+                  .explicit_action_count = 0,
+                  .planned_action_count = 3,
+                  .full_drain_count = 1,
+                  .partial_wait_count = 2,
+                  .drained_count = 5,
+                  .max_drained_count = 4,
+                  .max_outstanding_before = 7,
+                  .max_full_drain_outstanding_before = 6,
+              },
       };
   IREE_ASSERT_OK(loom_target_compile_report_record_wait_reason_summary_row(
       &report, &wait_reason_summary));

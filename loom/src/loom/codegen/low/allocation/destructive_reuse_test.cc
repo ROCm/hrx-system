@@ -76,8 +76,8 @@ class DestructiveReuseTest : public ::testing::Test {
     units.end_points = unit_ends;
     units.point_count = IREE_ARRAYSIZE(unit_ends);
     units.values_with_incomplete_storage_segments = {
-        /*.bit_count=*/IREE_ARRAYSIZE(unit_values),
-        /*.words=*/incomplete_segment_words,
+        .bit_count = IREE_ARRAYSIZE(unit_values),
+        .words = incomplete_segment_words,
     };
 
     const loom_liveness_segment_t segments[] = {
@@ -187,8 +187,8 @@ TEST_F(DestructiveReuseTest, PreservesRequiredTiedFamilyObservations) {
   units.end_points = unit_ends;
   units.point_count = IREE_ARRAYSIZE(unit_ends);
   units.values_with_incomplete_storage_segments = {
-      /*.bit_count=*/IREE_ARRAYSIZE(unit_values),
-      /*.words=*/incomplete_segment_words,
+      .bit_count = IREE_ARRAYSIZE(unit_values),
+      .words = incomplete_segment_words,
   };
 
   const loom_liveness_segment_t segments[] = {
@@ -263,8 +263,8 @@ TEST_F(DestructiveReuseTest, PreservesMappedResultUnitAcrossSourceWrite) {
   units.end_points = unit_ends;
   units.point_count = IREE_ARRAYSIZE(unit_ends);
   units.values_with_incomplete_storage_segments = {
-      /*.bit_count=*/IREE_ARRAYSIZE(unit_values),
-      /*.words=*/incomplete_segment_words,
+      .bit_count = IREE_ARRAYSIZE(unit_values),
+      .words = incomplete_segment_words,
   };
 
   const loom_liveness_interval_t intervals[] = {

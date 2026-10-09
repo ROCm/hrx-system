@@ -92,8 +92,8 @@ class SymbolDCETest : public ::testing::Test {
     loom_low_descriptor_text_asm_environment_initialize(
         &low_descriptor_registry_, &low_asm_environment);
     loom_text_print_options_t options = {
-        /*.flags=*/LOOM_TEXT_PRINT_DEFAULT,
-        /*.low_asm_environment=*/low_asm_environment,
+        .flags = LOOM_TEXT_PRINT_DEFAULT,
+        .low_asm_environment = low_asm_environment,
     };
     iree_string_builder_t builder;
     iree_string_builder_initialize(iree_allocator_system(), &builder);

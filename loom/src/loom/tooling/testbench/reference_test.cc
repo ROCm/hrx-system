@@ -63,12 +63,12 @@ class ReferenceTest : public ::testing::Test {
 
   iree_hal_buffer_params_t BufferParams() {
     return iree_hal_buffer_params_t{
-        /*.usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT |
-            IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
-        /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-        /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
-            IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
-        /*.queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+        .usage = IREE_HAL_BUFFER_USAGE_DEFAULT |
+                 IREE_HAL_BUFFER_USAGE_TRANSFER | IREE_HAL_BUFFER_USAGE_MAPPING,
+        .access = IREE_HAL_MEMORY_ACCESS_ALL,
+        .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL |
+                IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE,
+        .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
     };
   }
 

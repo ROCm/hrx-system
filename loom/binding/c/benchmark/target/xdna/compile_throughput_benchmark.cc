@@ -57,22 +57,20 @@ class XdnaWorkloadCompileTarget final : public WorkloadCompileTarget {
                              loomc_compile_report_mode_t report_mode,
                              int64_t* out_artifact_byte_count) const override {
     const loomc_compile_report_options_t report_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
-        /*.structure_size=*/sizeof(report_options),
-        /*.next=*/nullptr,
-        /*.mode=*/report_mode,
-        /*.format=*/LOOMC_COMPILE_REPORT_FORMAT_JSON,
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+        .structure_size = sizeof(report_options),
+        .next = nullptr,
+        .mode = report_mode,
+        .format = LOOMC_COMPILE_REPORT_FORMAT_JSON,
     };
     const loomc_emit_options_t emit_options = {
-        /*.type=*/LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
-        /*.structure_size=*/sizeof(emit_options),
-        /*.next=*/report_mode != LOOMC_COMPILE_REPORT_MODE_NONE
-            ? &report_options
-            : nullptr,
-        /*.artifact_format=*/
-        loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA),
-        /*.identifier=*/identifier,
-        /*.artifact_flags=*/LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
+        .type = LOOMC_STRUCTURE_TYPE_EMIT_OPTIONS,
+        .structure_size = sizeof(emit_options),
+        .next = report_mode != LOOMC_COMPILE_REPORT_MODE_NONE ? &report_options
+                                                              : nullptr,
+        .artifact_format = loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA),
+        .identifier = identifier,
+        .artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY,
     };
     loomc_result_t* raw_result = nullptr;
     iree_status_t status = to_iree_status(
@@ -93,13 +91,13 @@ const XdnaWorkloadCompileTarget kXdnaWorkloadTarget;
   RegisterInputScalingCompileBenchmarks(
       kXdnaWorkloadTarget, "FfnGateUpQuadraticBF16",
       {
-          /*.source=*/FindEmbeddedSource(
-              loomc_benchmark_ffn_gate_up_smoke_create(),
-              loomc_benchmark_ffn_gate_up_smoke_size(),
-              "gate_up_quadratic_bf16_xdna.loom"),
-          /*.function_symbol=*/"ffn_gate_up_quadratic_bf16",
-          /*.artifact_identifier=*/"ffn_gate_up_quadratic_bf16.xdna",
-          /*.input_size_config_symbol=*/"ffn_gate_up.input_size",
+          .source =
+              FindEmbeddedSource(loomc_benchmark_ffn_gate_up_smoke_create(),
+                                 loomc_benchmark_ffn_gate_up_smoke_size(),
+                                 "gate_up_quadratic_bf16_xdna.loom"),
+          .function_symbol = "ffn_gate_up_quadratic_bf16",
+          .artifact_identifier = "ffn_gate_up_quadratic_bf16.xdna",
+          .input_size_config_symbol = "ffn_gate_up.input_size",
       },
       {512, 1024, 4096}, {512, 1024, 4096});
   return true;

@@ -29,12 +29,12 @@ TEST(NativeElfSectionsTest, PreservesPlacedContentsAndAccess) {
   };
   for (const auto& test_case : cases) {
     const loom_native_section_t native = {
-        /*.name=*/IREE_SV(".payload"),
-        /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
-        /*.access=*/test_case.access,
-        /*.address=*/0x100004000ull,
-        /*.alignment=*/64,
-        /*.contents=*/iree_make_const_byte_span(bytes, sizeof(bytes)),
+        .name = IREE_SV(".payload"),
+        .storage = LOOM_NATIVE_SECTION_STORAGE_CONTENTS,
+        .access = test_case.access,
+        .address = 0x100004000ull,
+        .alignment = 64,
+        .contents = iree_make_const_byte_span(bytes, sizeof(bytes)),
     };
     const loom_native_elf_section_t elf =
         loom_native_elf_section_from_native(&native);
@@ -55,14 +55,14 @@ TEST(NativeElfSectionsTest, PreservesPlacedContentsAndAccess) {
 
 TEST(NativeElfSectionsTest, RepresentsReservationWithoutPayload) {
   const loom_native_section_t native = {
-      /*.name=*/IREE_SV(".storage"),
-      /*.storage=*/LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
-      /*.access=*/LOOM_NATIVE_SECTION_ACCESS_READ |
-          LOOM_NATIVE_SECTION_ACCESS_WRITE,
-      /*.address=*/0x70000,
-      /*.alignment=*/32,
-      /*.contents=*/{},
-      /*.reservation_length=*/320,
+      .name = IREE_SV(".storage"),
+      .storage = LOOM_NATIVE_SECTION_STORAGE_RESERVATION,
+      .access =
+          LOOM_NATIVE_SECTION_ACCESS_READ | LOOM_NATIVE_SECTION_ACCESS_WRITE,
+      .address = 0x70000,
+      .alignment = 32,
+      .contents = {},
+      .reservation_length = 320,
   };
   const loom_native_elf_section_t elf =
       loom_native_elf_section_from_native(&native);

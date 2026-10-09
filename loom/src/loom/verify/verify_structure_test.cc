@@ -351,15 +351,15 @@ TEST_F(VerifyStructureTest, AlternativeRequiredAncestorsAcceptEitherKind) {
       LOOM_OP_TEST_MAP,
   };
   const loom_op_placement_descriptor_t placement = {
-      /*.required_parents=*/nullptr,
-      /*.required_ancestors=*/nullptr,
-      /*.required_any_ancestors=*/required_ancestors,
-      /*.forbidden_ancestors=*/nullptr,
-      /*.required_any_ancestor_names=*/"test.isolated_region or test.map",
-      /*.required_parent_count=*/0,
-      /*.required_ancestor_count=*/0,
-      /*.required_any_ancestor_count=*/IREE_ARRAYSIZE(required_ancestors),
-      /*.forbidden_ancestor_count=*/0,
+      .required_parents = nullptr,
+      .required_ancestors = nullptr,
+      .required_any_ancestors = required_ancestors,
+      .forbidden_ancestors = nullptr,
+      .required_any_ancestor_names = "test.isolated_region or test.map",
+      .required_parent_count = 0,
+      .required_ancestor_count = 0,
+      .required_any_ancestor_count = IREE_ARRAYSIZE(required_ancestors),
+      .forbidden_ancestor_count = 0,
   };
   loom_op_t* op = Dictionary(0);
   loom_op_vtable_t vtable = *loom_op_vtable(module_, op);

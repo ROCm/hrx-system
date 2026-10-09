@@ -210,7 +210,7 @@ TEST(SpirvTargetProfileTest, RejectsUnknownNamedProfile) {
 
 TEST(SpirvTargetProfileTest, CheckedCastRejectsAnotherFamily) {
   static const loom_target_profile_type_t kOtherProfileType = {
-      /*.name=*/IREE_SVL("other"),
+      .name = IREE_SVL("other"),
   };
   const loom_target_profile_t other_profile = {
       .type = &kOtherProfileType,

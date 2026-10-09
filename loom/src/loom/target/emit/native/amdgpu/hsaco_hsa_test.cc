@@ -736,8 +736,8 @@ class LowKernelEmitter {
     }
 
     const loom_target_specialization_request_t specialization_request = {
-        /*.function_name=*/IREE_SV("loom_kernel"),
-        /*.target_profile=*/&target_profile->base,
+        .function_name = IREE_SV("loom_kernel"),
+        .target_profile = &target_profile->base,
     };
     loom_function_version_owner_t function_versions;
     loom_function_version_owner_initialize(arena, &function_versions);
@@ -1066,29 +1066,29 @@ iree_status_t EmitRuntimeGlobalKernelForAmdgpu(const AmdgpuHsaTarget& target,
   };
   const loom_amdgpu_hsaco_data_symbol_t data_symbols[] = {
       {
-          /*.name=*/IREE_SV(kAsanConfigGlobalName),
-          /*.initial_contents=*/{},
-          /*.byte_length=*/kAsanConfigByteLength,
-          /*.alignment=*/8,
-          /*.flags=*/LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
+          .name = IREE_SV(kAsanConfigGlobalName),
+          .initial_contents = {},
+          .byte_length = kAsanConfigByteLength,
+          .alignment = 8,
+          .flags = LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
       },
       {
-          /*.name=*/IREE_SV(kFeedbackConfigGlobalName),
-          /*.initial_contents=*/{},
-          /*.byte_length=*/kFeedbackConfigByteLength,
-          /*.alignment=*/8,
-          /*.flags=*/LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
+          .name = IREE_SV(kFeedbackConfigGlobalName),
+          .initial_contents = {},
+          .byte_length = kFeedbackConfigByteLength,
+          .alignment = 8,
+          .flags = LOOM_AMDGPU_HSACO_DATA_SYMBOL_FLAG_WRITABLE,
       },
   };
   loom_amdgpu_hsaco_kernel_t revisioned_kernel = kernel;
   revisioned_kernel.metadata.target_extensions =
       target_profile.identity.target->kernel_metadata_extensions;
   const loom_amdgpu_hsaco_input_t input = {
-      /*.target_identity=*/target_profile.identity,
-      /*.kernels=*/&revisioned_kernel,
-      /*.kernel_count=*/1,
-      /*.data_symbols=*/data_symbols,
-      /*.data_symbol_count=*/IREE_ARRAYSIZE(data_symbols),
+      .target_identity = target_profile.identity,
+      .kernels = &revisioned_kernel,
+      .kernel_count = 1,
+      .data_symbols = data_symbols,
+      .data_symbol_count = IREE_ARRAYSIZE(data_symbols),
   };
 
   StreamPtr stream = CreateStream();

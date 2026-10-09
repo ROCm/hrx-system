@@ -25,11 +25,11 @@ TEST(EncodingTest, ParameterDescriptorBindingIsNonSemantic) {
   EXPECT_EQ(loom_encoding_parameter_descriptor_index(&bound_attr), 5);
 
   loom_encoding_t bound_encoding = {
-      /*.name_id=*/42,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/&bound_attr,
+      .name_id = 42,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = &bound_attr,
   };
   loom_encoding_t unbound_encoding = bound_encoding;
   unbound_encoding.attributes = &unbound_attr;
@@ -86,18 +86,18 @@ TEST(EncodingTest, NotEqualForDifferentParams) {
   }};
 
   loom_encoding_t q8_a = {
-      /*.name_id=*/42,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/attrs_a,
+      .name_id = 42,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = attrs_a,
   };
   loom_encoding_t q8_b = {
-      /*.name_id=*/42,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/1,
-      /*.family=*/{},
-      /*.attributes=*/attrs_b,
+      .name_id = 42,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 1,
+      .family = {},
+      .attributes = attrs_b,
   };
 
   EXPECT_FALSE(loom_encoding_equal(&q8_a, &q8_b));
@@ -105,11 +105,11 @@ TEST(EncodingTest, NotEqualForDifferentParams) {
 
 TEST(EncodingTest, AttrsEmptySliceForNoParams) {
   loom_encoding_t encoding = {
-      /*.name_id=*/42,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/0,
-      /*.family=*/{},
-      /*.attributes=*/NULL,
+      .name_id = 42,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = 0,
+      .family = {},
+      .attributes = NULL,
   };
 
   loom_named_attr_slice_t attrs = loom_encoding_attrs(&encoding);

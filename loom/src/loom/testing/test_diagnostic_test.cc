@@ -33,10 +33,10 @@ class TestDiagnosticTest : public ::testing::Test {
 
 TEST_F(TestDiagnosticTest, MatchesStructuredConstraints) {
   loom_test_diagnostic_param_t params[] = {
-      {/*.name=*/IREE_SV("operand_name"), /*.value=*/IREE_SV("operand")},
-      {/*.name=*/IREE_SV("actual_type"), /*.value=*/IREE_SV("i32")},
-      {/*.name=*/IREE_SV("expected_type"),
-       /*.value=*/IREE_SV("floating-point scalar")},
+      {.name = IREE_SV("operand_name"), .value = IREE_SV("operand")},
+      {.name = IREE_SV("actual_type"), .value = IREE_SV("i32")},
+      {.name = IREE_SV("expected_type"),
+       .value = IREE_SV("floating-point scalar")},
   };
   loom_test_diagnostic_t diagnostic = {};
   diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;

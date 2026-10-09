@@ -126,11 +126,11 @@ static iree_status_t vmm_test_allocator_virtual_memory_reserve(
                             "test reservation is already live");
   }
   iree_hal_buffer_params_t params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
-      /*.queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-      /*.min_alignment=*/4096,
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_ALL,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      .min_alignment = 4096,
   };
   IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
       allocator->heap_allocator, params, size, out_virtual_buffer));

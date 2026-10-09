@@ -55,14 +55,14 @@ static iree_hal_amdgpu_device_spec_params_t MakeDeviceSpecParams(
         physical_devices,
     iree_host_size_t physical_device_count, iree_hal_allocator_t* allocator) {
   iree_hal_amdgpu_device_spec_params_t params = {
-      /*.logical_device_id=*/IREE_SV("amdgpu://0"),
-      /*.display_name=*/IREE_SV("AMDGPU test device"),
-      /*.physical_device_count=*/physical_device_count,
-      /*.physical_devices=*/physical_devices,
-      /*.device_memory_capacity_bytes=*/64ull * 1024ull * 1024ull * 1024ull,
-      /*.device_allocator=*/allocator,
-      /*.sanitizer=*/{},
-      /*.flags=*/IREE_HAL_AMDGPU_DEVICE_SPEC_PARAM_FLAG_DMABUF,
+      .logical_device_id = IREE_SV("amdgpu://0"),
+      .display_name = IREE_SV("AMDGPU test device"),
+      .physical_device_count = physical_device_count,
+      .physical_devices = physical_devices,
+      .device_memory_capacity_bytes = 64ull * 1024ull * 1024ull * 1024ull,
+      .device_allocator = allocator,
+      .sanitizer = {},
+      .flags = IREE_HAL_AMDGPU_DEVICE_SPEC_PARAM_FLAG_DMABUF,
   };
   return params;
 }

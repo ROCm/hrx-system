@@ -20,8 +20,8 @@ namespace loom {
 namespace {
 
 static const loom_attr_descriptor_t kElementParameter = {
-    /*.name=*/LOOM_BSTRING_REF(7, "element"),
-    /*.attr_kind=*/LOOM_ATTR_TYPE,
+    .name = LOOM_BSTRING_REF(7, "element"),
+    .attr_kind = LOOM_ATTR_TYPE,
 };
 static const loom_encoding_family_descriptor_t kTypedEncodingDescriptor = {
     /*.name=*/LOOM_BSTRING_REF(5, "typed"),

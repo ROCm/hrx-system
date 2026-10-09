@@ -32,14 +32,14 @@ class BufferFactsTest : public ::testing::Test {
       loom_value_fact_reference_nullability_t nullability,
       loom_value_facts_t maximum_byte_extent) {
     loom_value_fact_buffer_reference_t reference = {
-        /*.maximum_byte_extent=*/maximum_byte_extent,
-        /*.minimum_alignment=*/1,
-        /*.memory_space=*/LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
-        /*.root_value_id=*/LOOM_VALUE_ID_INVALID,
-        /*.root_symbol=*/loom_symbol_ref_null(),
-        /*.has_root_symbol=*/false,
-        /*.alias_scope_id=*/LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
-        /*.nullability=*/nullability,
+        .maximum_byte_extent = maximum_byte_extent,
+        .minimum_alignment = 1,
+        .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_UNKNOWN,
+        .root_value_id = LOOM_VALUE_ID_INVALID,
+        .root_symbol = loom_symbol_ref_null(),
+        .has_root_symbol = false,
+        .alias_scope_id = LOOM_VALUE_FACT_ALIAS_SCOPE_ID_NONE,
+        .nullability = nullability,
     };
     loom_value_facts_t operand_facts = loom_value_facts_unknown();
     IREE_EXPECT_OK(loom_value_facts_make_buffer_reference(

@@ -84,8 +84,8 @@ class LinkSourcesFixture {
         source_ptr = Serialize(module);
       }
       const loomc_link_index_source_options_t index_options = {
-          /*.provider_name=*/loomc_make_cstring_view(identifier.c_str()),
-          /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+          .provider_name = loomc_make_cstring_view(identifier.c_str()),
+          .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
       };
       IREE_CHECK_OK(to_iree_status(loomc_link_index_builder_add_source(
           builder, source_ptr.get(), &index_options, nullptr)));

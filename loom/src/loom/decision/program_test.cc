@@ -445,9 +445,9 @@ ReferenceResult EvaluateReference(
     uint32_t choice_count,
     loom_decision_program_resolution_policy_t resolution_policy) {
   ReferenceResult result = {
-      /*.kind=*/LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
-      /*.action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
-      /*.unresolved_action_ordinal=*/LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .kind = LOOM_DECISION_PROGRAM_RESULT_NO_MATCH,
+      .action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
+      .unresolved_action_ordinal = LOOM_DECISION_PROGRAM_ACTION_INVALID,
   };
   if (hard_truth == LOOM_DECISION_TRUTH_FALSE) {
     result.kind = LOOM_DECISION_PROGRAM_RESULT_HARD_REJECT;

@@ -510,19 +510,19 @@ TEST(JsonSink, SerializesRelatedLocations) {
       "test.use %arg : f32\n";
   iree_host_size_t consume_length = strcspn(source_text, "\n");
   loom_diagnostic_related_location_t related_locations[] = {{
-      /*.label=*/IREE_SV("consumed here"),
-      /*.source_location=*/
-      {
-          /*.provenance=*/LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
-          /*.filename=*/IREE_SV("model.loom"),
-          /*.source=*/iree_make_cstring_view(source_text),
-          /*.start=*/0,
-          /*.end=*/consume_length,
-          /*.start_line=*/3,
-          /*.start_column=*/3,
-          /*.end_line=*/3,
-          /*.end_column=*/3 + (uint32_t)consume_length,
-      },
+      .label = IREE_SV("consumed here"),
+      .source_location =
+          {
+              .provenance = LOOM_SOURCE_PROVENANCE_EXACT_SOURCE,
+              .filename = IREE_SV("model.loom"),
+              .source = iree_make_cstring_view(source_text),
+              .start = 0,
+              .end = consume_length,
+              .start_line = 3,
+              .start_column = 3,
+              .end_line = 3,
+              .end_column = 3 + (uint32_t)consume_length,
+          },
   }};
   loom_diagnostic_param_t params[] = {
       loom_param_string(IREE_SV("arg")),

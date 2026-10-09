@@ -148,8 +148,8 @@ static iree_status_t OpenArtifact(void* user_data,
   auto* state = static_cast<ArtifactSinkState*>(user_data);
   ++state->open_count;
   *out_artifact = (loom_pass_trace_artifact_t){
-      /*.stream=*/&state->stream,
-      /*.path=*/IREE_SV("ir/000000.loom"),
+      .stream = &state->stream,
+      .path = IREE_SV("ir/000000.loom"),
   };
   return iree_ok_status();
 }
@@ -247,19 +247,19 @@ class PassTraceTest : public ::testing::Test {
         .anchor_kind = LOOM_PASS_MODULE,
     };
     return (loom_pass_trace_event_t){
-        /*.module=*/module,
-        /*.instruction=*/&instruction,
-        /*.instruction_index=*/0,
-        /*.invocation_ordinal=*/0,
-        /*.pipeline_symbol=*/IREE_SV("@pipeline"),
-        /*.symbol_name=*/IREE_SV("<none>"),
-        /*.anchor_kind=*/LOOM_PASS_MODULE,
-        /*.point=*/LOOM_PASS_TRACE_POINT_AFTER,
-        /*.changed=*/false,
-        /*.status_code=*/IREE_STATUS_OK,
-        /*.error_count=*/0,
-        /*.warning_count=*/0,
-        /*.remark_count=*/0,
+        .module = module,
+        .instruction = &instruction,
+        .instruction_index = 0,
+        .invocation_ordinal = 0,
+        .pipeline_symbol = IREE_SV("@pipeline"),
+        .symbol_name = IREE_SV("<none>"),
+        .anchor_kind = LOOM_PASS_MODULE,
+        .point = LOOM_PASS_TRACE_POINT_AFTER,
+        .changed = false,
+        .status_code = IREE_STATUS_OK,
+        .error_count = 0,
+        .warning_count = 0,
+        .remark_count = 0,
     };
   }
 

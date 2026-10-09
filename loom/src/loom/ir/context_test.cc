@@ -27,11 +27,11 @@ static const loom_bstring_t kQ8_0EncodingFormatNames[] = {
     LOOM_BSTRING_REF(2, "i8"),
 };
 static const loom_attr_descriptor_t kQ8_0EncodingParameters[] = {{
-    /*.name=*/LOOM_BSTRING_REF(6, "format"),
-    /*.attr_kind=*/LOOM_ATTR_ENUM,
-    /*.flags=*/0,
-    /*.enum_max_value=*/0,
-    /*.enum_case_names=*/kQ8_0EncodingFormatNames,
+    .name = LOOM_BSTRING_REF(6, "format"),
+    .attr_kind = LOOM_ATTR_ENUM,
+    .flags = 0,
+    .enum_max_value = 0,
+    .enum_case_names = kQ8_0EncodingFormatNames,
 }};
 static const loom_encoding_alias_parameter_t kQ8_0EncodingAliasParameters[] = {
     {
@@ -42,9 +42,9 @@ static const loom_encoding_alias_parameter_t kQ8_0EncodingAliasParameters[] = {
 };
 static const loom_encoding_alias_descriptor_t kQ8_0EncodingAliases[] = {
     {
-        /*.name=*/LOOM_BSTRING_REF(16, "encoding.test_i8"),
-        /*.parameter_count=*/IREE_ARRAYSIZE(kQ8_0EncodingAliasParameters),
-        /*.parameters=*/kQ8_0EncodingAliasParameters,
+        .name = LOOM_BSTRING_REF(16, "encoding.test_i8"),
+        .parameter_count = IREE_ARRAYSIZE(kQ8_0EncodingAliasParameters),
+        .parameters = kQ8_0EncodingAliasParameters,
     },
 };
 static const uint8_t kQ8_0EncodingAliasOrdinals[] = {1};
@@ -69,8 +69,8 @@ static const loom_encoding_vtable_t kQ8_0EncodingVtable = {
 };
 
 static const loom_type_descriptor_t kTestTypeDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(9, "test.type"),
-    /*.ir_kind=*/LOOM_TYPE_DIALECT,
+    .name = LOOM_BSTRING_REF(9, "test.type"),
+    .ir_kind = LOOM_TYPE_DIALECT,
 };
 
 static const loom_type_registry_entry_t kTestTypeEntries[] = {
@@ -381,11 +381,11 @@ TEST_F(ContextTest, ParameterizedAttributeFamiliesResolveByKindAndName) {
       "test.tile";
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
-          /*.parameter_count=*/0,
-          /*.primary_parameter_index=*/
-          LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          .parameter_count = 0,
+          .primary_parameter_index =
+              LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
       },
   };
 
@@ -413,11 +413,11 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsWrongKind) {
       "test.tile";
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
-          /*.parameter_count=*/0,
-          /*.primary_parameter_index=*/
-          LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 1),
+          .parameter_count = 0,
+          .primary_parameter_index =
+              LOOM_PARAMETERIZED_ATTR_NO_PRIMARY_PARAMETER,
       },
   };
 
@@ -433,10 +433,10 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsInvalidPrimary) {
       "test.compact";
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
-          /*.parameter_count=*/0,
-          /*.primary_parameter_index=*/0,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          .parameter_count = 0,
+          .primary_parameter_index = 0,
       },
   };
 
@@ -462,11 +462,11 @@ TEST_F(ContextTest, ParameterizedAttributeRegistrationRejectsOptionalPrimary) {
   };
   static const loom_parameterized_attr_descriptor_t kFamilies[] = {
       {
-          /*.name=*/kFamilyName,
-          /*.kind=*/LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
-          /*.parameter_count=*/IREE_ARRAYSIZE(kParameters),
-          /*.primary_parameter_index=*/0,
-          /*.parameter_descriptors=*/kParameters,
+          .name = kFamilyName,
+          .kind = LOOM_PARAMETERIZED_ATTR_KIND(LOOM_DIALECT_TEST, 0),
+          .parameter_count = IREE_ARRAYSIZE(kParameters),
+          .primary_parameter_index = 0,
+          .parameter_descriptors = kParameters,
       },
   };
 
@@ -609,8 +609,8 @@ TEST_F(ContextTest, RegisterEncodingVtableRejectsDuplicateName) {
       loom_context_register_encoding_vtable(&context_, &kQ8_0EncodingVtable));
 
   static const loom_encoding_family_descriptor_t kDuplicateDescriptor = {
-      /*.name=*/LOOM_BSTRING_REF(4, "q8_0"),
-      /*.role=*/LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
+      .name = LOOM_BSTRING_REF(4, "q8_0"),
+      .role = LOOM_ENCODING_ROLE_STORAGE_SCHEMA,
   };
   static const loom_encoding_vtable_t kDuplicate = {
       .descriptor = &kDuplicateDescriptor,

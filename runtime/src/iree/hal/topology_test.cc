@@ -93,24 +93,24 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(
 
   iree_hal_external_buffer_handle_spec_t external_buffer_handles[1] = {
       {
-          /*.handle_type_mask=*/IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
-          /*.direction_flags=*/IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
-              IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
-          /*.allowed_buffer_usage=*/IREE_HAL_BUFFER_USAGE_DEFAULT,
-          /*.allowed_memory_access=*/IREE_HAL_MEMORY_ACCESS_ALL,
-          /*.compatible_memory_type_mask=*/UINT32_MAX,
-          /*.flags=*/IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
+          .handle_type_mask = IREE_HAL_TOPOLOGY_HANDLE_TYPE_DMA_BUF,
+          .direction_flags = IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_IMPORT |
+                             IREE_HAL_EXTERNAL_HANDLE_DIRECTION_FLAG_EXPORT,
+          .allowed_buffer_usage = IREE_HAL_BUFFER_USAGE_DEFAULT,
+          .allowed_memory_access = IREE_HAL_MEMORY_ACCESS_ALL,
+          .compatible_memory_type_mask = UINT32_MAX,
+          .flags = IREE_HAL_EXTERNAL_HANDLE_CAPABILITY_FLAG_CROSS_PROCESS,
       },
   };
   iree_hal_device_memory_spec_t memory = {
-      /*.heap_count=*/0,
-      /*.heaps=*/NULL,
-      /*.memory_type_count=*/0,
-      /*.memory_types=*/NULL,
-      /*.external_buffer_handle_count=*/
-      (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES) ? 1u : 0u,
-      /*.external_buffer_handles=*/external_buffer_handles,
-      /*.flags=*/IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
+      .heap_count = 0,
+      .heaps = NULL,
+      .memory_type_count = 0,
+      .memory_types = NULL,
+      .external_buffer_handle_count =
+          (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_BUFFER_HANDLES) ? 1u : 0u,
+      .external_buffer_handles = external_buffer_handles,
+      .flags = IREE_HAL_DEVICE_MEMORY_SPEC_FLAG_NONE,
   };
   iree_hal_external_timepoint_handle_spec_t external_timepoint_handles[1] = {
       {
@@ -122,18 +122,18 @@ static iree_hal_device_spec_t* CreateTestDeviceSpec(
       },
   };
   iree_hal_device_queue_spec_t queues = {
-      /*.family_count=*/0,
-      /*.families=*/NULL,
-      /*.external_timepoint_handle_count=*/
-      (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES) ? 1u : 0u,
-      /*.external_timepoint_handles=*/external_timepoint_handles,
-      /*.flags=*/IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
+      .family_count = 0,
+      .families = NULL,
+      .external_timepoint_handle_count =
+          (flags & TEST_DEVICE_SPEC_FLAG_EXTERNAL_TIMEPOINT_HANDLES) ? 1u : 0u,
+      .external_timepoint_handles = external_timepoint_handles,
+      .flags = IREE_HAL_DEVICE_QUEUE_SPEC_FLAG_NONE,
   };
   iree_hal_device_spec_params_t params = {
-      /*.identity=*/&identity,
-      /*.memory=*/&memory,
-      /*.virtual_memory=*/NULL,
-      /*.queues=*/&queues,
+      .identity = &identity,
+      .memory = &memory,
+      .virtual_memory = NULL,
+      .queues = &queues,
   };
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_CHECK_OK(iree_hal_device_spec_create(&params, iree_allocator_system(),

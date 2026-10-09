@@ -116,11 +116,12 @@ static iree_status_t ProveSemanticallyEquivalentUpperBound(
     loom_value_id_t query_value, loom_symbolic_proof_result_t* out_result) {
   loom_condition_integer_relation_t relation = {
       .relation = LOOM_SYMBOLIC_INTEGER_RELATION_LE,
-      .left = {
-          /*.kind=*/LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
-          /*.value_id=*/LOOM_VALUE_ID_INVALID,
-          /*.constant=*/0,
-      },
+      .left =
+          {
+              .kind = LOOM_CONDITION_INTEGER_OPERAND_CONSTANT,
+              .value_id = LOOM_VALUE_ID_INVALID,
+              .constant = 0,
+          },
       .right =
           {
               .kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE,

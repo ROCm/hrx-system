@@ -56,15 +56,15 @@ class TemplateCatalogFixture {
     CheckStatus(loom_link_module_index_allocate(
         &context_, &block_pool_, iree_allocator_system(), &index_));
     const loom_link_module_index_add_options_t root_options = {
-        /*.provider_name=*/IREE_SV("root"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = IREE_SV("root"),
+        .role = LOOM_LINK_PROVIDER_ROLE_INPUT,
     };
     CheckStatus(loom_link_module_index_add_materialized(
         index_, root_module_, &root_options,
         /*out_provider_ordinal=*/nullptr));
     const loom_link_module_index_add_options_t library_options = {
-        /*.provider_name=*/IREE_SV("library"),
-        /*.role=*/LOOM_LINK_PROVIDER_ROLE_LIBRARY,
+        .provider_name = IREE_SV("library"),
+        .role = LOOM_LINK_PROVIDER_ROLE_LIBRARY,
     };
     CheckStatus(loom_link_module_index_add_bytecode(
         index_,

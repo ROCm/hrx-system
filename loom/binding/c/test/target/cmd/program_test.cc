@@ -82,13 +82,13 @@ WorkspacePtr CreateWorkspace() {
 
 SourcePtr CreateTextSource(const char* identifier, const char* contents) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, std::strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, std::strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -115,11 +115,11 @@ ModulePtr DeserializeModule(loomc_context_t* context,
 SourcePtr SerializeModuleToBytecode(const loomc_module_t* module,
                                     const char* identifier) {
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+      .identifier = loomc_make_cstring_view(identifier),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(
@@ -225,22 +225,22 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
 
   BuilderPtr builder = CreateIndexBuilder(context.get());
   loomc_link_index_source_options_t requester_options = {
-      /*.provider_name=*/loomc_make_cstring_view("requester"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+      .provider_name = loomc_make_cstring_view("requester"),
+      .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
   };
   loomc_link_index_source_slot_t requester_slot = {};
   LOOMC_ASSERT_OK(
       loomc_link_index_builder_add_source(builder.get(), requester_source.get(),
                                           &requester_options, &requester_slot));
   loomc_link_index_source_options_t schedule_options = {
-      /*.provider_name=*/loomc_make_cstring_view("schedule"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
+      .provider_name = loomc_make_cstring_view("schedule"),
+      .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
   };
   LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
       builder.get(), schedule_source.get(), &schedule_options, nullptr));
   loomc_link_index_source_options_t kernel_options = {
-      /*.provider_name=*/loomc_make_cstring_view("kernel"),
-      /*.role=*/LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
+      .provider_name = loomc_make_cstring_view("kernel"),
+      .role = LOOMC_LINK_PROVIDER_ROLE_LIBRARY,
   };
   LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
       builder.get(), kernel_bytecode.get(), &kernel_options, nullptr));
@@ -266,19 +266,19 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   RequestCapture capture;
   const loomc_host_size_t explicit_roots[] = {private_root.ordinal};
   loomc_cmd_program_product_options_t product_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
-      /*.structure_size=*/sizeof(product_options),
-      /*.next=*/nullptr,
-      /*.link_index=*/link_index.get(),
-      /*.root_symbol_ordinals=*/explicit_roots,
-      /*.root_symbol_count=*/std::size(explicit_roots),
-      /*.flags=*/LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
-      /*.config=*/{},
-      /*.request_sink=*/
-      {
-          /*.publish=*/CaptureRequest,
-          /*.user_data=*/&capture,
-      },
+      .type = LOOMC_STRUCTURE_TYPE_CMD_PROGRAM_PRODUCT_OPTIONS,
+      .structure_size = sizeof(product_options),
+      .next = nullptr,
+      .link_index = link_index.get(),
+      .root_symbol_ordinals = explicit_roots,
+      .root_symbol_count = std::size(explicit_roots),
+      .flags = LOOMC_CMD_PROGRAM_PRODUCT_FLAG_INCLUDE_INPUT_EXPORTS,
+      .config = {},
+      .request_sink =
+          {
+              .publish = CaptureRequest,
+              .user_data = &capture,
+          },
   };
   loomc_product_t* product = nullptr;
   loomc_result_t* result = nullptr;
@@ -391,8 +391,8 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
   product_options.root_symbol_count = std::size(public_roots);
   product_options.flags = 0;
   product_options.request_sink = {
-      /*.publish=*/RejectRequest,
-      /*.user_data=*/&reject_state,
+      .publish = RejectRequest,
+      .user_data = &reject_state,
   };
   product = reinterpret_cast<loomc_product_t*>(0x1);
   result = reinterpret_cast<loomc_result_t*>(0x1);
@@ -419,8 +419,8 @@ template.def<@request.schedule> priority(1) @small(%size: index) {
     ASSERT_TRUE(loomc_request_root_at(request.get(), 0, &root));
     BuilderPtr restored_builder = CreateIndexBuilder(restored_context.get());
     loomc_link_index_source_options_t options = {
-        /*.provider_name=*/loomc_make_cstring_view("restored_request"),
-        /*.role=*/LOOMC_LINK_PROVIDER_ROLE_INPUT,
+        .provider_name = loomc_make_cstring_view("restored_request"),
+        .role = LOOMC_LINK_PROVIDER_ROLE_INPUT,
     };
     LOOMC_ASSERT_OK(loomc_link_index_builder_add_source(
         restored_builder.get(), loomc_request_source(request.get()), &options,

@@ -38,15 +38,15 @@ static iree_status_t CreateSource(loomc_string_view_t identifier,
                                   SourcePtr* out_source) {
   out_source->reset();
   const loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/format,
-      /*.identifier=*/identifier,
-      /*.contents=*/contents,
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
-      /*.release=*/nullptr,
-      /*.release_user_data=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = format,
+      .identifier = identifier,
+      .contents = contents,
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
+      .release = nullptr,
+      .release_user_data = nullptr,
   };
   loomc_source_t* source = nullptr;
   IREE_RETURN_IF_ERROR(

@@ -102,24 +102,22 @@ static iree_status_t ReconstructZeroComponentSlot(
 }
 
 static const loom_boundary_projection_rule_t kZeroComponentRule = {
-    /*.name=*/IREE_SVL("test-zero-component"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-zero-component"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_BLOCK_ARGUMENT),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/nullptr,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanZeroComponentSlot,
-    /*.transport=*/
-    {
-        .plan_source = PlanZeroComponentSource,
-        .materialize_source = MaterializeZeroComponentSource,
-        .reconstruct = ReconstructZeroComponentSlot,
-        .eliminate = nullptr,
-    },
+    .function_applies = nullptr,
+    .slot_matches = nullptr,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanZeroComponentSlot,
+    .transport =
+        {
+            .plan_source = PlanZeroComponentSource,
+            .materialize_source = MaterializeZeroComponentSource,
+            .reconstruct = ReconstructZeroComponentSlot,
+            .eliminate = nullptr,
+        },
 };
 
 typedef struct IdentitySourcePlan {
@@ -237,24 +235,22 @@ static iree_status_t EliminateIdentitySlot(
 }
 
 static const loom_boundary_projection_rule_t kRejectableIdentityRule = {
-    /*.name=*/IREE_SVL("test-rejectable-identity"),
-    /*.type_kind_bits=*/
-    LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
-    /*.slot_role_bits=*/
-    LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
+    .name = IREE_SVL("test-rejectable-identity"),
+    .type_kind_bits = LOOM_BOUNDARY_PROJECTION_TYPE_KIND_BIT(LOOM_TYPE_SCALAR),
+    .slot_role_bits = LOOM_BOUNDARY_PROJECTION_SLOT_ROLE_BIT(
         LOOM_BOUNDARY_PROJECTION_SLOT_BLOCK_ARGUMENT),
-    /*.function_applies=*/nullptr,
-    /*.slot_matches=*/nullptr,
-    /*.initialize=*/nullptr,
-    /*.prepare_function=*/nullptr,
-    /*.plan_slot=*/PlanEliminativeIdentitySlot,
-    /*.transport=*/
-    {
-        .plan_source = PlanRejectableEliminativeIdentitySource,
-        .materialize_source = MaterializeEliminativeIdentitySource,
-        .reconstruct = nullptr,
-        .eliminate = EliminateIdentitySlot,
-    },
+    .function_applies = nullptr,
+    .slot_matches = nullptr,
+    .initialize = nullptr,
+    .prepare_function = nullptr,
+    .plan_slot = PlanEliminativeIdentitySlot,
+    .transport =
+        {
+            .plan_source = PlanRejectableEliminativeIdentitySource,
+            .materialize_source = MaterializeEliminativeIdentitySource,
+            .reconstruct = nullptr,
+            .eliminate = EliminateIdentitySlot,
+        },
 };
 
 typedef struct FinalPlanObservation {
@@ -309,9 +305,9 @@ static iree_status_t CountSelectedFunctionPreparation(
 }
 
 static const loom_pass_info_t kProjectionPassInfo = {
-    /*.name=*/IREE_SVL("test-boundary-projection"),
-    /*.description=*/IREE_SVL("Test boundary projection."),
-    /*.kind=*/LOOM_PASS_MODULE,
+    .name = IREE_SVL("test-boundary-projection"),
+    .description = IREE_SVL("Test boundary projection."),
+    .kind = LOOM_PASS_MODULE,
 };
 
 class BoundaryProjectionTest : public ::testing::Test {

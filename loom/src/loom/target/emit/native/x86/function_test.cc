@@ -131,11 +131,11 @@ TEST_F(FunctionTest, PackedVectorRecipeUsesOrdinaryWriterPath) {
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/0,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/1,
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 0,
+      .block_starts = block_starts,
+      .block_count = 1,
   };
 
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
@@ -150,11 +150,11 @@ TEST_F(FunctionTest, ReadOnlyDataUsesGenericObjectFixup) {
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/1,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/1,
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 1,
+      .block_starts = block_starts,
+      .block_count = 1,
   };
   uint32_t symbol_indices[8] = {};
   symbol_indices[7] = 3;
@@ -191,17 +191,17 @@ TEST_F(FunctionTest, RestoreStackAndRegistersAfterResultTransport) {
   };
   iree_host_size_t block_starts[] = {0, IREE_ARRAYSIZE(instructions)};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/0,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/1,
-      /*.saved_registers=*/(1u << 3) | (1u << 12),
-      /*.may_dirty_upper_vector_state=*/false,
-      /*.has_upper_vector_result=*/false,
-      /*.upper_vector_call_cleanup_indices=*/nullptr,
-      /*.upper_vector_call_cleanup_count=*/0,
-      /*.stack=*/{24, 16, {}},
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 0,
+      .block_starts = block_starts,
+      .block_count = 1,
+      .saved_registers = (1u << 3) | (1u << 12),
+      .may_dirty_upper_vector_state = false,
+      .has_upper_vector_result = false,
+      .upper_vector_call_cleanup_indices = nullptr,
+      .upper_vector_call_cleanup_count = 0,
+      .stack = {24, 16, {}},
   };
   IREE_ASSERT_OK(loom_x86_function_write(&function, nullptr, 0, nullptr,
                                          stream_, &arena_));
@@ -250,17 +250,17 @@ TEST_F(FunctionTest, BranchesSkipEntryTransportAndPreservation) {
   // the exit reaches stack restoration before POP and RET.
   iree_host_size_t block_starts[] = {1, 1, 2, 4, 4};
   const loom_x86_function_t function = {
-      /*.instructions=*/instructions,
-      /*.instruction_count=*/IREE_ARRAYSIZE(instructions),
-      /*.symbol_fixup_count=*/0,
-      /*.block_starts=*/block_starts,
-      /*.block_count=*/4,
-      /*.saved_registers=*/1u << 3,
-      /*.may_dirty_upper_vector_state=*/false,
-      /*.has_upper_vector_result=*/false,
-      /*.upper_vector_call_cleanup_indices=*/nullptr,
-      /*.upper_vector_call_cleanup_count=*/0,
-      /*.stack=*/{16, 16, {}},
+      .instructions = instructions,
+      .instruction_count = IREE_ARRAYSIZE(instructions),
+      .symbol_fixup_count = 0,
+      .block_starts = block_starts,
+      .block_count = 4,
+      .saved_registers = 1u << 3,
+      .may_dirty_upper_vector_state = false,
+      .has_upper_vector_result = false,
+      .upper_vector_call_cleanup_indices = nullptr,
+      .upper_vector_call_cleanup_count = 0,
+      .stack = {16, 16, {}},
   };
 
   // Layout also works when a previous function has already used the stream.

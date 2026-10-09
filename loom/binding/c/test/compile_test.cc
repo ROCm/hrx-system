@@ -67,9 +67,9 @@ WorkspacePtr CreateWorkspace() {
 
 CompilerPtr CreateCompiler(loomc_context_t* context) {
   loomc_compiler_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILER_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILER_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
   };
   loomc_compiler_t* compiler = nullptr;
   loomc_status_t status = loomc_compiler_create(
@@ -114,13 +114,13 @@ PassProgramPtr CreatePassProgramFromModuleSymbol(
 
 SourcePtr CreateTextSource(const char* identifier, const char* contents) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -210,11 +210,11 @@ const loomc_artifact_t* FindArtifact(const loomc_result_t* result,
 
 std::string SerializeModuleToText(const loomc_module_t* module) {
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view("compiled.loom"),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view("compiled.loom"),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(
@@ -230,11 +230,11 @@ std::string SerializeModuleToText(const loomc_module_t* module) {
 SourcePtr SerializeModuleToBytecode(const loomc_module_t* module,
                                     const char* identifier) {
   loomc_module_serialize_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
+      .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+      .identifier = loomc_make_cstring_view(identifier),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_module_serialize_to_source(
@@ -248,15 +248,15 @@ void DestroyAlternateProduct(loomc_product_t* base_product) {
 }
 
 const loomc_product_descriptor_t kAlternateProductDescriptor = {
-    /*.destroy=*/DestroyAlternateProduct,
+    .destroy = DestroyAlternateProduct,
 };
 
 RequestPtr CreateSingleRootRequest(
     SourcePtr source, const loomc_product_descriptor_t* product_descriptor =
                           loomc_compiled_module_product_descriptor()) {
   const loomc_request_root_t root = {
-      /*.module_ordinal=*/0,
-      /*.symbol_ordinal=*/0,
+      .module_ordinal = 0,
+      .symbol_ordinal = 0,
   };
   loomc_request_t* request = nullptr;
   loomc_status_t status = loomc_request_create(
@@ -339,13 +339,13 @@ TEST(CompileTest, CompileModuleRunsPreparedPassProgram) {
   ModulePtr module = CreateValidModule(context.get(), workspace.get());
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/0,
-      /*.config_module=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_make_cstring_view("jit_kernel"),
+      .artifact_flags = 0,
+      .config_flags = 0,
+      .config_module = nullptr,
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -510,13 +510,13 @@ config.def @model36.unused = 1 : index
   const std::string config_text_before =
       SerializeModuleToText(config_module.get());
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .config_module = config_module.get(),
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -545,15 +545,15 @@ TEST(CompileTest, CompileModuleEmitsRequestedArtifacts) {
       context.get(), workspace.get(),
       "config.def @model36.model.hidden_size = 4096 : index\n");
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_make_cstring_view("jit_kernel"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT |
-          LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE |
-          LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
-      /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_make_cstring_view("jit_kernel"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT |
+                        LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE |
+                        LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
+      .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .config_module = config_module.get(),
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -619,11 +619,11 @@ TEST(CompileTest, CompileRequestReturnsOwnedProduct) {
   module.reset();
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_make_cstring_view("request-product"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_make_cstring_view("request-product"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_BYTECODE,
   };
   loomc_product_t* product = nullptr;
   loomc_result_t* result = nullptr;
@@ -667,13 +667,13 @@ config.def @model36.model.hidden_size = 4096 : index
 )"));
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_make_cstring_view("configured-request"),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
-      /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_make_cstring_view("configured-request"),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_MODULE_TEXT,
+      .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .config_module = config_module.get(),
   };
   loomc_product_t* product = nullptr;
   loomc_result_t* result = nullptr;
@@ -708,8 +708,8 @@ TEST(CompileTest, CompileRequestRejectsUnavailableRoots) {
   module.reset();
 
   const loomc_request_root_t unavailable_roots[] = {
-      {/*.module_ordinal=*/1, /*.symbol_ordinal=*/0},
-      {/*.module_ordinal=*/0, /*.symbol_ordinal=*/UINT32_MAX},
+      {.module_ordinal = 1, .symbol_ordinal = 0},
+      {.module_ordinal = 0, .symbol_ordinal = UINT32_MAX},
   };
   for (const loomc_request_root_t root : unavailable_roots) {
     RequestPtr request = CreateRootedRequest(source.get(), root);
@@ -751,14 +751,14 @@ TEST(CompileTest, CompileRequestReturnsFailedParseResultWithoutProduct) {
   PassProgramPtr pass_program = CreateEmptyPassProgram(context.get());
   const char malformed_bytecode[] = "not Loom bytecode";
   loomc_source_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_BYTECODE,
-      /*.identifier=*/loomc_make_cstring_view("malformed.loombc"),
-      /*.contents=*/
-      loomc_make_byte_span(malformed_bytecode, sizeof(malformed_bytecode) - 1),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_BYTECODE,
+      .identifier = loomc_make_cstring_view("malformed.loombc"),
+      .contents = loomc_make_byte_span(malformed_bytecode,
+                                       sizeof(malformed_bytecode) - 1),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   LOOMC_ASSERT_OK(
@@ -786,13 +786,13 @@ TEST(CompileTest, CompileModuleIgnoresUnusedConfig) {
   ModulePtr config_module = CreateConfigProviderModule(
       context.get(), workspace.get(), "config.def @tile_m = 128 : index\n");
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
-      /*.config_flags=*/0,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = LOOMC_COMPILE_ARTIFACT_FLAG_REPORT_JSON,
+      .config_flags = 0,
+      .config_module = config_module.get(),
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -821,13 +821,13 @@ TEST(CompileTest, CompileModuleReportsUnresolvedConfigAsResultDiagnostic) {
   ModulePtr module = CreateConfigConsumerModule(context.get(), workspace.get());
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      /*.config_module=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .config_module = nullptr,
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -847,13 +847,13 @@ TEST(CompileTest, CompileModuleReportsNonConfigProviderAsDiagnostic) {
   ModulePtr config_module = CreateValidModule(context.get(), workspace.get());
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/0,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .config_flags = 0,
+      .config_module = config_module.get(),
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -875,13 +875,13 @@ TEST(CompileTest, CompileModuleReportsConfigConstraintFailure) {
       "config.def @model36.model.hidden_size = 4095 : index\n");
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .config_flags = LOOMC_CONFIG_POLICY_FLAG_REQUIRE_RESOLVED,
+      .config_module = config_module.get(),
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -900,13 +900,13 @@ TEST(CompileTest, CompileModuleRejectsProgramAsConfigModule) {
   ModulePtr module = CreateValidModule(context.get(), workspace.get());
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/0,
-      /*.config_module=*/module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .config_flags = 0,
+      .config_module = module.get(),
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -929,13 +929,13 @@ TEST(CompileTest, CompileModuleRejectsConfigFromAnotherContext) {
                                  "config.def @unused = 1 : index\n");
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/0,
-      /*.config_module=*/config_module.get(),
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .config_flags = 0,
+      .config_module = config_module.get(),
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -953,13 +953,13 @@ TEST(CompileTest, CompileModuleRejectsUnknownConfigPolicy) {
   ModulePtr module = CreateValidModule(context.get(), workspace.get());
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.module_name=*/loomc_string_view_empty(),
-      /*.artifact_flags=*/0,
-      /*.config_flags=*/UINT32_MAX,
-      /*.config_module=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_COMPILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .module_name = loomc_string_view_empty(),
+      .artifact_flags = 0,
+      .config_flags = UINT32_MAX,
+      .config_module = nullptr,
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(
@@ -977,9 +977,9 @@ TEST(CompileTest, CompileModuleRejectsUnknownOptionStructure) {
   ModulePtr module = CreateValidModule(context.get(), workspace.get());
 
   loomc_compile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
   };
   loomc_result_t* result = nullptr;
   loomc_status_t status = loomc_compile_module(

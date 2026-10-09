@@ -117,12 +117,11 @@ TEST(AtomicTest, HostCapabilitiesFollowLockFreeWidths) {
 
 TEST(AtomicTest, ValidatesWaitParameters) {
   iree_hal_atomic_wait_params_t params = {
-      /*.value=*/1,
-      /*.mask=*/UINT32_MAX,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-          IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
+      .value = 1,
+      .mask = UINT32_MAX,
+      .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_SYSTEM_SCOPE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_UNSIGNED_GREATER_EQUAL,
   };
   IREE_EXPECT_OK(iree_hal_atomic_wait_params_validate(params));
 
@@ -136,9 +135,9 @@ TEST(AtomicTest, ValidatesWaitParameters) {
 
 TEST(AtomicTest, RejectsNonCanonical32BitValues) {
   iree_hal_atomic_store_params_t params = {
-      /*.value=*/UINT64_C(1) << 32,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
+      .value = UINT64_C(1) << 32,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_atomic_store_params_validate(params));
@@ -170,12 +169,12 @@ TEST(AtomicTest, ValidatesReadModifyWriteParameters) {
 
 TEST(AtomicTest, RejectsUnknownTargetErrorModes) {
   iree_hal_atomic_wait_params_t wait_params = {
-      /*.value=*/1,
-      /*.mask=*/UINT32_MAX,
-      /*.flags=*/IREE_HAL_ATOMIC_FLAG_NONE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-      /*.target_error_mode=*/2,
+      .value = 1,
+      .mask = UINT32_MAX,
+      .flags = IREE_HAL_ATOMIC_FLAG_NONE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+      .target_error_mode = 2,
   };
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,
                         iree_hal_atomic_wait_params_validate(wait_params));

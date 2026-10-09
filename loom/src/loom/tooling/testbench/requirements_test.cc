@@ -99,9 +99,9 @@ static iree_status_t QueryUnavailable(
   (void)module;
   (void)attrs;
   *out_result = (loom_testbench_requirement_provider_result_t){
-      /*.state=*/LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNAVAILABLE,
-      /*.provider_code=*/IREE_SV("fake_runtime_unavailable"),
-      /*.display_message=*/IREE_SV("fake runtime unavailable"),
+      .state = LOOM_TESTBENCH_REQUIREMENT_PROVIDER_STATE_UNAVAILABLE,
+      .provider_code = IREE_SV("fake_runtime_unavailable"),
+      .display_message = IREE_SV("fake runtime unavailable"),
   };
   return iree_ok_status();
 }
@@ -134,14 +134,14 @@ check.case @unavailable_requirement {
 
   const loom_testbench_requirement_provider_t providers[] = {
       {
-          /*.name=*/IREE_SV("fake.enabled"),
-          /*.user_data=*/nullptr,
-          /*.query=*/QueryEnabled,
+          .name = IREE_SV("fake.enabled"),
+          .user_data = nullptr,
+          .query = QueryEnabled,
       },
       {
-          /*.name=*/IREE_SV("fake.unavailable"),
-          /*.user_data=*/nullptr,
-          /*.query=*/QueryUnavailable,
+          .name = IREE_SV("fake.unavailable"),
+          .user_data = nullptr,
+          .query = QueryUnavailable,
       },
   };
   loom_testbench_requirement_provider_registry_t registry = {};

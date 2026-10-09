@@ -72,11 +72,11 @@ TEST(AmdgpuKernelEntryTest, PrependsTextAndDisplacesBodyFixups) {
       loom_amdgpu_kernel_entry_envelope_for_properties(&properties);
   const uint8_t body[] = {0xaa, 0xbb, 0xcc, 0xdd, 0x00, 0x00, 0x00, 0x00};
   const loom_amdgpu_hsaco_text_fixup_t body_fixup = {
-      /*.kind=*/LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
-      /*.literal_byte_offset=*/4,
-      /*.base_pc_byte_offset=*/0,
-      /*.target_symbol=*/IREE_SV("target_data"),
-      /*.target_symbol_byte_offset=*/12,
+      .kind = LOOM_AMDGPU_HSACO_TEXT_FIXUP_KIND_DATA_SYMBOL_REL32_LO,
+      .literal_byte_offset = 4,
+      .base_pc_byte_offset = 0,
+      .target_symbol = IREE_SV("target_data"),
+      .target_symbol_byte_offset = 12,
   };
 
   TestArena arena;

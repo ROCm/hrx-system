@@ -16,24 +16,24 @@ namespace {
 
 static const loom_attr_descriptor_t kEncodingParameters[] = {
     {
-        /*.name=*/LOOM_BSTRING_REF(4, "base"),
-        /*.attr_kind=*/LOOM_ATTR_ENCODING,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(4, "base"),
+        .attr_kind = LOOM_ATTR_ENCODING,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(5, "block"),
-        /*.attr_kind=*/LOOM_ATTR_I64,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(5, "block"),
+        .attr_kind = LOOM_ATTR_I64,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(7, "element"),
-        /*.attr_kind=*/LOOM_ATTR_TYPE,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(7, "element"),
+        .attr_kind = LOOM_ATTR_TYPE,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
     {
-        /*.name=*/LOOM_BSTRING_REF(7, "options"),
-        /*.attr_kind=*/LOOM_ATTR_DICT,
-        /*.flags=*/LOOM_ATTR_OPTIONAL,
+        .name = LOOM_BSTRING_REF(7, "options"),
+        .attr_kind = LOOM_ATTR_DICT,
+        .flags = LOOM_ATTR_OPTIONAL,
     },
 };
 static const loom_encoding_family_descriptor_t kEncodingDescriptor = {

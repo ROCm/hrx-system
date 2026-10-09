@@ -71,24 +71,24 @@ TEST(CleanupPatternsTest, KeepsPhaseRegistriesSeparate) {
       {source_combine_kind, IgnorePattern, nullptr},
   };
   const loom_rewrite_pattern_provider_t region_initialization_provider = {
-      /*.name=*/IREE_SVL("region-initialization"),
-      /*.patterns=*/region_initialization_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(region_initialization_patterns),
+      .name = IREE_SVL("region-initialization"),
+      .patterns = region_initialization_patterns,
+      .pattern_count = IREE_ARRAYSIZE(region_initialization_patterns),
   };
   const loom_rewrite_pattern_provider_t pre_fold_provider = {
-      /*.name=*/IREE_SVL("pre-fold"),
-      /*.patterns=*/pre_fold_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(pre_fold_patterns),
+      .name = IREE_SVL("pre-fold"),
+      .patterns = pre_fold_patterns,
+      .pattern_count = IREE_ARRAYSIZE(pre_fold_patterns),
   };
   const loom_rewrite_pattern_provider_t post_type_provider = {
-      /*.name=*/IREE_SVL("post-type"),
-      /*.patterns=*/post_type_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(post_type_patterns),
+      .name = IREE_SVL("post-type"),
+      .patterns = post_type_patterns,
+      .pattern_count = IREE_ARRAYSIZE(post_type_patterns),
   };
   const loom_rewrite_pattern_provider_t source_combine_provider = {
-      /*.name=*/IREE_SVL("source-combine"),
-      /*.patterns=*/source_combine_patterns,
-      /*.pattern_count=*/IREE_ARRAYSIZE(source_combine_patterns),
+      .name = IREE_SVL("source-combine"),
+      .patterns = source_combine_patterns,
+      .pattern_count = IREE_ARRAYSIZE(source_combine_patterns),
   };
   const loom_rewrite_pattern_provider_t* region_initialization_providers[] = {
       &region_initialization_provider,

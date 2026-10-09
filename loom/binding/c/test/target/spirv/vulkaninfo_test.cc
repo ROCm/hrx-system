@@ -63,15 +63,15 @@ std::string ToString(loomc_string_view_t value) {
 
 SourcePtr CreateJsonSource(const char* identifier, const char* json) {
   loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(json, strlen(json)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
-      /*.release=*/nullptr,
-      /*.release_user_data=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_UNKNOWN,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(json, strlen(json)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
+      .release = nullptr,
+      .release_user_data = nullptr,
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status =
@@ -141,8 +141,8 @@ void ExpectLimitValue(const loomc_target_profile_t* profile,
                       loomc_target_fact_state_t expected_state,
                       uint64_t expected_value) {
   loomc_spirv_limit_value_t value = {
-      /*.state=*/LOOMC_TARGET_FACT_STATE_UNKNOWN,
-      /*.value=*/0,
+      .state = LOOMC_TARGET_FACT_STATE_UNKNOWN,
+      .value = 0,
   };
   LOOMC_EXPECT_OK(
       loomc_spirv_target_profile_query_limit(profile, limit, &value));
@@ -155,8 +155,8 @@ void ExpectEnvironmentValue(const loomc_target_profile_t* profile,
                             loomc_target_fact_state_t expected_state,
                             uint64_t expected_value) {
   loomc_spirv_environment_value_t value = {
-      /*.state=*/LOOMC_TARGET_FACT_STATE_UNKNOWN,
-      /*.value=*/0,
+      .state = LOOMC_TARGET_FACT_STATE_UNKNOWN,
+      .value = 0,
   };
   LOOMC_EXPECT_OK(loomc_spirv_target_profile_query_environment(
       profile, environment, &value));
@@ -248,12 +248,12 @@ TEST(TargetSpirvVulkaninfoTest, ImportsGpuinfoProfileWrapper) {
   })json";
   SourcePtr source = CreateJsonSource("unit-vulkaninfo.json", json.c_str());
   loomc_spirv_vulkaninfo_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKANINFO_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("imported-wrapper"),
-      /*.profile_name=*/loomc_make_cstring_view("VP_unit_test"),
-      /*.device_index=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKANINFO_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("imported-wrapper"),
+      .profile_name = loomc_make_cstring_view("VP_unit_test"),
+      .device_index = 0,
   };
   TargetProfilePtr profile =
       ImportVulkaninfoProfile(target_environment.get(), source.get(), &options);
@@ -365,12 +365,12 @@ TEST(TargetSpirvVulkaninfoTest, ImportsRawDevicesArrayByIndex) {
   })json";
   SourcePtr source = CreateJsonSource("raw-vulkaninfo.json", json.c_str());
   loomc_spirv_vulkaninfo_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKANINFO_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("selected-device"),
-      /*.profile_name=*/loomc_string_view_empty(),
-      /*.device_index=*/1,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKANINFO_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("selected-device"),
+      .profile_name = loomc_string_view_empty(),
+      .device_index = 1,
   };
   TargetProfilePtr profile =
       ImportVulkaninfoProfile(target_environment.get(), source.get(), &options);
@@ -400,11 +400,11 @@ TEST(TargetSpirvVulkaninfoTest, ImportsSourceLoadedFromOpenFile) {
   ASSERT_EQ(fseek(file, 0, SEEK_SET), 0);
 
   loomc_source_load_options_t source_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_LOAD_OPTIONS,
-      /*.structure_size=*/sizeof(source_options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_UNKNOWN,
-      /*.identifier=*/loomc_make_cstring_view("open-file-vulkaninfo.json"),
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_LOAD_OPTIONS,
+      .structure_size = sizeof(source_options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_UNKNOWN,
+      .identifier = loomc_make_cstring_view("open-file-vulkaninfo.json"),
   };
   loomc_source_t* source = nullptr;
   loomc_status_t status = loomc_source_create_from_file(
@@ -478,12 +478,12 @@ TEST(TargetSpirvVulkaninfoTest, ReportsMissingSelectedProfile) {
   })json";
   SourcePtr source = CreateJsonSource("profiles.json", json.c_str());
   loomc_spirv_vulkaninfo_profile_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_VULKANINFO_PROFILE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.profile_name=*/loomc_make_cstring_view("VP_missing"),
-      /*.device_index=*/0,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_VULKANINFO_PROFILE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_string_view_empty(),
+      .profile_name = loomc_make_cstring_view("VP_missing"),
+      .device_index = 0,
   };
   loomc_target_profile_t* profile = nullptr;
   loomc_result_t* result = nullptr;

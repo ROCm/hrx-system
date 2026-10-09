@@ -76,11 +76,11 @@ class ModuleEncodingTest : public ::testing::Test {
         .value = loom_attr_i64_array(strides, IREE_ARRAYSIZE(strides)),
     }};
     const loom_encoding_t encoding = {
-        /*.name_id=*/family_id_,
-        /*.alias_id=*/alias_id,
-        /*.attribute_count=*/IREE_ARRAYSIZE(parameters),
-        /*.family=*/{},
-        /*.attributes=*/parameters,
+        .name_id = family_id_,
+        .alias_id = alias_id,
+        .attribute_count = IREE_ARRAYSIZE(parameters),
+        .family = {},
+        .attributes = parameters,
     };
     return loom_module_add_encoding(module_, &encoding, out_id);
   }
@@ -135,11 +135,11 @@ TEST_F(ModuleEncodingTest, RejectedParametersAndAliasesReleaseCandidates) {
       {strides_id_, {}, loom_attr_i64_array(strides, 2)},
   };
   const loom_encoding_t duplicate_keys = {
-      /*.name_id=*/family_id_,
-      /*.alias_id=*/LOOM_STRING_ID_INVALID,
-      /*.attribute_count=*/IREE_ARRAYSIZE(parameters),
-      /*.family=*/{},
-      /*.attributes=*/parameters,
+      .name_id = family_id_,
+      .alias_id = LOOM_STRING_ID_INVALID,
+      .attribute_count = IREE_ARRAYSIZE(parameters),
+      .family = {},
+      .attributes = parameters,
   };
   for (int i = 0; i < 8; ++i) {
     uint16_t rejected_id = 0;

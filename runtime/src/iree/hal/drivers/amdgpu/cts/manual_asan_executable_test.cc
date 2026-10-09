@@ -294,8 +294,8 @@ TEST_P(ManualAsanExecutableTest, ReportsCompatibleHooksThroughFeedback) {
   binding_refs[0] = iree_hal_make_buffer_ref(
       output_buffer, /*offset=*/0, iree_hal_buffer_byte_length(output_buffer));
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   asan_device.recorder()->Reset();
@@ -332,8 +332,8 @@ TEST_P(ManualAsanExecutableTest, ReportsCompatibleHooksThroughFeedback) {
   tail_binding_refs[0] = iree_hal_make_buffer_ref(
       output_buffer, kManualAsanBufferLength - 1, /*length=*/1);
   iree_hal_buffer_ref_list_t tail_bindings = {
-      /*.count=*/IREE_ARRAYSIZE(tail_binding_refs),
-      /*.values=*/tail_binding_refs,
+      .count = IREE_ARRAYSIZE(tail_binding_refs),
+      .values = tail_binding_refs,
   };
   asan_device.recorder()->Reset();
   IREE_ASSERT_OK(DispatchManualAsanSelector(

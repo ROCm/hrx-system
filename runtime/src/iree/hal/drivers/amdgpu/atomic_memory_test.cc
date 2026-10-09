@@ -125,10 +125,10 @@ static iree_hal_amdgpu_atomic_memory_cell_flags_t SelectImportCells(
     uint32_t global_flags, bool allocation_flags_available,
     uint32_t allocation_flags) {
   const iree_hal_amdgpu_atomic_memory_import_selection_t selection = {
-      /*.global_flags=*/global_flags,
-      /*.allocation_flags=*/allocation_flags,
-      /*.allocation_flags_available=*/allocation_flags_available,
-      /*.candidate_cells=*/IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL,
+      .global_flags = global_flags,
+      .allocation_flags = allocation_flags,
+      .allocation_flags_available = allocation_flags_available,
+      .candidate_cells = IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAGS_ALL,
   };
   return iree_hal_amdgpu_atomic_memory_select_import_cells(&selection);
 }

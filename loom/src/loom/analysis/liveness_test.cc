@@ -268,9 +268,9 @@ func.def @ordered(%a: i32, %b: i32) -> (i32) {
       loom_block_const_op(entry, 2),
   };
   const loom_liveness_block_order_t block_order = {
-      /*.block=*/entry,
-      /*.ops=*/ordered_ops,
-      /*.op_count=*/IREE_ARRAYSIZE(ordered_ops),
+      .block = entry,
+      .ops = ordered_ops,
+      .op_count = IREE_ARRAYSIZE(ordered_ops),
   };
   const loom_liveness_order_t order = {
       .blocks = &block_order,

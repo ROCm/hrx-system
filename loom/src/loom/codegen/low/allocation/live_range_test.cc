@@ -186,13 +186,13 @@ TEST(LowAllocationLiveRangeTest, ChecksBlockObservableOverlap) {
   const loom_value_id_t live_in_values[] = {1};
   const loom_liveness_block_info_t blocks[] = {
       {
-          /*.block=*/nullptr,
-          /*.start_point=*/0,
-          /*.end_point=*/10,
-          /*.live_in_values=*/live_in_values,
-          /*.live_in_count=*/IREE_ARRAYSIZE(live_in_values),
-          /*.live_out_values=*/nullptr,
-          /*.live_out_count=*/0,
+          .block = nullptr,
+          .start_point = 0,
+          .end_point = 10,
+          .live_in_values = live_in_values,
+          .live_in_count = IREE_ARRAYSIZE(live_in_values),
+          .live_out_values = nullptr,
+          .live_out_count = 0,
       },
   };
   loom_liveness_analysis_t liveness = Liveness(blocks, IREE_ARRAYSIZE(blocks));

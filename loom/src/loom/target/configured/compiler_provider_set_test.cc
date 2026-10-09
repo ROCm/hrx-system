@@ -80,8 +80,8 @@ TEST(ConfiguredCompilerProviderSetTest, NativeCpuSelectionUsesDeviceFacts) {
   IREE_ASSERT_OK(loom_target_environment_initialize(
       loom_configured_compiler_provider_set(), &environment));
   const loom_target_specification_t scalar_specification = {
-      /*.family=*/IREE_SVL("x86"),
-      /*.selector=*/IREE_SVL("scalar"),
+      .family = IREE_SVL("x86"),
+      .selector = IREE_SVL("scalar"),
   };
   const loom_target_profile_t* scalar_profile = nullptr;
   IREE_ASSERT_OK(loom_target_environment_select_profile(

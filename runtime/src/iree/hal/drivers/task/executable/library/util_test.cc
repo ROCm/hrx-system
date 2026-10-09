@@ -16,7 +16,7 @@ namespace {
 
 TEST(ExecutableLibraryUtilTest, AcceptsCurrentLibraryVersion) {
   const iree_hal_executable_library_header_t header = {
-      /*.version=*/IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
+      .version = IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST,
   };
   const iree_hal_executable_library_v0_t library = {
       .header = &header,
@@ -30,7 +30,7 @@ TEST(ExecutableLibraryUtilTest, AcceptsCurrentLibraryVersion) {
 
 TEST(ExecutableLibraryUtilTest, RejectsPreviousLibraryVersion) {
   const iree_hal_executable_library_header_t header = {
-      /*.version=*/IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST - 1,
+      .version = IREE_HAL_EXECUTABLE_LIBRARY_VERSION_LATEST - 1,
   };
   const iree_hal_executable_library_v0_t library = {
       .header = &header,
@@ -80,11 +80,11 @@ TEST(ExecutableLibraryUtilTest, ReportsFixedWorkgroupLocalMemory) {
 
 TEST(ExecutableLibraryUtilTest, InitializesUnspecifiedParameterFields) {
   const iree_hal_executable_dispatch_parameter_v0_t parameter = {
-      /*.type=*/IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
-      /*.size=*/sizeof(void*),
-      /*.flags=*/IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
-      /*.name=*/UINT16_MAX,
-      /*.offset=*/0,
+      .type = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_TYPE_V0_BINDING,
+      .size = sizeof(void*),
+      .flags = IREE_HAL_EXECUTABLE_DISPATCH_PARAM_FLAG_V0_NONE,
+      .name = UINT16_MAX,
+      .offset = 0,
   };
   const iree_hal_executable_dispatch_parameter_v0_t* parameters[] = {
       &parameter,

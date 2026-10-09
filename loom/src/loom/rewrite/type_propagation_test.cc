@@ -24,8 +24,8 @@ namespace loom {
 namespace {
 
 static const loom_encoding_family_descriptor_t kLayoutDescriptor = {
-    /*.name=*/LOOM_BSTRING_REF(11, "test.layout"),
-    /*.role=*/LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+    .name = LOOM_BSTRING_REF(11, "test.layout"),
+    .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
 };
 static const loom_encoding_vtable_t kLayoutVtable = {
     .descriptor = &kLayoutDescriptor,

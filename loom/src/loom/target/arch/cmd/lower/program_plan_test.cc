@@ -224,9 +224,9 @@ command.program.def public @root() launch() {
       .user_data = &pattern_data,
   };
   const loom_rewrite_pattern_provider_t provider = {
-      /*.name=*/IREE_SVL("cmd-program-plan-test"),
-      /*.patterns=*/&pattern,
-      /*.pattern_count=*/1,
+      .name = IREE_SVL("cmd-program-plan-test"),
+      .patterns = &pattern,
+      .pattern_count = 1,
   };
   const loom_rewrite_pattern_provider_t* providers[] = {&provider};
   const loom_cleanup_pattern_provider_set_t provider_set = {
@@ -393,7 +393,7 @@ command.program.def public @selected_schedule() launch(%storage: buffer) {
   IREE_ASSERT_OK(loom_link_module_index_allocate(
       &context_, &block_pool_, iree_allocator_system(), &index));
   const loom_link_module_index_add_options_t add_options = {
-      /*.provider_name=*/IREE_SV("indexed_command_test"),
+      .provider_name = IREE_SV("indexed_command_test"),
   };
   iree_host_size_t provider_ordinal = 0;
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(
@@ -634,7 +634,7 @@ command.program.def public @root_b() launch(%storage: buffer) {
   IREE_ASSERT_OK(loom_link_module_index_allocate(
       &context_, &block_pool_, iree_allocator_system(), &index));
   const loom_link_module_index_add_options_t add_options = {
-      /*.provider_name=*/IREE_SV("indexed_kernel_request_test"),
+      .provider_name = IREE_SV("indexed_kernel_request_test"),
   };
   iree_host_size_t provider_ordinal = 0;
   IREE_ASSERT_OK(loom_link_module_index_add_materialized(

@@ -50,9 +50,9 @@ static iree_status_t counting_byte_sequence_enumerate(
 }
 
 static const iree_byte_sequence_vtable_t counting_byte_sequence_vtable = {
-    /*.destroy=*/counting_byte_sequence_destroy,
-    /*.enumerate=*/counting_byte_sequence_enumerate,
-    /*.try_get_contiguous_span=*/NULL,
+    .destroy = counting_byte_sequence_destroy,
+    .enumerate = counting_byte_sequence_enumerate,
+    .try_get_contiguous_span = NULL,
 };
 
 TEST(VMModuleBinaryTest,

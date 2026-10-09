@@ -33,10 +33,10 @@ class AmdgpuQueueExecutionResourceTest : public CtsTestBase<> {
     family_spec_ = iree_hal_queue_family_spec(queue_family_);
 
     const iree_hal_executable_target_selection_t exact_target_selection = {
-        /*.family=*/IREE_SV("amdgpu"),
-        /*.target_key=*/iree_string_view_empty(),
-        /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
-        /*.physical_device_affinity=*/family_spec_->physical_device_affinity,
+        .family = IREE_SV("amdgpu"),
+        .target_key = iree_string_view_empty(),
+        .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_EXACT,
+        .physical_device_affinity = family_spec_->physical_device_affinity,
     };
     const iree_hal_executable_target_selection_result_t exact_target_result =
         iree_hal_device_spec_select_executable_target(

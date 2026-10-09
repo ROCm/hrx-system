@@ -77,7 +77,7 @@ class ReplayDispatchTest : public ::testing::Test {
     family_ = iree_hal_device_queue_family(device_, 0);
     ASSERT_NE(nullptr, family_);
     const iree_hal_executable_target_selection_t selection = {
-        /*.family=*/IREE_SV("cpu"),
+        .family = IREE_SV("cpu"),
     };
     auto result = iree_hal_device_spec_select_executable_target(
         iree_hal_device_spec(device_), &selection);

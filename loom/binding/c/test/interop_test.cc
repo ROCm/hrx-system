@@ -41,15 +41,15 @@ ContextPtr CreateContext() {
 
 ContextPtr CreateTargetContext(loomc_target_environment_t* target_environment) {
   loomc_context_target_options_t target_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(target_options),
-      /*.next=*/nullptr,
-      /*.target_environment=*/target_environment,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_TARGET_OPTIONS,
+      .structure_size = sizeof(target_options),
+      .next = nullptr,
+      .target_environment = target_environment,
   };
   loomc_context_options_t context_options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
-      /*.structure_size=*/sizeof(context_options),
-      /*.next=*/&target_options,
+      .type = LOOMC_STRUCTURE_TYPE_CONTEXT_OPTIONS,
+      .structure_size = sizeof(context_options),
+      .next = &target_options,
   };
   loomc_context_t* context = nullptr;
   LOOMC_EXPECT_OK(loomc_context_create(&context_options,
@@ -66,13 +66,13 @@ WorkspacePtr CreateWorkspace() {
 
 SourcePtr CreateSource(const char* identifier, const char* contents) {
   const loomc_source_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.format=*/LOOMC_SOURCE_FORMAT_TEXT,
-      /*.identifier=*/loomc_make_cstring_view(identifier),
-      /*.contents=*/loomc_make_byte_span(contents, std::strlen(contents)),
-      /*.storage=*/LOOMC_SOURCE_STORAGE_COPY,
+      .type = LOOMC_STRUCTURE_TYPE_SOURCE_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .format = LOOMC_SOURCE_FORMAT_TEXT,
+      .identifier = loomc_make_cstring_view(identifier),
+      .contents = loomc_make_byte_span(contents, std::strlen(contents)),
+      .storage = LOOMC_SOURCE_STORAGE_COPY,
   };
   loomc_source_t* source = nullptr;
   LOOMC_EXPECT_OK(
