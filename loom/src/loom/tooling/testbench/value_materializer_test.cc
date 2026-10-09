@@ -61,8 +61,7 @@ class ValueMaterializerTest : public ::testing::Test {
   }
 
   loom_module_t* ParseModule(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("value_materializer_test.loom"),
@@ -645,10 +644,10 @@ check.case @file_io {
   IREE_ASSERT_OK(
       iree_io_stream_seek(written_stream_, IREE_IO_STREAM_SEEK_SET, 0));
   iree_hal_buffer_view_t* written_buffer_view = nullptr;
-  iree_hal_buffer_params_t buffer_params = {};
-  buffer_params.usage = IREE_HAL_BUFFER_USAGE_TRANSFER;
-  buffer_params.access = IREE_HAL_MEMORY_ACCESS_READ;
-  buffer_params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
+  iree_hal_buffer_params_t buffer_params = {
+      .usage = IREE_HAL_BUFFER_USAGE_TRANSFER,
+      .access = IREE_HAL_MEMORY_ACCESS_READ,
+      .type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL};
   IREE_ASSERT_OK(iree_numpy_npy_load_ndarray(
       written_stream_, IREE_NUMPY_NPY_LOAD_OPTION_DEFAULT, buffer_params,
       device_allocator_, &written_buffer_view));

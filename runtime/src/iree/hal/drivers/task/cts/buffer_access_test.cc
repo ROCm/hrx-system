@@ -51,9 +51,9 @@ TEST_P(TaskBufferAccessTest, DirectionalStorageBindings) {
         i == 2 ? IREE_HAL_MEMORY_ACCESS_WRITE : IREE_HAL_MEMORY_ACCESS_READ;
     params.usage = i == 2 ? IREE_HAL_BUFFER_USAGE_STORAGE_WRITE
                           : IREE_HAL_BUFFER_USAGE_STORAGE_READ;
-    iree_hal_external_buffer_t external = {};
-    external.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
-    external.size = sizeof(values[i]);
+    iree_hal_external_buffer_t external = {
+        .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+        .size = sizeof(values[i])};
     external.handle.host_allocation.ptr = values[i].data();
     IREE_ASSERT_OK(iree_hal_allocator_import_buffer(
         device_allocator_, params, &external,
@@ -129,9 +129,9 @@ TEST_P(TaskBufferAccessTest, DirectionalStorageBindings) {
                       IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
         params.usage = IREE_HAL_BUFFER_USAGE_STORAGE_READ;
         params.access = IREE_HAL_MEMORY_ACCESS_ALL;
-        iree_hal_external_buffer_t external = {};
-        external.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
-        external.size = sizeof(values[2]);
+        iree_hal_external_buffer_t external = {
+            .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+            .size = sizeof(values[2])};
         external.handle.host_allocation.ptr = values[2].data();
         Ref<iree_hal_buffer_t> storage_read_only;
         IREE_ASSERT_OK(iree_hal_allocator_import_buffer(
@@ -185,8 +185,7 @@ TEST_P(TaskBufferAccessTest, ExecutionOnlyNestedViews) {
   IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
       device_, iree_hal_queue_family(queue), &backend));
   Ref<iree_hal_pool_t> pool;
-  iree_hal_passthrough_pool_options_t options = {};
-  options.asan = backend.asan;
+  iree_hal_passthrough_pool_options_t options = {.asan = backend.asan};
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
       options, backend.slab_provider, backend.notification,
       backend.frontier_tracker, backend.maintenance, iree_allocator_system(),

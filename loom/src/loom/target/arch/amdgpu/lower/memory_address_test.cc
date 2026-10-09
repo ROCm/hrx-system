@@ -29,8 +29,8 @@ loom_low_source_memory_dynamic_term_t Term(loom_value_id_t index, int64_t low,
 // A realization is the exact sum of its covered byte terms; its retained facts
 // may be stronger than independently adding their ranges.
 loom_amdgpu_memory_access_t MixedAccess() {
-  loom_amdgpu_memory_access_t access = {};
-  access.address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_GLOBAL_SADDR;
+  loom_amdgpu_memory_access_t access = {
+      .address_form = LOOM_AMDGPU_MEMORY_ADDRESS_FORM_GLOBAL_SADDR};
   access.source.dynamic_term_count = 2;
   access.source.dynamic_terms[0] = Term(1, 0, 1024);
   access.source.dynamic_terms[1] = Term(2, 0, 252);

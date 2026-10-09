@@ -16,8 +16,7 @@ static loom_trait_flags_t ProjectEffects(const loom_low_effect_t* effects,
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.effects = effects;
   descriptor_set.effect_count = effect_count;
-  loom_low_descriptor_t descriptor = {};
-  descriptor.effect_count = effect_count;
+  loom_low_descriptor_t descriptor = {.effect_count = effect_count};
   return loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);
 }
 
@@ -59,8 +58,7 @@ TEST(LowDescriptorTraitsTest, OpaqueEffectsRemainUnknown) {
 }
 
 TEST(LowDescriptorTraitsTest, BarrierIsMemoryFence) {
-  loom_low_effect_t effect = {};
-  effect.kind = LOOM_LOW_EFFECT_KIND_BARRIER;
+  loom_low_effect_t effect = {.kind = LOOM_LOW_EFFECT_KIND_BARRIER};
 
   const loom_trait_flags_t traits = ProjectEffects(&effect, 1);
 
@@ -73,8 +71,7 @@ TEST(LowDescriptorTraitsTest, BarrierIsMemoryFence) {
 }
 
 TEST(LowDescriptorTraitsTest, CounterOrdersWithoutAccessingMemory) {
-  loom_low_effect_t effect = {};
-  effect.kind = LOOM_LOW_EFFECT_KIND_COUNTER;
+  loom_low_effect_t effect = {.kind = LOOM_LOW_EFFECT_KIND_COUNTER};
   const loom_trait_flags_t traits = ProjectEffects(&effect, 1);
   EXPECT_TRUE(loom_traits_order_memory(traits));
   EXPECT_TRUE(loom_traits_may_read(traits));
@@ -168,12 +165,9 @@ TEST(LowDescriptorTraitsTest, ImplicitStateResultIsNonDeterministic) {
   operand.role = LOOM_LOW_OPERAND_ROLE_RESULT;
   operand.flags =
       LOOM_LOW_OPERAND_FLAG_IMPLICIT | LOOM_LOW_OPERAND_FLAG_STATE_WRITE;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.operands = &operand;
-  descriptor_set.operand_count = 1;
-  loom_low_descriptor_t descriptor = {};
-  descriptor.operand_count = 1;
-  descriptor.result_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {.operands = &operand,
+                                              .operand_count = 1};
+  loom_low_descriptor_t descriptor = {.operand_count = 1, .result_count = 1};
 
   const loom_trait_flags_t traits =
       loom_low_descriptor_effective_traits(&descriptor_set, &descriptor);

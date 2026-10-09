@@ -326,10 +326,10 @@ TEST_F(LowAllocationNumberingTest, IndependentClassesDoNotConflict) {
 }
 
 TEST_F(LowAllocationNumberingTest, OverlappingLeaseJoinsRigidBlocks) {
-  loom_low_allocation_storage_lease_t instance = {};
-  instance.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  instance.location_base = 3;
-  instance.location_count = 2;
+  loom_low_allocation_storage_lease_t instance = {
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 3,
+      .location_count = 2};
   leases_.instances = &instance;
   leases_.instance_count = 1;
   Number();
@@ -340,15 +340,15 @@ TEST_F(LowAllocationNumberingTest, OverlappingLeaseJoinsRigidBlocks) {
 }
 
 TEST_F(LowAllocationNumberingTest, ReservedRangeKeepsItsOriginalCoordinates) {
-  loom_low_allocation_resolved_reserved_range_t reserved = {};
-  reserved.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  reserved.location_base = 8;
-  reserved.location_count = 1;
+  loom_low_allocation_resolved_reserved_range_t reserved = {
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = 8,
+      .location_count = 1};
   constraints_.reserved_ranges = &reserved;
   constraints_.reserved_range_count = 1;
   // The scalar at the reserved coordinate represents its ABI-fixed occupant.
-  loom_low_allocation_resolved_fixed_value_t fixed = {};
-  fixed.assignment = assignments_[2];
+  loom_low_allocation_resolved_fixed_value_t fixed = {.assignment =
+                                                          assignments_[2]};
   constraints_.fixed_values = &fixed;
   constraints_.fixed_value_count = 1;
   Number();
@@ -357,8 +357,8 @@ TEST_F(LowAllocationNumberingTest, ReservedRangeKeepsItsOriginalCoordinates) {
 }
 
 TEST_F(LowAllocationNumberingTest, KeepsFixedAndImplicitLocationsAnchored) {
-  loom_low_allocation_resolved_fixed_value_t fixed = {};
-  fixed.assignment = assignments_[0];
+  loom_low_allocation_resolved_fixed_value_t fixed = {.assignment =
+                                                          assignments_[0]};
   constraints_.fixed_values = &fixed;
   constraints_.fixed_value_count = 1;
   uint16_t implicit_counts[] = {1, 0};

@@ -282,9 +282,8 @@ TEST_F(LowLowerRuleValueTest,
       .source_node_index = 0,
       .index = 0,
   };
-  loom_low_lower_rule_set_t rule_set = {};
-  rule_set.value_refs = &value_ref;
-  rule_set.value_ref_count = 1;
+  loom_low_lower_rule_set_t rule_set = {.value_refs = &value_ref,
+                                        .value_ref_count = 1};
   loom_value_id_t resolved = LOOM_VALUE_ID_INVALID;
   ASSERT_TRUE(loom_low_lower_rule_resolve_source_value_from_nodes(
       module_, &fact_table_, (loom_target_contract_vector_lane_projection_t){0},
@@ -309,9 +308,8 @@ TEST_F(LowLowerRuleValueTest, ResolvesUniformElementOrigins) {
         .source_node_index = 0,
         .index = 0,
     };
-    loom_low_lower_rule_set_t rule_set = {};
-    rule_set.value_refs = &value_ref;
-    rule_set.value_ref_count = 1;
+    loom_low_lower_rule_set_t rule_set = {.value_refs = &value_ref,
+                                          .value_ref_count = 1};
     loom_value_id_t resolved = LOOM_VALUE_ID_INVALID;
     ASSERT_TRUE(loom_low_lower_rule_resolve_source_value_from_nodes(
         module_, &fact_table_,

@@ -123,8 +123,7 @@ TEST(MemoryTypeTest, RoundTripsOrthogonalLocalityAndCoherence) {
 }
 
 TEST(BufferRangeTest, AcceptsContainedRanges) {
-  iree_hal_buffer_t buffer = {};
-  buffer.byte_length = 16;
+  iree_hal_buffer_t buffer = {.byte_length = 16};
 
   IREE_EXPECT_OK(iree_hal_buffer_validate_range(&buffer, 0, 16));
   IREE_EXPECT_OK(iree_hal_buffer_validate_range(&buffer, 7, 9));

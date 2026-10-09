@@ -217,25 +217,26 @@ TEST(ContractStorageTest, BuildsMatrixRequestFromPayloadFacts) {
       EncodedSchema(LOOM_VALUE_FACT_NUMERIC_FORMAT_BF6, 32,
                     LOOM_VALUE_FACT_NUMERIC_FORMAT_NONE, 6, 32);
 
-  loom_contract_matrix_request_options_t options = {};
-  options.shape = (loom_contract_shape_t){.m = 16, .n = 16, .k = 128};
-  options.k_group_size = 1;
-  options.lhs = MatrixPayloadWithAuxiliaryData(LOOM_CONTRACT_OPERAND_ROLE_LHS,
-                                               lhs_schema);
-  options.rhs = MatrixPayloadWithAuxiliaryData(LOOM_CONTRACT_OPERAND_ROLE_RHS,
-                                               rhs_schema);
-  options.accumulator_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
-  options.result_numeric_type = LOOM_CONTRACT_NUMERIC_F32;
-  options.arithmetic = LOOM_CONTRACT_ARITHMETIC_MIXED_DOT;
-  options.fragment = (loom_contract_fragment_t){
-      .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
-      .vector_bit_width = {},
-      .source_lane_count = {},
-      .result_lane_count = {},
-      .subgroup_size = 64,
-  };
-  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX;
-  options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
+  loom_contract_matrix_request_options_t options = {
+      .shape = (loom_contract_shape_t){.m = 16, .n = 16, .k = 128},
+      .k_group_size = 1,
+      .lhs = MatrixPayloadWithAuxiliaryData(LOOM_CONTRACT_OPERAND_ROLE_LHS,
+                                            lhs_schema),
+      .rhs = MatrixPayloadWithAuxiliaryData(LOOM_CONTRACT_OPERAND_ROLE_RHS,
+                                            rhs_schema),
+      .accumulator_numeric_type = LOOM_CONTRACT_NUMERIC_F32,
+      .result_numeric_type = LOOM_CONTRACT_NUMERIC_F32,
+      .arithmetic = LOOM_CONTRACT_ARITHMETIC_MIXED_DOT,
+      .fragment =
+          (loom_contract_fragment_t){
+              .atom_bits = LOOM_CONTRACT_FRAGMENT_SUBGROUP_LANE,
+              .vector_bit_width = {},
+              .source_lane_count = {},
+              .result_lane_count = {},
+              .subgroup_size = 64,
+          },
+      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_MATRIX,
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED};
 
   loom_contract_request_t request = {};
   loom_contract_diagnostic_t diagnostic = {};
@@ -303,24 +304,25 @@ TEST(ContractStorageTest, BuildsMatrixRequestWithDynamicShapeRefs) {
 }
 
 TEST(ContractStorageTest, BuildsPackedDotRequestFromPlainPayloadFacts) {
-  loom_contract_matrix_request_options_t options = {};
-  options.shape = (loom_contract_shape_t){.m = 8, .n = 1, .k = 32};
-  options.k_group_size = 4;
-  options.lhs =
-      PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_NUMERIC_U8);
-  options.rhs =
-      PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS, LOOM_CONTRACT_NUMERIC_I8);
-  options.accumulator_numeric_type = LOOM_CONTRACT_NUMERIC_I32;
-  options.result_numeric_type = LOOM_CONTRACT_NUMERIC_I32;
-  options.arithmetic = LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT;
-  options.fragment = (loom_contract_fragment_t){
-      .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
-      .vector_bit_width = 256,
-      .source_lane_count = 32,
-      .result_lane_count = 8,
-  };
-  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT;
-  options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
+  loom_contract_matrix_request_options_t options = {
+      .shape = (loom_contract_shape_t){.m = 8, .n = 1, .k = 32},
+      .k_group_size = 4,
+      .lhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS,
+                          LOOM_CONTRACT_NUMERIC_U8),
+      .rhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS,
+                          LOOM_CONTRACT_NUMERIC_I8),
+      .accumulator_numeric_type = LOOM_CONTRACT_NUMERIC_I32,
+      .result_numeric_type = LOOM_CONTRACT_NUMERIC_I32,
+      .arithmetic = LOOM_CONTRACT_ARITHMETIC_INTEGER_DOT,
+      .fragment =
+          (loom_contract_fragment_t){
+              .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
+              .vector_bit_width = 256,
+              .source_lane_count = 32,
+              .result_lane_count = 8,
+          },
+      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT,
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED};
 
   loom_contract_request_t request = {};
   ASSERT_TRUE(

@@ -734,9 +734,8 @@ class AmdgpuHalKernelLibraryTest : public ::testing::Test {
     ASSERT_NO_FATAL_FAILURE(ParseGfx942Kernel(&module));
 
     loom_amdgpu_hal_kernel_library_t library = {};
-    loom_amdgpu_hal_kernel_library_options_t options = {};
-    options.diagnostic_sink = capture->sink();
-    options.max_errors = 20;
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        .diagnostic_sink = capture->sink(), .max_errors = 20};
     iree_status_t status = loom_amdgpu_compile_hal_kernel_library(
         module, &options, iree_allocator_system(), out_emitted, &library);
     loom_amdgpu_hal_kernel_library_deinitialize(&library,
@@ -776,13 +775,13 @@ TEST_F(AmdgpuHalKernelLibraryTest, RetainsRequestedArtifactMetadata) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_PRESSURE_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SPILL_ROWS |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_SOURCE_LOW_ROWS;
-  loom_target_emit_request_t request = {};
-  request.module = module;
-  request.flags = LOOM_TARGET_EMIT_REQUEST_FLAG_RETAIN_TARGET_BUNDLE |
-                  LOOM_TARGET_EMIT_REQUEST_FLAG_TARGET_LISTING;
-  request.compile_report = &report;
-  request.scratch_arena = &scratch_arena;
-  request.allocator = iree_allocator_system();
+  loom_target_emit_request_t request = {
+      .module = module,
+      .flags = LOOM_TARGET_EMIT_REQUEST_FLAG_RETAIN_TARGET_BUNDLE |
+               LOOM_TARGET_EMIT_REQUEST_FLAG_TARGET_LISTING,
+      .compile_report = &report,
+      .scratch_arena = &scratch_arena,
+      .allocator = iree_allocator_system()};
   loom_target_emit_artifact_t artifact = {};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_hal_kernel_library_emitter.emit(&request, &emitted,
@@ -900,11 +899,11 @@ TEST_F(AmdgpuHalKernelLibraryTest,
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.function_versions = &function_versions;
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
-  options.report = &report;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .function_versions = &function_versions,
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+      .report = &report};
   bool emitted = false;
   loom_amdgpu_hal_kernel_library_t library = {};
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
@@ -968,9 +967,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsIncompatibleRepresentationContract) {
       ParseSource(iree_make_cstring_view(kSource), &module));
 
   DiagnosticCapture capture;
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = true;
   loom_amdgpu_hal_kernel_library_t library = {};
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
@@ -1009,10 +1007,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsGfx1250HardwareEntryEnvelope) {
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
-  options.report = &report;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20, .report = &report};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1073,10 +1069,10 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsDynamicLocalSizeKernel) {
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
-  options.artifact_manifest = artifact_manifest_options;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(),
+      .max_errors = 20,
+      .artifact_manifest = artifact_manifest_options};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1128,9 +1124,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsEveryLinkedCanonicalTarget) {
 
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
-    loom_amdgpu_hal_kernel_library_options_t options = {};
-    options.diagnostic_sink = capture.sink();
-    options.max_errors = 20;
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        .diagnostic_sink = capture.sink(), .max_errors = 20};
     bool emitted = false;
     IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
         module, &options, iree_allocator_system(), &emitted, &library))
@@ -1262,10 +1257,10 @@ TEST_F(AmdgpuHalKernelLibraryTest,
     manifest_options.mode = LOOM_TARGET_ARTIFACT_MANIFEST_MODE_SUMMARY;
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
-    loom_amdgpu_hal_kernel_library_options_t options = {};
-    options.diagnostic_sink = capture.sink();
-    options.max_errors = 20;
-    options.artifact_manifest = manifest_options;
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        .diagnostic_sink = capture.sink(),
+        .max_errors = 20,
+        .artifact_manifest = manifest_options};
     bool emitted = false;
     IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
         module, &options, iree_allocator_system(), &emitted, &library));
@@ -1358,10 +1353,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsMatrixFeatureCapabilities) {
     loom_target_compile_report_initialize(&report, iree_allocator_system());
     DiagnosticCapture capture;
     loom_amdgpu_hal_kernel_library_t library = {};
-    loom_amdgpu_hal_kernel_library_options_t options = {};
-    options.diagnostic_sink = capture.sink();
-    options.max_errors = 20;
-    options.report = &report;
+    loom_amdgpu_hal_kernel_library_options_t options = {
+        .diagnostic_sink = capture.sink(), .max_errors = 20, .report = &report};
     bool emitted = false;
     IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
         module, &options, iree_allocator_system(), &emitted, &library))
@@ -1425,10 +1418,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RecordsTensorWaitCounter) {
       LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN |
       LOOM_TARGET_COMPILE_REPORT_DETAIL_TARGET_INSERTION_ROWS;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
-  options.report = &report;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20, .report = &report};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1452,9 +1443,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsArgumentMetadataFromLowKernelAbi) {
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1482,10 +1472,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsAllCompatibleKernels) {
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
-  options.report = &report;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20, .report = &report};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1526,9 +1514,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = true;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1566,9 +1553,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1605,9 +1591,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1707,9 +1692,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1780,9 +1764,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, RejectsRel32AddWithoutPcProvenance) {
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = false;
   iree::Status status(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1832,9 +1815,8 @@ TEST_F(AmdgpuHalKernelLibraryTest,
 
   DiagnosticCapture capture;
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));
@@ -1894,9 +1876,8 @@ TEST_F(AmdgpuHalKernelLibraryTest, EmitsSourceLoweredSanitizerSiteTableRodata) {
   DiagnosticCapture capture;
 
   loom_amdgpu_hal_kernel_library_t library = {};
-  loom_amdgpu_hal_kernel_library_options_t options = {};
-  options.diagnostic_sink = capture.sink();
-  options.max_errors = 20;
+  loom_amdgpu_hal_kernel_library_options_t options = {
+      .diagnostic_sink = capture.sink(), .max_errors = 20};
   bool emitted = false;
   IREE_ASSERT_OK(loom_amdgpu_compile_hal_kernel_library(
       module, &options, iree_allocator_system(), &emitted, &library));

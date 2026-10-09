@@ -390,8 +390,8 @@ class VMSourceCaptureTest : public VMImportsTest {
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_READABLE |
             IREE_IO_STREAM_MODE_SEEKABLE,
         4096, iree_allocator_system(), &stream));
-    loom_bytecode_write_options_t write_options = {};
-    write_options.location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS;
+    loom_bytecode_write_options_t write_options = {
+        .location_mode = LOOM_BYTECODE_LOCATION_MODE_NO_LOCATIONS};
     IREE_ASSERT_OK(loom_bytecode_write_module(input.module, stream,
                                               &write_options, &pool));
     std::vector<uint8_t> serialized(iree_io_stream_length(stream));

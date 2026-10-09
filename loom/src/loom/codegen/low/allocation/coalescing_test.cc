@@ -66,12 +66,11 @@ loom_liveness_value_class_t RegisterValueClass(uint64_t descriptor_set_id) {
 loom_liveness_interval_t Interval(loom_value_id_t value_id, uint32_t start,
                                   uint32_t end,
                                   loom_liveness_value_class_t value_class) {
-  loom_liveness_interval_t interval = {};
-  interval.value_id = value_id;
-  interval.start_point = start;
-  interval.end_point = end;
-  interval.value_class = value_class;
-  interval.unit_count = 1;
+  loom_liveness_interval_t interval = {.value_id = value_id,
+                                       .start_point = start,
+                                       .end_point = end,
+                                       .value_class = value_class,
+                                       .unit_count = 1};
   return interval;
 }
 
@@ -79,16 +78,16 @@ loom_low_allocation_assignment_t Assignment(
     loom_value_id_t value_id, uint32_t start, uint32_t end,
     loom_liveness_value_class_t value_class, uint32_t location_base,
     uint32_t unit_point_start) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.value_id = value_id;
-  assignment.descriptor_reg_class_id = value_class.register_class_id;
-  assignment.start_point = start;
-  assignment.end_point = end;
-  assignment.unit_count = 1;
-  assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  assignment.location_base = location_base;
-  assignment.location_count = 1;
-  assignment.unit_point_start = unit_point_start;
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .descriptor_reg_class_id = value_class.register_class_id,
+      .start_point = start,
+      .end_point = end,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = location_base,
+      .location_count = 1,
+      .unit_point_start = unit_point_start};
   return assignment;
 }
 
@@ -155,19 +154,17 @@ TEST_F(LowAllocationCoalescingTest, ConcatMayPrecedeItsSourceAssignments) {
   reg_class.alloc_unit_bits = 32;
   reg_class.allocatable_count = 8;
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = 17;
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = 17, .reg_classes = &reg_class, .reg_class_count = 1};
   loom_low_resolved_target_t target = {};
   target.descriptor_set = &descriptor_set;
   target.descriptor_set_key = IREE_SV("test");
-  loom_low_allocation_target_constraints_t target_constraints = {};
-  target_constraints.target = &target;
-  loom_low_allocation_search_context_t search_context = {};
-  search_context.descriptor_set = &descriptor_set;
-  search_context.liveness = &liveness;
-  search_context.placement = &placement;
+  loom_low_allocation_target_constraints_t target_constraints = {.target =
+                                                                     &target};
+  loom_low_allocation_search_context_t search_context = {
+      .descriptor_set = &descriptor_set,
+      .liveness = &liveness,
+      .placement = &placement};
 
   loom_low_allocation_coalescing_context_t context = {};
   context.arena = &arena_;
@@ -242,16 +239,16 @@ TEST_F(LowAllocationCoalescingTest,
   placement.relation_indices_by_source_ordinal = source_relations;
 
   uint32_t assignment_indices[] = {UINT32_MAX, UINT32_MAX};
-  loom_low_allocation_assignment_map_t assignment_map = {};
-  assignment_map.module = module;
-  assignment_map.liveness = &liveness;
-  assignment_map.assignment_indices_by_value_ordinal = assignment_indices;
+  loom_low_allocation_assignment_map_t assignment_map = {
+      .module = module,
+      .liveness = &liveness,
+      .assignment_indices_by_value_ordinal = assignment_indices};
 
-  loom_low_allocation_coalescing_context_t context = {};
-  context.arena = &arena_;
-  context.liveness = &liveness;
-  context.placement = &placement;
-  context.assignment_map = &assignment_map;
+  loom_low_allocation_coalescing_context_t context = {
+      .arena = &arena_,
+      .liveness = &liveness,
+      .placement = &placement,
+      .assignment_map = &assignment_map};
 
   for (loom_low_placement_cause_t cause :
        {LOOM_LOW_PLACEMENT_CAUSE_LOW_COPY, LOOM_LOW_PLACEMENT_CAUSE_LOW_MOVE,

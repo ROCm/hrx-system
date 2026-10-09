@@ -21,8 +21,7 @@ namespace {
 
 TEST(CompileReportLowMixTest, CountsExecutionBarriersFromInstructionClasses) {
   // Both packets have ordering effects; only one is an execution rendezvous.
-  loom_low_effect_t effect = {};
-  effect.kind = LOOM_LOW_EFFECT_KIND_BARRIER;
+  loom_low_effect_t effect = {.kind = LOOM_LOW_EFFECT_KIND_BARRIER};
   loom_low_descriptor_t descriptors[2] = {};
   loom_low_descriptor_view_t descriptor_views[2] = {};
   for (iree_host_size_t i = 0; i < IREE_ARRAYSIZE(descriptors); ++i) {

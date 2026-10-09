@@ -86,12 +86,12 @@ class LowAllocationIntervalOrderTest : public ::testing::Test {
         unit_count += intervals[i].unit_count;
       }
     }
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = intervals;
-    liveness.interval_count = count;
-    liveness.value_ids = value_ids.data();
-    liveness.value_count = count;
-    liveness.value_interval_indices = interval_indices.data();
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals,
+        .interval_count = count,
+        .value_ids = value_ids.data(),
+        .value_count = count,
+        .value_interval_indices = interval_indices.data()};
     loom_low_allocation_unit_liveness_t unit_liveness = {};
     unit_liveness.values = values.data();
     unit_liveness.point_count = unit_count;
@@ -266,11 +266,11 @@ TEST_F(LowAllocationIntervalOrderTest,
   for (uint32_t i = 0; i < kIntervalCount; ++i) {
     storage_order[i] = kIntervalCount - i - 1;
   }
-  loom_low_placement_table_t placement = {};
-  placement.value_count = kIntervalCount;
-  placement.storage_value_order = storage_order;
-  placement.storage_value_order_count = kIntervalCount;
-  placement.tied_storage_origins_by_value_ordinal = tied_origins;
+  loom_low_placement_table_t placement = {
+      .value_count = kIntervalCount,
+      .storage_value_order = storage_order,
+      .storage_value_order_count = kIntervalCount,
+      .tied_storage_origins_by_value_ordinal = tied_origins};
   loom_low_allocation_interval_order_t order = {};
   IREE_ASSERT_OK(BuildOrder(intervals, kIntervalCount, acquisition_starts,
                             placement, &order));

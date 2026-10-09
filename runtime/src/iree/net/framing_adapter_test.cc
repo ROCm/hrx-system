@@ -848,9 +848,9 @@ TEST_F(FramingAdapterTest, SendForwardsToCarrier) {
   std::vector<uint8_t> data = {0x01, 0x02, 0x03, 0x04};
   iree_async_span_t span = iree_async_span_from_ptr(data.data(), data.size());
   SendCompletion completion;
-  iree_net_message_endpoint_send_params_t params = {};
-  params.data = iree_async_span_list_make(&span, 1);
-  params.completion_callback = completion.callback();
+  iree_net_message_endpoint_send_params_t params = {
+      .data = iree_async_span_list_make(&span, 1),
+      .completion_callback = completion.callback()};
 
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   EXPECT_EQ(completion.count, 0);
@@ -873,9 +873,9 @@ TEST_F(FramingAdapterTest, SendMultipleSpans) {
       iree_async_span_from_ptr(data2.data(), data2.size()),
   };
   SendCompletion completion;
-  iree_net_message_endpoint_send_params_t params = {};
-  params.data = iree_async_span_list_make(spans, 2);
-  params.completion_callback = completion.callback();
+  iree_net_message_endpoint_send_params_t params = {
+      .data = iree_async_span_list_make(spans, 2),
+      .completion_callback = completion.callback()};
 
   IREE_ASSERT_OK(iree_net_message_endpoint_send(endpoint_, &params));
   EXPECT_EQ(completion.count, 0);
@@ -974,11 +974,11 @@ TEST_F(FramingAdapterTest, SendCarrierError) {
   std::vector<uint8_t> data = {0x01};
   iree_async_span_t span = iree_async_span_from_ptr(data.data(), data.size());
   SendCompletion completion;
-  iree_net_message_endpoint_send_params_t params = {};
-  params.generated_prefix = iree_net_send_prefix_from_bytes(
-      iree_make_const_byte_span(prefix.data(), prefix.size()));
-  params.data = iree_async_span_list_make(&span, 1);
-  params.completion_callback = completion.callback();
+  iree_net_message_endpoint_send_params_t params = {
+      .generated_prefix = iree_net_send_prefix_from_bytes(
+          iree_make_const_byte_span(prefix.data(), prefix.size())),
+      .data = iree_async_span_list_make(&span, 1),
+      .completion_callback = completion.callback()};
 
   IREE_EXPECT_STATUS_IS(IREE_STATUS_RESOURCE_EXHAUSTED,
                         iree_net_message_endpoint_send(endpoint_, &params));

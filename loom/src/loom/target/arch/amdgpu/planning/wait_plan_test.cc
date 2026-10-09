@@ -163,9 +163,7 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
                        iree_string_view_t field_name, uint16_t value) {
     loom_string_id_t name = LOOM_STRING_ID_INVALID;
     IREE_ASSERT_OK(loom_builder_intern_string(&builder_, field_name, &name));
-    loom_named_attr_t attr = {};
-    attr.name_id = name;
-    attr.value = loom_attr_i64(value);
+    loom_named_attr_t attr = {.name_id = name, .value = loom_attr_i64(value)};
     Append(descriptor_ref, loom_make_named_attr_slice(&attr, 1));
   }
 
@@ -178,10 +176,10 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
                      schedule_.effect_dependencies.start +
                          schedule_.effect_dependencies.count);
     }
-    loom_low_schedule_dependency_t dependency = {};
-    dependency.producer_node = producer;
-    dependency.consumer_node = consumer;
-    dependency.kind = LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT;
+    loom_low_schedule_dependency_t dependency = {
+        .producer_node = producer,
+        .consumer_node = consumer,
+        .kind = LOOM_LOW_SCHEDULE_DEPENDENCY_EFFECT};
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
         &schedule_.dependencies, dependency, &module_->arena));
     ++schedule_.effect_dependencies.count;
@@ -389,32 +387,32 @@ class AmdgpuWaitPlanTest : public ::testing::Test {
     nodes_.push_back(node);
     for (uint16_t i = 0; i < descriptor->effect_count; ++i) {
       const auto& effect = descriptors_->effects[descriptor->effect_start + i];
-      loom_low_schedule_effect_use_t use = {};
-      use.node_index = node.source_ordinal;
-      use.scheduled_ordinal = node.scheduled_ordinal;
-      use.effect_ordinal = i;
-      use.kind = effect.kind;
-      use.memory_space = effect.memory_space;
-      use.scope_id = effect.scope_id;
-      use.effect_flags = effect.flags;
-      use.counter_id = effect.counter_id;
-      use.width_bits = effect.width_bits;
+      loom_low_schedule_effect_use_t use = {
+          .node_index = node.source_ordinal,
+          .scheduled_ordinal = node.scheduled_ordinal,
+          .effect_ordinal = i,
+          .kind = effect.kind,
+          .memory_space = effect.memory_space,
+          .scope_id = effect.scope_id,
+          .effect_flags = effect.flags,
+          .counter_id = effect.counter_id,
+          .width_bits = effect.width_bits};
       effects_.push_back(use);
     }
     for (uint16_t i = 0; i < node.schedule_class->hazard_count; ++i) {
       const auto& hazard =
           descriptors_->hazards[node.schedule_class->hazard_start + i];
-      loom_low_schedule_hazard_use_t use = {};
-      use.node_index = node.source_ordinal;
-      use.scheduled_ordinal = node.scheduled_ordinal;
-      use.hazard_ordinal = i;
-      use.kind = hazard.kind;
-      use.reference_kind = hazard.reference_kind;
-      use.reference_id = hazard.reference_id;
-      use.producer_stage = hazard.producer_stage;
-      use.consumer_stage = hazard.consumer_stage;
-      use.distance = hazard.distance;
-      use.hazard_flags = hazard.flags;
+      loom_low_schedule_hazard_use_t use = {
+          .node_index = node.source_ordinal,
+          .scheduled_ordinal = node.scheduled_ordinal,
+          .hazard_ordinal = i,
+          .kind = hazard.kind,
+          .reference_kind = hazard.reference_kind,
+          .reference_id = hazard.reference_id,
+          .producer_stage = hazard.producer_stage,
+          .consumer_stage = hazard.consumer_stage,
+          .distance = hazard.distance,
+          .hazard_flags = hazard.flags};
       hazards_.push_back(use);
     }
   }

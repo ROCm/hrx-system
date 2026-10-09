@@ -166,10 +166,10 @@ class LinkIndexMaterializerTest : public ::testing::Test {
       const loom_link_module_index_t* index,
       const loom_link_plan_options_t* plan_options,
       loom_link_index_materialization_t* out_materialization) {
-    loom_link_plan_materialization_environment_t environment = {};
-    environment.context = &context_;
-    environment.block_pool = &block_pool_;
-    environment.allocator = iree_allocator_system();
+    loom_link_plan_materialization_environment_t environment = {
+        .context = &context_,
+        .block_pool = &block_pool_,
+        .allocator = iree_allocator_system()};
     return loom_link_index_materialize(index, plan_options, &environment,
                                        IREE_SV("linked"), out_materialization);
   }
@@ -180,13 +180,13 @@ class LinkIndexMaterializerTest : public ::testing::Test {
       loom_link_plan_unresolved_policy_t unresolved_policy,
       loom_link_index_materialization_t* out_materialization) {
     const iree_string_view_t roots[] = {root};
-    loom_link_plan_options_t plan_options = {};
-    plan_options.mode = mode;
-    plan_options.root_symbols = {
-        /*.count=*/IREE_ARRAYSIZE(roots),
-        /*.values=*/roots,
-    };
-    plan_options.unresolved_policy = unresolved_policy;
+    loom_link_plan_options_t plan_options = {
+        .mode = mode,
+        .root_symbols = {
+            /*.count=*/IREE_ARRAYSIZE(roots),
+            /*.values=*/roots,
+        },
+        .unresolved_policy = unresolved_policy};
     return TryMaterializeWithOptions(index, &plan_options, out_materialization);
   }
 

@@ -79,12 +79,12 @@ void AqlDispatchTest::CreateFixedScratchQueue(
 
   // Scratch stays untouched by the CPU. Each workitem initializes the private
   // words it reads; the queue borrows the backing until destruction succeeds.
-  amdf_gpu_queue_scratch_t scratch = {};
-  scratch.memory = scratch_memory->memory;
-  scratch.byte_length = scratch_byte_length;
-  scratch.maximum_private_segment_byte_length =
-      maximum_private_segment_byte_length;
-  scratch.maximum_wave_count = static_cast<uint32_t>(wave_count);
+  amdf_gpu_queue_scratch_t scratch = {
+      .memory = scratch_memory->memory,
+      .byte_length = scratch_byte_length,
+      .maximum_private_segment_byte_length =
+          maximum_private_segment_byte_length,
+      .maximum_wave_count = static_cast<uint32_t>(wave_count)};
   ASSERT_NO_FATAL_FAILURE(
       CreateQueue(out_queue, AMDF_QUEUE_PRODUCER_MODE_SINGLE, scratch));
 }

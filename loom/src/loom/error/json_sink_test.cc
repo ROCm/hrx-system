@@ -191,12 +191,12 @@ TEST(JsonSink, StructuredSameType) {
       loom_param_type(f32_type),
   };
 
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1);
-  diagnostic.params = params;
-  diagnostic.param_count = 4;
-  diagnostic.emitter = LOOM_EMITTER_VERIFIER;
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_TYPE, 1),
+      .params = params,
+      .param_count = 4,
+      .emitter = LOOM_EMITTER_VERIFIER};
 
   std::string json = EmitJson(&diagnostic, {loom_type_format_minimal, nullptr});
 
@@ -232,12 +232,12 @@ TEST(JsonSink, StructuredStructureError) {
       loom_param_u32(2),
   };
 
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 1);
-  diagnostic.params = params;
-  diagnostic.param_count = 3;
-  diagnostic.emitter = LOOM_EMITTER_VERIFIER;
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_STRUCTURE, 1),
+      .params = params,
+      .param_count = 3,
+      .emitter = LOOM_EMITTER_VERIFIER};
 
   std::string json = EmitJson(&diagnostic);
 

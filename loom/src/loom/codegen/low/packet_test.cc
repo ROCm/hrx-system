@@ -29,11 +29,9 @@ TEST(LowPacketTest, ReadsSparseImmediateValuesAndPreservesOmission) {
   loom_low_op_initialize_attrs(
       &storage.op,
       loom_make_canonical_attr_dict(entries, IREE_ARRAYSIZE(entries)));
-  loom_low_schedule_node_t node = {};
-  node.op = &storage.op;
-  node.immediate_presence = (1u << 1) | (1u << 31);
-  loom_low_packet_view_t packet = {};
-  packet.node = &node;
+  loom_low_schedule_node_t node = {
+      .op = &storage.op, .immediate_presence = (1u << 1) | (1u << 31)};
+  loom_low_packet_view_t packet = {.node = &node};
   loom_low_immediate_t field = {};
   field.attribute_mask = 1u << 1;
   EXPECT_EQ(loom_low_packet_immediate_attr(&packet, &field).i64, 17);
@@ -99,8 +97,7 @@ TEST(LowPacketTest, GetsPacketViewAttrs) {
 
   loom_low_schedule_node_t node = {};
   node.op = &low_op_storage.op;
-  loom_low_packet_view_t packet = {};
-  packet.node = &node;
+  loom_low_packet_view_t packet = {.node = &node};
 
   loom_named_attr_slice_t attrs = loom_low_packet_attrs(&packet);
   EXPECT_EQ(attrs.entries, named_attrs);

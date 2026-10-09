@@ -20,10 +20,8 @@ void ExpectBinaryResult(void (*execute)(const Record*, uint64_t*), uint64_t lhs,
   for (uint8_t destination = 0; destination < 3; ++destination) {
     SCOPED_TRACE(static_cast<int>(destination));
     uint64_t values[] = {lhs, rhs, UINT64_C(0xA55AA55AA55AA55A)};
-    Record record = {};
-    record.destination_v8 = destination;
-    record.left_v8 = 0;
-    record.right_v8 = 1;
+    Record record = {
+        .destination_v8 = destination, .left_v8 = 0, .right_v8 = 1};
     execute(&record, values);
     EXPECT_EQ(values[destination], expected);
   }
@@ -35,9 +33,7 @@ void ExpectUnaryResult(void (*execute)(const Record*, uint64_t*),
   for (uint8_t destination = 0; destination < 2; ++destination) {
     SCOPED_TRACE(static_cast<int>(destination));
     uint64_t values[] = {source, UINT64_C(0xA55AA55AA55AA55A)};
-    Record record = {};
-    record.destination_v8 = destination;
-    record.source_v8 = 0;
+    Record record = {.destination_v8 = destination, .source_v8 = 0};
     execute(&record, values);
     EXPECT_EQ(values[destination], expected);
   }
@@ -52,10 +48,7 @@ void ExpectDivisionResult(
     uint64_t expected_result) {
   constexpr uint64_t kDestinationSentinel = UINT64_C(0xA55AA55AA55AA55A);
   uint64_t values[] = {lhs, rhs, kDestinationSentinel};
-  Record record = {};
-  record.destination_v8 = 2;
-  record.left_v8 = 0;
-  record.right_v8 = 1;
+  Record record = {.destination_v8 = 2, .left_v8 = 0, .right_v8 = 1};
   const iree_vm_bytecode_integer_division_failure_t failure =
       execute(&record, values);
   EXPECT_EQ(failure, expected_failure);
@@ -70,10 +63,8 @@ void ExpectDivisionAliasing(iree_vm_bytecode_integer_division_failure_t (
   for (uint8_t destination = 0; destination < 2; ++destination) {
     SCOPED_TRACE(static_cast<int>(destination));
     uint64_t values[] = {lhs, rhs};
-    Record record = {};
-    record.destination_v8 = destination;
-    record.left_v8 = 0;
-    record.right_v8 = 1;
+    Record record = {
+        .destination_v8 = destination, .left_v8 = 0, .right_v8 = 1};
     EXPECT_EQ(execute(&record, values),
               IREE_VM_BYTECODE_INTEGER_DIVISION_FAILURE_NONE);
     EXPECT_EQ(values[destination], expected_result);
@@ -85,14 +76,13 @@ Record MakeBitstreamRecord(uint8_t result_base, uint8_t source_base,
                            uint8_t field_width, uint8_t source_count,
                            uint8_t result_count, uint8_t source_width,
                            uint8_t result_width) {
-  Record record = {};
-  record.result_base_v8 = result_base;
-  record.source_base_v8 = source_base;
-  record.field_width_u8 = field_width;
-  record.source_count_u8 = source_count;
-  record.result_count_u8 = result_count;
-  record.source_width_u8 = source_width;
-  record.result_width_u8 = result_width;
+  Record record = {.result_base_v8 = result_base,
+                   .source_base_v8 = source_base,
+                   .field_width_u8 = field_width,
+                   .source_count_u8 = source_count,
+                   .result_count_u8 = result_count,
+                   .source_width_u8 = source_width,
+                   .result_width_u8 = result_width};
   return record;
 }
 
@@ -104,11 +94,10 @@ void ExpectComparisonPredicates(void (*execute)(const Record*, uint64_t*),
        ++predicate) {
     SCOPED_TRACE(static_cast<int>(predicate));
     uint64_t values[] = {lhs, rhs, UINT64_MAX};
-    Record record = {};
-    record.destination_v8 = 2;
-    record.left_v8 = 0;
-    record.right_v8 = 1;
-    record.predicate_u8 = predicate;
+    Record record = {.destination_v8 = 2,
+                     .left_v8 = 0,
+                     .right_v8 = 1,
+                     .predicate_u8 = predicate};
     execute(&record, values);
     EXPECT_EQ(values[2], expected[predicate]);
   }
@@ -402,10 +391,8 @@ void CheckCeilDivRecords() {
   for (const CeilDivCase& test_case : ceildiv_cases) {
     SCOPED_TRACE(static_cast<int>(test_case.log2));
     uint64_t values[] = {test_case.source};
-    typename Traits::CeilDivRecord record = {};
-    record.destination_v8 = 0;
-    record.source_v8 = 0;
-    record.log2_u8 = test_case.log2;
+    typename Traits::CeilDivRecord record = {
+        .destination_v8 = 0, .source_v8 = 0, .log2_u8 = test_case.log2};
     Traits::kCeilDiv(&record, values);
     EXPECT_EQ(values[0], test_case.expected);
   }

@@ -26,9 +26,8 @@ static amdf_memory_native_profile_t QueryProfile(amdf_gpu_umd_device_t* device,
 }
 
 TEST(LinuxGpuMemoryProfileTest, InstanceLifetimeExposesOwnedSystemMemory) {
-  amdf_gpu_umd_device_t device = {};
-  device.native_lifetime = AMDF_NATIVE_LIFETIME_INSTANCE;
-  device.page_size = 4096;
+  amdf_gpu_umd_device_t device = {
+      .native_lifetime = AMDF_NATIVE_LIFETIME_INSTANCE, .page_size = 4096};
   device.topology.virtual_address.begin = UINT64_C(0x10000);
   device.topology.virtual_address.end = UINT64_C(1) << 48;
 
@@ -77,9 +76,8 @@ TEST(LinuxGpuMemoryProfileTest, InstanceLifetimeExposesOwnedSystemMemory) {
 }
 
 TEST(LinuxGpuMemoryProfileTest, ProcessLifetimeUsesDenseOptionalProfiles) {
-  amdf_gpu_umd_device_t device = {};
-  device.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
-  device.page_size = 4096;
+  amdf_gpu_umd_device_t device = {
+      .native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS, .page_size = 4096};
   device.topology.virtual_address.begin = UINT64_C(0x10000);
   device.topology.virtual_address.end = UINT64_C(1) << 48;
   device.topology.memory_features =
@@ -156,8 +154,7 @@ TEST(LinuxGpuMemoryProfileTest, ProcessLifetimeUsesDenseOptionalProfiles) {
 }
 
 TEST(LinuxGpuMemoryProfileTest, QualifiesLocalBackingByHiveOrDirectedPciPeer) {
-  amdf_gpu_umd_device_t source = {};
-  source.page_size = 4096;
+  amdf_gpu_umd_device_t source = {.page_size = 4096};
   source.topology.gpu_id = 41;
   source.topology.memory_features = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
   source.topology.virtual_address.begin = UINT64_C(0x10000);
@@ -217,9 +214,8 @@ TEST(LinuxGpuMemoryProfileTest, QualifiesLocalBackingByHiveOrDirectedPciPeer) {
 }
 
 static amdf_gpu_umd_device_t MakeDiscreteGfx942Device() {
-  amdf_gpu_umd_device_t device = {};
-  device.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
-  device.page_size = 4096;
+  amdf_gpu_umd_device_t device = {
+      .native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS, .page_size = 4096};
   device.topology.gpu_id = 41;
   device.topology.properties.gfx_ip = {9, 4, 2};
   device.topology.properties.compute.wavefront_size = 64;
@@ -241,9 +237,8 @@ static amdf_gpu_umd_device_t MakeDiscreteGfx942Device() {
 }
 
 static amdf_gpu_umd_device_t MakeGfx1151Device() {
-  amdf_gpu_umd_device_t device = {};
-  device.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
-  device.page_size = 4096;
+  amdf_gpu_umd_device_t device = {
+      .native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS, .page_size = 4096};
   device.topology.gpu_id = 73;
   device.topology.properties.gfx_ip = {11, 5, 1};
   device.topology.properties.compute.wavefront_size = 32;
@@ -901,9 +896,8 @@ TEST(LinuxGpuMemoryProfileTest, SystemGroupStoresRemainConsumerSpecific) {
 }
 
 static amdf_gpu_umd_device_t MakeLegacySdmaMemoryDevice() {
-  amdf_gpu_umd_device_t device = {};
-  device.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
-  device.page_size = 4096;
+  amdf_gpu_umd_device_t device = {
+      .native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS, .page_size = 4096};
   device.topology.gpu_id = 41;
   device.topology.sdma.ip = {4, 4, 2, true};
   device.topology.memory_features = AMDF_GPU_DEVICE_FEATURE_LOCAL_MEMORY;
@@ -1083,9 +1077,8 @@ TEST(LinuxGpuMemoryProfileTest, LegacySdmaExcludesHostApertureAndRegistration) {
 }
 
 TEST(LinuxGpuMemoryProfileTest, SystemStoresRequireNativeMappingAndCpuRoutes) {
-  amdf_gpu_umd_device_t device = {};
-  device.native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS;
-  device.page_size = 4096;
+  amdf_gpu_umd_device_t device = {
+      .native_lifetime = AMDF_NATIVE_LIFETIME_PROCESS, .page_size = 4096};
   device.topology.virtual_address.begin = UINT64_C(0x10000);
   device.topology.virtual_address.end = UINT64_C(1) << 48;
   device.topology.gc_ip = {.major = 11, .exact = true};

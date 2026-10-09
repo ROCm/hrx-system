@@ -58,8 +58,7 @@ class ExpectationTest : public ::testing::Test {
   }
 
   loom_module_t* ParseModule(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("expectation_test.loom"), &context_,
@@ -108,9 +107,8 @@ class ExpectationTest : public ::testing::Test {
                                             &expectation.actual_value_id));
     IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                             &expectation.expected_value_id));
-    loom_testbench_case_plan_t case_plan = {};
-    case_plan.expectations = &expectation;
-    case_plan.expectation_count = 1;
+    loom_testbench_case_plan_t case_plan = {.expectations = &expectation,
+                                            .expectation_count = 1};
     loom_testbench_value_table_t table = {};
     IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(
         module, &case_plan, host_allocator_, &table));
@@ -163,8 +161,7 @@ TEST_F(ExpectationTest, ComparesNarrowScalarsUsingSourceTypes) {
   };
   for (const auto& format : formats) {
     SCOPED_TRACE(loom_scalar_type_name(format.type));
-    iree_tooling_value_t actual = {};
-    actual.kind = IREE_TOOLING_VALUE_KIND_RAW_U32;
+    iree_tooling_value_t actual = {.kind = IREE_TOOLING_VALUE_KIND_RAW_U32};
     actual.storage.u32 = format.one;
     iree_tooling_value_t expected = actual;
     loom_testbench_close_expectation_plan_t close = {};
@@ -213,16 +210,14 @@ TEST_F(ExpectationTest, ComparesInfinitiesIndependentlyOfTolerance) {
     SCOPED_TRACE(::testing::Message()
                  << comparison.actual << " versus " << comparison.expected);
     for (double tolerance : {0.0, 2.0}) {
-      iree_tooling_value_t actual = {};
-      actual.kind = IREE_TOOLING_VALUE_KIND_F64;
+      iree_tooling_value_t actual = {.kind = IREE_TOOLING_VALUE_KIND_F64};
       actual.storage.f64 = comparison.actual;
-      iree_tooling_value_t expected = {};
-      expected.kind = IREE_TOOLING_VALUE_KIND_F64;
+      iree_tooling_value_t expected = {.kind = IREE_TOOLING_VALUE_KIND_F64};
       expected.storage.f64 = comparison.expected;
-      loom_testbench_close_expectation_plan_t close = {};
-      close.absolute_tolerance = tolerance;
-      close.relative_tolerance = tolerance;
-      close.nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT;
+      loom_testbench_close_expectation_plan_t close = {
+          .absolute_tolerance = tolerance,
+          .relative_tolerance = tolerance,
+          .nan_policy = LOOM_CHECK_EXPECT_CLOSE_NAN_DIFFERENT};
       ExpectScalarClose(LOOM_SCALAR_TYPE_F64, actual, expected, close,
                         comparison.matched);
     }
@@ -309,9 +304,8 @@ TEST_F(ExpectationTest, ComparesBufferReferencesByLogicalIdentity) {
                                           &expectation.actual_value_id));
   IREE_ASSERT_OK(loom_module_define_value(module, expectation.type,
                                           &expectation.expected_value_id));
-  loom_testbench_case_plan_t case_plan = {};
-  case_plan.expectations = &expectation;
-  case_plan.expectation_count = 1;
+  loom_testbench_case_plan_t case_plan = {.expectations = &expectation,
+                                          .expectation_count = 1};
   loom_testbench_value_table_t table = {};
   IREE_ASSERT_OK(loom_testbench_value_table_initialize_case(
       module, &case_plan, host_allocator_, &table));

@@ -21,12 +21,11 @@ namespace {
 loom_liveness_interval_t MakeInterval(loom_value_id_t value_id,
                                       uint32_t start_point, uint32_t end_point,
                                       loom_liveness_value_class_t value_class) {
-  loom_liveness_interval_t interval = {};
-  interval.value_id = value_id;
-  interval.start_point = start_point;
-  interval.end_point = end_point;
-  interval.value_class = value_class;
-  interval.unit_count = 1;
+  loom_liveness_interval_t interval = {.value_id = value_id,
+                                       .start_point = start_point,
+                                       .end_point = end_point,
+                                       .value_class = value_class,
+                                       .unit_count = 1};
   return interval;
 }
 
@@ -34,16 +33,16 @@ loom_low_allocation_assignment_t MakeAssignment(
     loom_value_id_t value_id, uint32_t start_point, uint32_t end_point,
     uint32_t location_base, uint32_t unit_point_start,
     loom_liveness_value_class_t value_class) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.value_id = value_id;
-  assignment.descriptor_reg_class_id = value_class.register_class_id;
-  assignment.start_point = start_point;
-  assignment.end_point = end_point;
-  assignment.unit_count = 1;
-  assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  assignment.location_base = location_base;
-  assignment.location_count = 1;
-  assignment.unit_point_start = unit_point_start;
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .descriptor_reg_class_id = value_class.register_class_id,
+      .start_point = start_point,
+      .end_point = end_point,
+      .unit_count = 1,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = location_base,
+      .location_count = 1,
+      .unit_point_start = unit_point_start};
   return assignment;
 }
 
@@ -741,8 +740,7 @@ TEST_F(AllocationCheckerTest, RejectsMissingLeaseReleaseAction) {
 }
 
 TEST_F(AllocationCheckerTest, RejectsFixedLocationMismatch) {
-  loom_low_allocation_resolved_fixed_value_t fixed = {};
-  fixed.value_ordinal = 0;
+  loom_low_allocation_resolved_fixed_value_t fixed = {.value_ordinal = 0};
   fixed.assignment.value_id = value_ids_[0];
   fixed.assignment.descriptor_reg_class_id = 0;
   fixed.assignment.location_kind =
@@ -758,11 +756,11 @@ TEST_F(AllocationCheckerTest, RejectsFixedLocationMismatch) {
 }
 
 TEST_F(AllocationCheckerTest, RejectsReservedLocationOverlap) {
-  loom_low_allocation_resolved_reserved_range_t reserved = {};
-  reserved.descriptor_reg_class_id = 0;
-  reserved.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  reserved.location_base = assignments_[1].location_base;
-  reserved.location_count = 1;
+  loom_low_allocation_resolved_reserved_range_t reserved = {
+      .descriptor_reg_class_id = 0,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = assignments_[1].location_base,
+      .location_count = 1};
   frame_.allocation.reserved_ranges = &reserved;
   frame_.allocation.reserved_range_count = 1;
   const loom_low_allocation_check_result_t result = Check();

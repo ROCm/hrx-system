@@ -66,8 +66,7 @@ class LowVerifyTest : public ::testing::Test {
   }
 
   ModulePtr ParseModule(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -90,12 +89,12 @@ class LowVerifyTest : public ::testing::Test {
       loom_module_t* module, DiagnosticEmissionCapture* capture,
       loom_low_verify_result_t* out_result,
       const loom_function_version_list_t* function_versions = nullptr) {
-    loom_low_verify_options_t options = {};
-    options.descriptor_registry = &registry_.registry;
-    options.function_versions = function_versions;
-    options.emitter = capture->emitter();
-    options.provider_list = loom_low_verify_provider_list_empty();
-    options.max_errors = 20;
+    loom_low_verify_options_t options = {
+        .descriptor_registry = &registry_.registry,
+        .function_versions = function_versions,
+        .emitter = capture->emitter(),
+        .provider_list = loom_low_verify_provider_list_empty(),
+        .max_errors = 20};
     loom_low_verify_scratch_t scratch =
         loom_low_verify_scratch_for_module(module);
     IREE_EXPECT_OK(

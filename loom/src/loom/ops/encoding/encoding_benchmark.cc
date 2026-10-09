@@ -189,8 +189,7 @@ class EncodingBenchmarkFixture {
   ~EncodingBenchmarkFixture() { loom_context_deinitialize(&context_); }
 
   iree_status_t Parse(iree_string_view_t source, loom_module_t** out_module) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 1;
+    loom_text_parse_options_t options = {.max_errors = 1};
     return loom_text_parse(source, IREE_SV("encoding_benchmark.loom"),
                            &context_, block_pool_.get(), &options, out_module);
   }

@@ -77,8 +77,7 @@ class LowAllocationStorageLeaseTest : public ::testing::Test {
 };
 
 loom_low_reg_class_t RegClass(uint16_t alias_set_id) {
-  loom_low_reg_class_t reg_class = {};
-  reg_class.alias_set_id = alias_set_id;
+  loom_low_reg_class_t reg_class = {.alias_set_id = alias_set_id};
   return reg_class;
 }
 
@@ -92,9 +91,8 @@ loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_classes,
 
 loom_liveness_block_info_t LivenessBlock(uint32_t start_point,
                                          uint32_t end_point) {
-  loom_liveness_block_info_t block = {};
-  block.start_point = start_point;
-  block.end_point = end_point;
+  loom_liveness_block_info_t block = {.start_point = start_point,
+                                      .end_point = end_point};
   return block;
 }
 
@@ -102,29 +100,27 @@ loom_liveness_analysis_t Liveness(const loom_liveness_block_info_t* blocks,
                                   iree_host_size_t block_count,
                                   const loom_value_id_t* value_ids,
                                   iree_host_size_t value_count) {
-  loom_liveness_analysis_t liveness = {};
-  liveness.blocks = blocks;
-  liveness.block_count = block_count;
-  liveness.value_ids = value_ids;
-  liveness.value_count = value_count;
+  loom_liveness_analysis_t liveness = {.blocks = blocks,
+                                       .block_count = block_count,
+                                       .value_ids = value_ids,
+                                       .value_count = value_count};
   return liveness;
 }
 
 loom_low_schedule_block_t ScheduleBlock(uint32_t scheduled_node_start,
                                         uint32_t scheduled_node_count) {
-  loom_low_schedule_block_t block = {};
-  block.scheduled_node_start = scheduled_node_start;
-  block.scheduled_node_count = scheduled_node_count;
+  loom_low_schedule_block_t block = {
+      .scheduled_node_start = scheduled_node_start,
+      .scheduled_node_count = scheduled_node_count};
   return block;
 }
 
 loom_low_schedule_node_t ScheduleOperandNode(uint32_t block_index,
                                              uint32_t scheduled_ordinal,
                                              loom_value_ordinal_t operand) {
-  loom_low_schedule_node_t node = {};
-  node.block_index = block_index;
-  node.scheduled_ordinal = scheduled_ordinal;
-  node.operand_count = 1;
+  loom_low_schedule_node_t node = {.block_index = block_index,
+                                   .scheduled_ordinal = scheduled_ordinal,
+                                   .operand_count = 1};
   node.value_ordinals.inline_value_ordinals[0] = operand;
   return node;
 }
@@ -136,19 +132,19 @@ loom_low_schedule_table_t Schedule(
     iree_host_size_t node_count, const uint32_t* scheduled_node_indices,
     iree_host_size_t scheduled_node_count,
     const uint32_t* value_producer_nodes) {
-  loom_low_schedule_table_t schedule = {};
-  schedule.module = module;
-  schedule.function_op = function_op;
-  schedule.value_ids = liveness.value_ids;
-  schedule.value_count = (loom_value_ordinal_t)liveness.value_count;
-  schedule.value_producer_nodes = value_producer_nodes;
-  schedule.liveness = liveness;
-  schedule.blocks = blocks;
-  schedule.block_count = block_count;
-  schedule.nodes = nodes;
-  schedule.node_count = node_count;
-  schedule.scheduled_node_indices = scheduled_node_indices;
-  schedule.scheduled_node_count = scheduled_node_count;
+  loom_low_schedule_table_t schedule = {
+      .module = module,
+      .function_op = function_op,
+      .value_ids = liveness.value_ids,
+      .value_count = (loom_value_ordinal_t)liveness.value_count,
+      .value_producer_nodes = value_producer_nodes,
+      .liveness = liveness,
+      .blocks = blocks,
+      .block_count = block_count,
+      .nodes = nodes,
+      .node_count = node_count,
+      .scheduled_node_indices = scheduled_node_indices,
+      .scheduled_node_count = scheduled_node_count};
   return schedule;
 }
 
@@ -178,10 +174,8 @@ loom_low_storage_lease_table_t StorageLeaseTable(
     const loom_low_schedule_table_t* schedule,
     const loom_low_storage_lease_record_t* records,
     iree_host_size_t record_count) {
-  loom_low_storage_lease_table_t table = {};
-  table.schedule = schedule;
-  table.records = records;
-  table.record_count = record_count;
+  loom_low_storage_lease_table_t table = {
+      .schedule = schedule, .records = records, .record_count = record_count};
   return table;
 }
 
@@ -191,14 +185,14 @@ loom_low_allocation_assignment_t Assignment(loom_value_id_t value_id,
                                             uint32_t end_point,
                                             uint32_t location_base,
                                             uint32_t location_count) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.value_id = value_id;
-  assignment.descriptor_reg_class_id = descriptor_reg_class_id;
-  assignment.start_point = start_point;
-  assignment.end_point = end_point;
-  assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  assignment.location_base = location_base;
-  assignment.location_count = location_count;
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .descriptor_reg_class_id = descriptor_reg_class_id,
+      .start_point = start_point,
+      .end_point = end_point,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = location_base,
+      .location_count = location_count};
   return assignment;
 }
 
@@ -1260,14 +1254,14 @@ TEST_F(LowAllocationStorageLeaseTest,
       record.unit_offset = 0;
       const loom_low_storage_lease_table_t table =
           StorageLeaseTable(nullptr, &record, 1);
-      loom_low_allocation_storage_lease_t lease = {};
-      lease.value_id = 0;
-      lease.start_point = 2;
-      lease.end_point = 6;
-      lease.descriptor_reg_class_id = 0;
-      lease.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-      lease.location_base = 10;
-      lease.location_count = 2;
+      loom_low_allocation_storage_lease_t lease = {
+          .value_id = 0,
+          .start_point = 2,
+          .end_point = 6,
+          .descriptor_reg_class_id = 0,
+          .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+          .location_base = 10,
+          .location_count = 2};
       auto leased_assignment =
           Assignment(/*value_id=*/0, /*descriptor_reg_class_id=*/0,
                      /*start_point=*/0, /*end_point=*/1,

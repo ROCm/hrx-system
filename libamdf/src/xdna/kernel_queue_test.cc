@@ -404,8 +404,7 @@ TEST_F(XdnaKernelQueueTest, RetirementDoesNotPreventPublicationIntoFreeSlots) {
   EXPECT_EQ(SubmitCommand(&rejected),
             amdf_make_api_status(AMDF_STATUS_CODE_BUSY));
   EXPECT_EQ(Query().retired_submission, 0u);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   for (uint32_t i = 0; i < 2; ++i) {
     EXPECT_EQ(amdf_kernel_queue_request_notification(queue, first, &event),
@@ -491,8 +490,7 @@ TEST_F(XdnaKernelQueueTest, NotificationResolvesNativePointsWithoutRetirement) {
   info.structure_size = sizeof(info);
   ASSERT_EQ(amdf_kernel_queue_query_info(queue, &info), AMDF_STATUS_OK);
   ASSERT_NE(info.notification_types & AMDF_NATIVE_EVENT_TYPE_BIT_EVENTFD, 0u);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_kernel_queue_request_notification(queue, submission, &event),
             AMDF_STATUS_OK);
@@ -518,8 +516,7 @@ TEST_F(XdnaKernelQueueTest, NotificationOfRecycledPointRequestsFreshHint) {
   ASSERT_EQ(SubmitCommand(&next), AMDF_STATUS_OK);
   ASSERT_EQ(Query().retired_submission, submission);
   ASSERT_EQ(native.slots[0].native_submission, next);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   for (uint32_t i = 0; i < 2; ++i) {
     EXPECT_EQ(amdf_kernel_queue_request_notification(queue, submission, &event),
@@ -536,8 +533,7 @@ TEST_F(XdnaKernelQueueTest, NotificationErrorDoesNotRejectAcceptedWork) {
   auto& native = context.native.queue;
   native.notification_status =
       amdf_make_status(AMDF_STATUS_DOMAIN_ERRNO, ENOMEM);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_kernel_queue_request_notification(queue, submission, &event),
             native.notification_status);

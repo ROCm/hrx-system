@@ -65,8 +65,8 @@ class GenTest : public ::testing::Test {
     loom_test_gen_initialize_seeded(seed, &gen);
     IREE_RETURN_IF_ERROR(loom_test_gen_module(&gen, &config, &context_,
                                               &block_pool_, out_module));
-    loom_verify_options_t options = {};
-    options.sink = {loom_diagnostic_stderr_sink, NULL};
+    loom_verify_options_t options = {
+        .sink = {loom_diagnostic_stderr_sink, NULL}};
     loom_verify_result_t result = {};
     iree_status_t status = loom_verify_module(*out_module, &options, &result);
     if (!iree_status_is_ok(status)) {
@@ -342,8 +342,7 @@ TEST_F(GenTest, FuzzPresetRegressionBytes) {
   IREE_ASSERT_OK(
       loom_test_gen_module(&gen, &config, &context_, &block_pool_, &module));
 
-  loom_verify_options_t options = {};
-  options.sink = {loom_diagnostic_stderr_sink, NULL};
+  loom_verify_options_t options = {.sink = {loom_diagnostic_stderr_sink, NULL}};
   loom_verify_result_t result = {};
   IREE_ASSERT_OK(loom_verify_module(module, &options, &result));
   EXPECT_EQ(result.error_count, 0);

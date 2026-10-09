@@ -846,8 +846,8 @@ TEST_F(LowLowerPassTest, InvokeNormalizesToDirectLowCallWithPolicyPreserved) {
   EXPECT_EQ(loom_low_func_call_callee(call_op).module_id, helper_ref.module_id);
   EXPECT_EQ(loom_low_func_call_callee(call_op).symbol_id, helper_ref.symbol_id);
 
-  loom_target_provider_t direct_provider = {};
-  direct_provider.select_call_policy = loom_target_select_call_policy_direct;
+  loom_target_provider_t direct_provider = {
+      .select_call_policy = loom_target_select_call_policy_direct};
   loom_target_function_version_t entry_version = {};
   entry_version.base.type = &loom_target_function_version_type;
   entry_version.base.function = entry;
@@ -1126,11 +1126,10 @@ TEST_F(LowLowerPassTest, LowCallPolicyIsSelectedPerCallerProvider) {
       "  low.return %result : reg<test.i32>\n"
       "}\n"));
 
-  loom_target_provider_t require_inline_provider = {};
-  require_inline_provider.select_call_policy =
-      loom_target_select_call_policy_require_inline;
-  loom_target_provider_t direct_provider = {};
-  direct_provider.select_call_policy = loom_target_select_call_policy_direct;
+  loom_target_provider_t require_inline_provider = {
+      .select_call_policy = loom_target_select_call_policy_require_inline};
+  loom_target_provider_t direct_provider = {
+      .select_call_policy = loom_target_select_call_policy_direct};
 
   const loom_symbol_ref_t required_caller_ref =
       FindSymbolRef(module.get(), IREE_SV("required_caller"));
@@ -1195,8 +1194,8 @@ TEST_F(LowLowerPassTest, CallPolicyDistinguishesSemanticAndLowStages) {
               "  low.return %result : reg<test.i32>\n"
               "}\n"));
 
-  loom_target_provider_t provider = {};
-  provider.select_call_policy = RequireInlineSemanticCalls;
+  loom_target_provider_t provider = {.select_call_policy =
+                                         RequireInlineSemanticCalls};
 
   const loom_symbol_ref_t source_caller_ref =
       FindSymbolRef(module.get(), IREE_SV("source_caller"));

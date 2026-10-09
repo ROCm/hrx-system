@@ -73,9 +73,7 @@ TEST_F(RegisterPartsTest, FullMasksNeedNoDependencyStorage) {
   EXPECT_EQ(loom_low_register_parts_mask(&parts_, 0), 1u);
   EXPECT_EQ(loom_low_register_parts_mask(&parts_, 1), 3u);
   EXPECT_EQ(loom_low_register_parts_mask(&parts_, 2), 3u);
-  loom_low_register_part_requirement_t requirement = {};
-  requirement.value = 2;
-  requirement.mask = 3;
+  loom_low_register_part_requirement_t requirement = {.value = 2, .mask = 3};
   IREE_ASSERT_OK(loom_low_register_parts_require(&parts_, &requirement));
   EXPECT_EQ(parts_.requirements.count, 0u);
   EXPECT_EQ(arena_.used_allocation_size, 0u);

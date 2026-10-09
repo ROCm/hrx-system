@@ -68,8 +68,7 @@ class InvocationTest : public ::testing::Test {
   }
 
   loom_module_t* ParseModule(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("invocation_test.loom"), &context_,
@@ -199,10 +198,8 @@ check.case @invoke {
   IREE_ASSERT_OK(loom_testbench_materialize_case_sample(
       &materializer_options, &case_plan, /*sample_ordinal=*/0, &table));
 
-  DeltaProviderState actual_state = {};
-  actual_state.delta = 10;
-  DeltaProviderState oracle_state = {};
-  oracle_state.delta = 20;
+  DeltaProviderState actual_state = {.delta = 10};
+  DeltaProviderState oracle_state = {.delta = 20};
   loom_testbench_oracle_provider_t oracle_providers[1] = {};
   oracle_providers[0].name = IREE_SV("reference.scalar");
   oracle_providers[0].provider.invoke = InvocationTest::InvokeDelta;

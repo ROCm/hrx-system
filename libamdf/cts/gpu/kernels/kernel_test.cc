@@ -454,8 +454,7 @@ TEST(KernelTest, PhysicalRevisionSelectsTheInstructionEncodingOverlay) {
 TEST(KernelTest, MissingPhysicalProductDoesNotSelectANearbyProcessor) {
   constexpr kernels::Kernel kVariants[] = {{.target = "gfx1151"}};
   const kernels::KernelSet products = {kVariants};
-  amdf_gpu_endpoint_info_t endpoint = {};
-  endpoint.gfx_ip = {11, 5, 15};
+  amdf_gpu_endpoint_info_t endpoint = {.gfx_ip = {11, 5, 15}};
   EXPECT_EQ(products.Find(endpoint), nullptr);
 }
 

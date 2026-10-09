@@ -367,16 +367,14 @@ TEST_F(VerifyStructureTest, AlternativeRequiredAncestorsAcceptEitherKind) {
 
   for (loom_op_kind_t ancestor_kind : required_ancestors) {
     SCOPED_TRACE(ancestor_kind);
-    loom_op_t ancestor = {};
-    ancestor.kind = ancestor_kind;
+    loom_op_t ancestor = {.kind = ancestor_kind};
     op->parent_op = &ancestor;
     result_ = {};
     loom_verify_op_placement(&state_, op, &vtable);
     EXPECT_EQ(result_.error_count, 0u);
   }
 
-  loom_op_t wrong_ancestor = {};
-  wrong_ancestor.kind = LOOM_OP_TEST_CONSTANT;
+  loom_op_t wrong_ancestor = {.kind = LOOM_OP_TEST_CONSTANT};
   op->parent_op = &wrong_ancestor;
   result_ = {};
   loom_verify_op_placement(&state_, op, &vtable);

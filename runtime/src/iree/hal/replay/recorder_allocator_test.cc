@@ -88,9 +88,9 @@ class ReplayRecorderAllocatorTest : public ::testing::Test {
     iree_hal_buffer_params_t params = {};
     params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
     params.usage = IREE_HAL_BUFFER_USAGE_MAPPING;
-    iree_hal_external_buffer_t external_buffer = {};
-    external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
-    external_buffer.size = sizeof(storage_);
+    iree_hal_external_buffer_t external_buffer = {
+        .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+        .size = sizeof(storage_)};
     external_buffer.handle.host_allocation.ptr = storage_;
     iree_hal_buffer_release_callback_t release_callback = {
         [](void* user_data, iree_hal_buffer_t*) {

@@ -78,8 +78,7 @@ TEST(SourceMemoryAccessPlanTest, ClassifiesRetainedRejectionBits) {
 }
 
 TEST(SourceMemoryAccessPlanTest, IncludesPhysicalRootByteOffset) {
-  loom_low_source_memory_access_plan_t plan = {};
-  plan.static_byte_offset = 12;
+  loom_low_source_memory_access_plan_t plan = {.static_byte_offset = 12};
   EXPECT_TRUE(
       loom_low_source_memory_access_plan_include_root_byte_offset(&plan, 20));
   EXPECT_EQ(plan.static_byte_offset, 32);
@@ -1325,8 +1324,8 @@ TEST(SourceMemoryPlan, SummaryRetainsAtomicObservationSemantics) {
       LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_STORE,
   };
   for (const auto operation_kind : atomic_observations) {
-    loom_low_source_memory_access_plan_t plan = {};
-    plan.operation_kind = operation_kind;
+    loom_low_source_memory_access_plan_t plan = {.operation_kind =
+                                                     operation_kind};
     loom_low_byte_interval_t interval = {};
     loom_low_memory_access_summary_t summary = {};
     loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
@@ -1341,8 +1340,8 @@ TEST(SourceMemoryPlan, SummaryRetainsAtomicObservationSemantics) {
       LOOM_LOW_SOURCE_MEMORY_OPERATION_ATOMIC_CMPXCHG,
   };
   for (const auto operation_kind : non_observations) {
-    loom_low_source_memory_access_plan_t plan = {};
-    plan.operation_kind = operation_kind;
+    loom_low_source_memory_access_plan_t plan = {.operation_kind =
+                                                     operation_kind};
     loom_low_byte_interval_t interval = {};
     loom_low_memory_access_summary_t summary = {};
     loom_low_source_memory_access_plan_make_summary(&plan, &interval, &summary);
@@ -1391,8 +1390,8 @@ TEST(SourceMemoryPlan, DynamicPacketOffsetsPreserveDivisibility) {
 TEST(SourceMemoryComponentTest, RetainedComponentConvertsExactCoordinateUnits) {
   loom_low_source_memory_dynamic_term_t term = {};
   term.byte_stride = 4;
-  loom_low_source_memory_access_plan_t access = {};
-  access.retained_component = {&term, 0b1010};
+  loom_low_source_memory_access_plan_t access = {
+      .retained_component = {&term, 0b1010}};
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 0, 1),
             &access.retained_component);
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 0, 4),
@@ -1405,8 +1404,7 @@ TEST(SourceMemoryComponentTest, RetainedComponentConvertsExactCoordinateUnits) {
 }
 
 TEST(SourceMemoryComponentTest, MaterializedPrefixCannotOverlapComponent) {
-  loom_low_source_memory_dynamic_term_t term = {};
-  term.byte_stride = 4;
+  loom_low_source_memory_dynamic_term_t term = {.byte_stride = 4};
   loom_low_source_memory_access_plan_t access = {};
   access.retained_component = {&term, 0b1010};
   EXPECT_EQ(loom_low_source_memory_access_retained_component(&access, 1, 1),

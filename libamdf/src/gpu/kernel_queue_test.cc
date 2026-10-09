@@ -175,8 +175,7 @@ TEST_P(GpuKernelQueueTest, UnsupportedNotificationDoesNotChangeAcceptedWork) {
   ASSERT_EQ(info.notification_types, 0u);
   uint64_t submission = 0;
   ASSERT_EQ(Submit(&submission), AMDF_STATUS_OK);
-  amdf_native_event_t event = {};
-  event.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD;
+  amdf_native_event_t event = {.type = AMDF_NATIVE_EVENT_TYPE_EVENTFD};
   event.payload.file_descriptor = 5;
   EXPECT_EQ(amdf_status_code(amdf_kernel_queue_request_notification(
                 queue, submission, &event)),

@@ -1073,10 +1073,8 @@ static iree_status_t CreateSingleBlockPool(
         IREE_STATUS_FAILED_PRECONDITION,
         "queue pool backend query returned an incomplete backend bundle");
   }
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = block_size;
-  options.blocks_per_slab = 1;
-  options.frontier_capacity = 2;
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = block_size, .blocks_per_slab = 1, .frontier_capacity = 2};
   return iree::hal::cts::CreateFiniteBlockPool(
       backend, options, iree_allocator_system(), out_backing_pool, out_pool);
 }

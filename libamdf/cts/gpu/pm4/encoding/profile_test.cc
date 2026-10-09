@@ -53,8 +53,8 @@ TEST(Pm4ProfileTest, DoesNotInferAnEncodingForUnrepresentedFamilies) {
       {12, 2, 0},
   }};
   for (const auto& target : targets) {
-    amdf_gpu_endpoint_info_t endpoint = {};
-    endpoint.gfx_ip = {target[0], target[1], target[2]};
+    amdf_gpu_endpoint_info_t endpoint = {
+        .gfx_ip = {target[0], target[1], target[2]}};
     EXPECT_EQ(Pm4CommandProfile::Find(endpoint), nullptr);
   }
 }
@@ -62,8 +62,7 @@ TEST(Pm4ProfileTest, DoesNotInferAnEncodingForUnrepresentedFamilies) {
 TEST(Pm4ProfileTest, BacksImageTailAndTheCompletePrefetchField) {
   for (const auto& version :
        std::array<std::array<uint32_t, 2>, 3>{{{11, 5}, {12, 0}, {12, 5}}}) {
-    amdf_gpu_endpoint_info_t endpoint = {};
-    endpoint.gfx_ip = {version[0], version[1], 0};
+    amdf_gpu_endpoint_info_t endpoint = {.gfx_ip = {version[0], version[1], 0}};
     const auto* profile = Pm4CommandProfile::Find(endpoint);
     ASSERT_NE(profile, nullptr);
     // Preserve the complete linked image, then pad three 64-byte fetch lines.

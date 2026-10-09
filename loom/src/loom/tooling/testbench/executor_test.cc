@@ -90,8 +90,7 @@ class ExecutorTest : public ::testing::Test {
   }
 
   loom_module_t* ParseModule(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("executor_test.loom"), &context_,
@@ -199,11 +198,11 @@ check.case @device_events {
     loom_testbench_device_event_capture_t capture = {};
     IREE_EXPECT_OK(loom_testbench_device_event_capture_initialize(
         capture_capacity, iree_allocator_system(), &capture));
-    DeltaProviderState actual_state = {};
-    actual_state.device_events = device_events;
-    actual_state.device_event_count = device_event_count;
-    actual_state.device_event_sink =
-        loom_testbench_device_event_capture_sink(&capture);
+    DeltaProviderState actual_state = {
+        .device_events = device_events,
+        .device_event_count = device_event_count,
+        .device_event_sink =
+            loom_testbench_device_event_capture_sink(&capture)};
     loom_testbench_case_execution_options_t options = {};
     loom_testbench_case_execution_options_initialize(&options);
     options.invocation.function_call.invoke = ExecutorTest::InvokeDelta;
@@ -266,10 +265,8 @@ check.case @sampled {
   ASSERT_EQ(plan.issue_count, 0u);
   ASSERT_EQ(plan.cases[0].sample_count, 2u);
 
-  DeltaProviderState actual_state = {};
-  actual_state.delta = 3;
-  DeltaProviderState oracle_state = {};
-  oracle_state.delta = 3;
+  DeltaProviderState actual_state = {.delta = 3};
+  DeltaProviderState oracle_state = {.delta = 3};
   loom_testbench_oracle_provider_t oracle_providers[1] = {};
   loom_testbench_case_execution_options_t options =
       DeltaExecutionOptions(&actual_state, &oracle_state, oracle_providers);
@@ -326,10 +323,8 @@ check.case @mismatch {
   ASSERT_EQ(plan.case_count, 1u);
   ASSERT_EQ(plan.issue_count, 0u);
 
-  DeltaProviderState actual_state = {};
-  actual_state.delta = 0;
-  DeltaProviderState oracle_state = {};
-  oracle_state.delta = 1;
+  DeltaProviderState actual_state = {.delta = 0};
+  DeltaProviderState oracle_state = {.delta = 1};
   loom_testbench_oracle_provider_t oracle_providers[1] = {};
   loom_testbench_case_execution_options_t options =
       DeltaExecutionOptions(&actual_state, &oracle_state, oracle_providers);
@@ -471,8 +466,7 @@ check.case @provider_error {
   ASSERT_EQ(plan.issue_count, 0u);
   ASSERT_EQ(plan.cases[0].sample_count, 2u);
 
-  DeltaProviderState actual_state = {};
-  actual_state.fail_invocation = true;
+  DeltaProviderState actual_state = {.fail_invocation = true};
   DeltaProviderState oracle_state = {};
   loom_testbench_oracle_provider_t oracle_providers[1] = {};
   loom_testbench_case_execution_options_t options =

@@ -325,17 +325,18 @@ void CollectiveLink::Pump() {
         }
         description.assign(data.data(), data.data() + length);
       }
-      iree_net_queue_channel_send_params_t params = {};
-      params.generated_payload_length = description.size();
-      params.build =
-          +[](void* value, const iree_net_queue_message_builder_t* builder) {
-            auto& link = *static_cast<CollectiveLink*>(value);
-            memcpy(builder->generated_payload.data, link.description.data(),
-                   link.description.size());
-            return iree_ok_status();
-          };
-      params.build_user_data = this;
-      params.completion_callback = {OnControlSent, this};
+      iree_net_queue_channel_send_params_t params = {
+          .generated_payload_length = description.size(),
+          .build =
+              +[](void* value,
+                  const iree_net_queue_message_builder_t* builder) {
+                auto& link = *static_cast<CollectiveLink*>(value);
+                memcpy(builder->generated_payload.data, link.description.data(),
+                       link.description.size());
+                return iree_ok_status();
+              },
+          .build_user_data = this,
+          .completion_callback = {OnControlSent, this}};
       iree_status_t status =
           iree_net_queue_channel_send_command(channel, 0, &params);
       if (iree_status_is_ok(status)) {
@@ -352,20 +353,20 @@ void CollectiveLink::Pump() {
       purpose == LinkPurpose::kResult ? result_coordinate : consumed;
   if (publishes && progress != published &&
       iree_net_queue_channel_query_send_budget(channel).slots) {
-    iree_net_queue_channel_send_params_t params = {};
-    params.signal_frontier_count = 1;
-    params.build =
-        +[](void* value, const iree_net_queue_message_builder_t* builder) {
-          auto& link = *static_cast<CollectiveLink*>(value);
-          iree_net_queue_frontier_builder_set(
-              &builder->signal_frontier, 0,
-              link.purpose == LinkPurpose::kResult
-                  ? iree_async_frontier_entry_t{2, link.result_coordinate}
-                  : iree_async_frontier_entry_t{1, link.consumed});
-          return iree_ok_status();
-        };
-    params.build_user_data = this;
-    params.completion_callback = {OnControlSent, this};
+    iree_net_queue_channel_send_params_t params = {
+        .signal_frontier_count = 1,
+        .build =
+            +[](void* value, const iree_net_queue_message_builder_t* builder) {
+              auto& link = *static_cast<CollectiveLink*>(value);
+              iree_net_queue_frontier_builder_set(
+                  &builder->signal_frontier, 0,
+                  link.purpose == LinkPurpose::kResult
+                      ? iree_async_frontier_entry_t{2, link.result_coordinate}
+                      : iree_async_frontier_entry_t{1, link.consumed});
+              return iree_ok_status();
+            },
+        .build_user_data = this,
+        .completion_callback = {OnControlSent, this}};
     iree_status_t status =
         iree_net_queue_channel_send_advance(channel, &params);
     if (iree_status_is_ok(status)) {
@@ -402,27 +403,28 @@ void CollectiveLink::Send(iree_async_span_t data, uint32_t* pending_sources) {
         data, &target,
         (submitted % (storage.length / options.block_size)) *
             options.block_size};
-    iree_net_direct_write_params_t params = {};
-    params.flags = IREE_NET_DIRECT_WRITE_FLAG_NOTIFY;
-    params.notification_cookie = sequence;
-    params.entry_count = 1;
-    params.entries = &entry;
-    params.completion_callback = {OnSourceReturned, &source};
+    iree_net_direct_write_params_t params = {
+        .flags = IREE_NET_DIRECT_WRITE_FLAG_NOTIFY,
+        .notification_cookie = sequence,
+        .entry_count = 1,
+        .entries = &entry,
+        .completion_callback = {OnSourceReturned, &source}};
     status = iree_net_direct_endpoint_write(direct, &params);
   } else {
     source.expected_length +=
         IREE_NET_QUEUE_MESSAGE_HEADER_SIZE + IREE_NET_QUEUE_FRONTIER_ENTRY_SIZE;
-    iree_net_queue_channel_send_params_t params = {};
-    params.signal_frontier_count = 1;
-    params.build = +[](void* value,
-                       const iree_net_queue_message_builder_t* builder) {
-      iree_net_queue_frontier_builder_set(&builder->signal_frontier, 0,
-                                          {1, *static_cast<uint32_t*>(value)});
-      return iree_ok_status();
-    };
-    params.build_user_data = &sequence;
-    params.payload = iree_async_span_list_make(&data, 1);
-    params.completion_callback = {OnSourceReturned, &source};
+    iree_net_queue_channel_send_params_t params = {
+        .signal_frontier_count = 1,
+        .build =
+            +[](void* value, const iree_net_queue_message_builder_t* builder) {
+              iree_net_queue_frontier_builder_set(
+                  &builder->signal_frontier, 0,
+                  {1, *static_cast<uint32_t*>(value)});
+              return iree_ok_status();
+            },
+        .build_user_data = &sequence,
+        .payload = iree_async_span_list_make(&data, 1),
+        .completion_callback = {OnSourceReturned, &source}};
     status = iree_net_queue_channel_send_command(channel, 1, &params);
   }
   if (iree_status_is_ok(status)) {

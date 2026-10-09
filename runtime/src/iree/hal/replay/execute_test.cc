@@ -285,8 +285,8 @@ static void AppendImmediateQueueTransferRecord(
       .operation_count = 1,
       .data_length = 0,
   };
-  iree_hal_replay_queue_transfer_operation_payload_t operation = {};
-  operation.type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD;
+  iree_hal_replay_queue_transfer_operation_payload_t operation = {
+      .type = IREE_HAL_REPLAY_QUEUE_TRANSFER_OPERATION_TYPE_DOWNLOAD};
   operation.source_ref.buffer_id = queue_id + 11;
   operation.source_ref.length = 4;
   const iree_hal_replay_file_record_metadata_t metadata = {
@@ -314,8 +314,7 @@ static void AppendDispatchRecord(
     iree_hal_replay_object_id_t target_id,
     iree_hal_replay_object_id_t executable_id,
     iree_hal_replay_operation_code_t operation_code) {
-  iree_hal_replay_dispatch_payload_t payload = {};
-  payload.executable_id = executable_id;
+  iree_hal_replay_dispatch_payload_t payload = {.executable_id = executable_id};
   payload.workgroup_size[0] = 1;
   payload.workgroup_size[1] = 1;
   payload.workgroup_size[2] = 1;
@@ -2140,8 +2139,8 @@ TEST(ReplayExecuteTest, ExecutesRecordedFdBackedQueueWrite) {
       .semaphores = &signal_semaphore,
       .payload_values = &signal_value,
   };
-  iree_hal_barrier_t publication = {};
-  publication.flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+  iree_hal_barrier_t publication = {
+      .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE};
   const iree_hal_barrier_list_t publication_list = {1, &publication};
   const iree_hal_queue_barriers_t barriers = {&publication_list, nullptr};
   IREE_ASSERT_OK(iree_hal_queue_write(
@@ -2206,8 +2205,7 @@ TEST(ReplayExecuteTest, ExecutesRecordedQueueAlloca) {
   iree_hal_queue_pool_backend_t backend = {};
   IREE_ASSERT_OK(iree_hal_device_query_queue_pool_backend(
       wrapped_device, iree_hal_queue_family(wrapped_queue), &backend));
-  iree_hal_passthrough_pool_options_t pool_options = {};
-  pool_options.asan = backend.asan;
+  iree_hal_passthrough_pool_options_t pool_options = {.asan = backend.asan};
   iree_hal_pool_t* pool = nullptr;
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
       pool_options, backend.slab_provider, backend.notification,
@@ -2318,9 +2316,9 @@ TEST(ReplayExecuteTest, ExecutesHostAllocationImportedBufferRecord) {
       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
       0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F,
   };
-  iree_hal_external_buffer_t external_buffer = {};
-  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
-  external_buffer.size = sizeof(imported_storage);
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+      .size = sizeof(imported_storage)};
   external_buffer.handle.host_allocation.ptr = imported_storage;
 
   iree_hal_buffer_params_t params = {0};
@@ -2416,9 +2414,8 @@ TEST(ReplayExecuteTest, SkipsFailedUnsupportedImportedBufferRecord) {
   iree_hal_allocator_t* allocator = iree_hal_device_allocator(wrapped_device);
   ASSERT_NE(nullptr, allocator);
 
-  iree_hal_external_buffer_t external_buffer = {};
-  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD;
-  external_buffer.size = 16;
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_OPAQUE_FD, .size = 16};
 
   iree_hal_buffer_params_t params = {};
   params.type = IREE_HAL_MEMORY_TYPE_HOST_VISIBLE;
@@ -2536,11 +2533,11 @@ TEST(ReplayExecuteTest, ExecutesRecordedExactQueueTransfer) {
         .operation_count = 1,
         .operations = &operation,
     };
-    iree_hal_buffer_barrier_t range = {};
-    range.source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
-    range.target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ;
-    range.buffer_ref = iree_hal_make_buffer_ref(barrier_view, 2, 4);
-    range.recipe = &recipe;
+    iree_hal_buffer_barrier_t range = {
+        .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+        .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
+        .buffer_ref = iree_hal_make_buffer_ref(barrier_view, 2, 4),
+        .recipe = &recipe};
     iree_hal_barrier_t after = {};
     after.source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER;
     after.target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST;

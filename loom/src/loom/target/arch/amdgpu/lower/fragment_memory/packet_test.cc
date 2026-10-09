@@ -55,11 +55,11 @@ TEST(AmdgpuFragmentMemoryPacketTest, OriginPartitionPreservesStaticBytes) {
 loom_amdgpu_fragment_memory_packet_plan_t Packet(
     loom_amdgpu_descriptor_ref_t descriptor_ref, uint16_t register_index,
     uint16_t result_register_count, uint16_t packet_register_count) {
-  loom_amdgpu_fragment_memory_packet_plan_t packet = {};
-  packet.descriptor_ref = descriptor_ref;
-  packet.register_index = register_index;
-  packet.result_register_count = result_register_count;
-  packet.packet_register_count = packet_register_count;
+  loom_amdgpu_fragment_memory_packet_plan_t packet = {
+      .descriptor_ref = descriptor_ref,
+      .register_index = register_index,
+      .result_register_count = result_register_count,
+      .packet_register_count = packet_register_count};
   return packet;
 }
 

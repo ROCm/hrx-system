@@ -97,9 +97,8 @@ class EncodingFormatTest : public ::testing::Test {
 
   iree_status_t Parse(const char* source, loom_module_t** out_module) {
     capture_.Reset();
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = capture_.sink();
-    options.max_errors = 100;
+    loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink(),
+                                         .max_errors = 100};
     return loom_text_parse(iree_make_cstring_view(source),
                            IREE_SV("encoding_format_test.loom"), &context_,
                            &block_pool_, &options, out_module);

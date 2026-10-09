@@ -15,20 +15,16 @@ namespace {
 
 uint64_t ExecuteUnaryF32(uint8_t selector, uint32_t source) {
   uint64_t values[] = {UINT64_C(0xDEADBEEF00000000) | source};
-  iree_vm_bytecode_float_math_unary_f32_t record = {};
-  record.destination_v8 = 0;
-  record.source_v8 = 0;
-  record.selector_u8 = selector;
+  iree_vm_bytecode_float_math_unary_f32_t record = {
+      .destination_v8 = 0, .source_v8 = 0, .selector_u8 = selector};
   iree_vm_bytecode_execute_float_math_unary_f32(&record, values);
   return values[0];
 }
 
 uint64_t ExecuteUnaryF64(uint8_t selector, uint64_t source) {
   uint64_t values[] = {source};
-  iree_vm_bytecode_float_math_unary_f64_t record = {};
-  record.destination_v8 = 0;
-  record.source_v8 = 0;
-  record.selector_u8 = selector;
+  iree_vm_bytecode_float_math_unary_f64_t record = {
+      .destination_v8 = 0, .source_v8 = 0, .selector_u8 = selector};
   iree_vm_bytecode_execute_float_math_unary_f64(&record, values);
   return values[0];
 }
@@ -36,11 +32,7 @@ uint64_t ExecuteUnaryF64(uint8_t selector, uint64_t source) {
 template <typename Record, typename Execute>
 uint64_t ExecuteFma(Execute execute, uint64_t a, uint64_t b, uint64_t c) {
   uint64_t values[] = {a, b, c};
-  Record record = {};
-  record.destination_v8 = 0;
-  record.a_v8 = 0;
-  record.b_v8 = 1;
-  record.c_v8 = 2;
+  Record record = {.destination_v8 = 0, .a_v8 = 0, .b_v8 = 1, .c_v8 = 2};
   execute(&record, values);
   return values[0];
 }

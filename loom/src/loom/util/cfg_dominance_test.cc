@@ -281,8 +281,7 @@ TEST_F(CfgDominanceTest, FullBlockIndexRangeWithoutRecursiveStack) {
 }
 
 TEST_F(CfgDominanceTest, MalformedGraphIsUnavailable) {
-  loom_cfg_graph_t graph = {};
-  graph.malformed = true;
+  loom_cfg_graph_t graph = {.malformed = true};
   loom_cfg_dominance_t dominance;
   IREE_ASSERT_OK(loom_cfg_dominance_build(&graph, &arena_, &dominance));
   EXPECT_FALSE(dominance.available);

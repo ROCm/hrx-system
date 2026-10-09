@@ -402,8 +402,7 @@ TEST_F(MemoryAccessMapTest,
   IREE_ASSERT_OK(loom_low_memory_access_map_create(&target_arena_, &target));
   loom_op_t packets[4] = {};
   const loom_symbolic_term_t term = {4, 7, 7};
-  loom_symbolic_congruence_t periodic = {};
-  periodic.modulus = 64;
+  loom_symbolic_congruence_t periodic = {.modulus = 64};
   periodic.expression.terms = &term;
   periodic.expression.term_count = 1;
   periodic.expression.flags = LOOM_SYMBOLIC_EXPR_FLAG_LINEAR;
@@ -415,10 +414,10 @@ TEST_F(MemoryAccessMapTest,
   interval.origin.facts = loom_value_facts_unknown();
   interval.origin.congruence = &periodic;
   interval.upper = 16;
-  loom_low_memory_access_summary_t access = {};
-  access.memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP;
-  access.source_flags = LOOM_LOW_MEMORY_ACCESS_SOURCE_FLAG_ATOMIC_OBSERVATION;
-  access.relative_interval = &interval;
+  loom_low_memory_access_summary_t access = {
+      .memory_space = LOOM_LOW_MEMORY_SPACE_WORKGROUP,
+      .source_flags = LOOM_LOW_MEMORY_ACCESS_SOURCE_FLAG_ATOMIC_OBSERVATION,
+      .relative_interval = &interval};
   IREE_ASSERT_OK(
       loom_low_memory_access_map_insert(source, &packets[0], 0, &access));
   interval.lower = 16;

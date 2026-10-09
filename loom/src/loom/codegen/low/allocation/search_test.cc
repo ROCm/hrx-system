@@ -91,12 +91,11 @@ loom_liveness_interval_t Interval(loom_value_id_t value_id, uint32_t start,
                                   uint32_t end,
                                   loom_liveness_value_class_t value_class,
                                   uint32_t unit_count) {
-  loom_liveness_interval_t interval = {};
-  interval.value_id = value_id;
-  interval.start_point = start;
-  interval.end_point = end;
-  interval.value_class = value_class;
-  interval.unit_count = unit_count;
+  loom_liveness_interval_t interval = {.value_id = value_id,
+                                       .start_point = start,
+                                       .end_point = end,
+                                       .value_class = value_class,
+                                       .unit_count = unit_count};
   return interval;
 }
 
@@ -104,37 +103,35 @@ loom_low_allocation_assignment_t Assignment(
     loom_value_id_t value_id, uint32_t start, uint32_t end,
     loom_liveness_value_class_t value_class, uint32_t location_base,
     uint32_t location_count, uint32_t unit_point_start) {
-  loom_low_allocation_assignment_t assignment = {};
-  assignment.value_id = value_id;
-  assignment.descriptor_reg_class_id = value_class.register_class_id;
-  assignment.start_point = start;
-  assignment.end_point = end;
-  assignment.unit_count = location_count;
-  assignment.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  assignment.location_base = location_base;
-  assignment.location_count = location_count;
-  assignment.unit_point_start = unit_point_start;
+  loom_low_allocation_assignment_t assignment = {
+      .value_id = value_id,
+      .descriptor_reg_class_id = value_class.register_class_id,
+      .start_point = start,
+      .end_point = end,
+      .unit_count = location_count,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_base = location_base,
+      .location_count = location_count,
+      .unit_point_start = unit_point_start};
   return assignment;
 }
 
 loom_low_allocation_class_capacity_t Capacity(uint32_t max_units) {
-  loom_low_allocation_class_capacity_t capacity = {};
-  capacity.descriptor_reg_class_id = 0;
-  capacity.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  capacity.max_units = max_units;
-  capacity.alloc_unit_bits = 32;
-  capacity.spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_UNKNOWN;
-  capacity.is_spillable = true;
-  capacity.is_bounded = true;
+  loom_low_allocation_class_capacity_t capacity = {
+      .descriptor_reg_class_id = 0,
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .max_units = max_units,
+      .alloc_unit_bits = 32,
+      .spill_slot_space = LOOM_LOW_SPILL_SLOT_SPACE_UNKNOWN,
+      .is_spillable = true,
+      .is_bounded = true};
   return capacity;
 }
 
 loom_low_descriptor_set_t DescriptorSet(const loom_low_reg_class_t* reg_class,
                                         uint64_t stable_id) {
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = stable_id;
-  descriptor_set.reg_classes = reg_class;
-  descriptor_set.reg_class_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {
+      .stable_id = stable_id, .reg_classes = reg_class, .reg_class_count = 1};
   return descriptor_set;
 }
 
@@ -157,9 +154,8 @@ loom_low_resolved_target_t ResolvedTarget(
 }
 
 loom_liveness_block_info_t Block(uint32_t start_point, uint32_t end_point) {
-  loom_liveness_block_info_t block = {};
-  block.start_point = start_point;
-  block.end_point = end_point;
+  loom_liveness_block_info_t block = {.start_point = start_point,
+                                      .end_point = end_point};
   return block;
 }
 
@@ -237,10 +233,10 @@ uint32_t FindFreeLocationWithPlacement(
                               : DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {1};
-  loom_low_allocation_target_constraints_t target_constraints = {};
-  target_constraints.target = &target;
-  target_constraints.max_assigned_location_end_by_reg_class =
-      max_assigned_location_end_by_reg_class;
+  loom_low_allocation_target_constraints_t target_constraints = {
+      .target = &target,
+      .max_assigned_location_end_by_reg_class =
+          max_assigned_location_end_by_reg_class};
 
   const uint32_t counterpart_base =
       physical_descriptor_set
@@ -407,14 +403,14 @@ uint32_t FindFreeLocationWithStorageLease(
   std::vector<uint32_t> unit_end_points(options.unit_count + 1, 4);
   unit_end_points.back() = 1;
   uint64_t edge_handoff_words[] = {0};
-  loom_low_allocation_unit_liveness_t unit_liveness = {};
-  unit_liveness.values = unit_values;
-  unit_liveness.end_points = unit_end_points.data();
-  unit_liveness.point_count = unit_end_points.size();
-  unit_liveness.values_with_incomplete_storage_segments = {
-      liveness.value_count,
-      edge_handoff_words,
-  };
+  loom_low_allocation_unit_liveness_t unit_liveness = {
+      .values = unit_values,
+      .end_points = unit_end_points.data(),
+      .point_count = unit_end_points.size(),
+      .values_with_incomplete_storage_segments = {
+          liveness.value_count,
+          edge_handoff_words,
+      }};
 
   const loom_low_reg_class_t reg_class =
       RegClass(/*allocatable_count=*/0, LOOM_LOW_REG_CLASS_FLAG_PHYSICAL);
@@ -699,12 +695,12 @@ TEST_F(LowAllocationSearchTest,
       UINT32_MAX,
   };
   loom_low_allocation_assignment_t assignments[1] = {};
-  loom_low_allocation_assignment_map_t assignment_map = {};
-  assignment_map.module = module;
-  assignment_map.liveness = &liveness;
-  assignment_map.assignments = assignments;
-  assignment_map.assignment_indices_by_value_ordinal =
-      assignment_indices_by_value_ordinal;
+  loom_low_allocation_assignment_map_t assignment_map = {
+      .module = module,
+      .liveness = &liveness,
+      .assignments = assignments,
+      .assignment_indices_by_value_ordinal =
+          assignment_indices_by_value_ordinal};
 
   loom_low_allocation_active_set_t active_set = {};
   IREE_ASSERT_OK(loom_low_allocation_active_set_initialize(
@@ -1113,10 +1109,10 @@ TEST_F(LowAllocationSearchTest,
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {2};
-  loom_low_allocation_target_constraints_t target_constraints = {};
-  target_constraints.target = &target;
-  target_constraints.max_assigned_location_end_by_reg_class =
-      max_assigned_location_end_by_reg_class;
+  loom_low_allocation_target_constraints_t target_constraints = {
+      .target = &target,
+      .max_assigned_location_end_by_reg_class =
+          max_assigned_location_end_by_reg_class};
 
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(active_value, /*start=*/0, /*end=*/12, value_class,
@@ -1181,12 +1177,12 @@ TEST_F(LowAllocationSearchTest,
   lease_instances[0].location_base = 0;
   lease_instances[0].location_count = 1;
   uint8_t lease_instance_written[] = {1};
-  loom_low_allocation_storage_lease_state_t storage_leases = {};
-  storage_leases.lease_table = &lease_table;
-  storage_leases.value_domain = &value_domain;
-  storage_leases.unit_liveness = &unit_liveness;
-  storage_leases.instances = lease_instances;
-  storage_leases.instance_written = lease_instance_written;
+  loom_low_allocation_storage_lease_state_t storage_leases = {
+      .lease_table = &lease_table,
+      .value_domain = &value_domain,
+      .unit_liveness = &unit_liveness,
+      .instances = lease_instances,
+      .instance_written = lease_instance_written};
   loom_low_allocation_spill_plan_traffic_t spill_traffic[] = {
       {},
       {
@@ -1286,10 +1282,10 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficActiveSpillVictimSetTie) {
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {4};
-  loom_low_allocation_target_constraints_t target_constraints = {};
-  target_constraints.target = &target;
-  target_constraints.max_assigned_location_end_by_reg_class =
-      max_assigned_location_end_by_reg_class;
+  loom_low_allocation_target_constraints_t target_constraints = {
+      .target = &target,
+      .max_assigned_location_end_by_reg_class =
+          max_assigned_location_end_by_reg_class};
 
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(expensive_value, /*start=*/0, /*end=*/20, value_class,
@@ -1425,10 +1421,10 @@ TEST_F(LowAllocationSearchTest, SelectsLowerTrafficOverFewerVictims) {
       DescriptorSet(&reg_class, descriptor_set_id);
   const loom_low_resolved_target_t target = ResolvedTarget(&descriptor_set);
   uint32_t max_assigned_location_end_by_reg_class[] = {4};
-  loom_low_allocation_target_constraints_t target_constraints = {};
-  target_constraints.target = &target;
-  target_constraints.max_assigned_location_end_by_reg_class =
-      max_assigned_location_end_by_reg_class;
+  loom_low_allocation_target_constraints_t target_constraints = {
+      .target = &target,
+      .max_assigned_location_end_by_reg_class =
+          max_assigned_location_end_by_reg_class};
 
   loom_low_allocation_assignment_t assignments[] = {
       Assignment(expensive_value, /*start=*/0, /*end=*/28, value_class,

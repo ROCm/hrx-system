@@ -782,14 +782,13 @@ TEST(CompileReportFormatTest, KeepsImpreciseSourceLowMemoryIntervalEnvelopes) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
 
-  loom_target_compile_report_memory_interval_t imprecise_interval = {};
-  imprecise_interval.flags =
-      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
-      LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE;
-  imprecise_interval.begin_min_bytes = 0;
-  imprecise_interval.begin_max_bytes = 64;
-  imprecise_interval.end_min_bytes = 4;
-  imprecise_interval.end_max_bytes = 68;
+  loom_target_compile_report_memory_interval_t imprecise_interval = {
+      .flags = LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_BEGIN_RANGE |
+               LOOM_TARGET_COMPILE_REPORT_MEMORY_INTERVAL_END_RANGE,
+      .begin_min_bytes = 0,
+      .begin_max_bytes = 64,
+      .end_min_bytes = 4,
+      .end_max_bytes = 68};
   const loom_target_compile_report_source_low_memory_row_t row = MakeMemoryRow(
       IREE_SVL("vector.load"), /*source_op_kind=*/43, IREE_SVL("load"),
       IREE_SVL("test.load.v1"), /*static_offset_bytes=*/0,
@@ -903,9 +902,9 @@ TEST(CompileReportFormatTest, FormatsSourceLowMemorySummaryEconomics) {
   loom_target_compile_report_t report;
   loom_target_compile_report_initialize(&report, iree_allocator_system());
 
-  loom_target_compile_report_workload_t workload = {};
-  workload.flags = LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT;
-  workload.dispatch_workitem_count = 16;
+  loom_target_compile_report_workload_t workload = {
+      .flags = LOOM_TARGET_COMPILE_REPORT_WORKLOAD_DISPATCH_WORKITEM_COUNT,
+      .dispatch_workitem_count = 16};
   loom_target_compile_report_record_workload(&report, &workload);
 
   const loom_target_compile_report_source_low_memory_row_t load_row =

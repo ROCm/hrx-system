@@ -39,11 +39,10 @@ class DestructiveReuseTest : public ::testing::Test {
                                            uint32_t start_point,
                                            uint32_t end_point,
                                            uint32_t unit_count) {
-    loom_liveness_interval_t interval = {};
-    interval.value_id = value_id;
-    interval.start_point = start_point;
-    interval.end_point = end_point;
-    interval.unit_count = unit_count;
+    loom_liveness_interval_t interval = {.value_id = value_id,
+                                         .start_point = start_point,
+                                         .end_point = end_point,
+                                         .unit_count = unit_count};
     return interval;
   }
 

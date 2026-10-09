@@ -89,8 +89,7 @@ TEST(EncodingTest, VectorRegisterPrefixesAndBehaviors) {
 }
 
 TEST(EncodingTest, AvxVnniInt8FamilyHasExactReferenceBytes) {
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 1;
+  loom_x86_encoding_operands_t operands = {.result = 1};
   operands.inputs[0] = 1;
   operands.inputs[1] = 2;
   operands.inputs[2] = 3;
@@ -308,8 +307,7 @@ TEST(EncodingTest, EveryVectorRecipeHasExactReferenceBytes) {
 
 TEST(EncodingTest, RegisterDirectionAndWidth) {
   // ADD r9,r10 uses r/m as the result; IMUL r9,r10 uses reg as the result.
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 9;
+  loom_x86_encoding_operands_t operands = {.result = 9};
   operands.inputs[0] = 9;
   operands.inputs[1] = 10;
   ExpectEncoding(LOOM_X86_ENCODING_FORM_BINARY_RM_R,
@@ -324,8 +322,7 @@ TEST(EncodingTest, RegisterDirectionAndWidth) {
 
 TEST(EncodingTest, ByteRegisterPrefixAndFullWidthDefinition) {
   // MOVZX esi,sil requires a REX prefix even without extended registers.
-  loom_x86_encoding_operands_t operands = {};
-  operands.result = 6;
+  loom_x86_encoding_operands_t operands = {.result = 6};
   operands.inputs[0] = 6;
   ExpectEncoding(LOOM_X86_ENCODING_FORM_MOVE,
                  LOOM_X86_ENCODING_OPCODE_0F | 0xb6 | LOOM_X86_ENCODING_BYTE,

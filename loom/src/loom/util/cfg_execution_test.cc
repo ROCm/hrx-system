@@ -89,8 +89,7 @@ TEST_F(CfgExecutionTest, ModeledLoopSelectorPreservesBodyCounts) {
 
 TEST_F(CfgExecutionTest, UnavailableControlKeepsReachableBlocksConservative) {
   testing::CfgGraph fixture({{1}, {}, {3}, {}});
-  loom_cfg_control_t control = {};
-  control.graph = fixture.get();
+  loom_cfg_control_t control = {.graph = fixture.get()};
   iree_bitmap_t unmodeled = {};
   IREE_ASSERT_OK(loom_cfg_execution_classify_unmodeled_blocks(
       &control, loom_cfg_execution_selector_model_t{}, &arena_, &unmodeled));

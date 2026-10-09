@@ -369,9 +369,8 @@ TEST_P(BufferRangeTest, MaintenanceGranulesPreserveFiniteNativeAlignment) {
     IREE_ASSERT_OK(iree_hal_tlsf_pool_create_from_buffer(
         view, 2, 1024, &options, allocator_, &child));
   } else {
-    iree_hal_fixed_block_pool_options_t options = {};
-    options.block_size = 13;
-    options.alignment = 64;
+    iree_hal_fixed_block_pool_options_t options = {.block_size = 13,
+                                                   .alignment = 64};
     IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
         view, 2, 1024, &options, allocator_, &child));
   }
@@ -408,8 +407,7 @@ TEST_P(BufferRangeTest, MaintenanceGranulesPreserveFiniteNativeAlignment) {
 TEST_P(BufferRangeTest, MaintenanceGranulesSurviveGrowableChildren) {
   iree_hal_buffer_t* source = nullptr;
   IREE_ASSERT_OK(CreateMaintenanceBuffer(&source));
-  iree_hal_fixed_block_pool_options_t parent_options = {};
-  parent_options.block_size = 1024;
+  iree_hal_fixed_block_pool_options_t parent_options = {.block_size = 1024};
   iree_hal_pool_t* parent = nullptr;
   IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
       source, 0, IREE_HAL_WHOLE_BUFFER, &parent_options, allocator_, &parent));
@@ -424,9 +422,8 @@ TEST_P(BufferRangeTest, MaintenanceGranulesSurviveGrowableChildren) {
     IREE_ASSERT_OK(
         iree_hal_tlsf_pool_create(parent, &options, allocator_, &child));
   } else {
-    iree_hal_fixed_block_pool_options_t options = {};
-    options.block_size = 13;
-    options.blocks_per_slab = 2;
+    iree_hal_fixed_block_pool_options_t options = {.block_size = 13,
+                                                   .blocks_per_slab = 2};
     IREE_ASSERT_OK(iree_hal_fixed_block_pool_query_backing_request(
         parent, &options, &backing_request));
     IREE_ASSERT_OK(

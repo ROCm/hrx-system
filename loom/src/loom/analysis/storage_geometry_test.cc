@@ -178,9 +178,9 @@ TEST_F(StorageGeometryFactsTest,
 
   const loom_value_facts_t strides[] = {loom_value_facts_exact_i64(768),
                                         loom_value_facts_exact_i64(1)};
-  loom_value_fact_encoding_summary_t summary = {};
-  summary.role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT;
-  summary.address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED, 2, strides};
+  loom_value_fact_encoding_summary_t summary = {
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED, 2, strides}};
   loom_value_facts_t layout;
   IREE_ASSERT_OK(loom_value_facts_make_encoding_summary(&facts_.context,
                                                         summary, &layout));

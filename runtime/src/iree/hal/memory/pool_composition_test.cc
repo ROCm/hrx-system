@@ -85,9 +85,8 @@ class PoolCompositionTest : public ::testing::TestWithParam<
       status = iree_hal_tlsf_pool_create_from_buffer(
           backing_, offset, length, &options, allocator_, out_pool);
     } else {
-      iree_hal_fixed_block_pool_options_t options = {};
-      options.block_size = block_size;
-      options.frontier_capacity = 2;
+      iree_hal_fixed_block_pool_options_t options = {.block_size = block_size,
+                                                     .frontier_capacity = 2};
       status = iree_hal_fixed_block_pool_create_from_buffer(
           backing_, offset, length, &options, allocator_, out_pool);
     }

@@ -309,16 +309,16 @@ TEST(CompileReportFormatTest, FormatsWaitPlanningRows) {
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   report.requested_detail_flags = LOOM_TARGET_COMPILE_REPORT_DETAIL_WAIT_PLAN;
 
-  loom_target_compile_report_wait_plan_t wait_plan = {};
-  wait_plan.action_count = 5;
-  wait_plan.explicit_action_count = 1;
-  wait_plan.planned_action_count = 4;
-  wait_plan.full_drain_count = 2;
-  wait_plan.partial_wait_count = 3;
-  wait_plan.drained_count = 6;
-  wait_plan.max_drained_count = 4;
-  wait_plan.max_outstanding_before = 6;
-  wait_plan.max_full_drain_outstanding_before = 6;
+  loom_target_compile_report_wait_plan_t wait_plan = {
+      .action_count = 5,
+      .explicit_action_count = 1,
+      .planned_action_count = 4,
+      .full_drain_count = 2,
+      .partial_wait_count = 3,
+      .drained_count = 6,
+      .max_drained_count = 4,
+      .max_outstanding_before = 6,
+      .max_full_drain_outstanding_before = 6};
   loom_target_compile_report_record_wait_plan(&report, &wait_plan);
 
   loom_target_compile_report_wait_counter_row_t counter = {};

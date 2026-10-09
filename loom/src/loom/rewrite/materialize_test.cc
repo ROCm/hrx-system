@@ -141,14 +141,14 @@ TEST_F(MaterializeTest, ClonesOwnedDeclarationArguments) {
       &target_builder_, loom_attr_i64(4), argument_types[0],
       LOOM_LOCATION_UNKNOWN, &target_constant));
   loom_symbol_ref_t target_callee = {0, target_symbol};
-  loom_ir_remap_options_t options = {};
-  options.remap_symbol = loom_ir_remap_symbol_callback_make(
-      [](void* user_data, const loom_module_t*, loom_module_t*,
-         loom_symbol_ref_t, loom_symbol_ref_t* out_ref) {
-        *out_ref = *static_cast<const loom_symbol_ref_t*>(user_data);
-        return iree_ok_status();
-      },
-      &target_callee);
+  loom_ir_remap_options_t options = {
+      .remap_symbol = loom_ir_remap_symbol_callback_make(
+          [](void* user_data, const loom_module_t*, loom_module_t*,
+             loom_symbol_ref_t, loom_symbol_ref_t* out_ref) {
+            *out_ref = *static_cast<const loom_symbol_ref_t*>(user_data);
+            return iree_ok_status();
+          },
+          &target_callee)};
   loom_ir_remap_t remap =
       InitializeRemap(/*allow_unmapped_values=*/false, &options);
   loom_op_t* target_declaration = nullptr;

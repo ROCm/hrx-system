@@ -129,10 +129,9 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   reg_class.alloc_unit_bits = 32;
   reg_class.allocatable_count = 4;
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = descriptor_set_id;
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {.stable_id = descriptor_set_id,
+                                              .reg_classes = &reg_class,
+                                              .reg_class_count = 1};
   loom_low_resolved_target_t target = {};
   target.descriptor_set = &descriptor_set;
   target.descriptor_set_key = IREE_SV("test");
@@ -524,10 +523,9 @@ TEST_F(LowAllocationIntervalAssignmentTest,
   reg_class.alloc_unit_bits = 32;
   reg_class.allocatable_count = 8;
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.stable_id = descriptor_set_id;
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {.stable_id = descriptor_set_id,
+                                              .reg_classes = &reg_class,
+                                              .reg_class_count = 1};
   loom_low_resolved_target_t target = {};
   target.descriptor_set = &descriptor_set;
   target.descriptor_set_key = IREE_SV("test");

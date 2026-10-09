@@ -45,9 +45,8 @@ static iree_async_frontier_entry_t E(iree_async_axis_t axis, uint64_t epoch) {
 }
 
 static iree_hal_memory_arena_options_t DefaultOptions() {
-  iree_hal_memory_arena_options_t options = {};
-  options.capacity = 65536;
-  options.frontier_capacity = 4;
+  iree_hal_memory_arena_options_t options = {.capacity = 65536,
+                                             .frontier_capacity = 4};
   return options;
 }
 
@@ -77,9 +76,8 @@ TEST(Arena, InvalidOptionsZeroCapacity) {
 }
 
 TEST(Arena, DefaultFrontierCapacity) {
-  iree_hal_memory_arena_options_t options = {};
-  options.capacity = 4096;
-  options.frontier_capacity = 0;
+  iree_hal_memory_arena_options_t options = {.capacity = 4096,
+                                             .frontier_capacity = 0};
   iree_hal_memory_arena_t* arena = NULL;
   IREE_ASSERT_OK(
       iree_hal_memory_arena_allocate(options, iree_allocator_system(), &arena));
@@ -144,9 +142,8 @@ TEST(Arena, AcquireAlignment) {
 }
 
 TEST(Arena, AcquireExhaustion) {
-  iree_hal_memory_arena_options_t options = {};
-  options.capacity = 100;
-  options.frontier_capacity = 1;
+  iree_hal_memory_arena_options_t options = {.capacity = 100,
+                                             .frontier_capacity = 1};
   iree_hal_memory_arena_t* arena = NULL;
   IREE_ASSERT_OK(
       iree_hal_memory_arena_allocate(options, iree_allocator_system(), &arena));
@@ -166,9 +163,8 @@ TEST(Arena, AcquireExhaustion) {
 }
 
 TEST(Arena, AcquireExhaustionFromAlignmentPadding) {
-  iree_hal_memory_arena_options_t options = {};
-  options.capacity = 32;
-  options.frontier_capacity = 1;
+  iree_hal_memory_arena_options_t options = {.capacity = 32,
+                                             .frontier_capacity = 1};
   iree_hal_memory_arena_t* arena = NULL;
   IREE_ASSERT_OK(
       iree_hal_memory_arena_allocate(options, iree_allocator_system(), &arena));
@@ -501,9 +497,8 @@ TEST(Arena, TaintOnFrontierOverflow) {
 }
 
 TEST(Arena, TaintClearedOnNextBatch) {
-  iree_hal_memory_arena_options_t options = {};
-  options.capacity = 4096;
-  options.frontier_capacity = 1;
+  iree_hal_memory_arena_options_t options = {.capacity = 4096,
+                                             .frontier_capacity = 1};
 
   iree_hal_memory_arena_t* arena = NULL;
   IREE_ASSERT_OK(

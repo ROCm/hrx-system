@@ -154,9 +154,9 @@ TEST(BenchmarkSnapshotSinkTest, AggregatesDeduplicatedWorkItems) {
       /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
   };
   result.launch_evidence = &launch_evidence;
-  loom_sanitizer_options_t sanitizer = {};
-  sanitizer.checks = LOOM_SANITIZER_CHECK_RACE;
-  sanitizer.reporting_mode = LOOM_SANITIZER_REPORTING_MODE_REPORT_ONLY;
+  loom_sanitizer_options_t sanitizer = {
+      .checks = LOOM_SANITIZER_CHECK_RACE,
+      .reporting_mode = LOOM_SANITIZER_REPORTING_MODE_REPORT_ONLY};
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
       &event_sink, &run, /*dry_run=*/false, &sanitizer));
@@ -293,11 +293,10 @@ TEST(BenchmarkSnapshotSinkTest, IncludesRequestedProfileSummary) {
   case_plan.name = IREE_SV("kernel_case");
   iree_benchmark_loom_benchmark_policy_t policy = {};
   policy.measure = IREE_SV("dispatch_complete");
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
-  result.has_hal_benchmark = true;
+  iree_benchmark_loom_benchmark_result_t result = {.executed = true,
+                                                   .passed = true,
+                                                   .samples_per_iteration = 1,
+                                                   .has_hal_benchmark = true};
   result.hal_benchmark.timing.batch_size = 16;
   result.hal_benchmark.timing.measured_batch_count = 3;
   result.hal_benchmark.timing.measured_operation_count = 48;
@@ -376,11 +375,10 @@ TEST(BenchmarkSnapshotSinkTest, IncludesHalTimingCountsAndWarnings) {
   iree_benchmark_loom_benchmark_policy_t policy = {};
   policy.measure = IREE_SV("dispatch_complete");
   policy.hal_options.timing.stable_p90_to_p50_delta_ppm = 100000;
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
-  result.has_hal_benchmark = true;
+  iree_benchmark_loom_benchmark_result_t result = {.executed = true,
+                                                   .passed = true,
+                                                   .samples_per_iteration = 1,
+                                                   .has_hal_benchmark = true};
   result.hal_benchmark.timing.batch_size = 1;
   result.hal_benchmark.timing.measured_batch_count = 3;
   result.hal_benchmark.timing.measured_operation_count = 3;
@@ -711,15 +709,15 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsPlannedWorkAliases) {
   logical_samples[1].has_case_sample_ordinal = true;
   logical_samples[1].case_sample_ordinal = 0;
   logical_samples[1].work_item_index = 7;
-  iree_benchmark_loom_work_item_t work_item = {};
-  work_item.kind = IREE_BENCHMARK_LOOM_WORK_ITEM_DISPATCH_SAMPLE;
-  work_item.work_item_index = 7;
-  work_item.representative_selection_index = 0;
-  work_item.hal_compile_item_index = 0;
-  work_item.begin_benchmark_sample = 0;
-  work_item.end_benchmark_sample = 1;
-  work_item.has_case_sample_ordinal = true;
-  work_item.case_sample_ordinal = 0;
+  iree_benchmark_loom_work_item_t work_item = {
+      .kind = IREE_BENCHMARK_LOOM_WORK_ITEM_DISPATCH_SAMPLE,
+      .work_item_index = 7,
+      .representative_selection_index = 0,
+      .hal_compile_item_index = 0,
+      .begin_benchmark_sample = 0,
+      .end_benchmark_sample = 1,
+      .has_case_sample_ordinal = true,
+      .case_sample_ordinal = 0};
   iree_benchmark_loom_work_plan_t work_plan = {};
   work_plan.selected_benchmarks = selections;
   work_plan.selected_benchmark_count = IREE_ARRAYSIZE(selections);
@@ -829,11 +827,11 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsScenarioTrialCoordinates) {
   selection.scenario_plan = &scenario_plan;
   selection.policy.measure = IREE_SV("dispatch_complete");
   const loom_testbench_scenario_sample_coordinate_t coordinate = {1, 2, 3};
-  iree_benchmark_loom_logical_sample_t logical_sample = {};
-  logical_sample.begin_benchmark_sample = 7;
-  logical_sample.end_benchmark_sample = 8;
-  logical_sample.scenario_coordinate = coordinate;
-  logical_sample.work_item_index = 4;
+  iree_benchmark_loom_logical_sample_t logical_sample = {
+      .begin_benchmark_sample = 7,
+      .end_benchmark_sample = 8,
+      .scenario_coordinate = coordinate,
+      .work_item_index = 4};
   iree_benchmark_loom_work_item_t work_item = {};
   work_item.kind = IREE_BENCHMARK_LOOM_WORK_ITEM_SCENARIO_TRIAL;
   work_item.work_item_index = 4;
@@ -841,13 +839,13 @@ TEST(BenchmarkSnapshotSinkTest, DryRunReportsScenarioTrialCoordinates) {
   work_item.begin_benchmark_sample = 7;
   work_item.end_benchmark_sample = 8;
   work_item.scenario_coordinate = coordinate;
-  iree_benchmark_loom_work_plan_t work_plan = {};
-  work_plan.selected_benchmarks = &selection;
-  work_plan.selected_benchmark_count = 1;
-  work_plan.logical_samples = &logical_sample;
-  work_plan.logical_sample_count = 1;
-  work_plan.work_items = &work_item;
-  work_plan.work_item_count = 1;
+  iree_benchmark_loom_work_plan_t work_plan = {
+      .selected_benchmarks = &selection,
+      .selected_benchmark_count = 1,
+      .logical_samples = &logical_sample,
+      .logical_sample_count = 1,
+      .work_items = &work_item,
+      .work_item_count = 1};
   loom_module_t module = {};
   iree_benchmark_loom_artifact_bundle_t bundle = {};
 
@@ -904,14 +902,14 @@ TEST(BenchmarkSnapshotSinkTest, ReportsExecutedScenarioTrialCoordinates) {
   candidate.candidate_id = IREE_SV("c0");
   iree_benchmark_loom_benchmark_policy_t policy = {};
   policy.measure = IREE_SV("dispatch_complete");
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.has_benchmark_sample_ordinal = true;
-  result.benchmark_sample_ordinal = 17;
-  result.has_scenario_coordinate = true;
-  result.scenario_coordinate = {2, 3, 5};
-  result.samples_per_iteration = 1;
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .has_benchmark_sample_ordinal = true,
+      .benchmark_sample_ordinal = 17,
+      .has_scenario_coordinate = true,
+      .scenario_coordinate = {2, 3, 5},
+      .samples_per_iteration = 1};
 
   IREE_ASSERT_OK(iree_benchmark_loom_event_sink_emit_run(
       &event_sink, &run, /*dry_run=*/false, &kNoSanitizer));

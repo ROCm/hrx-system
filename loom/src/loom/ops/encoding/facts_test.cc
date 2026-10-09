@@ -217,8 +217,7 @@ TEST_F(EncodingFactDomainTest, DropsSummariesWithDifferentUntypedRoles) {
 }
 
 TEST_F(EncodingFactDomainTest, RetainsCommonStorageSchemaFacts) {
-  loom_value_fact_storage_schema_t schema = {};
-  schema.static_spec_encoding_id = 5;
+  loom_value_fact_storage_schema_t schema = {.static_spec_encoding_id = 5};
   schema.encoded_operand.payload_element_count = 32;
   loom_value_facts_t lhs_facts;
   loom_value_facts_t rhs_facts;

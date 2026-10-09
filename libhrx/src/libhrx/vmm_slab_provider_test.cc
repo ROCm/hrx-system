@@ -45,8 +45,8 @@ class VmmSlabProviderTest : public ::testing::Test {
     options.tlsf_options.alignment = 256;
     options.tlsf_options.frontier_capacity =
         IREE_HAL_MEMORY_TLSF_DEFAULT_FRONTIER_CAPACITY;
-    iree_hal_passthrough_pool_options_t backing_options = {};
-    backing_options.epoch_query = backend.epoch_query;
+    iree_hal_passthrough_pool_options_t backing_options = {
+        .epoch_query = backend.epoch_query};
     iree_hal_pool_t* backing_pool = nullptr;
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
         backing_options, provider_, backend.notification,

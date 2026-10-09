@@ -114,11 +114,10 @@ class TaskQueueAllocaTest : public ::testing::TestWithParam<iree_host_size_t> {
 
   iree_status_t CreatePool(const iree_hal_queue_pool_backend_t& backend,
                            iree_hal_pool_t** out_pool) {
-    iree_hal_fixed_block_pool_options_t options = {};
-    options.block_size = kBlockSize;
-    options.blocks_per_slab = 2;
-    options.frontier_capacity = 2;
-    options.asan = backend.asan;
+    iree_hal_fixed_block_pool_options_t options = {.block_size = kBlockSize,
+                                                   .blocks_per_slab = 2,
+                                                   .frontier_capacity = 2,
+                                                   .asan = backend.asan};
     return iree::hal::cts::CreateFiniteBlockPool(
         backend, options, iree_allocator_system(), &backing_pool_, out_pool);
   }
@@ -197,8 +196,8 @@ class TaskQueueAllocaTest : public ::testing::TestWithParam<iree_host_size_t> {
       options.budget_limit = 2 * kBlockSize;
       iree_hal_pool_release(pool_);
       pool_ = nullptr;
-      iree_hal_passthrough_pool_options_t backing_options = {};
-      backing_options.epoch_query = backend.epoch_query;
+      iree_hal_passthrough_pool_options_t backing_options = {
+          .epoch_query = backend.epoch_query};
       iree_hal_pool_t* backing_pool = nullptr;
       IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
           backing_options, backend.slab_provider, backend.notification,
@@ -395,11 +394,10 @@ TEST_P(TaskQueueAllocaTest, SiblingPoolResumesThroughBackingNotificationOwner) {
       &backend));
   Ref<iree_hal_pool_t> native;
   Ref<iree_hal_pool_t> source;
-  iree_hal_fixed_block_pool_options_t source_options = {};
-  source_options.block_size = 65536;
-  source_options.blocks_per_slab = 1;
-  source_options.frontier_capacity = 2;
-  source_options.asan = backend.asan;
+  iree_hal_fixed_block_pool_options_t source_options = {.block_size = 65536,
+                                                        .blocks_per_slab = 1,
+                                                        .frontier_capacity = 2,
+                                                        .asan = backend.asan};
   IREE_ASSERT_OK(iree::hal::cts::CreateFiniteBlockPool(
       backend, source_options, iree_allocator_system(), native.out(),
       source.out()));
@@ -427,11 +425,11 @@ TEST_P(TaskQueueAllocaTest, SiblingPoolResumesThroughBackingNotificationOwner) {
   IREE_ASSERT_OK(iree_hal_tlsf_pool_create(
       cache, &producer_options, iree_allocator_system(), producer.out()));
   Ref<iree_hal_pool_t> consumer;
-  iree_hal_fixed_block_pool_options_t consumer_options = {};
-  consumer_options.block_size = kBlockSize;
-  consumer_options.blocks_per_slab = 2;
-  consumer_options.frontier_capacity = 2;
-  consumer_options.asan = backend.asan;
+  iree_hal_fixed_block_pool_options_t consumer_options = {
+      .block_size = kBlockSize,
+      .blocks_per_slab = 2,
+      .frontier_capacity = 2,
+      .asan = backend.asan};
   IREE_ASSERT_OK(iree_hal_fixed_block_pool_create(
       cache, &consumer_options, iree_allocator_system(), consumer.out()));
   auto* consumer_notification = iree_hal_pool_notification(consumer);
@@ -713,8 +711,7 @@ TEST_P(TaskQueueNativeRetirementTest, QueueBytesRetireOnCapturedOwner) {
       args, IREE_HAL_HOST_CALL_FLAG_NONE));
   ASSERT_NO_FATAL_FAILURE(Wait(semaphores_[0], first_value));
 
-  iree_hal_pool_reservation_request_t request = {};
-  request.allocation_size = kBlockSize;
+  iree_hal_pool_reservation_request_t request = {.allocation_size = kBlockSize};
   request.params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   request.params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   request.params.usage =
@@ -765,8 +762,7 @@ TEST_P(TaskQueueNativeRetirementTest, QueueBytesRetireOnCapturedOwner) {
 TEST_P(TaskQueueNativeRetirementTest,
        BorrowedAddressesRetainCrossQueueHistory) {
   ASSERT_NO_FATAL_FAILURE(UseNativePool());
-  iree_hal_pool_reservation_request_t request = {};
-  request.allocation_size = kBlockSize;
+  iree_hal_pool_reservation_request_t request = {.allocation_size = kBlockSize};
   request.params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;
   request.params.access = IREE_HAL_MEMORY_ACCESS_ALL;
   request.params.usage = IREE_HAL_BUFFER_USAGE_MAPPING_PERSISTENT;
@@ -812,8 +808,7 @@ TEST_P(TaskQueueNativeRetirementTest,
       },
       &output);
   IREE_ASYNC_FIXED_FRONTIER_TYPE(PairFrontier, 2);
-  PairFrontier frontier = {};
-  frontier.entry_count = 2;
+  PairFrontier frontier = {.entry_count = 2};
   for (size_t i = 0; i < queues_.size(); ++i) {
     const auto* queue = reinterpret_cast<iree_hal_task_queue_t*>(queues_[i]);
     // The fixture owns both fresh queues and submits exactly one operation to

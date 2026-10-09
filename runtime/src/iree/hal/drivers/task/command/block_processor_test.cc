@@ -985,8 +985,7 @@ TEST_P(BlockProcessorTest, KernelFailurePropagates) {
   iree_hal_cmd_block_builder_initialize(&block_pool_, &builder);
   IREE_ASSERT_OK(iree_hal_cmd_block_builder_begin(&builder));
 
-  DispatchDesc desc = {};
-  desc.function = kernel_fail;
+  DispatchDesc desc = {.function = kernel_fail};
   desc.workgroup_count[0] = 1;
   desc.workgroup_count[1] = 1;
   desc.workgroup_count[2] = 1;

@@ -115,11 +115,11 @@ TEST(BenchmarkReportTest, WritesSelectedSampleAndCliIterationOverrides) {
   policy.measure_kind = IREE_BENCHMARK_LOOM_MEASURE_CASE_END_TO_END;
   policy.measure = IREE_SV("case_end_to_end");
   policy.iterations = 2;
-  iree_benchmark_loom_selected_benchmark_t selection = {};
-  selection.identity = candidate;
-  selection.benchmark_plan = &benchmark_plan;
-  selection.case_plan = &case_plan;
-  selection.policy = policy;
+  iree_benchmark_loom_selected_benchmark_t selection = {
+      .identity = candidate,
+      .benchmark_plan = &benchmark_plan,
+      .case_plan = &case_plan,
+      .policy = policy};
   iree_benchmark_loom_options_t options = {};
   iree_benchmark_loom_options_initialize(&options);
   options.sample_ordinal = 1;
@@ -189,14 +189,14 @@ TEST(BenchmarkReportTest, WritesScenarioResultCoordinate) {
   scenario_plan.name = IREE_SV("scenario");
   iree_benchmark_loom_benchmark_policy_t policy = {};
   policy.measure = IREE_SV("dispatch_complete");
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.has_benchmark_sample_ordinal = true;
-  result.benchmark_sample_ordinal = 17;
-  result.has_scenario_coordinate = true;
-  result.scenario_coordinate = {2, 3, 5};
-  result.samples_per_iteration = 1;
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .has_benchmark_sample_ordinal = true,
+      .benchmark_sample_ordinal = 17,
+      .has_scenario_coordinate = true,
+      .scenario_coordinate = {2, 3, 5},
+      .samples_per_iteration = 1};
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -603,11 +603,11 @@ TEST(BenchmarkReportTest, WritesExactWorkloadAndResolvedLaunchConfig) {
       /*.workload_values=*/workload_values,
       /*.workload_value_count=*/IREE_ARRAYSIZE(workload_values),
   };
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
-  result.launch_evidence = &launch_evidence;
+  iree_benchmark_loom_benchmark_result_t result = {
+      .executed = true,
+      .passed = true,
+      .samples_per_iteration = 1,
+      .launch_evidence = &launch_evidence};
 
   iree_string_builder_t builder;
   iree_string_builder_initialize(iree_allocator_system(), &builder);
@@ -666,11 +666,10 @@ TEST(BenchmarkReportTest, ScopesComparableDispatchTimingToProfileReplay) {
   iree_benchmark_loom_benchmark_policy_t policy = {};
   policy.measure = IREE_SV("dispatch_complete");
 
-  iree_benchmark_loom_benchmark_result_t result = {};
-  result.executed = true;
-  result.passed = true;
-  result.samples_per_iteration = 1;
-  result.has_hal_benchmark = true;
+  iree_benchmark_loom_benchmark_result_t result = {.executed = true,
+                                                   .passed = true,
+                                                   .samples_per_iteration = 1,
+                                                   .has_hal_benchmark = true};
   result.hal_benchmark.timing.batch_size = 16;
   result.hal_benchmark.timing.measured_batch_count = 4;
   result.hal_benchmark.timing.measured_operation_count = 64;
@@ -851,16 +850,15 @@ TEST(BenchmarkReportTest, ScopesComparableDispatchTimingToProfileReplay) {
 
 TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
   iree::testing::TempFilePath bundle_dir("loom_benchmark_bundle");
-  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {};
-  bundle_options.dir = bundle_dir.path_view();
-  bundle_options.policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG;
-  bundle_options.output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT;
+  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {
+      .dir = bundle_dir.path_view(),
+      .policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG,
+      .output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT};
   iree_benchmark_loom_artifact_bundle_t bundle = {};
   IREE_ASSERT_OK(iree_benchmark_loom_artifact_bundle_initialize(
       &bundle_options, iree_allocator_system(), &bundle));
 
-  iree_benchmark_loom_hal_context_t context = {};
-  context.artifact_bundle = &bundle;
+  iree_benchmark_loom_hal_context_t context = {.artifact_bundle = &bundle};
   context.execution.host_allocator = iree_allocator_system();
   const char kManifestJson[] = "{\"kind\":\"loom.artifact_manifest\"}";
   ByteSequencePtr manifest_contents =
@@ -880,8 +878,7 @@ TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
       .contents = executable_contents.get(),
   };
 
-  iree_benchmark_loom_hal_actual_provider_t provider = {};
-  provider.context = &context;
+  iree_benchmark_loom_hal_actual_provider_t provider = {.context = &context};
   provider.execution.artifacts.executable = &executable_artifact;
   provider.execution.artifacts.artifact_manifest = &manifest_artifact;
 
@@ -914,10 +911,10 @@ TEST(BenchmarkReportTest, WritesArtifactManifestSidecarPath) {
 
 TEST(BenchmarkReportTest, WritesManifestFileIdentityErrors) {
   iree::testing::TempFilePath bundle_dir("loom_benchmark_manifest_bundle");
-  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {};
-  bundle_options.dir = bundle_dir.path_view();
-  bundle_options.policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG;
-  bundle_options.output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT;
+  iree_benchmark_loom_artifact_bundle_options_t bundle_options = {
+      .dir = bundle_dir.path_view(),
+      .policy = IREE_BENCHMARK_LOOM_ARTIFACT_BUNDLE_POLICY_DEBUG,
+      .output_format = IREE_BENCHMARK_LOOM_OUTPUT_FORMAT_SNAPSHOT};
   iree_benchmark_loom_artifact_bundle_t bundle = {};
   IREE_ASSERT_OK(iree_benchmark_loom_artifact_bundle_initialize(
       &bundle_options, iree_allocator_system(), &bundle));

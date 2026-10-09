@@ -22,9 +22,8 @@ TEST(HeapAllocatorTest, ImportsByteAlignedStorageWithExplicitAlignment) {
   alignas(64) uint8_t storage[18] = {};
   storage[0] = 0xA5;
   storage[17] = 0x5A;
-  iree_hal_external_buffer_t external_buffer = {};
-  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
-  external_buffer.size = 16;
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION, .size = 16};
   external_buffer.handle.host_allocation.ptr = storage + 1;
   iree_hal_buffer_params_t params = {};
   params.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL;

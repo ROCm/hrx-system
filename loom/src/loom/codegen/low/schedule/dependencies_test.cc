@@ -37,23 +37,22 @@ TEST_F(ScheduleDependenciesTest, StableAcrossSegmentBoundaries) {
   constexpr uint32_t kDependencyCount =
       LOOM_LOW_SCHEDULE_DEPENDENCY_SEGMENT_CAPACITY + 1;
   for (uint32_t i = 0; i < kDependencyCount; ++i) {
-    loom_low_schedule_dependency_t dependency = {};
-    dependency.producer_node = i;
-    dependency.consumer_node = i + 1;
-    dependency.minimum_issue_separation_cycles = (i & 1u) == 0 ? -3 : 5;
-    dependency.producer_attachment_index = static_cast<uint16_t>(i & 7u);
-    dependency.consumer_attachment_index = static_cast<uint16_t>(i & 15u);
-    dependency.producer_event_id = static_cast<uint16_t>(i & 31u);
-    dependency.consumer_event_id = static_cast<uint16_t>(i & 63u);
-    dependency.value_operand_index = static_cast<uint16_t>(i & 3u);
-    dependency.producer_attachment_kind =
-        LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_OPERAND;
-    dependency.consumer_attachment_kind =
-        LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT;
-    dependency.kind = LOOM_LOW_SCHEDULE_DEPENDENCY_SSA;
-    dependency.separation_source =
-        LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR;
-    dependency.model_quality = 4;
+    loom_low_schedule_dependency_t dependency = {
+        .producer_node = i,
+        .consumer_node = i + 1,
+        .minimum_issue_separation_cycles = (i & 1u) == 0 ? -3 : 5,
+        .producer_attachment_index = static_cast<uint16_t>(i & 7u),
+        .consumer_attachment_index = static_cast<uint16_t>(i & 15u),
+        .producer_event_id = static_cast<uint16_t>(i & 31u),
+        .consumer_event_id = static_cast<uint16_t>(i & 63u),
+        .value_operand_index = static_cast<uint16_t>(i & 3u),
+        .producer_attachment_kind =
+            LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_OPERAND,
+        .consumer_attachment_kind =
+            LOOM_LOW_SCHEDULE_DEPENDENCY_ATTACHMENT_EFFECT,
+        .kind = LOOM_LOW_SCHEDULE_DEPENDENCY_SSA,
+        .separation_source = LOOM_LOW_SCHEDULE_SEPARATION_SOURCE_EVENT_PAIR,
+        .model_quality = 4};
     IREE_ASSERT_OK(loom_low_schedule_dependency_graph_append(
         &source, dependency, &arena_));
   }

@@ -301,8 +301,8 @@ TEST_F(PipelineConstructionTest, CapturesKeepProtocolAndStorageSeparate) {
   IREE_ASSERT_OK(loom_pipeline_finish_build(&builder_, LOOM_LOCATION_UNKNOWN,
                                             &terminator));
 
-  loom_verify_options_t verify_options = {};
-  verify_options.sink = {loom_diagnostic_stderr_sink, nullptr};
+  loom_verify_options_t verify_options = {
+      .sink = {loom_diagnostic_stderr_sink, nullptr}};
   loom_verify_result_t verification = {};
   IREE_ASSERT_OK(loom_verify_module(module_, &verify_options, &verification));
   ASSERT_EQ(verification.error_count, 0u);

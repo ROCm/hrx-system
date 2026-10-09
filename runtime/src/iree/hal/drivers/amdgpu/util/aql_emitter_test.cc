@@ -16,8 +16,7 @@
 namespace {
 
 static iree_hsa_signal_t MakeSignal(uint64_t handle) {
-  iree_hsa_signal_t signal = {};
-  signal.handle = handle;
+  iree_hsa_signal_t signal = {.handle = handle};
   return signal;
 }
 

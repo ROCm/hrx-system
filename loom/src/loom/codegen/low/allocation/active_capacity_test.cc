@@ -70,16 +70,16 @@ class LowAllocationActiveCapacityTest : public ::testing::Test {
       ASSERT_EQ(refined_ends.size(), unit_ends.size());
       unit_ends = std::move(refined_ends);
     }
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = intervals.data();
-    liveness.interval_count = intervals.size();
-    liveness.value_count = intervals.size();
-    liveness.value_interval_indices = interval_indices.data();
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
-    unit_liveness.values = values.data();
-    unit_liveness.start_points = unit_starts.data();
-    unit_liveness.end_points = unit_ends.data();
-    unit_liveness.point_count = unit_ends.size();
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals.data(),
+        .interval_count = intervals.size(),
+        .value_count = intervals.size(),
+        .value_interval_indices = interval_indices.data()};
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = values.data(),
+        .start_points = unit_starts.data(),
+        .end_points = unit_ends.data(),
+        .point_count = unit_ends.size()};
 
     // Build both adjacency directions used by production placement tables.
     std::sort(edges.begin(), edges.end());

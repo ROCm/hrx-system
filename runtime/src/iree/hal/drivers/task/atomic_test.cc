@@ -62,10 +62,8 @@ template <typename AtomicType, typename ValueType>
 static void TestStoreAndRmw(iree_hal_atomic_width_t width) {
   AtomicType target = IREE_ATOMIC_VAR_INIT(0);
 
-  iree_hal_atomic_store_params_t store_params = {};
-  store_params.value = 10;
-  store_params.flags = IREE_HAL_ATOMIC_FLAG_RELEASE;
-  store_params.width = width;
+  iree_hal_atomic_store_params_t store_params = {
+      .value = 10, .flags = IREE_HAL_ATOMIC_FLAG_RELEASE, .width = width};
   iree_hal_task_atomic_store(&target, store_params);
   EXPECT_EQ(iree_atomic_load(&target, iree_memory_order_acquire),
             static_cast<ValueType>(10));

@@ -514,8 +514,8 @@ TEST(LowMoveSequenceTest, ReusesBoundedSolverStorageAcrossIncreasingGroups) {
   loom_low_move_sequence_scratch_t scratch = {};
   IREE_ASSERT_OK(loom_low_move_sequence_scratch_initialize(
       arena.arena(), kCapacity, &scratch));
-  loom_low_move_sequence_options_t options = {};
-  options.descriptor_set = IndependentDescriptorSet();
+  loom_low_move_sequence_options_t options = {.descriptor_set =
+                                                  IndependentDescriptorSet()};
   loom_low_move_t output[kCapacity] = {};
   iree_host_size_t storage_bytes = arena.arena()->used_allocation_size;
   for (uint32_t count = 0; count <= kCapacity; ++count) {
@@ -554,9 +554,9 @@ TEST(LowMoveSequenceTest, ReusesBoundedCycleStorageAcrossClassesAndGroups) {
   const loom_low_move_location_t temporaries[] = {
       Location(kCapacity, 0), Location(kCapacity, 1), Location(kCapacity, 2)};
   TemporaryResolver resolver = {temporaries, IREE_ARRAYSIZE(temporaries)};
-  loom_low_move_sequence_options_t options = {};
-  options.descriptor_set = IndependentDescriptorSet();
-  options.resolve_temporary = {ResolveTemporary, &resolver};
+  loom_low_move_sequence_options_t options = {
+      .descriptor_set = IndependentDescriptorSet(),
+      .resolve_temporary = {ResolveTemporary, &resolver}};
   loom_low_move_t output[kCapacity + kCapacity / 2] = {};
   iree_host_size_t storage_bytes = 0;
   for (uint32_t count = 2; count <= kCapacity; count += 2) {

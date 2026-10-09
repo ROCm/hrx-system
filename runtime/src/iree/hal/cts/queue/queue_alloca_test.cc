@@ -172,8 +172,7 @@ class QueueAllocaTest : public CtsTestBase<> {
           IREE_STATUS_FAILED_PRECONDITION,
           "queue pool backend query returned an incomplete bundle");
     }
-    iree_hal_passthrough_pool_options_t options = {};
-    options.asan = backend.asan;
+    iree_hal_passthrough_pool_options_t options = {.asan = backend.asan};
     return iree_hal_passthrough_pool_create(
         options, backend.slab_provider, backend.notification,
         backend.frontier_tracker, backend.maintenance, iree_allocator_system(),
@@ -194,8 +193,8 @@ class QueueAllocaTest : public CtsTestBase<> {
     options.tlsf_options.alignment = IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT;
     options.tlsf_options.frontier_capacity = 2;
     options.asan = backend.asan;
-    iree_hal_passthrough_pool_options_t backing_options = {};
-    backing_options.epoch_query = backend.epoch_query;
+    iree_hal_passthrough_pool_options_t backing_options = {
+        .epoch_query = backend.epoch_query};
     iree_hal_pool_t* backing_pool = nullptr;
     IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
         backing_options, backend.slab_provider, backend.notification,
@@ -218,11 +217,11 @@ class QueueAllocaTest : public CtsTestBase<> {
           IREE_STATUS_FAILED_PRECONDITION,
           "queue pool backend query returned an incomplete bundle");
     }
-    iree_hal_fixed_block_pool_options_t options = {};
-    options.block_size = block_size;
-    options.blocks_per_slab = block_count;
-    options.frontier_capacity = 2;
-    options.asan = backend.asan;
+    iree_hal_fixed_block_pool_options_t options = {
+        .block_size = block_size,
+        .blocks_per_slab = block_count,
+        .frontier_capacity = 2,
+        .asan = backend.asan};
     return CreateFiniteBlockPool(backend, options, iree_allocator_system(),
                                  out_backing_pool, out_pool);
   }
@@ -327,8 +326,8 @@ TEST_P(QueueAllocaTest, IndependentAllocatorsShareCachedNativeBacking) {
   // Both allocation policies can give and receive the same cached range.
   for (uint32_t policies = 0; policies < 4; ++policies) {
     SCOPED_TRACE(policies);
-    iree_hal_passthrough_pool_options_t native_options = {};
-    native_options.epoch_query = backend.epoch_query;
+    iree_hal_passthrough_pool_options_t native_options = {
+        .epoch_query = backend.epoch_query};
     Ref<iree_hal_pool_t> native;
     IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
         native_options, backend.slab_provider, backend.notification,
@@ -352,11 +351,10 @@ TEST_P(QueueAllocaTest, IndependentAllocatorsShareCachedNativeBacking) {
     for (uint32_t iteration = 0; iteration < 2; ++iteration) {
       auto& child = children[iteration];
       if (policies & (1u << iteration)) {
-        iree_hal_fixed_block_pool_options_t options = {};
-        options.block_size = 256;
-        options.blocks_per_slab = 16;
-        options.frontier_capacity = 2;
-        options.asan = backend.asan;
+        iree_hal_fixed_block_pool_options_t options = {.block_size = 256,
+                                                       .blocks_per_slab = 16,
+                                                       .frontier_capacity = 2,
+                                                       .asan = backend.asan};
         IREE_ASSERT_OK(iree_hal_fixed_block_pool_create(
             cache, &options, iree_allocator_system(), child.out()));
       } else {
@@ -435,11 +433,10 @@ TEST_P(QueueAllocaTest, BlockedSiblingResumesFromSharedCache) {
     Ref<iree_hal_pool_t> children[2];
     for (uint32_t i = 0; i < 2; ++i) {
       if (policies & (1u << i)) {
-        iree_hal_fixed_block_pool_options_t options = {};
-        options.block_size = 256;
-        options.blocks_per_slab = 16;
-        options.frontier_capacity = 2;
-        options.asan = backend.asan;
+        iree_hal_fixed_block_pool_options_t options = {.block_size = 256,
+                                                       .blocks_per_slab = 16,
+                                                       .frontier_capacity = 2,
+                                                       .asan = backend.asan};
         IREE_ASSERT_OK(iree_hal_fixed_block_pool_create(
             cache, &options, iree_allocator_system(), children[i].out()));
       } else {
@@ -523,11 +520,10 @@ TEST_P(QueueAllocaTest, MapsSubspanBackingInNativeCoordinates) {
     GTEST_SKIP() << "queue pool backing is not host visible";
   }
 
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = 256;
-  options.blocks_per_slab = 2;
-  options.frontier_capacity = 2;
-  options.asan = backend.asan;
+  iree_hal_fixed_block_pool_options_t options = {.block_size = 256,
+                                                 .blocks_per_slab = 2,
+                                                 .frontier_capacity = 2,
+                                                 .asan = backend.asan};
   backend.slab_provider = provider.get();
   Ref<iree_hal_pool_t> backing_pool;
   Ref<iree_hal_pool_t> pool;
@@ -603,9 +599,8 @@ TEST_P(QueueAllocaTest, NestedBufferPoolsPreserveRangesAndOwnership) {
   Ref<iree_hal_buffer_t> source_view;
   IREE_ASSERT_OK(iree_hal_buffer_subspan(
       source, 256, 4096, iree_allocator_system(), source_view.out()));
-  iree_hal_fixed_block_pool_options_t block_options = {};
-  block_options.block_size = 512;
-  block_options.frontier_capacity = 2;
+  iree_hal_fixed_block_pool_options_t block_options = {.block_size = 512,
+                                                       .frontier_capacity = 2};
   Ref<iree_hal_pool_t> blocks;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_hal_fixed_block_pool_create_from_buffer(

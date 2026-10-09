@@ -385,8 +385,7 @@ static iree_status_t CreateGrowingPool(
     iree_hal_slab_provider_t* provider, iree_async_notification_t* notification,
     iree_async_frontier_tracker_t* tracker, iree_hal_pool_epoch_query_t query,
     iree_allocator_t allocator, iree_hal_pool_t** out_pool) {
-  iree_hal_passthrough_pool_options_t source_options = {};
-  source_options.epoch_query = query;
+  iree_hal_passthrough_pool_options_t source_options = {.epoch_query = query};
   iree_hal_pool_t* source = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_passthrough_pool_create(
       source_options, provider, notification, tracker, test_maintenance(),
@@ -398,10 +397,8 @@ static iree_status_t CreateGrowingPool(
 }
 
 static iree_hal_fixed_block_pool_options_t DefaultOptions() {
-  iree_hal_fixed_block_pool_options_t options = {};
-  options.block_size = 256;
-  options.blocks_per_slab = 4;
-  options.frontier_capacity = 2;
+  iree_hal_fixed_block_pool_options_t options = {
+      .block_size = 256, .blocks_per_slab = 4, .frontier_capacity = 2};
   return options;
 }
 

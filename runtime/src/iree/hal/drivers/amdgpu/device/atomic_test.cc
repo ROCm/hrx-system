@@ -35,27 +35,31 @@ static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
 }
 
 static iree_hal_amdgpu_device_kernels_t MakeKernels() {
-  iree_hal_amdgpu_device_kernels_t kernels = {};
-  kernels.iree_hal_amdgpu_device_atomic_wait_x32 = MakeKernelArgs(
-      kWaitX32KernelObject, 1, IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_SIZE,
-      IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_ALIGNMENT);
-  kernels.iree_hal_amdgpu_device_atomic_wait_x64 = MakeKernelArgs(
-      kWaitX64KernelObject, 2, IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_SIZE,
-      IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_ALIGNMENT);
-  kernels.iree_hal_amdgpu_device_atomic_store_x32 =
-      MakeKernelArgs(kStoreX32KernelObject, 3,
-                     IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_SIZE,
-                     IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_ALIGNMENT);
-  kernels.iree_hal_amdgpu_device_atomic_store_x64 =
-      MakeKernelArgs(kStoreX64KernelObject, 4,
-                     IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_SIZE,
-                     IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_ALIGNMENT);
-  kernels.iree_hal_amdgpu_device_atomic_rmw_x32 = MakeKernelArgs(
-      kRmwX32KernelObject, 5, IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_SIZE,
-      IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_ALIGNMENT);
-  kernels.iree_hal_amdgpu_device_atomic_rmw_x64 = MakeKernelArgs(
-      kRmwX64KernelObject, 6, IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_SIZE,
-      IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_ALIGNMENT);
+  iree_hal_amdgpu_device_kernels_t kernels = {
+      .iree_hal_amdgpu_device_atomic_wait_x32 =
+          MakeKernelArgs(kWaitX32KernelObject, 1,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_SIZE,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_ALIGNMENT),
+      .iree_hal_amdgpu_device_atomic_wait_x64 =
+          MakeKernelArgs(kWaitX64KernelObject, 2,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_SIZE,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_WAIT_KERNARG_ALIGNMENT),
+      .iree_hal_amdgpu_device_atomic_store_x32 =
+          MakeKernelArgs(kStoreX32KernelObject, 3,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_SIZE,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_ALIGNMENT),
+      .iree_hal_amdgpu_device_atomic_store_x64 =
+          MakeKernelArgs(kStoreX64KernelObject, 4,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_SIZE,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_STORE_KERNARG_ALIGNMENT),
+      .iree_hal_amdgpu_device_atomic_rmw_x32 =
+          MakeKernelArgs(kRmwX32KernelObject, 5,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_SIZE,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_ALIGNMENT),
+      .iree_hal_amdgpu_device_atomic_rmw_x64 =
+          MakeKernelArgs(kRmwX64KernelObject, 6,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_SIZE,
+                         IREE_HAL_AMDGPU_DEVICE_ATOMIC_RMW_KERNARG_ALIGNMENT)};
   return kernels;
 }
 

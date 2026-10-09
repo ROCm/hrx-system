@@ -503,17 +503,17 @@ TEST(LowAllocationStorageTest, ResolvesCompletePhysicalCandidateRangeFamily) {
       LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES;
   reg_class.allocatable_count = kCandidateCount;
   reg_class.physical_atomic_unit_count = 1;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
-  descriptor_set.physical_registers = physical_registers;
-  descriptor_set.physical_register_count = kCandidateCount;
-  descriptor_set.physical_register_candidate_ids = candidate_ids;
-  descriptor_set.physical_register_allocation_ordinals = allocation_ordinals;
-  descriptor_set.physical_register_candidate_count = kCandidateCount;
-  descriptor_set.physical_register_atomic_units = atomic_units;
-  descriptor_set.physical_register_atomic_unit_count = kCandidateCount;
-  descriptor_set.physical_register_unit_count = kCandidateCount;
+  loom_low_descriptor_set_t descriptor_set = {
+      .reg_classes = &reg_class,
+      .reg_class_count = 1,
+      .physical_registers = physical_registers,
+      .physical_register_count = kCandidateCount,
+      .physical_register_candidate_ids = candidate_ids,
+      .physical_register_allocation_ordinals = allocation_ordinals,
+      .physical_register_candidate_count = kCandidateCount,
+      .physical_register_atomic_units = atomic_units,
+      .physical_register_atomic_unit_count = kCandidateCount,
+      .physical_register_unit_count = kCandidateCount};
 
   for (uint32_t unit_count = 1; unit_count <= kCandidateCount; ++unit_count) {
     bool seen_bases[kCandidateCount] = {};

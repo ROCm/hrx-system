@@ -257,9 +257,8 @@ TEST_F(ValueReplacementTest,
   const loom_overflow_dim_t target_dimensions[] = {
       loom_dim_pack_dynamic(new_id_), loom_dim_pack_static(7),
       loom_dim_pack_dynamic(other_target_id), loom_dim_pack_dynamic(new_id_)};
-  loom_type_t source_leaf = {};
-  source_leaf.header =
-      loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0);
+  loom_type_t source_leaf = {.header = loom_type_make_header(
+                                 LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0)};
   source_leaf.dims[0] = reinterpret_cast<uintptr_t>(source_dimensions);
   loom_type_t target_leaf = source_leaf;
   target_leaf.dims[0] = reinterpret_cast<uintptr_t>(target_dimensions);
@@ -623,9 +622,8 @@ TEST_F(ValueReplacementTest, OverflowDimensionsPreserveOtherProviders) {
   const loom_overflow_dim_t dimensions[] = {
       loom_dim_pack_dynamic(old_id_), loom_dim_pack_static(7),
       loom_dim_pack_dynamic(other), loom_dim_pack_dynamic(old_id_)};
-  loom_type_t original = {};
-  original.header =
-      loom_type_make_header(LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0);
+  loom_type_t original = {.header = loom_type_make_header(
+                              LOOM_TYPE_VECTOR, LOOM_SCALAR_TYPE_F32, 4, 0)};
   original.dims[0] = reinterpret_cast<uintptr_t>(dimensions);
   const auto carrier = Carrier(original);
   IREE_ASSERT_OK(loom_value_replace_all_uses_with(module_, old_id_, new_id_));

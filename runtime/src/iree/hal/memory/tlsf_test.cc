@@ -91,9 +91,7 @@ static iree_status_t TestAllocatorCtl(void* self,
 }
 
 static iree_allocator_t TestAllocator(TestAllocatorState* state) {
-  iree_allocator_t allocator = {};
-  allocator.self = state;
-  allocator.ctl = TestAllocatorCtl;
+  iree_allocator_t allocator = {.self = state, .ctl = TestAllocatorCtl};
   return allocator;
 }
 

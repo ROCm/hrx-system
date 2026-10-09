@@ -58,8 +58,7 @@ class OperandDictionaryParseTest : public ::testing::Test {
         "%result = test.operand_dict %even " +
         dictionary + " : index\n";
     capture_.Reset();
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = capture_.sink();
+    loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink()};
     return loom_text_parse(iree_make_string_view(source.data(), source.size()),
                            IREE_SV("dictionary.loom"), &context_, &pool_,
                            &options, out_module);
@@ -147,10 +146,8 @@ TEST_F(OperandDictionaryParseTest, DictionaryScratchEndsBeforeTheNextField) {
   IREE_ASSERT_OK(Parse("", &module));
   ASSERT_NE(module, nullptr);
   loom_parser_scope_t scope = {};
-  loom_parser_t parser = {};
-  parser.module = module;
-  parser.context = &context_;
-  parser.scope = &scope;
+  loom_parser_t parser = {
+      .module = module, .context = &context_, .scope = &scope};
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&pool_, &parser.parser_arena);
   const char* names[] = {"even", "odd"};

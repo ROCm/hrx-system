@@ -114,9 +114,8 @@ TEST_F(ScheduleResourceCalendarTest, ResetRetainsAnEmptyCalendar) {
 
 TEST_F(ScheduleResourceCalendarTest,
        AdvancesOnlyWhenCommonIssueCapacityIsFull) {
-  loom_low_resource_t resource = {};
-  resource.capacity_per_cycle = 2;
-  resource.kind = LOOM_LOW_RESOURCE_KIND_PIPELINE;
+  loom_low_resource_t resource = {.capacity_per_cycle = 2,
+                                  .kind = LOOM_LOW_RESOURCE_KIND_PIPELINE};
   resource.calendar.slot_mask = 3;
   resource.calendar.minimum_issue_units = 1;
   const loom_low_issue_use_t uses[] = {
@@ -288,9 +287,8 @@ TEST_F(ScheduleResourceCalendarTest, HistoryRetainsStageOccupancyAcrossWraps) {
 }
 
 TEST_F(ScheduleResourceCalendarTest, ForwardIssueFloorDoesNotExcludeHistory) {
-  loom_low_resource_t resource = {};
-  resource.capacity_per_cycle = 1;
-  resource.kind = LOOM_LOW_RESOURCE_KIND_PIPELINE;
+  loom_low_resource_t resource = {.capacity_per_cycle = 1,
+                                  .kind = LOOM_LOW_RESOURCE_KIND_PIPELINE};
   resource.calendar.slot_mask = 3;
   resource.calendar.minimum_issue_units = 1;
   const loom_low_issue_use_t use = {/*resource_id=*/0, /*cycles=*/1,
@@ -299,15 +297,15 @@ TEST_F(ScheduleResourceCalendarTest, ForwardIssueFloorDoesNotExcludeHistory) {
   loom_low_schedule_class_t schedule_class = {};
   schedule_class.issue_use_count = 1;
   schedule_class.flags = LOOM_LOW_SCHEDULE_CLASS_FLAG_DISJOINT_ISSUE_USES;
-  loom_low_descriptor_set_t descriptors = {};
-  descriptors.schedule_classes = &schedule_class;
-  descriptors.schedule_class_count = 1;
-  descriptors.issue_uses = &use;
-  descriptors.issue_use_count = 1;
-  descriptors.resources = &resource;
-  descriptors.resource_count = 1;
-  descriptors.resource_calendar_slot_count = 4;
-  descriptors.resource_calendar_lookback_cycles = 3;
+  loom_low_descriptor_set_t descriptors = {
+      .schedule_classes = &schedule_class,
+      .schedule_class_count = 1,
+      .issue_uses = &use,
+      .issue_use_count = 1,
+      .resources = &resource,
+      .resource_count = 1,
+      .resource_calendar_slot_count = 4,
+      .resource_calendar_lookback_cycles = 3};
   IREE_ASSERT_OK(loom_low_schedule_resource_calendar_initialize(
       &descriptors, &arena_, &calendar_));
   Commit(&schedule_class, 10);

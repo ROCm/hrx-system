@@ -136,8 +136,7 @@ TEST_F(CfgLoopTest, AcyclicGraphHasEmptyForest) {
 
 TEST_F(CfgLoopTest, EdgelessScheduleDoesNotNeedAdjacencyStorage) {
   // The Low function model omits adjacency for structured single-block bodies.
-  loom_cfg_graph_t graph = {};
-  graph.block_count = 1;
+  loom_cfg_graph_t graph = {.block_count = 1};
   loom_cfg_loop_forest_t forest = {};
   uint64_t block_count = 0;
   EXPECT_TRUE(loom_cfg_loop_forest_calculate_block_execution_counts(

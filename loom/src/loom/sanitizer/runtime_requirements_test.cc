@@ -103,9 +103,7 @@ class SanitizerRuntimeRequirementsTest
   }
 
   loom_predicate_t MakeRangePredicate(loom_value_id_t value) {
-    loom_predicate_t predicate = {};
-    predicate.kind = LOOM_PREDICATE_RANGE;
-    predicate.arg_count = 3;
+    loom_predicate_t predicate = {.kind = LOOM_PREDICATE_RANGE, .arg_count = 3};
     predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
     predicate.arg_tags[1] = LOOM_PRED_ARG_CONST;
     predicate.arg_tags[2] = LOOM_PRED_ARG_CONST;

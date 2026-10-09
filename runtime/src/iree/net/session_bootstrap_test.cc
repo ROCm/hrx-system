@@ -19,8 +19,7 @@ namespace {
 static std::vector<uint8_t> SerializePeer(
     iree_net_bootstrap_type_t type,
     const iree_net_bootstrap_peer_info_t& peer) {
-  iree_net_bootstrap_message_t message = {};
-  message.type = type;
+  iree_net_bootstrap_message_t message = {.type = type};
   if (type == IREE_NET_BOOTSTRAP_TYPE_HELLO) {
     message.value.hello = peer;
   } else {
@@ -137,10 +136,9 @@ TEST(SessionBootstrapTest, NegotiatesSymmetricCapabilities) {
 }
 
 TEST(SessionBootstrapTest, RejectsEndpointCountMismatch) {
-  iree_net_bootstrap_peer_info_t local_peer = {};
-  local_peer.application_endpoint_count = 2;
-  iree_net_bootstrap_peer_info_t remote_peer = {};
-  remote_peer.application_endpoint_count = 3;
+  iree_net_bootstrap_peer_info_t local_peer = {.application_endpoint_count = 2};
+  iree_net_bootstrap_peer_info_t remote_peer = {.application_endpoint_count =
+                                                    3};
   const std::vector<uint8_t> hello =
       SerializePeer(IREE_NET_BOOTSTRAP_TYPE_HELLO, remote_peer);
 
@@ -199,8 +197,8 @@ TEST(SessionBootstrapTest, ConvertsRemoteRejectToTerminalStatus) {
   iree_net_session_bootstrap_consume_outbound_message(&client);
 
   const std::string reason = "server policy rejected the session";
-  iree_net_bootstrap_message_t reject = {};
-  reject.type = IREE_NET_BOOTSTRAP_TYPE_REJECT;
+  iree_net_bootstrap_message_t reject = {.type =
+                                             IREE_NET_BOOTSTRAP_TYPE_REJECT};
   reject.value.reject.status_code = IREE_STATUS_PERMISSION_DENIED;
   reject.value.reject.reason =
       iree_make_string_view(reason.data(), reason.size());

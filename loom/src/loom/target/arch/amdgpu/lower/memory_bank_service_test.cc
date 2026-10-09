@@ -25,11 +25,11 @@ static const loom_amdgpu_lds_bank_service_model_t* WriteModel(
 
 static loom_low_source_memory_access_plan_t CoordinateSource(
     int64_t x_stride, int64_t y_stride, int64_t z_stride = 0) {
-  loom_low_source_memory_access_plan_t source = {};
-  source.memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP;
-  source.root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP;
-  source.root_minimum_alignment = 16;
-  source.minimum_alignment = 16;
+  loom_low_source_memory_access_plan_t source = {
+      .memory_space = LOOM_VALUE_FACT_MEMORY_SPACE_WORKGROUP,
+      .root_uniform_scope = LOOM_VALUE_FACT_UNIFORM_SCOPE_WORKGROUP,
+      .root_minimum_alignment = 16,
+      .minimum_alignment = 16};
   const int64_t strides[] = {x_stride, y_stride, z_stride};
   for (uint8_t axis = 0; axis < 3; ++axis) {
     if (strides[axis] == 0) {

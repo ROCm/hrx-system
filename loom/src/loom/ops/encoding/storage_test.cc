@@ -747,10 +747,10 @@ TEST(EncodingStorageQueryTest, ValueLayoutKeepsNumericAndSsaAxesSeparate) {
   const loom_value_id_t dynamic_stride = 3;
   const loom_value_facts_t numeric_strides[] = {
       loom_value_facts_make(4, 4096, 4), loom_value_facts_exact_i64(1)};
-  loom_value_fact_encoding_summary_t summary = {};
-  summary.role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT;
-  summary.address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
-                            IREE_ARRAYSIZE(numeric_strides), numeric_strides};
+  loom_value_fact_encoding_summary_t summary = {
+      .role = LOOM_ENCODING_ROLE_ADDRESS_LAYOUT,
+      .address_layout = {LOOM_VALUE_FACT_ADDRESS_LAYOUT_STRIDED,
+                         IREE_ARRAYSIZE(numeric_strides), numeric_strides}};
   loom_value_facts_t facts;
   IREE_ASSERT_OK(
       loom_value_facts_make_encoding_summary(&table.context, summary, &facts));

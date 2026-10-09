@@ -759,8 +759,8 @@ TEST_F(XdnaProductTest, RejectsExactSectionHeaderOverflow) {
       .contribution = &contribution,
       .linked_tile = &linked_tile,
   };
-  loom_aie2p_program_record_t record = {};
-  record.type = LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD;
+  loom_aie2p_program_record_t record = {
+      .type = LOOM_AIE2P_PROGRAM_RECORD_TILE_PROGRAM_LOAD};
   record.value.tile_program_load.tile_program_index = 0;
   const loom_aie2p_array_program_t program = {
       .array_records = &record,

@@ -16,23 +16,21 @@ namespace iree::hal::amdgpu {
 namespace {
 
 static hsa_agent_t Agent(uint64_t handle) {
-  hsa_agent_t agent = {};
-  agent.handle = handle;
+  hsa_agent_t agent = {.handle = handle};
   return agent;
 }
 
 static hsa_amd_memory_pool_t MemoryPool(uint64_t handle) {
-  hsa_amd_memory_pool_t memory_pool = {};
-  memory_pool.handle = handle;
+  hsa_amd_memory_pool_t memory_pool = {.handle = handle};
   return memory_pool;
 }
 
 static hsa_amd_hdp_flush_t HdpFlush(uintptr_t mem_flush_control,
                                     uintptr_t register_flush_control) {
-  hsa_amd_hdp_flush_t hdp_flush = {};
-  hdp_flush.HDP_MEM_FLUSH_CNTL = reinterpret_cast<uint32_t*>(mem_flush_control);
-  hdp_flush.HDP_REG_FLUSH_CNTL =
-      reinterpret_cast<uint32_t*>(register_flush_control);
+  hsa_amd_hdp_flush_t hdp_flush = {
+      .HDP_MEM_FLUSH_CNTL = reinterpret_cast<uint32_t*>(mem_flush_control),
+      .HDP_REG_FLUSH_CNTL =
+          reinterpret_cast<uint32_t*>(register_flush_control)};
   return hdp_flush;
 }
 
@@ -135,8 +133,8 @@ static hsa_status_t HSA_API FakeClusterAgentGetInfo(hsa_agent_t agent,
 }
 
 static iree_hal_amdgpu_libhsa_t ClusterQueryLibhsa() {
-  iree_hal_amdgpu_libhsa_t libhsa = {};
-  libhsa.hsa_agent_get_info = FakeClusterAgentGetInfo;
+  iree_hal_amdgpu_libhsa_t libhsa = {.hsa_agent_get_info =
+                                         FakeClusterAgentGetInfo};
   return libhsa;
 }
 
@@ -165,10 +163,10 @@ static void ExpectAllClusterAttributesQueriedOnce(
 static iree_hal_amdgpu_workgroup_cluster_capabilities_t
 SupportedClusterCapabilities(uint64_t x, uint64_t y, uint64_t z,
                              uint64_t total) {
-  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {};
-  capabilities.supported = 1;
-  capabilities.cluster_count = {1024, 64, 64, 4096};
-  capabilities.workgroups_per_cluster = {x, y, z, total};
+  iree_hal_amdgpu_workgroup_cluster_capabilities_t capabilities = {
+      .supported = 1,
+      .cluster_count = {1024, 64, 64, 4096},
+      .workgroups_per_cluster = {x, y, z, total}};
   return capabilities;
 }
 
@@ -881,11 +879,10 @@ TEST_F(PhysicalDeviceCapabilitiesTest, SvmDefaultAccessDoesNotImplyPeerFlags) {
 
 TEST_F(PhysicalDeviceCapabilitiesTest,
        LargeBarDoesNotImplyPageableSvmDefaultAccess) {
-  iree_hal_amdgpu_cpu_visible_device_coarse_memory_t coarse_memory = {};
-  coarse_memory.memory_pool = MemoryPool(40);
-  coarse_memory.flags =
-      IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_AVAILABLE |
-      IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_HDP_FLUSH;
+  iree_hal_amdgpu_cpu_visible_device_coarse_memory_t coarse_memory = {
+      .memory_pool = MemoryPool(40),
+      .flags = IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_AVAILABLE |
+               IREE_HAL_AMDGPU_CPU_VISIBLE_DEVICE_COARSE_MEMORY_FLAG_HDP_FLUSH};
 
   iree_hal_amdgpu_memory_system_capabilities_selection_t selection =
       MakeMemorySystemSelection();

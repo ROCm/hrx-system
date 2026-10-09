@@ -86,11 +86,10 @@ check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}
   benchmark_options.warmup_iterations = 0;
 
   event_collector_t collector = {};
-  iree_benchmark_loom_event_sink_t event_sink = {};
-  event_sink.emit = collect_event;
-  event_sink.user_data = &collector;
-  iree_benchmark_loom_configuration_t configuration = {};
-  configuration.tool_name = "iree-benchmark-loom-test";
+  iree_benchmark_loom_event_sink_t event_sink = {.emit = collect_event,
+                                                 .user_data = &collector};
+  iree_benchmark_loom_configuration_t configuration = {
+      .tool_name = "iree-benchmark-loom-test"};
   iree_benchmark_loom_file_run_options_t run_options = {};
   run_options.configuration = &configuration;
   run_options.benchmark_options = &benchmark_options;
@@ -146,8 +145,8 @@ check.benchmark<@sampled_choice> @sampled_choice_value7 {value = 7}
   benchmark_options.iterations = 1;
   benchmark_options.warmup_iterations = 0;
 
-  iree_benchmark_loom_configuration_t configuration = {};
-  configuration.tool_name = "iree-benchmark-loom-test";
+  iree_benchmark_loom_configuration_t configuration = {
+      .tool_name = "iree-benchmark-loom-test"};
   iree_benchmark_loom_file_run_options_t run_options = {};
   run_options.configuration = &configuration;
   run_options.benchmark_options = &benchmark_options;

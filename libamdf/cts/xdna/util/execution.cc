@@ -60,8 +60,7 @@ void XdnaExecution::Prepare(const amdf_api_t* api,
                                                       &scope_count),
             AMDF_STATUS_OK);
   ASSERT_EQ(scope_count, 1u);
-  amdf_memory_device_access_t access = {};
-  access.device = device;
+  amdf_memory_device_access_t access = {.device = device};
   access.requirements.access = AMDF_MEMORY_ACCESS_READ |
                                AMDF_MEMORY_ACCESS_WRITE |
                                AMDF_MEMORY_ACCESS_EXECUTE;

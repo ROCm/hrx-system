@@ -206,8 +206,7 @@ TEST_F(VMReflectionTest, EnumeratesAndLooksUpTypedMetadata) {
   EXPECT_EQ(revision, 7u);
 
   bool found = true;
-  iree_vm_metadata_value_t value = {};
-  value.type = 99;
+  iree_vm_metadata_value_t value = {.type = 99};
   IREE_ASSERT_OK(iree_vm_module_try_lookup_metadata(module_, IREE_SV("missing"),
                                                     &found, &value));
   EXPECT_FALSE(found);

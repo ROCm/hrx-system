@@ -567,8 +567,8 @@ TEST(PM4EmitterTest, EmitsCopyDataMemoryPackets) {
 
 TEST(PM4EmitterTest, EmitsWaitRegMem64Packet) {
   iree_amd_signal_t signal_abi = {};
-  iree_hsa_signal_t epoch_signal = {};
-  epoch_signal.handle = reinterpret_cast<uint64_t>(&signal_abi);
+  iree_hsa_signal_t epoch_signal = {
+      .handle = reinterpret_cast<uint64_t>(&signal_abi)};
   iree_hal_amdgpu_pm4_ib_slot_t slot;
 
   const uint32_t dword_count = iree_hal_amdgpu_pm4_emit_wait_reg_mem64(

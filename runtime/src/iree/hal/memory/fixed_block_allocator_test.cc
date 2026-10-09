@@ -62,10 +62,8 @@ static iree_async_frontier_entry_t E(iree_async_axis_t axis, uint64_t epoch) {
 
 // Default test options: 64 blocks of 4096 bytes each.
 static iree_hal_memory_fixed_block_allocator_options_t DefaultOptions() {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 4096;
-  options.block_count = 64;
-  options.frontier_capacity = 4;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 4096, .block_count = 64, .frontier_capacity = 4};
   return options;
 }
 
@@ -223,10 +221,8 @@ TEST(FixedBlockAllocator, AcquireSingle) {
 }
 
 TEST(FixedBlockAllocator, BlockOffsetsAreCorrect) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 256;
-  options.block_count = 16;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 256, .block_count = 16, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -266,10 +262,8 @@ TEST(FixedBlockAllocator, BlockOffsetsAreCorrect) {
 //===----------------------------------------------------------------------===//
 
 TEST(FixedBlockAllocator, ExhaustionReturnsResourceExhausted) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = 4;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64, .block_count = 4, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -296,10 +290,8 @@ TEST(FixedBlockAllocator, ExhaustionReturnsResourceExhausted) {
 }
 
 TEST(FixedBlockAllocator, TryAcquireExhaustionReturnsResult) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = 4;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64, .block_count = 4, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -330,10 +322,8 @@ TEST(FixedBlockAllocator, TryAcquireExhaustionReturnsResult) {
 }
 
 TEST(FixedBlockAllocator, ReleaseAndReacquire) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 128;
-  options.block_count = 2;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 128, .block_count = 2, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -483,10 +473,8 @@ TEST(FixedBlockAllocator, BlockDeathFrontierAccessor) {
 //===----------------------------------------------------------------------===//
 
 TEST(FixedBlockAllocator, OversizedFrontierCausesTaint) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 256;
-  options.block_count = 4;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 256, .block_count = 4, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -512,10 +500,8 @@ TEST(FixedBlockAllocator, OversizedFrontierCausesTaint) {
 }
 
 TEST(FixedBlockAllocator, TaintClearedOnReleaseWithFittingFrontier) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 256;
-  options.block_count = 4;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 256, .block_count = 4, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -547,10 +533,8 @@ TEST(FixedBlockAllocator, TaintClearedOnReleaseWithFittingFrontier) {
 }
 
 TEST(FixedBlockAllocator, RestorePreservesTaint) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 256;
-  options.block_count = 1;
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 256, .block_count = 1, .frontier_capacity = 1};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -579,10 +563,8 @@ TEST(FixedBlockAllocator, RestorePreservesTaint) {
 }
 
 TEST(FixedBlockAllocator, BlockFlagsAccessor) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = 2;
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64, .block_count = 2, .frontier_capacity = 1};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -651,10 +633,8 @@ TEST(FixedBlockAllocator, PartialWordBlockCount) {
 }
 
 TEST(FixedBlockAllocator, SingleFixedBlockAllocator) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 1024;
-  options.block_count = 1;
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 1024, .block_count = 1, .frontier_capacity = 1};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -680,10 +660,8 @@ TEST(FixedBlockAllocator, SingleFixedBlockAllocator) {
 //===----------------------------------------------------------------------===//
 
 TEST(FixedBlockAllocator, StatsTracking) {
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = 8;
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64, .block_count = 8, .frontier_capacity = 1};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -727,10 +705,8 @@ TEST(FixedBlockAllocator, ConcurrentAcquireExhaustion) {
   static constexpr int kBlockCount = 256;
   static constexpr int kThreadCount = 8;
 
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = kBlockCount;
-  options.frontier_capacity = 1;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64, .block_count = kBlockCount, .frontier_capacity = 1};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -792,10 +768,8 @@ TEST(FixedBlockAllocator, ConcurrentAcquireRelease) {
   static constexpr int kThreadCount = 4;
   static constexpr int kIterationsPerThread = 1000;
 
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = kBlockCount;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64, .block_count = kBlockCount, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(
@@ -852,10 +826,8 @@ TEST(FixedBlockAllocator, ConcurrentFrontierVisibility) {
   // via an atomic flag; the consumer runs until it has consumed all blocks.
   static constexpr int kBlockCount = 64;
 
-  iree_hal_memory_fixed_block_allocator_options_t options = {};
-  options.block_size = 64;
-  options.block_count = kBlockCount;
-  options.frontier_capacity = 2;
+  iree_hal_memory_fixed_block_allocator_options_t options = {
+      .block_size = 64, .block_count = kBlockCount, .frontier_capacity = 2};
 
   iree_hal_memory_fixed_block_allocator_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_memory_fixed_block_allocator_allocate(

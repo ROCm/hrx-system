@@ -629,13 +629,13 @@ TEST_F(GreedyRewriteTest, CyclicFactsNarrowAfterSemanticUpdates) {
   // Structural snapshots belong to the rewriter and leave the caller-owned
   // table before their backing arenas are released or the table is reattached.
   std::vector<const loom_cfg_graph_t*> graphs;
-  loom_value_fact_cfg_graph_callback_t callback = {};
-  callback.user_data = &graphs;
-  callback.fn = [](void* user_data, const loom_cfg_graph_t* graph) {
-    static_cast<std::vector<const loom_cfg_graph_t*>*>(user_data)->push_back(
-        graph);
-    return iree_ok_status();
-  };
+  loom_value_fact_cfg_graph_callback_t callback = {
+      .user_data = &graphs,
+      .fn = [](void* user_data, const loom_cfg_graph_t* graph) {
+        static_cast<std::vector<const loom_cfg_graph_t*>*>(user_data)
+            ->push_back(graph);
+        return iree_ok_status();
+      }};
   // Non-CFG region context must not be exposed as a structural snapshot.
   IREE_ASSERT_OK(loom_value_fact_table_set_region_temporal_scope(
       facts, module_->body, loom_value_facts_unknown(), /*may_repeat=*/false));
@@ -645,10 +645,10 @@ TEST_F(GreedyRewriteTest, CyclicFactsNarrowAfterSemanticUpdates) {
   IREE_ASSERT_OK(loom_value_fact_table_enumerate_cfg_graphs(facts, callback));
   EXPECT_THAT(graphs, ::testing::ElementsAre(
                           loom_value_fact_table_lookup_cfg_graph(facts, body)));
-  loom_value_fact_cfg_graph_callback_t failing_callback = {};
-  failing_callback.fn = [](void*, const loom_cfg_graph_t*) {
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
-  };
+  loom_value_fact_cfg_graph_callback_t failing_callback = {
+      .fn = [](void*, const loom_cfg_graph_t*) {
+        return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED);
+      }};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_RESOURCE_EXHAUSTED,
       loom_value_fact_table_enumerate_cfg_graphs(facts, failing_callback));

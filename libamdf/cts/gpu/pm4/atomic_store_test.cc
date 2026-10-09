@@ -125,12 +125,10 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
       query.accesses = creation.accesses;
       query.registered_host_cacheability =
           creation.registered_host_cacheability;
-      amdf_memory_profile_site_t host = {};
-      host.kind = AMDF_MEMORY_SITE_KIND_HOST;
+      amdf_memory_profile_site_t host = {.kind = AMDF_MEMORY_SITE_KIND_HOST};
       host.value.host_access = direction == 0 ? AMDF_MEMORY_MAP_FLAG_WRITE
                                               : AMDF_MEMORY_MAP_FLAG_READ;
-      amdf_memory_profile_site_t pm4 = {};
-      pm4.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
+      amdf_memory_profile_site_t pm4 = {.kind = AMDF_MEMORY_SITE_KIND_DEVICE};
       pm4.value.device.access_ordinal = 0;
       pm4.value.device.queue_family_ordinal = family_.ordinal;
       query.producer = direction == 0 ? host : pm4;

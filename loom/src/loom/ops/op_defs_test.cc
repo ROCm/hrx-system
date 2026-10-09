@@ -332,8 +332,7 @@ TEST(DialectTableHelpers, LookupSemanticsByDialectAndIndex) {
 }
 
 TEST(MemoryAccessHelpers, OperandIndexIsPayload) {
-  loom_op_t op = {};
-  op.operand_count = 5;
+  loom_op_t op = {.operand_count = 5};
 
   loom_memory_access_vtable_t memory_access = {};
   memory_access.operation_kind = LOOM_MEMORY_ACCESS_OPERATION_STORE;
@@ -345,9 +344,7 @@ TEST(MemoryAccessHelpers, OperandIndexIsPayload) {
   op_vtable.fixed_operand_count = op.operand_count;
   op_vtable.memory_access = &memory_access;
 
-  loom_memory_access_t access = {};
-  access.op = &op;
-  access.op_vtable = &op_vtable;
+  loom_memory_access_t access = {.op = &op, .op_vtable = &op_vtable};
 
   EXPECT_FALSE(loom_memory_access_operand_index_is_payload(access, 0));
   EXPECT_TRUE(loom_memory_access_operand_index_is_payload(access, 3));

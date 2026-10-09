@@ -36,14 +36,14 @@ static iree_const_byte_span_t Record(iree_const_byte_span_t table,
 
 static loom_sanitizer_site_payload_t MakePayload(
     iree_const_byte_span_t extension_data = iree_const_byte_span_empty()) {
-  loom_sanitizer_site_payload_t payload = {};
-  payload.site_kind = LOOM_SANITIZER_SITE_KIND_ACCESS;
-  payload.check_kind = LOOM_SANITIZER_CHECK_KIND_ACCESS_RANGE;
-  payload.provenance_kind = LOOM_SANITIZER_PROVENANCE_KIND_ANALYSIS;
-  payload.lane_policy = LOOM_SANITIZER_LANE_POLICY_ANY_LANE;
-  payload.lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL;
-  payload.flags = 0x1234u;
-  payload.extension_data = extension_data;
+  loom_sanitizer_site_payload_t payload = {
+      .site_kind = LOOM_SANITIZER_SITE_KIND_ACCESS,
+      .check_kind = LOOM_SANITIZER_CHECK_KIND_ACCESS_RANGE,
+      .provenance_kind = LOOM_SANITIZER_PROVENANCE_KIND_ANALYSIS,
+      .lane_policy = LOOM_SANITIZER_LANE_POLICY_ANY_LANE,
+      .lineage_role = LOOM_SANITIZER_LINEAGE_ROLE_ORIGINAL,
+      .flags = 0x1234u,
+      .extension_data = extension_data};
   return payload;
 }
 

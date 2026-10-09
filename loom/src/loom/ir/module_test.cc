@@ -3061,8 +3061,7 @@ TEST_F(ModuleTest, ParameterizedTypeDuplicateAtGrowthThresholdKeepsStorage) {
 TEST_F(ModuleTest, InternTopologicalTypeHandlesDeepCanonicalChain) {
   constexpr iree_host_size_t kDepth = 4096;
   loom_module_t* module = NULL;
-  loom_module_size_hints_t hints = {};
-  hints.type_count = kDepth + 1;
+  loom_module_size_hints_t hints = {.type_count = kDepth + 1};
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       &hints, iree_allocator_system(),
                                       &module));
@@ -3772,12 +3771,11 @@ TEST_F(ModuleTest, BlockAppendSupportsMoreThanUint16Ops) {
 //===----------------------------------------------------------------------===//
 
 TEST_F(ModuleTest, SizeHints) {
-  loom_module_size_hints_t hints = {};
-  hints.string_count = 50;
-  hints.type_count = 20;
-  hints.encoding_count = 12;
-  hints.source_count = 6;
-  hints.symbol_count = 10;
+  loom_module_size_hints_t hints = {.string_count = 50,
+                                    .type_count = 20,
+                                    .encoding_count = 12,
+                                    .source_count = 6,
+                                    .symbol_count = 10};
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       &hints, iree_allocator_system(),

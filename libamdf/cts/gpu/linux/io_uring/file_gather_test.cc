@@ -279,8 +279,7 @@ class GpuFileGatherTest : public GpuFileIoFixture {
     }
     std::vector<uint32_t> completion_tickets(summary.completed, kAbsent);
     std::array<SourceOracle, protocol::kSlotCount> sources;
-    protocol::State predicted = {};
-    predicted.summary = summary;
+    protocol::State predicted = {.summary = summary};
     uint32_t unique_reads = 0;
     uint32_t peer_completed = 0;
     uint32_t held_peer_reloads = 0;

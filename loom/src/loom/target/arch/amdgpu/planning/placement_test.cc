@@ -30,9 +30,8 @@ loom_low_placement_instruction_preferences_t Preferences(
                                     LOOM_TARGET_FACT_FIELD_SUBGROUP_SIZE);
   loom_target_bundle_storage_rebind(&facts.base.storage);
   loom_amdgpu_target_facts_initialize(&facts);
-  loom_low_resolved_target_t target = {};
-  target.target_facts = &facts.base;
-  target.descriptor_set = descriptors;
+  loom_low_resolved_target_t target = {.target_facts = &facts.base,
+                                       .descriptor_set = descriptors};
   return loom_amdgpu_placement_instruction_preferences(&target);
 }
 
@@ -114,15 +113,13 @@ TEST(AmdgpuPlacementTest, FlatClausesMatchEveryPartialMinimum) {
   const auto& preference =
       view.preferences[view.indices_by_descriptor[ordinal] - 1];
   loom_low_placement_preference_use_t use = {&preference, 0, 1};
-  loom_low_placement_preference_index_t index = {};
-  index.uses = &use;
+  loom_low_placement_preference_index_t index = {.uses = &use};
   const uint32_t use_index = 0;
   loom_low_allocation_preference_location_t locations[3] = {};
-  loom_low_allocation_preference_query_t query = {};
-  query.index = &index;
-  query.use_indices = &use_index;
-  query.locations = locations;
-  query.use_count = 1;
+  loom_low_allocation_preference_query_t query = {.index = &index,
+                                                  .use_indices = &use_index,
+                                                  .locations = locations,
+                                                  .use_count = 1};
   loom_low_allocation_assignment_t assignments[3] = {};
   uint16_t register_class = LOOM_LOW_REG_CLASS_NONE;
   ASSERT_TRUE(loom_low_descriptor_set_lookup_register_class(

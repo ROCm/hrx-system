@@ -85,11 +85,10 @@ TEST(AmdgpuTargetProfileTest, ProjectsCompilerOwnedTypedFacts) {
   // A structured profile can override the preset without changing processor
   // identity. Those values must become explicit before standalone IR emission.
   const auto& preset = *profile.base.target_bundle;
-  loom_target_bundle_storage_t storage = {};
-  storage.snapshot = *preset.snapshot;
-  storage.export_plan = *preset.export_plan;
-  storage.config = *preset.config;
-  storage.bundle = preset;
+  loom_target_bundle_storage_t storage = {.snapshot = *preset.snapshot,
+                                          .export_plan = *preset.export_plan,
+                                          .config = *preset.config,
+                                          .bundle = preset};
   loom_target_bundle_storage_rebind(&storage);
   storage.snapshot.subgroup_size = 64;
   storage.config.contract_set_key = IREE_SV("custom_contract");

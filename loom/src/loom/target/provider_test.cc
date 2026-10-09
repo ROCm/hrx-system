@@ -512,8 +512,7 @@ TEST_F(TargetProviderTest, LooksUpProfileProvider) {
 TEST_F(TargetProviderTest, LooksUpProviderWithoutProfileByFactType) {
   static const loom_target_fact_type_t kOwnedFactType = {};
   static const loom_target_fact_type_t kUnownedFactType = {};
-  loom_target_provider_t provider = {};
-  provider.target_fact_type = &kOwnedFactType;
+  loom_target_provider_t provider = {.target_fact_type = &kOwnedFactType};
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
@@ -542,13 +541,12 @@ TEST_F(TargetProviderTest, ComposesCanonicalModuleEmitterByFactType) {
       /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kEmitters[] = {&kEmitter};
-  loom_target_provider_t target_provider = {};
-  target_provider.target_fact_type = &kFactType;
-  loom_target_provider_t emission_provider = {};
-  emission_provider.emitter_list =
-      loom_target_emitter_list_make(kEmitters, IREE_ARRAYSIZE(kEmitters));
-  emission_provider.canonical_module_emitter = &kEmitter;
-  emission_provider.canonical_module_fact_type = &kFactType;
+  loom_target_provider_t target_provider = {.target_fact_type = &kFactType};
+  loom_target_provider_t emission_provider = {
+      .emitter_list =
+          loom_target_emitter_list_make(kEmitters, IREE_ARRAYSIZE(kEmitters)),
+      .canonical_module_emitter = &kEmitter,
+      .canonical_module_fact_type = &kFactType};
   const loom_target_provider_t* providers[] = {
       &target_provider,
       &emission_provider,
@@ -586,13 +584,12 @@ TEST_F(TargetProviderTest, ComposesCanonicalKernelEmitterByFactType) {
       /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kEmitters[] = {&kEmitter};
-  loom_target_provider_t target_provider = {};
-  target_provider.target_fact_type = &kFactType;
-  loom_target_provider_t emission_provider = {};
-  emission_provider.emitter_list =
-      loom_target_emitter_list_make(kEmitters, IREE_ARRAYSIZE(kEmitters));
-  emission_provider.canonical_kernel_emitter = &kEmitter;
-  emission_provider.canonical_kernel_fact_type = &kFactType;
+  loom_target_provider_t target_provider = {.target_fact_type = &kFactType};
+  loom_target_provider_t emission_provider = {
+      .emitter_list =
+          loom_target_emitter_list_make(kEmitters, IREE_ARRAYSIZE(kEmitters)),
+      .canonical_kernel_emitter = &kEmitter,
+      .canonical_kernel_fact_type = &kFactType};
   const loom_target_provider_t* providers[] = {
       &target_provider,
       &emission_provider,
@@ -623,10 +620,10 @@ TEST_F(TargetProviderTest, RejectsCanonicalModuleEmitterWithoutFactType) {
       /*.emit=*/EmitNothing,
   };
   static const loom_target_emitter_t* const kEmitters[] = {&kEmitter};
-  loom_target_provider_t provider = {};
-  provider.emitter_list =
-      loom_target_emitter_list_make(kEmitters, IREE_ARRAYSIZE(kEmitters));
-  provider.canonical_module_emitter = &kEmitter;
+  loom_target_provider_t provider = {
+      .emitter_list =
+          loom_target_emitter_list_make(kEmitters, IREE_ARRAYSIZE(kEmitters)),
+      .canonical_module_emitter = &kEmitter};
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
@@ -639,8 +636,7 @@ TEST_F(TargetProviderTest, RejectsCanonicalModuleEmitterWithoutFactType) {
 
 TEST_F(TargetProviderTest, RejectsCanonicalModuleFactTypeWithoutEmitter) {
   static const loom_target_fact_type_t kFactType = {};
-  loom_target_provider_t provider = {};
-  provider.canonical_module_fact_type = &kFactType;
+  loom_target_provider_t provider = {.canonical_module_fact_type = &kFactType};
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
@@ -661,9 +657,8 @@ TEST_F(TargetProviderTest, RejectsUncontributedCanonicalModuleEmitter) {
       /*.default_pipeline_options=*/{},
       /*.emit=*/EmitNothing,
   };
-  loom_target_provider_t provider = {};
-  provider.canonical_module_emitter = &kEmitter;
-  provider.canonical_module_fact_type = &kFactType;
+  loom_target_provider_t provider = {.canonical_module_emitter = &kEmitter,
+                                     .canonical_module_fact_type = &kFactType};
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));
@@ -698,16 +693,16 @@ TEST_F(TargetProviderTest, RejectsDuplicateCanonicalModuleEmitter) {
   static const loom_target_emitter_t* const kSecondEmitters[] = {
       &kSecondEmitter,
   };
-  loom_target_provider_t first_provider = {};
-  first_provider.emitter_list = loom_target_emitter_list_make(
-      kFirstEmitters, IREE_ARRAYSIZE(kFirstEmitters));
-  first_provider.canonical_module_emitter = &kFirstEmitter;
-  first_provider.canonical_module_fact_type = &kFactType;
-  loom_target_provider_t second_provider = {};
-  second_provider.emitter_list = loom_target_emitter_list_make(
-      kSecondEmitters, IREE_ARRAYSIZE(kSecondEmitters));
-  second_provider.canonical_module_emitter = &kSecondEmitter;
-  second_provider.canonical_module_fact_type = &kFactType;
+  loom_target_provider_t first_provider = {
+      .emitter_list = loom_target_emitter_list_make(
+          kFirstEmitters, IREE_ARRAYSIZE(kFirstEmitters)),
+      .canonical_module_emitter = &kFirstEmitter,
+      .canonical_module_fact_type = &kFactType};
+  loom_target_provider_t second_provider = {
+      .emitter_list = loom_target_emitter_list_make(
+          kSecondEmitters, IREE_ARRAYSIZE(kSecondEmitters)),
+      .canonical_module_emitter = &kSecondEmitter,
+      .canonical_module_fact_type = &kFactType};
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
@@ -745,16 +740,16 @@ TEST_F(TargetProviderTest, RejectsDuplicateCanonicalKernelEmitter) {
   static const loom_target_emitter_t* const kSecondEmitters[] = {
       &kSecondEmitter,
   };
-  loom_target_provider_t first_provider = {};
-  first_provider.emitter_list = loom_target_emitter_list_make(
-      kFirstEmitters, IREE_ARRAYSIZE(kFirstEmitters));
-  first_provider.canonical_kernel_emitter = &kFirstEmitter;
-  first_provider.canonical_kernel_fact_type = &kFactType;
-  loom_target_provider_t second_provider = {};
-  second_provider.emitter_list = loom_target_emitter_list_make(
-      kSecondEmitters, IREE_ARRAYSIZE(kSecondEmitters));
-  second_provider.canonical_kernel_emitter = &kSecondEmitter;
-  second_provider.canonical_kernel_fact_type = &kFactType;
+  loom_target_provider_t first_provider = {
+      .emitter_list = loom_target_emitter_list_make(
+          kFirstEmitters, IREE_ARRAYSIZE(kFirstEmitters)),
+      .canonical_kernel_emitter = &kFirstEmitter,
+      .canonical_kernel_fact_type = &kFactType};
+  loom_target_provider_t second_provider = {
+      .emitter_list = loom_target_emitter_list_make(
+          kSecondEmitters, IREE_ARRAYSIZE(kSecondEmitters)),
+      .canonical_kernel_emitter = &kSecondEmitter,
+      .canonical_kernel_fact_type = &kFactType};
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
@@ -772,10 +767,8 @@ TEST_F(TargetProviderTest, RejectsDuplicateFactTypeProviders) {
   static const loom_target_fact_type_t kFactType = {
       /*.name=*/IREE_SVL("shared-facts"),
   };
-  loom_target_provider_t first_provider = {};
-  first_provider.target_fact_type = &kFactType;
-  loom_target_provider_t second_provider = {};
-  second_provider.target_fact_type = &kFactType;
+  loom_target_provider_t first_provider = {.target_fact_type = &kFactType};
+  loom_target_provider_t second_provider = {.target_fact_type = &kFactType};
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
@@ -800,10 +793,9 @@ TEST_F(TargetProviderTest, RejectsDuplicateProfileFamilyNames) {
       /*.name=*/IREE_SVL("shared-family"),
       /*.fact_type=*/&kSecondFactType,
   };
-  loom_target_provider_t first_provider = {};
-  first_provider.profile_type = &kFirstProfileType;
-  loom_target_provider_t second_provider = {};
-  second_provider.profile_type = &kSecondProfileType;
+  loom_target_provider_t first_provider = {.profile_type = &kFirstProfileType};
+  loom_target_provider_t second_provider = {.profile_type =
+                                                &kSecondProfileType};
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
@@ -840,12 +832,12 @@ TEST_F(TargetProviderTest, RejectsDuplicateEmitterFormats) {
   static const loom_target_emitter_t* const kSecondEmitters[] = {
       &kSecondEmitter,
   };
-  loom_target_provider_t first_provider = {};
-  first_provider.emitter_list = loom_target_emitter_list_make(
-      kFirstEmitters, IREE_ARRAYSIZE(kFirstEmitters));
-  loom_target_provider_t second_provider = {};
-  second_provider.emitter_list = loom_target_emitter_list_make(
-      kSecondEmitters, IREE_ARRAYSIZE(kSecondEmitters));
+  loom_target_provider_t first_provider = {
+      .emitter_list = loom_target_emitter_list_make(
+          kFirstEmitters, IREE_ARRAYSIZE(kFirstEmitters))};
+  loom_target_provider_t second_provider = {
+      .emitter_list = loom_target_emitter_list_make(
+          kSecondEmitters, IREE_ARRAYSIZE(kSecondEmitters))};
   const loom_target_provider_t* providers[] = {
       &first_provider,
       &second_provider,
@@ -891,8 +883,8 @@ TEST_F(TargetProviderTest, RejectsIncompleteEmitterDescriptors) {
   };
   for (const loom_target_emitter_t* emitter : kInvalidEmitters) {
     const loom_target_emitter_t* emitters[] = {emitter};
-    loom_target_provider_t provider = {};
-    provider.emitter_list = loom_target_emitter_list_make(emitters, 1);
+    loom_target_provider_t provider = {
+        .emitter_list = loom_target_emitter_list_make(emitters, 1)};
     const loom_target_provider_t* providers[] = {&provider};
     const loom_target_provider_set_t provider_set =
         loom_target_provider_set_make(providers, 1);
@@ -910,9 +902,8 @@ TEST_F(TargetProviderTest, RejectsMismatchedProfileAndProviderFactTypes) {
       /*.name=*/IREE_SVL("mismatched"),
       /*.fact_type=*/&kProfileFactType,
   };
-  loom_target_provider_t provider = {};
-  provider.profile_type = &kProfileType;
-  provider.target_fact_type = &kProviderFactType;
+  loom_target_provider_t provider = {.profile_type = &kProfileType,
+                                     .target_fact_type = &kProviderFactType};
   const loom_target_provider_t* providers[] = {&provider};
   const loom_target_provider_set_t provider_set =
       loom_target_provider_set_make(providers, IREE_ARRAYSIZE(providers));

@@ -413,11 +413,9 @@ static const iree_hal_task_executable_vtable_t kFakeTaskExecutableVTable = {
 class TaskProfileRecorderTest : public ::testing::Test {
  protected:
   void SetUp() override {
-    iree_hal_device_queue_spec_t queues = {};
-    queues.family_count = 1;
-    queues.families = &kQueueFamilySpec;
-    iree_hal_device_spec_params_t spec_params = {};
-    spec_params.queues = &queues;
+    iree_hal_device_queue_spec_t queues = {.family_count = 1,
+                                           .families = &kQueueFamilySpec};
+    iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(
         &spec_params, iree_allocator_system(), &device_spec));

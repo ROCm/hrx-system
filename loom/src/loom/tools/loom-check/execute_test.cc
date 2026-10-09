@@ -767,11 +767,11 @@ TEST_F(ExecuteTest, HeaderDiagnosticCannotMatchOrEditTheMainSource) {
   collector.result = &result;
   loom_diagnostic_param_t parameter =
       loom_param_string(IREE_SV("invalid input"));
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.severity = LOOM_DIAGNOSTIC_ERROR;
-  diagnostic.error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 36);
-  diagnostic.params = &parameter;
-  diagnostic.param_count = 1;
+  loom_diagnostic_t diagnostic = {
+      .severity = LOOM_DIAGNOSTIC_ERROR,
+      .error = loom_error_def_lookup(LOOM_ERROR_DOMAIN_PARSE, 36),
+      .params = &parameter,
+      .param_count = 1};
   diagnostic.origin.filename = IREE_SV("included.h");
   diagnostic.origin.start_line = 2;
   IREE_ASSERT_OK(loom_check_diagnostic_collector_sink(&collector, &diagnostic));

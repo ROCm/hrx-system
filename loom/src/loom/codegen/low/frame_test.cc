@@ -53,8 +53,8 @@ class LowEmissionFrameTest : public ::testing::Test {
   }
 
   ModulePtr ParseModule(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+    loom_text_parse_options_t options = {
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -83,10 +83,10 @@ low.func.def target<test.low.core> @structural_model() -> (reg<test.i32 x4>) asm
           LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL) {
     loom_block_t* module_block = loom_module_block(module);
     IREE_ASSERT_EQ(module_block->op_count, 1);
-    loom_low_emission_frame_options_t options = {};
-    options.descriptor_registry = &registry_.registry;
-    options.schedule_structural_models = structural_models;
-    options.schedule_strategy = schedule_strategy;
+    loom_low_emission_frame_options_t options = {
+        .descriptor_registry = &registry_.registry,
+        .schedule_structural_models = structural_models,
+        .schedule_strategy = schedule_strategy};
     bool accepted = false;
     iree_status_t status =
         loom_low_emission_frame_build(module, loom_block_op(module_block, 0),
@@ -120,17 +120,18 @@ TEST_F(LowEmissionFrameTest, ResidencyQueryConsumesRetainedFunctionFacts) {
   loom_target_facts_builder_initialize(&loom_test_target_fact_type,
                                        loom_test_target_bundles.values[1],
                                        &target_facts);
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.function_target_facts = &target_facts;
-  options.residency_query =
-      [](const loom_low_resolved_target_t* target,
-         const loom_low_storage_layout_space_sizes_t* storage_sizes) {
-        EXPECT_NE(target->target_facts, nullptr);
-        EXPECT_EQ(target->descriptor_set, loom_test_low_core_descriptor_set());
-        EXPECT_EQ(storage_sizes->workgroup_bytes, 64u);
-        return loom_target_residency_view(&model, 2);
-      };
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .function_target_facts = &target_facts,
+      .residency_query =
+          [](const loom_low_resolved_target_t* target,
+             const loom_low_storage_layout_space_sizes_t* storage_sizes) {
+            EXPECT_NE(target->target_facts, nullptr);
+            EXPECT_EQ(target->descriptor_set,
+                      loom_test_low_core_descriptor_set());
+            EXPECT_EQ(storage_sizes->workgroup_bytes, 64u);
+            return loom_target_residency_view(&model, 2);
+          }};
   loom_low_emission_frame_t frame = {};
   bool accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -212,9 +213,9 @@ low.func.def target<test.low.core> @caller(%value: reg<test.pressure.alias32>) -
   contract.argument_count = IREE_ARRAYSIZE(arguments);
   contract.results = results;
   contract.result_count = IREE_ARRAYSIZE(results);
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY};
   options.call_contracts.query = [](void* user_data, loom_symbol_ref_t callee) {
     (void)callee;
     return static_cast<const loom_low_call_contract_t*>(user_data);
@@ -331,9 +332,9 @@ low.func.def target<test.low.core> @caller(%value: reg<test.pressure.alias32>) -
       .contract = {},
       .common_clobbers = {&common_clobber, 1},
   };
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY};
   options.call_contracts.query =
       [](void* user_data,
          loom_symbol_ref_t callee) -> const loom_low_call_contract_t* {
@@ -501,14 +502,13 @@ low.func.def target<test.low.core> @constant_pair(%input: reg<test.i32>) -> (reg
     const loom_low_descriptor_t* constant =
         loom_low_descriptor_set_descriptor_at(
             descriptor_set, TEST_LOW_CORE_DESCRIPTOR_REF_TEST_CONST_ISSUED_I32);
-    loom_low_schedule_pair_affinity_t affinity = {};
-    affinity.first_descriptor = constant;
-    affinity.second_descriptor = constant;
-    affinity.priority = 1;
-    loom_low_emission_frame_options_t options = {};
-    options.descriptor_registry = &registry_.registry;
-    options.schedule_pair_affinities = {&affinity, 1};
-    options.schedule_strategy = strategy;
+    loom_low_schedule_pair_affinity_t affinity = {.first_descriptor = constant,
+                                                  .second_descriptor = constant,
+                                                  .priority = 1};
+    loom_low_emission_frame_options_t options = {
+        .descriptor_registry = &registry_.registry,
+        .schedule_pair_affinities = {&affinity, 1},
+        .schedule_strategy = strategy};
     loom_low_emission_frame_t frame = {};
     bool frame_accepted = false;
     IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -536,19 +536,18 @@ low.func.def target<test.low.core> @bounded_pair(%address: reg<test.ptr>, %value
   const loom_low_descriptor_t* constant = loom_low_descriptor_set_descriptor_at(
       loom_test_low_core_descriptor_set(),
       TEST_LOW_CORE_DESCRIPTOR_REF_TEST_CONST_ISSUED_I32);
-  loom_low_schedule_pair_affinity_t affinity = {};
-  affinity.first_descriptor = constant;
-  affinity.second_descriptor = constant;
-  affinity.priority = 1;
+  loom_low_schedule_pair_affinity_t affinity = {.first_descriptor = constant,
+                                                .second_descriptor = constant,
+                                                .priority = 1};
   loom_low_allocation_budget_t budget = {};
   budget.register_class = IREE_SV("test.i32");
   budget.max_units = 5;
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_pair_affinities = {&affinity, 1};
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
-  options.allocation_budgets = &budget;
-  options.allocation_budget_count = 1;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_pair_affinities = {&affinity, 1},
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      .allocation_budgets = &budget,
+      .allocation_budget_count = 1};
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -571,11 +570,11 @@ low.func.def target<test.low.core> @spills(%first: reg<test.i32>, %second: reg<t
   loom_low_allocation_budget_t budget = {};
   budget.register_class = IREE_SV("test.i32");
   budget.max_units = 1;
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
-  options.allocation_budgets = &budget;
-  options.allocation_budget_count = 1;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY,
+      .allocation_budgets = &budget,
+      .allocation_budget_count = 1};
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -621,35 +620,36 @@ low.func.def target<test.low.core> @feedback(%lhs: reg<test.i32>, %rhs: reg<test
     // Number of allocation copy decisions observed.
     uint32_t copy_count = 0;
   } captured;
-  iree_diagnostic_emitter_t emitter = {};
-  emitter.fn = [](void* user_data, const loom_diagnostic_emission_t* emission) {
-    auto* captured = static_cast<CapturedDiagnostics*>(user_data);
-    ++captured->count;
-    if (emission->error == LOOM_ERR_BACKEND_003) {
-      captured->pressure_budget = emission->params[5].u32;
-    } else if (emission->error == LOOM_ERR_BACKEND_006) {
-      ++captured->copy_count;
-    }
-    return iree_ok_status();
-  };
-  emitter.user_data = &captured;
+  iree_diagnostic_emitter_t emitter = {
+      .fn =
+          [](void* user_data, const loom_diagnostic_emission_t* emission) {
+            auto* captured = static_cast<CapturedDiagnostics*>(user_data);
+            ++captured->count;
+            if (emission->error == LOOM_ERR_BACKEND_003) {
+              captured->pressure_budget = emission->params[5].u32;
+            } else if (emission->error == LOOM_ERR_BACKEND_006) {
+              ++captured->copy_count;
+            }
+            return iree_ok_status();
+          },
+      .user_data = &captured};
   loom_low_allocation_budget_t budget = {IREE_SV("test.i32"), 8};
   loom_low_planning_statistics_t statistics = {};
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
-  options.schedule_diagnostic_flags =
-      LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS |
-      LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS |
-      LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS |
-      LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS |
-      LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY;
-  options.allocation_budgets = &budget;
-  options.allocation_budget_count = 1;
-  options.allocation_diagnostic_flags =
-      LOOM_LOW_ALLOCATION_DIAGNOSTIC_COPY_DECISIONS;
-  options.emitter = emitter;
-  options.statistics = &statistics;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      .schedule_diagnostic_flags =
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_PRESSURE_PEAKS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_RESOURCE_BOTTLENECKS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_HAZARD_GAPS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_CANDIDATE_DECISIONS |
+          LOOM_LOW_SCHEDULE_DIAGNOSTIC_MODEL_QUALITY,
+      .allocation_budgets = &budget,
+      .allocation_budget_count = 1,
+      .allocation_diagnostic_flags =
+          LOOM_LOW_ALLOCATION_DIAGNOSTIC_COPY_DECISIONS,
+      .emitter = emitter,
+      .statistics = &statistics};
   loom_low_emission_frame_spill_free_options_t spill_free_options = {};
   spill_free_options.materialization_options.has_supported_storage_spaces =
       true;
@@ -771,9 +771,9 @@ low.func.def target<test.low.core> @too_wide(%wide: reg<test.special x2>) -> (re
 
 TEST_F(LowEmissionFrameTest, FinalValidatorRejectsWithoutDiagnosticSink) {
   ModulePtr module = ParseModule();
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY};
   loom_low_emission_frame_spill_free_options_t spill_free_options = {};
   spill_free_options.materialization_options.has_supported_storage_spaces =
       true;
@@ -912,11 +912,11 @@ low.func.def target<test.low.core> @fixed_loop(%initial: reg<test.fixed.r0>, %co
     }
   }
 
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
-  options.allocation_flags =
-      LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      .allocation_flags =
+          LOOM_LOW_ALLOCATION_FLAG_RETAIN_COALESCED_INCOMING_INDEX};
   loom_low_emission_frame_t indexed_frame = {};
   bool accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -996,9 +996,9 @@ low.func.def target<test.low.core> @dependency_cycle(%lhs: reg<test.schedule_sta
 }
 )");
   uint32_t diagnostic_count = 0;
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL};
   options.emitter.fn = [](void* user_data,
                           const loom_diagnostic_emission_t* emission) {
     EXPECT_EQ(emission->error, LOOM_ERR_BACKEND_044);
@@ -1034,10 +1034,10 @@ low.func.def target<test.low.core> @guarded_tail(%base: reg<test.ptr>, %origin: 
 }
 )");
   loom_low_planning_statistics_t statistics = {};
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
-  options.statistics = &statistics;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL,
+      .statistics = &statistics};
   loom_low_emission_frame_t frame = {};
   bool accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(

@@ -74,8 +74,7 @@ class UnreachableDominanceTest : public ::testing::Test {
     }
     IREE_ASSERT_OK(loom_module_compute_uses(module_));
     testing::DiagnosticCapture capture;
-    loom_verify_options_t options = {};
-    options.sink = capture.sink();
+    loom_verify_options_t options = {.sink = capture.sink()};
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module_, &options, &result));
     EXPECT_EQ(result.error_count, 1u);

@@ -286,9 +286,8 @@ TEST_F(RemapTest, SharedTypesFollowBindingsInstalledBetweenCalls) {
                                                   &signature));
   for (auto map_kind : {LOOM_IR_REMAP_VALUE_MAP_SPARSE,
                         LOOM_IR_REMAP_VALUE_MAP_SOURCE_INDEXED}) {
-    loom_ir_remap_options_t options = {};
-    options.allow_unmapped_values = true;
-    options.value_map_kind = map_kind;
+    loom_ir_remap_options_t options = {.allow_unmapped_values = true,
+                                       .value_map_kind = map_kind};
     loom_ir_remap_t remap;
     IREE_ASSERT_OK(loom_ir_remap_initialize(source_, source_, &remap_arena_,
                                             &options, &remap));
@@ -1398,16 +1397,16 @@ TEST_F(RemapTest, SharedTypesObserveSymbolPolicyChangesBetweenCalls) {
     // Callback visits for the shared symbol-bearing leaf.
     int visits;
   } policy = {};
-  loom_ir_remap_options_t options = {};
-  options.remap_symbol = loom_ir_remap_symbol_callback_make(
-      [](void* user_data, const loom_module_t*, loom_module_t*,
-         loom_symbol_ref_t, loom_symbol_ref_t* result) {
-        auto* policy = static_cast<SymbolPolicy*>(user_data);
-        ++policy->visits;
-        *result = {0, policy->target};
-        return iree_ok_status();
-      },
-      &policy);
+  loom_ir_remap_options_t options = {
+      .remap_symbol = loom_ir_remap_symbol_callback_make(
+          [](void* user_data, const loom_module_t*, loom_module_t*,
+             loom_symbol_ref_t, loom_symbol_ref_t* result) {
+            auto* policy = static_cast<SymbolPolicy*>(user_data);
+            ++policy->visits;
+            *result = {0, policy->target};
+            return iree_ok_status();
+          },
+          &policy)};
   auto remap = InitializeRemap(&options);
   for (auto target : targets) {
     policy.target = target;

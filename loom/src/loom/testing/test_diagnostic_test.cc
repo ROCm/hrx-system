@@ -123,11 +123,10 @@ TEST_F(TestDiagnosticTest, MaterializationPreservesSourceIdentity) {
       &emitted, &options, &arena_, iree_allocator_system(), &diagnostic));
   filename.assign(filename.size(), '?');
 
-  loom_test_annotation_t annotation = {};
-  annotation.severity = LOOM_DIAGNOSTIC_ERROR;
-  annotation.domain = LOOM_ERROR_DOMAIN_PARSE;
-  annotation.code = 36;
-  annotation.target_line = 1;
+  loom_test_annotation_t annotation = {.severity = LOOM_DIAGNOSTIC_ERROR,
+                                       .domain = LOOM_ERROR_DOMAIN_PARSE,
+                                       .code = 36,
+                                       .target_line = 1};
   EXPECT_FALSE(loom_test_diagnostic_matches_annotation(
       &diagnostic, &annotation, IREE_SV("case.loom-test")));
   EXPECT_TRUE(loom_test_diagnostic_matches_annotation(&diagnostic, &annotation,

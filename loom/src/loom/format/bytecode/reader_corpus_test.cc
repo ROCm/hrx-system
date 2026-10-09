@@ -211,8 +211,8 @@ class ReaderCorpusTest : public ::testing::Test {
         IREE_IO_STREAM_MODE_WRITABLE | IREE_IO_STREAM_MODE_SEEKABLE |
             IREE_IO_STREAM_MODE_READABLE | IREE_IO_STREAM_MODE_RESIZABLE,
         4096, iree_allocator_system(), &stream));
-    loom_bytecode_write_options_t options = {};
-    options.low_repr_environment = low_repr_environment;
+    loom_bytecode_write_options_t options = {.low_repr_environment =
+                                                 low_repr_environment};
     iree_status_t status =
         loom_bytecode_write_module(module, stream, &options, &block_pool_);
 

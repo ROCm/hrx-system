@@ -150,8 +150,7 @@ static amdf_status_t CreateFakeQueue(amdf_device_t* device,
 }
 
 TEST(UserQueueTest, PreservesOutputsAndEnforcesMappingLifetime) {
-  amdf_device_t device = {};
-  device.host_allocator = amdf_allocator_system();
+  amdf_device_t device = {.host_allocator = amdf_allocator_system()};
   amdf_child_tracker_initialize(&device.children);
   amdf_user_queue_t* queue = nullptr;
   ASSERT_EQ(CreateFakeQueue(&device, &queue), AMDF_STATUS_OK);
@@ -219,8 +218,7 @@ TEST(UserQueueTest, PreservesOutputsAndEnforcesMappingLifetime) {
 }
 
 TEST(UserQueueTest, NativeErrorCodeDoesNotAliasPreconditionRejection) {
-  amdf_device_t device = {};
-  device.host_allocator = amdf_allocator_system();
+  amdf_device_t device = {.host_allocator = amdf_allocator_system()};
   amdf_child_tracker_initialize(&device.children);
   amdf_user_queue_t* queue = nullptr;
   ASSERT_EQ(CreateFakeQueue(&device, &queue), AMDF_STATUS_OK);

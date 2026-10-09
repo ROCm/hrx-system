@@ -29,16 +29,16 @@ class LowAllocationStorageLivenessIndexTest : public ::testing::Test {
       uint32_t start_point, uint32_t end_point, uint32_t unit_point_start,
       loom_low_allocation_location_kind_t location_kind =
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
-    loom_low_allocation_assignment_t assignment = {};
-    assignment.descriptor_reg_class_id = reg_class_id;
-    assignment.flags = LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS;
-    assignment.start_point = start_point;
-    assignment.end_point = end_point;
-    assignment.unit_count = unit_count;
-    assignment.location_kind = location_kind;
-    assignment.location_base = location;
-    assignment.location_count = unit_count;
-    assignment.unit_point_start = unit_point_start;
+    loom_low_allocation_assignment_t assignment = {
+        .descriptor_reg_class_id = reg_class_id,
+        .flags = LOOM_LOW_ALLOCATION_ASSIGNMENT_FLAG_REFINED_UNIT_STARTS,
+        .start_point = start_point,
+        .end_point = end_point,
+        .unit_count = unit_count,
+        .location_kind = location_kind,
+        .location_base = location,
+        .location_count = unit_count,
+        .unit_point_start = unit_point_start};
     return assignment;
   }
 
@@ -65,10 +65,10 @@ class LowAllocationStorageLivenessIndexTest : public ::testing::Test {
   static loom_low_allocation_unit_liveness_t UnitLiveness(
       uint32_t* start_points, uint32_t* end_points,
       iree_host_size_t point_count) {
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
-    unit_liveness.start_points = start_points;
-    unit_liveness.end_points = end_points;
-    unit_liveness.point_count = point_count;
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .start_points = start_points,
+        .end_points = end_points,
+        .point_count = point_count};
     return unit_liveness;
   }
 

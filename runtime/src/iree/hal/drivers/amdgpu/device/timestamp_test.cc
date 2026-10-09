@@ -58,11 +58,11 @@ TEST(TimestampTest, AbiRecordLayoutIsFixed) {
 }
 
 TEST(TimestampTest, MakesRecordHeader) {
-  iree_hal_amdgpu_timestamp_record_header_t header = {};
-  header.record_length = sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t);
-  header.version = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_VERSION_0;
-  header.type = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_TYPE_DISPATCH;
-  header.record_ordinal = 7;
+  iree_hal_amdgpu_timestamp_record_header_t header = {
+      .record_length = sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t),
+      .version = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_VERSION_0,
+      .type = IREE_HAL_AMDGPU_TIMESTAMP_RECORD_TYPE_DISPATCH,
+      .record_ordinal = 7};
 
   EXPECT_EQ(header.record_length,
             sizeof(iree_hal_amdgpu_dispatch_timestamp_record_t));

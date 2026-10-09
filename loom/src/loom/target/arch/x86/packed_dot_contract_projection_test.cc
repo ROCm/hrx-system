@@ -44,26 +44,28 @@ bool BuildPackedDotRequest(
     loom_contract_numeric_type_t result_numeric_type, uint16_t vector_bit_width,
     uint16_t source_lane_count, uint16_t result_lane_count,
     uint16_t k_group_size, loom_contract_request_t* out_request) {
-  loom_contract_matrix_request_options_t options = {};
-  options.shape = {
-      .m = result_lane_count,
-      .n = 1,
-      .k = source_lane_count,
-  };
-  options.k_group_size = k_group_size;
-  options.lhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_numeric_type);
-  options.rhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS, rhs_numeric_type);
-  options.accumulator_numeric_type = accumulator_numeric_type;
-  options.result_numeric_type = result_numeric_type;
-  options.arithmetic = ArithmeticForAccumulator(accumulator_numeric_type);
-  options.fragment = {
-      .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
-      .vector_bit_width = vector_bit_width,
-      .source_lane_count = source_lane_count,
-      .result_lane_count = result_lane_count,
-  };
-  options.capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT;
-  options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
+  loom_contract_matrix_request_options_t options = {
+      .shape =
+          {
+              .m = result_lane_count,
+              .n = 1,
+              .k = source_lane_count,
+          },
+      .k_group_size = k_group_size,
+      .lhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, lhs_numeric_type),
+      .rhs = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS, rhs_numeric_type),
+      .accumulator_numeric_type = accumulator_numeric_type,
+      .result_numeric_type = result_numeric_type,
+      .arithmetic = ArithmeticForAccumulator(accumulator_numeric_type),
+      .fragment =
+          {
+              .atom_bits = LOOM_CONTRACT_FRAGMENT_VECTOR_LANE,
+              .vector_bit_width = vector_bit_width,
+              .source_lane_count = source_lane_count,
+              .result_lane_count = result_lane_count,
+          },
+      .capability_class = LOOM_CONTRACT_CAPABILITY_CLASS_CPU_PACKED_DOT,
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED};
   return loom_contract_request_from_matrix_payloads(&options, out_request,
                                                     NULL);
 }

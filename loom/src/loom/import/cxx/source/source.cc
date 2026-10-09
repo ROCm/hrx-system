@@ -49,14 +49,13 @@ void Diagnostics::emit(const cxx::Token& token,
     range.end_column = last.column;
   }
   loom_diagnostic_param_t parameter = loom_param_string(view(message));
-  loom_diagnostic_t diagnostic = {};
-  diagnostic.severity = severity;
-  diagnostic.error = error;
-  diagnostic.params = &parameter;
-  diagnostic.param_count = 1;
-  diagnostic.emitter = LOOM_EMITTER_PARSER;
-  diagnostic.origin = range;
-  diagnostic.source_location = range;
+  loom_diagnostic_t diagnostic = {.severity = severity,
+                                  .error = error,
+                                  .params = &parameter,
+                                  .param_count = 1,
+                                  .emitter = LOOM_EMITTER_PARSER,
+                                  .origin = range,
+                                  .source_location = range};
   status_ = sink_.fn(sink_.user_data, &diagnostic);
 }
 

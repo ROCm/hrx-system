@@ -389,8 +389,7 @@ TEST_F(LoopbackConnectionTest,
   EXPECT_EQ(iree_net_message_endpoint_query_send_budget(server_endpoint).slots,
             options.max_send_operations);
 
-  iree_async_region_t inaccessible_region = {};
-  inaccessible_region.length = 1;
+  iree_async_region_t inaccessible_region = {.length = 1};
   iree_async_span_t inaccessible_span =
       iree_async_span_from_region(&inaccessible_region, 1);
   SendState lower_rejection;

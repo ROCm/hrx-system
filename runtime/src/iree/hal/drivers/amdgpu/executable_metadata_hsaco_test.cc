@@ -485,12 +485,12 @@ TEST(ExecutableMetadataHsacoTest, PreservesParameterRangesWithElfOnlyExports) {
       {ViewFromCodeObjectData(source_data, "implicit"),
        ViewFromCodeObjectData(source_data, "implicit.kd")},
   };
-  iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {};
-  hsaco_metadata.elf_data = source_data;
-  hsaco_metadata.kernel_count = 1;
-  hsaco_metadata.kernels = &kernel;
-  hsaco_metadata.elf_kernel_symbol_count = 2;
-  hsaco_metadata.elf_kernel_symbols = symbols;
+  iree_hal_amdgpu_hsaco_metadata_t hsaco_metadata = {
+      .elf_data = source_data,
+      .kernel_count = 1,
+      .kernels = &kernel,
+      .elf_kernel_symbol_count = 2,
+      .elf_kernel_symbols = symbols};
   auto* metadata = AllocateAndPopulate(&hsaco_metadata, loaded_data);
   ASSERT_EQ(metadata->export_count, 3);
   ASSERT_EQ(metadata->parameter_count, 2);

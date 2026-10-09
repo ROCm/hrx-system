@@ -222,12 +222,12 @@ class VMEmissionTest : public ::testing::Test {
       const auto checkpoint = iree_arena_checkpoint_save(&arena);
       allocations->attempts = 0;
       allocations->fail_at = fail_at;
-      loom_target_emit_request_t request = {};
-      request.target_environment = environment_;
-      request.low_descriptor_registry = &registry_.registry;
-      request.module = native_module_;
-      request.scratch_arena = &arena;
-      request.allocator = allocations->allocator();
+      loom_target_emit_request_t request = {
+          .target_environment = environment_,
+          .low_descriptor_registry = &registry_.registry,
+          .module = native_module_,
+          .scratch_arena = &arena,
+          .allocator = allocations->allocator()};
       status = loom_vm_module_emitter.emit(&request, out_emitted, out_artifact);
       EXPECT_EQ(arena.used_allocation_size, checkpoint.used_allocation_size);
       EXPECT_EQ(arena.total_allocation_size, checkpoint.total_allocation_size);

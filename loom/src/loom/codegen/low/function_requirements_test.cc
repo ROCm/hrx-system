@@ -41,8 +41,8 @@ class LowFunctionRequirementsTest : public ::testing::Test {
   }
 
   testing::ModulePtr Parse(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+    loom_text_parse_options_t options = {
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;

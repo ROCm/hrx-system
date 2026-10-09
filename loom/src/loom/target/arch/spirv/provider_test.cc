@@ -177,11 +177,10 @@ TEST_F(SpirvProviderTest, MaterializesAuthoredRefinements) {
 
 TEST_F(SpirvProviderTest, MaterializesStructuredProfileOverrides) {
   const auto& preset = loom_spirv_low_target_bundle_vulkan1_3;
-  loom_target_bundle_storage_t storage = {};
-  storage.snapshot = *preset.snapshot;
-  storage.export_plan = *preset.export_plan;
-  storage.config = *preset.config;
-  storage.bundle = preset;
+  loom_target_bundle_storage_t storage = {.snapshot = *preset.snapshot,
+                                          .export_plan = *preset.export_plan,
+                                          .config = *preset.config,
+                                          .bundle = preset};
   loom_target_bundle_storage_rebind(&storage);
   storage.snapshot.subgroup_size = 32;
   storage.snapshot.max_workgroup_size.x = 128;

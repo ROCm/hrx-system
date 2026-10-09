@@ -202,8 +202,7 @@ class TemplateSelectionFixture {
                         IREE_SV("template_selection_benchmark.loom"), &context_,
                         &block_pool_, &parse_options, &module));
     module_.reset(module);
-    loom_verify_options_t verify_options = {};
-    verify_options.max_errors = 20;
+    loom_verify_options_t verify_options = {.max_errors = 20};
     loom_verify_result_t verify_result = {};
     IREE_CHECK_OK(
         loom_verify_module(module_.get(), &verify_options, &verify_result));
@@ -230,9 +229,8 @@ class TemplateSelectionFixture {
   }
 
   uint64_t Query() {
-    loom_template_selection_query_options_t options = {};
-    options.mode = LOOM_TEMPLATE_SELECTION_MODE_EARLY;
-    options.catalog = &catalog_;
+    loom_template_selection_query_options_t options = {
+        .mode = LOOM_TEMPLATE_SELECTION_MODE_EARLY, .catalog = &catalog_};
     loom_template_selection_query_result_t result = {};
     IREE_CHECK_OK(loom_template_selection_query(
         module_.get(), &options, &block_pool_, &query_arena_, &result));
@@ -299,8 +297,8 @@ class TemplateSelectionFixture {
               nullptr);
         },
         nullptr, &pipeline_op));
-    loom_pass_program_compile_options_t options = {};
-    options.registry = loom_pass_builtin_registry();
+    loom_pass_program_compile_options_t options = {
+        .registry = loom_pass_builtin_registry()};
     IREE_CHECK_OK(loom_pass_program_compile_pipeline(
         pipeline_module, pipeline_op, &options, &block_pool_,
         &expansion_program_));
@@ -317,8 +315,7 @@ class TemplateSelectionFixture {
   }
 
   void Expand(loom_module_t* module) {
-    loom_pass_interpreter_options_t options = {};
-    options.block_pool = &block_pool_;
+    loom_pass_interpreter_options_t options = {.block_pool = &block_pool_};
     loom_pass_run_result_t result = {};
     IREE_CHECK_OK(loom_pass_interpreter_run_module(&expansion_program_, module,
                                                    &options, &result));

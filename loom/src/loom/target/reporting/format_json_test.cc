@@ -720,14 +720,14 @@ TEST(CompileReportFormatTest, OwnsAndFormatsPipelinePlans) {
 }
 
 TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
-  loom_target_compile_report_pipeline_memory_row_t memory = {};
-  memory.placement = {2, 1, 1, 0};
-  memory.reserved_byte_count = 72;
-  memory.occupied_byte_count = 72;
-  memory.high_water_byte_count = 131104;
-  memory.capacity_byte_count = 524288;
-  memory.maximum_bank_storage_byte_count = 32;
-  memory.bank_storage_capacity_byte_count = 65536;
+  loom_target_compile_report_pipeline_memory_row_t memory = {
+      .placement = {2, 1, 1, 0},
+      .reserved_byte_count = 72,
+      .occupied_byte_count = 72,
+      .high_water_byte_count = 131104,
+      .capacity_byte_count = 524288,
+      .maximum_bank_storage_byte_count = 32,
+      .bank_storage_capacity_byte_count = 65536};
   loom_target_compile_report_pipeline_plan_t plan = {};
   plan.summary.root_name = IREE_SVL("resident");
   plan.summary.realization = IREE_SVL("resident-configuration");
@@ -756,8 +756,8 @@ TEST(CompileReportFormatTest, PhysicalInventoryOmitsUnavailableChannelFacts) {
   iree_string_builder_initialize(iree_allocator_system(), &builder);
   loom_output_stream_t stream;
   loom_output_stream_for_builder(&builder, &stream);
-  loom_target_compile_report_format_options_t options = {};
-  options.mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS;
+  loom_target_compile_report_format_options_t options = {
+      .mode = LOOM_TARGET_COMPILE_REPORT_FORMAT_MODE_DETAILS};
   IREE_ASSERT_OK(
       loom_target_compile_report_format_json(&report, &options, &stream));
   const iree_string_view_t root =

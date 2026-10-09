@@ -66,8 +66,7 @@ static iree_status_t CreateNativePool(iree_hal_slab_provider_t* provider,
                                       iree_async_frontier_tracker_t* tracker,
                                       iree_hal_pool_epoch_query_t epoch_query,
                                       iree_hal_pool_t** out_pool) {
-  iree_hal_passthrough_pool_options_t options = {};
-  options.epoch_query = epoch_query;
+  iree_hal_passthrough_pool_options_t options = {.epoch_query = epoch_query};
   return iree_hal_passthrough_pool_create(options, provider, notification,
                                           tracker, test_maintenance(),
                                           iree_allocator_system(), out_pool);
@@ -786,9 +785,8 @@ TEST_F(TLSFPoolTest, TrimRetainsByteThresholdForIdleSlabs) {
   iree_hal_pool_t* native = nullptr;
   IREE_ASSERT_OK(CreateNativePool(slab_provider_, notification_,
                                   test_frontier_tracker(), {}, &native));
-  iree_hal_slab_cache_options_t cache_options = {};
-  cache_options.slab = MakeReservationRequest(4096, 16);
-  cache_options.max_count = 4;
+  iree_hal_slab_cache_options_t cache_options = {
+      .slab = MakeReservationRequest(4096, 16), .max_count = 4};
   iree_hal_pool_t* cache = nullptr;
   IREE_ASSERT_OK(
       iree_hal_slab_cache_create(native, &cache_options, allocator_, &cache));
@@ -1849,9 +1847,8 @@ TEST(TLSFPool, GuardedGrowingPoolReportsUsableSourceLimit) {
   iree_hal_buffer_t* backing = nullptr;
   IREE_ASSERT_OK(iree_hal_pool_allocate_buffer(
       source_pool, params, 1024, iree_infinite_timeout(), &backing));
-  iree_hal_fixed_block_pool_options_t parent_options = {};
-  parent_options.block_size = 1024;
-  parent_options.alignment = 64;
+  iree_hal_fixed_block_pool_options_t parent_options = {.block_size = 1024,
+                                                        .alignment = 64};
   iree_hal_pool_t* parent = nullptr;
   IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
       backing, 0, IREE_HAL_WHOLE_BUFFER, &parent_options, allocator, &parent));
@@ -1942,8 +1939,7 @@ TEST(TLSFPool, FinitePoolsPreserveNativeAdviceCoordinates) {
     SCOPED_TRACE(use_tlsf ? "TLSF" : "fixed block");
     iree_hal_pool_t* child = nullptr;
     if (use_tlsf) {
-      iree_hal_tlsf_pool_options_t options = {};
-      options.asan = ShadowOptions();
+      iree_hal_tlsf_pool_options_t options = {.asan = ShadowOptions()};
       IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                             iree_hal_tlsf_pool_create_from_buffer(
                                 view, 64, 64, &options, allocator, &child));
@@ -1966,10 +1962,8 @@ TEST(TLSFPool, FinitePoolsPreserveNativeAdviceCoordinates) {
                                         iree_immediate_timeout(), &largest));
       EXPECT_EQ(source, largest);
     } else {
-      iree_hal_fixed_block_pool_options_t options = {};
-      options.block_size = 13;
-      options.alignment = 16;
-      options.asan = ShadowOptions();
+      iree_hal_fixed_block_pool_options_t options = {
+          .block_size = 13, .alignment = 16, .asan = ShadowOptions()};
       IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
           view, 64, 768, &options, allocator, &child));
     }
@@ -2013,8 +2007,7 @@ TEST(TLSFPool, GuardedFinitePoolsKeepPendingBookkeepingSideEffectFree) {
     const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 0, 0, 0);
     IREE_ASSERT_OK(
         iree_async_frontier_tracker_register_axis(tracker, axis, nullptr));
-    iree_async_single_frontier_t prior_use = {};
-    prior_use.entry_count = 1;
+    iree_async_single_frontier_t prior_use = {.entry_count = 1};
     prior_use.entries[0] = {axis, 1};
     const auto* frontier =
         iree_async_fixed_frontier_as_const_frontier(&prior_use);
@@ -2059,11 +2052,10 @@ TEST(TLSFPool, GuardedFinitePoolsKeepPendingBookkeepingSideEffectFree) {
       IREE_ASSERT_OK(iree_hal_tlsf_pool_create_from_buffer(
           source, 0, 256, &options, allocator, &child));
     } else {
-      iree_hal_fixed_block_pool_options_t options = {};
-      options.block_size = 176;
-      options.frontier_capacity = 2;
-      options.alignment = 16;
-      options.asan = ShadowOptions();
+      iree_hal_fixed_block_pool_options_t options = {.block_size = 176,
+                                                     .frontier_capacity = 2,
+                                                     .alignment = 16,
+                                                     .asan = ShadowOptions()};
       IREE_ASSERT_OK(iree_hal_fixed_block_pool_create_from_buffer(
           source, 0, 256, &options, allocator, &child));
     }

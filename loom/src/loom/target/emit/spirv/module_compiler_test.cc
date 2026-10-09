@@ -89,8 +89,7 @@ class SpirvModuleCompilerTest : public ::testing::Test {
   }
 
   ModulePtr ParseModule(iree_string_view_t source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_low_descriptor_text_asm_environment_initialize(
         &low_registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -158,8 +157,8 @@ low.func.def target<spirv.logical.core> abi(shader_entry_point) @kernel() asm {
   loom_function_version_list_t function_versions = {};
   function_versions.values = version_values;
   function_versions.count = IREE_ARRAYSIZE(version_values);
-  loom_spirv_compile_options_t options = {};
-  options.function_versions = &function_versions;
+  loom_spirv_compile_options_t options = {.function_versions =
+                                              &function_versions};
 
   loom_spirv_module_binary_t generic_module = {};
   bool generic_emitted = false;

@@ -77,12 +77,12 @@ TEST_F(CfgConditionRelationTableTest, InternsEqualPagesAcrossViews) {
   views[1].integer_relations = {second_rows.data(),
                                 static_cast<uint32_t>(second_rows.size())};
   const loom_cfg_condition_operand_domain_t operand_domain = {};
-  loom_cfg_condition_relation_table_builder_t builder = {};
-  builder.operand_domain = &operand_domain;
-  builder.set_builder = set_builder_;
-  builder.views = views.data();
-  builder.view_count = static_cast<uint32_t>(views.size());
-  builder.block_count = static_cast<uint32_t>(views.size());
+  loom_cfg_condition_relation_table_builder_t builder = {
+      .operand_domain = &operand_domain,
+      .set_builder = set_builder_,
+      .views = views.data(),
+      .view_count = static_cast<uint32_t>(views.size()),
+      .block_count = static_cast<uint32_t>(views.size())};
   loom_cfg_condition_relation_table_t table = {};
   IREE_ASSERT_OK(loom_cfg_condition_relation_table_publish(
       &builder, &table, &publication_arena_, &retained_arena_));

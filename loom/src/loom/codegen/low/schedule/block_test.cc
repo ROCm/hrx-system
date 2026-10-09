@@ -22,15 +22,14 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
   iree_arena_allocator_t arena;
   iree_arena_initialize(&pool, &arena);
   const auto* descriptors = loom_test_low_core_descriptor_set();
-  loom_low_schedule_options_t options = {};
-  options.strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+  loom_low_schedule_options_t options = {
+      .strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL};
 
   // Node indices shift because an earlier block gained an operation. The
   // unchanged block keeps its selected order, including two simultaneous
   // instructions. Operation pointers are identities owned outside both tables.
   loom_op_t operations[4] = {};
-  loom_block_t block = {};
-  block.region_index = 1;
+  loom_block_t block = {.region_index = 1};
   loom_low_schedule_block_t previous_blocks[2] = {};
   auto& previous_block = previous_blocks[1];
   previous_block.block = &block;
@@ -77,12 +76,12 @@ TEST(ScheduleBlockTest, RetainsOwnedRowsWithShiftedNodeIndices) {
   previous_decisions[1].rejected_node = 1;
   previous_decisions[1].ready_candidate_count = 2;
   previous_decisions[1].scored_candidate_count = 2;
-  loom_low_schedule_table_t previous = {};
-  previous.blocks = previous_blocks;
-  previous.nodes = previous_nodes;
-  previous.scheduled_node_indices = previous_order;
-  previous.pressure_steps = previous_steps;
-  previous.candidate_decisions = previous_decisions;
+  loom_low_schedule_table_t previous = {
+      .blocks = previous_blocks,
+      .nodes = previous_nodes,
+      .scheduled_node_indices = previous_order,
+      .pressure_steps = previous_steps,
+      .candidate_decisions = previous_decisions};
 
   loom_low_schedule_block_t blocks[2] = {};
   blocks[1].block = &block;
@@ -201,11 +200,9 @@ TEST(ScheduleBlockTest, MergesRoundedClassPeaksWithoutDoubleCountingCliffs) {
   table.cliff_count = IREE_ARRAYSIZE(cliffs);
   table.member_indices_by_direct_resource = member_indices;
   table.member_ranges_by_direct_resource = ranges;
-  loom_low_descriptor_set_t descriptors = {};
-  descriptors.reg_class_count = 2;
+  loom_low_descriptor_set_t descriptors = {.reg_class_count = 2};
   const uint64_t retained_peaks[] = {5, 2, 2, 5, 1, 1};
-  loom_low_schedule_table_t previous = {};
-  previous.block_pressure_peaks = retained_peaks;
+  loom_low_schedule_table_t previous = {.block_pressure_peaks = retained_peaks};
   const iree_string_view_t direct_names[] = {IREE_SV("first"),
                                              IREE_SV("second")};
   const loom_target_residency_cliff_range_t direct_ranges[] = {{0, 2}, {2, 0}};

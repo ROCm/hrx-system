@@ -434,10 +434,8 @@ TEST(LinuxXdnaMemoryAddressTest, TranslatesCompleteLogicalRanges) {
   const amdf_xdna_device_profile_t profile = {
       .dma = {.byte_offset = UINT32_C(0x80000000), .address_bit_count = 48},
   };
-  amdf_xdna_umd_device_t device = {};
-  device.profile = &profile;
-  amdf_xdna_umd_memory_t memory = {};
-  memory.device = &device;
+  amdf_xdna_umd_device_t device = {.profile = &profile};
+  amdf_xdna_umd_memory_t memory = {.device = &device};
   const uint64_t maximum_address = (UINT64_C(1) << 48) - 1;
   const uint64_t maximum_native_address =
       maximum_address - profile.dma.byte_offset;
@@ -462,10 +460,8 @@ TEST(LinuxXdnaMemoryAddressTest, RejectsOverflowWithoutPublishingAddress) {
   const amdf_xdna_device_profile_t profile = {
       .dma = {.byte_offset = UINT32_C(0x80000000), .address_bit_count = 48},
   };
-  amdf_xdna_umd_device_t device = {};
-  device.profile = &profile;
-  amdf_xdna_umd_memory_t memory = {};
-  memory.device = &device;
+  amdf_xdna_umd_device_t device = {.profile = &profile};
+  amdf_xdna_umd_memory_t memory = {.device = &device};
   const uint64_t maximum_native_address =
       (UINT64_C(1) << 48) - 1 - profile.dma.byte_offset;
   const struct {

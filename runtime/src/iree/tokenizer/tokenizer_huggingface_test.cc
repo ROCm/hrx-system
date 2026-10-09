@@ -1051,13 +1051,13 @@ static StatusOr<PairEncodeResult> EncodePair(iree_tokenizer_t* tokenizer,
   std::vector<iree_tokenizer_token_id_t> token_ids(256);
   std::vector<uint8_t> type_ids(256, 0xFF);
 
-  iree_tokenizer_encode_batch_item_t item = {};
-  item.text = text;
-  item.text_pair = text_pair;
-  item.flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR;
-  item.output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
-                                                 type_ids.data(), 256);
-  item.out_token_count = 0;
+  iree_tokenizer_encode_batch_item_t item = {
+      .text = text,
+      .text_pair = text_pair,
+      .flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR,
+      .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
+                                                 type_ids.data(), 256),
+      .out_token_count = 0};
 
   IREE_RETURN_IF_ERROR(iree_tokenizer_encode_batch(
       tokenizer, &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,
@@ -1086,13 +1086,13 @@ static StatusOr<PairEncodeDetailedResult> EncodePairDetailed(
   std::vector<uint8_t> type_ids(storage_capacity, 0xFF);
   std::vector<iree_tokenizer_offset_t> token_offsets(storage_capacity);
 
-  iree_tokenizer_encode_batch_item_t item = {};
-  item.text = text;
-  item.text_pair = text_pair;
-  item.flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR;
-  item.output = iree_tokenizer_make_token_output(
-      token_ids.data(), track_offsets ? token_offsets.data() : nullptr,
-      type_ids.data(), output_capacity);
+  iree_tokenizer_encode_batch_item_t item = {
+      .text = text,
+      .text_pair = text_pair,
+      .flags = IREE_TOKENIZER_ENCODE_BATCH_ITEM_FLAG_HAS_TEXT_PAIR,
+      .output = iree_tokenizer_make_token_output(
+          token_ids.data(), track_offsets ? token_offsets.data() : nullptr,
+          type_ids.data(), output_capacity)};
 
   iree_tokenizer_offset_run_list_t offset_run_list = {
       .capacity = offset_runs.size(),
@@ -1123,11 +1123,11 @@ static StatusOr<std::vector<iree_tokenizer_token_id_t>> EncodeSingle(
 
   std::vector<iree_tokenizer_token_id_t> token_ids(256);
 
-  iree_tokenizer_encode_batch_item_t item = {};
-  item.text = text;
-  item.output =
-      iree_tokenizer_make_token_output(token_ids.data(), nullptr, nullptr, 256);
-  item.out_token_count = 0;
+  iree_tokenizer_encode_batch_item_t item = {
+      .text = text,
+      .output = iree_tokenizer_make_token_output(token_ids.data(), nullptr,
+                                                 nullptr, 256),
+      .out_token_count = 0};
 
   IREE_RETURN_IF_ERROR(iree_tokenizer_encode_batch(
       tokenizer, &item, 1, IREE_TOKENIZER_ENCODE_FLAG_ADD_SPECIAL_TOKENS,

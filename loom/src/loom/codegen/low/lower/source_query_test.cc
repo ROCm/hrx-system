@@ -166,12 +166,12 @@ class LowLowerSourceQueryTest : public ::testing::Test {
 
   iree_status_t QueryContract(const loom_op_t* source_op,
                               loom_target_contract_query_result_t* out_result) {
-    loom_target_contract_query_environment_t environment = {};
-    environment.module = module_;
-    environment.function = function_;
-    environment.target_facts = &target_facts_;
-    environment.descriptor_set = mapping_context_.descriptor_set;
-    environment.fact_table = &fact_table_;
+    loom_target_contract_query_environment_t environment = {
+        .module = module_,
+        .function = function_,
+        .target_facts = &target_facts_,
+        .descriptor_set = mapping_context_.descriptor_set,
+        .fact_table = &fact_table_};
     const loom_target_contract_query_callback_t callback =
         loom_low_lower_source_query_scope_callback(query_scope_);
     return callback.fn(callback.user_data, &environment, source_op, out_result);
@@ -309,8 +309,8 @@ TEST_F(LowLowerSourceQueryTest, RejectedNativeCandidateAllowsFollowingRule) {
       &mapping_context_.lowering->value_domain));
   const loom_op_t* constant =
       loom_value_def_op(loom_module_value(module_, unsupported_value_id_));
-  loom_low_lower_value_ref_t value_ref = {};
-  value_ref.kind = LOOM_LOW_LOWER_VALUE_REF_RESULT;
+  loom_low_lower_value_ref_t value_ref = {.kind =
+                                              LOOM_LOW_LOWER_VALUE_REF_RESULT};
   loom_low_lower_guard_t guard = {};
   loom_low_lower_guard_payload_t guard_payload = {};
   guard.kind = LOOM_LOW_LOWER_GUARD_LOW_VALUE_REGISTER_UNIT_COUNT;

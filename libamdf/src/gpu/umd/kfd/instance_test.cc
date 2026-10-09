@@ -106,20 +106,22 @@ class KfdInstanceTest : public ::testing::Test {
 
   amdf_status_t Prepare(
       amdf_native_lifetime_t lifetime = AMDF_NATIVE_LIFETIME_INSTANCE) {
-    amdf_allocator_t allocator = {};
-    allocator.user_data = &native_;
-    allocator.allocate = [](void* user_data, uint64_t byte_length,
-                            uint64_t minimum_alignment) -> void* {
-      if (static_cast<NativeState*>(user_data)->fail_allocation) {
-        return nullptr;
-      }
-      const amdf_allocator_t system = amdf_allocator_system();
-      return system.allocate(system.user_data, byte_length, minimum_alignment);
-    };
-    allocator.free = [](void*, void* allocation) {
-      const amdf_allocator_t system = amdf_allocator_system();
-      system.free(system.user_data, allocation);
-    };
+    amdf_allocator_t allocator = {
+        .user_data = &native_,
+        .allocate = [](void* user_data, uint64_t byte_length,
+                       uint64_t minimum_alignment) -> void* {
+          if (static_cast<NativeState*>(user_data)->fail_allocation) {
+            return nullptr;
+          }
+          const amdf_allocator_t system = amdf_allocator_system();
+          return system.allocate(system.user_data, byte_length,
+                                 minimum_alignment);
+        },
+        .free =
+            [](void*, void* allocation) {
+              const amdf_allocator_t system = amdf_allocator_system();
+              system.free(system.user_data, allocation);
+            }};
     return amdf_gpu_umd_instance_prepare(&instance_, lifetime, allocator);
   }
 
@@ -206,8 +208,7 @@ TEST_F(KfdInstanceTest, NativeMemoryQueryPrecedesBootstrapAndPublication) {
 TEST_F(KfdInstanceTest, FailedMemoryQueryDoesNotAcquireOrPublishFacts) {
   ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
   native_.failure = Operation::kDeviceInfo;
-  amdf_gpu_kfd_topology_t topology = {};
-  topology.gpu_id = 11;
+  amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
   topology.virtual_address.begin = 0x20000;
   const amdf_gpu_kfd_topology_t original = topology;
   int descriptor = -7;
@@ -243,8 +244,7 @@ TEST_F(KfdInstanceTest, InvalidNativeMemoryFactsNeverReachBootstrap) {
         native_.device_info.virtual_address_alignment = 65536;
         break;
     }
-    amdf_gpu_kfd_topology_t topology = {};
-    topology.gpu_id = 11;
+    amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
     const amdf_gpu_kfd_topology_t original = topology;
     int descriptor = -7;
     EXPECT_EQ(PrepareVm(11, &descriptor, &topology),
@@ -347,8 +347,7 @@ TEST_F(KfdInstanceTest, FailedRenderOpenDoesNotPublishBorrow) {
 TEST_F(KfdInstanceTest, FailedAcquisitionReleasesProgressBeforeRetry) {
   ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
   native_.failure = Operation::kAcquire;
-  amdf_gpu_kfd_topology_t topology = {};
-  topology.gpu_id = 11;
+  amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
   const amdf_gpu_kfd_topology_t original = topology;
   int descriptor = -7;
   EXPECT_EQ(PrepareVm(11, &descriptor, &topology), amdf_linux_error(EIO));
@@ -365,8 +364,7 @@ TEST_F(KfdInstanceTest, FailedAcquisitionReleasesProgressBeforeRetry) {
 TEST_F(KfdInstanceTest, FailedBootstrapReleaseNeverReacquiresConvertedVm) {
   ASSERT_EQ(Prepare(), AMDF_STATUS_OK);
   native_.failure = Operation::kReleaseBootstrap;
-  amdf_gpu_kfd_topology_t topology = {};
-  topology.gpu_id = 11;
+  amdf_gpu_kfd_topology_t topology = {.gpu_id = 11};
   const amdf_gpu_kfd_topology_t original = topology;
   int descriptor = -7;
   EXPECT_EQ(PrepareVm(11, &descriptor, &topology), amdf_linux_error(EIO));

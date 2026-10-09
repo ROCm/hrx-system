@@ -159,10 +159,10 @@ TEST_P(QueueTransferTest, TransferExecutesMixedBatch) {
   SemaphoreList empty_wait;
   SemaphoreList signal(device_, {0}, {1});
   {
-    iree_hal_barrier_t before = {};
-    before.flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
-    iree_hal_barrier_t after = {};
-    after.flags = IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE;
+    iree_hal_barrier_t before = {
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE};
+    iree_hal_barrier_t after = {.flags =
+                                    IREE_HAL_BARRIER_FLAG_ACQUIRE_SYSTEM_SCOPE};
     const iree_hal_barrier_list_t before_list = {1, &before};
     const iree_hal_barrier_list_t after_list = {1, &after};
     const iree_hal_queue_barriers_t barriers = {&before_list, &after_list};

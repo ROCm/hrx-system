@@ -20,10 +20,10 @@ std::vector<uint8_t> BuildStringTable(
   tokens->clear();
   tokens->reserve(strings.size());
   for (const auto& s : strings) {
-    iree_tokenizer_token_t token = {};
-    token.string_offset = static_cast<uint32_t>(table.size());
-    token.string_length = static_cast<uint16_t>(s.size());
-    token.attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE;
+    iree_tokenizer_token_t token = {
+        .string_offset = static_cast<uint32_t>(table.size()),
+        .string_length = static_cast<uint16_t>(s.size()),
+        .attributes = IREE_TOKENIZER_TOKEN_ATTR_NONE};
     tokens->push_back(token);
     table.insert(table.end(), s.begin(), s.end());
   }

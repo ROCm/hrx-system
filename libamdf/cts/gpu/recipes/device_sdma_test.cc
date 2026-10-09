@@ -102,8 +102,7 @@ TEST_F(DeviceGeneratedSdmaTest, DependentCopiesReuseRingAndPayload) {
   expected_destination.fill(kDestinationGuard);
   std::array<uint32_t, kAllocationWordCount> expected_control;
   expected_control.fill(kControlGuard);
-  aql::Signal final_signal = {};
-  final_signal.kind = 1;
+  aql::Signal final_signal = {.kind = 1};
   std::memcpy(expected_control.data(), &final_signal, sizeof(final_signal));
   expected_control[kCompletionByteOffset / sizeof(uint32_t)] = kRoundCount;
   std::vector<uint32_t> expected_records(kRecordByteLength / sizeof(uint32_t),
@@ -341,8 +340,7 @@ TEST_P(DeviceGeneratedSdmaBatchTest, SeparateCommandAndPayloadCredits) {
       destination_byte_length / sizeof(uint32_t), kDestinationGuard);
   std::array<uint32_t, kAllocationWordCount> expected_control;
   expected_control.fill(kControlGuard);
-  aql::Signal final_signal = {};
-  final_signal.kind = 1;
+  aql::Signal final_signal = {.kind = 1};
   std::memcpy(expected_control.data(), &final_signal, sizeof(final_signal));
   expected_control[kCompletionByteOffset / sizeof(uint32_t)] =
       test_case.round_count;
@@ -824,9 +822,7 @@ TEST_P(DeviceGeneratedSdmaStagedTest, IndependentConsumerReusesSelectedSlots) {
               selections->info.byte_length);
   std::array<uint32_t, 1024> expected_control;
   expected_control.fill(kControlGuard);
-  aql::Signal final_signal = {};
-  final_signal.kind = 1;
-  final_signal.value = 1;
+  aql::Signal final_signal = {.kind = 1, .value = 1};
   std::memcpy(expected_control.data(), &final_signal, sizeof(final_signal));
   expected_control[kCompletionByteOffset / 4] = 0;
   expected_control[kStateByteOffset / 4 + 2] = kSeed;

@@ -570,8 +570,7 @@ TEST_F(KfdBufferNativeTest, MemoryOwnerRetainsBackingAfterIdentityQueryFails) {
 }
 
 TEST(KfdBufferTest, RejectsMalformedConstructionWithoutPublishingOutputs) {
-  amdf_gpu_umd_device_t device = {};
-  device.page_size = 4096;
+  amdf_gpu_umd_device_t device = {.page_size = 4096};
   amdf_gpu_kfd_buffer_create_info_t create_info = {};
   create_info.byte_length = 4096;
   create_info.alignment = 4096;

@@ -945,8 +945,8 @@ TEST_F(HostQueueStagingTest, ShortReadReleasesBuffersBeforeFailure) {
     iree_hal_semaphore_list_t signal_list =
         MakeSemaphoreList(&signal_semaphore_ptr, &signal_value);
 
-    iree_hal_barrier_t after_barrier = {};
-    after_barrier.flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE;
+    iree_hal_barrier_t after_barrier = {
+        .flags = IREE_HAL_BARRIER_FLAG_RELEASE_SYSTEM_SCOPE};
     const iree_hal_barrier_list_t after = {1, &after_barrier};
     const iree_hal_queue_barriers_t barriers = {nullptr, &after};
     IREE_ASSERT_OK(iree_hal_queue_read(
@@ -962,16 +962,16 @@ TEST_F(HostQueueStagingTest, ShortReadReleasesBuffersBeforeFailure) {
       std::promise<int32_t> reference_count;
     } completion = {buffer};
     auto result = completion.reference_count.get_future();
-    iree_async_semaphore_timepoint_t timepoint = {};
-    timepoint.callback = [](void* user_data,
-                            iree_async_semaphore_timepoint_t* timepoint,
-                            iree_status_t status) {
-      IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, status);
-      auto* completion = static_cast<Completion*>(user_data);
-      completion->reference_count.set_value(
-          iree_atomic_ref_count_load(&completion->buffer->resource.ref_count));
-    };
-    timepoint.user_data = &completion;
+    iree_async_semaphore_timepoint_t timepoint = {
+        .callback =
+            [](void* user_data, iree_async_semaphore_timepoint_t* timepoint,
+               iree_status_t status) {
+              IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE, status);
+              auto* completion = static_cast<Completion*>(user_data);
+              completion->reference_count.set_value(iree_atomic_ref_count_load(
+                  &completion->buffer->resource.ref_count));
+            },
+        .user_data = &completion};
     IREE_ASSERT_OK(iree_async_semaphore_acquire_timepoint(
         reinterpret_cast<iree_async_semaphore_t*>(signal_semaphore.get()),
         signal_value, &timepoint));

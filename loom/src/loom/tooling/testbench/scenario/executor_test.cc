@@ -302,8 +302,7 @@ check.scenario public @batched configure[2](%configuration: index, %configuratio
   check.return
 }
 )";
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("scenario_executor_test.loom"),
@@ -341,8 +340,7 @@ check.scenario public @expected_device_event {
   check.return
 }
 )";
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_module_t* module = nullptr;
     IREE_EXPECT_OK(loom_text_parse(iree_make_cstring_view(source),
                                    IREE_SV("scenario_device_events.loom"),
@@ -416,10 +414,8 @@ TEST_F(ScenarioExecutorTest, PreparesBeforeMaterializationAndExecutesBatches) {
       &configuration));
 
   ExecutionTimeline timeline = {};
-  TestProfileState target_state = {};
-  target_state.timeline = &timeline;
-  TestProfileState oracle_state = {};
-  oracle_state.timeline = &timeline;
+  TestProfileState target_state = {.timeline = &timeline};
+  TestProfileState oracle_state = {.timeline = &timeline};
   loom_testbench_scenario_execution_options_t execution_options = {};
   loom_testbench_scenario_execution_options_initialize(&execution_options);
   execution_options.target.name = IREE_SV("test-target");
@@ -530,10 +526,8 @@ TEST_F(ScenarioExecutorTest, BenchmarksIndependentTargetOnlyReplicas) {
       &configuration));
 
   ExecutionTimeline timeline = {};
-  TestProfileState target_state = {};
-  target_state.timeline = &timeline;
-  TestProfileState oracle_state = {};
-  oracle_state.timeline = &timeline;
+  TestProfileState target_state = {.timeline = &timeline};
+  TestProfileState oracle_state = {.timeline = &timeline};
   loom_testbench_scenario_execution_options_t execution_options = {};
   loom_testbench_scenario_execution_options_initialize(&execution_options);
   execution_options.target.name = IREE_SV("test-target");
@@ -633,12 +627,10 @@ TEST_F(ScenarioExecutorTest, ReportsAuthoredExpectationAndReplayIdentity) {
       &configuration));
 
   ExecutionTimeline timeline = {};
-  TestProfileState target_state = {};
-  target_state.timeline = &timeline;
-  TestProfileState oracle_state = {};
-  oracle_state.timeline = &timeline;
-  oracle_state.mismatch_trial_ordinal = 1;
-  oracle_state.inject_mismatch = true;
+  TestProfileState target_state = {.timeline = &timeline};
+  TestProfileState oracle_state = {.timeline = &timeline,
+                                   .mismatch_trial_ordinal = 1,
+                                   .inject_mismatch = true};
   loom_testbench_scenario_execution_options_t execution_options = {};
   loom_testbench_scenario_execution_options_initialize(&execution_options);
   execution_options.target.name = IREE_SV("test-target");

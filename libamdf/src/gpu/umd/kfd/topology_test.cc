@@ -323,29 +323,30 @@ TEST_F(KfdTopologyTest, ChangedGenerationReleasesUnpublishedPeerMetadata) {
     // Metadata allocations that have not yet been released.
     uint32_t live_count = 0;
   } state = {directory_ / "class/kfd/kfd/topology/generation_id"};
-  amdf_allocator_t allocator = {};
-  allocator.user_data = &state;
-  allocator.allocate = [](void* user_data, uint64_t length,
-                          uint64_t alignment) -> void* {
-    auto* state = static_cast<AllocationState*>(user_data);
-    std::ofstream stream(state->generation_path);
-    stream << "2\n";
-    stream.close();
-    EXPECT_TRUE(stream.good());
-    const auto system = amdf_allocator_system();
-    void* pointer = system.allocate(system.user_data, length, alignment);
-    if (pointer != nullptr) {
-      ++state->live_count;
-    }
-    return pointer;
-  };
-  allocator.free = [](void* user_data, void* pointer) {
-    auto* state = static_cast<AllocationState*>(user_data);
-    EXPECT_GT(state->live_count, 0u);
-    --state->live_count;
-    const auto system = amdf_allocator_system();
-    system.free(system.user_data, pointer);
-  };
+  amdf_allocator_t allocator = {
+      .user_data = &state,
+      .allocate = [](void* user_data, uint64_t length,
+                     uint64_t alignment) -> void* {
+        auto* state = static_cast<AllocationState*>(user_data);
+        std::ofstream stream(state->generation_path);
+        stream << "2\n";
+        stream.close();
+        EXPECT_TRUE(stream.good());
+        const auto system = amdf_allocator_system();
+        void* pointer = system.allocate(system.user_data, length, alignment);
+        if (pointer != nullptr) {
+          ++state->live_count;
+        }
+        return pointer;
+      },
+      .free =
+          [](void* user_data, void* pointer) {
+            auto* state = static_cast<AllocationState*>(user_data);
+            EXPECT_GT(state->live_count, 0u);
+            --state->live_count;
+            const auto system = amdf_allocator_system();
+            system.free(system.user_data, pointer);
+          }};
   amdf_gpu_kfd_topology_t topology;
   std::memset(&topology, 0xA5, sizeof(topology));
   const amdf_gpu_kfd_topology_t original = topology;
@@ -368,28 +369,29 @@ TEST_F(KfdTopologyTest, FailedSnapshotAllocationsLeaveNoMetadataOrOutput) {
   };
   for (uint32_t failure_ordinal : {0u, 1u, 2u}) {
     AllocationState state = {failure_ordinal};
-    amdf_allocator_t allocator = {};
-    allocator.user_data = &state;
-    allocator.allocate = [](void* user_data, uint64_t length,
-                            uint64_t alignment) -> void* {
-      auto* state = static_cast<AllocationState*>(user_data);
-      if (state->count++ == state->failure_ordinal) {
-        return nullptr;
-      }
-      const auto system = amdf_allocator_system();
-      void* pointer = system.allocate(system.user_data, length, alignment);
-      if (pointer != nullptr) {
-        ++state->live_count;
-      }
-      return pointer;
-    };
-    allocator.free = [](void* user_data, void* pointer) {
-      auto* state = static_cast<AllocationState*>(user_data);
-      EXPECT_GT(state->live_count, 0u);
-      --state->live_count;
-      const auto system = amdf_allocator_system();
-      system.free(system.user_data, pointer);
-    };
+    amdf_allocator_t allocator = {
+        .user_data = &state,
+        .allocate = [](void* user_data, uint64_t length,
+                       uint64_t alignment) -> void* {
+          auto* state = static_cast<AllocationState*>(user_data);
+          if (state->count++ == state->failure_ordinal) {
+            return nullptr;
+          }
+          const auto system = amdf_allocator_system();
+          void* pointer = system.allocate(system.user_data, length, alignment);
+          if (pointer != nullptr) {
+            ++state->live_count;
+          }
+          return pointer;
+        },
+        .free =
+            [](void* user_data, void* pointer) {
+              auto* state = static_cast<AllocationState*>(user_data);
+              EXPECT_GT(state->live_count, 0u);
+              --state->live_count;
+              const auto system = amdf_allocator_system();
+              system.free(system.user_data, pointer);
+            }};
     auto* const sentinel =
         reinterpret_cast<amdf_gpu_endpoint_profile_t*>(uintptr_t{1});
     amdf_gpu_endpoint_profile_t* profile = sentinel;

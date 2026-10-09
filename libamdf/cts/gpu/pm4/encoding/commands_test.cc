@@ -28,8 +28,7 @@ void ExpectWords(const uint32_t* words,
 }
 
 const Pm4CommandProfile& Profile(uint32_t major, uint32_t minor) {
-  amdf_gpu_endpoint_info_t info = {};
-  info.gfx_ip = {major, minor, 0};
+  amdf_gpu_endpoint_info_t info = {.gfx_ip = {major, minor, 0}};
   return *Pm4CommandProfile::Find(info);
 }
 

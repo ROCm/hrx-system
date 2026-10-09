@@ -168,9 +168,8 @@ static loom_testbench_value_t F64Value(double value) {
 
 static loom_target_snapshot_t AddressTargetSnapshot(uint32_t index_bitwidth,
                                                     uint32_t offset_bitwidth) {
-  loom_target_snapshot_t snapshot = {};
-  snapshot.index_bitwidth = index_bitwidth;
-  snapshot.offset_bitwidth = offset_bitwidth;
+  loom_target_snapshot_t snapshot = {.index_bitwidth = index_bitwidth,
+                                     .offset_bitwidth = offset_bitwidth};
   return snapshot;
 }
 
@@ -214,8 +213,7 @@ static iree_status_t InitializeFakeHalContext(
       .family_count = 1,
       .families = &queue_family,
   };
-  iree_hal_device_spec_params_t params = {};
-  params.queues = &queues;
+  iree_hal_device_spec_params_t params = {.queues = &queues};
   iree_hal_device_spec_t* device_spec = nullptr;
   IREE_RETURN_IF_ERROR(iree_hal_device_spec_create(
       &params, iree_allocator_system(), &device_spec));
@@ -796,8 +794,8 @@ func.def public pure @device_dynamic(%workgroup_count: index) -> (index, index, 
       loom_run_hal_testbench_select_kernel_launch(case_plan, &kernel_launch));
 
   uint64_t workload_argument_bits[1] = {};
-  loom_run_hal_testbench_context_t context = {};
-  context.host_allocator = iree_allocator_system();
+  loom_run_hal_testbench_context_t context = {.host_allocator =
+                                                  iree_allocator_system()};
   loom_run_hal_testbench_actual_provider_t provider = {};
   provider.context = &context;
   provider.native_module = native_module;

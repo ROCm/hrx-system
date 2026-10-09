@@ -602,8 +602,8 @@ TEST_F(QueueChannelTest, BuilderFailureCompletesAcceptedSend) {
 TEST_F(QueueChannelTest, ValidatesSemanticsBeforeEndpointAdmission) {
   Attach();
   SendCompletion completion;
-  iree_net_queue_channel_send_params_t params = {};
-  params.completion_callback = completion.callback();
+  iree_net_queue_channel_send_params_t params = {.completion_callback =
+                                                     completion.callback()};
   IREE_EXPECT_STATUS_IS(
       IREE_STATUS_INVALID_ARGUMENT,
       iree_net_queue_channel_send_command(channel_, 0, &params));

@@ -1016,8 +1016,7 @@ TEST_F(CanonicalizerTest, DriverAcceptsSeedFacts) {
       module_, &pass_arena, &value_facts, &kSpecialValuePolicy,
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
-  loom_canonicalizer_options_t options = {};
-  options.seed_facts = {&seed_facts, &arg, 1};
+  loom_canonicalizer_options_t options = {.seed_facts = {&seed_facts, &arg, 1}};
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, func_like_,
                                                  &options, &result));
 
@@ -1101,9 +1100,8 @@ TEST_F(CanonicalizerTest, DriverPreservesExplicitTargetFactsAcrossSideRegions) {
       module_, &pass_arena, &value_facts, &kSpecialValuePolicy,
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
-  loom_canonicalizer_options_t options = {};
-  options.target_facts = &target_facts;
-  options.seed_facts = {&seed_facts, nullptr, 0};
+  loom_canonicalizer_options_t options = {
+      .target_facts = &target_facts, .seed_facts = {&seed_facts, nullptr, 0}};
   IREE_ASSERT_OK(loom_canonicalizer_run_function(&canonicalizer, split_func,
                                                  &options, &result));
 
@@ -1170,8 +1168,8 @@ TEST_F(CanonicalizerTest, RegionDriverAcceptsSeedFacts) {
       module_, &pass_arena, &value_facts, &kSpecialValuePolicy,
       /*fact_refinement_policy=*/nullptr, &canonicalizer));
   loom_canonicalizer_result_t result;
-  loom_canonicalizer_options_t options = {};
-  options.seed_facts = {&seed_facts, &config_arg, 1};
+  loom_canonicalizer_options_t options = {
+      .seed_facts = {&seed_facts, &config_arg, 1}};
   IREE_ASSERT_OK(loom_canonicalizer_run_region(
       &canonicalizer, split_func, config, split_op, &options, &result));
 

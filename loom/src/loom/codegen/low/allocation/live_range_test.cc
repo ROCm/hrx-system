@@ -29,16 +29,14 @@ loom_low_allocation_assignment_t Assignment(
 }
 
 loom_low_reg_class_t RegClass(uint16_t alias_set_id) {
-  loom_low_reg_class_t reg_class = {};
-  reg_class.alias_set_id = alias_set_id;
+  loom_low_reg_class_t reg_class = {.alias_set_id = alias_set_id};
   return reg_class;
 }
 
 loom_liveness_analysis_t Liveness(const loom_liveness_block_info_t* blocks,
                                   iree_host_size_t block_count) {
-  loom_liveness_analysis_t liveness = {};
-  liveness.blocks = blocks;
-  liveness.block_count = block_count;
+  loom_liveness_analysis_t liveness = {.blocks = blocks,
+                                       .block_count = block_count};
   return liveness;
 }
 
@@ -101,13 +99,10 @@ TEST(LowAllocationLiveRangeTest, ClassifiesAllocatableIntervals) {
 }
 
 TEST(LowAllocationLiveRangeTest, ComputesIntervalStorageEndPoints) {
-  loom_liveness_interval_t live_interval = {};
-  live_interval.start_point = 3;
-  live_interval.end_point = 7;
+  loom_liveness_interval_t live_interval = {.start_point = 3, .end_point = 7};
 
-  loom_liveness_interval_t dead_result_interval = {};
-  dead_result_interval.start_point = 3;
-  dead_result_interval.end_point = 3;
+  loom_liveness_interval_t dead_result_interval = {.start_point = 3,
+                                                   .end_point = 3};
 
   loom_liveness_interval_t saturated_interval = {};
   saturated_interval.start_point = UINT32_MAX;
@@ -141,11 +136,9 @@ TEST(LowAllocationLiveRangeTest, SeparatesRequiredAndPreferredAlignment) {
   const uint32_t aligned[] = {1, 2, 2, 4, 2, 2, 2, 8, 2};
   loom_low_placement_table_t placement = {};
   for (size_t i = 0; i < IREE_ARRAYSIZE(unit_counts); ++i) {
-    loom_liveness_interval_t interval = {};
-    interval.unit_count = unit_counts[i];
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = &interval;
-    liveness.interval_count = 1;
+    loom_liveness_interval_t interval = {.unit_count = unit_counts[i]};
+    loom_liveness_analysis_t liveness = {.intervals = &interval,
+                                         .interval_count = 1};
     EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(
                   &descriptor_set, &liveness,
                   placement.operand_constraints_by_interval, &interval),
@@ -167,9 +160,8 @@ TEST(LowAllocationLiveRangeTest, SeparatesRequiredAndPreferredAlignment) {
 TEST(LowAllocationLiveRangeTest, CombinesRetainedOperandAndClassAlignment) {
   loom_low_reg_class_t reg_class = {};
   reg_class.flags = LOOM_LOW_REG_CLASS_FLAG_EVEN_ALIGNED_TUPLES;
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {.reg_classes = &reg_class,
+                                              .reg_class_count = 1};
   loom_liveness_interval_t intervals[3] = {};
   for (auto& interval : intervals) {
     interval.unit_count = 4;
@@ -179,8 +171,8 @@ TEST(LowAllocationLiveRangeTest, CombinesRetainedOperandAndClassAlignment) {
   liveness.interval_count = IREE_ARRAYSIZE(intervals);
   const loom_low_placement_operand_constraints_t operands[] = {
       {0, 0, false}, {0, 1, false}, {0, 3, false}};
-  loom_low_placement_table_t placement = {};
-  placement.operand_constraints_by_interval = operands;
+  loom_low_placement_table_t placement = {.operand_constraints_by_interval =
+                                              operands};
   const uint32_t expected[] = {2, 2, 8};
   for (size_t i = 0; i < IREE_ARRAYSIZE(intervals); ++i) {
     EXPECT_EQ(loom_low_allocation_live_range_interval_alignment(

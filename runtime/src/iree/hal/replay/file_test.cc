@@ -52,25 +52,25 @@ TEST(ReplayFileWriterTest, WritesReplayRecordsAndRanges) {
       iree_make_const_byte_span(&first_payload, sizeof(first_payload)),
       iree_make_const_byte_span(&second_payload, sizeof(second_payload)),
   };
-  iree_hal_replay_file_record_metadata_t metadata = {};
-  metadata.sequence_ordinal = 42;
-  metadata.thread_id = 7;
-  metadata.device_id = 1;
-  metadata.object_id = 2;
-  metadata.related_object_id = 3;
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION;
-  metadata.payload_type = 10;
-  metadata.object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER;
-  metadata.operation_code = 11;
-  metadata.status_code = (uint32_t)IREE_STATUS_CANCELLED;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .sequence_ordinal = 42,
+      .thread_id = 7,
+      .device_id = 1,
+      .object_id = 2,
+      .related_object_id = 3,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_OPERATION,
+      .payload_type = 10,
+      .object_type = IREE_HAL_REPLAY_OBJECT_TYPE_BUFFER,
+      .operation_code = 11,
+      .status_code = (uint32_t)IREE_STATUS_CANCELLED};
   iree_hal_replay_file_range_t payload_range =
       iree_hal_replay_file_range_empty();
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
       writer, &metadata, 2, iovecs, &payload_range));
 
-  iree_hal_replay_file_record_metadata_t empty_metadata = {};
-  empty_metadata.sequence_ordinal = 43;
-  empty_metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_BLOB;
+  iree_hal_replay_file_record_metadata_t empty_metadata = {
+      .sequence_ordinal = 43,
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_BLOB};
   iree_hal_replay_file_range_t empty_payload_range =
       iree_hal_replay_file_range_empty();
   IREE_ASSERT_OK(iree_hal_replay_file_writer_append_record(
@@ -155,8 +155,8 @@ TEST(ReplayFileWriterTest, RejectsAppendAfterClose) {
   iree_io_file_handle_release(file_handle);
   IREE_ASSERT_OK(iree_hal_replay_file_writer_close(writer));
 
-  iree_hal_replay_file_record_metadata_t metadata = {};
-  metadata.record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION;
+  iree_hal_replay_file_record_metadata_t metadata = {
+      .record_type = IREE_HAL_REPLAY_FILE_RECORD_TYPE_SESSION};
   IREE_EXPECT_STATUS_IS(IREE_STATUS_FAILED_PRECONDITION,
                         iree_hal_replay_file_writer_append_record(
                             writer, &metadata, 0, nullptr, nullptr));

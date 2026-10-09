@@ -248,15 +248,15 @@ TEST_P(TaskQueueTest, TransfersReleaseBuffersBeforeTerminalSignal) {
       const iree_hal_semaphore_list_t waits = {1, &ready, &value};
       const iree_hal_semaphore_list_t signals = {1, &completion, &value};
       {
-        iree_hal_buffer_barrier_t range = {};
-        range.source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE;
-        range.target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ;
-        range.buffer_ref = iree_hal_make_buffer_ref(buffer, 0, length);
-        iree_hal_barrier_t after = {};
-        after.source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER;
-        after.target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST;
-        after.buffer_barrier_count = 1;
-        after.buffer_barriers = &range;
+        iree_hal_buffer_barrier_t range = {
+            .source_scope = IREE_HAL_ACCESS_SCOPE_TRANSFER_WRITE,
+            .target_scope = IREE_HAL_ACCESS_SCOPE_HOST_READ,
+            .buffer_ref = iree_hal_make_buffer_ref(buffer, 0, length)};
+        iree_hal_barrier_t after = {
+            .source_stage_mask = IREE_HAL_EXECUTION_STAGE_TRANSFER,
+            .target_stage_mask = IREE_HAL_EXECUTION_STAGE_HOST,
+            .buffer_barrier_count = 1,
+            .buffer_barriers = &range};
         const iree_hal_barrier_list_t list = {1, &after};
         const iree_hal_queue_barriers_t barriers = {nullptr, &list};
         IREE_ASSERT_OK(iree_hal_queue_upload(queue, waits, signals,

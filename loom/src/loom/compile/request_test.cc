@@ -329,8 +329,8 @@ kernel.def target(@Target789) @excluded() {
 }
 )");
   const iree_string_view_t roots[] = {IREE_SV("kept")};
-  loom_compile_request_options_t options = {};
-  options.roots = {IREE_ARRAYSIZE(roots), roots};
+  loom_compile_request_options_t options = {
+      .roots = {IREE_ARRAYSIZE(roots), roots}};
   const loom_compile_request_t request = Resolve(module.get(), options);
 
   module = Materialize(std::move(module), request);
@@ -456,9 +456,9 @@ kernel.def @excluded() {
 }
 )");
   const iree_string_view_t excluded_roots[] = {IREE_SV("excluded")};
-  loom_compile_request_options_t options = {};
-  options.target_profile = &kTargetProfile;
-  options.excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots};
+  loom_compile_request_options_t options = {
+      .target_profile = &kTargetProfile,
+      .excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots}};
   const loom_compile_request_t request = Resolve(module.get(), options);
 
   EXPECT_EQ(request.selection.kind, LOOM_COMPILE_ENTRY_KIND_KERNEL);
@@ -487,8 +487,8 @@ kernel.def target(@UnavailableTarget) @excluded() {
 }
 )");
   const iree_string_view_t excluded_roots[] = {IREE_SV("excluded")};
-  loom_compile_request_options_t options = {};
-  options.excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots};
+  loom_compile_request_options_t options = {
+      .excluded_roots = {IREE_ARRAYSIZE(excluded_roots), excluded_roots}};
   const loom_compile_request_t request = Resolve(module.get(), options);
 
   EXPECT_EQ(request.selection.kind, LOOM_COMPILE_ENTRY_KIND_KERNEL);

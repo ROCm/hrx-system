@@ -239,8 +239,8 @@ command.program.def public @root() launch() {
 
   const loom_symbol_ref_t root_ref =
       FindSymbolRef(source_module.get(), IREE_SV("root"));
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release()};
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
   IREE_ASSERT_OK(loom_cmd_program_plan_build_from_materialization(
@@ -278,8 +278,8 @@ command.program.def public @increment_twice() launch(%source: buffer, %scratch: 
       FindSymbolRef(source_module.get(), IREE_SV("increment_twice")),
       FindSymbolRef(source_module.get(), IREE_SV("increment_then_double")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release()};
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -489,8 +489,8 @@ command.program.def public @root() launch() {
   loom_link_module_index_t* index = nullptr;
   IREE_ASSERT_OK(loom_link_module_index_allocate(
       &context_, &block_pool_, iree_allocator_system(), &index));
-  loom_bytecode_index_options_t index_options = {};
-  index_options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+  loom_bytecode_index_options_t index_options = {
+      .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
   IREE_ASSERT_OK(loom_link_module_index_add_bytecode(
       index, iree_make_const_byte_span(bytecode.data(), bytecode.size()),
       IREE_SV("provider.loombc"), &index_options, /*options=*/nullptr,
@@ -776,8 +776,8 @@ command.program.def public @parameterized() launch(%parameters: buffer, %target:
   const loom_symbol_ref_t program_refs[] = {
       FindSymbolRef(source_module.get(), IREE_SV("parameterized")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release()};
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -846,8 +846,8 @@ command.program.def public @bodyless() launch(%output: buffer) {
   const loom_symbol_ref_t program_refs[] = {
       FindSymbolRef(source_module.get(), IREE_SV("bodyless")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release()};
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -965,8 +965,8 @@ command.program.def public @dynamic_root() launch() {
       FindSymbolRef(source_module.get(), IREE_SV("stable_root")),
       FindSymbolRef(source_module.get(), IREE_SV("dynamic_root")),
   };
-  loom_link_plan_materialization_t materialization = {};
-  materialization.module = source_module.release();
+  loom_link_plan_materialization_t materialization = {
+      .module = source_module.release()};
 
   loom_cmd_program_plan_t plan = {};
   bool valid = false;
@@ -1047,15 +1047,13 @@ low.func.def target<cmd.core> abi(command_program) @moved_binding() {
 )");
   ASSERT_NE(module, nullptr);
 
-  loom_cmd_program_root_t root = {};
-  root.function_op = FindSymbol(module.get(), IREE_SV("moved_binding"));
+  loom_cmd_program_root_t root = {
+      .function_op = FindSymbol(module.get(), IREE_SV("moved_binding"))};
   root.abi_layout.rebindable_binding_count = 1;
   root.transient.binding_index = UINT32_MAX;
   root.launch_counts.binding_index = UINT32_MAX;
-  loom_cmd_program_plan_t plan = {};
-  plan.root_module = module.get();
-  plan.roots = &root;
-  plan.root_count = 1;
+  loom_cmd_program_plan_t plan = {
+      .root_module = module.get(), .roots = &root, .root_count = 1};
 
   iree_byte_span_t data = iree_byte_span_empty();
   IREE_ASSERT_OK(loom_cmd_program_plan_serialize_root(&plan, 0, &data,

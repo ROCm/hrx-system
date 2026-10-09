@@ -569,9 +569,8 @@ class PacketPlanFixture {
     if (low_function == nullptr) {
       std::abort();
     }
-    loom_low_verify_options_t verify_options = {};
-    verify_options.descriptor_registry = &target_registry_.registry;
-    verify_options.max_errors = 20;
+    loom_low_verify_options_t verify_options = {
+        .descriptor_registry = &target_registry_.registry, .max_errors = 20};
     loom_low_verify_result_t verify_result = {};
     loom_low_verify_scratch_t verify_scratch =
         loom_low_verify_scratch_for_module(module_);

@@ -62,10 +62,9 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
   }
   const loom_low_constraint_t constraint = {
       LOOM_LOW_CONSTRAINT_KIND_SAME_REGISTER_ORDINAL, 0, 1, 0};
-  loom_low_descriptor_t descriptor = {};
-  descriptor.operand_count = 2;
-  descriptor.minimum_packet_operand_count = 2;
-  descriptor.constraint_count = 1;
+  loom_low_descriptor_t descriptor = {.operand_count = 2,
+                                      .minimum_packet_operand_count = 2,
+                                      .constraint_count = 1};
   loom_low_descriptor_set_t descriptor_set = {};
   descriptor_set.stable_id = 1;
   descriptor_set.reg_classes = classes;
@@ -175,8 +174,7 @@ TEST(LowPlacementTest, DefiningTransferPrecedesEarlierCollectedUses) {
     }
     loom_low_placement_table_t placement = {};
     loom_low_placement_preference_index_t preferences = {};
-    loom_low_resolved_target_t target = {};
-    target.descriptor_set = &descriptor_set;
+    loom_low_resolved_target_t target = {.descriptor_set = &descriptor_set};
     loom_low_allocation_target_constraints_t constraints = {};
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
         module, function, &target, nullptr, 0, nullptr, 0, {}, &module->arena,
@@ -379,8 +377,7 @@ TEST(LowPlacementTest, RetainsOperandConstraintsAcrossExactTiesOnly) {
         &domain, loom_liveness_order_empty(), &module->arena, &liveness));
     loom_low_placement_table_t placement = {};
     loom_low_placement_preference_index_t preferences = {};
-    loom_low_resolved_target_t target = {};
-    target.descriptor_set = &descriptor_set;
+    loom_low_resolved_target_t target = {.descriptor_set = &descriptor_set};
     loom_low_allocation_target_constraints_t constraints = {};
     IREE_ASSERT_OK(loom_low_allocation_target_constraints_initialize(
         module, function, &target, nullptr, 0, nullptr, 0, {}, &module->arena,
@@ -609,8 +606,7 @@ class LowPlacementStorageTest : public ::testing::Test {
   iree_status_t Analyze(loom_low_placement_table_t* out_table) {
     *out_table = {};
     loom_low_placement_preference_index_t preferences = {};
-    loom_low_resolved_target_t target = {};
-    target.descriptor_set = &descriptor_set_;
+    loom_low_resolved_target_t target = {.descriptor_set = &descriptor_set_};
     loom_low_allocation_target_constraints_t constraints = {};
     IREE_RETURN_IF_ERROR(loom_low_allocation_target_constraints_initialize(
         module_, function_, &target, nullptr, 0, nullptr, 0, {}, &result_arena_,

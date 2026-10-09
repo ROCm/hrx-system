@@ -22,16 +22,16 @@ static loom_native_contraction_role_facts_t MakeNativeContractionRoleFacts(
     loom_contract_operand_role_t role, uint16_t element_bit_count,
     uint16_t payload_element_count, uint32_t physical_position_count,
     uint16_t owner_multiplicity) {
-  loom_native_contraction_role_facts_t facts = {};
-  facts.role = role;
-  facts.evidence = LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT;
-  facts.element_bit_count = element_bit_count;
-  facts.register_count = 8;
-  facts.payload_element_count = payload_element_count;
-  facts.physical_position_count = physical_position_count;
-  facts.logical_coordinate_count = 256;
-  facts.owner_multiplicity_minimum = owner_multiplicity;
-  facts.owner_multiplicity_maximum = owner_multiplicity;
+  loom_native_contraction_role_facts_t facts = {
+      .role = role,
+      .evidence = LOOM_NATIVE_LAYOUT_EVIDENCE_EXACT,
+      .element_bit_count = element_bit_count,
+      .register_count = 8,
+      .payload_element_count = payload_element_count,
+      .physical_position_count = physical_position_count,
+      .logical_coordinate_count = 256,
+      .owner_multiplicity_minimum = owner_multiplicity,
+      .owner_multiplicity_maximum = owner_multiplicity};
   return facts;
 }
 
@@ -58,12 +58,12 @@ static loom_native_transition_owner_factor_t MakeNativeTransitionOwnerFactor(
     loom_native_physical_dimension_t source_owner_dimension,
     uint32_t destination_divisor, uint32_t destination_modulus,
     uint32_t source_owner_multiplier) {
-  loom_native_transition_owner_factor_t factor = {};
-  factor.destination_dimension = destination_dimension;
-  factor.source_owner_dimension = source_owner_dimension;
-  factor.destination_divisor = destination_divisor;
-  factor.destination_modulus = destination_modulus;
-  factor.source_owner_multiplier = source_owner_multiplier;
+  loom_native_transition_owner_factor_t factor = {
+      .destination_dimension = destination_dimension,
+      .source_owner_dimension = source_owner_dimension,
+      .destination_divisor = destination_divisor,
+      .destination_modulus = destination_modulus,
+      .source_owner_multiplier = source_owner_multiplier};
   return factor;
 }
 
@@ -491,10 +491,10 @@ TEST(CompileReportFormatTest, LegalizationPeaksDoNotRequireDetailedRows) {
   loom_target_compile_report_t report = {};
   loom_target_compile_report_initialize(&report, iree_allocator_system());
   for (uint64_t created_op_count : {40, 2}) {
-    loom_target_compile_report_math_row_t math = {};
-    math.action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN;
-    math.created_op_count = created_op_count;
-    math.erased_op_count = 1;
+    loom_target_compile_report_math_row_t math = {
+        .action = LOOM_TARGET_COMPILE_REPORT_MATH_ACTION_REWRITTEN,
+        .created_op_count = created_op_count,
+        .erased_op_count = 1};
     IREE_ASSERT_OK(loom_target_compile_report_record_math_row(&report, &math));
     loom_target_compile_report_record_legalization_summary(
         &report, LOOM_TARGET_COMPILE_REPORT_LEGALIZATION_ACTION_REWRITTEN,

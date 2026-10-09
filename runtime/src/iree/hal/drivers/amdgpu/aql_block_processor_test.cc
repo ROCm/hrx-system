@@ -235,15 +235,15 @@ static iree_hal_amdgpu_device_kernel_args_t MakeKernelArgs(
 }
 
 static iree_hal_amdgpu_device_kernels_t MakeTransferKernels() {
-  iree_hal_amdgpu_device_kernels_t kernels = {};
-  kernels.iree_hal_amdgpu_device_buffer_fill_block_x16 =
-      MakeKernelArgs(kFillBlockX16KernelObject, 5, 32, 8, 12);
-  kernels.iree_hal_amdgpu_device_buffer_copy_block_x16 =
-      MakeKernelArgs(kCopyBlockX16KernelObject, 10, 32, 13, 17);
-  kernels.iree_hal_amdgpu_device_dispatch_patch_indirect_params =
-      MakeKernelArgs(kPatchIndirectParamsKernelObject, 12, 1, 3, 7);
-  kernels.iree_hal_amdgpu_device_grid_sync_gws_initialize =
-      MakeKernelArgs(kGridSyncGwsInitializeKernelObject, 13, 1, 0, 0);
+  iree_hal_amdgpu_device_kernels_t kernels = {
+      .iree_hal_amdgpu_device_buffer_fill_block_x16 =
+          MakeKernelArgs(kFillBlockX16KernelObject, 5, 32, 8, 12),
+      .iree_hal_amdgpu_device_buffer_copy_block_x16 =
+          MakeKernelArgs(kCopyBlockX16KernelObject, 10, 32, 13, 17),
+      .iree_hal_amdgpu_device_dispatch_patch_indirect_params =
+          MakeKernelArgs(kPatchIndirectParamsKernelObject, 12, 1, 3, 7),
+      .iree_hal_amdgpu_device_grid_sync_gws_initialize =
+          MakeKernelArgs(kGridSyncGwsInitializeKernelObject, 13, 1, 0, 0)};
   kernels.iree_hal_amdgpu_device_grid_sync_gws_initialize.kernarg_size =
       IREE_HAL_AMDGPU_DEVICE_GRID_SYNC_GWS_INITIALIZE_KERNARG_SIZE;
   kernels.iree_hal_amdgpu_device_grid_sync_gws_initialize.kernarg_alignment =
@@ -278,10 +278,8 @@ static void NoOpBufferRelease(void* user_data, iree_hal_buffer_t* buffer) {
 static iree_hal_buffer_binding_t MakeBinding(iree_hal_buffer_t* buffer,
                                              iree_device_size_t offset,
                                              iree_device_size_t length) {
-  iree_hal_buffer_binding_t binding = {};
-  binding.buffer = buffer;
-  binding.offset = offset;
-  binding.length = length;
+  iree_hal_buffer_binding_t binding = {
+      .buffer = buffer, .offset = offset, .length = length};
   return binding;
 }
 
@@ -627,11 +625,9 @@ class AqlBlockProcessorRecordedTest : public ::testing::Test {
                                                 &profile_metadata_);
     IREE_ASSERT_OK(iree_hal_amdgpu_aql_program_block_pool_initialize(
         block_size_, iree_allocator_system(), &block_pool_));
-    iree_hal_device_queue_spec_t queues = {};
-    queues.family_count = 1;
-    queues.families = &kQueueFamilySpec;
-    iree_hal_device_spec_params_t spec_params = {};
-    spec_params.queues = &queues;
+    iree_hal_device_queue_spec_t queues = {.family_count = 1,
+                                           .families = &kQueueFamilySpec};
+    iree_hal_device_spec_params_t spec_params = {.queues = &queues};
     iree_hal_device_spec_t* device_spec = nullptr;
     IREE_ASSERT_OK(iree_hal_device_spec_create(
         &spec_params, iree_allocator_system(), &device_spec));
@@ -670,8 +666,8 @@ class AqlBlockProcessorRecordedTest : public ::testing::Test {
       void* storage, iree_device_size_t length,
       iree_hal_amdgpu_atomic_memory_cell_flags_t atomic_memory_cells =
           IREE_HAL_AMDGPU_ATOMIC_MEMORY_CELL_FLAG_NONE) {
-    iree_hal_buffer_release_callback_t release_callback = {};
-    release_callback.fn = NoOpBufferRelease;
+    iree_hal_buffer_release_callback_t release_callback = {
+        .fn = NoOpBufferRelease};
     iree_hal_buffer_t* buffer = nullptr;
     IREE_EXPECT_OK(iree_hal_amdgpu_buffer_create(
         /*libhsa=*/nullptr, iree_hal_buffer_placement_undefined(),
@@ -758,9 +754,7 @@ TEST(AqlBlockProcessorTest, UnterminatedBlockFails) {
 TEST(AqlBlockProcessorTest, DirectDispatchPopulatesPacketAndKernarg) {
   DirectDispatchBlock block = MakeDirectDispatchBlock();
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets, .mask = 7};
   uint16_t packet_headers[1] = {0xCDCD};
   uint16_t packet_setups[1] = {0xCDCD};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
@@ -871,9 +865,8 @@ TEST(AqlBlockProcessorTest,
   uint16_t packet_setups[2] = {};
   iree_hal_amdgpu_kernarg_block_t
       kernarg_blocks[kCooperativeTargetKernargBlockCount + 2u] = {};
-  iree_hal_amdgpu_aql_block_processor_profile_t processor = {};
-  processor.queue = &queue;
-  processor.block = &block.header;
+  iree_hal_amdgpu_aql_block_processor_profile_t processor = {
+      .queue = &queue, .block = &block.header};
   processor.submission.resolution = &resolution;
   processor.packets.first_payload_id = 4;
   processor.packets.count = IREE_ARRAYSIZE(packet_headers);
@@ -923,9 +916,7 @@ TEST(AqlBlockProcessorTest, DirectClusteredDispatchUsesExtendedPacket) {
   block.dispatch_command.workgroup_cluster_size[2] = 1;
 
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets, .mask = 7};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
@@ -967,9 +958,8 @@ TEST(AqlBlockProcessorTest,
   block.dispatch_command.workgroup_cluster_size[2] = 1;
 
   alignas(64) iree_hal_amdgpu_aql_packet_t ordinary_packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ordinary_ring = {};
-  ordinary_ring.base = ordinary_packets;
-  ordinary_ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ordinary_ring = {.base = ordinary_packets,
+                                              .mask = 7};
   uint16_t ordinary_headers[1] = {};
   uint16_t ordinary_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
@@ -988,9 +978,8 @@ TEST(AqlBlockProcessorTest,
   iree_hal_amdgpu_wait_resolution_t resolution = {};
   uint16_t profiled_headers[1] = {};
   uint16_t profiled_setups[1] = {};
-  iree_hal_amdgpu_aql_block_processor_profile_t profiled_processor = {};
-  profiled_processor.queue = &queue;
-  profiled_processor.block = &block.header;
+  iree_hal_amdgpu_aql_block_processor_profile_t profiled_processor = {
+      .queue = &queue, .block = &block.header};
   profiled_processor.submission.resolution = &resolution;
   profiled_processor.packets.first_payload_id = 4;
   profiled_processor.packets.count = 1;
@@ -1024,9 +1013,8 @@ TEST(AqlBlockProcessorTest,
   block.dispatch_command.workitem_count[2] = 1;
 
   alignas(64) iree_hal_amdgpu_aql_packet_t ordinary_packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ordinary_ring = {};
-  ordinary_ring.base = ordinary_packets;
-  ordinary_ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ordinary_ring = {.base = ordinary_packets,
+                                              .mask = 7};
   uint16_t ordinary_headers[1] = {};
   uint16_t ordinary_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
@@ -1045,9 +1033,8 @@ TEST(AqlBlockProcessorTest,
   iree_hal_amdgpu_wait_resolution_t resolution = {};
   uint16_t profiled_headers[1] = {};
   uint16_t profiled_setups[1] = {};
-  iree_hal_amdgpu_aql_block_processor_profile_t profiled_processor = {};
-  profiled_processor.queue = &queue;
-  profiled_processor.block = &block.header;
+  iree_hal_amdgpu_aql_block_processor_profile_t profiled_processor = {
+      .queue = &queue, .block = &block.header};
   profiled_processor.submission.resolution = &resolution;
   profiled_processor.packets.first_payload_id = 4;
   profiled_processor.packets.count = 1;
@@ -1078,9 +1065,7 @@ TEST(AqlBlockProcessorTest, RejectsClusteredIndirectDispatch) {
   block.dispatch_command.workgroup_cluster_size[2] = 1;
 
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets, .mask = 7};
   uint16_t packet_headers[2] = {};
   uint16_t packet_setups[2] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[2] = {};
@@ -1110,9 +1095,7 @@ TEST(AqlBlockProcessorTest, DirectDispatchSelectsQueueScopedKernelObject) {
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT;
 
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets, .mask = 7};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
@@ -1138,9 +1121,7 @@ TEST(AqlBlockProcessorTest, DirectDispatchRejectsMissingQueueScopedTable) {
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT;
 
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets, .mask = 7};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
@@ -1166,9 +1147,7 @@ TEST(AqlBlockProcessorTest, DirectDispatchRejectsQueueScopedTableOverrun) {
       IREE_HAL_AMDGPU_COMMAND_BUFFER_DISPATCH_FLAG_QUEUE_SCOPED_KERNEL_OBJECT;
 
   alignas(64) iree_hal_amdgpu_aql_packet_t packets[8] = {};
-  iree_hal_amdgpu_aql_ring_t ring = {};
-  ring.base = packets;
-  ring.mask = 7;
+  iree_hal_amdgpu_aql_ring_t ring = {.base = packets, .mask = 7};
   uint16_t packet_headers[1] = {};
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};

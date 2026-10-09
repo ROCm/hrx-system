@@ -858,9 +858,9 @@ TEST(ReplayRecorderTest, WrappedImportsAndExportsPreserveNativeBufferViews) {
 
   alignas(64) uint8_t imported_storage[16] = {0, 1, 2,  3,  4,  5,  6,  7,
                                               8, 9, 10, 11, 12, 13, 14, 15};
-  iree_hal_external_buffer_t external_buffer = {};
-  external_buffer.type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION;
-  external_buffer.size = sizeof(imported_storage);
+  iree_hal_external_buffer_t external_buffer = {
+      .type = IREE_HAL_EXTERNAL_BUFFER_TYPE_HOST_ALLOCATION,
+      .size = sizeof(imported_storage)};
   external_buffer.handle.host_allocation.ptr = imported_storage;
   iree_hal_buffer_t* imported_buffer = nullptr;
   IREE_ASSERT_OK(iree_hal_allocator_import_buffer(
@@ -1699,12 +1699,12 @@ static iree_status_t RecorderVmmAllocatorReserve(
     return iree_make_status(IREE_STATUS_FAILED_PRECONDITION,
                             "test allocator already has a reservation");
   }
-  iree_hal_buffer_params_t params = {};
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE;
-  params.access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
-  params.type =
-      IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.queue_family_affinity = queue_family_affinity;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .type =
+          IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_family_affinity = queue_family_affinity};
   IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
       allocator->heap_allocator, params, size, out_virtual_buffer));
   state->virtual_buffer = *out_virtual_buffer;
@@ -1920,12 +1920,12 @@ constexpr iree_device_size_t kRecorderVmmPhysicalOffset = 8192;
 constexpr iree_device_size_t kRecorderVmmMappingSize = 4096;
 
 static iree_hal_buffer_params_t RecorderVmmPhysicalParams() {
-  iree_hal_buffer_params_t params = {};
-  params.usage = IREE_HAL_BUFFER_USAGE_STORAGE;
-  params.access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE;
-  params.type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL;
-  params.queue_family_affinity = kRecorderVmmQueueFamilyAffinity;
-  params.min_alignment = 4096;
+  iree_hal_buffer_params_t params = {
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_family_affinity = kRecorderVmmQueueFamilyAffinity,
+      .min_alignment = 4096};
   return params;
 }
 

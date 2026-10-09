@@ -19,10 +19,8 @@ namespace {
 
 loom_liveness_interval_t Interval(uint16_t class_id, uint32_t start,
                                   uint32_t end) {
-  loom_liveness_interval_t interval = {};
-  interval.start_point = start;
-  interval.end_point = end;
-  interval.unit_count = 1;
+  loom_liveness_interval_t interval = {
+      .start_point = start, .end_point = end, .unit_count = 1};
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.value_class.register_class_id = class_id;
   return interval;
@@ -83,17 +81,17 @@ class LowAllocationPhysicalDomainsTest : public ::testing::Test {
       starts[i] = intervals_[i].start_point;
       ends[i] = intervals_[i].end_point;
     }
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = intervals_.data();
-    liveness.interval_count = count;
-    liveness.value_ids = value_ids.data();
-    liveness.value_count = count;
-    liveness.value_interval_indices = interval_indices.data();
-    loom_low_allocation_unit_liveness_t unit_liveness = {};
-    unit_liveness.values = values.data();
-    unit_liveness.start_points = starts.data();
-    unit_liveness.end_points = ends.data();
-    unit_liveness.point_count = count;
+    loom_liveness_analysis_t liveness = {
+        .intervals = intervals_.data(),
+        .interval_count = count,
+        .value_ids = value_ids.data(),
+        .value_count = count,
+        .value_interval_indices = interval_indices.data()};
+    loom_low_allocation_unit_liveness_t unit_liveness = {
+        .values = values.data(),
+        .start_points = starts.data(),
+        .end_points = ends.data(),
+        .point_count = count};
     loom_low_placement_table_t placement = {};
     placement.value_ids = value_ids.data();
     placement.value_count = count;
@@ -107,9 +105,8 @@ class LowAllocationPhysicalDomainsTest : public ::testing::Test {
   }
 
   loom_low_allocation_physical_domain_row_t Row(size_t index) const {
-    loom_liveness_analysis_t liveness = {};
-    liveness.intervals = intervals_.data();
-    liveness.interval_count = intervals_.size();
+    loom_liveness_analysis_t liveness = {.intervals = intervals_.data(),
+                                         .interval_count = intervals_.size()};
     return loom_low_allocation_physical_domains_for_interval(
         &domains_, &liveness, &intervals_[index]);
   }

@@ -262,8 +262,7 @@ TEST(ThreadTest, NamedThread) {
 // Affinity changes operate on a live suspended thread, not a thread that may
 // already have exited by the time the native affinity syscall runs.
 TEST(ThreadTest, RequestAffinity) {
-  iree_thread_create_params_t params = {};
-  params.create_suspended = true;
+  iree_thread_create_params_t params = {.create_suspended = true};
   uint32_t observed_node = IREE_NUMA_NODE_ANY;
   iree_thread_t* thread = nullptr;
   IREE_ASSERT_OK(iree_thread_create(
@@ -357,8 +356,7 @@ TEST(ThreadTest, CpuAffinityBeforeEntry) {
 }
 
 TEST(ThreadTest, FailedNativeCreationNeverCallsEntry) {
-  iree_thread_create_params_t params = {};
-  params.stack_size = 1;
+  iree_thread_create_params_t params = {.stack_size = 1};
   bool called = false;
   iree_thread_t* thread = nullptr;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_INVALID_ARGUMENT,

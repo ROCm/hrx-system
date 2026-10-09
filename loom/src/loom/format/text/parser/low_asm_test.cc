@@ -73,9 +73,8 @@ class LowAsmParserTest : public ::testing::Test {
   iree_status_t Parse(const char* source, bool enable_low_asm,
                       loom_module_t** out_module) {
     capture_.Reset();
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = capture_.sink();
-    options.max_errors = 100;
+    loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink(),
+                                         .max_errors = 100};
     if (enable_low_asm) {
       loom_low_descriptor_text_asm_environment_initialize(
           &low_descriptor_registry_, &options.low_asm_environment);
@@ -275,8 +274,7 @@ TEST_F(LowAsmParserTest, EmbeddedAssemblyOwnsIrAndPreservesModule) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("embedded"), &name));
   loom_symbol_id_t symbol;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name, &symbol));
-  loom_text_parse_options_t options = {};
-  options.diagnostic_sink = capture_.sink();
+  loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink()};
   loom_low_descriptor_text_asm_environment_initialize(
       &low_descriptor_registry_, &options.low_asm_environment);
   loom_source_range_t range = {};
@@ -327,8 +325,7 @@ TEST_F(LowAsmParserTest, EmbeddedAssemblyEofIsInsideOriginalSource) {
   IREE_ASSERT_OK(loom_module_intern_string(module, IREE_SV("embedded"), &name));
   loom_symbol_id_t symbol;
   IREE_ASSERT_OK(loom_module_add_symbol(module, name, &symbol));
-  loom_text_parse_options_t options = {};
-  options.diagnostic_sink = capture_.sink();
+  loom_text_parse_options_t options = {.diagnostic_sink = capture_.sink()};
   loom_low_descriptor_text_asm_environment_initialize(
       &low_descriptor_registry_, &options.low_asm_environment);
   loom_source_range_t range = {};

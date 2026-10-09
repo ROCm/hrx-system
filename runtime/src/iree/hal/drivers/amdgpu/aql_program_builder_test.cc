@@ -99,12 +99,11 @@ TEST(CommandBufferAbiTest, BuilderRejectsOversizedUsableBlockSize) {
 }
 
 TEST_F(AqlProgramBuilderTest, DeinitializesEmptyProgram) {
-  iree_hal_amdgpu_aql_program_t program = {};
-  program.block_pool = block_pool();
-  program.block_count = 1;
-  program.command_count = 2;
-  program.max_block_aql_packet_count = 3;
-  program.max_block_kernarg_length = 4;
+  iree_hal_amdgpu_aql_program_t program = {.block_pool = block_pool(),
+                                           .block_count = 1,
+                                           .command_count = 2,
+                                           .max_block_aql_packet_count = 3,
+                                           .max_block_kernarg_length = 4};
 
   iree_hal_amdgpu_aql_program_deinitialize(&program);
 

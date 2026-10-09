@@ -37,8 +37,8 @@ loom_value_fact_storage_schema_t EncodedSchema(
 }
 
 loom_value_fact_storage_schema_t BlockQuantSchema(uint16_t static_schema_id) {
-  loom_value_fact_storage_schema_t schema = {};
-  schema.static_spec_encoding_id = static_schema_id;
+  loom_value_fact_storage_schema_t schema = {.static_spec_encoding_id =
+                                                 static_schema_id};
   return schema;
 }
 
@@ -205,16 +205,14 @@ TEST(ContractPreparationTest, PreservesStorageSchemasThroughPacking) {
 
 TEST(ContractPreparationTest,
      KeepsNumericTransformSeparateFromPhysicalPacking) {
-  loom_contract_operand_preparation_options_t transform_options = {};
-  transform_options.role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
-  transform_options.family = LOOM_CONTRACT_PREPARATION_FAMILY_NUMERIC_TRANSFORM;
-  transform_options.availability =
-      LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE;
-  transform_options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
-  transform_options.source_payload =
-      BlockQuantPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS, BlockQuantSchema(9));
-  transform_options.numeric_transform =
-      LOOM_CONTRACT_NUMERIC_TRANSFORM_DECODE_REPACK;
+  loom_contract_operand_preparation_options_t transform_options = {
+      .role = LOOM_CONTRACT_OPERAND_ROLE_RHS,
+      .family = LOOM_CONTRACT_PREPARATION_FAMILY_NUMERIC_TRANSFORM,
+      .availability = LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE,
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+      .source_payload = BlockQuantPayload(LOOM_CONTRACT_OPERAND_ROLE_RHS,
+                                          BlockQuantSchema(9)),
+      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_DECODE_REPACK};
 
   loom_contract_operand_preparation_t transform = {};
   ASSERT_TRUE(loom_contract_operand_preparation_select(&transform_options,
@@ -350,17 +348,13 @@ TEST(ContractPreparationTest, SamePayloadsFeedCpuAndGpuPreparationFamilies) {
   loom_contract_operand_preparation_options_t cpu_preparation_options =
       BaseRhsOptions(rhs,
                      StridedLayout(rhs_strides, IREE_ARRAYSIZE(rhs_strides)));
-  loom_contract_operand_preparation_options_t gpu_preparation_options = {};
-  gpu_preparation_options.role = LOOM_CONTRACT_OPERAND_ROLE_RHS;
-  gpu_preparation_options.family =
-      LOOM_CONTRACT_PREPARATION_FAMILY_SUBGROUP_MATRIX_FRAGMENT;
-  gpu_preparation_options.availability =
-      LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE;
-  gpu_preparation_options.policy =
-      LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
-  gpu_preparation_options.source_payload = rhs;
-  gpu_preparation_options.numeric_transform =
-      LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE;
+  loom_contract_operand_preparation_options_t gpu_preparation_options = {
+      .role = LOOM_CONTRACT_OPERAND_ROLE_RHS,
+      .family = LOOM_CONTRACT_PREPARATION_FAMILY_SUBGROUP_MATRIX_FRAGMENT,
+      .availability = LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE,
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+      .source_payload = rhs,
+      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE};
 
   loom_contract_operand_preparation_t cpu_preparation = {};
   loom_contract_operand_preparation_t gpu_preparation = {};
@@ -389,16 +383,15 @@ TEST(ContractPreparationTest, RejectsMmt4dPreparationForNonRhsRole) {
       loom_value_facts_exact_i64(8),
       loom_value_facts_exact_i64(1),
   };
-  loom_contract_operand_preparation_options_t options = {};
-  options.role = LOOM_CONTRACT_OPERAND_ROLE_LHS;
-  options.family = LOOM_CONTRACT_PREPARATION_FAMILY_MMT4D_RHS_N_MAJOR_BLOCKED;
-  options.availability = LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE;
-  options.policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED;
-  options.source_payload =
-      PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS, LOOM_CONTRACT_NUMERIC_I8);
-  options.address_layout =
-      StridedLayout(lhs_strides, IREE_ARRAYSIZE(lhs_strides));
-  options.numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE;
+  loom_contract_operand_preparation_options_t options = {
+      .role = LOOM_CONTRACT_OPERAND_ROLE_LHS,
+      .family = LOOM_CONTRACT_PREPARATION_FAMILY_MMT4D_RHS_N_MAJOR_BLOCKED,
+      .availability = LOOM_CONTRACT_PREPARATION_AVAILABILITY_AVAILABLE,
+      .policy = LOOM_LOWERING_POLICY_TARGET_PRIMITIVE_REQUIRED,
+      .source_payload = PlainPayload(LOOM_CONTRACT_OPERAND_ROLE_LHS,
+                                     LOOM_CONTRACT_NUMERIC_I8),
+      .address_layout = StridedLayout(lhs_strides, IREE_ARRAYSIZE(lhs_strides)),
+      .numeric_transform = LOOM_CONTRACT_NUMERIC_TRANSFORM_NONE};
 
   loom_contract_preparation_diagnostic_t diagnostic = {};
   loom_contract_operand_preparation_t preparation = {};

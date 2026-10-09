@@ -112,9 +112,8 @@ class EncodingVerifyTest : public ::testing::Test {
   void VerifySource(const char* source, DiagnosticCapture* capture,
                     loom_verify_result_t* result) {
     DiagnosticCapture parse_capture;
-    loom_text_parse_options_t parse_options = {};
-    parse_options.diagnostic_sink = parse_capture.sink();
-    parse_options.max_errors = 100;
+    loom_text_parse_options_t parse_options = {
+        .diagnostic_sink = parse_capture.sink(), .max_errors = 100};
 
     loom_module_t* module = nullptr;
     IREE_ASSERT_OK(loom_text_parse(IREE_SV(source), IREE_SV("test.loom"),
@@ -129,9 +128,8 @@ class EncodingVerifyTest : public ::testing::Test {
   void VerifyModule(loom_module_t* module, DiagnosticCapture* capture,
                     loom_verify_result_t* result) {
     capture->Reset();
-    loom_verify_options_t verify_options = {};
-    verify_options.sink = capture->sink();
-    verify_options.max_errors = 100;
+    loom_verify_options_t verify_options = {.sink = capture->sink(),
+                                            .max_errors = 100};
     IREE_ASSERT_OK(loom_verify_module(module, &verify_options, result));
   }
 

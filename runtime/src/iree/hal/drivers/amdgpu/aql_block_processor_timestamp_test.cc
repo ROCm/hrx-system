@@ -147,9 +147,9 @@ TEST(AqlBlockProcessorTimestampTest,
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
   iree_hal_amdgpu_command_buffer_timestamp_record_t record = {};
 
-  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {};
-  processor.base =
-      MakeBaseProcessor(&ring, packet_headers, packet_setups, kernarg_blocks);
+  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
+      .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
+                                kernarg_blocks)};
   processor.command_buffer.metadata.record_ordinal = 7;
   processor.command_buffer.metadata.command_buffer_id = 0xCAFEull;
   processor.command_buffer.metadata.block_ordinal = 3;
@@ -207,9 +207,9 @@ TEST(AqlBlockProcessorTimestampTest,
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
   iree_hal_amdgpu_command_buffer_timestamp_record_t record = {};
 
-  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {};
-  processor.base =
-      MakeBaseProcessor(&ring, packet_headers, packet_setups, kernarg_blocks);
+  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
+      .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
+                                kernarg_blocks)};
   processor.command_buffer.target.record = &record;
   processor.command_buffer.packets.start.packet = &packets[2];
   processor.command_buffer.packets.start.pm4_ib_slot = &pm4_ib_slots[2];
@@ -248,9 +248,9 @@ TEST(AqlBlockProcessorTimestampTest,
   dispatch.target.completion_signal = &completion_signal;
   dispatch.target.record = &record;
 
-  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {};
-  processor.base =
-      MakeBaseProcessor(&ring, packet_headers, packet_setups, kernarg_blocks);
+  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
+      .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
+                                kernarg_blocks)};
   processor.dispatches.values = &dispatch;
   processor.dispatches.count = 1;
   processor.harvest.kernel_args = &harvest_kernel_args;
@@ -382,9 +382,9 @@ TEST(AqlBlockProcessorTimestampTest, RejectsPartialCommandBufferTimestampPlan) {
   uint16_t packet_setups[1] = {};
   iree_hal_amdgpu_kernarg_block_t kernarg_blocks[1] = {};
 
-  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {};
-  processor.base =
-      MakeBaseProcessor(&ring, packet_headers, packet_setups, kernarg_blocks);
+  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
+      .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
+                                kernarg_blocks)};
   processor.command_buffer.packets.start.packet = &packets[2];
   processor.command_buffer.packets.start.pm4_ib_slot = &pm4_ib_slots[2];
 
@@ -414,9 +414,9 @@ TEST(AqlBlockProcessorTimestampTest, RejectsOutOfRangeDispatchPacketOrdinal) {
   dispatch.target.completion_signal = &completion_signal;
   dispatch.target.record = &record;
 
-  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {};
-  processor.base =
-      MakeBaseProcessor(&ring, packet_headers, packet_setups, kernarg_blocks);
+  iree_hal_amdgpu_aql_block_processor_timestamp_t processor = {
+      .base = MakeBaseProcessor(&ring, packet_headers, packet_setups,
+                                kernarg_blocks)};
   processor.dispatches.values = &dispatch;
   processor.dispatches.count = 1;
   processor.harvest.kernel_args = &harvest_kernel_args;

@@ -344,8 +344,8 @@ static int64_t ReadPassStatistic(const loom_pass_info_t* pass_info,
 
 static const loom_target_provider_t* RequireInlineProvider() {
   static const loom_target_provider_t provider = [] {
-    loom_target_provider_t value = {};
-    value.select_call_policy = loom_target_select_call_policy_require_inline;
+    loom_target_provider_t value = {
+        .select_call_policy = loom_target_select_call_policy_require_inline};
     return value;
   }();
   return &provider;

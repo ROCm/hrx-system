@@ -247,13 +247,12 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
     EXPECT_NE(results[0].id.words[0], results[1].id.words[0]);
   }
 
-  amdf_memory_native_create_info_t memory_create = {};
-  memory_create.device_access =
-      AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE;
-  memory_create.required_flags =
-      AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
-  memory_create.byte_length = 4097;
-  memory_create.minimum_alignment = 4096;
+  amdf_memory_native_create_info_t memory_create = {
+      .device_access = AMDF_MEMORY_ACCESS_READ | AMDF_MEMORY_ACCESS_WRITE,
+      .required_flags =
+          AMDF_MEMORY_FLAG_HOST_VISIBLE | AMDF_MEMORY_FLAG_DEVICE_ADDRESS,
+      .byte_length = 4097,
+      .minimum_alignment = 4096};
   amdf_xdna_umd_memory_result_t memory_result = {};
   amdf_memory_native_profile_t memory_profile = {};
   ASSERT_EQ(
@@ -271,10 +270,10 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
             memory_result.device_address + profile->dma.byte_offset);
   EXPECT_LE(memory_result.dma_address + memory_result.byte_length - 1,
             (UINT64_C(1) << profile->dma.address_bit_count) - 1);
-  amdf_memory_map_info_t map_info = {};
-  map_info.byte_offset = 1;
-  map_info.byte_length = 4096;
-  map_info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+  amdf_memory_map_info_t map_info = {
+      .byte_offset = 1,
+      .byte_length = 4096,
+      .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
   amdf_xdna_umd_host_mapping_result_t views[2] = {};
   for (size_t i = 0; i < 2; ++i) {
     ASSERT_EQ(amdf_xdna_umd_memory_map(memory, &memory_profile.host_mapping,
@@ -293,8 +292,8 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
   amdf_xdna_umd_host_mapping_destroy(mappings[0]);
   mappings[0] = nullptr;
   std::cout << "First view destroyed; attachment remains mapped" << std::endl;
-  struct amdxdna_drm_get_bo_info native_info = {};
-  native_info.handle = memory->buffer.handle;
+  struct amdxdna_drm_get_bo_info native_info = {.handle =
+                                                    memory->buffer.handle};
   ASSERT_EQ(
       ioctl(device->descriptor, DRM_IOCTL_AMDXDNA_GET_BO_INFO, &native_info),
       0);
@@ -309,9 +308,9 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
             AMDF_STATUS_OK);
   EXPECT_EQ(static_cast<uint8_t*>(views[1].pointer)[4095], 0xA5);
 
-  amdf_memory_export_info_t export_info = {};
-  export_info.external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
-  export_info.byte_length = memory_result.byte_length;
+  amdf_memory_export_info_t export_info = {
+      .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
+      .byte_length = memory_result.byte_length};
   ASSERT_EQ(amdf_xdna_umd_memory_export(memory, &export_info, &external_memory),
             AMDF_STATUS_OK);
   // Native export supplies the payload/release obligation; the public owner
@@ -324,8 +323,8 @@ TEST_P(LinuxXdnaDeviceTest, MemoryDoesNotDependOnSchedulingContexts) {
   ASSERT_EQ(
       amdf_xdna_umd_device_query_memory_profile(device, 1, &import_profile),
       AMDF_STATUS_OK);
-  amdf_memory_native_import_info_t import_info = {};
-  import_info.device_access = memory_create.device_access;
+  amdf_memory_native_import_info_t import_info = {
+      .device_access = memory_create.device_access};
   amdf_xdna_umd_memory_result_t import_result = {};
   uint32_t release_count = 0;
   amdf_external_memory_t borrowed_external = external_memory;

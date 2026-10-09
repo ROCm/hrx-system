@@ -204,8 +204,8 @@ class CpuStreamingMemoryTest : public ::testing::Test {
                                      iree_allocator_system(),
                                      &device_entry_.block_pool);
 
-    iree_hal_streaming_context_flags_t context_flags = {};
-    context_flags.scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO;
+    iree_hal_streaming_context_flags_t context_flags = {
+        .scheduling_mode = IREE_HAL_STREAMING_SCHEDULING_MODE_AUTO};
     IREE_ASSERT_OK(iree_hal_streaming_context_create(
         &device_entry_, context_flags, iree_allocator_system(), &context_));
     IREE_ASSERT_OK(iree_hal_streaming_stream_create(

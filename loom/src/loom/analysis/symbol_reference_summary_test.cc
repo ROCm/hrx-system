@@ -167,10 +167,10 @@ TEST_F(SymbolReferenceSummaryTest, UntypedRegistersNeedNoScratchStorage) {
 TEST_F(SymbolReferenceSummaryTest, TypedRegistersRetainValueReferences) {
   const auto target = Symbol(IREE_SV("target"));
   const auto value_type = ReferenceType(target);
-  loom_register_type_data_t data = {};
-  data.carrier_payload0 = 123;
-  data.carrier_payload1 = 4;
-  data.value_type = loom_type_table_get(&module_->types, value_type);
+  loom_register_type_data_t data = {
+      .carrier_payload0 = 123,
+      .carrier_payload1 = 4,
+      .value_type = loom_type_table_get(&module_->types, value_type)};
   loom_type_id_t register_type = LOOM_TYPE_ID_INVALID;
   IREE_ASSERT_OK(loom_module_intern_type_id(
       module_, loom_type_register_payload_with_value_type(&data),
@@ -193,14 +193,13 @@ TEST_F(SymbolReferenceSummaryTest, SharedArrayPayloadRetainsFieldSemantics) {
   targets[1] = second;
   targets[2] = first;
   const auto attr = loom_attr_symbol_array(targets, 3);
-  loom_symbol_reference_descriptor_t dependency = {};
-  dependency.interfaces = LOOM_SYMBOL_INTERFACE_GLOBAL;
+  loom_symbol_reference_descriptor_t dependency = {
+      .interfaces = LOOM_SYMBOL_INTERFACE_GLOBAL};
   loom_symbol_reference_descriptor_t availability = {};
   availability.role = LOOM_SYMBOL_REFERENCE_ROLE_AVAILABILITY;
   availability.interfaces = LOOM_SYMBOL_INTERFACE_CALLABLE;
   for (const auto* semantics : {&dependency, &availability, &dependency}) {
-    loom_attr_descriptor_t descriptor = {};
-    descriptor.attr_kind = LOOM_ATTR_SYMBOL_ARRAY;
+    loom_attr_descriptor_t descriptor = {.attr_kind = LOOM_ATTR_SYMBOL_ARRAY};
     descriptor.reference.symbol_ref = semantics;
     IREE_ASSERT_OK(loom_symbol_reference_summary_query_attr(
         &summary_, attr, &descriptor,

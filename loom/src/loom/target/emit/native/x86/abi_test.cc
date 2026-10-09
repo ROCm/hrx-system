@@ -198,8 +198,7 @@ class X86FunctionAbiTest : public ::testing::Test {
   }
 
   ModulePtr Parse(const std::string& source) {
-    loom_text_parse_options_t options = {};
-    options.max_errors = 20;
+    loom_text_parse_options_t options = {.max_errors = 20};
     loom_low_descriptor_text_asm_environment_initialize(
         &descriptor_registry_, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -224,8 +223,8 @@ class X86FunctionAbiTest : public ::testing::Test {
 
   PreparedAbi Prepare(loom_module_t* module, const char* function_name,
                       DescriptorSetProvider descriptor_set_provider) {
-    loom_low_resolved_target_t target = {};
-    target.descriptor_set = descriptor_set_provider();
+    loom_low_resolved_target_t target = {.descriptor_set =
+                                             descriptor_set_provider()};
     PreparedAbi prepared;
     IREE_CHECK_OK(loom_x86_function_abi_prepare(
         module, FindFunction(module, function_name), &target, &analysis_arena_,

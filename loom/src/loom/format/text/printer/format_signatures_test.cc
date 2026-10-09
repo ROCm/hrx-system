@@ -90,8 +90,8 @@ class FormatSignaturesTest : public ::testing::Test {
   }
 
   void Verify(const loom_module_t* module) {
-    loom_verify_options_t options = {};
-    options.sink = {loom_diagnostic_stderr_sink, nullptr};
+    loom_verify_options_t options = {
+        .sink = {loom_diagnostic_stderr_sink, nullptr}};
     loom_verify_result_t result = {};
     IREE_ASSERT_OK(loom_verify_module(module, &options, &result));
     ASSERT_EQ(result.error_count, 0u);
@@ -111,8 +111,8 @@ class FormatSignaturesTest : public ::testing::Test {
   void RoundTrip() {
     ASSERT_NO_FATAL_FAILURE(Verify(module_));
     std::string text = Print(module_);
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+    loom_text_parse_options_t options = {
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
     IREE_ASSERT_OK(loom_text_parse(
         iree_make_string_view(text.data(), text.size()),
         IREE_SV("signatures.loom"), &context_, &pool_, &options, &reparsed_));

@@ -110,9 +110,8 @@ TEST_F(LowAllocationClobberIndexTest,
 
 TEST_F(LowAllocationClobberIndexTest, OmitsUnusedDefinitionBitmap) {
   loom_low_reg_class_t reg_class = {};
-  loom_low_descriptor_set_t descriptor_set = {};
-  descriptor_set.reg_classes = &reg_class;
-  descriptor_set.reg_class_count = 1;
+  loom_low_descriptor_set_t descriptor_set = {.reg_classes = &reg_class,
+                                              .reg_class_count = 1};
 
   loom_low_allocation_clobber_builder_t builder;
   loom_low_allocation_clobber_builder_initialize(&scratch_arena_, &builder);

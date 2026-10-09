@@ -125,9 +125,8 @@ class TargetEntrySelectionTest : public ::testing::Test {
   loom_target_entry_t SelectNamedEntry(
       loom_module_t* module, iree_string_view_t function_name,
       const loom_function_version_list_t* function_versions) {
-    loom_target_entry_options_t options = {};
-    options.entry_symbol = function_name;
-    options.function_versions = function_versions;
+    loom_target_entry_options_t options = {
+        .entry_symbol = function_name, .function_versions = function_versions};
     loom_target_entry_diagnostic_emitter_t diagnostic_emitter = {};
     loom_target_entry_diagnostic_emitter_initialize(
         module, &options, LOOM_EMITTER_VERIFIER, &diagnostic_emitter);
@@ -156,8 +155,8 @@ TEST_F(TargetEntrySelectionTest, EmissionAndRelatedOpsUseTheirOwnModules) {
   const loom_source_entry_t snapshot = {0, iree_make_cstring_view(first_source),
                                         first->sources.entries[0]};
   loom_source_table_resolver_t table = {first.get(), &snapshot, 1};
-  loom_target_entry_options_t options = {};
-  options.source_resolver = {loom_source_table_resolve, &table};
+  loom_target_entry_options_t options = {
+      .source_resolver = {loom_source_table_resolve, &table}};
   options.diagnostic_sink.fn = [](void*, const loom_diagnostic_t* diagnostic) {
     EXPECT_EQ(diagnostic->origin.provenance,
               LOOM_SOURCE_PROVENANCE_UNAVAILABLE_SOURCE);

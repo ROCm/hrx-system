@@ -84,8 +84,7 @@ static bool AppendConditionFacts(
 static loom_condition_integer_relation_t ValueRelation(
     loom_symbolic_integer_relation_t relation, loom_value_id_t left,
     loom_value_id_t right) {
-  loom_condition_integer_relation_t result = {};
-  result.relation = relation;
+  loom_condition_integer_relation_t result = {.relation = relation};
   result.left.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
   result.left.value_id = left;
   result.right.kind = LOOM_CONDITION_INTEGER_OPERAND_VALUE;
@@ -95,19 +94,16 @@ static loom_condition_integer_relation_t ValueRelation(
 
 static loom_condition_fact_set_t SingleRelationFacts(
     loom_condition_integer_relation_t* relation) {
-  loom_condition_fact_set_t facts = {};
-  facts.integer_relations = relation;
-  facts.integer_relation_count = 1;
-  facts.integer_relation_capacity = 1;
+  loom_condition_fact_set_t facts = {.integer_relations = relation,
+                                     .integer_relation_count = 1,
+                                     .integer_relation_capacity = 1};
   return facts;
 }
 
 static loom_predicate_t ValuePredicate(loom_predicate_kind_t kind,
                                        loom_value_id_t left,
                                        loom_value_id_t right) {
-  loom_predicate_t predicate = {};
-  predicate.kind = kind;
-  predicate.arg_count = 2;
+  loom_predicate_t predicate = {.kind = kind, .arg_count = 2};
   predicate.arg_tags[0] = LOOM_PRED_ARG_VALUE;
   predicate.arg_tags[1] = LOOM_PRED_ARG_VALUE;
   predicate.args[0] = left;

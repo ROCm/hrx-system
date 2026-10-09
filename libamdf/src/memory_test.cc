@@ -53,8 +53,7 @@ TEST_F(MemoryTest, HostSitesUseTheSelectedPeerAndPreserveNativeApiOperations) {
 
   // Supply native mapping facts to the production pair composer. Queries must
   // neither dereference host payload nor perform a cache operation.
-  amdf_host_mapping_t mapping = {};
-  mapping.memory = memory;
+  amdf_host_mapping_t mapping = {.memory = memory};
   mapping.info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
   mapping.info.cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
   mapping.info.flush.kind = AMDF_CACHE_TRANSITION_KIND_RANGE;
@@ -167,8 +166,7 @@ TEST_F(MemoryTest, HostAtomicReachUsesOnlyTheExactPeersSystemWidths) {
   unrelated->site_status = amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
   auto* native = static_cast<FakeMemory*>(memory->accesses[1].native);
 
-  amdf_host_mapping_t mapping = {};
-  mapping.memory = memory;
+  amdf_host_mapping_t mapping = {.memory = memory};
   mapping.info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
   mapping.info.flush.kind = AMDF_CACHE_TRANSITION_KIND_GLOBAL;
   mapping.info.flush.executor = AMDF_CACHE_TRANSITION_EXECUTOR_HOST_API;

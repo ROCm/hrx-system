@@ -439,19 +439,20 @@ struct Peer {
     if (!iree_net_queue_channel_query_send_budget(channel).slots) {
       return;
     }
-    iree_net_queue_channel_send_params_t params = {};
-    params.generated_payload_length = 8 + description.size();
-    params.build =
-        +[](void* user_data, const iree_net_queue_message_builder_t* builder) {
-          auto& peer = *static_cast<Peer*>(user_data);
-          iree_unaligned_store_le_u64(builder->generated_payload.data,
-                                      peer.identity);
-          memcpy(builder->generated_payload.data + 8, peer.description.data(),
-                 peer.description.size());
-          return iree_ok_status();
-        };
-    params.build_user_data = this;
-    params.completion_callback = {OnMessageSent, this};
+    iree_net_queue_channel_send_params_t params = {
+        .generated_payload_length = 8 + description.size(),
+        .build =
+            +[](void* user_data,
+                const iree_net_queue_message_builder_t* builder) {
+              auto& peer = *static_cast<Peer*>(user_data);
+              iree_unaligned_store_le_u64(builder->generated_payload.data,
+                                          peer.identity);
+              memcpy(builder->generated_payload.data + 8,
+                     peer.description.data(), peer.description.size());
+              return iree_ok_status();
+            },
+        .build_user_data = this,
+        .completion_callback = {OnMessageSent, this}};
     iree_status_t status = iree_net_queue_channel_send_command(
         channel, IREE_NET_QUEUE_ID_NONE, &params);
     if (iree_status_is_ok(status)) {

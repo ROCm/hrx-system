@@ -927,8 +927,7 @@ TEST_F(PassthroughPoolTest, ReturnedTokenAndViewsBothPrecedeRetirement) {
   const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 0, 0, 0);
   IREE_ASSERT_OK(
       iree_async_frontier_tracker_register_axis(tracker_, axis, nullptr));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {axis, 1};
   ReleaseOneReservation(pool_, &reservation,
                         iree_async_fixed_frontier_as_const_frontier(&frontier));
@@ -953,8 +952,7 @@ TEST_F(PassthroughPoolTest, FailedAxisQuarantinesPendingNativeBacking) {
                                        IREE_HAL_POOL_RESERVE_FLAG_NONE,
                                        &reservation, &info, &result));
   IREE_ASYNC_FIXED_FRONTIER_TYPE(PairFrontier, 2);
-  PairFrontier frontier = {};
-  frontier.entry_count = 2;
+  PairFrontier frontier = {.entry_count = 2};
   for (uint8_t i = 0; i < 2; ++i) {
     frontier.entries[i] = {iree_async_axis_make_queue(1, 0, 0, i, 0), 1};
     IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
@@ -995,8 +993,7 @@ TEST_F(PassthroughPoolTest,
   IREE_ASSERT_OK(AcquireOneReservation(pool_, 4096, 16, nullptr,
                                        IREE_HAL_POOL_RESERVE_FLAG_NONE,
                                        &reservation, &info, &result));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {iree_async_axis_make_queue(1, 0, 0, 0, 0), 1};
   IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
       tracker_, frontier.entries[0].axis, nullptr));
@@ -1021,8 +1018,7 @@ TEST_F(PassthroughPoolTest, MaintenanceDrainDoesNotJoinPendingRetirement) {
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
       {}, slab_provider, notification_, tracker_, test_maintenance(),
       allocator_, &pool));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {iree_async_axis_make_queue(1, 0, 0, 0, 0), 1};
   IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
       tracker_, frontier.entries[0].axis, nullptr));
@@ -1080,8 +1076,7 @@ TEST_F(PassthroughPoolTest, FrontierDispatchRacesFinalPoolRelease) {
     IREE_ASSERT_OK(AcquireOneReservation(pool_, 4096, 16, nullptr,
                                          IREE_HAL_POOL_RESERVE_FLAG_NONE,
                                          &reservation, &info, &result));
-    iree_async_single_frontier_t frontier = {};
-    frontier.entry_count = 1;
+    iree_async_single_frontier_t frontier = {.entry_count = 1};
     frontier.entries[0] = {axis, epoch};
     ReleaseOneReservation(
         pool_, &reservation,
@@ -1190,8 +1185,7 @@ TEST(PassthroughPool, CreateRejectsASANWhenProviderCannotAdviseRanges) {
   IREE_ASSERT_OK(iree_async_notification_create(
       test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
-  iree_hal_passthrough_pool_options_t options = {};
-  options.asan = ShadowOptions();
+  iree_hal_passthrough_pool_options_t options = {.asan = ShadowOptions()};
 
   iree_hal_pool_t* pool = NULL;
   IREE_EXPECT_STATUS_IS(
@@ -1214,8 +1208,7 @@ TEST(PassthroughPool, ASANAdvisesBackingRangeAndExposesUserRange) {
   IREE_ASSERT_OK(iree_async_notification_create(
       test_proactor(), IREE_ASYNC_NOTIFICATION_FLAG_NONE, &notification));
 
-  iree_hal_passthrough_pool_options_t options = {};
-  options.asan = ShadowOptions();
+  iree_hal_passthrough_pool_options_t options = {.asan = ShadowOptions()};
 
   iree_hal_pool_t* pool = NULL;
   IREE_ASSERT_OK(iree_hal_passthrough_pool_create(
@@ -1308,8 +1301,7 @@ TEST(PassthroughPool, ASANAdvisesBackingRangeAndExposesUserRange) {
   const iree_async_axis_t axis = iree_async_axis_make_queue(1, 0, 1, 0, 0);
   IREE_ASSERT_OK(iree_async_frontier_tracker_register_axis(
       test_frontier_tracker(), axis, nullptr));
-  iree_async_single_frontier_t frontier = {};
-  frontier.entry_count = 1;
+  iree_async_single_frontier_t frontier = {.entry_count = 1};
   frontier.entries[0] = {axis, 1};
   ReleaseOneReservation(pool, &reservation,
                         iree_async_fixed_frontier_as_const_frontier(&frontier));

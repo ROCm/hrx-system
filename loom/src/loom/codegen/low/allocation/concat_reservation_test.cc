@@ -109,25 +109,21 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   reg_class.alloc_unit_bits = 32;
   reg_class.allocatable_count = 16;
   reg_class.spill_class_id = LOOM_LOW_REG_CLASS_NONE;
-  loom_low_descriptor_set_t descriptors = {};
-  descriptors.stable_id = 17;
-  descriptors.reg_classes = &reg_class;
-  descriptors.reg_class_count = 1;
-  loom_low_resolved_target_t target = {};
-  target.descriptor_set = &descriptors;
-  loom_low_allocation_resolved_reserved_range_t prefix = {};
-  prefix.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
-  prefix.location_count = 2;
+  loom_low_descriptor_set_t descriptors = {
+      .stable_id = 17, .reg_classes = &reg_class, .reg_class_count = 1};
+  loom_low_resolved_target_t target = {.descriptor_set = &descriptors};
+  loom_low_allocation_resolved_reserved_range_t prefix = {
+      .location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER,
+      .location_count = 2};
   uint32_t high_water[] = {6};
   uint32_t constrained_high_water[] = {prefix.location_count};
-  loom_low_allocation_target_constraints_t constraints = {};
-  constraints.module = module;
-  constraints.target = &target;
-  constraints.reserved_ranges = &prefix;
-  constraints.reserved_range_count = 1;
-  constraints.max_assigned_location_end_by_reg_class = high_water;
-  constraints.max_constrained_location_end_by_reg_class =
-      constrained_high_water;
+  loom_low_allocation_target_constraints_t constraints = {
+      .module = module,
+      .target = &target,
+      .reserved_ranges = &prefix,
+      .reserved_range_count = 1,
+      .max_assigned_location_end_by_reg_class = high_water,
+      .max_constrained_location_end_by_reg_class = constrained_high_water};
 
   loom_low_allocation_assignment_t future = {};
   future.value_id = value_ids[3];
@@ -138,12 +134,12 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   future.unit_point_start = 8;
   future.end_point = 14;
   const uint32_t assignment_indices[] = {UINT32_MAX, UINT32_MAX, UINT32_MAX, 0};
-  loom_low_allocation_assignment_map_t assignments = {};
-  assignments.module = module;
-  assignments.liveness = &liveness;
-  assignments.assignments = &future;
-  assignments.assignment_count = 1;
-  assignments.assignment_indices_by_value_ordinal = assignment_indices;
+  loom_low_allocation_assignment_map_t assignments = {
+      .module = module,
+      .liveness = &liveness,
+      .assignments = &future,
+      .assignment_count = 1,
+      .assignment_indices_by_value_ordinal = assignment_indices};
   loom_low_allocation_storage_lease_state_t leases = {};
   loom_low_allocation_search_context_t context = {};
   context.module = module;
@@ -168,16 +164,16 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   const loom_low_placement_preference_binding_t bindings[] = {{2, 0}, {3, 1}};
   const uint32_t use_indices[] = {0, 0};
   const uint32_t offsets[] = {0, 0, 0, 1, 2};
-  loom_low_placement_preference_index_t preferences = {};
-  preferences.uses = &use;
-  preferences.bindings = bindings;
-  preferences.use_indices = use_indices;
-  preferences.offsets_by_origin = offsets;
-  preferences.use_count = 1;
-  preferences.binding_count = 2;
-  preferences.max_incident_use_count = 1;
-  preferences.max_incident_binding_count = 2;
-  preferences.max_memo_entry_count = 4;
+  loom_low_placement_preference_index_t preferences = {
+      .uses = &use,
+      .bindings = bindings,
+      .use_indices = use_indices,
+      .offsets_by_origin = offsets,
+      .use_count = 1,
+      .binding_count = 2,
+      .max_incident_use_count = 1,
+      .max_incident_binding_count = 2,
+      .max_memo_entry_count = 4};
   loom_low_allocation_preference_workspace_t workspace = {};
   IREE_ASSERT_OK(loom_low_allocation_preference_workspace_initialize(
       &preferences, &arena, &workspace));
@@ -246,10 +242,9 @@ TEST(LowAllocationConcatReservationTest, ChoosesOnlyLegalAssemblies) {
   const iree_string_view_t resource_names[] = {IREE_SVL("register")};
   const loom_target_residency_cliff_t cliffs[] = {{0, 8, 8, 4}};
   const loom_target_residency_cliff_range_t cliff_ranges[] = {{0, 1}};
-  loom_target_residency_model_t residency_model = {};
-  residency_model.best_tier = 8;
-  residency_model.direct_resources = {resource_names, cliffs, 1, cliff_ranges,
-                                      1};
+  loom_target_residency_model_t residency_model = {
+      .best_tier = 8,
+      .direct_resources = {resource_names, cliffs, 1, cliff_ranges, 1}};
   for (uint32_t tier_limit : {8u, 4u, 0u}) {
     context.residency =
         loom_target_residency_view(&residency_model, tier_limit);

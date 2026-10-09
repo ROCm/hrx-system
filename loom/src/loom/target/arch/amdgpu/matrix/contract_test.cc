@@ -48,8 +48,8 @@ iree_host_size_t FindDescriptorOrdinal(const char* name) {
 
 loom_amdgpu_matrix_payload_shape_t PayloadShape(
     loom_amdgpu_matrix_numeric_type_t numeric_type) {
-  loom_amdgpu_matrix_payload_shape_t payload_shape = {};
-  payload_shape.numeric_type = numeric_type;
+  loom_amdgpu_matrix_payload_shape_t payload_shape = {.numeric_type =
+                                                          numeric_type};
   return payload_shape;
 }
 

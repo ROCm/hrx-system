@@ -215,10 +215,9 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
   }
 
   amdf_status_t Execute(DeviceAccess& access, uint64_t command_offset) {
-    amdf_gpu_kernel_command_t command = {};
-    command.memory = access.memory;
-    command.byte_offset = command_offset;
-    command.byte_length = 6 * sizeof(uint32_t);
+    amdf_gpu_kernel_command_t command = {.memory = access.memory,
+                                         .byte_offset = command_offset,
+                                         .byte_length = 6 * sizeof(uint32_t)};
     amdf_gpu_kernel_queue_submission_info_t submission = {};
     submission.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO;
     submission.structure_size = sizeof(submission);

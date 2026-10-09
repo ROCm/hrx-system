@@ -27,11 +27,11 @@ static iree_hal_amdgpu_device_kernel_args_t MakeQueueInitializeKernelArgs() {
 
 static iree_hal_amdgpu_tsan_queue_initialize_args_t MakeQueueInitializeArgs(
     uint64_t shadow_size) {
-  iree_hal_amdgpu_tsan_queue_initialize_args_t initialize_args = {};
-  initialize_args.queue_state =
-      reinterpret_cast<iree_hal_amdgpu_tsan_queue_state_t*>(0x1000);
-  initialize_args.shadow_base = reinterpret_cast<void*>(0x2000);
-  initialize_args.shadow_size = shadow_size;
+  iree_hal_amdgpu_tsan_queue_initialize_args_t initialize_args = {
+      .queue_state =
+          reinterpret_cast<iree_hal_amdgpu_tsan_queue_state_t*>(0x1000),
+      .shadow_base = reinterpret_cast<void*>(0x2000),
+      .shadow_size = shadow_size};
   return initialize_args;
 }
 

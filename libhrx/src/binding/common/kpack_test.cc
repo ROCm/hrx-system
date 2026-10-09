@@ -2361,10 +2361,8 @@ TEST(KpackIntegration, HipkWrapperNoMatchReportsNotFound) {
   std::string path = WriteTempFile("integration_nomatch.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;
-  header.version = 1;
-  header.binary = metadata.data();
+  HipFatHeader header = {
+      .magic = 0x4b504948u, .version = 1, .binary = metadata.data()};
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx942"));  // not in the archive
@@ -2419,10 +2417,8 @@ TEST(KpackIntegration, HipkResolvedGarbageRejected) {
   std::string path = WriteTempFile("integration_garbage.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;
-  header.version = 1;
-  header.binary = metadata.data();
+  HipFatHeader header = {
+      .magic = 0x4b504948u, .version = 1, .binary = metadata.data()};
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));
@@ -2447,11 +2443,11 @@ TEST(KpackIntegration, HipkReservedSelectsCoIndex) {
   std::string path = WriteTempFile("integration_coindex.kpack", archive);
   auto metadata = MakeMetadata("lib/libhip.so", {path});
 
-  HipFatHeader header = {};
-  header.magic = 0x4b504948u;
-  header.version = 1;
-  header.binary = metadata.data();
-  header.reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1));
+  HipFatHeader header = {
+      .magic = 0x4b504948u,
+      .version = 1,
+      .binary = metadata.data(),
+      .reserved = reinterpret_cast<void*>(static_cast<uintptr_t>(1))};
 
   const iree_hal_executable_target_t executable_target =
       MakeAmdgpuDeviceTarget(IREE_SV("gfx1100"));

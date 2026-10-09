@@ -87,8 +87,7 @@ TEST_F(ModuleSourceTest, RegisterEmptySource) {
 }
 
 TEST_F(ModuleSourceTest, AppendSourcePreservesInsertionOrder) {
-  loom_module_size_hints_t hints = {};
-  hints.source_count = 2;
+  loom_module_size_hints_t hints = {.source_count = 2};
   loom_module_t* module = NULL;
   IREE_ASSERT_OK(loom_module_allocate(&context_, IREE_SV("test"), &block_pool_,
                                       &hints, iree_allocator_system(),

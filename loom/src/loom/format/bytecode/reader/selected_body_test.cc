@@ -78,9 +78,9 @@ TEST_F(BytecodeSelectedBodyTest, ProjectsHighValueReferencesToCompactIds) {
   bytecode.push_back(LOOM_SCALAR_TYPE_F32);
   types[kSourceOrdinal].entry_length = 2;
 
-  loom_bytecode_module_metadata_t metadata = {};
-  metadata.strings = {strings.size(), strings.data()};
-  metadata.types = {types.size(), types.data()};
+  loom_bytecode_module_metadata_t metadata = {
+      .strings = {strings.size(), strings.data()},
+      .types = {types.size(), types.data()}};
   loom_bytecode_selected_table_materializer_t tables;
   loom_bytecode_selected_table_materializer_initialize(
       &decoder_, iree_make_const_byte_span(bytecode.data(), bytecode.size()),

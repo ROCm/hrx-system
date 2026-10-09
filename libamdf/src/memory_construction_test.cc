@@ -41,29 +41,30 @@ struct AllocationState {
   uint32_t live_count = 0;
 
   amdf_allocator_t allocator() {
-    amdf_allocator_t value = {};
-    value.user_data = this;
-    value.allocate = [](void* user_data, uint64_t byte_length,
-                        uint64_t minimum_alignment) -> void* {
-      auto* state = static_cast<AllocationState*>(user_data);
-      if (state->allocation_count++ == state->failure_ordinal) {
-        return nullptr;
-      }
-      const amdf_allocator_t system = amdf_allocator_system();
-      void* pointer =
-          system.allocate(system.user_data, byte_length, minimum_alignment);
-      if (pointer != nullptr) {
-        ++state->live_count;
-      }
-      return pointer;
-    };
-    value.free = [](void* user_data, void* pointer) {
-      auto* state = static_cast<AllocationState*>(user_data);
-      EXPECT_GT(state->live_count, 0u);
-      --state->live_count;
-      const amdf_allocator_t system = amdf_allocator_system();
-      system.free(system.user_data, pointer);
-    };
+    amdf_allocator_t value = {
+        .user_data = this,
+        .allocate = [](void* user_data, uint64_t byte_length,
+                       uint64_t minimum_alignment) -> void* {
+          auto* state = static_cast<AllocationState*>(user_data);
+          if (state->allocation_count++ == state->failure_ordinal) {
+            return nullptr;
+          }
+          const amdf_allocator_t system = amdf_allocator_system();
+          void* pointer =
+              system.allocate(system.user_data, byte_length, minimum_alignment);
+          if (pointer != nullptr) {
+            ++state->live_count;
+          }
+          return pointer;
+        },
+        .free =
+            [](void* user_data, void* pointer) {
+              auto* state = static_cast<AllocationState*>(user_data);
+              EXPECT_GT(state->live_count, 0u);
+              --state->live_count;
+              const amdf_allocator_t system = amdf_allocator_system();
+              system.free(system.user_data, pointer);
+            }};
     return value;
   }
 };
@@ -410,8 +411,8 @@ TEST_F(MemoryConstructionTest, LiveProfilePreservesBackingPayloadGeometry) {
 TEST_F(MemoryConstructionTest, HostOnlyPairDoesNotQueryDeviceAtomicReach) {
   FakeDevice device;
   InitializeFakeDevice(1, &instance_, &device);
-  amdf_memory_host_description_t host = {};
-  host.cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
+  amdf_memory_host_description_t host = {.cacheability =
+                                             AMDF_HOST_CACHEABILITY_WRITE_BACK};
   host.flush.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
   host.invalidate.kind = AMDF_CACHE_TRANSITION_KIND_NONE;
   device.profile.visibility.data = &host;

@@ -45,8 +45,8 @@ class LowAllocationMovePlanTest : public ::testing::Test {
   }
 
   ModulePtr Parse(const char* source) {
-    loom_text_parse_options_t options = {};
-    options.diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr};
+    loom_text_parse_options_t options = {
+        .diagnostic_sink = {loom_diagnostic_stderr_sink, nullptr}};
     loom_low_descriptor_text_asm_environment_initialize(
         &registry_.registry, &options.low_asm_environment);
     loom_module_t* module = nullptr;
@@ -119,9 +119,9 @@ low.func.def target<test.low.core> @subtrees(%condition: reg<test.i32>, %lhs: re
   return %returned
 }
 )");
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_SOURCE_PRIORITY};
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(
@@ -165,9 +165,9 @@ low.func.def target<test.low.core> @reordered(%lhs: reg<test.i32>, %rhs: reg<tes
   return %result
 }
 )");
-  loom_low_emission_frame_options_t options = {};
-  options.descriptor_registry = &registry_.registry;
-  options.schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL;
+  loom_low_emission_frame_options_t options = {
+      .descriptor_registry = &registry_.registry,
+      .schedule_strategy = LOOM_LOW_SCHEDULE_STRATEGY_RESOURCE_STALL};
   loom_low_emission_frame_t frame = {};
   bool frame_accepted = false;
   IREE_ASSERT_OK(loom_low_emission_frame_build(

@@ -571,17 +571,17 @@ TEST_F(LowAllocationTargetConstraintsTest,
     intervals[i].start_point = unit_start_points[i];
     intervals[i].end_point = unit_end_points[i];
   }
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = values;
-  domain.value_count = kValueCount;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = kValueCount;
-  liveness.value_ids = values;
-  liveness.value_count = kValueCount;
-  liveness.value_interval_indices = interval_indices;
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = kValueCount,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .value_interval_indices = interval_indices};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.values = unit_values;
   unit_liveness.start_points = unit_start_points;
@@ -694,11 +694,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
       &value));
   loom_module_value_ordinal_scratch_acquire(module);
   loom_module_value_ordinal_scratch_set(module, value, 0);
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = &value;
-  domain.value_count = 1;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = &value,
+      .value_count = 1,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
   loom_liveness_interval_t interval = {};
   interval.value_id = value;
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
@@ -708,12 +708,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
   interval.unit_count = 1;
   interval.end_point = 1;
   uint32_t zero = 0, one = 1;
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = &interval;
-  liveness.interval_count = 1;
-  liveness.value_ids = &value;
-  liveness.value_count = 1;
-  liveness.value_interval_indices = &zero;
+  loom_liveness_analysis_t liveness = {.intervals = &interval,
+                                       .interval_count = 1,
+                                       .value_ids = &value,
+                                       .value_count = 1,
+                                       .value_interval_indices = &zero};
   loom_low_allocation_unit_liveness_value_t unit_value = {};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.values = &unit_value;
@@ -723,10 +722,10 @@ TEST_F(LowAllocationTargetConstraintsTest,
   uint64_t incomplete_storage_words[] = {0};
   unit_liveness.values_with_incomplete_storage_segments = {
       1, incomplete_storage_words};
-  loom_low_placement_operand_constraints_t operand = {};
-  operand.addressable_unit_count = 8;
-  loom_low_placement_table_t placement = {};
-  placement.operand_constraints_by_interval = &operand;
+  loom_low_placement_operand_constraints_t operand = {.addressable_unit_count =
+                                                          8};
+  loom_low_placement_table_t placement = {.operand_constraints_by_interval =
+                                              &operand};
   // The class's ABI-fixed window at 32 is legal storage, but still cannot be
   // encoded by an operand restricted to the first eight registers.
   for (uint32_t location : {7, 8, 32}) {
@@ -825,11 +824,11 @@ TEST_F(LowAllocationTargetConstraintsTest,
       fixed_values[i].location_count = 1;
     }
   }
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = values;
-  domain.value_count = kValueCount;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
   loom_liveness_analysis_t liveness = {};
   liveness.intervals = intervals;
   liveness.interval_count = kValueCount;
@@ -1045,17 +1044,17 @@ TEST_F(LowAllocationTargetConstraintsTest,
         target_.descriptor_set->stable_id;
     intervals[i].value_class.register_class_id = reg_class_id;
   }
-  loom_local_value_domain_t domain = {};
-  domain.module = module;
-  domain.value_ids = values;
-  domain.value_count = kValueCount;
-  domain.flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED;
-  loom_liveness_analysis_t liveness = {};
-  liveness.intervals = intervals;
-  liveness.interval_count = kValueCount;
-  liveness.value_ids = values;
-  liveness.value_count = kValueCount;
-  liveness.value_interval_indices = interval_indices;
+  loom_local_value_domain_t domain = {
+      .module = module,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .flags = LOOM_LOCAL_VALUE_DOMAIN_FLAG_ACQUIRED};
+  loom_liveness_analysis_t liveness = {
+      .intervals = intervals,
+      .interval_count = kValueCount,
+      .value_ids = values,
+      .value_count = kValueCount,
+      .value_interval_indices = interval_indices};
   loom_low_allocation_unit_liveness_t unit_liveness = {};
   unit_liveness.values = unit_values;
   unit_liveness.start_points = unit_starts;

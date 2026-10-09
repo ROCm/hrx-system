@@ -189,8 +189,7 @@ TEST_F(BytecodeAttributeTest, CompleteBindingsSurviveAttributeScratchReset) {
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &width));
   iree_arena_allocator_t scope_arena;
   iree_arena_initialize(&block_pool_, &scope_arena);
-  loom_bytecode_type_bindings_t bindings = {};
-  bindings.arena = &scope_arena;
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
   const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
       /*.symbol_name=*/IREE_SV("function"),
       /*.values=*/&width,
@@ -235,8 +234,7 @@ TEST_F(BytecodeAttributeTest, ScopedRegisterRetainsCarrierAndBoundValueType) {
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &width));
   iree_arena_allocator_t scope_arena;
   iree_arena_initialize(&block_pool_, &scope_arena);
-  loom_bytecode_type_bindings_t bindings = {};
-  bindings.arena = &scope_arena;
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
   const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
       /*.symbol_name=*/IREE_SV("function"),
       /*.values=*/&width,
@@ -295,8 +293,7 @@ TEST_F(BytecodeAttributeTest, ScopedViewAlignmentValidatesBeforeNarrowing) {
     SCOPED_TRACE(alignment);
     iree_arena_allocator_t scope_arena;
     iree_arena_initialize(&block_pool_, &scope_arena);
-    loom_bytecode_type_bindings_t bindings = {};
-    bindings.arena = &scope_arena;
+    loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
     const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
         /*.symbol_name=*/IREE_SV("function"),
         /*.values=*/&width,
@@ -366,8 +363,7 @@ TEST_F(BytecodeAttributeTest, ScopedDialectNameUsesFullStringOrdinal) {
       module_, loom_type_scalar(LOOM_SCALAR_TYPE_INDEX), &width));
   iree_arena_allocator_t scope_arena;
   iree_arena_initialize(&block_pool_, &scope_arena);
-  loom_bytecode_type_bindings_t bindings = {};
-  bindings.arena = &scope_arena;
+  loom_bytecode_type_bindings_t bindings = {.arena = &scope_arena};
   const loom_bytecode_attribute_ssa_materialization_scope_t scope = {
       /*.symbol_name=*/IREE_SV("function"),
       /*.values=*/&width,

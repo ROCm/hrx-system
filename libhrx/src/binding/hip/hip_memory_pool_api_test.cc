@@ -176,8 +176,7 @@ TEST_F(HipMemoryPoolApiTest, GraphAllocationReleasesSelectedPool) {
   ASSERT_EQ(hipSuccess,
             api_.device_get_default_mem_pool(&default_pool, device_));
 
-  hipMemPoolProps properties = {};
-  properties.allocType = hipMemAllocationTypePinned;
+  hipMemPoolProps properties = {.allocType = hipMemAllocationTypePinned};
   properties.location.type = hipMemLocationTypeDevice;
   properties.location.id = device_;
 
@@ -195,9 +194,8 @@ TEST_F(HipMemoryPoolApiTest, GraphAllocationReleasesSelectedPool) {
   const hipError_t graph_create_result = api_.graph_create(&graph, /*flags=*/0);
   EXPECT_EQ(hipSuccess, graph_create_result);
   if (graph_create_result == hipSuccess) {
-    hipMemAllocNodeParams parameters = {};
-    parameters.poolProps = properties;
-    parameters.bytesize = 4096;
+    hipMemAllocNodeParams parameters = {.poolProps = properties,
+                                        .bytesize = 4096};
     hipGraphNode_t node = nullptr;
     EXPECT_EQ(hipSuccess, api_.graph_add_mem_alloc_node(
                               &node, graph, /*dependencies=*/nullptr,

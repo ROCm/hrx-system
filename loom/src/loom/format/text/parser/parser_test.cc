@@ -459,8 +459,7 @@ TEST_F(ParserTest, ParsedOpScratchFramesStayDepthSafeWhileParentIsActive) {
 
 TEST_F(ParserTest, ScopeFramesReuseHashStorageAcrossSiblingScopes) {
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.scope = &root_scope;
+  loom_parser_t parser = {.scope = &root_scope};
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
   IREE_ASSERT_OK(loom_parser_scope_push(&parser, &root_scope, &parser.scope));
@@ -514,8 +513,7 @@ TEST_F(ParserTest, ScopeFramesReuseHashStorageAcrossSiblingScopes) {
 
 TEST_F(ParserTest, ScopeFramesPreserveParentLookupAndRejectLocalDuplicates) {
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.scope = &root_scope;
+  loom_parser_t parser = {.scope = &root_scope};
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
   bool duplicate = true;
@@ -579,10 +577,8 @@ TEST_F(ParserTest, FunctionTypeScratchAndModulePayloadAreReusedOnInternHits) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.module = module;
-  parser.context = &context_;
-  parser.scope = &root_scope;
+  loom_parser_t parser = {
+      .module = module, .context = &context_, .scope = &root_scope};
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
 
@@ -636,10 +632,8 @@ TEST_F(ParserTest, RegisterTypeRequiresTargetLowDescriptorContext) {
                                       /*hints=*/nullptr,
                                       iree_allocator_system(), &module));
   loom_parser_scope_t root_scope = {};
-  loom_parser_t parser = {};
-  parser.module = module;
-  parser.context = &context_;
-  parser.scope = &root_scope;
+  loom_parser_t parser = {
+      .module = module, .context = &context_, .scope = &root_scope};
   parser.definition_scope.pop_at = UINT16_MAX;
   iree_arena_initialize(&block_pool_, &parser.parser_arena);
   loom_tokenizer_initialize(IREE_SV("reg<test.ptr x4>"), IREE_SV("test.loom"),

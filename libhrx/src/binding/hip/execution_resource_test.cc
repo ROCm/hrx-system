@@ -560,8 +560,7 @@ TEST_F(ExecutionResourceTest, DryRunPublishesStructuredRemainder) {
       &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
-  hipDevSmResourceGroupParams group_parameter = {};
-  group_parameter.smCount = 4;
+  hipDevSmResourceGroupParams group_parameter = {.smCount = 4};
   hipDevResource remainder;
   ASSERT_EQ(SplitSm(/*out_resources=*/nullptr, /*group_count=*/1,
                     &full_resource, &remainder, /*flags=*/0, &group_parameter),
@@ -585,9 +584,8 @@ TEST_F(ExecutionResourceTest,
       &device_, uniform_queue_family(), {/*.count=*/0, /*.ordinals=*/nullptr},
       hipDevSmResourceGroupDefault, &full_resource));
 
-  hipDevSmResourceGroupParams group_parameter = {};
-  group_parameter.smCount = 4;
-  group_parameter.coscheduledSmCount = 4;
+  hipDevSmResourceGroupParams group_parameter = {.smCount = 4,
+                                                 .coscheduledSmCount = 4};
   const hipDevSmResourceGroupParams expected_parameter = group_parameter;
   hipDevResource partition;
   std::memset(&partition, 0xA5, sizeof(partition));

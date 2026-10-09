@@ -18,10 +18,8 @@ namespace {
 
 loom_liveness_interval_t Interval(uint32_t start, uint32_t end, uint32_t units,
                                   uint16_t class_id) {
-  loom_liveness_interval_t interval = {};
-  interval.start_point = start;
-  interval.end_point = end;
-  interval.unit_count = units;
+  loom_liveness_interval_t interval = {
+      .start_point = start, .end_point = end, .unit_count = units};
   interval.value_class.type_kind = LOOM_TYPE_REGISTER;
   interval.value_class.register_class_id = class_id;
   return interval;

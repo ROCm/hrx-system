@@ -422,12 +422,12 @@ func.def @helper(%x: i32) -> (i32) {
   ASSERT_NE(second_helper, nullptr);
 
   const iree_host_size_t root_ordinals[] = {second_entry->ordinal};
-  loom_link_plan_options_t options = {};
-  options.mode = LOOM_LINK_PLAN_LINK;
-  options.root_symbol_ordinals = {
-      /*.count=*/IREE_ARRAYSIZE(root_ordinals),
-      /*.values=*/root_ordinals,
-  };
+  loom_link_plan_options_t options = {
+      .mode = LOOM_LINK_PLAN_LINK,
+      .root_symbol_ordinals = {
+          /*.count=*/IREE_ARRAYSIZE(root_ordinals),
+          /*.values=*/root_ordinals,
+      }};
   PlanPtr plan = BuildPlan(index.get(), &options);
 
   EXPECT_FALSE(ContainsSymbol(plan.get(), first_entry));
@@ -446,12 +446,12 @@ TEST_F(LinkPlannerTest, LinkExactRootOrdinalRejectsOutOfRangeIdentity) {
   const iree_host_size_t root_ordinals[] = {
       loom_link_module_index_symbol_count(index.get()),
   };
-  loom_link_plan_options_t options = {};
-  options.mode = LOOM_LINK_PLAN_LINK;
-  options.root_symbol_ordinals = {
-      /*.count=*/IREE_ARRAYSIZE(root_ordinals),
-      /*.values=*/root_ordinals,
-  };
+  loom_link_plan_options_t options = {
+      .mode = LOOM_LINK_PLAN_LINK,
+      .root_symbol_ordinals = {
+          /*.count=*/IREE_ARRAYSIZE(root_ordinals),
+          /*.values=*/root_ordinals,
+      }};
   PlanPtr plan;
   IREE_EXPECT_STATUS_IS(IREE_STATUS_OUT_OF_RANGE,
                         BuildPlanStatus(index.get(), &options, &plan));
@@ -497,9 +497,8 @@ TEST_F(LinkPlannerTest,
         .symbol_ordinal = root->ordinal,
         .kind = LOOM_LINK_SYMBOL_FACET_DEFINITION,
     };
-    loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_LINK;
-    options.root_facets = {1, &definition_root};
+    loom_link_plan_options_t options = {.mode = LOOM_LINK_PLAN_LINK,
+                                        .root_facets = {1, &definition_root}};
     PlanPtr plan = BuildPlan(index, &options);
     EXPECT_TRUE(ContainsSymbol(plan.get(), root));
     EXPECT_TRUE(ContainsSymbol(plan.get(), config_dependency));
@@ -550,9 +549,8 @@ TEST_F(LinkPlannerTest,
         .symbol_ordinal = root->ordinal,
         .kind = LOOM_LINK_SYMBOL_FACET_COMMAND_CONTRACT,
     };
-    loom_link_plan_options_t contract_options = {};
-    contract_options.mode = LOOM_LINK_PLAN_LINK;
-    contract_options.root_facets = {1, &contract_root};
+    loom_link_plan_options_t contract_options = {
+        .mode = LOOM_LINK_PLAN_LINK, .root_facets = {1, &contract_root}};
     PlanPtr contract_plan = BuildPlan(index, &contract_options);
     EXPECT_TRUE(ContainsSymbol(contract_plan.get(), root));
     EXPECT_FALSE(ContainsSymbol(contract_plan.get(), leaf));
@@ -567,9 +565,8 @@ TEST_F(LinkPlannerTest,
         .symbol_ordinal = root->ordinal,
         .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_CONFIGURATION,
     };
-    loom_link_plan_options_t invalid_options = {};
-    invalid_options.mode = LOOM_LINK_PLAN_LINK;
-    invalid_options.root_facets = {1, &invalid_root};
+    loom_link_plan_options_t invalid_options = {
+        .mode = LOOM_LINK_PLAN_LINK, .root_facets = {1, &invalid_root}};
     PlanPtr invalid_plan;
     IREE_EXPECT_STATUS_IS(
         IREE_STATUS_INVALID_ARGUMENT,
@@ -579,9 +576,8 @@ TEST_F(LinkPlannerTest,
         .symbol_ordinal = root->ordinal,
         .kind = LOOM_LINK_SYMBOL_FACET_COMMAND_IMPLEMENTATION,
     };
-    loom_link_plan_options_t implementation_options = {};
-    implementation_options.mode = LOOM_LINK_PLAN_LINK;
-    implementation_options.root_facets = {1, &implementation_root};
+    loom_link_plan_options_t implementation_options = {
+        .mode = LOOM_LINK_PLAN_LINK, .root_facets = {1, &implementation_root}};
     PlanPtr implementation_plan = BuildPlan(index, &implementation_options);
     EXPECT_TRUE(ContainsSymbol(implementation_plan.get(), root));
     EXPECT_TRUE(ContainsSymbol(implementation_plan.get(), leaf));
@@ -650,8 +646,7 @@ TEST_F(LinkPlannerTest, InterleavedKernelFacetUpgradesPreservePerSymbolChains) {
             .kind = LOOM_LINK_SYMBOL_FACET_KERNEL_IMPLEMENTATION,
         },
     };
-    loom_link_plan_options_t options = {};
-    options.mode = LOOM_LINK_PLAN_LINK;
+    loom_link_plan_options_t options = {.mode = LOOM_LINK_PLAN_LINK};
     options.root_facets.count = IREE_ARRAYSIZE(roots);
     options.root_facets.values = roots;
     PlanPtr plan = BuildPlan(index, &options);
@@ -1128,16 +1123,16 @@ TEST_F(LinkPlannerTest, OverlayPlansInputAgainstImmutableLibrary) {
 
   iree_string_view_t roots[] = {IREE_SV("@entry")};
   const iree_host_size_t exact_roots[] = {declaration->ordinal};
-  loom_link_plan_options_t options = {};
-  options.mode = LOOM_LINK_PLAN_LINK;
-  options.root_symbols = {
-      /*.count=*/IREE_ARRAYSIZE(roots),
-      /*.values=*/roots,
-  };
-  options.root_symbol_ordinals = {
-      /*.count=*/IREE_ARRAYSIZE(exact_roots),
-      /*.values=*/exact_roots,
-  };
+  loom_link_plan_options_t options = {
+      .mode = LOOM_LINK_PLAN_LINK,
+      .root_symbols = {
+          /*.count=*/IREE_ARRAYSIZE(roots),
+          /*.values=*/roots,
+      },
+      .root_symbol_ordinals = {
+          /*.count=*/IREE_ARRAYSIZE(exact_roots),
+          /*.values=*/exact_roots,
+      }};
   PlanPtr plan = BuildPlan(overlay.get(), &options);
 
   EXPECT_TRUE(ContainsSymbol(plan.get(), entry));
