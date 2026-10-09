@@ -872,14 +872,14 @@ func.def public @unused_library(%x: i32) -> (i32) {
     const loomc_string_view_t roots[] = {
         loomc_make_cstring_view("@caller"),
     };
-    loomc_link_options_t options = {};
-    options.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS;
-    options.structure_size = sizeof(options);
-    options.mode = LOOMC_LINK_MODE_LINK;
-    options.root_symbols = roots;
-    options.root_symbol_count = IREE_ARRAYSIZE(roots);
-    options.module_providers = module_providers;
-    options.module_provider_count = IREE_ARRAYSIZE(module_providers);
+    loomc_link_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+        .structure_size = sizeof(options),
+        .mode = LOOMC_LINK_MODE_LINK,
+        .root_symbols = roots,
+        .root_symbol_count = IREE_ARRAYSIZE(roots),
+        .module_providers = module_providers,
+        .module_provider_count = IREE_ARRAYSIZE(module_providers)};
 
     LinkerPtr linker = CreateLinker(context.get());
     WorkspacePtr link_workspace = CreateWorkspace();
@@ -957,14 +957,13 @@ func.def public @identity(%x: i32) -> (i32) {
   const loomc_string_view_t roots[] = {
       loomc_make_cstring_view("@caller"),
   };
-  loomc_link_options_t options = {};
-  options.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS;
-  options.structure_size = sizeof(options);
-  options.mode = LOOMC_LINK_MODE_LINK;
-  options.root_symbols = roots;
-  options.root_symbol_count = IREE_ARRAYSIZE(roots);
-  options.module_providers = &module_provider;
-  options.module_provider_count = 1;
+  loomc_link_options_t options = {.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+                                  .structure_size = sizeof(options),
+                                  .mode = LOOMC_LINK_MODE_LINK,
+                                  .root_symbols = roots,
+                                  .root_symbol_count = IREE_ARRAYSIZE(roots),
+                                  .module_providers = &module_provider,
+                                  .module_provider_count = 1};
 
   LinkerPtr linker = CreateLinker(context.get());
   WorkspacePtr link_workspace = CreateWorkspace();

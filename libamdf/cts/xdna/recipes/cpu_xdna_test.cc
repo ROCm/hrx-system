@@ -50,15 +50,15 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
  protected:
   void SetUp() override {
     ASSERT_NO_FATAL_FAILURE(XdnaDeviceFixture::SetUp());
-    amdf_xdna_endpoint_info_t endpoint_info = {};
-    endpoint_info.type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO;
-    endpoint_info.structure_size = sizeof(endpoint_info);
+    amdf_xdna_endpoint_info_t endpoint_info = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_ENDPOINT_INFO,
+        .structure_size = sizeof(endpoint_info)};
     ASSERT_EQ(xdna_api_->endpoint_query_info(endpoint_, &endpoint_info),
               AMDF_STATUS_OK);
     RecordProperty("amdf_xdna_target", endpoint_info.target_id);
-    amdf_xdna_device_info_t device_info = {};
-    device_info.type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO;
-    device_info.structure_size = sizeof(device_info);
+    amdf_xdna_device_info_t device_info = {
+        .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
+        .structure_size = sizeof(device_info)};
     ASSERT_EQ(xdna_api_->device_query_info(device_, &device_info),
               AMDF_STATUS_OK);
     ASSERT_TRUE(FindXdnaKernelQueueFamily(api_, endpoint_, &family_ordinal_));
@@ -104,12 +104,11 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
         FindMemoryProfileOrdinal(role | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
                                  AMDF_MEMORY_FLAG_HOST_VISIBLE);
     ASSERT_NE(ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
-    amdf_memory_profile_t profile = {};
-    profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-    profile.structure_size = sizeof(profile);
-    amdf_memory_access_capabilities_t capabilities = {};
-    capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-    capabilities.structure_size = sizeof(capabilities);
+    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                     .structure_size = sizeof(profile)};
+    amdf_memory_access_capabilities_t capabilities = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(capabilities)};
     ASSERT_EQ(QueryMemoryProfile(ordinal, &profile, &capabilities),
               AMDF_STATUS_OK);
     const auto& geometry = role == AMDF_MEMORY_PROFILE_ROLE_REGISTER
@@ -130,13 +129,12 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
           geometry.byte_length_granularity * geometry.byte_length_granularity;
       create.minimum_alignment = geometry.minimum_alignment;
       if (role == AMDF_MEMORY_PROFILE_ROLE_REGISTER) {
-        amdf_memory_create_info_t host_create = {};
-        host_create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-        host_create.structure_size = sizeof(host_create);
-        host_create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-        host_create.byte_length = create.byte_length;
-        host_create.minimum_alignment =
-            geometry.registered_host_pointer_alignment;
+        amdf_memory_create_info_t host_create = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+            .structure_size = sizeof(host_create),
+            .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+            .byte_length = create.byte_length,
+            .minimum_alignment = geometry.registered_host_pointer_alignment};
         ASSERT_NO_FATAL_FAILURE(
             registered_storage_[i].Create(api_, system_scope_, host_create));
         ASSERT_EQ(registered_storage_[i].host.cacheability,
@@ -237,11 +235,11 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
                   AMDF_STATUS_OK);
       }
 
-      amdf_xdna_kernel_queue_submission_info_t submit = {};
-      submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
-      submit.structure_size = sizeof(submit);
-      submit.command_count = 1;
-      submit.commands = &execution_.command;
+      amdf_xdna_kernel_queue_submission_info_t submit = {
+          .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
+          .structure_size = sizeof(submit),
+          .command_count = 1,
+          .commands = &execution_.command};
       uint64_t point = 0;
       ASSERT_EQ(
           xdna_api_->kernel_queue_submit(execution_.queue, &submit, &point),
@@ -279,9 +277,9 @@ class CpuXdnaRecipeTest : public XdnaDeviceFixture {
             << std::distance(observed[ordinal].begin(), mismatch.first);
       }
       EXPECT_EQ(observed_commands, original_commands);
-      amdf_kernel_queue_status_t status = {};
-      status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
-      status.structure_size = sizeof(status);
+      amdf_kernel_queue_status_t status = {
+          .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
+          .structure_size = sizeof(status)};
       ASSERT_EQ(api_->kernel_queue_query_status(execution_.queue, &status),
                 AMDF_STATUS_OK);
       EXPECT_EQ(status.retired_submission, point);

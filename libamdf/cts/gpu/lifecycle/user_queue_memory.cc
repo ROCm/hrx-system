@@ -116,12 +116,11 @@ class UserQueueMemoryScenario {
     create_info.required_flags = kRequiredFlags;
     create_info.byte_length = kMemoryByteLength;
     create_info.minimum_alignment = 4096;
-    amdf_memory_profile_t profile = {};
-    profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-    profile.structure_size = sizeof(profile);
-    amdf_memory_access_capabilities_t capabilities = {};
-    capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-    capabilities.structure_size = sizeof(capabilities);
+    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                     .structure_size = sizeof(profile)};
+    amdf_memory_access_capabilities_t capabilities = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(capabilities)};
     ASSERT_EQ(api_->memory_scope_query_device_profile(
                   system_scope_, profile_ordinal, 1, &access, &profile,
                   &capabilities),
@@ -167,11 +166,11 @@ class UserQueueMemoryScenario {
                   memory_info.physical_backing_id.words[1],
               0u);
 
-    amdf_memory_map_info_t map_info = {};
-    map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-    map_info.structure_size = sizeof(map_info);
-    map_info.byte_length = kMemoryByteLength;
-    map_info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
+    amdf_memory_map_info_t map_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+        .structure_size = sizeof(map_info),
+        .byte_length = kMemoryByteLength,
+        .flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE};
     ASSERT_EQ(api_->memory_map(memory, &map_info, &mapping), AMDF_STATUS_OK);
     mapping_info.type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO;
     mapping_info.structure_size = sizeof(mapping_info);
@@ -301,21 +300,21 @@ void UserQueueMemoryScenario::RunCopiesBetweenExactAccessAttachments(
                                              kMemoryByteLength),
             AMDF_STATUS_OK);
 
-  amdf_gpu_user_queue_create_info_t create_info = {};
-  create_info.type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.queue_family_ordinal = queue_family_ordinal;
-  create_info.priority = AMDF_QUEUE_PRIORITY_NORMAL;
-  create_info.producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE;
-  create_info.required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER;
-  create_info.ring_byte_length = std::max(family_.minimum_ring_byte_length,
-                                          kUserQueueMemoryCommandByteCapacity);
+  amdf_gpu_user_queue_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_USER_QUEUE_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .queue_family_ordinal = queue_family_ordinal,
+      .priority = AMDF_QUEUE_PRIORITY_NORMAL,
+      .producer_mode = AMDF_QUEUE_PRODUCER_MODE_SINGLE,
+      .required_capabilities = AMDF_USER_QUEUE_CAPABILITY_HOST_PRODUCER,
+      .ring_byte_length = std::max(family_.minimum_ring_byte_length,
+                                   kUserQueueMemoryCommandByteCapacity)};
   ASSERT_EQ(gpu_api_->user_queue_create(device_, &create_info, &queue_),
             AMDF_STATUS_OK);
 
-  amdf_user_queue_info_t queue_info = {};
-  queue_info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO;
-  queue_info.structure_size = sizeof(queue_info);
+  amdf_user_queue_info_t queue_info = {
+      .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
+      .structure_size = sizeof(queue_info)};
   ASSERT_EQ(api_->user_queue_query_info(queue_, &queue_info), AMDF_STATUS_OK);
   EXPECT_EQ(queue_info.queue_family_ordinal, queue_family_ordinal);
   EXPECT_EQ(queue_info.command_type, command_type);
@@ -336,9 +335,9 @@ void UserQueueMemoryScenario::RunCopiesBetweenExactAccessAttachments(
 
   ASSERT_EQ(api_->user_queue_map(queue_, nullptr, &queue_mapping_),
             AMDF_STATUS_OK);
-  amdf_user_queue_mapping_info_t mapping_info = {};
-  mapping_info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO;
-  mapping_info.structure_size = sizeof(mapping_info);
+  amdf_user_queue_mapping_info_t mapping_info = {
+      .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO,
+      .structure_size = sizeof(mapping_info)};
   ASSERT_EQ(api_->user_queue_mapping_query_info(queue_mapping_, &mapping_info),
             AMDF_STATUS_OK);
   EXPECT_TRUE(
@@ -377,9 +376,9 @@ void UserQueueMemoryScenario::RunCopiesBetweenExactAccessAttachments(
   EXPECT_EQ(LoadAcquire(read_index), 0u);
   EXPECT_EQ(LoadAcquire(write_index), 0u);
 
-  amdf_user_queue_status_t queue_status = {};
-  queue_status.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS;
-  queue_status.structure_size = sizeof(queue_status);
+  amdf_user_queue_status_t queue_status = {
+      .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+      .structure_size = sizeof(queue_status)};
   ASSERT_EQ(api_->user_queue_query_status(queue_, &queue_status),
             AMDF_STATUS_OK);
   EXPECT_EQ(queue_status.state, AMDF_QUEUE_STATE_ACTIVE);
@@ -459,17 +458,16 @@ bool RunUserQueueMemoryCopies(const amdf_api_t* api,
 
 amdf_status_t UserQueueMemoryTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                                     bool* out_matches) {
-  amdf_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
+  amdf_endpoint_info_t info = {.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+                               .structure_size = sizeof(info)};
   amdf_status_t status = api_->endpoint_query_info(endpoint, &info);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
   for (uint32_t ordinal = 0; ordinal < info.queue_family_count; ++ordinal) {
-    amdf_queue_family_info_t family = {};
-    family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-    family.structure_size = sizeof(family);
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family)};
     status = api_->endpoint_query_queue_family_info(endpoint, ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -512,9 +510,9 @@ void UserQueueMemoryTest::RunConcurrentDeviceCreationAndRecreation() {
   if ((features_ & AMDF_GPU_DEVICE_FEATURE_DEVICE_RECREATION) == 0) {
     GTEST_SKIP() << "device recreation is not supported";
   }
-  amdf_gpu_device_create_info_t create_info = {};
-  create_info.type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
+  amdf_gpu_device_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO,
+      .structure_size = sizeof(create_info)};
   // This lifecycle case deliberately creates peers; all ordinary queue and
   // memory tests continue borrowing the one cached device.
   UserQueueMemoryScenario survivor(api_, gpu_api_, family_, commands_,

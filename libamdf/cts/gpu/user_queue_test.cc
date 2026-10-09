@@ -49,9 +49,9 @@ class GpuUserQueueCapacityTest
   amdf_status_t MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                  bool* out_matches) override {
     if (GetParam().command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_PM4) {
-      amdf_gpu_endpoint_info_t info = {};
-      info.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
-      info.structure_size = sizeof(info);
+      amdf_gpu_endpoint_info_t info = {
+          .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+          .structure_size = sizeof(info)};
       const auto status = gpu_api_->endpoint_query_info(endpoint, &info);
       if (!amdf_status_is_ok(status)) {
         return status;
@@ -201,9 +201,9 @@ TEST_P(GpuUserQueueCapacityTest, CopiesAcrossWrapAndRetiredReuse) {
     EXPECT_EQ(observed_input, expected_input);
     EXPECT_EQ(observed_completion, expected_completion);
     EXPECT_EQ(observed_ring, expected_ring);
-    amdf_user_queue_status_t status = {};
-    status.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS;
-    status.structure_size = sizeof(status);
+    amdf_user_queue_status_t status = {
+        .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+        .structure_size = sizeof(status)};
     ASSERT_EQ(api_->user_queue_query_status(queue->queue, &status),
               AMDF_STATUS_OK);
     EXPECT_EQ(status.producer_index, producer_index);

@@ -112,13 +112,13 @@ class LinkProviderRootsTest : public ::testing::Test {
 
   ModulePtr Link(const loomc_host_size_t* root_provider_ordinals,
                  loomc_host_size_t root_provider_count, ResultPtr* out_result) {
-    loomc_link_options_t options = {};
-    options.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS;
-    options.structure_size = sizeof(options);
-    options.link_index = link_index_.get();
-    options.mode = LOOMC_LINK_MODE_LINK;
-    options.root_provider_ordinals = root_provider_ordinals;
-    options.root_provider_count = root_provider_count;
+    loomc_link_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+        .structure_size = sizeof(options),
+        .link_index = link_index_.get(),
+        .mode = LOOMC_LINK_MODE_LINK,
+        .root_provider_ordinals = root_provider_ordinals,
+        .root_provider_count = root_provider_count};
 
     loomc_module_t* module = nullptr;
     loomc_result_t* result = nullptr;
@@ -130,10 +130,10 @@ class LinkProviderRootsTest : public ::testing::Test {
   }
 
   std::string SerializeText(const loomc_module_t* module) {
-    loomc_module_serialize_options_t options = {};
-    options.type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS;
-    options.structure_size = sizeof(options);
-    options.format = LOOMC_SOURCE_FORMAT_TEXT;
+    loomc_module_serialize_options_t options = {
+        .type = LOOMC_STRUCTURE_TYPE_MODULE_SERIALIZE_OPTIONS,
+        .structure_size = sizeof(options),
+        .format = LOOMC_SOURCE_FORMAT_TEXT};
     loomc_source_t* source = nullptr;
     LOOMC_EXPECT_OK(loomc_module_serialize_to_source(
         module, &options, loomc_allocator_system(), &source));
@@ -187,12 +187,11 @@ TEST_F(LinkProviderRootsTest, ReportsOutOfRangeProviderOrdinal) {
 }
 
 TEST_F(LinkProviderRootsTest, RejectsMissingProviderOrdinalArray) {
-  loomc_link_options_t options = {};
-  options.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS;
-  options.structure_size = sizeof(options);
-  options.link_index = link_index_.get();
-  options.mode = LOOMC_LINK_MODE_LINK;
-  options.root_provider_count = 1;
+  loomc_link_options_t options = {.type = LOOMC_STRUCTURE_TYPE_LINK_OPTIONS,
+                                  .structure_size = sizeof(options),
+                                  .link_index = link_index_.get(),
+                                  .mode = LOOMC_LINK_MODE_LINK,
+                                  .root_provider_count = 1};
 
   loomc_module_t* module = reinterpret_cast<loomc_module_t*>(0x1);
   loomc_result_t* result = reinterpret_cast<loomc_result_t*>(0x1);

@@ -480,15 +480,15 @@ check.case @device_event {
   loom_testbench_device_event_capture_t capture = {};
   IREE_ASSERT_OK(loom_testbench_device_event_capture_initialize(
       4, host_allocator_, &capture));
-  iree_hal_device_tsan_report_t tsan_report = {};
-  tsan_report.record_length = sizeof(tsan_report);
-  tsan_report.abi_version = IREE_HAL_DEVICE_TSAN_REPORT_ABI_VERSION_0;
-  tsan_report.check_kind = IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE;
-  tsan_report.memory_space = IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_WORKGROUP;
-  tsan_report.current_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE;
-  tsan_report.prior_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_READ;
-  tsan_report.access_length = 4;
-  tsan_report.memory_address = 12;
+  iree_hal_device_tsan_report_t tsan_report = {
+      .record_length = sizeof(tsan_report),
+      .abi_version = IREE_HAL_DEVICE_TSAN_REPORT_ABI_VERSION_0,
+      .check_kind = IREE_HAL_DEVICE_TSAN_CHECK_KIND_DATA_RACE,
+      .memory_space = IREE_HAL_DEVICE_TSAN_MEMORY_SPACE_WORKGROUP,
+      .current_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_WRITE,
+      .prior_access_kind = IREE_HAL_DEVICE_TSAN_ACCESS_KIND_READ,
+      .access_length = 4,
+      .memory_address = 12};
   iree_hal_device_event_t tsan_event = iree_hal_device_event_default();
   tsan_event.type = IREE_HAL_DEVICE_EVENT_TYPE_TSAN_REPORT;
   tsan_event.severity = IREE_HAL_DEVICE_EVENT_SEVERITY_ERROR;
@@ -497,13 +497,13 @@ check.case @device_event {
       iree_make_const_byte_span(&tsan_report, sizeof(tsan_report));
   iree_hal_device_event_sink_publish(
       loom_testbench_device_event_capture_sink(&capture), &tsan_event);
-  iree_hal_device_ubsan_report_t ubsan_report = {};
-  ubsan_report.record_length = sizeof(ubsan_report);
-  ubsan_report.abi_version = IREE_HAL_DEVICE_UBSAN_REPORT_ABI_VERSION_0;
-  ubsan_report.check_kind = IREE_HAL_DEVICE_UBSAN_CHECK_KIND_ASSERTION;
-  ubsan_report.site_id = 17;
-  ubsan_report.operand0 = 3;
-  ubsan_report.operand1 = 4;
+  iree_hal_device_ubsan_report_t ubsan_report = {
+      .record_length = sizeof(ubsan_report),
+      .abi_version = IREE_HAL_DEVICE_UBSAN_REPORT_ABI_VERSION_0,
+      .check_kind = IREE_HAL_DEVICE_UBSAN_CHECK_KIND_ASSERTION,
+      .site_id = 17,
+      .operand0 = 3,
+      .operand1 = 4};
   iree_hal_device_event_t ubsan_event = iree_hal_device_event_default();
   ubsan_event.type = IREE_HAL_DEVICE_EVENT_TYPE_UBSAN_REPORT;
   ubsan_event.payload =

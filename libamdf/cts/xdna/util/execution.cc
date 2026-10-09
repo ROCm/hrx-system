@@ -12,17 +12,16 @@
 ::testing::AssertionResult FindXdnaKernelQueueFamily(
     const amdf_api_t* api, amdf_endpoint_t* endpoint,
     uint32_t* out_queue_family_ordinal) {
-  amdf_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
+  amdf_endpoint_info_t info = {.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+                               .structure_size = sizeof(info)};
   auto status = api->endpoint_query_info(endpoint, &info);
   if (!amdf_status_is_ok(status)) {
     return ::testing::AssertionFailure() << "endpoint query: " << status;
   }
   for (uint32_t ordinal = 0; ordinal < info.queue_family_count; ++ordinal) {
-    amdf_queue_family_info_t family = {};
-    family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-    family.structure_size = sizeof(family);
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family)};
     status = api->endpoint_query_queue_family_info(endpoint, ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return ::testing::AssertionFailure() << "family query: " << status;
@@ -44,13 +43,12 @@ void XdnaExecution::Prepare(const amdf_api_t* api,
                             uint32_t logical_column_count,
                             std::span<const uint8_t> commands,
                             uint64_t command_alignment) {
-  amdf_xdna_context_create_info_t context_create = {};
-  context_create.type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_CREATE_INFO;
-  context_create.structure_size = sizeof(context_create);
-  context_create.logical_column_count = logical_column_count;
-  context_create.physical_column_origin = AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY;
-  context_create.acceptable_scheduling_modes =
-      AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED;
+  amdf_xdna_context_create_info_t context_create = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_CONTEXT_CREATE_INFO,
+      .structure_size = sizeof(context_create),
+      .logical_column_count = logical_column_count,
+      .physical_column_origin = AMDF_XDNA_PHYSICAL_COLUMN_ORIGIN_ANY,
+      .acceptable_scheduling_modes = AMDF_XDNA_SCHEDULING_MODE_TIME_SLICED};
   ASSERT_EQ(xdna_api->context_create(device, &context_create, &context),
             AMDF_STATUS_OK);
 
@@ -67,12 +65,11 @@ void XdnaExecution::Prepare(const amdf_api_t* api,
   access.requirements.flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS;
   access.requirements.address_kinds = UINT64_C(1)
                                       << AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE;
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
-  amdf_memory_access_capabilities_t capabilities = {};
-  capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-  capabilities.structure_size = sizeof(capabilities);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
+  amdf_memory_access_capabilities_t capabilities = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+      .structure_size = sizeof(capabilities)};
   ASSERT_EQ(api->memory_scope_query_device_profile(scope, 0, 1, &access,
                                                    &profile, &capabilities),
             AMDF_STATUS_OK);
@@ -110,11 +107,11 @@ void XdnaExecution::Prepare(const amdf_api_t* api,
              .byte_offset = byte_offset,
              .byte_length = commands.size()};
 
-  amdf_xdna_kernel_queue_create_info_t queue_create = {};
-  queue_create.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO;
-  queue_create.structure_size = sizeof(queue_create);
-  queue_create.queue_family_ordinal = queue_family_ordinal;
-  queue_create.maximum_pending_submission_count = 1;
+  amdf_xdna_kernel_queue_create_info_t queue_create = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_CREATE_INFO,
+      .structure_size = sizeof(queue_create),
+      .queue_family_ordinal = queue_family_ordinal,
+      .maximum_pending_submission_count = 1};
   ASSERT_EQ(xdna_api->kernel_queue_create(context, &queue_create, &queue),
             AMDF_STATUS_OK);
 }

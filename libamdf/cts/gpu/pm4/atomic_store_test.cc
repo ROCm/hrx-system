@@ -95,12 +95,11 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
     creation.accesses = &attachment;
     creation.byte_length = kPageByteLength;
     creation.minimum_alignment = kPageByteLength;
-    amdf_memory_profile_t profile = {};
-    profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-    profile.structure_size = sizeof(profile);
-    amdf_memory_access_capabilities_t capabilities = {};
-    capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-    capabilities.structure_size = sizeof(capabilities);
+    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                     .structure_size = sizeof(profile)};
+    amdf_memory_access_capabilities_t capabilities = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(capabilities)};
     ASSERT_EQ(
         QueryMemoryProfile(system_scope_, creation.memory_profile_ordinal,
                            attachment.requirements, &profile, &capabilities),
@@ -175,9 +174,9 @@ class Pm4AtomicStoreTest : public Pm4CommandTest,
         const auto pm4 = memory->DeviceSite(family_.ordinal);
         const auto& producer = direction == 0 ? host : pm4;
         const auto& consumer = direction == 0 ? pm4 : host;
-        amdf_memory_pair_info_t pair = {};
-        pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-        pair.structure_size = sizeof(pair);
+        amdf_memory_pair_info_t pair = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+            .structure_size = sizeof(pair)};
         ASSERT_EQ(api_->memory_query_pair_info(&producer, &consumer, &pair),
                   AMDF_STATUS_OK);
         ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE,

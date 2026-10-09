@@ -105,11 +105,11 @@ TEST_F(XdnaLinuxMemoryTest, PortableImportDoesNotInheritNativeHostProtocol) {
   create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
   ASSERT_EQ(api_->memory_create(system_scope_, &create, &memories_[0]),
             AMDF_STATUS_OK);
-  amdf_memory_export_info_t export_info = {};
-  export_info.type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO;
-  export_info.structure_size = sizeof(export_info);
-  export_info.external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
-  export_info.byte_length = create.byte_length;
+  amdf_memory_export_info_t export_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO,
+      .structure_size = sizeof(export_info),
+      .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
+      .byte_length = create.byte_length};
   ASSERT_EQ(
       api_->memory_export(memories_[0], &export_info, &external_memories_[0]),
       AMDF_STATUS_OK);
@@ -133,14 +133,12 @@ TEST_F(XdnaLinuxMemoryTest, PortableImportDoesNotInheritNativeHostProtocol) {
                   mappings_[1], operation, 0, create.byte_length)),
               AMDF_STATUS_CODE_UNSUPPORTED);
   }
-  amdf_memory_site_t host = {};
-  host.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE;
-  host.structure_size = sizeof(host);
-  host.kind = AMDF_MEMORY_SITE_KIND_HOST;
+  amdf_memory_site_t host = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+                             .structure_size = sizeof(host),
+                             .kind = AMDF_MEMORY_SITE_KIND_HOST};
   host.value.host_mapping = mappings_[1];
-  amdf_memory_pair_info_t pair = {};
-  pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  pair.structure_size = sizeof(pair);
+  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+                                  .structure_size = sizeof(pair)};
   const auto original = pair;
   EXPECT_EQ(amdf_status_code(api_->memory_query_pair_info(&host, &host, &pair)),
             AMDF_STATUS_CODE_UNSUPPORTED);
@@ -189,9 +187,9 @@ TEST_F(XdnaLinuxMemoryTest,
       .structure_size = sizeof(amdf_memory_info_t),
   };
   ASSERT_EQ(api_->memory_query_info(memories_[0], &first_info), AMDF_STATUS_OK);
-  amdf_memory_access_info_t first_access_info = {};
-  first_access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-  first_access_info.structure_size = sizeof(first_access_info);
+  amdf_memory_access_info_t first_access_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+      .structure_size = sizeof(first_access_info)};
   ASSERT_EQ(api_->memory_query_access_info(memories_[0], 0, &first_access_info),
             AMDF_STATUS_OK);
   EXPECT_EQ(first_info.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
@@ -312,9 +310,9 @@ TEST_F(XdnaLinuxMemoryTest,
   };
   ASSERT_EQ(api_->memory_query_info(memories_[0], &source_info),
             AMDF_STATUS_OK);
-  amdf_memory_access_info_t source_access_info = {};
-  source_access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-  source_access_info.structure_size = sizeof(source_access_info);
+  amdf_memory_access_info_t source_access_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+      .structure_size = sizeof(source_access_info)};
   ASSERT_EQ(
       api_->memory_query_access_info(memories_[0], 0, &source_access_info),
       AMDF_STATUS_OK);

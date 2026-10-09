@@ -272,9 +272,9 @@ TEST_F(AqlDispatchTest, ReplacesCompletedExecutableAtSameAddress) {
     RecordProperty("aql_replacement_completed_generations", generation + 1);
   }
 
-  amdf_user_queue_status_t status = {};
-  status.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS;
-  status.structure_size = sizeof(status);
+  amdf_user_queue_status_t status = {
+      .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+      .structure_size = sizeof(status)};
   ASSERT_EQ(api_->user_queue_query_status(queue->queue, &status),
             AMDF_STATUS_OK);
   ASSERT_EQ(status.terminal_status, AMDF_STATUS_OK);

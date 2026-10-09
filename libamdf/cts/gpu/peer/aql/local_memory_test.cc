@@ -189,9 +189,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
                    uint64_t byte_length, JointMemory* memory) {
     memory->scope = scope;
     const bool system = memory_class == AMDF_MEMORY_CLASS_SYSTEM;
-    amdf_memory_scope_info_t scope_info = {};
-    scope_info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-    scope_info.structure_size = sizeof(scope_info);
+    amdf_memory_scope_info_t scope_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(scope_info)};
     ASSERT_EQ(api_->memory_scope_query_info(scope, &scope_info),
               AMDF_STATUS_OK);
     for (size_t i = 0; i < 2; ++i) {
@@ -206,9 +206,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
                                           AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN};
     for (uint32_t ordinal = 0; ordinal < scope_info.memory_profile_count;
          ++ordinal) {
-      amdf_memory_profile_t profile = {};
-      profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-      profile.structure_size = sizeof(profile);
+      amdf_memory_profile_t profile = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+          .structure_size = sizeof(profile)};
       std::array<amdf_memory_access_capabilities_t, 2> capabilities = {};
       for (auto& capability : capabilities) {
         capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -300,9 +300,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
             memory->Site(from, from < 0 ? 0 : families_[from].ordinal);
         const auto target =
             memory->Site(to, to < 0 ? 0 : families_[to].ordinal);
-        amdf_memory_pair_info_t concrete = {};
-        concrete.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-        concrete.structure_size = sizeof(concrete);
+        amdf_memory_pair_info_t concrete = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+            .structure_size = sizeof(concrete)};
         ASSERT_EQ(api_->memory_query_pair_info(&source, &target, &concrete),
                   AMDF_STATUS_OK);
         const auto& prospective = pairs[(from + 1) * 3 + to + 1];
@@ -369,9 +369,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
   void Retire() {
     for (size_t i = 0; i < 2; ++i) {
       EXPECT_NO_FATAL_FAILURE(queues_[i].WaitConsumed(api_, indices_[i]));
-      amdf_user_queue_status_t status = {};
-      status.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS;
-      status.structure_size = sizeof(status);
+      amdf_user_queue_status_t status = {
+          .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+          .structure_size = sizeof(status)};
       EXPECT_EQ(api_->user_queue_query_status(queues_[i].queue, &status),
                 AMDF_STATUS_OK);
       EXPECT_EQ(status.state, AMDF_QUEUE_STATE_ACTIVE);
@@ -466,9 +466,9 @@ class PeerAqlMemoryTest : public GpuPeerDeviceFixture {
               AMDF_STATUS_OK);
     amdf_memory_scope_t* selected = nullptr;
     for (auto* scope : scopes) {
-      amdf_memory_scope_info_t info = {};
-      info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-      info.structure_size = sizeof(info);
+      amdf_memory_scope_info_t info = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+          .structure_size = sizeof(info)};
       ASSERT_EQ(api_->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
       if (info.kind == AMDF_MEMORY_SCOPE_KIND_LOCAL) {
         const auto& endpoint =

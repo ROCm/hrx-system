@@ -53,20 +53,18 @@ bool CtsMappedMemory::Release(const amdf_api_t* api) {
 }
 
 amdf_memory_site_t CtsMappedMemory::HostSite() const {
-  amdf_memory_site_t site = {};
-  site.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE;
-  site.structure_size = sizeof(site);
-  site.kind = AMDF_MEMORY_SITE_KIND_HOST;
+  amdf_memory_site_t site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+                             .structure_size = sizeof(site),
+                             .kind = AMDF_MEMORY_SITE_KIND_HOST};
   site.value.host_mapping = mapping;
   return site;
 }
 
 amdf_memory_site_t CtsMappedMemory::DeviceSite(
     uint32_t access_ordinal, uint32_t queue_family_ordinal) const {
-  amdf_memory_site_t site = {};
-  site.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE;
-  site.structure_size = sizeof(site);
-  site.kind = AMDF_MEMORY_SITE_KIND_DEVICE;
+  amdf_memory_site_t site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+                             .structure_size = sizeof(site),
+                             .kind = AMDF_MEMORY_SITE_KIND_DEVICE};
   site.value.device.memory = memory;
   site.value.device.access_ordinal = access_ordinal;
   site.value.device.queue_family_ordinal = queue_family_ordinal;

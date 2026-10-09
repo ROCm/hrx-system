@@ -78,9 +78,9 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
 
   amdf_status_t MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                  bool* out_matches) override {
-    amdf_endpoint_info_t endpoint_info = {};
-    endpoint_info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-    endpoint_info.structure_size = sizeof(endpoint_info);
+    amdf_endpoint_info_t endpoint_info = {
+        .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+        .structure_size = sizeof(endpoint_info)};
     amdf_status_t status = api_->endpoint_query_info(endpoint, &endpoint_info);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -89,9 +89,9 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
     for (uint32_t ordinal = 0; amdf_status_is_ok(status) &&
                                ordinal < endpoint_info.queue_family_count;
          ++ordinal) {
-      amdf_queue_family_info_t family = {};
-      family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-      family.structure_size = sizeof(family);
+      amdf_queue_family_info_t family = {
+          .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+          .structure_size = sizeof(family)};
       status =
           api_->endpoint_query_queue_family_info(endpoint, ordinal, &family);
       if (amdf_status_is_ok(status) &&
@@ -170,10 +170,10 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
       return status;
     }
 
-    amdf_gpu_kernel_queue_create_info_t queue_info = {};
-    queue_info.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO;
-    queue_info.structure_size = sizeof(queue_info);
-    queue_info.queue_family_ordinal = family_ordinal;
+    amdf_gpu_kernel_queue_create_info_t queue_info = {
+        .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
+        .structure_size = sizeof(queue_info),
+        .queue_family_ordinal = family_ordinal};
     return gpu_api_->kernel_queue_create(access.device, &queue_info,
                                          &access.queue);
   }
@@ -218,11 +218,11 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
     amdf_gpu_kernel_command_t command = {.memory = access.memory,
                                          .byte_offset = command_offset,
                                          .byte_length = 6 * sizeof(uint32_t)};
-    amdf_gpu_kernel_queue_submission_info_t submission = {};
-    submission.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO;
-    submission.structure_size = sizeof(submission);
-    submission.command_count = 1;
-    submission.commands = &command;
+    amdf_gpu_kernel_queue_submission_info_t submission = {
+        .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
+        .structure_size = sizeof(submission),
+        .command_count = 1,
+        .commands = &command};
     amdf_status_t status = gpu_api_->kernel_queue_submit(
         access.queue, &submission, &access.pending_submission);
     if (!amdf_status_is_ok(status)) {
@@ -246,9 +246,9 @@ class GpuMemoryInteropTest : public GpuDeviceFixture {
 
 TEST_F(GpuMemoryInteropTest, SharedBackingSurvivesIndependentPeerTeardown) {
   const uint32_t family_ordinal = family_ordinal_;
-  amdf_gpu_device_create_info_t device_info = {};
-  device_info.type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO;
-  device_info.structure_size = sizeof(device_info);
+  amdf_gpu_device_create_info_t device_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_CREATE_INFO,
+      .structure_size = sizeof(device_info)};
   ASSERT_TRUE(amdf_status_is_ok(
       gpu_api_->device_create(endpoint_, &device_info, &peer_device_)));
   accesses_[0].device = device_;

@@ -90,10 +90,10 @@ class CxxSourceScenarioBase : public TargetCompileScenario {
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_environment_create_amdgpu(
         loom_allocator(), &raw_environment)));
     TargetEnvironmentPtr environment(raw_environment);
-    loomc_amdgpu_profile_options_t profile_options = {};
-    profile_options.type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS;
-    profile_options.structure_size = sizeof(profile_options);
-    profile_options.identifier = loomc_make_cstring_view(kernel_.target);
+    loomc_amdgpu_profile_options_t profile_options = {
+        .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+        .structure_size = sizeof(profile_options),
+        .identifier = loomc_make_cstring_view(kernel_.target)};
     profile_options.identity.target = profile_options.identifier;
     loomc_target_profile_t* raw_profile = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(

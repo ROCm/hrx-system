@@ -45,9 +45,9 @@ void AqlGeometryTest::RunGeometry(
   constexpr std::array<uint32_t, 2> kEpochTokens = {0x13579bdfu, 0xa5c31f27u};
   constexpr std::array<const char*, 3> kAxes = {"x", "y", "z"};
 
-  amdf_gpu_endpoint_info_t endpoint_info = {};
-  endpoint_info.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
-  endpoint_info.structure_size = sizeof(endpoint_info);
+  amdf_gpu_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info)};
   ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &endpoint_info),
             AMDF_STATUS_OK);
   ASSERT_EQ(endpoint_info.compute.wavefront_size, kernel.wavefront_size);

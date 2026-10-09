@@ -47,16 +47,16 @@ void GpuCommandQueue::Initialize(
     return;
   }
   ASSERT_EQ(publication_mode, AMDF_QUEUE_PUBLICATION_MODE_KERNEL);
-  amdf_gpu_kernel_queue_create_info_t create_queue = {};
-  create_queue.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO;
-  create_queue.structure_size = sizeof(create_queue);
-  create_queue.queue_family_ordinal = family.ordinal;
-  create_queue.maximum_pending_submission_count = 1;
+  amdf_gpu_kernel_queue_create_info_t create_queue = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_CREATE_INFO,
+      .structure_size = sizeof(create_queue),
+      .queue_family_ordinal = family.ordinal,
+      .maximum_pending_submission_count = 1};
   ASSERT_EQ(gpu_api->kernel_queue_create(device, &create_queue, &kernel_queue_),
             AMDF_STATUS_OK);
-  amdf_kernel_queue_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO;
-  info.structure_size = sizeof(info);
+  amdf_kernel_queue_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_INFO,
+      .structure_size = sizeof(info)};
   ASSERT_EQ(api->kernel_queue_query_info(kernel_queue_, &info), AMDF_STATUS_OK);
   ASSERT_EQ(info.queue_family_ordinal, family.ordinal);
   ASSERT_EQ(info.command_type, command_type_);
@@ -75,12 +75,11 @@ void GpuCommandQueue::Initialize(
       AMDF_MEMORY_PROFILE_ROLE_CREATE | AMDF_MEMORY_PROFILE_ROLE_HOST_MAP,
       AMDF_MEMORY_FLAG_HOST_VISIBLE, access.requirements);
   ASSERT_NE(ordinal, AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN);
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
-  amdf_memory_access_capabilities_t capabilities = {};
-  capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-  capabilities.structure_size = sizeof(capabilities);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
+  amdf_memory_access_capabilities_t capabilities = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+      .structure_size = sizeof(capabilities)};
   ASSERT_EQ(api->memory_scope_query_device_profile(
                 system_scope, ordinal, 1, &access, &profile, &capabilities),
             AMDF_STATUS_OK);
@@ -140,11 +139,11 @@ void GpuCommandQueue::Publish(const amdf_api_t* api,
 void GpuCommandQueue::Submit(const amdf_gpu_api_t* gpu_api,
                              const amdf_gpu_kernel_command_t& command) {
   ASSERT_NE(kernel_queue_, nullptr);
-  amdf_gpu_kernel_queue_submission_info_t submit = {};
-  submit.type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO;
-  submit.structure_size = sizeof(submit);
-  submit.command_count = 1;
-  submit.commands = &command;
+  amdf_gpu_kernel_queue_submission_info_t submit = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_KERNEL_QUEUE_SUBMISSION_INFO,
+      .structure_size = sizeof(submit),
+      .command_count = 1,
+      .commands = &command};
   ASSERT_EQ(gpu_api->kernel_queue_submit(kernel_queue_, &submit, &submission_),
             AMDF_STATUS_OK);
 }
@@ -154,9 +153,9 @@ void GpuCommandQueue::WaitRetired(const amdf_api_t* api) {
     ASSERT_EQ(api->kernel_queue_wait(kernel_queue_, submission_,
                                      AMDF_TIMEOUT_INFINITE, 0),
               AMDF_STATUS_OK);
-    amdf_kernel_queue_status_t status = {};
-    status.type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS;
-    status.structure_size = sizeof(status);
+    amdf_kernel_queue_status_t status = {
+        .type = AMDF_STRUCTURE_TYPE_KERNEL_QUEUE_STATUS,
+        .structure_size = sizeof(status)};
     ASSERT_EQ(api->kernel_queue_query_status(kernel_queue_, &status),
               AMDF_STATUS_OK);
     EXPECT_EQ(status.state, AMDF_QUEUE_STATE_ACTIVE);
@@ -167,9 +166,9 @@ void GpuCommandQueue::WaitRetired(const amdf_api_t* api) {
                                ? published_word_count_
                                : published_word_count_ * sizeof(uint32_t);
     ASSERT_NO_FATAL_FAILURE(user_queue_.WaitConsumed(api, index));
-    amdf_user_queue_status_t status = {};
-    status.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS;
-    status.structure_size = sizeof(status);
+    amdf_user_queue_status_t status = {
+        .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+        .structure_size = sizeof(status)};
     ASSERT_EQ(api->user_queue_query_status(user_queue_.queue, &status),
               AMDF_STATUS_OK);
     EXPECT_EQ(status.state, AMDF_QUEUE_STATE_ACTIVE);

@@ -279,10 +279,10 @@ kernel.def target(@target) @configured() {
   for (int invocation = 0; invocation < 2; ++invocation) {
     for (auto mode : {LOOMC_COMPILE_REPORT_MODE_SUMMARY,
                       LOOMC_COMPILE_REPORT_MODE_DETAILS}) {
-      loomc_compile_report_options_t report_options = {};
-      report_options.type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
-      report_options.structure_size = sizeof(report_options);
-      report_options.mode = mode;
+      loomc_compile_report_options_t report_options = {
+          .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+          .structure_size = sizeof(report_options),
+          .mode = mode};
       loomc_emit_options_t emit_options = {
           .next = &report_options,
           .artifact_format =

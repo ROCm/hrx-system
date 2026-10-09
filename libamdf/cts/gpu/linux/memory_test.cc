@@ -82,12 +82,11 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
   amdf_status_t MapMemory(amdf_memory_t* memory, uint32_t ordinal,
                           uint64_t byte_offset, uint64_t byte_length,
                           amdf_memory_map_flags_t flags) {
-    amdf_memory_map_info_t info = {};
-    info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-    info.structure_size = sizeof(info);
-    info.byte_offset = byte_offset;
-    info.byte_length = byte_length;
-    info.flags = flags;
+    amdf_memory_map_info_t info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+                                   .structure_size = sizeof(info),
+                                   .byte_offset = byte_offset,
+                                   .byte_length = byte_length,
+                                   .flags = flags};
     amdf_status_t status = api_->memory_map(memory, &info, &mappings_[ordinal]);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -141,12 +140,12 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
       create_info.byte_length = 4097;
       create_info.minimum_alignment = 1024 * 1024;
 
-      amdf_memory_profile_t profile = {};
-      profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-      profile.structure_size = sizeof(profile);
-      amdf_memory_access_capabilities_t capabilities = {};
-      capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-      capabilities.structure_size = sizeof(capabilities);
+      amdf_memory_profile_t profile = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+          .structure_size = sizeof(profile)};
+      amdf_memory_access_capabilities_t capabilities = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+          .structure_size = sizeof(capabilities)};
       ASSERT_EQ(
           QueryMemoryProfile(scope, create_info.memory_profile_ordinal,
                              access.requirements, &profile, &capabilities),
@@ -166,13 +165,12 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
                 AMDF_STATUS_OK)
           << "access case " << case_ordinal;
 
-      amdf_memory_info_t info = {};
-      info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-      info.structure_size = sizeof(info);
+      amdf_memory_info_t info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+                                 .structure_size = sizeof(info)};
       ASSERT_EQ(api_->memory_query_info(memories_[0], &info), AMDF_STATUS_OK);
-      amdf_memory_access_info_t access_info = {};
-      access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-      access_info.structure_size = sizeof(access_info);
+      amdf_memory_access_info_t access_info = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+          .structure_size = sizeof(access_info)};
       ASSERT_EQ(api_->memory_query_access_info(memories_[0], 0, &access_info),
                 AMDF_STATUS_OK);
       EXPECT_EQ(info.memory_profile_ordinal,
@@ -254,11 +252,11 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
         ASSERT_EQ(api_->host_mapping_destroy(mappings_[0]), AMDF_STATUS_OK);
         mappings_[0] = nullptr;
       } else {
-        amdf_memory_map_info_t map_info = {};
-        map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-        map_info.structure_size = sizeof(map_info);
-        map_info.byte_length = 1;
-        map_info.flags = AMDF_MEMORY_MAP_FLAG_READ;
+        amdf_memory_map_info_t map_info = {
+            .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+            .structure_size = sizeof(map_info),
+            .byte_length = 1,
+            .flags = AMDF_MEMORY_MAP_FLAG_READ};
         auto* const sentinel =
             reinterpret_cast<amdf_host_mapping_t*>(uintptr_t{1});
         amdf_host_mapping_t* output = sentinel;
@@ -319,13 +317,12 @@ class GpuLinuxMemoryTest : public GpuDeviceFixture {
     const amdf_memory_create_info_t create_info = MakeSystemMemoryCreateInfo();
     ASSERT_EQ(api_->memory_create(system_scope_, &create_info, &memories_[0]),
               AMDF_STATUS_OK);
-    amdf_memory_info_t info = {};
-    info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-    info.structure_size = sizeof(info);
+    amdf_memory_info_t info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+                               .structure_size = sizeof(info)};
     ASSERT_EQ(api_->memory_query_info(memories_[0], &info), AMDF_STATUS_OK);
-    amdf_memory_access_info_t access_info = {};
-    access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-    access_info.structure_size = sizeof(access_info);
+    amdf_memory_access_info_t access_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+        .structure_size = sizeof(access_info)};
     ASSERT_EQ(api_->memory_query_access_info(memories_[0], 0, &access_info),
               AMDF_STATUS_OK);
     EXPECT_EQ(info.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
@@ -446,12 +443,11 @@ TEST_F(GpuLinuxMemoryTest, OmitsRegistrationWhenLifetimeDoesNotSupportIt) {
     GTEST_SKIP() << "selected lifetime supports host registration";
   }
   for (uint32_t ordinal = 0;; ++ordinal) {
-    amdf_memory_profile_t profile = {};
-    profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-    profile.structure_size = sizeof(profile);
-    amdf_memory_access_capabilities_t capabilities = {};
-    capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-    capabilities.structure_size = sizeof(capabilities);
+    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                     .structure_size = sizeof(profile)};
+    amdf_memory_access_capabilities_t capabilities = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(capabilities)};
     const amdf_status_t status =
         QueryMemoryProfile(system_scope_, ordinal, memory_access_.requirements,
                            &profile, &capabilities);
@@ -472,9 +468,9 @@ TEST_F(GpuLinuxMemoryTest, RegistersOverlappingCallerPagesWithExactAccess) {
     GTEST_SKIP()
         << "host registration is unavailable under this native lifetime";
   }
-  amdf_gpu_device_info_t device_info = {};
-  device_info.type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO;
-  device_info.structure_size = sizeof(device_info);
+  amdf_gpu_device_info_t device_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_DEVICE_INFO,
+      .structure_size = sizeof(device_info)};
   ASSERT_EQ(gpu_api_->device_query_info(device_, &device_info), AMDF_STATUS_OK);
   EXPECT_EQ(device_info.features, features_);
   ASSERT_NO_FATAL_FAILURE(AllocateCallerPages());
@@ -523,9 +519,9 @@ TEST_F(GpuLinuxMemoryTest, RegistersOverlappingCallerPagesWithExactAccess) {
     info.structure_size = sizeof(info);
     ASSERT_EQ(api_->memory_query_info(memories_[case_ordinal], &info),
               AMDF_STATUS_OK);
-    amdf_memory_access_info_t access_info = {};
-    access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-    access_info.structure_size = sizeof(access_info);
+    amdf_memory_access_info_t access_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+        .structure_size = sizeof(access_info)};
     ASSERT_EQ(api_->memory_query_access_info(memories_[case_ordinal], 0,
                                              &access_info),
               AMDF_STATUS_OK);

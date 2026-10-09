@@ -20,17 +20,16 @@ void FindEndpoint(const amdf_api_t* api, amdf_memory_scope_t* scope,
                   const amdf_external_memory_provenance_t* provenance,
                   ResidentImportPlan::Endpoint& endpoint) {
   endpoint.profile.ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
-  amdf_memory_scope_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-  info.structure_size = sizeof(info);
+  amdf_memory_scope_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(info)};
   ASSERT_EQ(api->memory_scope_query_info(scope, &info), AMDF_STATUS_OK);
   for (uint32_t ordinal = 0; ordinal < info.memory_profile_count; ++ordinal) {
-    amdf_memory_profile_t profile = {};
-    profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-    profile.structure_size = sizeof(profile);
-    amdf_memory_access_capabilities_t access = {};
-    access.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-    access.structure_size = sizeof(access);
+    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                     .structure_size = sizeof(profile)};
+    amdf_memory_access_capabilities_t access = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+        .structure_size = sizeof(access)};
     const auto status = api->memory_scope_query_device_profile(
         scope, ordinal, 1, &endpoint.access, &profile, &access);
     if (amdf_status_code(status) == AMDF_STATUS_CODE_UNSUPPORTED) {
@@ -154,12 +153,12 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
   ASSERT_TRUE(
       amdf_physical_memory_id_is_valid(&memory.info.physical_backing_id));
 
-  amdf_memory_export_info_t export_info = {};
-  export_info.type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO;
-  export_info.structure_size = sizeof(export_info);
-  export_info.external_memory_type = plan.source.transport.type;
-  export_info.byte_offset = logical.byte_offset;
-  export_info.byte_length = logical.byte_length;
+  amdf_memory_export_info_t export_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO,
+      .structure_size = sizeof(export_info),
+      .external_memory_type = plan.source.transport.type,
+      .byte_offset = logical.byte_offset,
+      .byte_length = logical.byte_length};
   ASSERT_EQ(api->memory_export(memory.memory, &export_info, &external),
             AMDF_STATUS_OK);
   ASSERT_EQ(external.type, plan.source.transport.type);
@@ -184,9 +183,8 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
             AMDF_STATUS_OK);
   const amdf_external_memory_t empty = {};
   ASSERT_EQ(std::memcmp(&external, &empty, sizeof(empty)), 0);
-  amdf_memory_info_t imported_info = {};
-  imported_info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-  imported_info.structure_size = sizeof(imported_info);
+  amdf_memory_info_t imported_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+                                      .structure_size = sizeof(imported_info)};
   ASSERT_EQ(api->memory_query_info(xdna_import, &imported_info),
             AMDF_STATUS_OK);
   ASSERT_EQ(imported_info.memory_profile_ordinal,
@@ -196,9 +194,9 @@ void ResidentBuffer::CreateImported(const amdf_api_t* api,
   ASSERT_EQ(imported_info.access_count, 1u);
   ASSERT_TRUE(amdf_physical_memory_id_is_equal(
       &imported_info.physical_backing_id, &memory.info.physical_backing_id));
-  amdf_memory_access_info_t access = {};
-  access.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-  access.structure_size = sizeof(access);
+  amdf_memory_access_info_t access = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+      .structure_size = sizeof(access)};
   ASSERT_EQ(api->memory_query_access_info(xdna_import, 0, &access),
             AMDF_STATUS_OK);
   const auto& required = plan.destination.access.requirements;

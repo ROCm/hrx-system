@@ -157,9 +157,8 @@ TEST(UserQueueTest, PreservesOutputsAndEnforcesMappingLifetime) {
   ASSERT_NE(queue, nullptr);
   EXPECT_EQ(amdf_child_tracker_count(&device.children), 1u);
 
-  amdf_user_queue_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO;
-  info.structure_size = sizeof(info);
+  amdf_user_queue_info_t info = {.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_INFO,
+                                 .structure_size = sizeof(info)};
   ASSERT_EQ(amdf_user_queue_query_info(queue, &info), AMDF_STATUS_OK);
   EXPECT_EQ(info.command_type, AMDF_QUEUE_COMMAND_TYPE_GPU_PM4);
   EXPECT_EQ(info.ring_byte_length, 4096u);
@@ -194,9 +193,9 @@ TEST(UserQueueTest, PreservesOutputsAndEnforcesMappingLifetime) {
   EXPECT_EQ(amdf_status_code(amdf_user_queue_destroy(queue)),
             AMDF_STATUS_CODE_BUSY);
 
-  amdf_user_queue_mapping_info_t mapping_info = {};
-  mapping_info.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO;
-  mapping_info.structure_size = sizeof(mapping_info);
+  amdf_user_queue_mapping_info_t mapping_info = {
+      .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_MAPPING_INFO,
+      .structure_size = sizeof(mapping_info)};
   ASSERT_EQ(amdf_user_queue_mapping_query_info(mapping, &mapping_info),
             AMDF_STATUS_OK);
   EXPECT_EQ(mapping_info.ring_address, UINT64_C(0x1000));

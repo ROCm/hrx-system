@@ -125,9 +125,8 @@ TEST_P(MemoryGroupTest, NativeGroupUsesOneOwnerWithoutExternalTransport) {
       [](const amdf_memory_site_query_t*, amdf_memory_site_description_t*) {
         return amdf_make_api_status(AMDF_STATUS_CODE_UNSUPPORTED);
       };
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
   amdf_memory_access_capabilities_t capabilities[2] = {};
   for (auto& capability : capabilities) {
     capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -215,9 +214,8 @@ TEST_P(MemoryGroupTest, NativeGroupIntersectsTheSharedAddressEnvelope) {
     capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
     capability.structure_size = sizeof(capability);
   }
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
   ASSERT_EQ(amdf_memory_scope_query_device_profile(
                 &instance_.system_memory_scope, GetParam(), 2, accesses,
                 &profile, capabilities),
@@ -337,9 +335,8 @@ TEST_F(MemoryConstructionTest, LiveProfileConstrainsTheConstructedAccessSet) {
   // address envelope. Selection and publication must preserve both facts.
   devices[1].profile.import.maximum_byte_length = 8192;
   devices[1].profile.device_address.maximum_address = (UINT64_C(1) << 40) - 1;
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
   ASSERT_EQ(amdf_memory_scope_query_device_profile(
                 &instance_.system_memory_scope, 0, 2, accesses, &profile,
                 capabilities),
@@ -387,9 +384,8 @@ TEST_F(MemoryConstructionTest, LiveProfilePreservesBackingPayloadGeometry) {
   devices[0].profile.import.native_byte_length_granularity = 65536;
   devices[0].profile.import.maximum_byte_length = 8192;
   devices[1].profile.allocation.native_byte_length_prefix = 32768;
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
   amdf_memory_access_capabilities_t capabilities[2] = {};
   for (auto& capability : capabilities) {
     capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -435,9 +431,8 @@ TEST_F(MemoryConstructionTest, HostOnlyPairDoesNotQueryDeviceAtomicReach) {
   query.producer.value.host_access = AMDF_MEMORY_MAP_FLAG_WRITE;
   query.consumer.kind = AMDF_MEMORY_SITE_KIND_HOST;
   query.consumer.value.host_access = AMDF_MEMORY_MAP_FLAG_READ;
-  amdf_memory_pair_info_t pair = {};
-  pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  pair.structure_size = sizeof(pair);
+  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+                                  .structure_size = sizeof(pair)};
   ASSERT_EQ(amdf_memory_scope_query_pair_info(&instance_.system_memory_scope,
                                               &query, &pair),
             AMDF_STATUS_OK);
@@ -466,10 +461,9 @@ TEST_F(MemoryConstructionTest, LiveProfileFailurePublishesNoPartialOutputs) {
     capabilities[i].structure_size = sizeof(capabilities[i]);
     capabilities[i].device_address.maximum_address = 73 + i;
   }
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
-  profile.ordinal = 91;
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile),
+                                   .ordinal = 91};
   const amdf_memory_profile_t original_profile = profile;
   amdf_memory_access_capabilities_t original_capabilities[2];
   std::memcpy(original_capabilities, capabilities, sizeof(capabilities));
@@ -567,9 +561,9 @@ TEST_F(MemoryConstructionTest,
   for (uint32_t i = 0; i < accesses.size(); ++i) {
     devices[i].profile_status =
         amdf_make_api_status(AMDF_STATUS_CODE_DEVICE_LOST);
-    amdf_memory_access_info_t info = {};
-    info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-    info.structure_size = sizeof(info);
+    amdf_memory_access_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+        .structure_size = sizeof(info)};
     ASSERT_EQ(amdf_memory_query_access_info(memory, i, &info), AMDF_STATUS_OK);
     EXPECT_EQ(info.ordinal, i);
     EXPECT_EQ(info.access, accesses[i].requirements.access);
@@ -585,9 +579,8 @@ TEST_F(MemoryConstructionTest,
   amdf_memory_site_t producer = MakeMemorySite(memory, 3);
   producer.value.device.access_ordinal = 1;
   amdf_memory_site_t consumer = MakeMemorySite(memory, 5);
-  amdf_memory_pair_info_t pair = {};
-  pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  pair.structure_size = sizeof(pair);
+  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+                                  .structure_size = sizeof(pair)};
   ASSERT_EQ(amdf_memory_query_pair_info(&producer, &consumer, &pair),
             AMDF_STATUS_OK);
   EXPECT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);

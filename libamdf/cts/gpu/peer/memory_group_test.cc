@@ -80,13 +80,12 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   };
   const std::array<amdf_memory_device_access_t, 2> accesses = {
       {{peer_device_, requirements}, {device_, requirements}}};
-  amdf_memory_scope_info_t scope_info = {};
-  scope_info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-  scope_info.structure_size = sizeof(scope_info);
+  amdf_memory_scope_info_t scope_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(scope_info)};
   ASSERT_EQ(api_->memory_scope_query_info(scope, &scope_info), AMDF_STATUS_OK);
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
   std::array<amdf_memory_access_capabilities_t, 2> capabilities = {};
   for (auto& capability : capabilities) {
     capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -159,17 +158,16 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   // establishes a teardown path that permits this fixture to free the pages.
   ASSERT_EQ(api_->memory_create(scope, &create_info, &memory_), AMDF_STATUS_OK);
   caller_storage_ = caller_storage;
-  amdf_memory_info_t memory_info = {};
-  memory_info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-  memory_info.structure_size = sizeof(memory_info);
+  amdf_memory_info_t memory_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+                                    .structure_size = sizeof(memory_info)};
   ASSERT_EQ(api_->memory_query_info(memory_, &memory_info), AMDF_STATUS_OK);
   EXPECT_EQ(memory_info.access_count, accesses.size());
   EXPECT_EQ(memory_info.memory_class, GetParam().memory_class);
   EXPECT_EQ(memory_info.byte_length, create_info.byte_length);
   for (uint32_t i = 0; i < accesses.size(); ++i) {
-    amdf_memory_access_info_t access_info = {};
-    access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-    access_info.structure_size = sizeof(access_info);
+    amdf_memory_access_info_t access_info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+        .structure_size = sizeof(access_info)};
     ASSERT_EQ(api_->memory_query_access_info(memory_, i, &access_info),
               AMDF_STATUS_OK);
     EXPECT_EQ(access_info.ordinal, i);
@@ -193,9 +191,9 @@ TEST_P(GpuMemoryGroupTest, OneBackingForTwoPhysicalConsumers) {
   map_info.flags = AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE;
   map_info.byte_length = create_info.byte_length;
   ASSERT_EQ(api_->memory_map(memory_, &map_info, &mapping_), AMDF_STATUS_OK);
-  amdf_host_mapping_info_t mapping_info = {};
-  mapping_info.type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO;
-  mapping_info.structure_size = sizeof(mapping_info);
+  amdf_host_mapping_info_t mapping_info = {
+      .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
+      .structure_size = sizeof(mapping_info)};
   ASSERT_EQ(api_->host_mapping_query_info(mapping_, &mapping_info),
             AMDF_STATUS_OK);
   if (registered) {

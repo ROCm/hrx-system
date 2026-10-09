@@ -30,9 +30,9 @@ GpuXdnaDeviceFixture::GpuXdnaDeviceFixture(
 amdf_status_t GpuXdnaDeviceFixture::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                                      bool* out_matches) {
   *out_matches = false;
-  amdf_gpu_endpoint_info_t target = {};
-  target.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
-  target.structure_size = sizeof(target);
+  amdf_gpu_endpoint_info_t target = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+      .structure_size = sizeof(target)};
   auto status = gpu_api_->endpoint_query_info(endpoint, &target);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -41,17 +41,16 @@ amdf_status_t GpuXdnaDeviceFixture::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
   if (!profile) {
     return AMDF_STATUS_OK;
   }
-  amdf_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
+  amdf_endpoint_info_t info = {.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+                               .structure_size = sizeof(info)};
   status = api_->endpoint_query_info(endpoint, &info);
   if (!amdf_status_is_ok(status)) {
     return status;
   }
   for (uint32_t ordinal = 0; ordinal < info.queue_family_count; ++ordinal) {
-    amdf_queue_family_info_t family = {};
-    family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-    family.structure_size = sizeof(family);
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family)};
     status = api_->endpoint_query_queue_family_info(endpoint, ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return status;
@@ -154,15 +153,14 @@ void GpuXdnaDeviceFixture::FindProfile(
     std::span<const amdf_memory_device_access_t> accesses,
     amdf_memory_profile_roles_t role, amdf_memory_profile_t* result) {
   result->ordinal = AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN;
-  amdf_memory_scope_info_t scope = {};
-  scope.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-  scope.structure_size = sizeof(scope);
+  amdf_memory_scope_info_t scope = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+      .structure_size = sizeof(scope)};
   ASSERT_EQ(api_->memory_scope_query_info(system_scope_, &scope),
             AMDF_STATUS_OK);
   for (uint32_t ordinal = 0; ordinal < scope.memory_profile_count; ++ordinal) {
-    amdf_memory_profile_t profile = {};
-    profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-    profile.structure_size = sizeof(profile);
+    amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                     .structure_size = sizeof(profile)};
     std::array<amdf_memory_access_capabilities_t, 2> capabilities = {};
     for (auto& capability : capabilities) {
       capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -254,9 +252,9 @@ void GpuXdnaDeviceFixture::CheckConcretePairs(
     SCOPED_TRACE(i);
     const auto producer = ConcreteSite(memory, edges[i].producer, gpu_ordinal);
     const auto consumer = ConcreteSite(memory, edges[i].consumer, gpu_ordinal);
-    amdf_memory_pair_info_t pair = {};
-    pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-    pair.structure_size = sizeof(pair);
+    amdf_memory_pair_info_t pair = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(pair)};
     ASSERT_EQ(api_->memory_query_pair_info(&producer, &consumer, &pair),
               AMDF_STATUS_OK);
     ASSERT_NE(pair.flags & AMDF_MEMORY_PAIR_FLAG_SHARED_BACKING_REACHABLE, 0u);
@@ -307,9 +305,9 @@ void GpuXdnaDeviceFixture::CheckAccesses(
                 (AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE),
             AMDF_MEMORY_MAP_FLAG_READ | AMDF_MEMORY_MAP_FLAG_WRITE);
   for (uint32_t ordinal = 0; ordinal < accesses.size(); ++ordinal) {
-    amdf_memory_access_info_t actual = {};
-    actual.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-    actual.structure_size = sizeof(actual);
+    amdf_memory_access_info_t actual = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+        .structure_size = sizeof(actual)};
     ASSERT_EQ(api_->memory_query_access_info(memory.memory, ordinal, &actual),
               AMDF_STATUS_OK);
     const auto& required = accesses[ordinal].requirements;

@@ -481,13 +481,12 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
                              geometry.byte_length_granularity *
                              geometry.byte_length_granularity;
         if (role == AMDF_MEMORY_PROFILE_ROLE_REGISTER) {
-          amdf_memory_create_info_t host_create = {};
-          host_create.type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO;
-          host_create.structure_size = sizeof(host_create);
-          host_create.required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE;
-          host_create.byte_length = create.byte_length;
-          host_create.minimum_alignment =
-              geometry.registered_host_pointer_alignment;
+          amdf_memory_create_info_t host_create = {
+              .type = AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO,
+              .structure_size = sizeof(host_create),
+              .required_flags = AMDF_MEMORY_FLAG_HOST_VISIBLE,
+              .byte_length = create.byte_length,
+              .minimum_alignment = geometry.registered_host_pointer_alignment};
           ASSERT_NO_FATAL_FAILURE(
               buffer.registration.Create(api_, system_scope_, host_create));
           ASSERT_EQ(buffer.registration.host.cacheability,
@@ -1028,11 +1027,11 @@ class ResidentGpuXdnaTest : public GpuXdnaDeviceFixture {
     amdf_status_t npu_submit_status = AMDF_STATUS_OK;
     auto gpu_submit_result = ::testing::AssertionSuccess();
     const auto submit_npu = [&] {
-      amdf_xdna_kernel_queue_submission_info_t submit = {};
-      submit.type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO;
-      submit.structure_size = sizeof(submit);
-      submit.command_count = 1;
-      submit.commands = &execution_.command;
+      amdf_xdna_kernel_queue_submission_info_t submit = {
+          .type = AMDF_STRUCTURE_TYPE_XDNA_KERNEL_QUEUE_SUBMISSION_INFO,
+          .structure_size = sizeof(submit),
+          .command_count = 1,
+          .commands = &execution_.command};
       npu_submit_status =
           xdna_api_->kernel_queue_submit(execution_.queue, &submit, &npu_point);
       npu_pending_ = amdf_status_is_ok(npu_submit_status);

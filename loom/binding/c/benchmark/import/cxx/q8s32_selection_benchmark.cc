@@ -93,10 +93,10 @@ class Q8S32SelectionFixture {
         loom_allocator(), &raw_environment)));
     target_environment_.reset(raw_environment);
 
-    loomc_amdgpu_profile_options_t profile_options = {};
-    profile_options.type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS;
-    profile_options.structure_size = sizeof(profile_options);
-    profile_options.identifier = loomc_make_cstring_view("gfx1151");
+    loomc_amdgpu_profile_options_t profile_options = {
+        .type = LOOMC_STRUCTURE_TYPE_AMDGPU_PROFILE_OPTIONS,
+        .structure_size = sizeof(profile_options),
+        .identifier = loomc_make_cstring_view("gfx1151")};
     profile_options.identity.target = profile_options.identifier;
     loomc_target_profile_t* raw_profile = nullptr;
     IREE_RETURN_IF_ERROR(to_iree_status(loomc_target_profile_create_amdgpu(

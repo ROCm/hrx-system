@@ -140,9 +140,9 @@ void Pm4SdmaTest::ResolvePairs(
   for (const Edge& edge : edges) {
     SCOPED_TRACE(edge.name);
     const Backing& backing = backings[edge.backing];
-    amdf_memory_pair_info_t pair = {};
-    pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-    pair.structure_size = sizeof(pair);
+    amdf_memory_pair_info_t pair = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(pair)};
     if (query_kind == PairQuery::kProfile) {
       const auto& creation = backing.creation;
       amdf_memory_profile_pair_query_t query = {};

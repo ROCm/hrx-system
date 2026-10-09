@@ -68,9 +68,8 @@ TEST_F(MemoryTest, HostSitesUseTheSelectedPeerAndPreserveNativeApiOperations) {
   host.structure_size = sizeof(host);
   host.kind = AMDF_MEMORY_SITE_KIND_HOST;
   host.value.host_mapping = &mapping;
-  amdf_memory_pair_info_t pair = {};
-  pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  pair.structure_size = sizeof(pair);
+  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+                                  .structure_size = sizeof(pair)};
   for (uint32_t i = 0; i < 2; ++i) {
     amdf_memory_site_t device = MakeMemorySite(memory, 3);
     device.value.device.access_ordinal = i;
@@ -173,16 +172,14 @@ TEST_F(MemoryTest, HostAtomicReachUsesOnlyTheExactPeersSystemWidths) {
   mapping.info.flush.host_operation = AMDF_HOST_CACHE_OPERATION_FLUSH;
   mapping.info.invalidate = mapping.info.flush;
   mapping.info.invalidate.host_operation = AMDF_HOST_CACHE_OPERATION_INVALIDATE;
-  amdf_memory_site_t host = {};
-  host.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE;
-  host.structure_size = sizeof(host);
-  host.kind = AMDF_MEMORY_SITE_KIND_HOST;
+  amdf_memory_site_t host = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+                             .structure_size = sizeof(host),
+                             .kind = AMDF_MEMORY_SITE_KIND_HOST};
   host.value.host_mapping = &mapping;
   amdf_memory_site_t device = MakeMemorySite(memory, 3);
   device.value.device.access_ordinal = 1;
-  amdf_memory_pair_info_t pair = {};
-  pair.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-  pair.structure_size = sizeof(pair);
+  amdf_memory_pair_info_t pair = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+                                  .structure_size = sizeof(pair)};
 
   struct Case {
     // Native host cache class established for the view.
@@ -324,9 +321,8 @@ TEST_F(MemoryAddressTest, QueriesCachedAddressAndRejectsUnavailableConsumers) {
   ASSERT_EQ(
       amdf_memory_create(&instance_.system_memory_scope, &create_info, &memory),
       AMDF_STATUS_OK);
-  amdf_memory_info_t memory_info = {};
-  memory_info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-  memory_info.structure_size = sizeof(memory_info);
+  amdf_memory_info_t memory_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+                                    .structure_size = sizeof(memory_info)};
   ASSERT_EQ(amdf_memory_query_info(memory, &memory_info), AMDF_STATUS_OK);
   EXPECT_EQ(memory_info.access_count, 1u);
   EXPECT_EQ(memory_info.flags & AMDF_MEMORY_ACCESS_FLAGS, 0u);
@@ -471,9 +467,9 @@ TEST_F(MemoryExternalTest, CompletesProfileExportImportPairAndReverseTeardown) {
   const amdf_external_memory_t empty = {};
   EXPECT_EQ(std::memcmp(&external_memory, &empty, sizeof(external_memory)), 0);
 
-  amdf_memory_info_t destination_info = {};
-  destination_info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-  destination_info.structure_size = sizeof(destination_info);
+  amdf_memory_info_t destination_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+      .structure_size = sizeof(destination_info)};
   ASSERT_EQ(amdf_memory_query_info(destination_memory, &destination_info),
             AMDF_STATUS_OK);
   EXPECT_EQ(destination_info.memory_profile_ordinal,
@@ -739,11 +735,11 @@ TEST_F(MemoryExternalTest, FailedCreateAndMapPreserveCallerStorage) {
       AMDF_STATUS_OK);
   auto* fake_memory = static_cast<FakeMemory*>(memory->accesses[0].native);
   fake_memory->map_status = failure_status;
-  amdf_memory_map_info_t map_info = {};
-  map_info.type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO;
-  map_info.structure_size = sizeof(map_info);
-  map_info.byte_length = 4096;
-  map_info.flags = AMDF_MEMORY_MAP_FLAG_READ;
+  amdf_memory_map_info_t map_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_MAP_INFO,
+      .structure_size = sizeof(map_info),
+      .byte_length = 4096,
+      .flags = AMDF_MEMORY_MAP_FLAG_READ};
   auto* const mapping_sentinel =
       reinterpret_cast<amdf_host_mapping_t*>(uintptr_t{1});
   amdf_host_mapping_t* mapping = mapping_sentinel;

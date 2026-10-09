@@ -360,19 +360,18 @@ amdf_memory_import_info_t MakeMemoryImportInfo(FakeDevice& device) {
 }
 
 amdf_memory_export_info_t MakeMemoryExportInfo() {
-  amdf_memory_export_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO;
-  info.structure_size = sizeof(info);
-  info.external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD;
-  info.byte_length = 4096;
+  amdf_memory_export_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_EXPORT_INFO,
+      .structure_size = sizeof(info),
+      .external_memory_type = AMDF_EXTERNAL_MEMORY_TYPE_DMA_BUF_FD,
+      .byte_length = 4096};
   return info;
 }
 
 amdf_memory_site_t MakeMemorySite(amdf_memory_t* memory,
                                   uint32_t queue_family_ordinal) {
-  amdf_memory_site_t site = {};
-  site.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE;
-  site.structure_size = sizeof(site);
+  amdf_memory_site_t site = {.type = AMDF_STRUCTURE_TYPE_MEMORY_SITE,
+                             .structure_size = sizeof(site)};
   site.value.device.memory = memory;
   site.value.device.queue_family_ordinal = queue_family_ordinal;
   return site;

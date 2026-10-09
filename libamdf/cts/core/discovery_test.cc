@@ -24,24 +24,23 @@ const amdf_api_t* QueryApi() {
 }
 
 amdf_instance_create_info_t MakeInstanceCreateInfo() {
-  amdf_instance_create_info_t create_info = {};
-  create_info.type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO;
-  create_info.structure_size = sizeof(create_info);
-  create_info.native_lifetime = GetCtsDeviceCache().native_lifetime();
+  amdf_instance_create_info_t create_info = {
+      .type = AMDF_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
+      .structure_size = sizeof(create_info),
+      .native_lifetime = GetCtsDeviceCache().native_lifetime()};
   return create_info;
 }
 
 amdf_endpoint_info_t MakeEndpointInfo() {
-  amdf_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
+  amdf_endpoint_info_t info = {.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+                               .structure_size = sizeof(info)};
   return info;
 }
 
 amdf_queue_family_info_t MakeQueueFamilyInfo() {
-  amdf_queue_family_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-  info.structure_size = sizeof(info);
+  amdf_queue_family_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+      .structure_size = sizeof(info)};
   return info;
 }
 

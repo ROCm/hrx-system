@@ -8,9 +8,9 @@
 
 amdf_status_t AqlDispatchTest::MatchGpuEndpoint(amdf_endpoint_t* endpoint,
                                                 bool* out_matches) {
-  amdf_gpu_endpoint_info_t info = {};
-  info.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
-  info.structure_size = sizeof(info);
+  amdf_gpu_endpoint_info_t info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+      .structure_size = sizeof(info)};
   const amdf_status_t status = gpu_api_->endpoint_query_info(endpoint, &info);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -27,9 +27,9 @@ void AqlDispatchTest::CreateFixedScratchQueue(
   const uint64_t wave_byte_length =
       (uint64_t{maximum_private_segment_byte_length} * 64 + 1023) &
       ~UINT64_C(1023);
-  amdf_gpu_endpoint_info_t endpoint_info = {};
-  endpoint_info.type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO;
-  endpoint_info.structure_size = sizeof(endpoint_info);
+  amdf_gpu_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_GPU_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info)};
   ASSERT_EQ(gpu_api_->endpoint_query_info(endpoint_, &endpoint_info),
             AMDF_STATUS_OK);
   const auto& compute = endpoint_info.compute;

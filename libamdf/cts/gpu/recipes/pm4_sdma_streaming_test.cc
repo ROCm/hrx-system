@@ -622,9 +622,9 @@ class Pm4SdmaStreamingTest : public Pm4SdmaTest {
     RecordProperty("host_readback_consumptions",
                    std::to_string(completed_graphs));
     for (size_t queue = 0; queue < queues.size(); ++queue) {
-      amdf_user_queue_status_t status = {};
-      status.type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS;
-      status.structure_size = sizeof(status);
+      amdf_user_queue_status_t status = {
+          .type = AMDF_STRUCTURE_TYPE_USER_QUEUE_STATUS,
+          .structure_size = sizeof(status)};
       ASSERT_EQ(api_->user_queue_query_status(queues[queue]->queue, &status),
                 AMDF_STATUS_OK);
       EXPECT_EQ(status.state, AMDF_QUEUE_STATE_ACTIVE);

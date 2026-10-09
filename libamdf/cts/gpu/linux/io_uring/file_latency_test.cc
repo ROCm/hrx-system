@@ -258,9 +258,9 @@ class GpuFileLatencyTest : public GpuFileIoFixture,
   }
 
   void OpenClock() {
-    amdf_endpoint_info_t endpoint_info = {};
-    endpoint_info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-    endpoint_info.structure_size = sizeof(endpoint_info);
+    amdf_endpoint_info_t endpoint_info = {
+        .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+        .structure_size = sizeof(endpoint_info)};
     ASSERT_EQ(api_->endpoint_query_info(endpoint_, &endpoint_info),
               AMDF_STATUS_OK);
     ASSERT_EQ(endpoint_info.native_identity.type,

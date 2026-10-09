@@ -98,17 +98,17 @@ class PeerSdmaSystemTest : public GpuPeerDeviceFixture {
   }
 
   void SelectBacking() {
-    amdf_memory_scope_info_t info = {};
-    info.type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO;
-    info.structure_size = sizeof(info);
+    amdf_memory_scope_info_t info = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_SCOPE_INFO,
+        .structure_size = sizeof(info)};
     ASSERT_EQ(api_->memory_scope_query_info(system_scope_, &info),
               AMDF_STATUS_OK);
     amdf_memory_profile_t selected = {.ordinal =
                                           AMDF_MEMORY_PROFILE_ORDINAL_UNKNOWN};
     for (uint32_t ordinal = 0; ordinal < info.memory_profile_count; ++ordinal) {
-      amdf_memory_profile_t profile = {};
-      profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-      profile.structure_size = sizeof(profile);
+      amdf_memory_profile_t profile = {
+          .type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+          .structure_size = sizeof(profile)};
       std::array<amdf_memory_access_capabilities_t, 2> capabilities = {};
       for (auto& capability : capabilities) {
         capability.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
@@ -203,9 +203,9 @@ class PeerSdmaSystemTest : public GpuPeerDeviceFixture {
                  : backing_.DeviceSite(from, families_[from].ordinal);
     const auto target = to < 0 ? backing_.HostSite()
                                : backing_.DeviceSite(to, families_[to].ordinal);
-    amdf_memory_pair_info_t concrete = {};
-    concrete.type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO;
-    concrete.structure_size = sizeof(concrete);
+    amdf_memory_pair_info_t concrete = {
+        .type = AMDF_STRUCTURE_TYPE_MEMORY_PAIR_INFO,
+        .structure_size = sizeof(concrete)};
     ASSERT_EQ(api_->memory_query_pair_info(&source, &target, &concrete),
               AMDF_STATUS_OK);
     ASSERT_NO_FATAL_FAILURE(CheckTransitions(concrete));

@@ -354,10 +354,10 @@ TEST_F(XdnaTest, PreservesPreparedModuleAcrossRepeatedEmission) {
     emit_options.artifact_format =
         loomc_make_cstring_view(LOOMC_ARTIFACT_FORMAT_XDNA);
     emit_options.artifact_flags = LOOMC_EMIT_ARTIFACT_FLAG_PRIMARY;
-    loomc_compile_report_options_t report_options = {};
-    report_options.type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS;
-    report_options.structure_size = sizeof(report_options);
-    report_options.mode = LOOMC_COMPILE_REPORT_MODE_DETAILS;
+    loomc_compile_report_options_t report_options = {
+        .type = LOOMC_STRUCTURE_TYPE_COMPILE_REPORT_OPTIONS,
+        .structure_size = sizeof(report_options),
+        .mode = LOOMC_COMPILE_REPORT_MODE_DETAILS};
     if (invocation == 0) {
       loomc_artifact_manifest_options_t manifest_options = {
           .type = LOOMC_STRUCTURE_TYPE_ARTIFACT_MANIFEST_OPTIONS,

@@ -99,12 +99,11 @@ TEST_F(XdnaMemoryTest, ValidatesCreationArgumentsWithoutNativeAllocation) {
 
 TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
   const amdf_memory_create_info_t create_info = MakeMemoryCreateInfo();
-  amdf_memory_profile_t profile = {};
-  profile.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE;
-  profile.structure_size = sizeof(profile);
-  amdf_memory_access_capabilities_t access_capabilities = {};
-  access_capabilities.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES;
-  access_capabilities.structure_size = sizeof(access_capabilities);
+  amdf_memory_profile_t profile = {.type = AMDF_STRUCTURE_TYPE_MEMORY_PROFILE,
+                                   .structure_size = sizeof(profile)};
+  amdf_memory_access_capabilities_t access_capabilities = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_CAPABILITIES,
+      .structure_size = sizeof(access_capabilities)};
   ASSERT_EQ(QueryMemoryProfile(create_info.memory_profile_ordinal, &profile,
                                &access_capabilities),
             AMDF_STATUS_OK);
@@ -126,14 +125,13 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
       << " code=" << amdf_status_code(create_status);
   ASSERT_NE(memory_, nullptr);
 
-  amdf_memory_info_t memory_info = {};
-  memory_info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-  memory_info.structure_size = sizeof(memory_info);
+  amdf_memory_info_t memory_info = {.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+                                    .structure_size = sizeof(memory_info)};
   ASSERT_TRUE(
       amdf_status_is_ok(api_->memory_query_info(memory_, &memory_info)));
-  amdf_memory_access_info_t access_info = {};
-  access_info.type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO;
-  access_info.structure_size = sizeof(access_info);
+  amdf_memory_access_info_t access_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_ACCESS_INFO,
+      .structure_size = sizeof(access_info)};
   ASSERT_EQ(api_->memory_query_access_info(memory_, 0, &access_info),
             AMDF_STATUS_OK);
   EXPECT_EQ(memory_info.memory_class, AMDF_MEMORY_CLASS_SYSTEM);
@@ -186,9 +184,9 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
     }
   }
 
-  amdf_xdna_device_info_t device_info = {};
-  device_info.type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO;
-  device_info.structure_size = sizeof(device_info);
+  amdf_xdna_device_info_t device_info = {
+      .type = AMDF_STRUCTURE_TYPE_XDNA_DEVICE_INFO,
+      .structure_size = sizeof(device_info)};
   ASSERT_TRUE(
       amdf_status_is_ok(xdna_api_->device_query_info(device_, &device_info)));
   EXPECT_EQ(access_info.reset_epoch, device_info.reset_epoch);
@@ -207,9 +205,9 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
   EXPECT_EQ(
       std::memcmp(&access_info, &repeated_access_info, sizeof(access_info)), 0);
 
-  amdf_memory_info_t second_memory_info = {};
-  second_memory_info.type = AMDF_STRUCTURE_TYPE_MEMORY_INFO;
-  second_memory_info.structure_size = sizeof(second_memory_info);
+  amdf_memory_info_t second_memory_info = {
+      .type = AMDF_STRUCTURE_TYPE_MEMORY_INFO,
+      .structure_size = sizeof(second_memory_info)};
   ASSERT_TRUE(
       amdf_status_is_ok(api_->memory_query_info(memory_, &second_memory_info)));
   EXPECT_EQ(std::memcmp(&memory_info, &second_memory_info, sizeof(memory_info)),
@@ -235,9 +233,9 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
       amdf_status_is_ok(api_->memory_map(memory_, &map_info, &mapping_)));
   ASSERT_NE(mapping_, nullptr);
 
-  amdf_host_mapping_info_t mapping_info = {};
-  mapping_info.type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO;
-  mapping_info.structure_size = sizeof(mapping_info);
+  amdf_host_mapping_info_t mapping_info = {
+      .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
+      .structure_size = sizeof(mapping_info)};
   ASSERT_TRUE(amdf_status_is_ok(
       api_->host_mapping_query_info(mapping_, &mapping_info)));
   EXPECT_EQ(mapping_info.flags & map_info.flags, map_info.flags);
@@ -303,9 +301,9 @@ TEST_F(XdnaMemoryTest, OwnsStableAddressAndExplicitHostMapping) {
   ASSERT_TRUE(amdf_status_is_ok(
       api_->memory_map(memory_, &read_only_map_info, &read_only_mapping)));
   ASSERT_NE(read_only_mapping, nullptr);
-  amdf_host_mapping_info_t read_only_mapping_info = {};
-  read_only_mapping_info.type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO;
-  read_only_mapping_info.structure_size = sizeof(read_only_mapping_info);
+  amdf_host_mapping_info_t read_only_mapping_info = {
+      .type = AMDF_STRUCTURE_TYPE_HOST_MAPPING_INFO,
+      .structure_size = sizeof(read_only_mapping_info)};
   ASSERT_TRUE(amdf_status_is_ok(api_->host_mapping_query_info(
       read_only_mapping, &read_only_mapping_info)));
   EXPECT_TRUE(amdf_status_is_ok(api_->host_mapping_cache_control(

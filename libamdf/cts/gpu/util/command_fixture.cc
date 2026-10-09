@@ -11,9 +11,9 @@ amdf_status_t FindGpuQueueFamily(const amdf_api_t* api,
                                  const GpuQueueRequirements& requirements,
                                  amdf_queue_family_info_t* out_family,
                                  bool* out_matches) {
-  amdf_endpoint_info_t endpoint_info = {};
-  endpoint_info.type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO;
-  endpoint_info.structure_size = sizeof(endpoint_info);
+  amdf_endpoint_info_t endpoint_info = {
+      .type = AMDF_STRUCTURE_TYPE_ENDPOINT_INFO,
+      .structure_size = sizeof(endpoint_info)};
   amdf_status_t status = api->endpoint_query_info(endpoint, &endpoint_info);
   if (!amdf_status_is_ok(status)) {
     return status;
@@ -21,9 +21,9 @@ amdf_status_t FindGpuQueueFamily(const amdf_api_t* api,
   bool matches = false;
   for (uint32_t ordinal = 0; ordinal < endpoint_info.queue_family_count;
        ++ordinal) {
-    amdf_queue_family_info_t family = {};
-    family.type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO;
-    family.structure_size = sizeof(family);
+    amdf_queue_family_info_t family = {
+        .type = AMDF_STRUCTURE_TYPE_QUEUE_FAMILY_INFO,
+        .structure_size = sizeof(family)};
     status = api->endpoint_query_queue_family_info(endpoint, ordinal, &family);
     if (!amdf_status_is_ok(status)) {
       return status;
