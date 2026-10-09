@@ -548,6 +548,12 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   IREE_ASSERT_OK(Compile(1, "target"));
   IREE_ASSERT_OK(Compile(2, "auxiliary"));
   IREE_ASSERT_OK(Load(2, 3));
+  const auto first_activity = loom_serve_weights_activity(plans_[0]);
+  EXPECT_EQ(first_activity.activations, 1u);
+  EXPECT_EQ(first_activity.deactivations, 0u);
+  EXPECT_GT(first_activity.read_bytes, 0u);
+  EXPECT_GT(first_activity.prepared_bytes, 0u);
+  EXPECT_GT(first_activity.groups, 0u);
   Run(0, 70);
   Run(2, 93);
   auto* const root = buffers_[0][0];
@@ -583,6 +589,12 @@ TEST_P(WeightsTest, CachedConsumersSurviveBackingReuseAndPreparationReplay) {
   IREE_ASSERT_OK(loom_serve_virtual_buffer_destroy(other));
   IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
   IREE_ASSERT_OK(loom_serve_weights_activate(plans_[0], execution_));
+  const auto replay_activity = loom_serve_weights_activity(plans_[0]);
+  EXPECT_EQ(replay_activity.activations, 2u);
+  EXPECT_EQ(replay_activity.deactivations, 1u);
+  EXPECT_EQ(replay_activity.read_bytes, first_activity.read_bytes * 2);
+  EXPECT_EQ(replay_activity.prepared_bytes, first_activity.prepared_bytes * 2);
+  EXPECT_EQ(replay_activity.groups, first_activity.groups * 2);
   EXPECT_EQ(buffers_[0][0], root);
   EXPECT_EQ(commands_[0], command);
   EXPECT_EQ(loom_serve_weights_statistics(plans_[0]).committed_bytes,

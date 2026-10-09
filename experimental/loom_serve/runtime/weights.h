@@ -31,6 +31,22 @@ typedef struct loom_serve_weight_root_t {
 // parameter keys and preparations independently of the compiler.
 typedef struct loom_serve_weights_t loom_serve_weights_t;
 
+// Cumulative owner-side submissions, independent of telemetry retention. These
+// are accepted queue operations, not measured storage traffic or device time.
+typedef struct loom_serve_weight_activity_t {
+  // Fully submitted activations, excluding already-active no-ops.
+  uint64_t activations;
+  // Active-to-inactive releases of physical backing.
+  uint64_t deactivations;
+  // Payload bytes in successful gather batches, excluding failed partial
+  // batches.
+  uint64_t read_bytes;
+  // Payload bytes whose in-place preparation dispatch was accepted.
+  uint64_t prepared_bytes;
+  // Gather groups accepted across all activations.
+  uint64_t groups;
+} loom_serve_weight_activity_t;
+
 // Resolves final weight roots without submitting device work. Checkpoint
 // metadata is indexed here; payload reads wait for activation. The first
 // shared_root_count roots have identical parameter placement; subsequent roots
@@ -94,6 +110,10 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights);
 // Parameter accounting only, separate from state sharing the physical pool.
 // Fixed storage reports zero virtual-pool statistics.
 loom_serve_memory_statistics_t loom_serve_weights_statistics(
+    const loom_serve_weights_t* weights);
+
+// Copies cumulative submission counters on the serialized activation owner.
+loom_serve_weight_activity_t loom_serve_weights_activity(
     const loom_serve_weights_t* weights);
 
 // Consumer commands and root references must be released. Joins final queue

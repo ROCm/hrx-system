@@ -5,7 +5,6 @@
 
 #include "experimental/loom_serve/runtime/weights.h"
 
-#include <stdio.h>
 #include <string.h>
 
 #include "experimental/loom_serve/runtime/program.h"
@@ -63,6 +62,8 @@ struct loom_serve_weights_t {
   loom_serve_memory_pool_t* pool;
   // Parameter-only accounting across all unique roots.
   loom_serve_memory_statistics_t statistics;
+  // Accepted streaming/preparation work, never reconstructed from events.
+  loom_serve_weight_activity_t activity;
   // Final consumer ownership before virtual roots can be unmapped at teardown.
   loom_serve_retirement_t retirement;
   // Activation lanes retained independently of their submitting host turn.
@@ -408,7 +409,6 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
   }
   iree_host_size_t group_count = 0;
   uint64_t loaded_bytes = 0;
-  uint64_t prepared_bytes = 0;
   if (iree_status_is_ok(status)) {
     for (iree_host_size_t i = 0; i < span_count; ++i) {
       const weight_span_t* span = &spans[i];
@@ -420,9 +420,6 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
       }
       ++groups[group_count - 1].count;
       loaded_bytes += span->parameter.byte_length;
-      if (span->prepare) {
-        prepared_bytes += span->parameter.byte_length;
-      }
     }
     for (iree_host_size_t i = 0; i < group_count; ++i) {
       weight_group_t* group = &groups[i];
@@ -440,13 +437,12 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
                                     &group->signal_value},
       };
     }
-    fprintf(stderr,
-            "Streaming %.3f GiB of unique weights; preparing %.3f GiB in "
-            "place across %zu groups and %u lanes...\n",
-            loaded_bytes / 1073741824.0, prepared_bytes / 1073741824.0,
-            group_count, WEIGHT_LANES);
     status = iree_io_parameter_provider_gather_batch(
         weights->provider, device, weights->transfer, group_count, gathers);
+    if (iree_status_is_ok(status)) {
+      weights->activity.read_bytes += loaded_bytes;
+      weights->activity.groups += group_count;
+    }
   }
   for (iree_host_size_t i = 0; i < group_count && iree_status_is_ok(status);
        ++i) {
@@ -465,6 +461,9 @@ static iree_status_t weight_stream(loom_serve_weights_t* weights) {
         (iree_hal_semaphore_list_t){1, &ready[lane], &group->signal_value},
         span->prepare, (iree_hal_buffer_binding_table_t){1, &binding},
         IREE_HAL_QUEUE_EXECUTE_FLAG_NONE);
+    if (iree_status_is_ok(status)) {
+      weights->activity.prepared_bytes += span->parameter.byte_length;
+    }
   }
   if (!iree_status_is_ok(status)) {
     // Release waits for preparations that were never submitted. Queue-owned
@@ -618,6 +617,7 @@ iree_status_t loom_serve_weights_activate(loom_serve_weights_t* weights,
   }
   if (iree_status_is_ok(status)) {
     weights->active = true;
+    ++weights->activity.activations;
   }
   return status;
 }
@@ -645,6 +645,7 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights) {
     status = loom_serve_virtual_buffer_trim(reservation);
   }
   if (iree_status_is_ok(status)) {
+    weights->activity.deactivations += weights->active;
     weights->active = false;
     for (iree_host_size_t i = 0; i < weights->activation.count; ++i) {
       iree_hal_semaphore_release(weights->activation.semaphores[i]);
@@ -659,6 +660,11 @@ iree_status_t loom_serve_weights_deactivate(loom_serve_weights_t* weights) {
 loom_serve_memory_statistics_t loom_serve_weights_statistics(
     const loom_serve_weights_t* weights) {
   return weights->statistics;
+}
+
+loom_serve_weight_activity_t loom_serve_weights_activity(
+    const loom_serve_weights_t* weights) {
+  return weights->activity;
 }
 
 iree_status_t loom_serve_weights_destroy(loom_serve_weights_t* weights) {
