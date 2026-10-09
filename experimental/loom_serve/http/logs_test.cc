@@ -49,7 +49,9 @@ class LogsTest : public ::testing::Test {
 
 TEST_F(LogsTest, BoundsPollWorkAndPreservesIndependentTotals) {
   const loom_serve_telemetry_record_t record = {
-      .time_ns = 12, .request = 7, .event = LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+      .time_ns = 12,
+      .request = 7,
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
   for (int i = 0; i < 80; ++i) {
     loom_serve_telemetry_stream_append(stream_, &record);
   }
@@ -82,7 +84,7 @@ TEST_F(LogsTest, CopiesEscapedErrorBeforeStatusRetires) {
   loom_serve_telemetry_record_t record = {
       .time_ns = 42,
       .request = 9,
-      .event = LOOM_SERVE_TELEMETRY_REQUEST_END,
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_END,
       .data = {.end = {.outcome = LOOM_SERVE_TELEMETRY_REJECTED,
                        .duration_ns = 17,
                        .input_tokens = 3}}};
@@ -104,7 +106,7 @@ TEST_F(LogsTest, CopiesEscapedErrorBeforeStatusRetires) {
 
 TEST_F(LogsTest, DiagnosticOnlyScopeDoesNotInventCounters) {
   const loom_serve_telemetry_record_t record = {
-      .time_ns = 10, .event = LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
+      .time_ns = 10, .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
   loom_serve_telemetry_stream_append(stream_, &record);
   IREE_ASSERT_OK(loom_serve_http_logs(stream_, nullptr,
                                       iree_string_view_empty(),

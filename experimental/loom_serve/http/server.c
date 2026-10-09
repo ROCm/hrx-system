@@ -255,7 +255,7 @@ static void http_accept_completed(void* user_data,
     if (!connection) {
       const loom_serve_telemetry_record_t record = {
           .time_ns = iree_time_now(),
-          .event = LOOM_SERVE_TELEMETRY_ERROR,
+          .event = &LOOM_SERVE_TELEMETRY_ERROR,
           .data.error =
               {
                   .code = IREE_STATUS_RESOURCE_EXHAUSTED,
@@ -375,7 +375,7 @@ static bool http_server_drained(void* user_data) {
 void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
                                          iree_status_t status) {
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
-                                          .event = LOOM_SERVE_TELEMETRY_ERROR};
+                                          .event = &LOOM_SERVE_TELEMETRY_ERROR};
   loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
   iree_slim_mutex_lock(&server->mutex);
   loom_serve_telemetry_stream_append(server->diagnostics, &record);
@@ -531,7 +531,8 @@ iree_status_t loom_serve_http_server_create(
       128, &server->diagnostics, host_allocator);
   if (iree_status_is_ok(status)) {
     const loom_serve_telemetry_record_t begin = {
-        .time_ns = iree_time_now(), .event = LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
+        .time_ns = iree_time_now(),
+        .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
     loom_serve_telemetry_stream_append(server->diagnostics, &begin);
     status = iree_allocator_malloc_array(
         host_allocator, options->connection_capacity,

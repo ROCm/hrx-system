@@ -17,85 +17,6 @@ static iree_status_t logs_quote(iree_string_builder_t* output,
   return loom_json_write_escaped_string(&stream, value);
 }
 
-static iree_status_t logs_counters(
-    const loom_serve_telemetry_counters_t* counters,
-    iree_string_builder_t* output) {
-  return iree_string_builder_append_format(
-      output,
-      "{\"requests\":%" PRIu64 ",\"completed\":%" PRIu64
-      ",\"rejected\":%" PRIu64 ",\"cancelled\":%" PRIu64 ",\"failed\":%" PRIu64
-      ",\"input_tokens\":%" PRIu64 ",\"output_tokens\":%" PRIu64
-      ",\"batches\":%" PRIu64 "}",
-      counters->requests, counters->completed, counters->rejected,
-      counters->cancelled, counters->failed, counters->input_tokens,
-      counters->output_tokens, counters->batches);
-}
-
-static iree_status_t logs_diagnostic(
-    const loom_serve_telemetry_diagnostic_t* diagnostic,
-    iree_string_builder_t* output) {
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output, ",\"status\":%" PRIu64 ",\"message_truncated\":%s,\"message\":",
-      diagnostic->code, diagnostic->truncated ? "true" : "false"));
-  return logs_quote(
-      output, iree_make_string_view(diagnostic->message, diagnostic->length));
-}
-
-static iree_status_t logs_record(uint64_t position,
-                                 const loom_serve_telemetry_record_t* record,
-                                 iree_string_builder_t* output) {
-  static const char* const events[] = {
-      "stream_begin", "snapshot",  "request_begin", "request_end",
-      "batch_submit", "batch_end", "error"};
-  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-      output,
-      "{\"event\":\"%s\",\"sequence\":%" PRIu64 ",\"time_ns\":%" PRId64
-      ",\"request\":%" PRIu64,
-      events[record->event], position, record->time_ns, record->request));
-  switch (record->event) {
-    case LOOM_SERVE_TELEMETRY_SNAPSHOT: {
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          output, ",\"queued\":%" PRIu64 ",\"active\":%" PRIu64 ",\"phase\":",
-          record->data.snapshot.queued, record->data.snapshot.active));
-      IREE_RETURN_IF_ERROR(logs_quote(
-          output, iree_make_cstring_view(record->data.snapshot.phase)));
-      IREE_RETURN_IF_ERROR(
-          iree_string_builder_append_cstring(output, ",\"counters\":"));
-      IREE_RETURN_IF_ERROR(
-          logs_counters(&record->data.snapshot.counters, output));
-      break;
-    }
-    case LOOM_SERVE_TELEMETRY_REQUEST_END: {
-      static const char* const outcomes[] = {"completed", "rejected",
-                                             "cancelled", "failed"};
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          output,
-          ",\"outcome\":\"%s\",\"duration_ns\":%" PRIu64
-          ",\"input_tokens\":%" PRIu64,
-          outcomes[record->data.end.outcome], record->data.end.duration_ns,
-          record->data.end.input_tokens));
-      IREE_RETURN_IF_ERROR(
-          logs_diagnostic(&record->data.end.diagnostic, output));
-      break;
-    }
-    case LOOM_SERVE_TELEMETRY_BATCH_SUBMIT:
-    case LOOM_SERVE_TELEMETRY_BATCH_END: {
-      IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
-          output, ",\"batch\":%" PRIu64 ",\"requests\":%" PRIu64,
-          record->data.batch.id, record->data.batch.requests));
-      break;
-    }
-    case LOOM_SERVE_TELEMETRY_ERROR: {
-      IREE_RETURN_IF_ERROR(logs_diagnostic(&record->data.error, output));
-      break;
-    }
-    case LOOM_SERVE_TELEMETRY_STREAM_BEGIN:
-    case LOOM_SERVE_TELEMETRY_REQUEST_BEGIN:
-      break;
-  }
-  return iree_string_builder_append_cstring(output, "}\n");
-}
-
 static bool logs_cursor(iree_string_view_t value, uint64_t fields[3]) {
   for (iree_host_size_t i = 0; i < 3; ++i) {
     fields[i] = 0;
@@ -172,7 +93,7 @@ iree_status_t loom_serve_http_logs(
     const loom_serve_telemetry_read_t result =
         loom_serve_telemetry_stream_read(stream, &position, &record);
     if (result == LOOM_SERVE_TELEMETRY_READ_RECORD) {
-      status = logs_record(previous, &record, output);
+      status = loom_serve_telemetry_record_format(previous, &record, output);
     } else if (result == LOOM_SERVE_TELEMETRY_READ_GAP) {
       status = iree_string_builder_append_format(
           output,
@@ -188,7 +109,7 @@ iree_status_t loom_serve_http_logs(
         iree_time_now());
   }
   if (iree_status_is_ok(status) && counters) {
-    status = logs_counters(counters, output);
+    status = loom_serve_telemetry_counters_format(counters, output);
   }
   if (iree_status_is_ok(status) && counters) {
     status = iree_string_builder_append_cstring(output, "}\n");

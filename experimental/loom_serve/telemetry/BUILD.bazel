@@ -13,12 +13,36 @@ package(
 )
 
 loom_cc_library(
+    name = "record",
+    srcs = ["record.c"],
+    hdrs = ["record.h"],
+    deps = [
+        "//loom/src/loom/util:json",
+        "//loom/src/loom/util:stream",
+        "//runtime/src/iree/base",
+    ],
+)
+
+loom_cc_library(
     name = "stream",
     srcs = ["stream.c"],
     hdrs = ["stream.h"],
     deps = [
+        ":record",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal",
+    ],
+)
+
+loom_cc_test(
+    name = "record_test",
+    srcs = ["record_test.cc"],
+    deps = [
+        ":record",
+        ":stream",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
     ],
 )
 

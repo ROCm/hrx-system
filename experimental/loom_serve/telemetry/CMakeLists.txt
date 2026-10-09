@@ -11,15 +11,43 @@ iree_add_all_subdirs()
 
 loom_cc_library(
   NAME
+    record
+  HDRS
+    "record.h"
+  SRCS
+    "record.c"
+  DEPS
+    iree::base
+    loom::util::json
+    loom::util::stream
+  PUBLIC
+)
+
+loom_cc_library(
+  NAME
     stream
   HDRS
     "stream.h"
   SRCS
     "stream.c"
   DEPS
+    ::record
     iree::base
     iree::base::internal
   PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    record_test
+  SRCS
+    "record_test.cc"
+  DEPS
+    ::record
+    ::stream
+    iree::base
+    iree::testing::gtest
+    iree::testing::gtest_main
 )
 
 loom_cc_test(

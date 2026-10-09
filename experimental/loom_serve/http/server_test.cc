@@ -158,10 +158,10 @@ TEST_F(HttpServerTest, CapacityRejectionPublishesDiagnostic) {
   loom_serve_telemetry_record_t record;
   ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
             LOOM_SERVE_TELEMETRY_READ_RECORD);
-  EXPECT_EQ(record.event, LOOM_SERVE_TELEMETRY_STREAM_BEGIN);
+  EXPECT_EQ(record.event, &LOOM_SERVE_TELEMETRY_STREAM_BEGIN);
   ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
             LOOM_SERVE_TELEMETRY_READ_RECORD);
-  EXPECT_EQ(record.event, LOOM_SERVE_TELEMETRY_ERROR);
+  EXPECT_EQ(record.event, &LOOM_SERVE_TELEMETRY_ERROR);
   EXPECT_EQ(record.data.error.code, IREE_STATUS_RESOURCE_EXHAUSTED);
   EXPECT_EQ(std::string(record.data.error.message, record.data.error.length),
             "HTTP connection capacity exhausted");
@@ -183,7 +183,7 @@ TEST_F(HttpServerTest, DiagnosticsOwnMessageAfterStatusRetires) {
   loom_serve_telemetry_record_t record;
   ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
             LOOM_SERVE_TELEMETRY_READ_RECORD);
-  EXPECT_EQ(record.event, LOOM_SERVE_TELEMETRY_ERROR);
+  EXPECT_EQ(record.event, &LOOM_SERVE_TELEMETRY_ERROR);
   EXPECT_EQ(record.data.error.code, IREE_STATUS_INVALID_ARGUMENT);
 #if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS)
   EXPECT_EQ(std::string(record.data.error.message, record.data.error.length),

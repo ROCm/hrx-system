@@ -126,7 +126,7 @@ static uint64_t finite_request_begin(loom_serve_finite_service_t* service,
   const loom_serve_telemetry_record_t record = {
       .time_ns = time_ns,
       .request = id,
-      .event = LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_BEGIN};
   loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
   return id;
 }
@@ -155,7 +155,7 @@ static void finite_request_end(loom_serve_finite_service_t* service,
   loom_serve_telemetry_record_t record = {
       .time_ns = now,
       .request = id,
-      .event = LOOM_SERVE_TELEMETRY_REQUEST_END,
+      .event = &LOOM_SERVE_TELEMETRY_REQUEST_END,
       .data.end = {.outcome = outcome,
                    .duration_ns = now - arrival_time,
                    .input_tokens = input_tokens}};
@@ -167,13 +167,13 @@ static void finite_error(loom_serve_finite_service_t* service, uint64_t id,
                          iree_status_t status) {
   loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
                                           .request = id,
-                                          .event = LOOM_SERVE_TELEMETRY_ERROR};
+                                          .event = &LOOM_SERVE_TELEMETRY_ERROR};
   loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
   loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
 }
 
 static void finite_batch_event(loom_serve_finite_service_t* service,
-                               loom_serve_telemetry_event_t event,
+                               const loom_serve_telemetry_event_t* event,
                                uint64_t id) {
   const loom_serve_telemetry_record_t record = {
       .time_ns = iree_time_now(),
@@ -411,7 +411,7 @@ static iree_status_t finite_submit(loom_serve_finite_service_t* service) {
   IREE_RETURN_IF_ERROR(
       iree_async_proactor_submit_one(service->proactor, &wait->base));
   service->phase = FINITE_RUNNING;
-  finite_batch_event(service, LOOM_SERVE_TELEMETRY_BATCH_SUBMIT,
+  finite_batch_event(service, &LOOM_SERVE_TELEMETRY_BATCH_SUBMIT,
                      service->telemetry.counters.batches + 1);
   return iree_ok_status();
 }
@@ -501,7 +501,7 @@ static loom_serve_http_service_snapshot_t finite_snapshot(void* self) {
 static void finite_heartbeat(loom_serve_finite_service_t* service) {
   loom_serve_telemetry_record_t record = {
       .time_ns = iree_time_now(),
-      .event = LOOM_SERVE_TELEMETRY_SNAPSHOT,
+      .event = &LOOM_SERVE_TELEMETRY_SNAPSHOT,
       .data.snapshot = {.counters = service->telemetry.counters,
                         .queued = service->pending_count,
                         .active = service->cohort_count}};
@@ -570,7 +570,7 @@ static iree_status_t finite_collect(loom_serve_finite_service_t* service,
           loom_serve_finite_model_input_tokens(service->model, i);
       service->telemetry.counters.input_tokens += job->input_tokens;
     }
-    finite_batch_event(service, LOOM_SERVE_TELEMETRY_BATCH_END,
+    finite_batch_event(service, &LOOM_SERVE_TELEMETRY_BATCH_END,
                        ++service->telemetry.counters.batches);
     finite_schedule_cpu(service, FINITE_ENCODING);
   } else {
@@ -837,7 +837,7 @@ iree_status_t loom_serve_finite_service_create(
                                     heartbeat_interval);
     const loom_serve_telemetry_record_t record = {
         .time_ns = iree_time_now(),
-        .event = LOOM_SERVE_TELEMETRY_STREAM_BEGIN,
+        .event = &LOOM_SERVE_TELEMETRY_STREAM_BEGIN,
         .data.snapshot.phase = "idle"};
     loom_serve_telemetry_stream_append(service->telemetry.stream, &record);
     *out_service = service;

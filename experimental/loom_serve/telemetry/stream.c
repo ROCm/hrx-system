@@ -40,19 +40,6 @@ struct loom_serve_telemetry_stream_t {
 
 static iree_atomic_uint64_t telemetry_ordinal = IREE_ATOMIC_VAR_INIT(0);
 
-void loom_serve_telemetry_diagnostic_capture(
-    iree_status_t status, loom_serve_telemetry_diagnostic_t* out_diagnostic) {
-  memset(out_diagnostic, 0, sizeof(*out_diagnostic));
-  out_diagnostic->code = iree_status_code(status);
-  const iree_string_view_t message = iree_status_message(status);
-  out_diagnostic->length =
-      iree_min(message.size, sizeof(out_diagnostic->message));
-  out_diagnostic->truncated = message.size > out_diagnostic->length;
-  if (out_diagnostic->length) {
-    memcpy(out_diagnostic->message, message.data, out_diagnostic->length);
-  }
-}
-
 iree_status_t loom_serve_telemetry_stream_create(
     iree_host_size_t capacity, loom_serve_telemetry_stream_t** out_stream,
     iree_allocator_t allocator) {
