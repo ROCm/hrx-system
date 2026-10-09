@@ -79,10 +79,17 @@ typedef struct iree_shm_handle_t {
 // Sentinel value indicating an invalid or closed handle.
 #if defined(IREE_PLATFORM_WINDOWS)
 // INVALID_HANDLE_VALUE is (HANDLE)(LONG_PTR)-1 on Windows.
-#define IREE_SHM_HANDLE_INVALID ((iree_shm_handle_t){(uint64_t)(uintptr_t)-1})
+#define IREE_SHM_HANDLE_INVALID_VALUE ((uint64_t)(uintptr_t)-1)
 #else
-#define IREE_SHM_HANDLE_INVALID ((iree_shm_handle_t){(uint64_t)-1})
+#define IREE_SHM_HANDLE_INVALID_VALUE ((uint64_t)-1)
 #endif  // IREE_PLATFORM_WINDOWS
+#if defined(__cplusplus)
+#define IREE_SHM_HANDLE_INVALID \
+  (iree_shm_handle_t{IREE_SHM_HANDLE_INVALID_VALUE})
+#else
+#define IREE_SHM_HANDLE_INVALID \
+  ((iree_shm_handle_t){IREE_SHM_HANDLE_INVALID_VALUE})
+#endif  // __cplusplus
 
 // Returns true if the handle is valid (not the invalid sentinel).
 static inline bool iree_shm_handle_is_valid(iree_shm_handle_t handle) {
