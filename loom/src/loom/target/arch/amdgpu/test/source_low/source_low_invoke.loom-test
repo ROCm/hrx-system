@@ -275,3 +275,42 @@ low.func.def target<amdgpu.rdna3_5.core>(@caller_target) abi(hal_kernel) @compos
   %doubled = v_add_u32 %value, %value
   return %doubled
 }
+
+// ====
+
+// A same-type tie carries an otherwise opaque buffer result in the consumed
+// operand's selected register type. It does not carry semantic reference facts;
+// the caller still states the memory space required by the subsequent access.
+amdgpu.target<gfx11-generic> @target
+
+low.func.def target<amdgpu.gfx11.generic.core>(@target) @advance_buffer(%address: reg<amdgpu.sgpr x2>) -> (reg<amdgpu.sgpr x2>) asm {
+  %low = slice %address[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %high = slice %address[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %advanced_low, %carry = s_add_co_u32_rhs_inline %low, 16
+  %advanced_high, %carry_out = s_addc_u32_rhs_inline %high, %carry, 0
+  %advanced = concat(%advanced_low, %advanced_high) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  return %advanced
+}
+
+func.def target(@target) @tied_buffer_result(%input: buffer) -> (i32) {
+  %base = index.constant 0 : offset
+  %global = buffer.assume.memory_space<global> %input : buffer
+  %advanced = low.invoke @advance_buffer(%global) : (buffer) -> (%global as buffer)
+  %advanced_global = buffer.assume.memory_space<global> %advanced : buffer
+  %view = buffer.view %advanced_global[%base] : buffer -> view<1xi32>
+  %value = view.load %view[0] : view<1xi32> -> i32
+  func.return %value : i32
+}
+
+// ----
+low.func.def target<amdgpu.gfx11.generic.core>(@target) abi(hal_kernel) @tied_buffer_result() -> (reg<amdgpu.vgpr>) asm {
+  %global = resource<hal_binding> {index = 0, source_type = hal.buffer} : reg<amdgpu.sgpr x2>
+  %low = slice %global[0] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %high = slice %global[1] : reg<amdgpu.sgpr x2> -> reg<amdgpu.sgpr>
+  %advanced_low, %carry = s_add_co_u32_rhs_inline %low, 16
+  %advanced_high, %carry_out = s_addc_u32_rhs_inline %high, %carry, 0
+  %advanced = concat(%advanced_low, %advanced_high) : (reg<amdgpu.sgpr>, reg<amdgpu.sgpr>) -> reg<amdgpu.sgpr x2>
+  %20 = v_mov_b32 0
+  %value = global_load_b32_saddr %20, %advanced
+  return %value
+}

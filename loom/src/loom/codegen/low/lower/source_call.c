@@ -339,8 +339,24 @@ iree_status_t loom_low_lower_source_invoke(loom_low_lower_context_t* context,
       context, source_results.count, sizeof(*result_types),
       (void**)&result_types));
   for (uint16_t i = 0; i < source_results.count; ++i) {
-    IREE_RETURN_IF_ERROR(loom_low_source_call_map_result_type(
-        context, source_op, source_results.values[i], &result_types[i]));
+    result_types[i] = loom_type_none();
+  }
+  // A same-type tie fixes the result carrier even when the source result has
+  // no semantic facts of its own. Type-changing ties still require the target
+  // policy to select their distinct result representation.
+  const loom_tied_result_t* tied_results = loom_op_tied_results(source_op);
+  for (uint16_t i = 0; i < source_op->tied_result_count; ++i) {
+    const loom_tied_result_t tied = tied_results[i];
+    if (!tied.has_type_change) {
+      result_types[tied.result_index] =
+          loom_module_value_type(module, low_operands[tied.operand_index]);
+    }
+  }
+  for (uint16_t i = 0; i < source_results.count; ++i) {
+    if (loom_type_kind(result_types[i]) == LOOM_TYPE_NONE) {
+      IREE_RETURN_IF_ERROR(loom_low_source_call_map_result_type(
+          context, source_op, source_results.values[i], &result_types[i]));
+    }
     if (loom_type_kind(result_types[i]) == LOOM_TYPE_NONE) {
       return iree_ok_status();
     }
