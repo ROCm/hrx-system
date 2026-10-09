@@ -428,8 +428,6 @@ static iree_status_t loom_low_lower_source_query_prepare_coverage(
       .options = options,
       .coverage = coverage,
   };
-  iree_arena_allocator_t walk_arena;
-  iree_arena_initialize(context->module->arena.block_pool, &walk_arena);
   loom_walk_result_t walk_result = LOOM_WALK_CONTINUE;
   iree_status_t status = loom_walk_function(
       context->module, context->source_function, LOOM_WALK_PRE_ORDER,
@@ -437,8 +435,7 @@ static iree_status_t loom_low_lower_source_query_prepare_coverage(
           .fn = loom_low_lower_source_query_coverage_visit,
           .user_data = &state,
       },
-      &walk_arena, &walk_result);
-  iree_arena_deinitialize(&walk_arena);
+      &walk_result);
   coverage->preparing = false;
   coverage->prepared = iree_status_is_ok(status);
   return status;
