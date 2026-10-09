@@ -26,17 +26,17 @@ class VulkanAtomicSubmissionTest : public CtsTestBase<> {};
 TEST_P(VulkanAtomicSubmissionTest,
        MissingTargetDeviceAddressFollowsModeAndReleasesSubmissions) {
   const AtomicTestRequirements requirements = {
-      /*.operation_flags=*/IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
-          IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
-          IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
-      /*.wait_condition_flags=*/IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL,
-      /*.memory_type=*/IREE_HAL_MEMORY_TYPE_NONE,
-      /*.buffer_usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.memory_access=*/IREE_HAL_MEMORY_ACCESS_READ |
-          IREE_HAL_MEMORY_ACCESS_WRITE,
-      /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-      /*.atomic_flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-          IREE_HAL_ATOMIC_FLAG_RELEASE,
+      .operation_flags = IREE_HAL_ATOMIC_OPERATION_FLAG_WAIT |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_STORE |
+                         IREE_HAL_ATOMIC_OPERATION_FLAG_RMW_ADD,
+      .wait_condition_flags = IREE_HAL_ATOMIC_WAIT_CONDITION_FLAG_EQUAL,
+      .memory_type = IREE_HAL_MEMORY_TYPE_NONE,
+      .buffer_usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .memory_access =
+          IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .width = IREE_HAL_ATOMIC_WIDTH_32,
+      .atomic_flags =
+          IREE_HAL_ATOMIC_FLAG_ACQUIRE | IREE_HAL_ATOMIC_FLAG_RELEASE,
   };
   AtomicTestConfiguration configuration;
   if (!SelectAtomicTestConfiguration(iree_hal_device_spec(device_),
@@ -61,15 +61,15 @@ TEST_P(VulkanAtomicSubmissionTest,
   std::promise<void> released;
   std::future<void> released_future = released.get_future();
   const iree_hal_buffer_release_callback_t release_callback = {
-      /*.fn=*/NotifyForeignBufferReleased,
-      /*.user_data=*/&released,
+      .fn = NotifyForeignBufferReleased,
+      .user_data = &released,
   };
   const iree_hal_buffer_params_t buffer_params = {
-      /*.usage=*/IREE_HAL_BUFFER_USAGE_STORAGE,
-      /*.access=*/IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
-      /*.type=*/IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
-      /*.queue_family_affinity=*/IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
-      /*.min_alignment=*/alignof(uint32_t),
+      .usage = IREE_HAL_BUFFER_USAGE_STORAGE,
+      .access = IREE_HAL_MEMORY_ACCESS_READ | IREE_HAL_MEMORY_ACCESS_WRITE,
+      .type = IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL,
+      .queue_family_affinity = IREE_HAL_QUEUE_FAMILY_AFFINITY_ANY,
+      .min_alignment = alignof(uint32_t),
   };
   Ref<iree_hal_buffer_t> target_buffer;
   IREE_ASSERT_OK(iree_hal_allocator_import_buffer(
@@ -84,13 +84,13 @@ TEST_P(VulkanAtomicSubmissionTest,
       IREE_HAL_ATOMIC_TARGET_ERROR_MODE_INCOMPATIBLE,
   };
   const iree_hal_buffer_binding_t binding = {
-      /*.buffer=*/target_buffer.get(),
-      /*.offset=*/0,
-      /*.length=*/IREE_HAL_WHOLE_BUFFER,
+      .buffer = target_buffer.get(),
+      .offset = 0,
+      .length = IREE_HAL_WHOLE_BUFFER,
   };
   const iree_hal_buffer_binding_table_t binding_table = {
-      /*.count=*/1,
-      /*.bindings=*/&binding,
+      .count = 1,
+      .bindings = &binding,
   };
   for (iree_hal_atomic_target_error_mode_t mode : modes) {
     const StatusCode expected_status =
@@ -106,12 +106,12 @@ TEST_P(VulkanAtomicSubmissionTest,
               atomic_queue, iree_hal_semaphore_list_empty(), signal,
               target_buffer, /*target_offset=*/0,
               (iree_hal_atomic_wait_params_t){
-                  /*.value=*/0,
-                  /*.mask=*/UINT32_MAX,
-                  /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-                  /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-                  /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-                  /*.target_error_mode=*/mode,
+                  .value = 0,
+                  .mask = UINT32_MAX,
+                  .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+                  .width = IREE_HAL_ATOMIC_WIDTH_32,
+                  .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+                  .target_error_mode = mode,
               },
               /*barriers=*/NULL);
           break;
@@ -120,10 +120,10 @@ TEST_P(VulkanAtomicSubmissionTest,
               atomic_queue, iree_hal_semaphore_list_empty(), signal,
               target_buffer, /*target_offset=*/0,
               (iree_hal_atomic_store_params_t){
-                  /*.value=*/1,
-                  /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
-                  /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-                  /*.target_error_mode=*/mode,
+                  .value = 1,
+                  .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+                  .width = IREE_HAL_ATOMIC_WIDTH_32,
+                  .target_error_mode = mode,
               },
               /*barriers=*/NULL);
           break;
@@ -132,12 +132,12 @@ TEST_P(VulkanAtomicSubmissionTest,
               atomic_queue, iree_hal_semaphore_list_empty(), signal,
               target_buffer, /*target_offset=*/0,
               (iree_hal_atomic_rmw_params_t){
-                  /*.operand=*/1,
-                  /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-                      IREE_HAL_ATOMIC_FLAG_RELEASE,
-                  /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-                  /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-                  /*.target_error_mode=*/mode,
+                  .operand = 1,
+                  .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                           IREE_HAL_ATOMIC_FLAG_RELEASE,
+                  .width = IREE_HAL_ATOMIC_WIDTH_32,
+                  .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+                  .target_error_mode = mode,
               },
               /*barriers=*/NULL);
           break;
@@ -163,12 +163,12 @@ TEST_P(VulkanAtomicSubmissionTest,
               command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
               IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
               (iree_hal_atomic_wait_params_t){
-                  /*.value=*/0,
-                  /*.mask=*/UINT32_MAX,
-                  /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE,
-                  /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-                  /*.condition=*/IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
-                  /*.target_error_mode=*/mode,
+                  .value = 0,
+                  .mask = UINT32_MAX,
+                  .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE,
+                  .width = IREE_HAL_ATOMIC_WIDTH_32,
+                  .condition = IREE_HAL_ATOMIC_WAIT_CONDITION_EQUAL,
+                  .target_error_mode = mode,
               }));
           break;
         case AtomicKind::kStore:
@@ -176,10 +176,10 @@ TEST_P(VulkanAtomicSubmissionTest,
               command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
               IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
               (iree_hal_atomic_store_params_t){
-                  /*.value=*/1,
-                  /*.flags=*/IREE_HAL_ATOMIC_FLAG_RELEASE,
-                  /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-                  /*.target_error_mode=*/mode,
+                  .value = 1,
+                  .flags = IREE_HAL_ATOMIC_FLAG_RELEASE,
+                  .width = IREE_HAL_ATOMIC_WIDTH_32,
+                  .target_error_mode = mode,
               }));
           break;
         case AtomicKind::kRmw:
@@ -187,12 +187,12 @@ TEST_P(VulkanAtomicSubmissionTest,
               command_buffer, IREE_HAL_EXECUTION_STAGE_COMMAND_ISSUE,
               IREE_HAL_EXECUTION_STAGE_COMMAND_RETIRE, target_ref,
               (iree_hal_atomic_rmw_params_t){
-                  /*.operand=*/1,
-                  /*.flags=*/IREE_HAL_ATOMIC_FLAG_ACQUIRE |
-                      IREE_HAL_ATOMIC_FLAG_RELEASE,
-                  /*.width=*/IREE_HAL_ATOMIC_WIDTH_32,
-                  /*.operation=*/IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
-                  /*.target_error_mode=*/mode,
+                  .operand = 1,
+                  .flags = IREE_HAL_ATOMIC_FLAG_ACQUIRE |
+                           IREE_HAL_ATOMIC_FLAG_RELEASE,
+                  .width = IREE_HAL_ATOMIC_WIDTH_32,
+                  .operation = IREE_HAL_ATOMIC_RMW_OPERATION_ADD,
+                  .target_error_mode = mode,
               }));
           break;
       }

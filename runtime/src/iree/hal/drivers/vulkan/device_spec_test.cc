@@ -20,35 +20,35 @@ namespace {
 
 static iree_hal_vulkan_device_spec_t MakeTestSpec() {
   return {
-      /*.api_version=*/VK_MAKE_API_VERSION(0, 1, 3, 0),
-      /*.driver_version=*/1234,
-      /*.physical_device_type=*/VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
-      /*.enabled_features=*/
-      {
-          /*.general=*/IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
-              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
-              IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL,
-          /*.atomics=*/
-          IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64_ADD,
-      },
-      /*.flags=*/IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
-      /*.subgroup_supported_operations=*/
-      VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT,
+      .api_version = VK_MAKE_API_VERSION(0, 1, 3, 0),
+      .driver_version = 1234,
+      .physical_device_type = VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU,
+      .enabled_features =
+          {
+              .general = IREE_HAL_VULKAN_FEATURE_REQUIRED_BASELINE |
+                         IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_FLOAT16 |
+                         IREE_HAL_VULKAN_FEATURE_ENABLE_SUBGROUP_SIZE_CONTROL,
+              .atomics =
+                  IREE_HAL_VULKAN_SHADER_ATOMIC_FEATURE_SHARED_FLOAT64_ADD,
+          },
+      .flags = IREE_HAL_VULKAN_DEVICE_SPEC_FLAG_NONE,
+      .subgroup_supported_operations =
+          VK_SUBGROUP_FEATURE_BASIC_BIT | VK_SUBGROUP_FEATURE_BALLOT_BIT,
   };
 }
 
 TEST(DeviceSpecTest, EncodesAndDecodesPayload) {
   iree_hal_vulkan_device_spec_t source = MakeTestSpec();
   iree_hal_vulkan_cooperative_matrix_property_t source_property = {
-      /*.m_size=*/16,
-      /*.n_size=*/8,
-      /*.k_size=*/16,
-      /*.a_type=*/1,
-      /*.b_type=*/2,
-      /*.c_type=*/3,
-      /*.result_type=*/4,
-      /*.saturating_accumulation=*/1,
-      /*.scope=*/5,
+      .m_size = 16,
+      .n_size = 8,
+      .k_size = 16,
+      .a_type = 1,
+      .b_type = 2,
+      .c_type = 3,
+      .result_type = 4,
+      .saturating_accumulation = 1,
+      .scope = 5,
   };
   iree_host_size_t payload_size = 0;
   IREE_ASSERT_OK(
@@ -134,15 +134,15 @@ TEST(DeviceSpecTest, RejectsMalformedPayloads) {
 TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {
   iree_hal_vulkan_device_spec_t source = MakeTestSpec();
   iree_hal_vulkan_cooperative_matrix_property_t source_property = {
-      /*.m_size=*/16,
-      /*.n_size=*/16,
-      /*.k_size=*/8,
-      /*.a_type=*/1,
-      /*.b_type=*/1,
-      /*.c_type=*/2,
-      /*.result_type=*/2,
-      /*.saturating_accumulation=*/0,
-      /*.scope=*/3,
+      .m_size = 16,
+      .n_size = 16,
+      .k_size = 8,
+      .a_type = 1,
+      .b_type = 1,
+      .c_type = 2,
+      .result_type = 2,
+      .saturating_accumulation = 0,
+      .scope = 3,
   };
 
   iree_hal_device_spec_builder_t builder;
@@ -171,10 +171,11 @@ TEST(DeviceSpecTest, AddsAndFindsCoreFacet) {
 
 TEST(DeviceSpecTest, AtomicCapabilitiesRequireExactFeatures) {
   const iree_hal_vulkan_features_t required_features = {
-      /*.general=*/IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+      .general =
+          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
           IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL |
           IREE_HAL_VULKAN_FEATURE_ENABLE_VULKAN_MEMORY_MODEL_DEVICE_SCOPE,
-      /*.atomics=*/0,
+      .atomics = 0,
   };
   const iree_hal_vulkan_general_features_t required_feature_bits[] = {
       IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES,
@@ -311,33 +312,33 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
   uint32_t queue_indices[] = {0, 1, 0};
   iree_hal_vulkan_queue_family_plan_t queue_families[] = {
       {
-          /*.native_family_index=*/2,
-          /*.flags=*/VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,
-          /*.timestamp_valid_bits=*/64,
-          /*.queue_count=*/2,
-          /*.queue_offset=*/0,
+          .native_family_index = 2,
+          .flags = VK_QUEUE_COMPUTE_BIT | VK_QUEUE_TRANSFER_BIT,
+          .timestamp_valid_bits = 64,
+          .queue_count = 2,
+          .queue_offset = 0,
       },
       {
-          /*.native_family_index=*/5,
-          /*.flags=*/VK_QUEUE_TRANSFER_BIT,
-          /*.timestamp_valid_bits=*/48,
-          /*.queue_count=*/1,
-          /*.queue_offset=*/2,
+          .native_family_index = 5,
+          .flags = VK_QUEUE_TRANSFER_BIT,
+          .timestamp_valid_bits = 48,
+          .queue_count = 1,
+          .queue_offset = 2,
       },
   };
   device_plan.queue_inventory = {
-      /*.family_count=*/IREE_ARRAYSIZE(queue_families),
-      /*.families=*/queue_families,
-      /*.queue_count=*/IREE_ARRAYSIZE(queue_indices),
-      /*.queue_indices=*/queue_indices,
+      .family_count = IREE_ARRAYSIZE(queue_families),
+      .families = queue_families,
+      .queue_count = IREE_ARRAYSIZE(queue_indices),
+      .queue_indices = queue_indices,
   };
 
   iree_hal_vulkan_device_spec_params_t params = {
-      /*.logical_device_id=*/IREE_SV("vulkan://0"),
-      /*.display_name=*/IREE_SV("Vulkan test logical device"),
-      /*.physical_device=*/&physical_device,
-      /*.device_plan=*/&device_plan,
-      /*.device_allocator=*/allocator,
+      .logical_device_id = IREE_SV("vulkan://0"),
+      .display_name = IREE_SV("Vulkan test logical device"),
+      .physical_device = &physical_device,
+      .device_plan = &device_plan,
+      .device_allocator = allocator,
   };
   iree_hal_device_spec_t* device_spec = NULL;
   IREE_ASSERT_OK(iree_hal_vulkan_device_spec_create(
@@ -441,10 +442,10 @@ TEST_P(DeviceSpecFloatControlsTest, CreatesSpecFromParams) {
       iree_hal_device_spec_executables(device_spec);
   ASSERT_NE(executables, nullptr);
   iree_hal_executable_target_selection_t target_selection = {
-      /*.family=*/IREE_SV("spirv"),
-      /*.target_key=*/IREE_SV("vulkan1.3+bda"),
-      /*.kind_flags=*/IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
-      /*.physical_device_affinity=*/0,
+      .family = IREE_SV("spirv"),
+      .target_key = IREE_SV("vulkan1.3+bda"),
+      .kind_flags = IREE_HAL_EXECUTABLE_TARGET_KIND_FLAG_GENERIC,
+      .physical_device_affinity = 0,
   };
   const iree_hal_executable_target_selection_result_t selection_result =
       iree_hal_device_spec_select_executable_target(device_spec,

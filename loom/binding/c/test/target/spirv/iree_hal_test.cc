@@ -96,10 +96,9 @@ void InitializeFakeDevice(const iree_hal_device_spec_t* device_spec,
 }
 
 iree_hal_vulkan_features_t RequiredVulkanFeatures() {
-  return {/*.general=*/
-          IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
-              IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
-          /*.atomics=*/0};
+  return {.general = IREE_HAL_VULKAN_FEATURE_ENABLE_BUFFER_DEVICE_ADDRESSES |
+                     IREE_HAL_VULKAN_FEATURE_ENABLE_SHADER_INT64,
+          .atomics = 0};
 }
 
 iree_status_t CreateVulkanDeviceSpec(
@@ -113,12 +112,12 @@ iree_status_t CreateVulkanDeviceSpec(
     uint32_t subgroup_supported_operations = 0) {
   out_device_spec->reset();
   iree_hal_vulkan_device_spec_t vulkan_spec = {
-      /*.api_version=*/kVulkanApiVersion13,
-      /*.driver_version=*/1,
-      /*.physical_device_type=*/2,
-      /*.enabled_features=*/enabled_features,
-      /*.flags=*/device_spec_flags,
-      /*.subgroup_supported_operations=*/subgroup_supported_operations,
+      .api_version = kVulkanApiVersion13,
+      .driver_version = 1,
+      .physical_device_type = 2,
+      .enabled_features = enabled_features,
+      .flags = device_spec_flags,
+      .subgroup_supported_operations = subgroup_supported_operations,
   };
   iree_host_size_t vulkan_payload_size = 0;
   IREE_RETURN_IF_ERROR(iree_hal_vulkan_device_spec_calculate_payload_size(
@@ -130,12 +129,11 @@ iree_status_t CreateVulkanDeviceSpec(
       iree_make_byte_span(vulkan_payload_storage.data(),
                           vulkan_payload_storage.size())));
   iree_hal_device_spec_facet_t vulkan_facet = {
-      /*.schema_id=*/
-      iree_make_cstring_view(IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_ID),
-      /*.schema_version=*/IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION,
-      /*.payload=*/
-      iree_make_const_byte_span(vulkan_payload_storage.data(),
-                                vulkan_payload_storage.size()),
+      .schema_id =
+          iree_make_cstring_view(IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_ID),
+      .schema_version = IREE_HAL_VULKAN_DEVICE_SPEC_SCHEMA_VERSION,
+      .payload = iree_make_const_byte_span(vulkan_payload_storage.data(),
+                                           vulkan_payload_storage.size()),
   };
 
   iree_hal_device_spec_builder_t builder;
@@ -143,58 +141,59 @@ iree_status_t CreateVulkanDeviceSpec(
   iree_status_t status = iree_ok_status();
   if (iree_any_bit_set(flags, kDeviceSpecFlagIncludeDispatch)) {
     iree_hal_device_dispatch_spec_t dispatch = {
-        /*.launch=*/
-        {
-            /*.maximum_workgroup_invocations=*/256,
-            /*.maximum_workgroup_size=*/{256, 128, 64},
-            /*.maximum_workgroup_count=*/{65535, 65535, 65535},
-        },
-        /*.subgroup=*/
-        {
-            /*.default_size=*/32,
-            /*.minimum_size=*/32,
-            /*.maximum_size=*/32,
-            /*.supported_size_mask=*/1ull << 32,
-        },
-        /*.execution=*/
-        {
-            /*.unit_count=*/1,
-            /*.group_count=*/1,
-            /*.maximum_resident_workgroup_count=*/0,
-            /*.maximum_resident_invocation_count=*/0,
-            /*.maximum_resident_subgroup_count=*/0,
-            /*.maximum_register_count=*/0,
-            /*.maximum_workgroup_register_count=*/0,
-            /*.maximum_local_memory_size=*/0,
-            /*.maximum_workgroup_local_memory_size=*/
-            iree_any_bit_set(flags, kDeviceSpecFlagIncludeWorkgroupStorageLimit)
-                ? kMaximumWorkgroupLocalMemorySize
-                : 0,
-            /*.maximum_workgroup_local_memory_size_optin=*/0,
-        },
-        /*.addressing=*/
-        {
-            /*.pointer_size_bits=*/64,
-            /*.address_space_bits=*/64,
-        },
-        /*.flags=*/IREE_HAL_DEVICE_DISPATCH_SPEC_FLAG_NONE,
+        .launch =
+            {
+                .maximum_workgroup_invocations = 256,
+                .maximum_workgroup_size = {256, 128, 64},
+                .maximum_workgroup_count = {65535, 65535, 65535},
+            },
+        .subgroup =
+            {
+                .default_size = 32,
+                .minimum_size = 32,
+                .maximum_size = 32,
+                .supported_size_mask = 1ull << 32,
+            },
+        .execution =
+            {
+                .unit_count = 1,
+                .group_count = 1,
+                .maximum_resident_workgroup_count = 0,
+                .maximum_resident_invocation_count = 0,
+                .maximum_resident_subgroup_count = 0,
+                .maximum_register_count = 0,
+                .maximum_workgroup_register_count = 0,
+                .maximum_local_memory_size = 0,
+                .maximum_workgroup_local_memory_size =
+                    iree_any_bit_set(
+                        flags, kDeviceSpecFlagIncludeWorkgroupStorageLimit)
+                        ? kMaximumWorkgroupLocalMemorySize
+                        : 0,
+                .maximum_workgroup_local_memory_size_optin = 0,
+            },
+        .addressing =
+            {
+                .pointer_size_bits = 64,
+                .address_space_bits = 64,
+            },
+        .flags = IREE_HAL_DEVICE_DISPATCH_SPEC_FLAG_NONE,
     };
     status = iree_hal_device_spec_builder_set_dispatch(&builder, &dispatch);
   }
   const iree_hal_executable_target_t executable_target = {
-      /*.family=*/IREE_SV("spirv"),
-      /*.target_key=*/IREE_SV("vulkan1.3+bda"),
-      /*.kind=*/IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
-      /*.priority=*/100,
-      /*.physical_device_affinity=*/1,
-      /*.flags=*/IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
+      .family = IREE_SV("spirv"),
+      .target_key = IREE_SV("vulkan1.3+bda"),
+      .kind = IREE_HAL_EXECUTABLE_TARGET_KIND_GENERIC,
+      .priority = 100,
+      .physical_device_affinity = 1,
+      .flags = IREE_HAL_EXECUTABLE_TARGET_FLAG_NONE,
   };
   const bool include_target =
       iree_any_bit_set(flags, kDeviceSpecFlagIncludeExecutableTarget);
   const iree_hal_device_executable_spec_t executables = {
-      /*.target_count=*/include_target ? 1u : 0u,
-      /*.targets=*/include_target ? &executable_target : nullptr,
-      /*.flags=*/IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
+      .target_count = include_target ? 1u : 0u,
+      .targets = include_target ? &executable_target : nullptr,
+      .flags = IREE_HAL_DEVICE_EXECUTABLE_SPEC_FLAG_NONE,
   };
   if (iree_status_is_ok(status) && include_target) {
     status =
@@ -236,58 +235,58 @@ iree_hal_vulkan_features_t CooperativeMatrixVulkanFeatures() {
 
 iree_hal_vulkan_cooperative_matrix_property_t F16MatrixProperty() {
   return {
-      /*.m_size=*/16,
-      /*.n_size=*/16,
-      /*.k_size=*/16,
-      /*.a_type=*/LOOMC_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
-      /*.b_type=*/LOOMC_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
-      /*.c_type=*/LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
-      /*.result_type=*/LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
-      /*.saturating_accumulation=*/0,
-      /*.scope=*/LOOMC_SPIRV_SCOPE_SUBGROUP,
+      .m_size = 16,
+      .n_size = 16,
+      .k_size = 16,
+      .a_type = LOOMC_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
+      .b_type = LOOMC_SPIRV_COMPONENT_TYPE_FLOAT16_NV,
+      .c_type = LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
+      .result_type = LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
+      .saturating_accumulation = 0,
+      .scope = LOOMC_SPIRV_SCOPE_SUBGROUP,
   };
 }
 
 iree_hal_vulkan_cooperative_matrix_property_t Bf16MatrixProperty() {
   return {
-      /*.m_size=*/16,
-      /*.n_size=*/16,
-      /*.k_size=*/16,
-      /*.a_type=*/kVulkanComponentTypeBfloat16Khr,
-      /*.b_type=*/kVulkanComponentTypeBfloat16Khr,
-      /*.c_type=*/LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
-      /*.result_type=*/LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
-      /*.saturating_accumulation=*/0,
-      /*.scope=*/LOOMC_SPIRV_SCOPE_SUBGROUP,
+      .m_size = 16,
+      .n_size = 16,
+      .k_size = 16,
+      .a_type = kVulkanComponentTypeBfloat16Khr,
+      .b_type = kVulkanComponentTypeBfloat16Khr,
+      .c_type = LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
+      .result_type = LOOMC_SPIRV_COMPONENT_TYPE_FLOAT32_NV,
+      .saturating_accumulation = 0,
+      .scope = LOOMC_SPIRV_SCOPE_SUBGROUP,
   };
 }
 
 iree_hal_vulkan_cooperative_matrix_property_t S8MatrixProperty(
     uint32_t saturating_accumulation) {
   return {
-      /*.m_size=*/16,
-      /*.n_size=*/16,
-      /*.k_size=*/32,
-      /*.a_type=*/LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT8_NV,
-      /*.b_type=*/LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT8_NV,
-      /*.c_type=*/LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
-      /*.result_type=*/LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
-      /*.saturating_accumulation=*/saturating_accumulation,
-      /*.scope=*/LOOMC_SPIRV_SCOPE_SUBGROUP,
+      .m_size = 16,
+      .n_size = 16,
+      .k_size = 32,
+      .a_type = LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT8_NV,
+      .b_type = LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT8_NV,
+      .c_type = LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
+      .result_type = LOOMC_SPIRV_COMPONENT_TYPE_SIGNED_INT32_NV,
+      .saturating_accumulation = saturating_accumulation,
+      .scope = LOOMC_SPIRV_SCOPE_SUBGROUP,
   };
 }
 
 iree_hal_vulkan_cooperative_matrix_property_t U8MatrixProperty() {
   return {
-      /*.m_size=*/16,
-      /*.n_size=*/16,
-      /*.k_size=*/32,
-      /*.a_type=*/LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
-      /*.b_type=*/LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
-      /*.c_type=*/LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
-      /*.result_type=*/LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
-      /*.saturating_accumulation=*/0,
-      /*.scope=*/LOOMC_SPIRV_SCOPE_SUBGROUP,
+      .m_size = 16,
+      .n_size = 16,
+      .k_size = 32,
+      .a_type = LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
+      .b_type = LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT8_NV,
+      .c_type = LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
+      .result_type = LOOMC_SPIRV_COMPONENT_TYPE_UNSIGNED_INT32_NV,
+      .saturating_accumulation = 0,
+      .scope = LOOMC_SPIRV_SCOPE_SUBGROUP,
   };
 }
 
@@ -336,13 +335,13 @@ TargetProfilePtr SelectTargetFromHal(
     const iree_hal_executable_target_t** out_executable_target = nullptr) {
   iree_hal_device_t* hal_device = reinterpret_cast<iree_hal_device_t*>(device);
   loomc_spirv_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_SPIRV_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("fake-vulkan"),
-      /*.device=*/hal_device,
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
+      .type = LOOMC_STRUCTURE_TYPE_SPIRV_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("fake-vulkan"),
+      .device = hal_device,
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
   };
   loomc_iree_hal_target_selection_t selection = {};
   loomc_status_t status = loomc_target_select_spirv_iree_hal(
@@ -610,15 +609,15 @@ TEST(LoomcSpirvIreeHalTargetTest, ProviderRoutesThroughGenericHalRouter) {
       loomc_spirv_iree_hal_target_provider(),
   };
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("router"),
-      /*.device=*/hal_device,
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("router"),
+      .device = hal_device,
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};
@@ -652,15 +651,15 @@ TEST(LoomcSpirvIreeHalTargetTest,
       loomc_spirv_iree_hal_target_provider(),
   };
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.device=*/reinterpret_cast<iree_hal_device_t*>(&device),
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/requested_profile_ptr.get(),
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_string_view_empty(),
+      .device = reinterpret_cast<iree_hal_device_t*>(&device),
+      .physical_device_affinity = 0,
+      .target_profile = requested_profile_ptr.get(),
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_iree_hal_target_selection_t selection = {};
   loomc_result_t* result = nullptr;
@@ -694,15 +693,15 @@ TEST(LoomcSpirvIreeHalTargetTest, ForcedProfileMustMatchLoaderContract) {
       loomc_spirv_iree_hal_target_provider(),
   };
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_string_view_empty(),
-      /*.device=*/reinterpret_cast<iree_hal_device_t*>(&device),
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/requested_profile_ptr.get(),
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_string_view_empty(),
+      .device = reinterpret_cast<iree_hal_device_t*>(&device),
+      .physical_device_affinity = 0,
+      .target_profile = requested_profile_ptr.get(),
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_iree_hal_target_selection_t selection = {};
   loomc_result_t* result = nullptr;
@@ -726,15 +725,15 @@ TEST(LoomcSpirvIreeHalTargetTest, ProviderMissLetsRouterReportUnsupported) {
       loomc_spirv_iree_hal_target_provider(),
   };
   loomc_iree_hal_target_options_t options = {
-      /*.type=*/LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
-      /*.structure_size=*/sizeof(options),
-      /*.next=*/nullptr,
-      /*.identifier=*/loomc_make_cstring_view("miss"),
-      /*.device=*/hal_device,
-      /*.physical_device_affinity=*/0,
-      /*.target_profile=*/nullptr,
-      /*.providers=*/providers,
-      /*.provider_count=*/IREE_ARRAYSIZE(providers),
+      .type = LOOMC_STRUCTURE_TYPE_IREE_HAL_TARGET_OPTIONS,
+      .structure_size = sizeof(options),
+      .next = nullptr,
+      .identifier = loomc_make_cstring_view("miss"),
+      .device = hal_device,
+      .physical_device_affinity = 0,
+      .target_profile = nullptr,
+      .providers = providers,
+      .provider_count = IREE_ARRAYSIZE(providers),
   };
   loomc_result_t* result = nullptr;
   loomc_iree_hal_target_selection_t selection = {};

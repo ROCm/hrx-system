@@ -200,8 +200,8 @@ class BdaSpirvTest : public CtsTestBase<> {
         iree_hal_make_buffer_ref(output_buffer, /*offset=*/0,
                                  iree_hal_buffer_byte_length(output_buffer));
     return {
-        /*.count=*/2,
-        /*.values=*/binding_refs,
+        .count = 2,
+        .values = binding_refs,
     };
   }
 
@@ -238,8 +238,8 @@ class BdaSpirvTest : public CtsTestBase<> {
             /*length=*/(iree_device_size_t)workgroup_count * sizeof(int32_t)),
     };
     iree_hal_buffer_ref_list_t bindings = {
-        /*.count=*/IREE_ARRAYSIZE(binding_refs),
-        /*.values=*/binding_refs,
+        .count = IREE_ARRAYSIZE(binding_refs),
+        .values = binding_refs,
     };
 
     IREE_ASSERT_OK(CreateCommandBuffer(IREE_HAL_COMMAND_BUFFER_MODE_DEFAULT,
@@ -269,8 +269,8 @@ class BdaSpirvTest : public CtsTestBase<> {
         /*length=*/iree_hal_buffer_byte_length(output_buffer),
     };
     return {
-        /*.count=*/2,
-        /*.bindings=*/binding_table_entries,
+        .count = 2,
+        .bindings = binding_table_entries,
     };
   }
 
@@ -612,8 +612,8 @@ TEST_P(BdaSpirvTest, QueueDispatchRejectsBdaMetadataBindingMismatch) {
                                iree_hal_buffer_byte_length(input_buffer.get())),
   };
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/IREE_ARRAYSIZE(binding_refs),
-      /*.values=*/binding_refs,
+      .count = IREE_ARRAYSIZE(binding_refs),
+      .values = binding_refs,
   };
 
   IREE_EXPECT_STATUS_IS(
@@ -692,8 +692,8 @@ TEST_P(BdaSpirvTest, QueueDispatchHandlesOversizedBdaPublication) {
   std::vector<iree_hal_buffer_ref_t> binding_refs =
       MakeOversizedPublicationBindings(input_buffer, output_buffer);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/binding_refs.size(),
-      /*.values=*/binding_refs.data(),
+      .count = binding_refs.size(),
+      .values = binding_refs.data(),
   };
 
   SemaphoreList dispatch_signal(device_, {0}, {1});
@@ -763,8 +763,8 @@ TEST_P(BdaSpirvTest, CommandBufferCachesBdaPublicationRequirements) {
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(),
       iree_hal_buffer_ref_list_t{
-          /*.count=*/oversized_bindings.size(),
-          /*.values=*/oversized_bindings.data(),
+          .count = oversized_bindings.size(),
+          .values = oversized_bindings.data(),
       },
       IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_command_buffer_end(command_buffer));
@@ -806,8 +806,8 @@ TEST_P(BdaSpirvTest, TrimDropsIdleOversizedBdaPublicationBlock) {
       iree_hal_make_static_dispatch_config(1, 1, 1),
       iree_const_byte_span_empty(),
       iree_hal_buffer_ref_list_t{
-          /*.count=*/oversized_bindings.size(),
-          /*.values=*/oversized_bindings.data(),
+          .count = oversized_bindings.size(),
+          .values = oversized_bindings.data(),
       },
       /*barriers=*/NULL, IREE_HAL_DISPATCH_FLAG_NONE));
   IREE_ASSERT_OK(iree_hal_semaphore_list_wait(
@@ -924,8 +924,8 @@ TEST_P(BdaSpirvTest, CommandBufferHandlesOversizedBdaPublication) {
   std::vector<iree_hal_buffer_ref_t> binding_refs =
       MakeOversizedPublicationBindings(input_buffer, output_buffer);
   iree_hal_buffer_ref_list_t bindings = {
-      /*.count=*/binding_refs.size(),
-      /*.values=*/binding_refs.data(),
+      .count = binding_refs.size(),
+      .values = binding_refs.data(),
   };
 
   Ref<iree_hal_command_buffer_t> command_buffer;
