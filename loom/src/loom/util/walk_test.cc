@@ -489,9 +489,9 @@ TEST_F(WalkTest, DeepNesting) {
 
   constexpr uint16_t kNestedTrigger = kMapCount / 2;
   NestedWalkState nested_state = {
-      /*.module=*/module_,
-      /*.trigger_op=*/maps[kNestedTrigger],
-      /*.nested_region=*/loom_test_map_body(maps[kNestedTrigger]),
+      .module = module_,
+      .trigger_op = maps[kNestedTrigger],
+      .nested_region = loom_test_map_body(maps[kNestedTrigger]),
   };
   walk_result = LOOM_WALK_CONTINUE;
   IREE_ASSERT_OK(loom_walk_function(module_, func_like_, LOOM_WALK_PRE_ORDER,
