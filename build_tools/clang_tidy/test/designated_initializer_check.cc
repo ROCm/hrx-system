@@ -106,12 +106,14 @@ Config mixed_labels = {
 };
 
 Choice labeled_union = {/*.integer=*/9};
+Config empty_braced_label = {/*.ordinal=*/{}};
 
 // The comment names a different field than positional initialization selects.
 Config stale_label = {/*.name=*/10};
 Choice stale_union_label = {/*.real=*/11};
 
 WithAnonymous anonymous_label = {/*.integer=*/12, /*.tail=*/13};
+WithAnonymous empty_braced_anonymous_label = {/*.integer=*/{}};
 WithAnonymous stale_anonymous_label = {/*.real=*/14, /*.tail=*/15};
 WithAnonymous braced_anonymous_label = {/*.integer=*/{101}};
 

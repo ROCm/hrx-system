@@ -72,7 +72,12 @@ class DesignatedInitializerCheckTest(clang_tidy_test.ClangTidyAssertions):
         self.assertIn(".inner = {", fixed_source)
         self.assertIn(".x = 3,", fixed_source)
         self.assertIn("Choice labeled_union = {.integer = 9};", fixed_source)
+        self.assertIn("Config empty_braced_label = {.ordinal = {}};", fixed_source)
         self.assertIn("WithAnonymous anonymous_label = {.integer = 12", fixed_source)
+        self.assertIn(
+            "WithAnonymous empty_braced_anonymous_label = {.integer = {}};",
+            fixed_source,
+        )
         self.assertIn(".ordinal = CONFIG_VALUE(22),", fixed_source)
         self.assertIn(".flags = CONFIG_VALUE(23),", fixed_source)
         self.assertIn("Config macro_config = MAKE_CONFIG(21);", fixed_source)

@@ -213,7 +213,13 @@ bool CanUseDirectDesignator(const FieldDecl* Field, const Expr* Initializer,
   }
   QualType FieldType = Field->getType();
   const Expr* SourceExpression = Initializer->IgnoreParenImpCasts();
-  if (isa<InitListExpr>(SourceExpression)) {
+  if (const auto* List = dyn_cast<InitListExpr>(SourceExpression)) {
+    // An empty braced scalar initializer value-initializes the selected
+    // subobject before and after designation. It is also accepted under
+    // -Wbraced-scalar-init, unlike populated scalar initializer lists.
+    if (List->getNumInits() == 0) {
+      return true;
+    }
     // Braces around the anonymous aggregate containing a promoted scalar
     // member become braces around the scalar itself after direct designation.
     // Besides triggering -Wbraced-scalar-init, removing those braces would
