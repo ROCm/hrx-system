@@ -10,18 +10,8 @@
 #include "iree/async/util/proactor_pool.h"
 #include "iree/base/threading/numa.h"
 #include "iree/hal/api.h"
-#include "iree/hal/memory/slab_cache.h"
 #include "iree/hal/memory/tlsf_pool.h"
 #include "iree/tooling/device_util.h"
-
-// Reusable backing granularity for testbench fixture staging. Larger requests
-// use the TLSF pool's dedicated-backing path.
-static const iree_device_size_t LOOM_RUN_HAL_STAGING_SLAB_LENGTH =
-    (iree_device_size_t)64 * 1024 * 1024;
-
-// Preferred suballocation alignment when the selected native route supports
-// it. Device addressing requirements remain the hard lower bound.
-static const iree_device_size_t LOOM_RUN_HAL_STAGING_PREFERRED_ALIGNMENT = 256;
 
 static iree_status_t loom_run_hal_runtime_select_queue(
     iree_hal_device_t* device,
@@ -86,61 +76,33 @@ static iree_status_t loom_run_hal_runtime_create_staging_pool(
   iree_status_t status =
       iree_hal_slab_pool_create(runtime->device_group, scope, &source_options,
                                 host_allocator, &source_pool);
-
-  const iree_hal_device_spec_t* device_spec =
-      iree_hal_device_spec(runtime->device);
-  const iree_hal_device_dispatch_spec_t* dispatch_spec =
-      iree_hal_device_spec_dispatch(device_spec);
-  const iree_hal_device_sanitizer_spec_t* sanitizer_spec =
-      iree_hal_device_spec_sanitizer(device_spec);
-  iree_device_size_t pool_alignment = iree_max(
-      (iree_device_size_t)IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT,
-      dispatch_spec->addressing.minimum_buffer_device_address_alignment);
   if (iree_status_is_ok(status)) {
-    iree_hal_pool_capabilities_t source_capabilities;
-    iree_hal_pool_query_capabilities(source_pool, &source_capabilities);
-    if (!source_capabilities.max_allocation_alignment ||
-        source_capabilities.max_allocation_alignment >=
-            LOOM_RUN_HAL_STAGING_PREFERRED_ALIGNMENT) {
-      pool_alignment =
-          iree_max(pool_alignment, LOOM_RUN_HAL_STAGING_PREFERRED_ALIGNMENT);
-    } else if (source_capabilities.max_allocation_alignment >= pool_alignment) {
-      pool_alignment = source_capabilities.max_allocation_alignment;
+    const iree_hal_device_spec_t* device_spec =
+        iree_hal_device_spec(runtime->device);
+    const iree_hal_device_dispatch_spec_t* dispatch_spec =
+        iree_hal_device_spec_dispatch(device_spec);
+    const iree_device_size_t pool_alignment = iree_max(
+        (iree_device_size_t)IREE_HAL_MEMORY_TLSF_MIN_ALIGNMENT,
+        dispatch_spec->addressing.minimum_buffer_device_address_alignment);
+    iree_hal_tlsf_pool_options_t pool_options = {
+        .tlsf_options =
+            {
+                // This is the smallest ordinary backing range. Every larger
+                // request gets dedicated backing sized from that request.
+                .range_length = pool_alignment,
+                .alignment = pool_alignment,
+            },
+        .trace_name = IREE_SV("loom-staging"),
+    };
+    const iree_hal_device_sanitizer_spec_t* sanitizer_spec =
+        iree_hal_device_spec_sanitizer(device_spec);
+    if (iree_any_bit_set(sanitizer_spec->flags,
+                         IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
+      pool_options.asan = sanitizer_spec->asan.pool_options;
     }
-  }
-  iree_hal_tlsf_pool_options_t pool_options = {
-      .tlsf_options =
-          {
-              .range_length = LOOM_RUN_HAL_STAGING_SLAB_LENGTH,
-              .alignment = pool_alignment,
-          },
-      .trace_name = IREE_SV("loom-staging"),
-  };
-  if (iree_any_bit_set(sanitizer_spec->flags,
-                       IREE_HAL_DEVICE_SANITIZER_FLAG_ASAN)) {
-    pool_options.asan = sanitizer_spec->asan.pool_options;
-  }
-
-  iree_hal_pool_reservation_request_t backing_request = {0};
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_tlsf_pool_query_backing_request(
-        source_pool, &pool_options, &backing_request);
-  }
-  iree_hal_pool_t* backing_cache = NULL;
-  if (iree_status_is_ok(status)) {
-    iree_hal_slab_cache_options_t cache_options;
-    iree_hal_slab_cache_options_initialize(&cache_options);
-    cache_options.slab = backing_request;
-    cache_options.max_count = 1;
-    cache_options.trace_name = IREE_SV("loom-staging-cache");
-    status = iree_hal_slab_cache_create(source_pool, &cache_options,
-                                        host_allocator, &backing_cache);
-  }
-  if (iree_status_is_ok(status)) {
-    status = iree_hal_tlsf_pool_create(backing_cache, &pool_options,
+    status = iree_hal_tlsf_pool_create(source_pool, &pool_options,
                                        host_allocator, &runtime->staging_pool);
   }
-  iree_hal_pool_release(backing_cache);
   iree_hal_pool_release(source_pool);
   return status;
 }

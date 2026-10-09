@@ -67,25 +67,36 @@ static iree_status_t loom_run_hal_testbench_staging_prepare_transfers(
        iree_status_is_ok(status) && i < staging->copies.count; ++i) {
     const iree_hal_transfer_operation_t* transfer =
         &staging->copies.transfers[i];
+    iree_hal_transfer_operation_t* operation = &staging->copies.operations[i];
+    if (iree_hal_buffer_allocation_placement(transfer->copy.source_buffer)
+            .device == staging->runtime->device) {
+      *operation = *transfer;
+      if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_DOWNLOAD) {
+        operation->copy.source_buffer = transfer->copy.target_buffer;
+        operation->copy.target_buffer = transfer->copy.source_buffer;
+      }
+      continue;
+    }
+
     const iree_hal_memory_access_t access =
         type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD
             ? IREE_HAL_MEMORY_ACCESS_READ
             : IREE_HAL_MEMORY_ACCESS_WRITE;
+    iree_hal_buffer_mapping_t* mapping =
+        &staging->copies.mappings[*out_mapping_count];
     status = iree_hal_buffer_map_range(
         transfer->copy.source_buffer, IREE_HAL_MAPPING_MODE_SCOPED, access,
-        IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, transfer->copy.length,
-        &staging->copies.mappings[i]);
+        IREE_HAL_BUFFER_MAP_FLAG_NONE, 0, transfer->copy.length, mapping);
     if (iree_status_is_ok(status)) {
       ++*out_mapping_count;
-      iree_hal_transfer_operation_t* operation = &staging->copies.operations[i];
       *operation = (iree_hal_transfer_operation_t){.type = type};
       if (type == IREE_HAL_TRANSFER_OPERATION_TYPE_UPLOAD) {
-        operation->upload.source = staging->copies.mappings[i].contents.data;
+        operation->upload.source = mapping->contents.data;
         operation->upload.target_buffer = transfer->copy.target_buffer;
         operation->upload.length = transfer->copy.length;
       } else {
         operation->download.source_buffer = transfer->copy.target_buffer;
-        operation->download.target = staging->copies.mappings[i].contents.data;
+        operation->download.target = mapping->contents.data;
         operation->download.length = transfer->copy.length;
       }
     }
