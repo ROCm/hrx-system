@@ -962,6 +962,33 @@ loom_cc_library(
 
 loom_cc_library(
   NAME
+    clobber_index
+  HDRS
+    "clobber_index.h"
+  SRCS
+    "clobber_index.c"
+  DEPS
+    iree::base
+    iree::base::internal::arena
+    loom::codegen::low::descriptors
+  PUBLIC
+)
+
+loom_cc_test(
+  NAME
+    clobber_index_test
+  SRCS
+    "clobber_index_test.cc"
+  DEPS
+    ::clobber_index
+    iree::base::internal::arena
+    iree::testing::gtest
+    iree::testing::gtest_main
+    loom::codegen::low::descriptors
+)
+
+loom_cc_library(
+  NAME
     unit_liveness
   HDRS
     "unit_liveness.h"
@@ -969,6 +996,7 @@ loom_cc_library(
     "unit_liveness.c"
   DEPS
     ::assignment
+    ::clobber_index
     ::live_range
     ::storage
     iree::base
@@ -990,6 +1018,7 @@ loom_cc_library(
     "unit_liveness_builder.c"
   DEPS
     ::call
+    ::clobber_index
     ::live_range
     ::storage
     ::unit_liveness
@@ -1004,7 +1033,6 @@ loom_cc_library(
     loom::ir
     loom::ops::low
     loom::target::registers
-    loom::util::adaptive_sort
     loom::util::cfg_graph
   PUBLIC
 )

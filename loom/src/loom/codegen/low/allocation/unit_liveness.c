@@ -37,31 +37,96 @@ bool loom_low_allocation_unit_liveness_storage_is_ignored(
   return false;
 }
 
-static bool loom_low_allocation_unit_liveness_unit_is_clobbered(
-    const loom_low_allocation_unit_liveness_t* unit_liveness,
-    uint32_t storage_key, uint32_t location, uint32_t start_point,
-    uint32_t end_point) {
-  const loom_low_allocation_clobber_t key = {
-      .storage_key = storage_key, .location = location, .point = start_point};
-  iree_host_size_t begin = 0;
-  iree_host_size_t end = unit_liveness->clobbers.count;
+enum {
+  // Cover the common adjacent sparse gap within one compact point span before
+  // using a branchier binary search for longer skips.
+  LOOM_LOW_ALLOCATION_CLOBBER_LINEAR_SEEK_COUNT = 4u,
+};
+
+static uint32_t loom_low_allocation_unit_liveness_clobber_point_bound(
+    const uint32_t* points, uint32_t begin, uint32_t end, uint32_t point) {
   while (begin < end) {
-    const iree_host_size_t middle = begin + (end - begin) / 2;
-    if (loom_low_allocation_clobber_less(
-            &unit_liveness->clobbers.entries[middle], &key)) {
-      begin = middle + 1;
+    const uint32_t middle = begin + (end - begin) / 2u;
+    if (points[middle] < point) {
+      begin = middle + 1u;
     } else {
       end = middle;
     }
   }
-  for (; begin < unit_liveness->clobbers.count; ++begin) {
-    const loom_low_allocation_clobber_t* clobber =
-        &unit_liveness->clobbers.entries[begin];
-    if (clobber->storage_key != storage_key || clobber->location != location ||
-        clobber->point >= end_point) {
-      return false;
+  return begin;
+}
+
+static uint32_t loom_low_allocation_unit_liveness_clobber_point_seek(
+    const uint32_t* points, uint32_t begin, uint32_t end, uint32_t point) {
+  if (begin == end || points[begin] >= point) {
+    return begin;
+  }
+  if (points[end - 1u] < point) {
+    return end;
+  }
+  const uint32_t scan_count = iree_min(
+      end - begin, (uint32_t)LOOM_LOW_ALLOCATION_CLOBBER_LINEAR_SEEK_COUNT);
+  const uint32_t scan_end = begin + scan_count;
+  while (begin < scan_end && points[begin] < point) {
+    ++begin;
+  }
+  return begin < end && points[begin] < point
+             ? loom_low_allocation_unit_liveness_clobber_point_bound(
+                   points, begin, end, point)
+             : begin;
+}
+
+static bool loom_low_allocation_unit_liveness_clobber_window_conflicts(
+    const loom_low_allocation_clobber_index_t* clobbers, uint32_t range_end,
+    uint32_t start_point, uint32_t end_point, uint32_t definition_point,
+    uint32_t* cursor) {
+  if (start_point >= end_point) {
+    return false;
+  }
+  const uint32_t* points = clobbers->points;
+  *cursor = loom_low_allocation_unit_liveness_clobber_point_seek(
+      points, *cursor, range_end, start_point);
+  while (*cursor < range_end && points[*cursor] < end_point) {
+    if (points[*cursor] != definition_point ||
+        clobbers->permitted_definitions.words == NULL ||
+        !iree_bitmap_test(clobbers->permitted_definitions, *cursor)) {
+      return true;
     }
-    if (!clobber->permits_definition || clobber->point != start_point) {
+    ++*cursor;
+  }
+  return false;
+}
+
+static bool loom_low_allocation_unit_liveness_location_is_clobbered(
+    const loom_low_allocation_unit_liveness_t* unit_liveness,
+    const loom_low_allocation_assignment_t* candidate, uint32_t location,
+    uint32_t start_point, uint32_t end_point) {
+  const loom_low_allocation_clobber_index_t* clobbers =
+      &unit_liveness->clobbers;
+  const loom_low_allocation_clobber_range_t range =
+      loom_low_allocation_clobber_index_range(
+          clobbers, candidate->descriptor_reg_class_id, location);
+  if (range.start == range.end) {
+    return false;
+  }
+  uint32_t cursor = range.start;
+  if (candidate->liveness_segments.count == 0) {
+    return loom_low_allocation_unit_liveness_clobber_window_conflicts(
+        clobbers, range.end, start_point, end_point, start_point, &cursor);
+  }
+  for (uint32_t segment_index = 0;
+       segment_index < candidate->liveness_segments.count; ++segment_index) {
+    const loom_liveness_segment_t* segment =
+        &unit_liveness->storage_segments
+             .entries[candidate->liveness_segments.start + segment_index];
+    const uint32_t window_start = iree_max(start_point, segment->start_point);
+    const uint32_t window_end = iree_min(end_point, segment->end_point);
+    if (window_start >= window_end) {
+      continue;
+    }
+    if (loom_low_allocation_unit_liveness_clobber_window_conflicts(
+            clobbers, range.end, window_start, window_end, start_point,
+            &cursor)) {
       return true;
     }
   }
@@ -72,7 +137,7 @@ bool loom_low_allocation_unit_liveness_clobber_conflicts(
     const loom_low_allocation_unit_liveness_t* unit_liveness,
     const loom_low_descriptor_set_t* descriptor_set,
     const loom_low_allocation_assignment_t* candidate) {
-  if (unit_liveness->clobbers.count == 0 ||
+  if (unit_liveness->clobbers.points == NULL ||
       candidate->location_kind !=
           LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER) {
     return false;
@@ -80,30 +145,6 @@ bool loom_low_allocation_unit_liveness_clobber_conflicts(
   const bool is_explicit =
       loom_low_allocation_storage_assignment_uses_explicit_physical_register(
           descriptor_set, candidate);
-  const bool uses_candidate_ordinals =
-      is_explicit &&
-      loom_low_allocation_storage_assignment_uses_physical_candidate_ordinals(
-          descriptor_set, candidate);
-  if (is_explicit &&
-      (!uses_candidate_ordinals || candidate->location_count == 1)) {
-    uint32_t physical_register_id = candidate->location_base;
-    if (uses_candidate_ordinals) {
-      const bool resolved =
-          loom_low_allocation_storage_assignment_unit_physical_register(
-              descriptor_set, candidate, 0, &physical_register_id);
-      IREE_ASSERT_TRUE(resolved);
-    }
-    const loom_low_physical_register_t* physical_register =
-        &descriptor_set->physical_registers[physical_register_id];
-    const uint16_t* atomic_units =
-        &descriptor_set->physical_register_atomic_units
-             [physical_register->atomic_unit_start];
-    if (atomic_units[0] >= unit_liveness->clobbers.atomic_unit_end ||
-        atomic_units[physical_register->atomic_unit_count - 1] <
-            unit_liveness->clobbers.atomic_unit_begin) {
-      return false;
-    }
-  }
   for (uint32_t unit = 0; unit < candidate->location_count; ++unit) {
     const uint32_t start_point =
         loom_low_allocation_live_range_assignment_unit_start_point(
@@ -115,8 +156,6 @@ bool loom_low_allocation_unit_liveness_clobber_conflicts(
             unit);
     const uint16_t* atomic_units = NULL;
     uint16_t atomic_unit_count = 1;
-    uint32_t storage_key = loom_low_reg_class_storage_key(
-        descriptor_set, candidate->descriptor_reg_class_id);
     if (is_explicit) {
       uint32_t physical_register_id = 0;
       const bool resolved =
@@ -125,32 +164,15 @@ bool loom_low_allocation_unit_liveness_clobber_conflicts(
       IREE_ASSERT(resolved, "accepted assignment must name its physical units");
       atomic_units = loom_low_descriptor_set_physical_register_atomic_units(
           descriptor_set, physical_register_id, &atomic_unit_count);
-      storage_key = 0;
     }
     for (uint16_t atomic_unit = 0; atomic_unit < atomic_unit_count;
          ++atomic_unit) {
       const uint32_t location = atomic_units != NULL
                                     ? atomic_units[atomic_unit]
                                     : candidate->location_base + unit;
-      if (candidate->liveness_segments.count == 0) {
-        if (loom_low_allocation_unit_liveness_unit_is_clobbered(
-                unit_liveness, storage_key, location, start_point, end_point)) {
-          return true;
-        }
-        continue;
-      }
-      for (uint32_t segment_index = 0;
-           segment_index < candidate->liveness_segments.count;
-           ++segment_index) {
-        const loom_liveness_segment_t* segment =
-            &unit_liveness->storage_segments
-                 .entries[candidate->liveness_segments.start + segment_index];
-        if (loom_low_allocation_unit_liveness_unit_is_clobbered(
-                unit_liveness, storage_key, location,
-                iree_max(start_point, segment->start_point),
-                iree_min(end_point, segment->end_point))) {
-          return true;
-        }
+      if (loom_low_allocation_unit_liveness_location_is_clobbered(
+              unit_liveness, candidate, location, start_point, end_point)) {
+        return true;
       }
     }
   }

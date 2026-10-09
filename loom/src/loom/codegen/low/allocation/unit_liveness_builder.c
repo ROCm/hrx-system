@@ -16,18 +16,14 @@
 #include "loom/ir/module.h"
 #include "loom/ops/low/ops.h"
 #include "loom/target/registers.h"
-#include "loom/util/adaptive_sort.h"
 #include "loom/util/cfg_graph.h"
-
-LOOM_DEFINE_ADAPTIVE_SORT(loom_low_allocation_clobber_sort,
-                          loom_low_allocation_clobber_t,
-                          loom_low_allocation_clobber_less)
 
 static iree_status_t loom_low_allocation_unit_liveness_note_clobber(
     loom_low_allocation_unit_liveness_t* unit_liveness,
+    loom_low_allocation_clobber_builder_t* clobber_builder,
     const loom_low_descriptor_set_t* descriptor_set, uint16_t reg_class_id,
     uint32_t location, uint32_t point, bool permits_definition,
-    iree_arena_allocator_t* arena) {
+    iree_arena_allocator_t* decision_arena) {
   const loom_low_reg_class_t* reg_class =
       &descriptor_set->reg_classes[reg_class_id];
   if (loom_low_allocation_storage_reg_class_location_kind(reg_class) !=
@@ -42,18 +38,10 @@ static iree_status_t loom_low_allocation_unit_liveness_note_clobber(
     atomic_units = loom_low_descriptor_set_physical_register_atomic_units(
         descriptor_set, location, &atomic_unit_count);
     storage_key = 0;
-    unit_liveness->clobbers.atomic_unit_begin =
-        unit_liveness->clobbers.atomic_unit_end == 0
-            ? atomic_units[0]
-            : iree_min(unit_liveness->clobbers.atomic_unit_begin,
-                       atomic_units[0]);
-    unit_liveness->clobbers.atomic_unit_end =
-        iree_max(unit_liveness->clobbers.atomic_unit_end,
-                 (uint32_t)atomic_units[atomic_unit_count - 1] + 1);
   } else {
     if (unit_liveness->implicit_location_counts_by_reg_class == NULL) {
       IREE_RETURN_IF_ERROR(iree_arena_allocate_array(
-          arena, descriptor_set->reg_class_count, sizeof(uint16_t),
+          decision_arena, descriptor_set->reg_class_count, sizeof(uint16_t),
           (void**)&unit_liveness->implicit_location_counts_by_reg_class));
       memset(unit_liveness->implicit_location_counts_by_reg_class, 0,
              descriptor_set->reg_class_count * sizeof(uint16_t));
@@ -62,23 +50,11 @@ static iree_status_t loom_low_allocation_unit_liveness_note_clobber(
         &unit_liveness->implicit_location_counts_by_reg_class[reg_class_id];
     *count = iree_max(*count, location + 1);
   }
-  if (unit_liveness->clobbers.count + atomic_unit_count >
-      unit_liveness->clobbers.capacity) {
-    IREE_RETURN_IF_ERROR(
-        iree_arena_grow_array(arena, unit_liveness->clobbers.count,
-                              unit_liveness->clobbers.count + atomic_unit_count,
-                              sizeof(*unit_liveness->clobbers.entries),
-                              &unit_liveness->clobbers.capacity,
-                              (void**)&unit_liveness->clobbers.entries));
-  }
   for (uint16_t i = 0; i < atomic_unit_count; ++i) {
-    unit_liveness->clobbers.entries[unit_liveness->clobbers.count++] =
-        (loom_low_allocation_clobber_t){
-            .storage_key = storage_key,
-            .location = atomic_units != NULL ? atomic_units[i] : location,
-            .point = point,
-            .permits_definition = permits_definition,
-        };
+    IREE_RETURN_IF_ERROR(loom_low_allocation_clobber_builder_record(
+        clobber_builder, storage_key,
+        atomic_units != NULL ? atomic_units[i] : location, point,
+        permits_definition));
   }
   return iree_ok_status();
 }
@@ -108,6 +84,8 @@ typedef struct loom_low_allocation_unit_use_t {
 typedef struct loom_low_allocation_unit_use_index_t {
   // Mutable lifetime result receiving the recorded uses.
   loom_low_allocation_unit_liveness_t* unit_liveness;
+  // Program-ordered implicit writes retained in construction scratch.
+  loom_low_allocation_clobber_builder_t clobber_builder;
   // Canonical function CFG, borrowed for construction.
   const loom_cfg_graph_t* cfg_graph;
   // Canonical definition and block-boundary points, borrowed for construction.
@@ -171,6 +149,8 @@ static iree_status_t loom_low_allocation_unit_use_index_initialize(
       .arena = arena,
       .decision_arena = decision_arena,
   };
+  loom_low_allocation_clobber_builder_initialize(arena,
+                                                 &out_index->clobber_builder);
   if (multi_unit_value_count == 0 || liveness->block_count < 2 ||
       cfg_graph->edge_count == 0) {
     return iree_ok_status();
@@ -818,17 +798,17 @@ loom_low_allocation_unit_liveness_mark_early_clobber_operand_reads(
 }
 
 static iree_status_t loom_low_allocation_unit_liveness_note_call_clobbers(
-    loom_low_allocation_unit_liveness_t* unit_liveness,
+    loom_low_allocation_unit_use_index_t* unit_use_index,
     const loom_low_descriptor_set_t* descriptor_set,
-    const loom_low_call_clobber_list_t* clobbers, uint32_t point,
-    iree_arena_allocator_t* arena) {
+    const loom_low_call_clobber_list_t* clobbers, uint32_t point) {
   for (iree_host_size_t c = 0; c < clobbers->count; ++c) {
     const loom_low_call_clobber_t* clobber = &clobbers->values[c];
     for (uint32_t unit = 0; unit < clobber->count; ++unit) {
       IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_note_clobber(
-          unit_liveness, descriptor_set, clobber->register_class,
-          clobber->location + unit, point,
-          /*permits_definition=*/true, arena));
+          unit_use_index->unit_liveness, &unit_use_index->clobber_builder,
+          descriptor_set, clobber->register_class, clobber->location + unit,
+          point,
+          /*permits_definition=*/true, unit_use_index->decision_arena));
     }
   }
   return iree_ok_status();
@@ -855,16 +835,15 @@ static iree_status_t loom_low_allocation_unit_liveness_note_instruction_effects(
         call_contracts->query_common_clobbers = NULL;
       }
       IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_note_call_clobbers(
-          unit_liveness, target->descriptor_set,
-          &unit_use_index->common_call_clobbers, operation_point->end_point,
-          arena));
+          unit_use_index, target->descriptor_set,
+          &unit_use_index->common_call_clobbers, operation_point->end_point));
       if (call_contracts->query) {
         const loom_low_call_contract_t* contract = call_contracts->query(
             call_contracts->user_data, loom_low_func_call_callee(op));
         IREE_RETURN_IF_ERROR(
             loom_low_allocation_unit_liveness_note_call_clobbers(
-                unit_liveness, target->descriptor_set, &contract->clobbers,
-                operation_point->end_point, arena));
+                unit_use_index, target->descriptor_set, &contract->clobbers,
+                operation_point->end_point));
       }
     }
     return iree_ok_status();
@@ -948,8 +927,9 @@ static iree_status_t loom_low_allocation_unit_liveness_note_instruction_effects(
                     descriptor_set, reg_class_id, 0)
               : 0;
       IREE_RETURN_IF_ERROR(loom_low_allocation_unit_liveness_note_clobber(
-          unit_liveness, descriptor_set, reg_class_id, location, clobber_point,
-          /*permits_definition=*/false, arena));
+          unit_liveness, &unit_use_index->clobber_builder, descriptor_set,
+          reg_class_id, location, clobber_point,
+          /*permits_definition=*/false, unit_use_index->decision_arena));
     }
   }
   for (uint16_t i = 0; i < descriptor->constraint_count; ++i) {
@@ -1479,15 +1459,16 @@ iree_status_t loom_low_allocation_unit_liveness_initialize(
     status = loom_low_allocation_unit_use_index_extend_boundaries(
         &unit_use_index, liveness, out_unit_liveness);
   }
+  if (iree_status_is_ok(status)) {
+    status = loom_low_allocation_clobber_builder_build(
+        &unit_use_index.clobber_builder, target->descriptor_set, decision_arena,
+        &out_unit_liveness->clobbers);
+  }
   iree_arena_checkpoint_restore(&scratch_checkpoint);
   if (iree_status_is_ok(status)) {
     status =
         loom_low_allocation_unit_liveness_apply_storage_segment_refinements(
             &unit_use_index, liveness, result_arena, out_unit_liveness);
-  }
-  if (iree_status_is_ok(status)) {
-    loom_low_allocation_clobber_sort(out_unit_liveness->clobbers.entries,
-                                     out_unit_liveness->clobbers.count);
   }
   return status;
 }

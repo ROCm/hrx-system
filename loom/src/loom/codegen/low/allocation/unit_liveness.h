@@ -14,43 +14,13 @@
 #include "iree/base/internal/arena.h"
 #include "loom/analysis/liveness.h"
 #include "loom/codegen/low/allocation/assignment.h"
+#include "loom/codegen/low/allocation/clobber_index.h"
 #include "loom/codegen/low/placement.h"
 #include "loom/ir/ir.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-// Indexed physical write point retained by the unit-liveness producer.
-typedef struct loom_low_allocation_clobber_t {
-  // Shared register storage identity; explicit physical units use key zero.
-  // Descriptor storage keys occupy 17 bits. Sharing this word keeps ordinary
-  // instruction clobber rows unchanged in size when calls are absent.
-  uint32_t storage_key : 31;
-  // Calls permit a new result at this point; implicit instruction writes do
-  // not. Both exclude values whose last read preceded the write point.
-  uint32_t permits_definition : 1;
-  // Atomic physical unit or linear register location within storage_key.
-  uint32_t location;
-  // Program point overwritten by the implicit instruction output.
-  uint32_t point;
-} loom_low_allocation_clobber_t;
-
-static_assert(sizeof(loom_low_allocation_clobber_t) == 12,
-              "physical clobber rows must remain compact");
-
-// Shared construction and query ordering for physical clobber rows.
-static inline bool loom_low_allocation_clobber_less(
-    const loom_low_allocation_clobber_t* lhs,
-    const loom_low_allocation_clobber_t* rhs) {
-  if (lhs->storage_key != rhs->storage_key) {
-    return lhs->storage_key < rhs->storage_key;
-  }
-  if (lhs->location != rhs->location) {
-    return lhs->location < rhs->location;
-  }
-  return lhs->point < rhs->point;
-}
 
 typedef struct loom_low_allocation_write_interference_t
     loom_low_allocation_write_interference_t;
@@ -126,20 +96,8 @@ typedef struct loom_low_allocation_unit_liveness_t {
     // values.
     const loom_liveness_segment_range_t* tied_sources;
   } storage_segments;
-  // Implicit physical writes, sorted by storage identity and program point
-  // after construction. These occupy storage without defining SSA values.
-  struct {
-    // Arena-owned atomic-unit write points.
-    loom_low_allocation_clobber_t* entries;
-    // Number of initialized write points.
-    iree_host_size_t count;
-    // Allocated entry capacity used during construction.
-    iree_host_size_t capacity;
-    // Smallest explicit atomic unit written when atomic_unit_end is nonzero.
-    uint32_t atomic_unit_begin;
-    // One past the largest explicit atomic unit written; zero for none.
-    uint32_t atomic_unit_end;
-  } clobbers;
+  // Decision-arena-owned implicit physical writes indexed by storage location.
+  loom_low_allocation_clobber_index_t clobbers;
   // Instruction reads retained beyond semantic value death. Operand events
   // are collected here and finalized after fixed bindings, before assignment.
   loom_low_allocation_write_interference_t* write_interference;

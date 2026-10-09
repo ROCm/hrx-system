@@ -858,11 +858,35 @@ loom_cc_library(
 )
 
 loom_cc_library(
+    name = "clobber_index",
+    srcs = ["clobber_index.c"],
+    hdrs = ["clobber_index.h"],
+    deps = [
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base",
+        "//runtime/src/iree/base/internal:arena",
+    ],
+)
+
+loom_cc_test(
+    name = "clobber_index_test",
+    srcs = ["clobber_index_test.cc"],
+    deps = [
+        ":clobber_index",
+        "//loom/src/loom/codegen/low:descriptors",
+        "//runtime/src/iree/base/internal:arena",
+        "//runtime/src/iree/testing:gtest",
+        "//runtime/src/iree/testing:gtest_main",
+    ],
+)
+
+loom_cc_library(
     name = "unit_liveness",
     srcs = ["unit_liveness.c"],
     hdrs = ["unit_liveness.h"],
     deps = [
         ":assignment",
+        ":clobber_index",
         ":live_range",
         ":storage",
         "//loom/src/loom/analysis:liveness",
@@ -881,6 +905,7 @@ loom_cc_library(
     hdrs = ["unit_liveness_builder.h"],
     deps = [
         ":call",
+        ":clobber_index",
         ":live_range",
         ":storage",
         ":unit_liveness",
@@ -893,7 +918,6 @@ loom_cc_library(
         "//loom/src/loom/ir",
         "//loom/src/loom/ops/low",
         "//loom/src/loom/target:registers",
-        "//loom/src/loom/util:adaptive_sort",
         "//loom/src/loom/util:cfg_graph",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/internal:arena",

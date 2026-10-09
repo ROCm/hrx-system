@@ -85,6 +85,83 @@ class LowAllocationUnitLivenessTest : public ::testing::Test {
                                                                   placement);
   }
 
+  struct PhysicalClobber {
+    uint16_t reg_class_id;
+    uint32_t location;
+    uint32_t point;
+    bool permits_definition;
+  };
+
+  loom_low_allocation_clobber_index_t BuildClobberIndex(
+      const loom_low_descriptor_set_t* descriptor_set,
+      const PhysicalClobber* clobbers, iree_host_size_t clobber_count) {
+    loom_low_allocation_clobber_builder_t builder;
+    loom_low_allocation_clobber_builder_initialize(&arena_, &builder);
+    for (iree_host_size_t i = 0; i < clobber_count; ++i) {
+      const auto& clobber = clobbers[i];
+      IREE_CHECK_OK(loom_low_allocation_clobber_builder_record(
+          &builder,
+          loom_low_reg_class_storage_key(descriptor_set, clobber.reg_class_id),
+          clobber.location, clobber.point, clobber.permits_definition));
+    }
+    loom_low_allocation_clobber_index_t index;
+    IREE_CHECK_OK(loom_low_allocation_clobber_builder_build(
+        &builder, descriptor_set, &decision_arena_, &index));
+    return index;
+  }
+
+  bool HasClobberConflict(const loom_low_descriptor_set_t* descriptor_set,
+                          const loom_low_allocation_clobber_index_t& clobbers,
+                          uint16_t reg_class_id, uint32_t location,
+                          uint32_t start_point, uint32_t end_point,
+                          const loom_liveness_segment_t* segments = nullptr,
+                          uint32_t segment_count = 0) {
+    loom_low_allocation_unit_liveness_t liveness = {};
+    liveness.end_points = &end_point;
+    liveness.point_count = 1;
+    liveness.storage_segments.entries = segments;
+    liveness.clobbers = clobbers;
+    loom_low_allocation_assignment_t candidate = {};
+    candidate.descriptor_reg_class_id = reg_class_id;
+    candidate.start_point = start_point;
+    candidate.end_point = end_point;
+    candidate.unit_count = 1;
+    candidate.location_kind = LOOM_LOW_ALLOCATION_LOCATION_PHYSICAL_REGISTER;
+    candidate.location_base = location;
+    candidate.location_count = 1;
+    candidate.liveness_segments.count = segment_count;
+    return loom_low_allocation_unit_liveness_clobber_conflicts(
+        &liveness, descriptor_set, &candidate);
+  }
+
+  bool HasReferenceClobberConflict(const PhysicalClobber* clobbers,
+                                   iree_host_size_t clobber_count,
+                                   uint32_t location, uint32_t start_point,
+                                   uint32_t end_point,
+                                   const loom_liveness_segment_t* segments,
+                                   uint32_t segment_count) {
+    for (iree_host_size_t i = 0; i < clobber_count; ++i) {
+      const PhysicalClobber& clobber = clobbers[i];
+      if (clobber.location != location || clobber.point < start_point ||
+          clobber.point >= end_point) {
+        continue;
+      }
+      bool overlaps_storage_lifetime = segment_count == 0;
+      for (uint32_t segment_index = 0;
+           segment_index < segment_count && !overlaps_storage_lifetime;
+           ++segment_index) {
+        const loom_liveness_segment_t& segment = segments[segment_index];
+        overlaps_storage_lifetime = clobber.point >= segment.start_point &&
+                                    clobber.point < segment.end_point;
+      }
+      if (overlaps_storage_lifetime &&
+          (!clobber.permits_definition || clobber.point != start_point)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // Shared block pool for result, decision, and construction lifetimes.
   iree_arena_block_pool_t block_pool_;
   // Retains published point/segment arrays and prerequisite analyses.
@@ -284,9 +361,217 @@ TEST_F(LowAllocationUnitLivenessTest, RetainsImplicitReadsWithoutClobbering) {
   ASSERT_NE(result.implicit_location_counts_by_reg_class, nullptr);
   EXPECT_EQ(result.implicit_location_counts_by_reg_class[0], 3u);
   EXPECT_EQ(result.implicit_location_counts_by_reg_class[1], 1u);
-  EXPECT_EQ(result.clobbers.count, 1u);
+  EXPECT_EQ(result.clobbers.permitted_definitions.bit_count, 1u);
   loom_local_value_domain_release(&domain);
   loom_module_free(module);
+}
+
+TEST_F(LowAllocationUnitLivenessTest,
+       ClobbersContinuousLifetimeAtHalfOpenPoints) {
+  loom_low_reg_class_t reg_class = {};
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.reg_classes = &reg_class;
+  descriptors.reg_class_count = 1;
+  const PhysicalClobber events[] = {
+      {0, 0, 4, false},
+      {0, 0, 6, true},
+      {0, 0, 8, false},
+  };
+  const auto clobbers =
+      BuildClobberIndex(&descriptors, events, IREE_ARRAYSIZE(events));
+
+  EXPECT_FALSE(HasClobberConflict(&descriptors, clobbers, 0, 0, 6, 8));
+  EXPECT_TRUE(HasClobberConflict(&descriptors, clobbers, 0, 0, 6, 9));
+  EXPECT_FALSE(HasClobberConflict(&descriptors, clobbers, 0, 1, 6, 9));
+}
+
+TEST_F(LowAllocationUnitLivenessTest,
+       RejectsForbiddenWriteAtPermittedDefinitionPoint) {
+  loom_low_reg_class_t reg_class = {};
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.reg_classes = &reg_class;
+  descriptors.reg_class_count = 1;
+  const PhysicalClobber events[] = {
+      {0, 0, 6, true},
+      {0, 0, 6, false},
+  };
+  const auto clobbers =
+      BuildClobberIndex(&descriptors, events, IREE_ARRAYSIZE(events));
+
+  EXPECT_TRUE(HasClobberConflict(&descriptors, clobbers, 0, 0, 6, 7));
+}
+
+TEST_F(LowAllocationUnitLivenessTest,
+       MergesClobberHistoryAcrossSparseLifetimeSegments) {
+  loom_low_reg_class_t reg_class = {};
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.reg_classes = &reg_class;
+  descriptors.reg_class_count = 1;
+  const loom_liveness_segment_t segments[] = {
+      {/*.start_point=*/2, /*.end_point=*/4},
+      {/*.start_point=*/8, /*.end_point=*/10},
+  };
+  const PhysicalClobber gap_events[] = {
+      {0, 0, 6, false},
+  };
+  const auto gap_clobbers =
+      BuildClobberIndex(&descriptors, gap_events, IREE_ARRAYSIZE(gap_events));
+  EXPECT_FALSE(HasClobberConflict(&descriptors, gap_clobbers, 0, 0, 2, 10,
+                                  segments, IREE_ARRAYSIZE(segments)));
+
+  const PhysicalClobber later_events[] = {
+      {0, 0, 6, false},
+      {0, 0, 8, true},
+  };
+  const auto later_clobbers = BuildClobberIndex(&descriptors, later_events,
+                                                IREE_ARRAYSIZE(later_events));
+  EXPECT_TRUE(HasClobberConflict(&descriptors, later_clobbers, 0, 0, 2, 10,
+                                 segments, IREE_ARRAYSIZE(segments)));
+}
+
+TEST_F(LowAllocationUnitLivenessTest,
+       SeeksAcrossDenseClobbersBetweenSparseLifetimeSegments) {
+  loom_low_reg_class_t reg_class = {};
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.reg_classes = &reg_class;
+  descriptors.reg_class_count = 1;
+  constexpr uint32_t kGapEnd = 16;
+  std::array<PhysicalClobber, kGapEnd> events;
+  for (uint32_t point = 1; point <= kGapEnd; ++point) {
+    events[point - 1u] = {0, 0, point, point == kGapEnd};
+  }
+  const auto clobbers =
+      BuildClobberIndex(&descriptors, events.data(), events.size());
+
+  const loom_liveness_segment_t skipped_segments[] = {
+      {/*.start_point=*/0, /*.end_point=*/1},
+      {/*.start_point=*/17, /*.end_point=*/18},
+  };
+  EXPECT_FALSE(HasClobberConflict(&descriptors, clobbers, 0, 0, 0, 18,
+                                  skipped_segments,
+                                  IREE_ARRAYSIZE(skipped_segments)));
+
+  const loom_liveness_segment_t conflicting_segments[] = {
+      {/*.start_point=*/0, /*.end_point=*/1},
+      {/*.start_point=*/16, /*.end_point=*/17},
+  };
+  EXPECT_TRUE(HasClobberConflict(&descriptors, clobbers, 0, 0, 0, 17,
+                                 conflicting_segments,
+                                 IREE_ARRAYSIZE(conflicting_segments)));
+}
+
+TEST_F(LowAllocationUnitLivenessTest,
+       SeeksLongHistoryWithoutSkippingImmediateDefinition) {
+  loom_low_reg_class_t reg_class = {};
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.reg_classes = &reg_class;
+  descriptors.reg_class_count = 1;
+  std::array<PhysicalClobber, 32> events;
+  for (uint32_t point = 0; point < 32; ++point) {
+    events[point] = {0, 0, point, point == 24};
+  }
+  const auto clobbers =
+      BuildClobberIndex(&descriptors, events.data(), events.size());
+
+  EXPECT_FALSE(HasClobberConflict(&descriptors, clobbers, 0, 0, 24, 25));
+  EXPECT_TRUE(HasClobberConflict(&descriptors, clobbers, 0, 0, 24, 26));
+}
+
+TEST_F(LowAllocationUnitLivenessTest, ChecksEveryExplicitRegisterAtomicUnit) {
+  loom_low_reg_class_t reg_class = {};
+  reg_class.flags =
+      LOOM_LOW_REG_CLASS_FLAG_EXPLICIT_PHYSICAL_REGISTERS |
+      LOOM_LOW_REG_CLASS_FLAG_CONTIGUOUS_PHYSICAL_REGISTER_CANDIDATES;
+  reg_class.allocatable_count = 1;
+  reg_class.physical_atomic_unit_count = 2;
+  loom_low_physical_register_t physical_register = {};
+  physical_register.atomic_unit_count = 2;
+  const uint16_t physical_register_candidate_ids[] = {0};
+  const uint16_t physical_register_atomic_units[] = {2, 5};
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.reg_classes = &reg_class;
+  descriptors.reg_class_count = 1;
+  descriptors.physical_registers = &physical_register;
+  descriptors.physical_register_count = 1;
+  descriptors.physical_register_candidate_ids = physical_register_candidate_ids;
+  descriptors.physical_register_candidate_count =
+      IREE_ARRAYSIZE(physical_register_candidate_ids);
+  descriptors.physical_register_atomic_units = physical_register_atomic_units;
+  descriptors.physical_register_atomic_unit_count =
+      IREE_ARRAYSIZE(physical_register_atomic_units);
+  descriptors.physical_register_unit_count = 6;
+  const PhysicalClobber events[] = {
+      {0, 5, 4, false},
+  };
+  const auto clobbers =
+      BuildClobberIndex(&descriptors, events, IREE_ARRAYSIZE(events));
+
+  EXPECT_TRUE(HasClobberConflict(&descriptors, clobbers, 0, 0, 3, 5));
+}
+
+TEST_F(LowAllocationUnitLivenessTest,
+       ClobberIndexMatchesExhaustiveReferenceSemantics) {
+  loom_low_reg_class_t reg_class = {};
+  loom_low_descriptor_set_t descriptors = {};
+  descriptors.reg_classes = &reg_class;
+  descriptors.reg_class_count = 1;
+  const loom_liveness_segment_t sparse_segments[] = {
+      {/*.start_point=*/1, /*.end_point=*/3},
+      {/*.start_point=*/5, /*.end_point=*/7},
+  };
+
+  // Each ternary digit selects no write, a forbidden write, or a permitted
+  // definition at one point. This covers every policy combination across six
+  // ordered program points without trusting either search implementation.
+  constexpr uint32_t kPointCount = 6;
+  constexpr uint32_t kEventStateCount = 729;  // 3^kPointCount.
+  for (uint32_t event_state = 0; event_state < kEventStateCount;
+       ++event_state) {
+    const iree_arena_checkpoint_t scratch_checkpoint =
+        iree_arena_checkpoint_save(&arena_);
+    const iree_arena_checkpoint_t decision_checkpoint =
+        iree_arena_checkpoint_save(&decision_arena_);
+    std::array<PhysicalClobber, kPointCount> events;
+    iree_host_size_t event_count = 0;
+    uint32_t remaining_state = event_state;
+    for (uint32_t point = 0; point < kPointCount; ++point) {
+      const uint32_t policy = remaining_state % 3u;
+      remaining_state /= 3u;
+      if (policy != 0) {
+        events[event_count++] = {
+            0,
+            0,
+            point,
+            /*permits_definition=*/policy == 2u,
+        };
+      }
+    }
+    const auto clobbers =
+        BuildClobberIndex(&descriptors, events.data(), event_count);
+
+    for (uint32_t start_point = 0; start_point < kPointCount; ++start_point) {
+      for (uint32_t end_point = start_point + 1u; end_point <= kPointCount + 1u;
+           ++end_point) {
+        for (uint32_t segment_mode = 0; segment_mode < 2; ++segment_mode) {
+          const loom_liveness_segment_t* segments =
+              segment_mode == 0 ? nullptr : sparse_segments;
+          const uint32_t segment_count =
+              segment_mode == 0 ? 0 : IREE_ARRAYSIZE(sparse_segments);
+          const bool expected = HasReferenceClobberConflict(
+              events.data(), event_count, 0, start_point, end_point, segments,
+              segment_count);
+          const bool actual =
+              HasClobberConflict(&descriptors, clobbers, 0, 0, start_point,
+                                 end_point, segments, segment_count);
+          EXPECT_EQ(expected, actual)
+              << "event state " << event_state << ", lifetime [" << start_point
+              << ", " << end_point << "), segment mode " << segment_mode;
+        }
+      }
+    }
+    iree_arena_checkpoint_restore(&decision_checkpoint);
+    iree_arena_checkpoint_restore(&scratch_checkpoint);
+  }
 }
 
 enum class ResultDefinitionKind { kInstruction, kConstant, kCopy };
