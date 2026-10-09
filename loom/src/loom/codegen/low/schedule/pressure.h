@@ -434,8 +434,9 @@ void loom_low_schedule_pressure_publish_unlock_consumer(
     loom_low_schedule_pressure_state_t* pressure_state, uint32_t group_index);
 
 // Queries the retained descriptor frontier for a consumer made ready by
-// |candidate_node| with another live operand in |resource|. The resource's
-// pressure projection determines whether this continuation is constrained.
+// |candidate_node| that is the final local consumer of another live operand in
+// |resource|. Forwarded values cannot retire locally. The resource's pressure
+// projection determines whether this continuation is constrained.
 bool loom_low_schedule_pressure_candidate_unlocks_packing_continuation(
     const loom_low_schedule_build_state_t* state,
     const loom_low_schedule_pressure_state_t* pressure_state,

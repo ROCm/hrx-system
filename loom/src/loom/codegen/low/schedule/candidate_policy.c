@@ -95,10 +95,17 @@ static bool loom_low_schedule_candidate_defers_rematerializable_leaf(
       score->active_unspillable_transaction_final_capacity != UINT32_MAX) {
     return false;
   }
-  const uint16_t actionable_flags =
+  uint16_t actionable_flags =
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_UNLOCKS_DESCRIPTOR |
-      LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE |
       LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_EXACT_PACKING_COMPLETION;
+  // A private repair leaf can expose another setup without making its final
+  // consumer ready. Completion-path membership does not justify opening that
+  // live range when it incurs debt; retain its demand-driven placement.
+  if (score->pressure_risk != LOOM_LOW_SCHEDULE_PRESSURE_RISK_DEBT ||
+      !iree_any_bit_set(score->flags,
+                        LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_STORAGE_SETUP)) {
+    actionable_flags |= LOOM_LOW_SCHEDULE_CANDIDATE_FLAG_ADVANCES_STORAGE;
+  }
   return score->produced_live_value_count != 0 &&
          score->killed_live_units == 0 &&
          iree_any_bit_set(

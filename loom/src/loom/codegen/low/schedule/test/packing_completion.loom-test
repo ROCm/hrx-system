@@ -205,6 +205,55 @@ block 0 order: 1, 0, 2, 3, 4
 
 // ====
 
+// The configured expansion and the independent expansion both read the live
+// narrow value. Preparing the first cannot retire that shared storage. The
+// ordinary store can release its payload before opening this continuation.
+// This checks schedule priority under packing pressure, not allocation fit.
+// RUN: emit low-schedule-query @register_packing_rejects_non_final_live_in_continuation strategy=resource-stall order=0,1,2,3,4,5,6
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @register_packing_rejects_non_final_live_in_continuation(%shared_narrow: reg<test.packed.narrow>, %held_wide: reg<test.packed.wide>, %address: reg<test.ptr>, %payload: reg<test.i32 x4>, %configuration_lhs: reg<test.i32>, %configuration_rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.packed.wide>) asm {
+  test.store.v4i32 %address, %payload
+  %configuration = test.mul.i32 %configuration_lhs, %configuration_rhs
+  %first_wide, %second_wide = test.packing.configured.expand %shared_narrow, %configuration
+  %configured_result = test.packing.retire %first_wide, %second_wide
+  %independent_wide = test.packing.expand %shared_narrow
+  %independent_result = test.packing.retire %independent_wide, %independent_wide
+  return %configured_result, %independent_result, %held_wide
+}
+
+// ----
+block 0 order: 0, 1, 4, 5, 2, 3, 6
+
+// ====
+
+// The configured expansion is the narrow value's sole local consumer, but the
+// successor still owns that value. Its boundary use must prevent the same false
+// retirement priority even when the distinct local consumer count is one.
+// This checks schedule priority under packing pressure, not allocation fit.
+// RUN: emit low-schedule-query @register_packing_rejects_forwarded_live_in_continuation strategy=resource-stall order=0,1,2,3,4,5,6,7
+
+test.target<low_core> @test_target
+
+low.func.def target<test.low.core>(@test_target) @register_packing_rejects_forwarded_live_in_continuation(%shared_narrow: reg<test.packed.narrow>, %held_wide: reg<test.packed.wide>, %address: reg<test.ptr>, %payload: reg<test.i32 x4>, %configuration_lhs: reg<test.i32>, %configuration_rhs: reg<test.i32>) -> (reg<test.i32>, reg<test.i32>, reg<test.packed.wide>) asm {
+  test.store.v4i32 %address, %payload
+  %configuration = test.mul.i32 %configuration_lhs, %configuration_rhs
+  %first_wide, %second_wide = test.packing.configured.expand %shared_narrow, %configuration
+  %configured_result = test.packing.retire %first_wide, %second_wide
+  low.br ^continue
+^continue:
+  %independent_wide = test.packing.expand %shared_narrow
+  %independent_result = test.packing.retire %independent_wide, %independent_wide
+  return %configured_result, %independent_result, %held_wide
+}
+
+// ----
+block 0 order: 0, 1, 2, 3, 4
+block 1 order: 5, 6, 7
+
+// ====
+
 // An operand-bearing producer can make a configured packing continuation
 // ready. Preserve the active transaction's identity when another ready
 // producer would open a different transaction in the same full resource. One
