@@ -342,9 +342,7 @@ TEST_F(MemoryBackendTest, PublishesCanonicalPerDeviceBindings) {
       table, host, queue_a, IREE_HAL_MEMORY_TRANSITION_RELEASE, &host_to_a));
   const iree_hal_memory_transition_t publication =
       iree_hal_memory_transition_query(table, host_to_a);
-  EXPECT_EQ(publication.release.bits,
-            IREE_HAL_MEMORY_EFFECT_HOST_FLUSH |
-                IREE_HAL_MEMORY_EFFECT_RESOURCE_OPERANDS);
+  EXPECT_EQ(publication.release.bits, IREE_HAL_MEMORY_EFFECT_HOST_FLUSH);
   EXPECT_EQ(publication.acquire.bits, 0u);
   const iree_hal_memory_transition_recipe_t* publication_recipe =
       iree_hal_memory_transition_recipe(table, host_to_a,
@@ -363,9 +361,7 @@ TEST_F(MemoryBackendTest, PublishesCanonicalPerDeviceBindings) {
   const iree_hal_memory_transition_t observation =
       iree_hal_memory_transition_query(table, b_to_host);
   EXPECT_EQ(observation.release.bits, 0u);
-  EXPECT_EQ(observation.acquire.bits,
-            IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE |
-                IREE_HAL_MEMORY_EFFECT_RESOURCE_OPERANDS);
+  EXPECT_EQ(observation.acquire.bits, IREE_HAL_MEMORY_EFFECT_HOST_INVALIDATE);
   const iree_hal_memory_transition_t unqualified_program =
       iree_hal_pool_query_transition(pool, host, program_a);
   EXPECT_FALSE(
@@ -394,7 +390,8 @@ TEST_F(MemoryBackendTest, PublishesQueueGlobalDeviceTransition) {
       table, queue_a, queue_b, IREE_HAL_MEMORY_TRANSITION_RELEASE, &pair));
   const iree_hal_memory_transition_t transition =
       iree_hal_memory_transition_query(table, pair);
-  EXPECT_EQ(transition.release.bits, IREE_HAL_MEMORY_EFFECT_RELEASE_TO_SYSTEM);
+  EXPECT_EQ(transition.release.bits,
+            IREE_HAL_MEMORY_EFFECT_GLOBAL_RELEASE_TO_SYSTEM);
   EXPECT_EQ(transition.acquire.bits, 0u);
   EXPECT_EQ(iree_hal_memory_transition_recipe(
                 table, pair, IREE_HAL_MEMORY_TRANSITION_RELEASE),
