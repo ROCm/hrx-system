@@ -1,0 +1,229 @@
+kernel.decl @record_values() launch(%input: buffer, %output: buffer, %seed: i32, %count: i32, %choose: i32)
+
+kernel.decl @record_control() launch(%input: buffer, %output: buffer, %seed: i32, %count: i32)
+
+kernel.decl @leaf_control() launch(%input: buffer, %output: buffer, %seed: i32, %count: i32)
+
+global.rodata.def @record_seeds = align(4) bytes("0000000007000000ffffffff")
+
+global.rodata.def @record_counts = align(4) bytes("00000000010000000200000007000000")
+
+func.def @record_values_config(%trial: index) -> (i32, i32, i32) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 35)] : index
+  %seed_span = index.constant 12 : index
+  %choose_span = index.constant 3 : index
+  %seed_index = index.div %bounded_trial, %seed_span : index
+  %seed_remainder = index.rem %bounded_trial, %seed_span : index
+  %count_index = index.div %seed_remainder, %choose_span : index
+  %choose_index = index.rem %seed_remainder, %choose_span : index
+  %seed_buffer = global.load @record_seeds : buffer
+  %count_buffer = global.load @record_counts : buffer
+  %seeds = buffer.view %seed_buffer[%origin] : buffer -> view<3xi32>
+  %counts = buffer.view %count_buffer[%origin] : buffer -> view<4xi32>
+  %seed = view.load %seeds[%seed_index] : view<3xi32> -> i32
+  %count = view.load %counts[%count_index] : view<4xi32> -> i32
+  %choose = index.cast %choose_index : index to i32
+  func.return %seed, %count, %choose : i32, i32, i32
+}
+
+func.def @record_control_config(%trial: index) -> (i32, i32) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 11)] : index
+  %count_span = index.constant 4 : index
+  %seed_index = index.div %bounded_trial, %count_span : index
+  %count_index = index.rem %bounded_trial, %count_span : index
+  %seed_buffer = global.load @record_seeds : buffer
+  %count_buffer = global.load @record_counts : buffer
+  %seeds = buffer.view %seed_buffer[%origin] : buffer -> view<3xi32>
+  %counts = buffer.view %count_buffer[%origin] : buffer -> view<4xi32>
+  %seed = view.load %seeds[%seed_index] : view<3xi32> -> i32
+  %count = view.load %counts[%count_index] : view<4xi32> -> i32
+  func.return %seed, %count : i32, i32
+}
+
+func.def @record_values_oracle(%input: buffer, %output: buffer, %seed: i32, %count: i32, %choose: i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %lane_end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c2 = scalar.constant 2 : i32
+  %c3 = scalar.constant 3 : i32
+  %c5 = scalar.constant 5 : i32
+  %c7 = scalar.constant 7 : i32
+  %c9 = scalar.constant 9 : i32
+  %c12 = scalar.constant 12 : i32
+  %c21 = scalar.constant 21 : i32
+  %c30 = scalar.constant 30 : i32
+  %c44 = scalar.constant 44 : i32
+  %c60 = scalar.constant 60 : i32
+  %input_view = buffer.view %input[%origin] : buffer -> view<32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<27xi32>
+  %choose_low = scalar.andi %choose, %c1 : i32
+  %choose_odd = scalar.cmpi ne, %choose_low, %c0 : i32
+  %chosen = scalar.cmpi ne, %choose, %c0 : i32
+  %count_low = scalar.andi %count, %c1 : i32
+  %valid = scalar.cmpi eq, %count_low, %c0 : i32
+  %valid_i32 = scalar.extui %valid : i1 to i32
+  %count_minus_one = scalar.subi %count, %c1 : i32
+  %count_product = scalar.muli %count, %count_minus_one : i32
+  %pair_increment = scalar.divui %count_product, %c2 : i32
+  %count_plus_c1 = scalar.addi %count, %c1 : i32
+  %half_up = scalar.divui %count_plus_c1, %c2 : i32
+  %first_base = scalar.addi %seed, %pair_increment : i32
+  %seed_plus_c7 = scalar.addi %seed, %c7 : i32
+  %second_base = scalar.addi %seed_plus_c7, %half_up : i32
+  %copy_first, %copy_second = scf.if %choose_odd -> (i32, i32) {
+    %incremented = scalar.addi %first_base, %c1 : i32
+    scf.yield %incremented, %second_base : i32, i32
+  } else {
+    %scaled = scalar.muli %second_base, %c3 : i32
+    scf.yield %first_base, %scaled : i32, i32
+  }
+  %selected_first, %selected_second = scf.if %chosen -> (i32, i32) {
+    scf.yield %copy_first, %copy_second : i32, i32
+  } else {
+    scf.yield %seed, %seed_plus_c7 : i32, i32
+  }
+  scf.for %lane = [%begin to %lane_end step %step] {
+    %lane_i32 = index.cast %lane : index to i32
+    %lane_plus_c1 = scalar.addi %lane_i32, %c1 : i32
+    %original = scalar.addi %seed, %lane_i32 : i32
+    %advance = scalar.muli %count, %lane_plus_c1 : i32
+    %advanced = scalar.addi %original, %advance : i32
+    %copy = scf.if %choose_odd -> (i32) {
+      %lane_plus_c5 = scalar.addi %lane_i32, %c5 : i32
+      %adjusted = scalar.addi %advanced, %lane_plus_c5 : i32
+      scf.yield %adjusted : i32
+    } else {
+      scf.yield %advanced : i32
+    }
+    %selected = scf.if %chosen -> (i32) {
+      scf.yield %copy : i32
+    } else {
+      scf.yield %original : i32
+    }
+    %original_position = index.add %lane, %lane_end : index
+    %selected_offset = index.constant 8 : index
+    %selected_position = index.add %lane, %selected_offset : index
+    view.store %copy, %output_view[%lane] : i32, view<27xi32>
+    view.store %original, %output_view[%original_position] : i32, view<27xi32>
+    view.store %selected, %output_view[%selected_position] : i32, view<27xi32>
+  }
+  %copy_cursor_i32 = scalar.addi %count, %c3 : i32
+  %copy_cursor_unbounded = index.cast %copy_cursor_i32 : i32 to index
+  %copy_cursor = index.assume %copy_cursor_unbounded [range(%copy_cursor_unbounded, 3, 10)] : index
+  %copy_cursor_value = view.load %input_view[%copy_cursor] : view<32xi32> -> i32
+  %selected_cursor_i32 = scf.if %chosen -> (i32) {
+    scf.yield %copy_cursor_i32 : i32
+  } else {
+    scf.yield %c3 : i32
+  }
+  %selected_cursor_unbounded = index.cast %selected_cursor_i32 : i32 to index
+  %selected_cursor = index.assume %selected_cursor_unbounded [range(%selected_cursor_unbounded, 3, 10)] : index
+  %selected_cursor_value = view.load %input_view[%selected_cursor] : view<32xi32> -> i32
+  %original_cursor_value = view.load %input_view[3] : view<32xi32> -> i32
+  %seed_times_nine = scalar.muli %seed, %c9 : i32
+  %half_up_times_three = scalar.muli %half_up, %c3 : i32
+  %pair_partial = scalar.addi %seed_times_nine, %pair_increment : i32
+  %pair_with_constant = scalar.addi %pair_partial, %c21 : i32
+  %pair_result = scalar.addi %pair_with_constant, %half_up_times_three : i32
+  %defaults_result = scalar.addi %seed, %c44 : i32
+  %sequence_result = scf.if %chosen -> (i32) {
+    %scaled = scalar.muli %seed, %c5 : i32
+    %result = scalar.addi %scaled, %c60 : i32
+    scf.yield %result : i32
+  } else {
+    %scaled = scalar.muli %seed, %c12 : i32
+    %result = scalar.addi %scaled, %c30 : i32
+    scf.yield %result : i32
+  }
+  %input_one = view.load %input_view[1] : view<32xi32> -> i32
+  %input_eight = view.load %input_view[8] : view<32xi32> -> i32
+  %input_seven = view.load %input_view[7] : view<32xi32> -> i32
+  view.store %copy_cursor_value, %output_view[12] : i32, view<27xi32>
+  view.store %original_cursor_value, %output_view[13] : i32, view<27xi32>
+  view.store %selected_cursor_value, %output_view[14] : i32, view<27xi32>
+  view.store %valid_i32, %output_view[15] : i32, view<27xi32>
+  view.store %c1, %output_view[16] : i32, view<27xi32>
+  view.store %copy_first, %output_view[17] : i32, view<27xi32>
+  view.store %copy_second, %output_view[18] : i32, view<27xi32>
+  view.store %selected_first, %output_view[19] : i32, view<27xi32>
+  view.store %selected_second, %output_view[20] : i32, view<27xi32>
+  view.store %pair_result, %output_view[21] : i32, view<27xi32>
+  view.store %defaults_result, %output_view[22] : i32, view<27xi32>
+  view.store %sequence_result, %output_view[23] : i32, view<27xi32>
+  view.store %input_one, %output_view[24] : i32, view<27xi32>
+  view.store %input_eight, %output_view[25] : i32, view<27xi32>
+  view.store %input_seven, %output_view[26] : i32, view<27xi32>
+  func.return
+}
+
+func.def @record_control_oracle(%input: buffer, %output: buffer, %seed: i32, %count: i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %lane_end = index.constant 4 : index
+  %step = index.constant 1 : index
+  %c0 = scalar.constant 0 : i32
+  %c1 = scalar.constant 1 : i32
+  %c3 = scalar.constant 3 : i32
+  %input_view = buffer.view %input[%origin] : buffer -> view<32xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<8xi32>
+  scf.for %lane = [%begin to %lane_end step %step] {
+    %lane_i32 = index.cast %lane : index to i32
+    %lane_plus_c1 = scalar.addi %lane_i32, %c1 : i32
+    %original = scalar.addi %seed, %lane_i32 : i32
+    %advance = scalar.muli %count, %lane_plus_c1 : i32
+    %result = scalar.addi %original, %advance : i32
+    view.store %result, %output_view[%lane] : i32, view<8xi32>
+  }
+  %cursor_i32 = scalar.addi %count, %c3 : i32
+  %cursor_unbounded = index.cast %cursor_i32 : i32 to index
+  %cursor = index.assume %cursor_unbounded [range(%cursor_unbounded, 3, 10)] : index
+  %cursor_value = view.load %input_view[%cursor] : view<32xi32> -> i32
+  %count_low = scalar.andi %count, %c1 : i32
+  %valid = scalar.cmpi eq, %count_low, %c0 : i32
+  %valid_i32 = scalar.extui %valid : i1 to i32
+  %original_cursor_value = view.load %input_view[3] : view<32xi32> -> i32
+  view.store %cursor_value, %output_view[4] : i32, view<8xi32>
+  view.store %valid_i32, %output_view[5] : i32, view<8xi32>
+  view.store %original_cursor_value, %output_view[6] : i32, view<8xi32>
+  view.store %seed, %output_view[7] : i32, view<8xi32>
+  func.return
+}
+
+check.scenario @record_value_cases {
+  check.trial[36](%trial: index, %entropy: check.entropy) {
+    %seed, %count, %choose = check.generate<@record_values_config>(%trial) : (index) -> (i32, i32, i32)
+    %input = check.generate.iota offset(13) step(97) : tensor<32xi32>
+    %storage = check.generate.fill value(-123) : tensor<59xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<59xi32> -> tensor<27xi32>
+    check.compare<@record_values, @record_values_oracle>(%input, %output, %seed, %count, %choose) : (tensor<32xi32>, tensor<27xi32>, i32, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<32xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<59xi32>
+    }
+  }
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %seed, %count = check.generate<@record_control_config>(%trial) : (index) -> (i32, i32)
+    %input = check.generate.iota offset(13) step(97) : tensor<32xi32>
+    %storage = check.generate.fill value(-123) : tensor<40xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<40xi32> -> tensor<8xi32>
+    check.compare<@record_control, @record_control_oracle>(%input, %output, %seed, %count) : (tensor<32xi32>, tensor<8xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<32xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi32>
+    }
+  }
+  check.trial[12](%trial: index, %entropy: check.entropy) {
+    %seed, %count = check.generate<@record_control_config>(%trial) : (index) -> (i32, i32)
+    %input = check.generate.iota offset(13) step(97) : tensor<32xi32>
+    %storage = check.generate.fill value(-123) : tensor<40xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<40xi32> -> tensor<8xi32>
+    check.compare<@leaf_control, @record_control_oracle>(%input, %output, %seed, %count) : (tensor<32xi32>, tensor<8xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<32xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<40xi32>
+    }
+  }
+  check.return
+}

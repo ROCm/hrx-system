@@ -518,15 +518,11 @@ _GENERATED_KERNEL_SOURCES = [
     "enum_values",
     "flash_attention",
     "increment_values",
-    "integer_increment",
     "llama_rms_norm",
     "pointer_walk",
-    "record_values",
-    "scheduled_sum",
     "shaped_intrinsics",
     "short_circuit",
     "structured_continue",
-    "symbol_exports",
     "vector_depth",
     "vector_initializers",
     "vector_values",
@@ -534,6 +530,10 @@ _GENERATED_KERNEL_SOURCES = [
 ]
 
 _AUTHORED_KERNEL_SOURCES = [
+    "integer_increment",
+    "record_values",
+    "scheduled_sum",
+    "symbol_exports",
     "typed_views",
 ]
 

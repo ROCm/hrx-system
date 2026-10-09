@@ -1,0 +1,40 @@
+kernel.decl @library.dispatch() launch(%output: buffer, %input: buffer)
+
+global.rodata.def @symbol_export_trials = align(4) bytes("00000000010000000200000003000000ff00000000010000ffff000000000100ffffff7f00000080feffffffffffffff27346b916926c9c8d54a1277dce69a13a410dd1fce1ec3ee4b1f2d95bce71f2f26767b67d8a9989bffe4625243db58efe113886e2e54d4dc4ee4c49c1cf1b7d97d265bbfb17f754b7c3205da8a0a1cbc")
+
+func.def @symbol_export_input(%input: buffer, %trial: index) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 31)] : index
+  %trial_buffer = global.load @symbol_export_trials : buffer
+  %trials = buffer.view %trial_buffer[%origin] : buffer -> view<32xi32>
+  %input_view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %value = view.load %trials[%bounded_trial] : view<32xi32> -> i32
+  view.store %value, %input_view[0] : i32, view<1xi32>
+  func.return
+}
+
+func.def @symbol_export_oracle(%output: buffer, %input: buffer) {
+  %origin = index.constant 0 : offset
+  %input_view = buffer.view %input[%origin] : buffer -> view<1xi32>
+  %output_view = buffer.view %output[%origin] : buffer -> view<1xi32>
+  %value = view.load %input_view[0] : view<1xi32> -> i32
+  %square = scalar.muli %value, %value : i32
+  %c7 = scalar.constant 7 : i32
+  %result = scalar.addi %square, %c7 : i32
+  view.store %result, %output_view[0] : i32, view<1xi32>
+  func.return
+}
+
+check.scenario @symbol_export_values {
+  check.trial[32](%trial: index, %entropy: check.entropy) {
+    %input = check.generate.fill value(0) : tensor<1xi32>
+    check.generate<@symbol_export_input>(%input, %trial) : (tensor<1xi32>, index) -> ()
+    %storage = check.generate.fill value(-123) : tensor<33xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<33xi32> -> tensor<1xi32>
+    check.compare<@library.dispatch, @symbol_export_oracle>(%output, %input) : (tensor<1xi32>, tensor<1xi32>) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<1xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<33xi32>
+    }
+  }
+  check.return
+}

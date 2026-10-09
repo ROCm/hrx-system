@@ -1,0 +1,89 @@
+kernel.decl @increment_u8() launch(%output: buffer, %input: i32)
+
+kernel.decl @increment_u64() launch(%output: buffer, %input: i64)
+
+global.rodata.def @increment_u8_trials = align(4) bytes("000000007f00000080000000fe000000ff000000ff010000")
+
+global.rodata.def @increment_u64_trials = align(8) bytes("00000000000000007e00000000000000fe00000000000000ff00000000000000ffffffff000000000000000001000000ffffffffffffff7f0000000000000080ffffffffffffffff")
+
+func.def @increment_u8_input(%trial: index) -> (i32) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 5)] : index
+  %trial_buffer = global.load @increment_u8_trials : buffer
+  %trials = buffer.view %trial_buffer[%origin] : buffer -> view<6xi32>
+  %input = view.load %trials[%bounded_trial] : view<6xi32> -> i32
+  func.return %input : i32
+}
+
+func.def @increment_u64_input(%trial: index) -> (i64) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 8)] : index
+  %trial_buffer = global.load @increment_u64_trials : buffer
+  %trials = buffer.view %trial_buffer[%origin] : buffer -> view<9xi64>
+  %input = view.load %trials[%bounded_trial] : view<9xi64> -> i64
+  func.return %input : i64
+}
+
+func.def @increment_u8_oracle(%output: buffer, %input: i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %fields = index.constant 2 : index
+  %c1 = scalar.constant 1 : i32
+  %output_view = buffer.view %output[%origin] : buffer -> view<128xi8>
+  %uniform_i32 = scalar.addi %input, %c1 : i32
+  %uniform = scalar.trunci %uniform_i32 : i32 to i8
+  scf.for %lane = [%begin to %end step %step] {
+    %lane_i32 = index.cast %lane : index to i32
+    %varying_base = scalar.addi %input, %lane_i32 : i32
+    %varying_i32 = scalar.addi %varying_base, %c1 : i32
+    %varying = scalar.trunci %varying_i32 : i32 to i8
+    %position = index.mul %lane, %fields : index
+    %varying_position = index.add %position, %step : index
+    view.store %uniform, %output_view[%position] : i8, view<128xi8>
+    view.store %varying, %output_view[%varying_position] : i8, view<128xi8>
+  }
+  func.return
+}
+
+func.def @increment_u64_oracle(%output: buffer, %input: i64) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %end = index.constant 64 : index
+  %step = index.constant 1 : index
+  %fields = index.constant 2 : index
+  %c1 = scalar.constant 1 : i64
+  %output_view = buffer.view %output[%origin] : buffer -> view<128xi64>
+  %uniform = scalar.addi %input, %c1 : i64
+  scf.for %lane = [%begin to %end step %step] {
+    %lane_i64 = index.cast %lane : index to i64
+    %varying_base = scalar.addi %input, %lane_i64 : i64
+    %varying = scalar.addi %varying_base, %c1 : i64
+    %position = index.mul %lane, %fields : index
+    %varying_position = index.add %position, %step : index
+    view.store %uniform, %output_view[%position] : i64, view<128xi64>
+    view.store %varying, %output_view[%varying_position] : i64, view<128xi64>
+  }
+  func.return
+}
+
+check.scenario @increment_values {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %input = check.generate<@increment_u8_input>(%trial) : (index) -> (i32)
+    %storage = check.generate.fill value(-123) : tensor<160xi8>
+    %output = check.tensor.view %storage offset(16) : tensor<160xi8> -> tensor<128xi8>
+    check.compare<@increment_u8, @increment_u8_oracle>(%output, %input) : (tensor<128xi8>, i32) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi8>
+    }
+  }
+  check.trial[9](%trial: index, %entropy: check.entropy) {
+    %input = check.generate<@increment_u64_input>(%trial) : (index) -> (i64)
+    %storage = check.generate.fill value(-123) : tensor<160xi64>
+    %output = check.tensor.view %storage offset(128) : tensor<160xi64> -> tensor<128xi64>
+    check.compare<@increment_u64, @increment_u64_oracle>(%output, %input) : (tensor<128xi64>, i64) -> () {
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<160xi64>
+    }
+  }
+  check.return
+}

@@ -1538,25 +1538,6 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_generated_file_family(
   NAME
-    integer_increment_checks_gen
-  GENERATOR
-    loom::py::loom::gen::test::cxx_kernel_cases
-  OUTPUTS
-    "integer_increment_checks.loom"
-    "integer_increment_arrays"
-  OUTPUT_FLAGS
-    "--output"
-    "--arrays"
-  ARGS
-    "kernel"
-    "--group=integer_increment"
-  TESTONLY
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_generated_file_family(
-  NAME
     llama_rms_norm_checks_gen
   GENERATOR
     loom::py::loom::gen::test::cxx_kernel_cases
@@ -1588,44 +1569,6 @@ loom_generated_file_family(
   ARGS
     "kernel"
     "--group=pointer_walk"
-  TESTONLY
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_generated_file_family(
-  NAME
-    record_values_checks_gen
-  GENERATOR
-    loom::py::loom::gen::test::cxx_kernel_cases
-  OUTPUTS
-    "record_values_checks.loom"
-    "record_values_arrays"
-  OUTPUT_FLAGS
-    "--output"
-    "--arrays"
-  ARGS
-    "kernel"
-    "--group=record_values"
-  TESTONLY
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_generated_file_family(
-  NAME
-    scheduled_sum_checks_gen
-  GENERATOR
-    loom::py::loom::gen::test::cxx_kernel_cases
-  OUTPUTS
-    "scheduled_sum_checks.loom"
-    "scheduled_sum_arrays"
-  OUTPUT_FLAGS
-    "--output"
-    "--arrays"
-  ARGS
-    "kernel"
-    "--group=scheduled_sum"
   TESTONLY
 )
 endif()
@@ -1683,25 +1626,6 @@ loom_generated_file_family(
   ARGS
     "kernel"
     "--group=structured_continue"
-  TESTONLY
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_generated_file_family(
-  NAME
-    symbol_exports_checks_gen
-  GENERATOR
-    loom::py::loom::gen::test::cxx_kernel_cases
-  OUTPUTS
-    "symbol_exports_checks.loom"
-    "symbol_exports_arrays"
-  OUTPUT_FLAGS
-    "--output"
-    "--arrays"
-  ARGS
-    "kernel"
-    "--group=symbol_exports"
   TESTONLY
 )
 endif()
@@ -1905,21 +1829,6 @@ endif()
 if(LOOM_IMPORT_CXX)
 loom_test_module(
   NAME
-    integer_increment_module
-  SRCS
-    "integer_increment.cxx"
-    "${CMAKE_CURRENT_BINARY_DIR}/integer_increment_checks.loom"
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/integer_increment_arrays"
-    "${CMAKE_CURRENT_BINARY_DIR}/integer_increment_checks.loom"
-  INPUTOPTS
-
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_test_module(
-  NAME
     llama_rms_norm_module
   SRCS
     "llama_rms_norm.cxx"
@@ -1942,36 +1851,6 @@ loom_test_module(
   DATA
     "${CMAKE_CURRENT_BINARY_DIR}/pointer_walk_arrays"
     "${CMAKE_CURRENT_BINARY_DIR}/pointer_walk_checks.loom"
-  INPUTOPTS
-
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_test_module(
-  NAME
-    record_values_module
-  SRCS
-    "record_values.cxx"
-    "${CMAKE_CURRENT_BINARY_DIR}/record_values_checks.loom"
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/record_values_arrays"
-    "${CMAKE_CURRENT_BINARY_DIR}/record_values_checks.loom"
-  INPUTOPTS
-
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_test_module(
-  NAME
-    scheduled_sum_module
-  SRCS
-    "scheduled_sum.cxx"
-    "${CMAKE_CURRENT_BINARY_DIR}/scheduled_sum_checks.loom"
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/scheduled_sum_arrays"
-    "${CMAKE_CURRENT_BINARY_DIR}/scheduled_sum_checks.loom"
   INPUTOPTS
 
 )
@@ -2017,21 +1896,6 @@ loom_test_module(
   DATA
     "${CMAKE_CURRENT_BINARY_DIR}/structured_continue_arrays"
     "${CMAKE_CURRENT_BINARY_DIR}/structured_continue_checks.loom"
-  INPUTOPTS
-
-)
-endif()
-
-if(LOOM_IMPORT_CXX)
-loom_test_module(
-  NAME
-    symbol_exports_module
-  SRCS
-    "symbol_exports.cxx"
-    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_checks.loom"
-  DATA
-    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_arrays"
-    "${CMAKE_CURRENT_BINARY_DIR}/symbol_exports_checks.loom"
   INPUTOPTS
 
 )
@@ -2094,6 +1958,46 @@ loom_test_module(
     "${CMAKE_CURRENT_BINARY_DIR}/volatile_memory_checks.loom"
   INPUTOPTS
 
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    integer_increment_module
+  SRCS
+    "integer_increment.cxx"
+    "integer_increment.loom"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    record_values_module
+  SRCS
+    "record_values.cxx"
+    "record_values.loom"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    scheduled_sum_module
+  SRCS
+    "scheduled_sum.cxx"
+    "scheduled_sum.loom"
+)
+endif()
+
+if(LOOM_IMPORT_CXX)
+loom_test_module(
+  NAME
+    symbol_exports_module
+  SRCS
+    "symbol_exports.cxx"
+    "symbol_exports.loom"
 )
 endif()
 

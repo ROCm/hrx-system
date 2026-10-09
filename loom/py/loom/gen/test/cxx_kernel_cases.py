@@ -100,24 +100,6 @@ def control_flow(arrays):
     return "kernel.decl @control_flow() launch(%counts: buffer, %output: buffer, %length: i32)\n\n" + case.finish(expected)
 
 
-def scheduled_sum_variant(arrays, kernel):
-    cases = []
-    rows = 7
-    for columns in [0, 1, 2, 5, 17, 33]:
-        rng = random.Random(1030 + columns)
-        values = [rng.randrange(-100, 101) for _ in range(rows * max(1, columns))]
-        expected = [sum(values[row * columns : (row + 1) * columns]) for row in range(rows)]
-        case = Case(arrays, f"{kernel}_{columns}", "i32", rows)
-        case.array("input", values)
-        case.array("original", values)
-        case.scalar("rows", rows, "i32")
-        case.scalar("columns", columns, "i32")
-        case.launch(kernel, "%input, %output, %rows, %columns", f"tensor<{len(values)}xi32>, tensor<{rows}xi32>, i32, i32")
-        case.lines.append(f"  check.expect.bitwise actual(%input) expected(%original) : tensor<{len(values)}xi32>")
-        cases.append(case.finish(expected))
-    return f"kernel.decl @{kernel}() launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32)\n\n" + "\n".join(cases)
-
-
 def short_circuit(arrays):
     cases = []
     for length in [0, 1, 17, 33, 64]:
@@ -173,20 +155,6 @@ def early_returns(arrays):
         case.launch("early_returns", "%input, %output, %length", f"tensor<{len(values)}xi32>, tensor<{len(expected)}xi32>, i32")
         cases.append(case.finish(expected))
     return "kernel.decl @early_returns() launch(%input: buffer, %output: buffer, %length: i32)\n\n" + "\n".join(cases)
-
-
-def integer_increment(arrays, width, inputs):
-    cases = []
-    argument_width = 32 if width == 8 else 64
-    for input_value in inputs:
-        expected = []
-        for lane in range(64):
-            expected.extend([signed_bits(input_value + 1, width), signed_bits(input_value + lane + 1, width)])
-        case = Case(arrays, f"increment_u{width}_{input_value}", f"i{width}", len(expected))
-        case.scalar("input", signed_bits(input_value, argument_width), f"i{argument_width}")
-        case.launch(f"increment_u{width}", "%output, %input", f"tensor<{len(expected)}xi{width}>, i{argument_width}")
-        cases.append(case.finish(expected))
-    return f"kernel.decl @increment_u{width}() launch(%output: buffer, %input: i{argument_width})\n\n" + "\n".join(cases)
 
 
 def function_cases(name, argument_widths, result_width, samples, *, argument_types=None):
@@ -822,63 +790,6 @@ def record_functions():
     )
 
 
-def record_values(arrays):
-    rng = random.Random(53091)
-    inputs = [rng.randrange(1 << 32) for _ in range(32)]
-    stored_inputs = [signed_bits(value, 32) for value in inputs]
-    cases = []
-    for seed in [0, 7, 0xFFFFFFFF]:
-        for count in [0, 1, 2, 7]:
-            original = [(seed + lane) % (1 << 32) for lane in range(4)]
-            advanced = [(value + count * (lane + 1)) % (1 << 32) for lane, value in enumerate(original)]
-            first = (seed + count * (count - 1) // 2) % (1 << 32)
-            second = (seed + 7 + (count + 1) // 2) % (1 << 32)
-            for choose in [0, 1, 2]:
-                lanes = [value + lane + 5 if choose & 1 else value for lane, value in enumerate(advanced)]
-                pair = [first + 1, second] if choose & 1 else [first, second * 3]
-                selected = lanes if choose else original
-                selected_pair = pair if choose else [seed, seed + 7]
-                expected = (
-                    lanes
-                    + original
-                    + selected
-                    + [
-                        inputs[3 + count],
-                        inputs[3],
-                        inputs[3 + count if choose else 3],
-                        int(count % 2 == 0),
-                        1,
-                        *pair,
-                        *selected_pair,
-                        record_pair_reference(seed, count),
-                        seed + 44,
-                        record_sequence_reference(seed, choose),
-                        inputs[1],
-                        inputs[8],
-                        inputs[7],
-                    ]
-                )
-                case = Case(arrays, f"records_{seed}_{count}_{choose}", "i32", len(expected))
-                case.array("input", stored_inputs)
-                for name, value in [("seed", seed), ("count", count), ("choose", choose)]:
-                    case.scalar(name, signed_bits(value, 32), "i32")
-                case.launch("record_values", "%input, %output, %seed, %count, %choose", f"tensor<32xi32>, tensor<{len(expected)}xi32>, i32, i32, i32")
-                case.array("original", stored_inputs)
-                case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<32xi32>")
-                cases.append(case.finish([signed_bits(value, 32) for value in expected]))
-            expected = [*advanced, inputs[3 + count], int(count % 2 == 0), inputs[3], seed]
-            for kernel in ["record_control", "leaf_control"]:
-                case = Case(arrays, f"{kernel}_{seed}_{count}", "i32", 8)
-                case.array("input", stored_inputs)
-                case.scalar("seed", signed_bits(seed, 32), "i32")
-                case.scalar("count", count, "i32")
-                case.launch(kernel, "%input, %output, %seed, %count", "tensor<32xi32>, tensor<8xi32>, i32, i32")
-                cases.append(case.finish([signed_bits(value, 32) for value in expected]))
-    declarations = "kernel.decl @record_values() launch(%input: buffer, %output: buffer, %seed: i32, %count: i32, %choose: i32)\n"
-    declarations += "".join(f"kernel.decl @{kernel}() launch(%input: buffer, %output: buffer, %seed: i32, %count: i32)\n" for kernel in ["record_control", "leaf_control"])
-    return declarations + "\n" + "\n".join(cases)
-
-
 def f32_bits(bits):
     return struct.unpack("<f", struct.pack("<I", bits))[0]
 
@@ -972,26 +883,6 @@ def mixed_dot(arrays):
 
 def launch_grid(kernel, x, y=1, z=1):
     return "".join(f"config.def @{kernel}.workgroup_count.{axis} = {count} : index\n" for axis, count in zip("xyz", (x, y, z), strict=True)) + "\n"
-
-
-def scheduled_sum(arrays):
-    return "\n".join(scheduled_sum_variant(arrays, f"scheduled_sum_unroll_{unroll}_depth_{depth}") for unroll in (1, 3) for depth in (1, 2))
-
-
-def symbol_exports(arrays):
-    samples = [0, 1, 2, 3, 255, 256, 65535, 65536, 0x7FFFFFFF, 0x80000000, 0xFFFFFFFE, 0xFFFFFFFF]
-    rng = random.Random(83728)
-    samples += [rng.randrange(1 << 32) for _ in range(20)]
-    cases = []
-    for index, value in enumerate(samples):
-        case = Case(arrays, f"symbol_export_{index}", "i32", 1)
-        original = signed_bits(value, 32)
-        case.array("input", [original])
-        case.launch("library.dispatch", "%output, %input", "tensor<1xi32>, tensor<1xi32>")
-        case.array("original", [original])
-        case.lines.append("  check.expect.bitwise actual(%input) expected(%original) : tensor<1xi32>")
-        cases.append(case.finish([signed_bits(value * value + 7, 32)]))
-    return "kernel.decl @library.dispatch() launch(%output: buffer, %input: buffer)\n\n" + "\n".join(cases)
 
 
 def volatile_memory(arrays):
@@ -1316,19 +1207,15 @@ KERNEL_GROUPS = {
     "enum_values": lambda arrays: "\n".join(enum_storage(arrays, width) for width in (8, 16, 32, 64)),
     "flash_attention": lambda arrays: launch_grid("flash_attention", 3) + attention(arrays),
     "increment_values": lambda arrays: increment_values(arrays) + "\n" + increment_pointers(arrays),
-    "integer_increment": lambda arrays: integer_increment(arrays, 8, BYTE_INPUTS) + "\n" + integer_increment(arrays, 64, WIDE_INPUTS),
     "iq4xs_blocks": iq4xs_blocks,
     "iq4xs_gate_up": iq4xs_gate_up,
     "llama_rms_norm": lambda arrays: launch_grid("llama_rms_norm", 3) + rms_norm(arrays),
     "packed_byte_shifts": packed_byte_shifts,
     "pointer_walk": pointer_walk,
     "q4k_q8_swiglu": q4k_q8_swiglu,
-    "record_values": record_values,
-    "scheduled_sum": scheduled_sum,
     "shaped_intrinsics": lambda arrays: register_lookup(arrays) + "\n" + register_lookup(arrays, floating=True) + "\n" + mixed_dot(arrays),
     "short_circuit": short_circuit,
     "structured_continue": lambda arrays: "\n".join(reference(arrays) for reference in (continue_values, continue_scheduled, continue_copy, continue_pointers, continue_vectors)),
-    "symbol_exports": symbol_exports,
     "vector_depth": lambda arrays: vector_depth(arrays) + "\n" + vector_depth_span(arrays),
     "vector_initializers": vector_initializers,
     "vector_values": lambda arrays: vector_control(arrays) + "\n" + vector_masks(arrays),

@@ -1,0 +1,99 @@
+kernel.decl @scheduled_sum_unroll_1_depth_1() launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32)
+
+kernel.decl @scheduled_sum_unroll_1_depth_2() launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32)
+
+kernel.decl @scheduled_sum_unroll_3_depth_1() launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32)
+
+kernel.decl @scheduled_sum_unroll_3_depth_2() launch(%input: buffer, %output: buffer, %rows: i32, %columns: i32)
+
+// Rows contain the column count and exact input element count.
+global.rodata.def @scheduled_sum_trials = align(4) bytes("00000000070000000100000007000000020000000e0000000500000023000000110000007700000021000000e7000000")
+
+func.def @scheduled_sum_config(%trial: index) -> (i32, index) {
+  %origin = index.constant 0 : offset
+  %bounded_trial = index.assume %trial [range(%trial, 0, 5)] : index
+  %trial_buffer = global.load @scheduled_sum_trials : buffer
+  %trials = buffer.view %trial_buffer[%origin] : buffer -> view<6x2xi32>
+  %columns = view.load %trials[%bounded_trial, 0] : view<6x2xi32> -> i32
+  %input_count_i32 = view.load %trials[%bounded_trial, 1] : view<6x2xi32> -> i32
+  %input_count_unbounded = index.cast %input_count_i32 : i32 to index
+  %input_count = index.assume %input_count_unbounded [range(%input_count_unbounded, 7, 231)] : index
+  func.return %columns, %input_count : i32, index
+}
+
+func.def @scheduled_sum_oracle(%input: buffer, %output: buffer, %rows_i32: i32, %columns_i32: i32) {
+  %origin = index.constant 0 : offset
+  %begin = index.constant 0 : index
+  %rows = index.constant 7 : index
+  %step = index.constant 1 : index
+  %element_bytes = index.constant 4 : index
+  %input_length = buffer.length %input
+  %bounded_input_length = index.assume %input_length [range(%input_length, 28, 924)] : offset
+  %input_bytes = index.cast %bounded_input_length : offset to index
+  %input_count = index.div %input_bytes, %element_bytes : index
+  %columns_unbounded = index.cast %columns_i32 : i32 to index
+  %columns = index.assume %columns_unbounded [range(%columns_unbounded, 0, 33)] : index
+  %output_view = buffer.view %output[%origin] : buffer -> view<7xi32>
+  %c0 = scalar.constant 0 : i32
+  scf.for %row = [%begin to %rows step %step] {
+    %row_origin = index.mul %row, %columns : index
+    %sum = scf.for %column = [%begin to %columns step %step](%accumulator = %c0 : i32) -> (i32) {
+      %position = index.add %row_origin, %column : index
+      %bounded_position, %bounded_input_count = index.assume %position, %input_count [range(%position, 0, 230), lt(%position, %input_count)] : index, index
+      %input_view = buffer.view %input[%origin] : buffer -> view<[%bounded_input_count]xi32>
+      %value = view.load %input_view[%bounded_position] : view<[%bounded_input_count]xi32> -> i32
+      %next = scalar.addi %accumulator, %value : i32
+      scf.yield %next : i32
+    }
+    view.store %sum, %output_view[%row] : i32, view<7xi32>
+  }
+  func.return
+}
+
+check.scenario @scheduled_sum_values {
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %columns, %input_count = check.generate<@scheduled_sum_config>(%trial) : (index) -> (i32, index)
+    %input = check.generate.iota offset(-100) step(37) : tensor<[%input_count]xi32>
+    %storage = check.generate.fill value(-123) : tensor<39xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<7xi32>
+    %rows = check.literal value(7) : i32
+    check.compare<@scheduled_sum_unroll_1_depth_1, @scheduled_sum_oracle>(%input, %output, %rows, %columns) : (tensor<[%input_count]xi32>, tensor<7xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_count]xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<39xi32>
+    }
+  }
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %columns, %input_count = check.generate<@scheduled_sum_config>(%trial) : (index) -> (i32, index)
+    %input = check.generate.iota offset(-100) step(37) : tensor<[%input_count]xi32>
+    %storage = check.generate.fill value(-123) : tensor<39xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<7xi32>
+    %rows = check.literal value(7) : i32
+    check.compare<@scheduled_sum_unroll_1_depth_2, @scheduled_sum_oracle>(%input, %output, %rows, %columns) : (tensor<[%input_count]xi32>, tensor<7xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_count]xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<39xi32>
+    }
+  }
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %columns, %input_count = check.generate<@scheduled_sum_config>(%trial) : (index) -> (i32, index)
+    %input = check.generate.iota offset(-100) step(37) : tensor<[%input_count]xi32>
+    %storage = check.generate.fill value(-123) : tensor<39xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<7xi32>
+    %rows = check.literal value(7) : i32
+    check.compare<@scheduled_sum_unroll_3_depth_1, @scheduled_sum_oracle>(%input, %output, %rows, %columns) : (tensor<[%input_count]xi32>, tensor<7xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_count]xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<39xi32>
+    }
+  }
+  check.trial[6](%trial: index, %entropy: check.entropy) {
+    %columns, %input_count = check.generate<@scheduled_sum_config>(%trial) : (index) -> (i32, index)
+    %input = check.generate.iota offset(-100) step(37) : tensor<[%input_count]xi32>
+    %storage = check.generate.fill value(-123) : tensor<39xi32>
+    %output = check.tensor.view %storage offset(64) : tensor<39xi32> -> tensor<7xi32>
+    %rows = check.literal value(7) : i32
+    check.compare<@scheduled_sum_unroll_3_depth_2, @scheduled_sum_oracle>(%input, %output, %rows, %columns) : (tensor<[%input_count]xi32>, tensor<7xi32>, i32, i32) -> () {
+      check.expect.bitwise actual(%input) expected(%input) : tensor<[%input_count]xi32>
+      check.expect.bitwise actual(%storage) expected(%storage) : tensor<39xi32>
+    }
+  }
+  check.return
+}
