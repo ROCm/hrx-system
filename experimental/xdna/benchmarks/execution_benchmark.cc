@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "benchmark/benchmark.h"
+#include "experimental/xdna/direct_binding.h"
 #include "iree/hal/drivers/amd/xdna/executable_storage.h"
 #include "iree/hal/drivers/amd/xdna/image/aie2p/npu2.h"
 #include "iree/hal/drivers/amd/xdna/image/testdata/mul_i32.h"
@@ -407,9 +408,8 @@ class ExecutionBenchmark {
       auto& binding = resolved_bindings[i];
       binding.buffer_ref =
           iree_hal_make_buffer_ref(bindings_[i].buffer, 0, kBindingByteLength);
-      binding.memory = bindings_[i].storage.memory;
-      binding.memory_byte_offset = kBindingByteLength;
-      CheckStatus(api_->memory_query_address(binding.memory, 0,
+      binding.byte_length = kBindingByteLength;
+      CheckStatus(api_->memory_query_address(bindings_[i].storage.memory, 0,
                                              AMDF_MEMORY_ADDRESS_XDNA_DMA,
                                              &binding.device_address),
                   "data_address");
@@ -425,7 +425,7 @@ class ExecutionBenchmark {
                 "instruction_address");
     CheckIreeStatus(iree_hal_amd_xdna_executable_storage_load(
         executable_, entry_ordinal, 1, &storage));
-    CheckIreeStatus(iree_hal_amd_xdna_executable_storage_bind(
+    CheckIreeStatus(iree_xdna_executable_storage_bind(
         executable_, entry_ordinal, 1, &storage, resolved_bindings.size(),
         resolved_bindings.data()));
     CheckIreeStatus(iree_hal_amd_xdna_executable_storage_query_invocation(

@@ -48,7 +48,7 @@ class XdnaPipelineCompletionTest : public XdnaExecutionFixture {
                                          AMDF_MEMORY_ADDRESS_XDNA_FIRMWARE,
                                          &storage.device_address),
               AMDF_STATUS_OK);
-    IREE_ASSERT_OK(iree_hal_amd_xdna_executable_bind(
+    IREE_ASSERT_OK(iree_xdna_executable_storage_bind(
         executable_, entry_ordinal_, 1, &storage, bindings.size(),
         bindings.data()));
     first_.original_instructions.assign(

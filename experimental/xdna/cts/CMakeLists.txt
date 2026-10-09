@@ -685,6 +685,7 @@ iree_cc_library(
     iree::base
     iree::base::internal::shm
     iree::base::internal::span
+    iree::experimental::xdna::direct_binding
     iree::hal
     iree::hal::drivers::amd::xdna::executable_storage
     iree::hal::drivers::amd::xdna::image::aie2p::npu2

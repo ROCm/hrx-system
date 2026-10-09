@@ -9,6 +9,42 @@
 
 iree_add_all_subdirs()
 
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+iree_cc_library(
+  NAME
+    direct_binding
+  HDRS
+    "direct_binding.h"
+  SRCS
+    "direct_binding.c"
+  DEPS
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::executable_storage
+  PUBLIC
+)
+endif()
+
+if(AMDF_BUILD AND AMDF_FAMILY_XDNA)
+iree_cc_test(
+  NAME
+    direct_binding_test
+  SRCS
+    "direct_binding_test.cc"
+  DEPS
+    ::direct_binding
+    iree::base
+    iree::hal
+    iree::hal::drivers::amd::xdna::executable_storage
+    iree::hal::drivers::amd::xdna::image::testing::image_fixture
+    iree::testing::gtest
+    iree::testing::gtest_main
+  LABELS
+    "iree-build-requirement=libamdf"
+    "iree-build-requirement=libamdf.xdna"
+)
+endif()
+
 if(AMDF_BUILD AND AMDF_FAMILY_XDNA AND (CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Windows"))
 iree_execution_test_suite(
   NAME
@@ -30,6 +66,7 @@ iree_cc_binary(
   SRCS
     "iree-xdna-run.c"
   DEPS
+    ::direct_binding
     amdf::amdf_static
     amdf::headers
     iree::base

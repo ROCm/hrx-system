@@ -596,6 +596,7 @@ xdna_cc_library(
     testonly = True,
     hdrs = ["execution_fixture.h"],
     deps = [
+        "//experimental/xdna:direct_binding",
         "//libamdf:headers",
         "//libamdf/cts/xdna:xdna_device_fixture",
         "//runtime/src/iree/base",
