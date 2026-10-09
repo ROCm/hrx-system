@@ -7,7 +7,6 @@
 #include "experimental/loom_serve/http/server.h"
 
 #include <limits.h>
-#include <stdio.h>
 #include <string.h>
 
 #include "iree/async/api.h"
@@ -86,6 +85,8 @@ struct loom_serve_http_server_t {
   uint32_t flags;
   // Owned listener failure propagated by destroy.
   iree_status_t failure;
+  // Bounded history, with network/application writers serialized by mutex.
+  loom_serve_telemetry_stream_t* diagnostics;
   // Fixed connection identities; a slot is reused only after caller and I/O
   // retire.
   loom_serve_http_connection_t* connections;
@@ -252,7 +253,17 @@ static void http_accept_completed(void* user_data,
       }
     }
     if (!connection) {
-      fprintf(stderr, "HTTP connection capacity exhausted; closing peer.\n");
+      const loom_serve_telemetry_record_t record = {
+          .time_ns = iree_time_now(),
+          .event = LOOM_SERVE_TELEMETRY_ERROR,
+          .data.error =
+              {
+                  .code = IREE_STATUS_RESOURCE_EXHAUSTED,
+                  .length = sizeof("HTTP connection capacity exhausted") - 1,
+                  .message = "HTTP connection capacity exhausted",
+              },
+      };
+      loom_serve_telemetry_stream_append(server->diagnostics, &record);
     }
   }
   if (!iree_status_is_ok(status)) {
@@ -361,14 +372,23 @@ static bool http_server_drained(void* user_data) {
   return drained;
 }
 
+void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
+                                         iree_status_t status) {
+  loom_serve_telemetry_record_t record = {.time_ns = iree_time_now(),
+                                          .event = LOOM_SERVE_TELEMETRY_ERROR};
+  loom_serve_telemetry_diagnostic_capture(status, &record.data.error);
+  iree_slim_mutex_lock(&server->mutex);
+  loom_serve_telemetry_stream_append(server->diagnostics, &record);
+  iree_slim_mutex_unlock(&server->mutex);
+}
+
 // Called only after the slot has returned both application and I/O ownership.
 static void http_connection_reclaim(loom_serve_http_connection_t* connection) {
   loom_serve_http_server_t* server = connection->server;
   iree_net_carrier_release(connection->carrier);
   loom_serve_http_request_parser_destroy(connection->parser);
   if (!iree_status_is_ok(connection->failure)) {
-    fprintf(stderr, "HTTP peer retired: ");
-    iree_status_fprint(stderr, connection->failure);
+    loom_serve_http_server_record_error(server, connection->failure);
     iree_status_free(connection->failure);
   }
   iree_slim_mutex_lock(&server->mutex);
@@ -423,6 +443,7 @@ iree_status_t loom_serve_http_server_destroy(loom_serve_http_server_t* server) {
     iree_async_proactor_end_polling(server->proactor);
   }
   iree_async_proactor_release(server->proactor);
+  loom_serve_telemetry_stream_destroy(server->diagnostics);
   iree_notification_deinitialize(&server->notification);
   iree_slim_mutex_deinitialize(&server->mutex);
   iree_allocator_free(server->allocator, server->connections);
@@ -506,9 +527,16 @@ iree_status_t loom_serve_http_server_create(
   server->allocator = host_allocator;
   iree_slim_mutex_initialize(&server->mutex);
   iree_notification_initialize(&server->notification);
-  iree_status_t status = iree_allocator_malloc_array(
-      host_allocator, options->connection_capacity,
-      sizeof(*server->connections), (void**)&server->connections);
+  iree_status_t status = loom_serve_telemetry_stream_create(
+      128, &server->diagnostics, host_allocator);
+  if (iree_status_is_ok(status)) {
+    const loom_serve_telemetry_record_t begin = {
+        .time_ns = iree_time_now(), .event = LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
+    loom_serve_telemetry_stream_append(server->diagnostics, &begin);
+    status = iree_allocator_malloc_array(
+        host_allocator, options->connection_capacity,
+        sizeof(*server->connections), (void**)&server->connections);
+  }
   if (iree_status_is_ok(status)) {
     server->options = *options;
     for (iree_host_size_t i = 0; i < options->connection_capacity; ++i) {
@@ -532,6 +560,11 @@ const iree_async_address_t* loom_serve_http_server_address(
 iree_notification_t* loom_serve_http_server_notification(
     loom_serve_http_server_t* server) {
   return &server->notification;
+}
+
+const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
+    const loom_serve_http_server_t* server) {
+  return server->diagnostics;
 }
 
 void loom_serve_http_server_set_observer(loom_serve_http_server_t* server,

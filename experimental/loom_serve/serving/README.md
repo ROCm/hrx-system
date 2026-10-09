@@ -303,23 +303,29 @@ Embedding and decision services publish typed events into a bounded 128-record
 overwriting ring (about 20 KiB per model), independently of their always-on
 request/model counters. Publication performs no formatting, allocation or sink
 I/O. `--heartbeat_ms` adds periodic snapshots; zero disables periodic samples,
-not counters or request/invocation events. Text/image and router diagnostics
-still use their existing stderr paths; they are not covered by this guarantee.
+not counters or request/invocation events. The HTTP transport owns a separate
+stream for peer, capacity, routing and tokenizer errors through shutdown. Its
+existing connection-state mutex serializes diagnostic producers; readers never
+take it. No ordinary HTTP diagnostic writes to stderr.
+Text/image still use their existing stderr paths; they are not covered by this
+guarantee.
 
-`GET /logz` returns a bounded JSONL poll. `X-Loom-Model` selects the deployment
-and can be omitted when exactly one model is registered:
+`GET /logz` returns a bounded JSONL poll of server diagnostics. `X-Loom-Model`
+instead selects a deployment's stream:
 
 ~~~sh
 curl -s http://127.0.0.1:8080/logz -H 'X-Loom-Model: vectors'
 ~~~
 
-The first `stream` line identifies the model and stream incarnation, current
+The first `stream` line identifies the scope and stream incarnation, current
 absolute `head`, oldest retained position and ring capacity. `partial` means
 this response does not include the original start of the stream. Retained
 events include `sequence`, monotonic `time_ns` and a request lifetime ID (zero
 for model-wide events). A `gap` line reports the half-open missed interval
 `[from,to)` for this reader. The `counters` line is a fresh cumulative snapshot,
-not reconstructed from whatever events remain. The final `cursor.value` is
+not reconstructed from whatever events remain. The server diagnostic stream
+reports `counters_available:false`: it does not infer model completion from
+request handoff or expose invented zero totals. The final `cursor.value` is
 passed verbatim as `X-Loom-Cursor` on the next poll. Each poll considers at most
 64 records; polling neither clears records nor adds events to the stream.
 

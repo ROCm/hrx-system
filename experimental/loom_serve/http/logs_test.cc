@@ -102,4 +102,22 @@ TEST_F(LogsTest, CopiesEscapedErrorBeforeStatusRetires) {
 #endif
 }
 
+TEST_F(LogsTest, DiagnosticOnlyScopeDoesNotInventCounters) {
+  const loom_serve_telemetry_record_t record = {
+      .time_ns = 10, .event = LOOM_SERVE_TELEMETRY_STREAM_BEGIN};
+  loom_serve_telemetry_stream_append(stream_, &record);
+  IREE_ASSERT_OK(loom_serve_http_logs(stream_, nullptr,
+                                      iree_string_view_empty(),
+                                      iree_string_view_empty(), &output_));
+  EXPECT_NE(Output().find(R"("scope":"server","counters_available":false)"),
+            std::string::npos);
+  EXPECT_NE(Output().find("{\"event\":\"stream_begin\",\"sequence\":0,\"time_"
+                          "ns\":10,\"request\":0}\n"),
+            std::string::npos);
+  EXPECT_EQ(Output().find("\"counters\":"), std::string::npos);
+  EXPECT_EQ(Output().find(R"("event":"counters")"), std::string::npos);
+  EXPECT_NE(Output().find("\"value\":\"" + prefix_ + "1\",\"next\":1"),
+            std::string::npos);
+}
+
 }  // namespace

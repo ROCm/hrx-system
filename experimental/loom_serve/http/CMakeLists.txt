@@ -160,6 +160,7 @@ loom_cc_library(
     iree::async::util::proactor_thread
     iree::base
     iree::base::threading
+    iree::experimental::loom_serve::telemetry::stream
     iree::net::carrier
     iree::net::carrier::tcp
   PUBLIC
@@ -197,6 +198,7 @@ loom_cc_test(
     iree::async
     iree::base
     iree::base::threading
+    iree::experimental::loom_serve::telemetry::stream
     iree::testing::gtest
     iree::testing::gtest_main
 )

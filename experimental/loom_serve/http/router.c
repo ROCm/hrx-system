@@ -6,8 +6,6 @@
 
 #include "experimental/loom_serve/http/router.h"
 
-#include <stdio.h>
-
 #include "experimental/loom_serve/http/logs.h"
 #include "experimental/loom_serve/http/tokenization.h"
 #include "iree/base/internal/json.h"
@@ -93,20 +91,26 @@ static iree_status_t router_quote(iree_string_builder_t* output,
   return loom_json_write_escaped_string(&stream, value);
 }
 
-static void router_send(loom_serve_http_connection_t* connection,
+static void router_send(router_t* router,
+                        loom_serve_http_connection_t* connection,
                         iree_string_view_t response) {
+  if (loom_serve_http_connection_failed(connection) ||
+      !loom_serve_http_connection_can_send(connection)) {
+    loom_serve_http_connection_abort(connection);
+    return;
+  }
   iree_status_t status = loom_serve_http_connection_send(connection, response);
   if (iree_status_is_ok(status)) {
     loom_serve_http_connection_finish(connection);
   } else {
-    fprintf(stderr, "Router peer failed: ");
-    iree_status_fprint(stderr, status);
+    loom_serve_http_server_record_error(router->server, status);
     iree_status_free(status);
     loom_serve_http_connection_abort(connection);
   }
 }
 
-static iree_status_t router_reject(loom_serve_http_connection_t* connection,
+static iree_status_t router_reject(router_t* router,
+                                   loom_serve_http_connection_t* connection,
                                    int code, const char* reason,
                                    iree_string_view_t message,
                                    iree_string_builder_t* output) {
@@ -124,7 +128,7 @@ static iree_status_t router_reject(loom_serve_http_connection_t* connection,
         output, ",\"type\":\"loom_route_error\"}}");
   }
   if (iree_status_is_ok(status)) {
-    router_send(connection, iree_string_builder_view(output));
+    router_send(router, connection, iree_string_builder_view(output));
   } else {
     loom_serve_http_connection_abort(connection);
   }
@@ -171,7 +175,7 @@ static iree_status_t router_tokenization_accept(
     loom_serve_http_connection_t* connection,
     const loom_serve_http_request_t* request) {
   if (!tokenizer) {
-    return router_reject(connection, 404, "Not Found",
+    return router_reject(router, connection, 404, "Not Found",
                          IREE_SV("model has no tokenizer capability"),
                          &router->output);
   }
@@ -224,7 +228,7 @@ static void router_tokenizations_collect(router_t* router, bool* out_progress) {
       if (router->stopping) {
         loom_serve_http_connection_abort(job->connection);
       } else {
-        response_status = router_reject(job->connection,
+        response_status = router_reject(router, job->connection,
                                         too_large ? 413
                                         : invalid ? 400
                                                   : 500,
@@ -235,14 +239,14 @@ static void router_tokenizations_collect(router_t* router, bool* out_progress) {
       }
       // A utility owns only independent CPU state. Its failure cannot poison
       // a model timeline or authorize cancellation of another request.
-      fprintf(stderr, "Tokenization request failed: ");
-      iree_status_fprint(stderr, status);
+      loom_serve_http_server_record_error(router->server, status);
       iree_status_free(status);
       status = response_status;
     } else if (router->stopping) {
       loom_serve_http_connection_abort(job->connection);
     } else {
-      router_send(job->connection, iree_string_builder_view(&job->output));
+      router_send(router, job->connection,
+                  iree_string_builder_view(&job->output));
     }
     router->status = iree_status_join(router->status, status);
     router->stopping |= !iree_status_is_ok(router->status);
@@ -480,50 +484,49 @@ static iree_status_t router_metrics(router_t* router) {
 static iree_status_t router_logs(router_t* router,
                                  loom_serve_http_connection_t* connection,
                                  const loom_serve_http_request_t* request) {
+  const loom_serve_telemetry_stream_t* stream =
+      loom_serve_http_server_diagnostics(router->server);
+  const loom_serve_telemetry_counters_t* counters = NULL;
   iree_string_view_t name;
-  if (!loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
-                                             &name)) {
-    if (router->service_count != 1) {
-      return router_reject(connection, 400, "Bad Request",
-                           IREE_SV("log polling requires X-Loom-Model"),
+  if (loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Model"),
+                                            &name)) {
+    const loom_serve_http_service_t* service = NULL;
+    for (iree_host_size_t i = 0; i < router->service_count; ++i) {
+      if (iree_string_view_equal(name, router->services[i].name)) {
+        service = &router->services[i];
+        break;
+      }
+    }
+    if (!service) {
+      return router_reject(router, connection, 404, "Not Found",
+                           IREE_SV("model is not registered"), &router->output);
+    }
+    if (!service->telemetry.stream) {
+      return router_reject(router, connection, 501, "Not Implemented",
+                           IREE_SV("model service has no telemetry stream"),
                            &router->output);
     }
-    name = router->services[0].name;
-  }
-  const loom_serve_http_service_t* service = NULL;
-  for (iree_host_size_t i = 0; i < router->service_count; ++i) {
-    if (iree_string_view_equal(name, router->services[i].name)) {
-      service = &router->services[i];
-      break;
-    }
-  }
-  if (!service) {
-    return router_reject(connection, 404, "Not Found",
-                         IREE_SV("model is not registered"), &router->output);
-  }
-  if (!service->telemetry.stream) {
-    return router_reject(connection, 501, "Not Implemented",
-                         IREE_SV("model service has no telemetry stream"),
-                         &router->output);
+    stream = service->telemetry.stream;
+    counters = service->telemetry.counters;
   }
   iree_string_view_t cursor;
   loom_serve_http_request_lookup_header(request, IREE_SV("X-Loom-Cursor"),
                                         &cursor);
-  iree_status_t status = loom_serve_http_logs(
-      service->telemetry.stream, service->telemetry.counters, service->name,
-      cursor, &router->output);
+  iree_status_t status =
+      loom_serve_http_logs(stream, counters, name, cursor, &router->output);
   if (iree_status_is_invalid_argument(status) ||
       iree_status_is_failed_precondition(status)) {
     const bool stale = iree_status_is_failed_precondition(status);
-    iree_status_t response_status = router_reject(
-        connection, stale ? 409 : 400, stale ? "Conflict" : "Bad Request",
-        iree_status_message(status), &router->output);
+    iree_status_t response_status =
+        router_reject(router, connection, stale ? 409 : 400,
+                      stale ? "Conflict" : "Bad Request",
+                      iree_status_message(status), &router->output);
     // The HTTP error owns the copied diagnostic before this status retires.
     iree_status_free(status);
     return response_status;
   }
   if (iree_status_is_ok(status)) {
-    router_send(connection, iree_string_builder_view(&router->output));
+    router_send(router, connection, iree_string_builder_view(&router->output));
   } else {
     loom_serve_http_connection_abort(connection);
   }
@@ -543,7 +546,7 @@ static iree_status_t router_accept(router_t* router,
   if (get && iree_string_view_equal(request->target, IREE_SV("/metrics"))) {
     iree_status_t status = router_metrics(router);
     if (iree_status_is_ok(status)) {
-      router_send(connection, iree_string_builder_view(output));
+      router_send(router, connection, iree_string_builder_view(output));
     } else {
       loom_serve_http_connection_abort(connection);
     }
@@ -551,7 +554,7 @@ static iree_status_t router_accept(router_t* router,
   }
   if (get && (iree_string_view_equal(request->target, IREE_SV("/healthz")) ||
               iree_string_view_equal(request->target, IREE_SV("/readyz")))) {
-    router_send(connection,
+    router_send(router, connection,
                 IREE_SV("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
                         "Connection: close\r\n\r\n{\"status\":\"ready\"}"));
     return iree_ok_status();
@@ -578,7 +581,7 @@ static iree_status_t router_accept(router_t* router,
       status = iree_string_builder_append_cstring(output, "]}");
     }
     if (iree_status_is_ok(status)) {
-      router_send(connection, iree_string_builder_view(output));
+      router_send(router, connection, iree_string_builder_view(output));
     } else {
       loom_serve_http_connection_abort(connection);
     }
@@ -590,7 +593,7 @@ static iree_status_t router_accept(router_t* router,
   if ((!checkpoint && !post) ||
       (checkpoint && !post &&
        !iree_string_view_equal(request->method, IREE_SV("DELETE")))) {
-    return router_reject(connection, 404, "Not Found",
+    return router_reject(router, connection, 404, "Not Found",
                          IREE_SV("unknown service endpoint"), output);
   }
   iree_string_view_t name;
@@ -599,7 +602,7 @@ static iree_status_t router_accept(router_t* router,
                                                &name)) {
       if (service_count != 1) {
         return router_reject(
-            connection, 400, "Bad Request",
+            router, connection, 400, "Bad Request",
             IREE_SV("checkpoint operations require X-Loom-Model"), output);
       }
       name = services[0].name;
@@ -612,10 +615,9 @@ static iree_status_t router_accept(router_t* router,
         loom_serve_http_connection_abort(connection);
         return status;
       }
-      fprintf(stderr, "Invalid route request: ");
-      iree_status_fprint(stderr, status);
+      loom_serve_http_server_record_error(router->server, status);
       iree_status_free(status);
-      return router_reject(connection, 400, "Bad Request",
+      return router_reject(router, connection, 400, "Bad Request",
                            IREE_SV("invalid model selector or request JSON"),
                            output);
     }
@@ -634,7 +636,7 @@ static iree_status_t router_accept(router_t* router,
           router_service_flags(i, service_count, services));
     }
   }
-  return router_reject(connection, 404, "Not Found",
+  return router_reject(router, connection, 404, "Not Found",
                        IREE_SV("model is not registered"), output);
 }
 

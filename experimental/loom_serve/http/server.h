@@ -8,6 +8,7 @@
 #define IREE_EXPERIMENTAL_LOOM_SERVE_HTTP_SERVER_H_
 
 #include "experimental/loom_serve/http/request.h"
+#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/address.h"
 #include "iree/base/threading/notification.h"
 
@@ -56,6 +57,19 @@ const iree_async_address_t* loom_serve_http_server_address(
     const loom_serve_http_server_t* server);
 iree_notification_t* loom_serve_http_server_notification(
     loom_serve_http_server_t* server);
+
+// Borrowed diagnostic stream, valid until server destruction. Readers use
+// independent cursors and never acquire the transport's mutex. This stream
+// includes routing failures, connection rejection and retired peer failures.
+const loom_serve_telemetry_stream_t* loom_serve_http_server_diagnostics(
+    const loom_serve_http_server_t* server);
+
+// Copies a borrowed error into the bounded diagnostic history, without
+// formatting, allocation or I/O. The transport mutex serializes network and
+// application producers; slow readers never delay them. Status ownership is
+// unchanged, including when callers also propagate the error normally.
+void loom_serve_http_server_record_error(loom_serve_http_server_t* server,
+                                         iree_status_t status);
 
 // Single application wakeup target. The callback only publishes a task wake;
 // it never calls back into the transport or waits. Registration immediately

@@ -20,6 +20,8 @@ extern "C" {
 // serialized turn while copying counters; counters are not replayed from
 // events. On success output contains a complete HTTP response with at most 64
 // retained events plus stream/gap/current-counter/cursor records.
+// An empty model name selects server scope. A NULL counters pointer omits the
+// current snapshot and reports counters_available=false, not invented zeros.
 iree_status_t loom_serve_http_logs(
     const loom_serve_telemetry_stream_t* stream,
     const loom_serve_telemetry_counters_t* counters, iree_string_view_t model,

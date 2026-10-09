@@ -134,6 +134,7 @@ loom_cc_library(
     hdrs = ["server.h"],
     deps = [
         ":request",
+        "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/async:platform",
         "//runtime/src/iree/async/util:proactor_thread",
@@ -175,6 +176,7 @@ loom_cc_test(
     deps = [
         ":request",
         ":server",
+        "//experimental/loom_serve/telemetry:stream",
         "//runtime/src/iree/async",
         "//runtime/src/iree/base",
         "//runtime/src/iree/base/threading",

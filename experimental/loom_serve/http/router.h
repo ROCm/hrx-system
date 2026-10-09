@@ -109,8 +109,8 @@ typedef struct loom_serve_http_service_t {
 // model-free: constructors have completed, not necessarily weight activation.
 // GET /metrics exposes the same copied ownership as Prometheus text gauges,
 // capturing each service once without model invocation or device queries.
-// GET /logz polls a service's bounded JSONL stream. X-Loom-Model selects the
-// service (optional with one service); X-Loom-Cursor resumes that reader's
+// GET /logz polls the server's bounded diagnostic stream. X-Loom-Model instead
+// selects a model service's stream; X-Loom-Cursor resumes that reader's
 // previous poll. Each response copies records and reports gaps/current counters
 // without retaining slots or slowing publication. See logs.h for cursor rules.
 // At most request_capacity claims are accepted before advancing each service

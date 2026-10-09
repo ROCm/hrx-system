@@ -75,7 +75,7 @@ typedef struct loom_serve_telemetry_record_t {
   uint64_t event;
   // Owned event arguments; unused bytes are initialized by the producer.
   union {
-    // Model snapshot used by stream begin and periodic observation.
+    // Model snapshot used by periodic observation.
     struct {
       // Cumulative work, independent of ring retention or consumers.
       loom_serve_telemetry_counters_t counters;

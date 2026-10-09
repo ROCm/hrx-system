@@ -395,7 +395,9 @@ TEST_P(SourceEmbeddingServiceTest,
   auto poll = [&](const std::string& cursor) {
     return Read(
         Send("", "/logz", "GET",
-             cursor.empty() ? "" : "X-Loom-Cursor: " + cursor + "\r\n"));
+             "X-Loom-Model: fixture\r\n" +
+                 (cursor.empty() ? std::string()
+                                 : "X-Loom-Cursor: " + cursor + "\r\n")));
   };
   auto cursor_of = [](const std::string& response) {
     const std::string marker = R"({"event":"cursor","value":")";
@@ -416,6 +418,21 @@ TEST_P(SourceEmbeddingServiceTest,
   std::string fast = slow;
   StalledStderr stalled;
   ASSERT_NO_FATAL_FAILURE(stalled.Begin());
+  EXPECT_EQ(Read(Send(R"({"model":7})")).find("HTTP/1.1 400"), 0u);
+  EXPECT_EQ(Read(Send(R"({"model":"fixture","tokens":[-1]})", "/detokenize"))
+                .find("HTTP/1.1 400"),
+            0u);
+  const std::string diagnostics = Read(Send("", "/logz", "GET"));
+  EXPECT_NE(diagnostics.find(R"("scope":"server","counters_available":false)"),
+            std::string::npos);
+  EXPECT_NE(diagnostics.find(R"("event":"error","sequence":1)"),
+            std::string::npos);
+  EXPECT_NE(diagnostics.find(R"("event":"error","sequence":2)"),
+            std::string::npos);
+  EXPECT_EQ(diagnostics.find(R"("event":"counters")"), std::string::npos);
+  EXPECT_EQ(Read(Send("", "/logz", "GET", "X-Loom-Cursor: " + slow + "\r\n"))
+                .find("HTTP/1.1 409"),
+            0u);
   uint64_t next = 1;
   std::string latest;
   for (uint64_t i = 0; i < 40; ++i) {
@@ -437,6 +454,15 @@ TEST_P(SourceEmbeddingServiceTest,
     }
     EXPECT_EQ(latest.find("\"sequence\":", offset), std::string::npos);
     fast = cursor_of(latest);
+    if (i % 8 == 0) {
+      // Observation transport cancellation must not write a blocking diagnostic
+      // or poison subsequent inference. The model stream remains unchanged.
+      const int peer = Send("", "/logz", "GET");
+      const linger reset = {1, 0};
+      ASSERT_EQ(setsockopt(peer, SOL_SOCKET, SO_LINGER, &reset, sizeof(reset)),
+                0);
+      ASSERT_EQ(close(peer), 0);
+    }
   }
   EXPECT_EQ(next, 161u);
   const std::string totals =

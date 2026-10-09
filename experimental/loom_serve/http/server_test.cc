@@ -13,7 +13,9 @@
 #include <cerrno>
 #include <cstring>
 #include <string>
+#include <vector>
 
+#include "experimental/loom_serve/telemetry/stream.h"
 #include "iree/async/proactor.h"
 #include "iree/testing/gtest.h"
 #include "iree/testing/status_matchers.h"
@@ -133,6 +135,62 @@ TEST_F(HttpServerTest, ConnectionSlotsRecycleAfterDrain) {
         "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK");
     ASSERT_EQ(close(client), 0);
   }
+}
+
+TEST_F(HttpServerTest, CapacityRejectionPublishesDiagnostic) {
+  std::vector<int> clients;
+  std::vector<loom_serve_http_connection_t*> connections;
+  for (int i = 0; i < 24; ++i) {
+    const int client = Connect();
+    ASSERT_TRUE(Write(client, "GET /healthz HTTP/1.1\r\nHost: local\r\n\r\n"));
+    const loom_serve_http_request_t* request = nullptr;
+    auto* connection = Take(&request);
+    ASSERT_NE(connection, nullptr);
+    clients.push_back(client);
+    connections.push_back(connection);
+  }
+  const int rejected = Connect();
+  EXPECT_EQ(Read(rejected), "");
+  ASSERT_EQ(close(rejected), 0);
+
+  const auto* stream = loom_serve_http_server_diagnostics(server_);
+  uint64_t cursor = 0;
+  loom_serve_telemetry_record_t record;
+  ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
+            LOOM_SERVE_TELEMETRY_READ_RECORD);
+  EXPECT_EQ(record.event, LOOM_SERVE_TELEMETRY_STREAM_BEGIN);
+  ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
+            LOOM_SERVE_TELEMETRY_READ_RECORD);
+  EXPECT_EQ(record.event, LOOM_SERVE_TELEMETRY_ERROR);
+  EXPECT_EQ(record.data.error.code, IREE_STATUS_RESOURCE_EXHAUSTED);
+  EXPECT_EQ(std::string(record.data.error.message, record.data.error.length),
+            "HTTP connection capacity exhausted");
+  EXPECT_EQ(record.data.error.truncated, 0u);
+  for (size_t i = 0; i < clients.size(); ++i) {
+    loom_serve_http_connection_abort(connections[i]);
+    EXPECT_EQ(Read(clients[i]), "");
+    ASSERT_EQ(close(clients[i]), 0);
+  }
+}
+
+TEST_F(HttpServerTest, DiagnosticsOwnMessageAfterStatusRetires) {
+  iree_status_t status = iree_make_status(IREE_STATUS_INVALID_ARGUMENT,
+                                          "malformed model selector");
+  loom_serve_http_server_record_error(server_, status);
+  iree_status_free(status);
+  const auto* stream = loom_serve_http_server_diagnostics(server_);
+  uint64_t cursor = 1;
+  loom_serve_telemetry_record_t record;
+  ASSERT_EQ(loom_serve_telemetry_stream_read(stream, &cursor, &record),
+            LOOM_SERVE_TELEMETRY_READ_RECORD);
+  EXPECT_EQ(record.event, LOOM_SERVE_TELEMETRY_ERROR);
+  EXPECT_EQ(record.data.error.code, IREE_STATUS_INVALID_ARGUMENT);
+#if (IREE_STATUS_FEATURES & IREE_STATUS_FEATURE_ANNOTATIONS)
+  EXPECT_EQ(std::string(record.data.error.message, record.data.error.length),
+            "malformed model selector");
+#else
+  EXPECT_EQ(record.data.error.length, 0u);
+#endif
 }
 
 TEST_F(HttpServerTest, ConfiguredBodiesAndClaimsOutliveOtherPeers) {

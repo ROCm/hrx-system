@@ -53,7 +53,6 @@ static iree_status_t logs_record(uint64_t position,
       ",\"request\":%" PRIu64,
       events[record->event], position, record->time_ns, record->request));
   switch (record->event) {
-    case LOOM_SERVE_TELEMETRY_STREAM_BEGIN:
     case LOOM_SERVE_TELEMETRY_SNAPSHOT: {
       IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
           output, ",\"queued\":%" PRIu64 ",\"active\":%" PRIu64 ",\"phase\":",
@@ -90,6 +89,7 @@ static iree_status_t logs_record(uint64_t position,
       IREE_RETURN_IF_ERROR(logs_diagnostic(&record->data.error, output));
       break;
     }
+    case LOOM_SERVE_TELEMETRY_STREAM_BEGIN:
     case LOOM_SERVE_TELEMETRY_REQUEST_BEGIN:
       break;
   }
@@ -148,8 +148,16 @@ iree_status_t loom_serve_http_logs(
       output,
       "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\n"
       "Cache-Control: no-store\r\nConnection: close\r\n\r\n"
-      "{\"event\":\"stream\",\"model\":"));
-  IREE_RETURN_IF_ERROR(logs_quote(output, model));
+      "{\"event\":\"stream\",\"scope\":"));
+  IREE_RETURN_IF_ERROR(
+      logs_quote(output, model.size ? IREE_SV("model") : IREE_SV("server")));
+  if (model.size) {
+    IREE_RETURN_IF_ERROR(
+        iree_string_builder_append_cstring(output, ",\"model\":"));
+    IREE_RETURN_IF_ERROR(logs_quote(output, model));
+  }
+  IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
+      output, ",\"counters_available\":%s", counters ? "true" : "false"));
   IREE_RETURN_IF_ERROR(iree_string_builder_append_format(
       output,
       ",\"identity\":\"%" PRIu64 ":%" PRIu64 "\",\"oldest\":%" PRIu64
@@ -174,18 +182,21 @@ iree_status_t loom_serve_http_logs(
       break;
     }
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && counters) {
     status = iree_string_builder_append_format(
         output, "{\"event\":\"counters\",\"time_ns\":%" PRId64 ",\"values\":",
         iree_time_now());
   }
-  if (iree_status_is_ok(status)) {
+  if (iree_status_is_ok(status) && counters) {
     status = logs_counters(counters, output);
+  }
+  if (iree_status_is_ok(status) && counters) {
+    status = iree_string_builder_append_cstring(output, "}\n");
   }
   if (iree_status_is_ok(status)) {
     status = iree_string_builder_append_format(
         output,
-        "}\n{\"event\":\"cursor\",\"value\":\"%" PRIu64 ":%" PRIu64 ":%" PRIu64
+        "{\"event\":\"cursor\",\"value\":\"%" PRIu64 ":%" PRIu64 ":%" PRIu64
         "\",\"next\":%" PRIu64 "}\n",
         identity.created_ns, identity.ordinal, position, position);
   }
